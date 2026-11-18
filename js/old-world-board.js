@@ -6,9 +6,9 @@
 // game has it. Ground keeps the look of its geography: what the board adds to it is drawn by the GPU
 // (js/board-stamp.js) from the compact tables made here once.
 import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist, segRectDist } from './old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
-import { WORKS_FENCE_M, WORKS_WHEEL } from './old-world-works.js';
-import { NATIVE_PALISADE_M } from './native-works.js';
+import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType, cityVariant } from './old-world-buildings.js';
+import { WORKS_BRIDGE, WORKS_WHEEL } from './old-world-works.js';
+import { NATIVE_PALISADE } from './native-works.js';
 
 // The board's furlongs are drawn into a square of cells this many to a side, each cell holding the furlong it
 // lies in (plus one; none is 0). The same square answers the land's questions here and is the GPU's to stamp from.
@@ -157,8 +157,6 @@ export function boardRoadCrossings(roads, rivers, places = null) {
 }
 // The model's kind of a stretch of wall where a cliff is itself the wall.
 const BOARD_WALL_CLIFF = 1;
-// A type is fitted to the plot the model gave its building, never beyond recognition.
-const BOARD_FIT = [0.8, 1.35];
 // A wharf's deck stands this far above the sea at the least.
 const BOARD_WHARF_M = 1.2;
 
@@ -410,7 +408,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     Math.hypot(fp.w, fp.d) * 0.5 + 16 + pad,
     (g) => segRectDist(fp, g.ax, g.az, g.bx, g.bz) < g.hw + pad
   );
-  const { seatBlock, pushBlock, pushTyped, curtain, tower, gate } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr });
+  const { seatBlock, pushBlock, pushTyped, fit, sections, seatRun, fence: layFence, curtain, tower, gate } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr });
   // The port's own buildings stand where they stand; the board builds round them.
   for (const inst of port.instances || []) {
     const f = { x: inst.x, z: inst.z, w: (inst.width ?? 12) + 2, d: (inst.depth ?? inst.length ?? 20) + 2, c: inst._cosNegYaw ?? Math.cos(inst.yaw ?? 0), s: inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0) };
@@ -601,28 +599,26 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       gate(q, (b.x - a.x) / L, (b.z - a.z) / L);
     }
   };
-  // A place built of earth and timber is ringed by a palisade of stakes (js/native-works.js), stood a length at a time
-  // along the model's circuit, each on its own ground; open where the model has a gate, where a way runs through it,
-  // over water and where the cliff is the wall.
+  // A place built of earth and timber is ringed by a palisade of stakes (js/native-works.js), stood a section at a time
+  // along the model's circuit, whole metres of its stakes, each on its own ground; open where the model has a gate,
+  // where a way runs through it, over water and where the cliff is the wall.
   let palisadeLengths = 0;
   const stakes = (cx, cz, rad, kind, gateAngles, standing = null) => {
     const n = rad.length, corner = (k) => { const a = (k % n) / n * 2 * Math.PI; return [cx + Math.cos(a) * rad[k % n], cz + Math.sin(a) * rad[k % n]]; };
     const openings = gateAngles.map((angle) => { const at = ((angle / (2 * Math.PI) * n) % n + n) % n, k = Math.floor(at), f = at - k, [ax, az] = corner(k), [bx, bz] = corner(k + 1); return [ax + (bx - ax) * f, az + (bz - az) * f]; });
-    const T = CITY_BUILDING_TYPES[CITY_TYPE.PALISADE];
+    const per = 3, unit = per * NATIVE_PALISADE.stake, counts = NATIVE_PALISADE.stakes.map((stakes) => stakes / per), width = CITY_BUILDING_TYPES[CITY_TYPE.PALISADE].width;
     for (let k = 0; k < n; k++) {
       if ((kind && kind[k] === BOARD_WALL_CLIFF) || (standing && !standing[k])) continue;
-      const [ax, az] = corner(k), [bx, bz] = corner(k + 1), L = Math.hypot(bx - ax, bz - az);
-      if (L < 0.5) continue;
-      const m = Math.max(1, Math.round(L / NATIVE_PALISADE_M)), len = L / m, yaw = Math.atan2(bx - ax, bz - az);
-      for (let i = 0; i < m; i++) {
-        const x0 = ax + (bx - ax) * i / m, z0 = az + (bz - az) * i / m, x1 = ax + (bx - ax) * (i + 1) / m, z1 = az + (bz - az) * (i + 1) / m, x = (x0 + x1) / 2, z = (z0 + z1) / 2;
-        if (!inside(x, z, 20) || heightAt(x, z) <= BOARD_DRY_M || hitsRiverCorridor(footprint(x, z, 1.2, len, yaw), 0)) continue;
-        if (openings.some(([gx, gz]) => Math.hypot(gx - x, gz - z) < 3.4 + len / 2)) continue;
+      const [ax, az] = corner(k), [bx, bz] = corner(k + 1);
+      if (Math.hypot(bx - ax, bz - az) < 0.5) continue;
+      for (const run of sections(ax, az, bx, bz, { unit, counts, past: 0.1, cover: true, sink: 0.35 })) {
+        const { x, z, yaw, half, ux, uz } = run, x0 = x - ux * half, z0 = z - uz * half, x1 = x + ux * half, z1 = z + uz * half;
+        if (!inside(x, z, 20) || heightAt(x, z) <= BOARD_DRY_M || hitsRiverCorridor(footprint(x, z, 1.2, 2 * half, yaw), 0)) continue;
+        if (openings.some(([gx, gz]) => Math.hypot(gx - x, gz - z) < 3.4 + half)) continue;
         if ([[x0, z0], [x, z], [x1, z1]].some(([px, pz]) => streetEdge(px, pz, 3) < 0.6)) continue;
-        const f = footprint(x, z, T.width, len, yaw);
+        const f = footprint(x, z, width, 2 * half, yaw);
         if (taken(f, 0.3)) continue;
-        const h0 = heightAt(x0, z0), h1 = heightAt(x1, z1), seatY = Math.max(0.5 * (h0 + h1), heightAt(x, z) - 0.22);
-        pushTyped(CITY_TYPE.PALISADE, x, seatY, z, yaw, T.width, T.height, len, -100.0 + Math.max(-0.85, Math.min(0.85, (h1 - h0) / Math.max(0.5, len))), 0);
+        pushTyped(cityVariant(CITY_TYPE.PALISADE, null, 2 * half), x, seatRun(run), z, yaw, 0.5, 0);
         keep(f); palisadeLengths++;
       }
     }
@@ -644,12 +640,9 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   const built = { thatched: 0, native: 0, palisade: palisadeLengths, roadBridges: 0, dams: 0, windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
   // The wash of a house, its own from where it stands in the model's list.
   const washOf = (k) => { const hue = form[k * 3 + 2]; return BOARD_HOUSE_TINTS[Math.floor(boardHashUnit(k, 23) * BOARD_HOUSE_TINTS.length)] + 0.2 + 0.75 * (hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31)); };
-  const fit = (v, of) => Math.max(BOARD_FIT[0] * of, Math.min(BOARD_FIT[1] * of, v));
-  // A thing of the street: a type stood as it is written, unstretched unless told, with no block of its own.
-  const furnish = (type, x, y, z, yaw, paint, tone, across = CITY_BUILDING_TYPES[type].width) => {
-    const T = CITY_BUILDING_TYPES[type];
-    pushTyped(type, x, y, z, yaw, across, T.height, T.length, paint + 0.3 + 0.65 * tone, 0);
-  };
+  // A thing of the street: a type stood as it is written, with no block of its own; of its family, the one as broad
+  // as `across` if that is asked.
+  const furnish = (type, x, y, z, yaw, paint, tone, across = null) => pushTyped(cityVariant(type, across), x, y, z, yaw, paint + 0.3 + 0.65 * tone, 0);
   const placeWallRadiusAt = (pl, wx, wz) => {
     const rad = pl?.wall?.rad;
     if (!rad?.length) return pl?.reach || pl?.radius || Infinity;
@@ -673,7 +666,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     return false;
   };
 
-  // The street front of a house of trade: fixed to its front wall, hung out over the street.
+  // The street front of a house of trade: fixed to its front wall (`f`, the house as it is drawn), hung out over the street.
   const standFront = (k, f, floor, wallH, extraMural = false) => {
     const arch = arches[kinds[k * 6 + 1]], look = BOARD_STREETFRONT[arch === 'burgher' && quarter && quarter[k] === market ? 'shop' : arch];
     if (!look) return;
@@ -682,75 +675,79 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const hue = form[k * 3 + 2], hu = hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31), side = hu > 0.5 ? 1 : -1;
     // Under the eaves of a house of one floor; never so near the ground that a head meets them.
     const penticeY = Math.min(BOARD_PENTICE_M, Math.max(2.25, wallH - 0.7)), signY = Math.min(BOARD_SIGN_M, Math.max(2.7, wallH - 0.3)), stakeY = Math.min(BOARD_STAKE_M, Math.max(2.9, wallH - 0.3));
-    if (look.awn && !extraMural) { const [x, z] = local(f, 0, -f.d / 2); furnish(CITY_TYPE.PENTICE, x, floor + penticeY, z, f.yaw, look.awn === true ? BOARD_CLOTHS[Math.floor(hu * 5)] : look.awn, boardHashUnit(k, 67), f.w * 0.82); }
+    if (look.awn && !extraMural) { const [x, z] = local(f, 0, -f.d / 2); furnish(CITY_TYPE.PENTICE, x, floor + penticeY, z, f.yaw, look.awn === true ? BOARD_CLOTHS[Math.floor(hu * 5)] : look.awn, boardHashUnit(k, 67), f.w - CITY_PENTICE.inset); }
     if (look.sign) { const [x, z] = local(f, f.w * 0.36 * side, -f.d / 2); furnish(CITY_TYPE.SIGN, x, floor + signY, z, f.yaw, look.sign, boardHashUnit(k, 71)); }
     if (look.bush) { const [x, z] = local(f, -f.w * 0.36 * side, -f.d / 2); furnish(CITY_TYPE.ALE_STAKE, x, floor + stakeY, z, f.yaw, CITY_PAINT.GREEN, boardHashUnit(k, 73)); }
     fronts++;
   };
+  // A house on its plot `f`: of its storeys, ridge and manner, the size that best fills the plot, fronted on its street.
+  // Its storeys are their own height; a house outside the walls is of one.
   const standHouse = (k, f, storeys, toStreet, mannered = true, { extraMural = false, royalProximity = false } = {}) => {
-    const storeySpan = extraMural ? (1 + (boardHashUnit(k, 61) < 0.38 ? 0.45 : 0)) : storeys;
-    const wallH = storeySpan * CITY_STOREY_M + boardHashUnit(k, 11) * (extraMural ? 0.35 : 0.5);
-    const base = seatBlock(f, toStreet ? heightAt(f.x - Math.sin(f.yaw) * (f.d / 2 + 1.5), f.z - Math.cos(f.yaw) * (f.d / 2 + 1.5)) : null);
+    // A broad front keeps its eaves to the street; a narrow, deep plot more often turns its gable to it.
+    const eaves = boardHashUnit(k, 47) < (f.w >= f.d * 0.8 ? 0.85 : 0.5);
+    const { type, T, at } = fit(cityHouseType(extraMural ? 1 : storeys, eaves, (mannered && !extraMural) ? (royalProximity ? 0.85 : boardHashUnit(k, 53)) : 0), f, toStreet);
+    const base = seatBlock(at, toStreet ? heightAt(at.x - Math.sin(at.yaw) * (at.d / 2 + 1.5), at.z - Math.cos(at.yaw) * (at.d / 2 + 1.5)) : null);
     if (base.range > 7.5) { dropped.steep++; return; }
     const tone = royalProximity ? (0.90 + boardHashUnit(k, 29) * 0.09) : washOf(k);
     const wallMat = royalProximity ? (boardHashUnit(k, 63) < 0.45 ? CITY_WALL.ASHLAR : CITY_WALL.STUCCO) : CITY_WALL.HOUSE;
-    // A broad front keeps its eaves to the street; a narrow, deep plot more often turns its gable to it.
-    const eaves = boardHashUnit(k, 47) < (f.w >= f.d * 0.8 ? 0.85 : 0.5), type = cityHouseType(extraMural ? 1 : storeys, eaves, (mannered && !extraMural) ? (royalProximity ? 0.85 : boardHashUnit(k, 53)) : 0), T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
-    if (eaves) pushBlock(footprint(f.x, f.z, f.d, f.w, f.yaw + Math.PI / 2), wallH, 0.36 * T.length / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallMat, tone, base);
-    else pushBlock(f, wallH, 0.5 * T.width / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallMat, tone, base);
-    pushTyped(type, f.x, base.floor, f.z, f.yaw, f.w, wallH, f.d, tone);
-    occupy(f); houses++;
+    if (eaves) pushBlock(footprint(f.x, f.z, f.d, f.w, f.yaw + Math.PI / 2), T.height, 0.36 * T.length / 2, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallMat, tone, base);
+    else pushBlock(f, T.height, 0.5 * T.width / 2, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallMat, tone, base);
+    pushTyped(type, at.x, base.floor, at.z, at.yaw, tone);
+    occupy(at); houses++;
     const house = typedTypes.length - 1;
-    if (toStreet) standFront(k, f, base.floor, wallH, extraMural);
+    if (toStreet) standFront(k, at, base.floor, T.height, extraMural);
     if (typedTypes.length - 1 > house) attached.set(house, typedTypes.length - 1 - house);
   };
-  const standChurch = (k, f, great, tall) => {
-    const C = great ? CITY_CHURCH.great : CITY_CHURCH.parish;
-    const w = Math.max(8, Math.min(great ? 17 : 13, f.w)), d = Math.max(18, Math.min(great ? 44 : 32, f.d)), h = Math.max(9, Math.min(16, tall));
-    const across = w / C.width, along = d / C.depth, up = h / C.height, tw = C.tower * across, td = C.tower * along;
-    const nave = footprint(f.x, f.z, w, d, f.yaw), base = seatBlock(nave), tone = 0.94 + boardHashUnit(k, 5) * 0.06;
+  // A church on its plot, its length running back from its door: of the breadths and nave bays it is built in, the
+  // one that best fills the plot (never less than a parish's nave of three bays).
+  const standChurch = (k, f, great) => {
+    const family = great ? CITY_TYPE.CHURCH_GREAT : boardHashUnit(k, 7) < 0.5 ? CITY_TYPE.CHURCH_LEFT : CITY_TYPE.CHURCH_RIGHT;
+    const plot = footprint(f.x, f.z, Math.max(CITY_CHURCH.parish[0].width, f.w), Math.max(18, f.d), f.yaw);
+    const { type, T, at: nave } = fit(family, plot), C = great ? CITY_CHURCH.great : CITY_CHURCH.parish.find((P) => P.width === T.width);
+    const base = seatBlock(nave), tone = 0.94 + boardHashUnit(k, 5) * 0.06;
     if (base.range > 9) { dropped.steep++; return; }
-    pushBlock(nave, h, (0.42 * C.width / 2 + 0.6) * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, great ? CITY_WALL.ASHLAR : CITY_WALL.STUCCO, tone, base);
-    const sides = great ? [-1, 1] : [boardHashUnit(k, 7) < 0.5 ? -1 : 1];
+    pushBlock(nave, T.height, 0.42 * T.width / 2 + 0.6, CITY_ROOF.GABLE + CITY_TYPED_ROOF, great ? CITY_WALL.ASHLAR : CITY_WALL.STUCCO, tone, base);
+    const sides = great ? [-1, 1] : [family === CITY_TYPE.CHURCH_LEFT ? -1 : 1];
     for (const side of sides) {
-      const [tx, tz] = local(nave, side * (w / 2 + tw / 2 - 0.3 * across), -d / 2 + td / 2), top = seatBlock(footprint(tx, tz, tw, td, f.yaw));
-      blocks.push(tx, base.floor, tz, f.yaw, tw, td, (C.height + CITY_CHURCH.towerRise) * up, CITY_CHURCH.spire * up, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, 0.93, Math.max(top.plinth, base.floor - top.floor + top.plinth));
+      const [tx, tz] = local(nave, side * (T.width / 2 + C.tower / 2 - 0.3), -T.length / 2 + C.tower / 2), top = seatBlock(footprint(tx, tz, C.tower, C.tower, f.yaw));
+      blocks.push(tx, base.floor, tz, f.yaw, C.tower, C.tower, C.height + CITY_CHURCH.towerRise, CITY_CHURCH.spire, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, 0.93, Math.max(top.plinth, base.floor - top.floor + top.plinth));
     }
-    pushTyped(great ? CITY_TYPE.CHURCH_GREAT : sides[0] < 0 ? CITY_TYPE.CHURCH_LEFT : CITY_TYPE.CHURCH_RIGHT, nave.x, base.floor, nave.z, f.yaw, w, h, d, tone, 1 + sides.length);
-    const whole = footprint(nave.x, nave.z, w + 2 * tw, d, f.yaw);
+    pushTyped(type, nave.x, base.floor, nave.z, f.yaw, tone, 1 + sides.length);
+    const whole = footprint(nave.x, nave.z, T.width + 2 * C.tower, T.length, f.yaw);
     keep(whole); occupy(whole);
     churches.push({ x: nave.x, z: nave.z, great });
   };
-  // One of the model's works that is no house: its own type, fitted to the plot the model gave it.
+  // One of the model's works that is no house: of its kind, the size that best fills the plot the model gave it,
+  // fronted on its street where it has one.
   const standWork = (k, f, arch, toStreet, as = BOARD_WORKS[arch], wharfOverride = null) => {
-    const [key, roof, wall, rise, ridgeAlong, fronted] = as, type = CITY_TYPE[key], T = CITY_BUILDING_TYPES[type];
+    const [key, roof, wall, rise, ridgeAlong, fronted] = as;
     const thatch = key === 'COT' || as === BOARD_THATCHED[arch] || as[6] ? CITY_THATCH_ROOF : 0;
-    const g = footprint(f.x, f.z, fit(f.w, T.width), fit(f.d, T.length), f.yaw), up = T.height * (0.95 + 0.1 * boardHashUnit(k, 11));
+    const { type, T, at: g } = fit(CITY_TYPE[key], f, toStreet && key !== 'WHARF');
     if (key === 'WHARF') g.isWharf = true;
     const base = key === 'WHARF' ? { floor: wharfOverride?.floor ?? Math.max(BOARD_WHARF_M, heightAt(g.x, g.z)), plinth: 0.3, range: 0 }
       : seatBlock(g, toStreet ? heightAt(g.x - Math.sin(g.yaw) * (g.d / 2 + 1.5), g.z - Math.cos(g.yaw) * (g.d / 2 + 1.5)) : null);
     if (base.range > 9) { dropped.steep++; return; }
     const hu = boardHashUnit(k, 31), paint = arch === 'tannery' ? CITY_PAINT.BROWN : arch === 'dyer' ? BOARD_CLOTHS[Math.floor(hu * 5)] : arch === 'toll' ? CITY_PAINT.RED : -1;
     const tone = paint >= 0 ? paint + 0.3 + 0.65 * hu : key === 'WINDMILL' || key === 'DOVECOTE' || key === 'WHARF' ? 0.2 + 0.75 * hu : washOf(k);
-    // Far off, a plain block of its size: the quarry's is its face, a wharf's its deck.
+    // Its plot's block: the quarry's is its face, a wharf's its deck.
     const Far = key === 'QUARRY' ? footprint(...local(g, 0, g.d * 0.3), g.w, g.d * 0.4, g.yaw) : ridgeAlong ? footprint(g.x, g.z, g.d, g.w, g.yaw + Math.PI / 2) : g;
-    pushBlock(Far, key === 'WHARF' ? 0.05 : key === 'QUARRY' ? 1.3 : up, rise * (ridgeAlong ? g.d / T.length : g.w / T.width), roof + CITY_TYPED_ROOF + thatch, wall, wall === 19 || paint < 0 && wall === 12 ? tone : 0.86 + 0.1 * hu, base);
-    pushTyped(type, g.x, base.floor, g.z, g.yaw, g.w, up, g.d, tone);
+    pushBlock(Far, key === 'WHARF' ? 0.05 : key === 'QUARRY' ? 1.3 : T.height, rise, roof + CITY_TYPED_ROOF + thatch, wall, wall === 19 || paint < 0 && wall === 12 ? tone : 0.86 + 0.1 * hu, base);
+    pushTyped(type, g.x, base.floor, g.z, g.yaw, tone);
     if (thatch) g.thatch = true;
     keep(g); occupy(g);
     const stood = typedTypes.length - 1;
-    if (fronted && toStreet) standFront(k, g, base.floor, up);
+    if (fronted && toStreet) standFront(k, g, base.floor, T.height);
     if (typedTypes.length - 1 > stood) attached.set(stood, typedTypes.length - 1 - stood);
     if (key === 'WINDMILL') built.windmills++; else if (key === 'WATERMILL') built.watermills++; else if (key === 'GRANARY' || key === 'BARN') built.stores++; else if (key === 'SHED') built.sheds++; else if (key === 'STONE_HALL') built.halls++; else if (as[6]) { built.native++; houses++; } else if (thatch && key !== 'COT') { built.thatched++; houses++; } else built.others++;
   };
-  // What is left of a building the model has burnt to its walls (a ruin) or thrown down (a heap).
+  // What is left of a building the model has burnt to its walls (a ruin, a house's bays and depth) or thrown down (a heap).
   const standLeft = (k, f, heap) => {
-    const type = heap ? CITY_TYPE.RUBBLE : CITY_TYPE.RUIN, T = CITY_BUILDING_TYPES[type], base = seatBlock(f);
+    const { type, at } = fit(heap ? CITY_TYPE.RUBBLE : CITY_TYPE.RUIN, f), base = seatBlock(at);
     if (base.range > 9) { dropped.steep++; return; }
-    const tone = washOf(k), up = heap ? T.height : Math.max(3, Math.min(7, stand[k * 6 + 5]));
-    pushBlock(f, heap ? 0.6 : up * 0.6, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, heap ? 11 : 12, heap ? 0.8 : tone, base);
-    pushTyped(type, f.x, base.floor, f.z, f.yaw, f.w, up, f.d, tone);
-    occupy(f); built.ruins++;
+    const tone = washOf(k);
+    pushBlock(at, heap ? 0.6 : 2.4, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, heap ? 11 : 12, heap ? 0.8 : tone, base);
+    pushTyped(type, at.x, base.floor, at.z, at.yaw, tone);
+    occupy(at); built.ruins++;
   };
   const wayClearance = (fp) => {
     let minC = Infinity, pushX = 0, pushZ = 0, roadHit = false;
@@ -864,15 +861,16 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
     // A watermill is turned to its water: the wheel's side of its type toward where the model's wheel turns.
     const wheel = arch === 'mill' ? wheelOf.get(k) : null;
+    let bx = x, bz = z;
     if (wheel) {
       let best = 0, most = -Infinity;
       for (let q = 0; q < 4; q++) { const a = rot + q * Math.PI / 2, toward = (wheel[0] - x) * Math.cos(a) - (wheel[1] - z) * Math.sin(a); if (toward > most) { most = toward; best = q; } }
       yaw = rot + best * Math.PI / 2; front = best & 1 ? d : w; depth = best & 1 ? w : d;
-      // As broad as brings the wheel to that water.
-      front = Math.max(front, 2 * (most - WORKS_WHEEL.out));
+      // Stood so far toward that water as brings its wheel there: the mill is its one size.
+      const shift = Math.max(0, most - CITY_BUILDING_TYPES[CITY_TYPE.WATERMILL].width / 2 - WORKS_WHEEL.out);
+      bx += Math.cos(yaw) * shift; bz -= Math.sin(yaw) * shift;
       built.wheels++;
     }
-    let bx = x, bz = z;
     let f = footprint(bx, bz, front, depth, yaw);
     const keepClearOfWater = arch !== 'mill' && arch !== 'wharf' && arch !== 'bridge';
     if (keepClearOfWater && arch !== 'wall' && arch !== 'tower' && arch !== 'keep') {
@@ -903,8 +901,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const left = stateOf ? stateOf[k] : 0;
     if (left) standLeft(k, f, left === 3);
     else if (arch === 'tower') {
-      tower(bx, bz, 6.2, Math.max(10, Math.min(15, h)), 0.9);
-      occupy(footprint(bx, bz, 7, 7, yaw));
+      occupy(tower(bx, bz, 6.2, Math.max(10, Math.min(15, h)), 0.9));
     } else if (arch === 'wall') {
       // A length of wall the model stood by itself: its parapet toward the street it faces, or outward from the place.
       const long = Math.max(w, d) / 2, a = rot + (w >= d ? 0 : Math.PI / 2), ux = Math.cos(a), uz = -Math.sin(a), p = places[place] ?? seat;
@@ -913,15 +910,14 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     else if (arch === 'temple') {
       // A church's length runs back from its door.
       const long = front > depth ? footprint(bx, bz, depth, front, yaw + Math.PI / 2) : f;
-      standChurch(k, long, (church & 3) === 3, h);
+      standChurch(k, long, (church & 3) === 3);
     } else if (arch === 'keep') {
-      tower(bx, bz, Math.max(9, Math.min(14, Math.max(w, d))), Math.max(18, h), 0.95, CITY_TYPE.KEEP);
-      occupy(footprint(bx, bz, Math.max(w, d), Math.max(w, d), yaw));
+      occupy(tower(bx, bz, Math.max(9, Math.min(14, Math.max(w, d))), Math.max(18, h), 0.95, CITY_TYPE.KEEP));
     } else if (arch === 'hall') {
-      const long = front > depth ? footprint(bx, bz, depth, front, yaw + Math.PI / 2) : f;
-      const floor = pushBlock(long, CITY_HALL.height, CITY_HALL.roof, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 0.9);
-      pushTyped(CITY_TYPE.HALL, long.x, floor, long.z, long.yaw, long.w, CITY_HALL.height, long.d, 0.9);
-      keep(long); occupy(long);
+      const { type, T, at } = fit(CITY_TYPE.HALL, front > depth ? footprint(bx, bz, depth, front, yaw + Math.PI / 2) : f);
+      const floor = pushBlock(at, T.height, CITY_HALL.roof, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 0.9);
+      pushTyped(type, at.x, floor, at.z, at.yaw, 0.9);
+      keep(at); occupy(at);
     } else if (kinds[k * 6 + 2] === 0 && BOARD_THATCHED[arch]) {
       standWork(k, f, arch, Boolean(fx || fz), BOARD_THATCHED[arch]);
     } else {
@@ -964,9 +960,9 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   });
 
   /* ---- the slighter works of the model: fences, the bridges of its tracks, churchyards, cairns, camps, hosts, works in hand ---- */
-  const slight = (type, x, y, z, yaw, tone = 0.5, along = CITY_BUILDING_TYPES[type].length) => { const T = CITY_BUILDING_TYPES[type]; pushTyped(type, x, y, z, yaw, T.width, T.height, along, tone, 0); };
+  const slight = (type, x, y, z, yaw, tone = 0.5) => pushTyped(type, x, y, z, yaw, tone, 0);
   const dry = (x, z, pad = 6) => inside(x, z, pad) && heightAt(x, z) > BOARD_DRY_M && !hitsRiverCorridor(footprint(x, z, 6, 6, 0), 1.0);
-  // A run of fence from one point to another, a length at a time, each on its own ground; none where a building
+  // A run of fence from one point to another, a section at a time, each on its own ground; none where a building
   // stands or a street runs through.
   const spans = works.trackBridges ?? [];
   const roadCrossings = boardRoadCrossings(board.roads, rivers, board.places);
@@ -1156,22 +1152,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   };
 
   const layFenceSubRun = (ax, az, bx, bz, stone) => {
-    const subL = Math.hypot(bx - ax, bz - az);
-    if (subL < 1.65) return;
-    const n = Math.max(1, Math.ceil(subL / (WORKS_FENCE_M * 1.46)), Math.round(subL / WORKS_FENCE_M));
-    const bayLen = subL / n, yaw = Math.atan2(bx - ax, bz - az), type = stone ? CITY_TYPE.FENCE_STONE : CITY_TYPE.FENCE_RAIL;
-    for (let i = 0; i < n; i++) {
-      const t0 = i / n, t1 = (i + 1) / n;
-      const x0 = ax + (bx - ax) * t0, z0 = az + (bz - az) * t0;
-      const x1 = ax + (bx - ax) * t1, z1 = az + (bz - az) * t1;
-      const x = 0.5 * (x0 + x1), z = 0.5 * (z0 + z1);
-      if (!dry(x, z) || bridged(x, z) || streetEdge(x, z, 2.5) < -0.15 || placed.some(x, z, 4, (o) => rectDist(o, x, z) <= 1.2) || solids.some(x, z, 4, (o) => rectDist(o, x, z) <= 1.2)) continue;
-      const h0 = heightAt(x0, z0), h1 = heightAt(x1, z1), hm = heightAt(x, z);
-      const seatY = Math.max(0.5 * (h0 + h1), hm - 0.22);
-      const dzSlope = Math.max(-0.85, Math.min(0.85, (h1 - h0) / Math.max(0.5, bayLen)));
-      slight(type, x, seatY, z, yaw, -100.0 + dzSlope, bayLen);
-      built.fences++;
-    }
+    if (Math.hypot(bx - ax, bz - az) < 1.65) return;
+    built.fences += layFence(ax, az, bx, bz, stone, { clear: (x, z) => dry(x, z) && !bridged(x, z) && streetEdge(x, z, 2.5) >= -0.15 && !placed.some(x, z, 4, (o) => rectDist(o, x, z) <= 1.2) && !solids.some(x, z, 4, (o) => rectDist(o, x, z) <= 1.2) });
   };
 
   const fence = (ax, az, bx, bz, stone) => {
@@ -1215,6 +1197,32 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (L - cur >= 1.65) layFenceSubRun(ax + ux * cur, az + uz * cur, bx, bz, stone);
   };
   for (const run of prepareFenceRuns(works.fences ?? [])) fence(run.ax, run.az, run.bx, run.bz, run.stone);
+  // A bridge `need` metres long from bank to bank, its middle at x, z and running along u, its deck at `deck`: of stone,
+  // as few arches as reach, each of the least span of three that does (js/old-world-works.js WORKS_BRIDGE), `width`
+  // wide; or of timber, as few bents as reach, in as few lengths as its longest. Answers how long it is as built, and
+  // its buildings.
+  const footbridgeMost = WORKS_BRIDGE.bent * WORKS_BRIDGE.bents[WORKS_BRIDGE.bents.length - 1] + 0.6;
+  const layBridge = (x, z, ux, uz, need, deck, stone, width) => {
+    let pieces, each, type;
+    if (stone) {
+      pieces = Math.max(1, Math.ceil(need / WORKS_BRIDGE.arches[WORKS_BRIDGE.arches.length - 1]));
+      each = WORKS_BRIDGE.arches.find((span) => span * pieces >= need) ?? WORKS_BRIDGE.arches[WORKS_BRIDGE.arches.length - 1];
+      type = pieces > 1 ? CITY_TYPE.STONE_BRIDGE_SPAN : CITY_TYPE.STONE_BRIDGE;
+    } else {
+      pieces = Math.max(1, Math.ceil(need / footbridgeMost));
+      const bents = Math.max(WORKS_BRIDGE.bents[0], Math.min(WORKS_BRIDGE.bents[WORKS_BRIDGE.bents.length - 1], Math.ceil((need / pieces - 0.6) / WORKS_BRIDGE.bent - 1e-6)));
+      each = WORKS_BRIDGE.bent * bents + 0.6;
+      type = CITY_TYPE.FOOTBRIDGE;
+    }
+    const length = pieces * each, cityIndices = [];
+    for (let a = 0; a < pieces; a++) {
+      const along = (a + 0.5) * each - length / 2;
+      pushTyped(cityVariant(type, stone ? width : null, each), x + ux * along, deck, z + uz * along, Math.atan2(ux, uz), 0.5, 0);
+      cityIndices.push(typedTypes.length - 1);
+      built.bridges++;
+    }
+    return { length, cityIndices };
+  };
   // A track's bridge and road/street crossings: seated above channel flood levels with masonry or timber piers.
   const bridges = [];
   for (const tb of trackBridgeSpecs) {
@@ -1234,30 +1242,14 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       stampBridgeApproach(nearPort.x, nearPort.z, pux, puz, pLen, pW);
       continue;
     }
-    const totalLen = span + 4.0;
-    const width = CITY_BUILDING_TYPES[isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE].width;
-    const cityIndices = [];
-    if (isStone) {
-      const T = CITY_BUILDING_TYPES[CITY_TYPE.STONE_BRIDGE];
-      const arches = Math.max(1, Math.ceil(totalLen / BOARD_ROAD_BRIDGE.arch)), each = totalLen / arches;
-      const bridgeType = arches > 1 ? CITY_TYPE.STONE_BRIDGE_SPAN : CITY_TYPE.STONE_BRIDGE;
-      for (let a = 0; a < arches; a++) {
-        const along = (a + 0.5) * each - totalLen * 0.5;
-        pushTyped(bridgeType, x + ux * along, deck, z + uz * along, Math.atan2(ux, uz), width, T.height, each, 0.5, 0);
-        cityIndices.push(typedTypes.length - 1);
-        built.bridges++;
-      }
-    } else {
-      slight(CITY_TYPE.FOOTBRIDGE, x, deck, z, Math.atan2(ux, uz), 0.5, totalLen);
-      cityIndices.push(typedTypes.length - 1);
-      built.bridges++;
-    }
+    const width = isStone ? WORKS_BRIDGE.widths[0] : CITY_BUILDING_TYPES[CITY_TYPE.FOOTBRIDGE].width;
+    const { length: totalLen, cityIndices } = layBridge(x, z, ux, uz, span + 4.0, deck, isStone, width);
     bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices, collapsed: false });
     stampBridgeApproach(x, z, ux, uz, totalLen, width);
   }
   // A road's or arterial street's bridge where it crosses a river: stone, the road's width, bank to bank in arches.
   for (const q of roadCrossings) {
-    const x = ox + q.x, z = oz + q.z, reach = Math.max(4.5, q.span / 2 + 2.6), T = CITY_BUILDING_TYPES[q.stone === false ? CITY_TYPE.FOOTBRIDGE : CITY_TYPE.STONE_BRIDGE];
+    const x = ox + q.x, z = oz + q.z, reach = Math.max(4.5, q.span / 2 + 2.6);
     if (!inside(x, z, 12)) continue;
     if (bridges.some((b) => Math.hypot(b.x - x, b.z - z) < 14)) continue;
     const hA = heightAt(x - q.ux * (reach + 1.5), z - q.uz * (reach + 1.5));
@@ -1274,18 +1266,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       continue;
     }
     const isStone = q.stone !== false;
-    const bridgeWidth = isStone ? BOARD_ROAD_BRIDGE.width : T.width;
-    const arches = isStone ? Math.max(1, Math.ceil(reach * 2 / BOARD_ROAD_BRIDGE.arch)) : 1, each = reach * 2 / arches;
-    const bridgeType = isStone ? (arches > 1 ? CITY_TYPE.STONE_BRIDGE_SPAN : CITY_TYPE.STONE_BRIDGE) : CITY_TYPE.FOOTBRIDGE;
-    const cityIndices = [];
-    for (let a = 0; a < arches; a++) {
-      const along = (a + 0.5) * each - reach;
-      pushTyped(bridgeType, x + q.ux * along, deck, z + q.uz * along, Math.atan2(q.ux, q.uz), bridgeWidth, T.height, each, 0.5, 0);
-      cityIndices.push(typedTypes.length - 1);
-      built.bridges++;
-    }
-    bridges.push({ x, z, ux: q.ux, uz: q.uz, length: reach * 2, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone, cityIndices, collapsed: false });
-    stampBridgeApproach(x, z, q.ux, q.uz, reach * 2, bridgeWidth);
+    const bridgeWidth = isStone ? BOARD_ROAD_BRIDGE.width : CITY_BUILDING_TYPES[CITY_TYPE.FOOTBRIDGE].width;
+    const { length, cityIndices } = layBridge(x, z, q.ux, q.uz, reach * 2, deck, isStone, bridgeWidth);
+    bridges.push({ x, z, ux: q.ux, uz: q.uz, length, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone, cityIndices, collapsed: false });
+    stampBridgeApproach(x, z, q.ux, q.uz, length, bridgeWidth);
     built.roadBridges++;
   }
   // A churchyard: a dry-stone wall about it, and its graves as they are dug.

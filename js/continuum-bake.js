@@ -900,12 +900,31 @@ function bakeFar(type, welded) {
     seen((P[a] + P[b] + P[c]) / 3, (P[a + 1] + P[b + 1] + P[c + 1]) / 3, (P[a + 2] + P[b + 2] + P[c + 2]) / 3);
   }
   const baseError = Math.max(outward, inward, base.error);
-  // Each wrap triangle wears the kind of the nearest surface of the type that is not glass, a recess or iron.
+  // Each wrap triangle wears the kind of the surface of the type, not glass, a recess or iron, nearest the middle of
+  // what is seen of it: its part above the type's floor, where it reaches above it (a wall's face run down over its
+  // buried footing wears the wall's stone, not the footing's).
   const solidSurface = (t) => !APERTURES.has(Math.floor(welded.kind[welded.index[t * 3] * 2] + 0.01));
+  let lowest = Infinity;
+  for (let v = 0; v < V; v++) lowest = Math.min(lowest, position[v * 3 + 1]);
+  const seenFrom = Math.max(lowest, 0), middle = [0, 0, 0];
+  // The middle of a triangle's corners (their offsets in `position`) above the floor and where its sides cross it.
+  const seenMiddle = (corners) => {
+    let n = 0;
+    middle.fill(0);
+    const add = (x, y, z) => { middle[0] += x; middle[1] += y; middle[2] += z; n++; };
+    for (let k = 0; k < 3; k++) {
+      const p = corners[k], q = corners[(k + 1) % 3], dp = position[p + 1] - seenFrom, dq = position[q + 1] - seenFrom;
+      if (dp >= 0) add(position[p], position[p + 1], position[p + 2]);
+      if (dp * dq < 0) { const f = dp / (dp - dq); add(position[p] + (position[q] - position[p]) * f, seenFrom, position[p + 2] + (position[q + 2] - position[p + 2]) * f); }
+    }
+    if (!n) for (const p of corners) add(position[p], position[p + 1], position[p + 2]);
+    for (let k = 0; k < 3; k++) middle[k] /= n;
+    return middle;
+  };
   const kinds = new Float32Array(T * 2);
   for (let t = 0; t < T; t++) {
-    const [a, b, c] = [0, 1, 2].map((k) => index[t * 3 + k] * 3);
-    const found = source((position[a] + position[b] + position[c]) / 3, (position[a + 1] + position[b + 1] + position[c + 1]) / 3, (position[a + 2] + position[b + 2] + position[c + 2]) / 3, solidSurface);
+    const [a, b, c] = [0, 1, 2].map((k) => index[t * 3 + k] * 3), [x, y, z] = seenMiddle([a, b, c]);
+    const found = source(x, y, z, solidSurface);
     const v = found >= 0 ? welded.index[found * 3] : 0;
     kinds[t * 2] = welded.kind[v * 2]; kinds[t * 2 + 1] = welded.kind[v * 2 + 1];
   }

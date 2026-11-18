@@ -10,8 +10,8 @@ import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERS
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
 import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_WORKS, alignWaterfrontWharves, boardRoadCrossings } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT } from '../js/old-world-buildings.js';
-import { WORKS_FENCE_M, WORKS_FENCE_POST, WORKS_FENCE_RAIL, WORKS_FENCE_STONE, WORKS_WHEEL } from '../js/old-world-works.js';
+import { CITY_BUILDING_TYPES, CITY_FAMILIES, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT, cityFamilyOf } from '../js/old-world-buildings.js';
+import { WORKS_FENCE, WORKS_WHEEL } from '../js/old-world-works.js';
 import { cityContinuumMaterial } from '../js/wgsl/city-continuum.js';
 import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
 import { TERRAIN } from '../js/wgsl/terrain.js';
@@ -20,6 +20,8 @@ import { openBoard } from '../scripts/board-host.mjs';
 
 // The bay of tests/board-model.test.mjs, set down where Lisbon is so that the country round it is Old World.
 const SPAN = 4096, SAMPLES = 129, SITE = { name: 'Porto Novo', culture: 'iberian', x: 150, z: 380 };
+// A type's family: the kind it is a size of.
+const keyOf = (type) => cityFamilyOf(type).key, familyTypes = (key) => { const f = CITY_FAMILIES.find((g) => g.key === key); return CITY_BUILDING_TYPES.slice(f.from, f.from + f.count); };
 function bayHeight(x, z) {
   const shore = 600 + 260 * Math.cos(x / 700) - 0.00012 * x * x, inland = shore - z;
   if (inland <= 0) return Math.max(-60, inland * 0.05);
@@ -83,7 +85,7 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   // Its wall: the model says of each stretch how its line was chosen (0 open ground, 1 a cliff that is itself the
   // wall, 2 along a bank, 3 a crest), and every stretch but a cliff is built. So the circuit stands here in stone,
   // with towers along it and a gate where the model has one, and is not taken for open where its kind is 0.
-  const wall = board.places[0].wall, towers = plan.typedTypes.reduce((n, type) => n + (type === CITY_TYPE.WALL_TOWER ? 1 : 0), 0);
+  const wall = board.places[0].wall, towers = plan.typedTypes.reduce((n, type) => n + (keyOf(type) === 'WALL_TOWER' ? 1 : 0), 0);
   t.diagnostic(JSON.stringify({ walls: board.places[0].walls, kinds: wall && [0, 1, 2, 3].map((kind) => wall.kind.filter((k) => k === kind).length), gates: stats.gates, towers }));
   assert.ok(wall && board.places[0].walls >= 2, 'the seat is walled in stone');
   assert.ok(wall.kind.filter((k) => k === 0).length > wall.kind.length / 2, 'and most of its circuit runs over open ground');
@@ -99,9 +101,9 @@ test('a founded board stands in the game as its own buildings, land and woods, a
     if (board.places[board.buildings.kinds[k * 6]]?.kind !== 'village') townHovels++;
   }
   for (let i = 0; i < plan.typedCount; i++) {
-    const type = plan.typedTypes[i], own = plan.typedBlocks[i * 2 + 1], straw = type === CITY_TYPE.THATCH_HOUSE || type === CITY_TYPE.THATCH_LONGHOUSE;
+    const type = plan.typedTypes[i], own = plan.typedBlocks[i * 2 + 1], straw = keyOf(type) === 'THATCH_HOUSE' || keyOf(type) === 'THATCH_LONGHOUSE';
     if (straw) thatched++;
-    for (let b = 0; b < own; b++) assert.equal(plan.blocks[(plan.typedBlocks[i * 2] + b) * CITY_BLOCK_FLOATS + 8] >= CITY_THATCH_ROOF, straw || type === CITY_TYPE.COT, `the far roof of building ${i}`);
+    for (let b = 0; b < own; b++) assert.equal(plan.blocks[(plan.typedBlocks[i * 2] + b) * CITY_BLOCK_FLOATS + 8] >= CITY_THATCH_ROOF, straw || keyOf(type) === 'COT', `the far roof of building ${i}`);
   }
   t.diagnostic(JSON.stringify({ hovels, townHovels, thatched }));
   assert.equal(thatched, stats.built.thatched);
@@ -131,7 +133,7 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   for (let i = 0; i < plan.typedCount; i++) {
     const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
     assert.ok(at.every(Number.isFinite) && plan.typedTypes[i] < CITY_BUILDING_TYPES.length, `building ${i}`);
-    if (![CITY_TYPE.WHARF, CITY_TYPE.FOOTBRIDGE, CITY_TYPE.STONE_BRIDGE, CITY_TYPE.STONE_BRIDGE_SPAN].includes(plan.typedTypes[i])) assert.ok(bayHeight(at[0], at[2]) > 0.5, `building ${i} stands in the water at ${at[0]}, ${at[2]}`);
+    if (!['WHARF', 'FOOTBRIDGE', 'STONE_BRIDGE', 'STONE_BRIDGE_SPAN'].includes(keyOf(plan.typedTypes[i]))) assert.ok(bayHeight(at[0], at[2]) > 0.5, `building ${i} stands in the water at ${at[0]}, ${at[2]}`);
   }
   assert.ok(stats.milliseconds < 2000, `laid in ${stats.milliseconds} ms`);
 
@@ -145,16 +147,16 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   }
   assert.equal(board.buildings.quarter.length, board.buildings.count);
   assert.ok(tradeHouses > 0 && stats.fronts > tradeHouses * 0.6 && stats.fronts <= tradeHouses, `fronts ${stats.fronts} of ${tradeHouses} houses of trade`);
-  const furnished = { [CITY_TYPE.PENTICE]: 0, [CITY_TYPE.SIGN]: 0, [CITY_TYPE.ALE_STAKE]: 0, [CITY_TYPE.STALL]: 0, [CITY_TYPE.MARKET_CROSS]: 0, [CITY_TYPE.WELL]: 0 };
+  const furnished = { PENTICE: 0, SIGN: 0, ALE_STAKE: 0, STALL: 0, MARKET_CROSS: 0, WELL: 0 };
   for (let i = 0; i < plan.typedCount; i++) {
     const type = plan.typedTypes[i];
     // A slighter work (a length of fence, a bridge, graves, a tent) has no block either; whatever else stands has.
     if (type >= CITY_TYPE_SLIGHT_FROM) { assert.equal(plan.typedBlocks[i * 2 + 1], 0, 'a slight work has no block'); continue; }
-    if (!(type in furnished)) { assert.ok(plan.typedBlocks[i * 2 + 1] >= 1, `building ${i} has its block`); continue; }
-    furnished[type]++;
+    if (!(keyOf(type) in furnished)) { assert.ok(plan.typedBlocks[i * 2 + 1] >= 1, `building ${i} has its block`); continue; }
+    furnished[keyOf(type)]++;
     assert.equal(plan.typedBlocks[i * 2 + 1], 0, 'a thing of the street has no block');
-    const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS), paint = Math.floor(at[7]);
-    assert.ok(paint >= 0 && paint <= 10 && at[5] === 1 && at[6] === 1, `painted ${paint}, unstretched but across`);
+    const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS), paint = Math.floor(at[4]);
+    assert.ok(paint >= 0 && paint <= 10, `painted ${paint}`);
     if (CITY_TYPES_OVERHEAD.has(type)) {
       // Fixed above a head, on the front of a house that stands there.
       const ground = bayHeight(at[0], at[2]);
@@ -169,46 +171,46 @@ test('a founded board stands in the game as its own buildings, land and woods, a
     hung += own;
     for (let k = 1; k <= own; k++) assert.ok(CITY_TYPES_OVERHEAD.has(plan.typedTypes[i + k]) && !CITY_TYPES_OVERHEAD.has(plan.typedTypes[i]), 'a house and what hangs on it');
   }
-  assert.equal(hung, furnished[CITY_TYPE.PENTICE] + furnished[CITY_TYPE.SIGN] + furnished[CITY_TYPE.ALE_STAKE]);
+  assert.equal(hung, furnished.PENTICE + furnished.SIGN + furnished.ALE_STAKE);
   t.diagnostic(JSON.stringify({ tradeHouses, furnished }));
-  assert.ok(furnished[CITY_TYPE.SIGN] > 0 && furnished[CITY_TYPE.PENTICE] > 0, 'signs and pentices');
-  assert.equal(furnished[CITY_TYPE.STALL], stats.stalls);
-  assert.ok(stats.stalls >= 4 && furnished[CITY_TYPE.MARKET_CROSS] >= 1, `stalls ${stats.stalls}`);
+  assert.ok(furnished.SIGN > 0 && furnished.PENTICE > 0, 'signs and pentices');
+  assert.equal(furnished.STALL, stats.stalls);
+  assert.ok(stats.stalls >= 4 && furnished.MARKET_CROSS >= 1, `stalls ${stats.stalls}`);
 
   // Whatever else the model built is stood as what it is: a mill is a mill, a granary a granary, an outbuilding
   // an outbuilding. Each kind is counted where the model has it and stood as its type nearly every time.
-  const founded = {}, of = new Array(CITY_BUILDING_TYPES.length).fill(0);
+  const founded = {}, of = {};
   for (let k = 0; k < board.buildings.count; k++) { const arch = board.arches[board.buildings.kinds[k * 6 + 1]]; if (BOARD_WORKS[arch]) founded[BOARD_WORKS[arch][0]] = (founded[BOARD_WORKS[arch][0]] ?? 0) + 1; }
-  for (let i = 0; i < plan.typedCount; i++) of[plan.typedTypes[i]]++;
+  for (let i = 0; i < plan.typedCount; i++) of[keyOf(plan.typedTypes[i])] = (of[keyOf(plan.typedTypes[i])] ?? 0) + 1;
   t.diagnostic(JSON.stringify({ founded, built: B }));
   assert.ok(Object.keys(founded).length >= 2, `the model founded ${Object.keys(founded)}`);
-  for (const [key, n] of Object.entries(founded)) assert.ok(of[CITY_TYPE[key]] <= n && of[CITY_TYPE[key]] >= Math.floor(n * 0.7), `${key}: ${of[CITY_TYPE[key]]} stand of ${n} founded`);
-  // A type is fitted to its plot, never beyond recognition; a ruin alone is as large as what fell.
-  for (let i = 0; i < plan.typedCount; i++) {
-    const type = plan.typedTypes[i], at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
-    if (type >= CITY_TYPE.WINDMILL && type < CITY_TYPE.RUIN) assert.ok(at[4] > 0.79 && at[4] < 1.36 && at[6] > 0.79 && at[6] < 1.36 && at[5] > 0.9 && at[5] < 1.1, `${CITY_BUILDING_TYPES[type].name} stretched ${at[4]}, ${at[5]}, ${at[6]}`);
-  }
+  for (const [key, n] of Object.entries(founded)) assert.ok((of[key] ?? 0) <= n && (of[key] ?? 0) >= Math.floor(n * 0.7), `${key}: ${of[key] ?? 0} stand of ${n} founded`);
+  // Nothing is stretched to its plot: a record is where a type stands and its tint, and the type is the size of its
+  // kind (its bays, its stages) that best fills the plot.
+  assert.equal(CITY_TYPED_FLOATS, 5);
   // A watermill's wheel is on the side of it where the model's wheel turns.
   const wheels = board.works.wheels;
   for (let w = 0; w < wheels.length; w += 3) {
     const k = wheels[w], x = board.buildings.stand[k * 6], z = board.buildings.stand[k * 6 + 1];
     for (let i = 0; i < plan.typedCount; i++) {
       const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
-      if (plan.typedTypes[i] !== CITY_TYPE.WATERMILL || Math.hypot(at[0] - x, at[2] - z) > 0.2) continue;
-      const out = (CITY_BUILDING_TYPES[CITY_TYPE.WATERMILL].width / 2 + WORKS_WHEEL.out) * at[4], wx = at[0] + out * Math.cos(at[3]), wz = at[2] - out * Math.sin(at[3]);
+      // The mill is its one size, stood toward its water as far as brings its wheel there.
+      if (plan.typedTypes[i] !== CITY_TYPE.WATERMILL || Math.hypot(at[0] - x, at[2] - z) > Math.hypot(wheels[w + 1] - x, wheels[w + 2] - z) + 0.2) continue;
+      const out = CITY_BUILDING_TYPES[CITY_TYPE.WATERMILL].width / 2 + WORKS_WHEEL.out, wx = at[0] + out * Math.cos(at[3]), wz = at[2] - out * Math.sin(at[3]);
       assert.ok(Math.hypot(wx - wheels[w + 1], wz - wheels[w + 2]) < 4.5, `a wheel ${Math.hypot(wx - wheels[w + 1], wz - wheels[w + 2])} m from its water`);
     }
   }
-  // Its worked furlongs are fenced a length at a time, of rail or of dry stone as the model has them, each length on
-  // dry ground and near its own measure; a churchyard is walled; none of these is a gun's target or stops a walker.
+  // Its worked furlongs are fenced a section at a time, of rail or of dry stone as the model has them, each section on
+  // dry ground and a whole number of its panels or courses; a churchyard is walled; none of these is a gun's target or
+  // stops a walker.
   const fenced = board.works.fences.length / 5;
   let lengths = 0;
   for (let i = 0; i < plan.typedCount; i++) {
     const type = plan.typedTypes[i];
-    if (type !== CITY_TYPE.FENCE_RAIL && type !== CITY_TYPE.FENCE_STONE) continue;
-    const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
+    if (keyOf(type) !== 'FENCE_RAIL' && keyOf(type) !== 'FENCE_STONE') continue;
+    const unit = keyOf(type) === 'FENCE_RAIL' ? WORKS_FENCE.panel : WORKS_FENCE.course, units = CITY_BUILDING_TYPES[type].length / unit;
     lengths++;
-    assert.ok(at[4] === 1 && at[5] === 1 && at[6] > 0.3 && at[6] < 1.5, `a length of fence stretched ${at[6]}`);
+    assert.ok(Math.abs(units - Math.round(units)) < 1e-6, `${CITY_BUILDING_TYPES[type].name} is ${units} of its bays`);
     assert.ok(CITY_TYPES_SLIGHT.has(type));
   }
   assert.equal(lengths, B.fences);
@@ -216,8 +218,8 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   let miteredRuns = 0;
   for (let k = 4; k < board.works.fences.length; k += 5) if (board.works.fences[k] & 4) miteredRuns++;
   assert.equal(miteredRuns, fenced, 'every founded fence run is polyline-chained & miter-bisected in runtime.js');
-  assert.ok(WORKS_FENCE_M > 2 && board.works.yards.length === B.yards);
-  assert.equal(of[CITY_TYPE.FOOTBRIDGE] + of[CITY_TYPE.STONE_BRIDGE] + of[CITY_TYPE.STONE_BRIDGE_SPAN], B.bridges);
+  assert.ok(WORKS_FENCE.panel > 2 && board.works.yards.length === B.yards);
+  assert.equal((of.FOOTBRIDGE ?? 0) + (of.STONE_BRIDGE ?? 0) + (of.STONE_BRIDGE_SPAN ?? 0), B.bridges);
 
   // Its land: uses only, no colour (the ground keeps its geography's; the GPU stamps the parcels on it).
   const kinds = new Set(); let woods = 0, forest = 0, town = 0, openPasture = 0, woodMargin = 0, openTilled = 0;
@@ -340,21 +342,25 @@ test('Lisbon\'s whole founded world is frozen beside its board, by the program t
 });
 
 test('waterfront wharves chain continuously along shoreline contours and roadside/hillside fences stay watertight & terrain-sheared', () => {
-  // 1. Fence & dry-stone wall architectural geometry: terminal posts on both ends (zero cantilever) & plumb stone end-caps.
-  assert.ok(WORKS_FENCE_POST && WORKS_FENCE_POST.primitives.length >= 2, 'dedicated WORKS_FENCE_POST exported');
-  const railParts = WORKS_FENCE_RAIL.primitives;
-  const railPosts = railParts.filter((p) => p.name === 'fence_post');
-  assert.ok(railPosts.some((p) => p.from[2] <= -2.48 && p.to[2] >= -2.36), 'rail fence has stout left terminal post');
-  assert.ok(railPosts.some((p) => p.from[2] <= 2.36 && p.to[2] >= 2.48), 'rail fence has stout right terminal post');
-  for (const r of railParts.filter((p) => p.name === 'fence_rail')) {
-    assert.ok(r.from[2] >= -2.50 && r.to[2] <= 2.50, 'rails mortised cleanly inside terminal posts without cantilever');
+  // 1. Fence & dry-stone wall architecture, a section of whole bays at a time: a rail section owns the post at its
+  // start and one at each panel line within it, its rails between them; a post of its own ends a run. A dry-stone
+  // section is whole courses, plumb at its ends, abutting the next.
+  const posts = familyTypes('FENCE_POST');
+  assert.ok(posts.length === 1 && posts[0].primitives.length >= 2, 'a post of its own ends a run of rails');
+  for (const rail of familyTypes('FENCE_RAIL')) {
+    const half = rail.length / 2, railPosts = rail.primitives.filter((p) => p.name === 'fence_post');
+    assert.equal(railPosts.length, Math.round(rail.length / WORKS_FENCE.panel), `${rail.name}: a post to each panel`);
+    assert.ok(railPosts.some((p) => p.from[2] <= -half + 1e-6), `${rail.name} owns the post at its start`);
+    for (const r of rail.primitives.filter((p) => p.name === 'fence_rail')) assert.ok(r.from[2] >= -half && r.to[2] <= half + 1e-6, 'rails within their section');
   }
-  const stoneParts = WORKS_FENCE_STONE.primitives;
-  for (const sp of stoneParts.filter((p) => p.name.startsWith('drystone_') && p.name !== 'drystone_cope')) {
-    assert.equal(sp.topInset, undefined, 'dry-stone wall avoids 4-sided batter V-notches along Z');
-    assert.ok(sp.from[2] <= -2.53 && sp.to[2] >= 2.53, 'plumb end-caps overlap +0.08 m across joints');
+  for (const stone of familyTypes('FENCE_STONE')) {
+    const half = stone.length / 2;
+    for (const sp of stone.primitives.filter((p) => p.name.startsWith('drystone_') && p.name !== 'drystone_cope')) {
+      assert.equal(sp.topInset, undefined, 'dry-stone wall avoids 4-sided batter V-notches along Z');
+      assert.ok(sp.from[2] <= -half + 1e-6 && sp.to[2] >= half - 1e-6, 'plumb ends, abutting the next section');
+    }
+    assert.ok(stone.primitives.some((p) => p.from[1] <= -0.30), 'dry-stone wall base embeds >= 0.30 m into ground');
   }
-  assert.ok(stoneParts.some((p) => p.from[1] <= -0.30), 'dry-stone wall base embeds >= 0.30 m into ground');
 
   // 2. Curved harbor/river shoreline wharf chaining (`alignWaterfrontWharves`): corner-to-corner joints & unified deck height.
   const curvedInlandAt = (x, z) => z - 40 * Math.sin(x / 180);
@@ -383,7 +389,7 @@ test('waterfront wharves chain continuously along shoreline contours and roadsid
     }
   }
 
-  // 3. Lisbon 1550 roadside verge preservation + hillside slope shear, as the city continuum stands it.
+  // 3. Lisbon 1550 roadside verge preservation, and hillside sections each stood on their own ground.
   const baked = JSON.parse(readFileSync(new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url), 'utf8'));
   const sN = BOARD_SURVEY_SIZE, tN = 257, heights = new Float32Array(tN * tN);
   for (let j = 0; j < tN; j++) {
@@ -396,26 +402,32 @@ test('waterfront wharves chain continuously along shoreline contours and roadsid
   }
   registerBakedBoard(baked);
   const lisbonReg = { ...baked.region, size: tN, biomeSize: 128, albedoSize: 256, year: 1550 };
+  // The ground the fences are laid on, before the rivers are cut into it.
+  const laid = heights.slice(), gs = (tN - 1) / lisbonReg.span, gx0 = lisbonReg.x - lisbonReg.span / 2, gz0 = lisbonReg.z - lisbonReg.span / 2;
+  const laidAt = (x, z) => {
+    const u = Math.max(0, Math.min(tN - 1.0001, (x - gx0) * gs)), v = Math.max(0, Math.min(tN - 1.0001, (z - gz0) * gs)), i = Math.floor(u), j = Math.floor(v), a = u - i, b = v - j, k = j * tN + i;
+    return (laid[k] * (1 - a) + laid[k + 1] * a) * (1 - b) + (laid[k + tN] * (1 - a) + laid[k + tN + 1] * a) * b;
+  };
   const lisbonCountry = oldWorldCountry(lisbonReg, heights, { center: { x: lisbonReg.x, z: lisbonReg.z }, clearRadius: 120, instances: [] });
   const lPlan = lisbonCountry.plan;
   // Previously 99.38% of Lisbon's 5,185 roadside fences were killed; now contiguous roadside & field runs stand intact.
   assert.ok(lPlan.stats.built.fences > 8000, `Lisbon roadside + field fence bays preserved: ${lPlan.stats.built.fences}`);
-  let shearedHillsideBays = 0;
+  // Each section is no longer than lets it stand on its own ground where the ground falls along the run: both its ends
+  // within its footing of where it is seated, never sheared or stretched to the slope.
+  let hillside = 0;
   for (let i = 0; i < lPlan.typedCount; i++) {
     const t = lPlan.typedTypes[i];
-    if (t !== CITY_TYPE.FENCE_RAIL && t !== CITY_TYPE.FENCE_STONE) continue;
-    const at = lPlan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
-    assert.ok(at[7] < -50, `fence bay ${i} encodes slope shear in shape.w (${at[7]})`);
-    const dzSlope = at[7] + 100;
-    assert.ok(Math.abs(dzSlope) <= 0.85 + 1e-5);
-    if (Math.abs(dzSlope) > 0.04) shearedHillsideBays++;
+    if (keyOf(t) !== 'FENCE_RAIL' && keyOf(t) !== 'FENCE_STONE') continue;
+    const at = lPlan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS), half = CITY_BUILDING_TYPES[t].length / 2, ux = Math.sin(at[3]), uz = Math.cos(at[3]);
+    const a = laidAt(at[0] - ux * half, at[2] - uz * half), b = laidAt(at[0] + ux * half, at[2] + uz * half);
+    assert.ok(Math.abs(at[1] - a) < 0.75 && Math.abs(at[1] - b) < 0.75, `fence section ${i} stands on its ground (${at[1] - a}, ${at[1] - b})`);
+    if (Math.abs(a - b) > 0.08) hillside++;
   }
-  assert.ok(shearedHillsideBays > 500, `hillside fence bays sheared to local ground slope: ${shearedHillsideBays}`);
-  // The continuum shears each bay to its slope (a STRETCHED record's stretch, its errors and bounds grown to match),
-  // and thins the horizon's bays through the shared core's area-preserving hash, not a copy of it.
+  assert.ok(hillside > 500, `fence sections on hillsides, each on its own ground: ${hillside}`);
+  // The city's records are its types at their own size: its material reads no stretch; and the horizon's sections are
+  // thinned through the shared core's area-preserving hash, not a copy of it.
   const CITY_RENDER = continuumModuleWGSL({ pass: 'view', material: cityContinuumMaterial(TERRAIN) }), CITY_SELECT = continuumModuleWGSL({ pass: 'select' });
-  assert.match(CITY_RENDER, /s\.y\+s\.z\*stretch\.w/);
-  assert.match(CITY_SELECT, /\*\(1\.0\+abs\(s\.w\)\)/);
+  assert.doesNotMatch(cityContinuumMaterial(TERRAIN).wgsl(), /continuumStretch/);
   assert.match(CITY_SELECT, /splatScale=continuumThin\(span,/);
   assert.doesNotMatch(CITY_SELECT + CITY_RENDER, /keepProb/);
 });

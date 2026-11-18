@@ -8,6 +8,11 @@
 // x along the street, z back from it, the street front at -z, the floor at y = 0. What is 'stucco' in a type takes
 // the instance's wash or paint (js/wgsl/terrain.js). The builder lays a plinth of its own under any type that names
 // none, so each names what it stands on.
+//
+// Nothing is stretched to its plot (AGENTS.md rule 1). A work that the model builds at many lengths is written at
+// each of them, in whole bays of a fixed real width (a granary's staddles, a longhouse's bays, a fence's panels, a
+// bridge's arches, a palisade's stakes): each entry of CITY_WORKS is a family of such variants, and the plan stands
+// the one nearest its plot (js/old-world-buildings.js cityVariant). Doors, steps and stairs are one size in all.
 import { NATIVE_SLIGHT_WORKS, NATIVE_WORKS } from './native-works.js';
 
 const WORKS_FOOT_M = 6.5;
@@ -73,27 +78,30 @@ const WORKS_WATERMILL = (() => {
 })();
 
 /* ---- stores ---- */
-const WORKS_GRANARY = (() => {
-  const hw = 4, hd = 4, floor = 0.95, eaves = 4.6, staddles = worksEvenly(3, -3.1, 3.1);
-  return worksSpec('Celeiro (granary raised on staddle stones)', 8, 8, eaves, 10, [
-    worksFoot(3.6, 3.6, 'ashlar', 0.25),
+// A granary is as many staddle bays to a side as it holds: two or three, each this wide.
+const WORKS_STADDLE_BAY_M = 2.2;
+const WORKS_GRANARY = [2, 3].map((bays) => {
+  const hw = bays * WORKS_STADDLE_BAY_M / 2 + 0.9, hd = hw, floor = 0.95, eaves = 4.6, staddles = worksEvenly(bays + 1, -bays * WORKS_STADDLE_BAY_M / 2, bays * WORKS_STADDLE_BAY_M / 2);
+  return worksSpec(`Celeiro (granary raised on staddle stones, ${bays} bays to a side)`, 2 * hw, 2 * hd, eaves, 10, [
+    worksFoot(hw - 0.4, hd - 0.4, 'ashlar', 0.25),
     ...staddles.flatMap((x) => staddles.flatMap((z) => [
       { primitive: 'cylinder', name: 'staddle', base: [x, 0.25, z], height: 0.56, radius: 0.3, radiusTop: 0.2, segments: 6, material: 'limestone' },
       worksBox('staddle_cap', [x - 0.42, 0.81, z - 0.42], [x + 0.42, floor, z + 0.42], 'limestone'),
     ])),
     worksBox('granary_floor', [-hw, floor, -hd], [hw, floor + 0.2, hd], 'oak'),
-    ...worksWalls('granary', hw, hd, floor + 0.2, eaves - floor - 0.2, 0.25, 'wood', { front: [worksDoor(4, 1.2, 1.9)], left: [worksWindow(4, 0.5, 0.5, 2.2)], right: [worksWindow(4, 0.5, 0.5, 2.2)] }),
+    ...worksWalls('granary', hw, hd, floor + 0.2, eaves - floor - 0.2, 0.25, 'wood', { front: [worksDoor(hw, 1.2, 1.9)], left: [worksWindow(hd, 0.5, 0.5, 2.2)], right: [worksWindow(hd, 0.5, 0.5, 2.2)] }),
     ...[-hw, hw].flatMap((x) => [-hd, hd].map((z) => worksPost('granary_corner', x - Math.sign(x) * 0.1, z - Math.sign(z) * 0.1, floor, eaves, 0.13))),
-    { primitive: 'pyramid', name: 'granary_roof', from: [-hw - 0.2, eaves, -hd - 0.2], to: [hw + 0.2, eaves, hd + 0.2], height: 2.3, material: 'roof_tile' },
+    { primitive: 'pyramid', name: 'granary_roof', from: [-hw - 0.2, eaves, -hd - 0.2], to: [hw + 0.2, eaves, hd + 0.2], height: 0.29 * 2 * hw, material: 'roof_tile' },
     worksBox('granary_step', [-0.9, 0, -hd - 0.64], [0.9, 0.36, -hd - 0.32], 'limestone'),
     worksBox('granary_step', [-0.9, 0, -hd - 0.32], [0.9, 0.72, -hd + 0.02], 'limestone'),
   ]);
-})();
+});
 const WORKS_SHED = (() => {
-  const hw = 2.5, hd = 2.25, eaves = 2.3;
-  return worksSpec('Telheiro (outbuilding, open to its yard)', 5, 4.5, eaves, 10, [
+  // The size the model gives its sheds.
+  const hw = 2.1, hd = 2.4, eaves = 2.3;
+  return worksSpec('Telheiro (outbuilding, open to its yard)', 2 * hw, 2 * hd, eaves, 10, [
     worksFoot(hw, hd, 'stone'),
-    ...worksWalls('shed', hw, hd, 0, eaves, 0.2, 'wood', { front: null, right: [worksWindow(2.25, 0.5, 0.5, 1.3)] }),
+    ...worksWalls('shed', hw, hd, 0, eaves, 0.2, 'wood', { front: null, right: [worksWindow(hd, 0.5, 0.5, 1.3)] }),
     worksPost('shed_post', -hw + 0.1, -hd + 0.1, 0, eaves, 0.1), worksPost('shed_post', hw - 0.1, -hd + 0.1, 0, eaves, 0.1), worksPost('shed_post', 0, -hd + 0.1, 0, eaves, 0.08),
     worksBox('shed_plate', [-hw, eaves - 0.16, -hd], [hw, eaves, -hd + 0.2], 'oak'),
     worksRoof('shed_roof', hw, hd, eaves, 0.95, 'x', 'roof_tile', 'wood', 'gable', 0.3),
@@ -145,25 +153,30 @@ const WORKS_COT = (() => {
   ]);
 })();
 // The house of the model's poorest building as it stands in a village: the model roofs it in thatch, steep and low
-// at the eaves. A town of this country roofs even its poor in tile, so these stand only outside one.
-const WORKS_THATCH_HOUSE = (() => {
-  const hw = 3.5, hd = 4, eaves = 2.3, rise = 3.6;
-  return worksSpec('Casa de colmo (villager\'s house under thatch)', 7, 8, eaves, 12, [
+// at the eaves. A town of this country roofs even its poor in tile, so these stand only outside one. Its front is in
+// the bays of a town house (WORKS_BAY_M), two to four of them, and it is one room deep or a room and a half.
+export const WORKS_BAY_M = 2.2;
+const WORKS_THATCH_DEPTHS = [6.4, 8];
+const WORKS_THATCH_HOUSE = [2, 3, 4].flatMap((bays) => WORKS_THATCH_DEPTHS.map((depth) => {
+  const hw = bays * WORKS_BAY_M / 2, hd = depth / 2, eaves = 2.3, rise = 0.45 * depth, door = bays > 2 ? 1 : 0;
+  const front = [worksDoor((door + 0.5) * WORKS_BAY_M, 0.95, 1.85), worksWindow((bays - 0.5) * WORKS_BAY_M, 0.6, 0.6, 1.05)];
+  return worksSpec(`Casa de colmo (villager's house under thatch, ${bays} bays, ${depth} m deep)`, 2 * hw, depth, eaves, 12, [
     worksFoot(hw, hd, 'stone'),
-    ...worksWalls('colmo', hw, hd, 0, eaves, 0.4, 'stucco', { front: [worksDoor(2.2, 0.95, 1.85), worksWindow(5, 0.6, 0.6, 1.05)], back: [worksWindow(3.5, 0.5, 0.5, 1.1)], right: [worksWindow(4, 0.5, 0.5, 1.1)] }),
+    ...worksWalls('colmo', hw, hd, 0, eaves, 0.4, 'stucco', { front, back: [worksWindow(hw, 0.5, 0.5, 1.1)], right: [worksWindow(hd, 0.5, 0.5, 1.1)] }),
     worksRoof('colmo_thatch', hw, hd, eaves, rise, 'x', 'thatch', 'stucco', 'gable', 0.55),
     worksBox('colmo_smoke_hole', [-0.35, eaves + rise - 0.42, -0.25], [0.35, eaves + rise + 0.02, 0.25], 'timber'),
   ]);
-})();
-const WORKS_THATCH_LONGHOUSE = (() => {
-  const hw = 7, hd = 3.5, eaves = 2.3, rise = 3.3;
-  return worksSpec('Casal comprido de colmo (longhouse under thatch, its byre at one end)', 14, 7, eaves, 12, [
+}));
+// A longhouse: the family's end and the byre's under one roof, four to seven bays long.
+const WORKS_THATCH_LONGHOUSE = [4, 5, 6, 7].map((bays) => {
+  const hw = bays * WORKS_BAY_M / 2, hd = 3.2, eaves = 2.3, rise = 3.0, at = (bay) => (bay + 0.5) * WORKS_BAY_M;
+  return worksSpec(`Casal comprido de colmo (longhouse under thatch, its byre at one end, ${bays} bays)`, 2 * hw, 2 * hd, eaves, 12, [
     worksFoot(hw, hd, 'stone'),
-    ...worksWalls('casal', hw, hd, 0, eaves, 0.4, 'stucco', { front: [worksDoor(4, 0.95, 1.85), worksWindow(7, 0.6, 0.6, 1.05), worksDoor(11.2, 1.5, 1.9)], back: [worksWindow(3.5, 0.5, 0.5, 1.1), worksWindow(9, 0.5, 0.5, 1.1)] }),
+    ...worksWalls('casal', hw, hd, 0, eaves, 0.4, 'stucco', { front: [worksDoor(at(1), 0.95, 1.85), worksWindow(at(2), 0.6, 0.6, 1.05), worksDoor(at(bays - 1), 1.5, 1.9)], back: [worksWindow(at(1), 0.5, 0.5, 1.1), worksWindow(at(bays - 2), 0.5, 0.5, 1.1)] }),
     worksRoof('casal_thatch', hw, hd, eaves, rise, 'x', 'thatch', 'stucco', 'gable', 0.55),
-    worksBox('casal_smoke_hole', [-3.35, eaves + rise - 0.42, -0.25], [-2.65, eaves + rise + 0.02, 0.25], 'timber'),
+    worksBox('casal_smoke_hole', [-hw + at(1) - 0.35, eaves + rise - 0.42, -0.25], [-hw + at(1) + 0.35, eaves + rise + 0.02, 0.25], 'timber'),
   ]);
-})();
+});
 const WORKS_WINEPRESS = (() => {
   const hw = 4.5, hd = 4, eaves = 3.4;
   return worksSpec('Lagar (winepress under its roof, open to the yard)', 9, 8, eaves, 11, [
@@ -203,15 +216,17 @@ const WORKS_VATS = (() => {
 })();
 
 /* ---- of stone: the halls of chapter, refectory, hospital, bath and guild; cloister and courtyard house ---- */
-const WORKS_STONE_HALL = (() => {
-  const hw = 8, hd = 5, low = 3.1, eaves = 6.4, th = 0.7, bays = 5, bay = 2 * hw / bays;
+// A stone hall is as long as its bays, each between two buttresses.
+const WORKS_HALL_BAY_M = 3.2;
+const WORKS_STONE_HALL = [4, 5, 6, 7].map((bays) => {
+  const bay = WORKS_HALL_BAY_M, hw = bays * bay / 2, hd = 5, low = 3.1, eaves = 6.4, th = 0.7, door = Math.floor(bays / 2);
   const upper = Array.from({ length: bays }, (_, k) => worksWindow((k + 0.5) * bay, 0.8, 1.9, 0.7));
-  return worksSpec('Casa de pedra (stone hall: chapter house, refectory, hospital, bath, guildhall)', 16, 10, eaves, 11, [
+  return worksSpec(`Casa de pedra (stone hall: chapter house, refectory, hospital, bath, guildhall; ${bays} bays)`, 2 * hw, 2 * hd, eaves, 11, [
     worksFoot(hw, hd),
     ...worksWalls('hall_ground', hw, hd, 0, low, th, 'ashlar', {
-      front: Array.from({ length: bays }, (_, k) => k === 2 ? worksDoor((k + 0.5) * bay, 1.6, 2.5) : worksWindow((k + 0.5) * bay, 0.5, 1.2, 1.1)),
-      back: [worksWindow(4, 0.5, 1.2, 1.1), worksWindow(12, 0.5, 1.2, 1.1)], left: [worksWindow(5, 0.5, 1.2, 1.1)], right: [worksWindow(5, 0.5, 1.2, 1.1)] }),
-    ...worksWalls('hall_upper', hw, hd, low, eaves - low, th, 'ashlar', { front: upper, back: upper, left: [worksWindow(5, 1.2, 2.2, 0.6)], right: [worksWindow(5, 1.2, 2.2, 0.6)] }),
+      front: Array.from({ length: bays }, (_, k) => k === door ? worksDoor((k + 0.5) * bay, 1.6, 2.5) : worksWindow((k + 0.5) * bay, 0.5, 1.2, 1.1)),
+      back: [worksWindow(1.25 * bay, 0.5, 1.2, 1.1), worksWindow((bays - 1.25) * bay, 0.5, 1.2, 1.1)], left: [worksWindow(hd, 0.5, 1.2, 1.1)], right: [worksWindow(hd, 0.5, 1.2, 1.1)] }),
+    ...worksWalls('hall_upper', hw, hd, low, eaves - low, th, 'ashlar', { front: upper, back: upper, left: [worksWindow(hd, 1.2, 2.2, 0.6)], right: [worksWindow(hd, 1.2, 2.2, 0.6)] }),
     // A buttress at each bay line of the front and back, stepped once.
     ...Array.from({ length: bays + 1 }, (_, k) => -hw + k * bay).flatMap((x) => [-1, 1].flatMap((side) => {
       const z0 = side < 0 ? -hd - 0.62 : hd, z1 = side < 0 ? -hd : hd + 0.62, x0 = Math.max(-hw, x - 0.3), x1 = Math.min(hw, x + 0.3);
@@ -220,7 +235,7 @@ const WORKS_STONE_HALL = (() => {
     worksBox('hall_string_course', [-hw - 0.03, low - 0.08, -hd - 0.06], [hw + 0.03, low + 0.08, -hd + 0.02], 'limestone'),
     worksRoof('hall_roof', hw, hd, eaves, 3.2, 'x', 'roof_tile', 'ashlar'),
   ]);
-})();
+});
 // The cloister's walk is this wide, under a pent roof falling from the outer wall to the arcade.
 const WORKS_CLOISTER = (() => {
   const hw = 9.6, hd = 11, wall = 3.5, walk = 3, arcade = 2.5, ix = hw - walk, iz = hd - walk, slope = Math.atan2(wall - 0.3 - arcade, walk) * 180 / Math.PI;
@@ -299,20 +314,28 @@ const WORKS_QUARRY = (() => {
 })();
 
 /* ---- what is left of a building: burnt to its walls, or thrown down ---- */
-const WORKS_RUIN = (() => {
-  const hw = 4, hd = 4, th = 0.5, broken = (name, x0, z0, x1, z1, heights) => heights.map((h, k) => {
-    const a = k / heights.length, b = (k + 1) / heights.length;
-    return worksBox(name, [x0 + (x1 - x0) * (x1 - x0 > th ? a : 0), 0, z0 + (z1 - z0) * (z1 - z0 > th ? a : 0)], [x1 - x0 > th ? x0 + (x1 - x0) * b : x1, h, z1 - z0 > th ? z0 + (z1 - z0) * b : z1], 'stucco');
-  });
-  return worksSpec('Ruína (a house burnt to its walls)', 8, 8, 4, 12, [
+// A ruin stands on a house's plot, so it is as many bays across and as deep as a house (js/old-world-buildings.js
+// CITY_HOUSE_DEPTHS); what is left of each length of its walls is thrown by dice of its own, the same on every machine.
+export const WORKS_HOUSE_DEPTHS = Object.freeze([6.6, 9.9, 13.2]);
+const WORKS_RUIN = [2, 3, 4].flatMap((bays) => WORKS_HOUSE_DEPTHS.map((depth) => {
+  let seed = (0x6e1d + bays * 131 + Math.round(depth * 10) * 17) >>> 0;
+  const dice = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const hw = bays * WORKS_BAY_M / 2, hd = depth / 2, th = 0.5, broken = (name, x0, z0, x1, z1) => {
+    const run = Math.max(Math.abs(x1 - x0), Math.abs(z1 - z0)), pieces = Math.max(2, Math.round(run / 1.6));
+    return Array.from({ length: pieces }, (_, k) => {
+      const a = k / pieces, b = (k + 1) / pieces, h = 0.9 + 3.1 * dice();
+      return worksBox(name, [x0 + (x1 - x0) * (x1 - x0 > th ? a : 0), 0, z0 + (z1 - z0) * (z1 - z0 > th ? a : 0)], [x1 - x0 > th ? x0 + (x1 - x0) * b : x1, h, z1 - z0 > th ? z0 + (z1 - z0) * b : z1], 'stucco');
+    });
+  };
+  return worksSpec(`Ruína (a house burnt to its walls, ${bays} bays, ${depth} m deep)`, 2 * hw, depth, 4, 12, [
     worksFoot(hw, hd, 'stone'),
-    ...broken('ruin_front', -hw, -hd, hw, -hd + th, [3.6, 2.2, 0.9, 2.8, 4.0]), ...broken('ruin_back', -hw, hd - th, hw, hd, [4.0, 3.4, 1.6, 2.4, 3.1]),
-    ...broken('ruin_left', -hw, -hd + th, -hw + th, hd - th, [3.2, 1.4, 2.6, 3.8]), ...broken('ruin_right', hw - th, -hd + th, hw, hd - th, [2.6, 3.9, 1.1, 2.9]),
+    ...broken('ruin_front', -hw, -hd, hw, -hd + th), ...broken('ruin_back', -hw, hd - th, hw, hd),
+    ...broken('ruin_left', -hw, -hd + th, -hw + th, hd - th), ...broken('ruin_right', hw - th, -hd + th, hw, hd - th),
     worksBox('ruin_door', [-0.55, 0, -hd - 0.02], [0.55, 2.0, -hd + th + 0.02], 'recess'),
-    ...[[-2.2, -1.4, 28], [0.6, 0.8, -22], [2.1, -2.0, 40]].map(([x, z, tilt], k) => ({ primitive: 'group', name: 'ruin_beams', position: [x, 0.2, z], rotation: [0, 35 * k, tilt], children: [worksBox('charred_beam', [-0.1, 0, -0.1], [0.1, 3.4, 0.1], 'dark_wood')] })),
-    ...[[-1.4, 1.6, 1.2, 0.5], [1.5, 2.2, 0.9, 0.4], [0.2, -1.9, 1.4, 0.6], [-2.6, -0.2, 0.8, 0.45]].map(([x, z, w, h]) => worksBox('ruin_fallen', [x - w / 2, 0, z - w / 2], [x + w / 2, h, z + w / 2], 'stone')),
+    ...[[-0.55, -0.35, 28], [0.15, 0.2, -22], [0.52, -0.5, 40]].map(([x, z, tilt], k) => ({ primitive: 'group', name: 'ruin_beams', position: [x * hw, 0.2, z * hd], rotation: [0, 35 * k, tilt], children: [worksBox('charred_beam', [-0.1, 0, -0.1], [0.1, 3.4, 0.1], 'dark_wood')] })),
+    ...[[-0.35, 0.4, 1.2, 0.5], [0.38, 0.55, 0.9, 0.4], [0.05, -0.48, 1.4, 0.6], [-0.65, -0.05, 0.8, 0.45]].map(([x, z, w, h]) => worksBox('ruin_fallen', [x * hw - w / 2, 0, z * hd - w / 2], [x * hw + w / 2, h, z * hd + w / 2], 'stone')),
   ]);
-})();
+}));
 const WORKS_RUBBLE = worksSpec('Entulho (the heap where a building stood)', 8, 8, 1.4, 11, [
   worksFoot(3.6, 3.6, 'stone', 0.2),
   ...[[-1.6, -1.2, 2.4, 0.9], [1.3, -0.8, 2.0, 1.2], [0.2, 1.5, 2.8, 0.8], [-2.2, 1.6, 1.6, 1.1], [2.3, 1.9, 1.5, 0.7], [-0.3, -2.4, 1.8, 0.6]].map(([x, z, r, h], k) => (
@@ -321,73 +344,91 @@ const WORKS_RUBBLE = worksSpec('Entulho (the heap where a building stood)', 8, 8
 ]);
 
 /* ---- the slighter works: a length of fence, a track's bridge, graves, a cairn, a tent, a standard, a scaffold ---- */
-// A fence is stood a length at a time; each length is this long before it is fitted to its run.
-export const WORKS_FENCE_M = 5;
-export const WORKS_FENCE_POST = worksSpec('Moirão de cerca (terminal gate/corner fence post)', 0.3, 0.3, 1.26, 10, [
+// A fence is stood a section at a time, each a whole number of its own bays: a post-and-rail fence's panel between
+// two posts, a dry-stone wall's length of two copes. A section of rails owns the post at its start and those within
+// it; the post that ends a run is a type of its own.
+export const WORKS_FENCE = Object.freeze({ panel: 2.5, panels: [1, 2, 3, 4], course: 1.25, courses: [2, 3, 4, 5, 6, 7, 8] });
+const WORKS_FENCE_POST = worksSpec('Moirão de cerca (the post that ends a fence)', 0.3, 0.3, 1.26, 10, [
   worksBox('fence_post_shaft', [-0.10, -1.3, -0.10], [0.10, 1.22, 0.10], 'timber', { partGroup: 'foundation_plinth' }),
   worksBox('fence_post_cap', [-0.12, 1.22, -0.12], [0.12, 1.28, 0.12], 'dark_wood'),
 ], 1.3);
-export const WORKS_FENCE_RAIL = worksSpec('Cerca (post-and-rail fence, a length)', 0.3, WORKS_FENCE_M, 1.2, 10, [
-  worksBox('fence_post', [-0.09, -1.3, -2.50], [0.09, 1.20, -2.35], 'timber', { partGroup: 'foundation_plinth' }),
-  worksBox('fence_post_cap', [-0.105, 1.20, -2.515], [0.105, 1.25, -2.335], 'dark_wood'),
-  worksBox('fence_post', [-0.085, -1.3, -0.085], [0.085, 1.18, 0.085], 'timber', { partGroup: 'foundation_plinth' }),
-  worksBox('fence_post', [-0.09, -1.3, 2.35], [0.09, 1.20, 2.50], 'timber', { partGroup: 'foundation_plinth' }),
-  worksBox('fence_post_cap', [-0.105, 1.20, 2.335], [0.105, 1.25, 2.515], 'dark_wood'),
-  worksBox('fence_rail', [-0.04, 0.42, -2.48], [0.04, 0.56, 2.48], 'wood'),
-  worksBox('fence_rail', [-0.04, 0.90, -2.48], [0.04, 1.04, 2.48], 'wood'),
-], 1.3);
-export const WORKS_FENCE_STONE = worksSpec('Muro de pedra solta (dry-stone wall, a length)', 0.7, WORKS_FENCE_M, 1.15, 11, [
-  worksBox('drystone_base', [-0.35, -1.3, -2.54], [0.35, 0.46, 2.54], 'stone', { partGroup: 'foundation_plinth' }),
-  worksBox('drystone_upper', [-0.30, 0.46, -2.54], [0.30, 1.00, 2.54], 'stone'),
-  ...worksEvenly(8, -2.205, 2.205).map((z, k) => worksBox('drystone_cope', [-0.31, 1.00, z - 0.32], [0.31, 1.11 + 0.04 * (k % 2), z + 0.32], 'dark_stone')),
-], 1.3);
-// A bridge is written this long and stretched to its span; its deck is the floor.
-export const WORKS_BRIDGE_M = 9;
-const WORKS_FOOTBRIDGE = worksSpec('Pontão (timber bridge of a track)', 3.2, WORKS_BRIDGE_M, 6.2, 10, [
-  worksBox('bridge_deck', [-1.5, -0.26, -3.4], [1.5, 0.06, 3.4], 'wood'),
-  worksBox('bridge_ramp_n', [-1.5, -0.35, -4.5], [1.5, -0.02, -3.35], 'wood'),
-  worksBox('bridge_ramp_s', [-1.5, -0.35, 3.35], [1.5, -0.02, 4.5], 'wood'),
-  worksBox('bridge_beam', [-1.32, -0.56, -4.45], [-0.98, -0.24, 4.45], 'oak'),
-  worksBox('bridge_beam', [0.98, -0.56, -4.45], [1.32, -0.24, 4.45], 'oak'),
-  ...[-2.8, 0, 2.8].flatMap((z) => [-1.15, 1.15].flatMap((x) => [
-    { primitive: 'cylinder', name: 'bridge_footing', base: [x, -5.8, z], height: 3.6, radius: 0.19, segments: 6, material: 'timber', partGroup: 'foundation_plinth' },
-    { primitive: 'cylinder', name: 'bridge_piles', base: [x, -2.2, z], height: 1.7, radius: 0.18, segments: 6, material: 'timber' },
-  ])),
-  ...[-2.8, 2.8].map((z) => worksBox('bridge_bent_cap', [-1.45, -0.78, z - 0.16], [1.45, -0.52, z + 0.16], 'oak')),
-  ...[-1.42, 1.42].flatMap((x) => [...worksEvenly(5, -4.3, 4.3).map((z) => worksPost('bridge_rail_post', x, z, 0, 1.02, 0.07)), worksBox('bridge_rail', [x - 0.05, 0.94, -4.45], [x + 0.05, 1.04, 4.45], 'oak')]),
-], 5.2);
-const STONE_BRIDGE_ARCH_AND_PARAPETS = [
-  { primitive: 'group', name: 'bridge_arch', rotation: [0, 90, 0], children: [
-    { primitive: 'arch', name: 'bridge_arch', from: [-3.15, -3.85, 0], to: [3.15, -3.85, 0], height: 3.55, thickness: 3.85, voussoirs: 11, pierWidth: 0.95, openThrough: true, material: 'ashlar' }] },
-  worksBox('bridge_footing', [-2.05, -6.2, -4.5], [2.05, -2.2, -3.05], 'ashlar', { partGroup: 'foundation_plinth' }),
-  worksBox('bridge_abutment', [-2.05, -2.2, -4.5], [2.05, -0.35, -3.05], 'ashlar'),
-  worksBox('bridge_footing', [-2.05, -6.2, 3.05], [2.05, -2.2, 4.5], 'ashlar', { partGroup: 'foundation_plinth' }),
-  worksBox('bridge_abutment', [-2.05, -2.2, 3.05], [2.05, -0.35, 4.5], 'ashlar'),
-  ...[-3.2, 3.2].flatMap((z) => [
-    worksBox('bridge_footing', [-2.35, -6.2, z - 0.5], [-1.85, -2.2, z + 0.5], 'stone', { partGroup: 'foundation_plinth' }),
-    worksBox('bridge_cutwater', [-2.35, -2.2, z - 0.5], [-1.85, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
-    worksBox('bridge_footing', [1.85, -6.2, z - 0.5], [2.35, -2.2, z + 0.5], 'stone', { partGroup: 'foundation_plinth' }),
-    worksBox('bridge_cutwater', [1.85, -2.2, z - 0.5], [2.35, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
-  ]),
-  worksBox('bridge_parapet', [-2.02, 0.02, -4.5], [-1.68, 0.92, 4.5], 'ashlar'),
-  worksBox('bridge_parapet', [1.68, 0.02, -4.5], [2.02, 0.92, 4.5], 'ashlar'),
-  worksBox('bridge_coping', [-2.06, 0.92, -4.52], [-1.64, 1.04, 4.52], 'dark_stone'),
-  worksBox('bridge_coping', [1.64, 0.92, -4.52], [2.06, 1.04, 4.52], 'dark_stone'),
-  ...worksEvenly(5, -4.1, 4.1).flatMap((z) => [
-    worksBox('bridge_bollard', [-2.08, 0.02, z - 0.18], [-1.62, 1.14, z + 0.18], 'limestone'),
-    worksBox('bridge_bollard', [1.62, 0.02, z - 0.18], [2.08, 1.14, z + 0.18], 'limestone'),
-  ]),
-];
-const WORKS_STONE_BRIDGE = worksSpec('Ponte de pedra (stone bridge of a track, arched with cutwaters)', 4.2, WORKS_BRIDGE_M, 6.5, 11, [
-  worksBox('bridge_deck', [-1.9, -0.4, -3.4], [1.9, 0.12, 3.4], 'limestone'),
-  worksBox('bridge_ramp_n', [-1.9, -0.55, -4.5], [1.9, -0.04, -3.35], 'dark_stone'),
-  worksBox('bridge_ramp_s', [-1.9, -0.55, 3.35], [1.9, -0.04, 4.5], 'dark_stone'),
-  ...STONE_BRIDGE_ARCH_AND_PARAPETS,
-], 5.5);
-const WORKS_STONE_BRIDGE_SPAN = worksSpec('Ponte de pedra — level interior arch span without mid-river ramp dips', 4.2, WORKS_BRIDGE_M, 6.5, 11, [
-  worksBox('bridge_deck', [-1.9, -0.4, -4.5], [1.9, 0.12, 4.5], 'limestone'),
-  ...STONE_BRIDGE_ARCH_AND_PARAPETS,
-], 5.5);
+const WORKS_FENCE_RAIL = WORKS_FENCE.panels.map((panels) => {
+  const half = panels * WORKS_FENCE.panel / 2;
+  return worksSpec(`Cerca (post-and-rail fence, ${panels} panel${panels > 1 ? 's' : ''})`, 0.3, 2 * half, 1.2, 10, [
+    ...Array.from({ length: panels }, (_, k) => -half + k * WORKS_FENCE.panel).flatMap((z, k) => k === 0
+      ? [worksBox('fence_post', [-0.09, -1.3, z], [0.09, 1.20, z + 0.15], 'timber', { partGroup: 'foundation_plinth' }), worksBox('fence_post_cap', [-0.105, 1.20, z - 0.015], [0.105, 1.25, z + 0.165], 'dark_wood')]
+      : [worksBox('fence_post', [-0.085, -1.3, z - 0.085], [0.085, 1.18, z + 0.085], 'timber')]),
+    worksBox('fence_rail', [-0.04, 0.42, -half + 0.02], [0.04, 0.56, half], 'wood'),
+    worksBox('fence_rail', [-0.04, 0.90, -half + 0.02], [0.04, 1.04, half], 'wood'),
+  ], 1.3);
+});
+const WORKS_FENCE_STONE = WORKS_FENCE.courses.map((courses) => {
+  const half = courses * WORKS_FENCE.course / 2, copes = 2 * courses;
+  return worksSpec(`Muro de pedra solta (dry-stone wall, ${2 * half} m)`, 0.7, 2 * half, 1.15, 11, [
+    worksBox('drystone_base', [-0.35, -1.3, -half], [0.35, 0.46, half], 'stone', { partGroup: 'foundation_plinth' }),
+    worksBox('drystone_upper', [-0.30, 0.46, -half], [0.30, 1.00, half], 'stone'),
+    ...Array.from({ length: copes }, (_, k) => -half + (k + 0.5) * half * 2 / copes).map((z, k) => worksBox('drystone_cope', [-0.31, 1.00, z - 0.3], [0.31, 1.11 + 0.04 * (k % 2), z + 0.3], 'dark_stone')),
+  ], 1.3);
+});
+// A timber bridge stands on bents of piles this far apart, as many as its crossing needs, a ramp at each end; a stone
+// bridge is a row of arches, each of one of three spans, as wide as a track's or a road's. Its deck is the floor.
+export const WORKS_BRIDGE = Object.freeze({ bent: 2.8, bents: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], ends: 3.4, arches: [7, 9, 11], widths: [4.2, 6] });
+const WORKS_FOOTBRIDGE = WORKS_BRIDGE.bents.map((bents) => {
+  const deck = (bents - 1) * WORKS_BRIDGE.bent / 2 + 0.6, half = deck + 1.1, rails = Math.max(2, Math.round(2 * half / 2.15) + 1);
+  const at = Array.from({ length: bents }, (_, k) => -(bents - 1) * WORKS_BRIDGE.bent / 2 + k * WORKS_BRIDGE.bent);
+  return worksSpec(`Pontão (timber bridge of a track, ${bents} bents)`, 3.2, 2 * half, 6.2, 10, [
+    worksBox('bridge_deck', [-1.5, -0.26, -deck], [1.5, 0.06, deck], 'wood'),
+    worksBox('bridge_ramp_n', [-1.5, -0.35, -half], [1.5, -0.02, -deck + 0.05], 'wood'),
+    worksBox('bridge_ramp_s', [-1.5, -0.35, deck - 0.05], [1.5, -0.02, half], 'wood'),
+    worksBox('bridge_beam', [-1.32, -0.56, -half + 0.05], [-0.98, -0.24, half - 0.05], 'oak'),
+    worksBox('bridge_beam', [0.98, -0.56, -half + 0.05], [1.32, -0.24, half - 0.05], 'oak'),
+    ...at.flatMap((z) => [-1.15, 1.15].flatMap((x) => [
+      { primitive: 'cylinder', name: 'bridge_footing', base: [x, -5.8, z], height: 3.6, radius: 0.19, segments: 6, material: 'timber', partGroup: 'foundation_plinth' },
+      { primitive: 'cylinder', name: 'bridge_piles', base: [x, -2.2, z], height: 1.7, radius: 0.18, segments: 6, material: 'timber' },
+    ])),
+    ...at.map((z) => worksBox('bridge_bent_cap', [-1.45, -0.78, z - 0.16], [1.45, -0.52, z + 0.16], 'oak')),
+    ...[-1.42, 1.42].flatMap((x) => [...worksEvenly(rails, -half + 0.2, half - 0.2).map((z) => worksPost('bridge_rail_post', x, z, 0, 1.02, 0.07)), worksBox('bridge_rail', [x - 0.05, 0.94, -half + 0.05], [x + 0.05, 1.04, half - 0.05], 'oak')]),
+  ], 5.2);
+});
+// One arch of a stone bridge `span` long and `width` wide: its piers and their cutwaters, its parapets; its crown
+// keeps under the deck whatever its span.
+function worksStoneArch(span, width) {
+  const h = span / 2, w = width / 2, open = h - 1.35, rise = 0.56 * 2 * open, bollards = Math.max(2, Math.round((span - 0.8) / 2.05) + 1);
+  return [
+    { primitive: 'group', name: 'bridge_arch', rotation: [0, 90, 0], children: [
+      { primitive: 'arch', name: 'bridge_arch', from: [-open, -0.3 - rise, 0], to: [open, -0.3 - rise, 0], height: rise, thickness: width - 0.35, voussoirs: Math.max(7, Math.round(open * 3.5) | 1), pierWidth: 0.95, openThrough: true, material: 'ashlar' }] },
+    ...[-1, 1].flatMap((side) => {
+      const z0 = side < 0 ? -h : h - 1.45, z1 = side < 0 ? -h + 1.45 : h;
+      return [
+        worksBox('bridge_footing', [-w + 0.05, -6.2, z0], [w - 0.05, -2.2, z1], 'ashlar', { partGroup: 'foundation_plinth' }),
+        worksBox('bridge_abutment', [-w + 0.05, -2.2, z0], [w - 0.05, -0.35, z1], 'ashlar'),
+      ];
+    }),
+    ...[-(h - 1.3), h - 1.3].flatMap((z) => [-1, 1].flatMap((side) => {
+      const x0 = side < 0 ? -w - 0.25 : w - 0.25, x1 = side < 0 ? -w + 0.25 : w + 0.25;
+      return [
+        worksBox('bridge_footing', [x0, -6.2, z - 0.5], [x1, -2.2, z + 0.5], 'stone', { partGroup: 'foundation_plinth' }),
+        worksBox('bridge_cutwater', [x0, -2.2, z - 0.5], [x1, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
+      ];
+    })),
+    ...[-1, 1].flatMap((side) => [
+      worksBox('bridge_parapet', [side < 0 ? -w + 0.08 : w - 0.42, 0.02, -h], [side < 0 ? -w + 0.42 : w - 0.08, 0.92, h], 'ashlar'),
+      worksBox('bridge_coping', [side < 0 ? -w + 0.04 : w - 0.46, 0.92, -h - 0.02], [side < 0 ? -w + 0.46 : w - 0.04, 1.04, h + 0.02], 'dark_stone'),
+      ...worksEvenly(bollards, -h + 0.4, h - 0.4).map((z) => worksBox('bridge_bollard', [side < 0 ? -w + 0.02 : w - 0.48, 0.02, z - 0.18], [side < 0 ? -w + 0.48 : w - 0.02, 1.14, z + 0.18], 'limestone')),
+    ]),
+  ];
+}
+// A bridge of one arch, ramped down to its banks; and an arch of a longer bridge, its deck level from pier to pier.
+const WORKS_STONE_BRIDGE = WORKS_BRIDGE.widths.flatMap((width) => WORKS_BRIDGE.arches.map((span) => worksSpec(`Ponte de pedra (stone bridge of one ${span} m arch, ${width} m wide, ramped to its banks)`, width, span, 6.5, 11, [
+  worksBox('bridge_deck', [-width / 2 + 0.2, -0.4, -span / 2 + 1.1], [width / 2 - 0.2, 0.12, span / 2 - 1.1], 'limestone'),
+  worksBox('bridge_ramp_n', [-width / 2 + 0.2, -0.55, -span / 2], [width / 2 - 0.2, -0.04, -span / 2 + 1.15], 'dark_stone'),
+  worksBox('bridge_ramp_s', [-width / 2 + 0.2, -0.55, span / 2 - 1.15], [width / 2 - 0.2, -0.04, span / 2], 'dark_stone'),
+  ...worksStoneArch(span, width),
+], 5.5)));
+const WORKS_STONE_BRIDGE_SPAN = WORKS_BRIDGE.widths.flatMap((width) => WORKS_BRIDGE.arches.map((span) => worksSpec(`Ponte de pedra (a ${span} m arch of a longer bridge, ${width} m wide, its deck level)`, width, span, 6.5, 11, [
+  worksBox('bridge_deck', [-width / 2 + 0.2, -0.4, -span / 2], [width / 2 - 0.2, 0.12, span / 2], 'limestone'),
+  ...worksStoneArch(span, width),
+], 5.5)));
 const WORKS_GRAVES = worksSpec('Campas (graves of a churchyard)', 6, 6, 1.2, 11, [
   worksBox('grave_slab', [-2.6, -0.4, -2.4], [-1.7, 0.14, -0.5], 'stone', { partGroup: 'foundation_plinth' }),
   ...[[-0.4, -2.2], [1.6, -1.9], [2.3, 0.4], [0.3, 0.2], [-1.9, 1.0], [1.1, 1.4]].flatMap(([x, z], k) => k % 3 === 2
@@ -417,15 +458,17 @@ const WORKS_SCAFFOLD = worksSpec('Andaime (a work in hand: scaffold, stone and t
 ], 0.8);
 
 // The works in the order their numbers follow the street's: what stands on a footing as a house does, then the
-// slighter things. `key` is each one's name in CITY_TYPE. The houses and palisade of the peoples of the Americas
-// (js/native-works.js) follow the Old World's own of each.
+// slighter things. `key` is each one's name in CITY_TYPE; then its variants (one spec, or a list of them), and which
+// of them the name stands for (its canonical size, the one the plan asks for when it has no plot to fit). The houses
+// and palisade of the peoples of the Americas (js/native-works.js) follow the Old World's own of each.
 const CITY_WORKS_OLD_BUILT = [
-  ['WINDMILL', WORKS_WINDMILL], ['WATERMILL', WORKS_WATERMILL], ['GRANARY', WORKS_GRANARY], ['SHED', WORKS_SHED], ['BARN', WORKS_BARN], ['DOVECOTE', WORKS_DOVECOTE], ['TOLL', WORKS_TOLL], ['COT', WORKS_COT], ['THATCH_HOUSE', WORKS_THATCH_HOUSE], ['THATCH_LONGHOUSE', WORKS_THATCH_LONGHOUSE],
-  ['WINEPRESS', WORKS_WINEPRESS], ['VATS', WORKS_VATS], ['STONE_HALL', WORKS_STONE_HALL], ['CLOISTER', WORKS_CLOISTER], ['COURT', WORKS_COURT], ['WHARF', WORKS_WHARF], ['QUARRY', WORKS_QUARRY], ['RUIN', WORKS_RUIN], ['RUBBLE', WORKS_RUBBLE],
+  ['WINDMILL', WORKS_WINDMILL], ['WATERMILL', WORKS_WATERMILL], ['GRANARY', WORKS_GRANARY, 1], ['SHED', WORKS_SHED], ['BARN', WORKS_BARN], ['DOVECOTE', WORKS_DOVECOTE], ['TOLL', WORKS_TOLL], ['COT', WORKS_COT], ['THATCH_HOUSE', WORKS_THATCH_HOUSE, 3], ['THATCH_LONGHOUSE', WORKS_THATCH_LONGHOUSE, 2],
+  ['WINEPRESS', WORKS_WINEPRESS], ['VATS', WORKS_VATS], ['STONE_HALL', WORKS_STONE_HALL, 1], ['CLOISTER', WORKS_CLOISTER], ['COURT', WORKS_COURT], ['WHARF', WORKS_WHARF], ['QUARRY', WORKS_QUARRY], ['RUIN', WORKS_RUIN, 4], ['RUBBLE', WORKS_RUBBLE],
 ];
 export const CITY_WORKS = Object.freeze([
   ...CITY_WORKS_OLD_BUILT, ...NATIVE_WORKS,
-  ['FENCE_RAIL', WORKS_FENCE_RAIL], ['FENCE_STONE', WORKS_FENCE_STONE], ['FOOTBRIDGE', WORKS_FOOTBRIDGE], ['STONE_BRIDGE', WORKS_STONE_BRIDGE], ['STONE_BRIDGE_SPAN', WORKS_STONE_BRIDGE_SPAN], ['GRAVES', WORKS_GRAVES], ['CAIRN', WORKS_CAIRN], ['TENT', WORKS_TENT], ['STANDARD', WORKS_STANDARD], ['SCAFFOLD', WORKS_SCAFFOLD],
+  ['FENCE_RAIL', WORKS_FENCE_RAIL, 1], ['FENCE_POST', WORKS_FENCE_POST], ['FENCE_STONE', WORKS_FENCE_STONE, 2], ['FOOTBRIDGE', WORKS_FOOTBRIDGE, 1], ['STONE_BRIDGE', WORKS_STONE_BRIDGE, 1], ['STONE_BRIDGE_SPAN', WORKS_STONE_BRIDGE_SPAN, 1],
+  ['GRAVES', WORKS_GRAVES], ['CAIRN', WORKS_CAIRN], ['TENT', WORKS_TENT], ['STANDARD', WORKS_STANDARD], ['SCAFFOLD', WORKS_SCAFFOLD],
   ...NATIVE_SLIGHT_WORKS,
 ]);
 // How many of them stand on a footing as a house does; the rest are the slighter works.

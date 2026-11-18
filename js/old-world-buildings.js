@@ -1,26 +1,39 @@
 // The building types of an Old World city, written in Cairn, the game's declarative JSON
 // building language (js/cairn-primitives.js): walls with their openings, arches, roofs, boxes.
-// Each type is compiled once into a mesh and drawn as GPU instances wherever the city's plan
-// stands a building of that type near the camera; farther off its plain block stands in.
+// Each type is compiled once into a mesh, baked into the city's continuum (scripts/prepare-city-continuum.mjs) and
+// drawn wherever the city's plan stands a building of that type, at the size it is written: nothing is stretched to
+// its plot (AGENTS.md rule 1). A building the plan stands at many sizes is a family of types, one to each size it is
+// built at in whole bays of a fixed real width (a house's windows, a church's nave bays, a wall's merlons, a hall's
+// buttresses); doors, steps and storeys are one size in all. The plan stands the one nearest its plot (cityVariant).
 //
-// A type's local frame is the plan's: x along the street, z away from it, the street front at
-// -z, the floor at y = 0. Its width, length and height are what an instance is scaled from.
-import { CITY_WORKS, CITY_WORKS_BUILT } from './old-world-works.js';
+// A type's local frame is the plan's: x along the street, z away from it, the street front at -z, the floor at y = 0.
+import { CITY_WORKS, CITY_WORKS_BUILT, WORKS_BAY_M, WORKS_HOUSE_DEPTHS } from './old-world-works.js';
 import { NATIVE_WORKS_TARGETS } from './native-works.js';
 
 export const CITY_STOREY_M = 2.9;
+// A house's front is so many bays of this width, a window or the door to each.
+export const CITY_BAY_M = WORKS_BAY_M;
 const FOOTING_M = 6.5; // Walls run this far below the floor, so a house on a slope has no gap under it.
+// A length in whole bays, rid of the float's dust (5 bays of 2.2 m is 11 m, not 11.000000000000002).
+const cityMetres = (v) => Math.round(v * 1000) / 1000;
 const WALL_M = 0.42;
 
-// What the plan and the types must agree on: a church's proportions, and how its towers stand.
+// A church is as long as its nave's bays, a tall window to each side of each, and its front and apse walls; a parish
+// church is of one of two breadths, a chapel's or a parish's; the great church of one.
 export const CITY_CHURCH = Object.freeze({
-  parish: Object.freeze({ width: 11, depth: 27, height: 11, tower: 5 }),
-  great: Object.freeze({ width: 15, depth: 40, height: 15, tower: 6.4 }),
-  towerRise: 9.5, // A bell tower's walls stand this far above the nave's.
-  spire: 3.4,
+  bay: 5, ends: 2, towerRise: 9.5, spire: 3.4, // A bell tower's walls stand towerRise above the nave's.
+  parish: Object.freeze([Object.freeze({ width: 8, height: 9, tower: 4.2 }), Object.freeze({ width: 11, height: 11, tower: 5 })]), parishBays: Object.freeze([3, 4, 5, 6]),
+  great: Object.freeze({ width: 15, height: 15, tower: 6.4 }), greatBays: Object.freeze([4, 5, 6, 7, 8]),
 });
-export const CITY_GATE = Object.freeze({ span: 10, thick: 2.6, passage: 8.6, chamber: 2.9 });
+// A tower of the wall is so many stages high, each this tall, on one of three sides; a keep is broader and higher.
+export const CITY_TOWER = Object.freeze({ stage: 3.1, sides: Object.freeze([5.6, 6.6, 7.6]), stages: Object.freeze([3, 4, 5]) });
+export const CITY_KEEP = Object.freeze({ sides: Object.freeze([10, 12, 14]), stages: Object.freeze([6, 7]) });
+// A gate: its arch `span` across and `thick` through, the passage and the chamber over it; a tower of `tower` a side
+// stands to either hand, its middle `reach` from the gate's.
+export const CITY_GATE = Object.freeze({ span: 8, thick: 2.6, passage: 8.6, chamber: 2.9, tower: 5.6, reach: 6.5 });
 export const CITY_HOUSE_STOREYS = 5;
+// How far past its plot a type may stand across its front (shared between two neighbours) and back into its yard.
+export const CITY_FIT = Object.freeze({ across: 0.7, along: 1.0 });
 
 // A town house. Its plot, its storeys and its ridge (eaves or gable to the street) are the plan's; how it is built
 // is its manner, and within a manner the particulars are thrown by dice of its own, so that a type is the same
@@ -91,8 +104,9 @@ function cityHouseRecipe({ storeys, ridge, manner, bays, dice }) {
   return recipe;
 }
 
-function houseSpec({ name, storeys, front, depth, ridge, manner = 'plain', seed = 0 }) {
-  const S = CITY_STOREY_M, hw = front / 2, hd = depth / 2, height = storeys * S, bays = Math.max(2, Math.round(front / 2.4)), bay = front / bays;
+// A house `bays` bays across its front (CITY_BAY_M each) and `depth` back from it, its storeys CITY_STOREY_M each.
+function houseSpec({ name, storeys, bays, depth, ridge, manner = 'plain', seed = 0 }) {
+  const S = CITY_STOREY_M, bay = CITY_BAY_M, front = cityMetres(bays * bay), hw = front / 2, hd = depth / 2, height = cityMetres(storeys * S);
   const R = cityHouseRecipe({ storeys, ridge, manner, bays, dice: cityHouseDice(seed) });
   const setback = R.ground === 'arcade' ? HOUSE_ARCADE_M : 0;
   const primitives = [{ primitive: 'box', partGroup: 'foundation_plinth', from: [-hw, -FOOTING_M, -hd], to: [hw, 0, hd], material: 'stucco' }];
@@ -223,19 +237,18 @@ function houseSpec({ name, storeys, front, depth, ridge, manner = 'plain', seed 
   return { schemaVersion: '0.4', name, width: front, length: depth, height, foundationDepth: FOOTING_M, materialKind: 12, roofPitch: 2, waterfront: false, manner, primitives };
 }
 
-// A parish church: a nave with its portal and round window to the street, tall windows down
-// each side, and a bell tower (or two) beside the front.
-function churchSpec({ name, width, depth, height, tower, towers, material = 'whitewash' }) {
-  const hw = width / 2, hd = depth / 2, th = 0.8, primitives = [
+// A parish church: a nave of `bays` bays with its portal and round window to the street, a tall window to each side of
+// each bay, and a bell tower (or two) beside the front.
+function churchSpec({ name, width, bays, height, tower, towers, material = 'whitewash' }) {
+  const depth = cityMetres(bays * CITY_CHURCH.bay + CITY_CHURCH.ends), hw = width / 2, hd = depth / 2, th = 0.8, primitives = [
     { primitive: 'box', partGroup: 'foundation_plinth', from: [-hw, -FOOTING_M, -hd], to: [hw, 0, hd], material: 'ashlar' },
     { primitive: 'wall', name: 'west_front', from: [-hw, 0, -hd + th / 2], to: [hw, 0, -hd + th / 2], height, thickness: th, material, openings: [{ offset: width / 2, width: 1.6, height: 1.6, sill: height * 0.62 }] },
     { primitive: 'arch', name: 'portal', from: [-1.7, 0, -hd - 0.12], to: [1.7, 0, -hd - 0.12], height: 4.6, thickness: 0.5, voussoirs: 9, material: 'limestone' },
     { primitive: 'box', name: 'apse_wall', from: [-hw, 0, hd - th], to: [hw, height, hd], material },
   ];
-  const windows = Math.max(2, Math.round((depth - 4) / 5.5));
   for (const side of [-1, 1]) {
     const openings = [];
-    for (let k = 0; k < windows; k++) openings.push({ offset: 2 + (k + 0.5) * (depth - 4) / windows, width: 0.9, height: height * 0.36, sill: height * 0.42 });
+    for (let k = 0; k < bays; k++) openings.push({ offset: CITY_CHURCH.ends / 2 + (k + 0.5) * CITY_CHURCH.bay, width: 0.9, height: height * 0.36, sill: height * 0.42 });
     primitives.push({ primitive: 'wall', name: side < 0 ? 'north_wall' : 'south_wall', from: [side * (hw - th / 2), 0, side < 0 ? hd : -hd], to: [side * (hw - th / 2), 0, side < 0 ? -hd : hd], height, thickness: th, material, openings });
   }
   primitives.push({ primitive: 'roof', from: [-hw, height, -hd], to: [hw, height, hd], height: 0.42 * hw + 0.6, style: 'gable', overhang: 0.35, material: 'roof_tile', wallMaterial: material });
@@ -252,9 +265,10 @@ function churchSpec({ name, width, depth, height, tower, towers, material = 'whi
   return { schemaVersion: '0.4', name, width, length: depth, height, foundationDepth: FOOTING_M, materialKind: 12, roofPitch: 3, waterfront: false, primitives };
 }
 
-// A square tower of the wall or the castle: an ashlar shaft with slits, a wall-walk and merlons.
-function towerSpec({ name, side, height, slits }) {
-  const h = side / 2, primitives = [
+// A square tower of the wall or the castle: an ashlar shaft with a slit to each face of each stage above the first, a
+// wall-walk and merlons.
+function towerSpec({ name, side, stages }) {
+  const h = side / 2, height = cityMetres(stages * CITY_TOWER.stage), primitives = [
     { primitive: 'box', partGroup: 'foundation_plinth', from: [-h, -FOOTING_M, -h], to: [h, 0, h], material: 'dark_stone' },
     { primitive: 'box', name: 'shaft', from: [-h, 0, -h], to: [h, height - 1.2, h], topInset: 0.1, material: 'ashlar' },
     { primitive: 'box', name: 'wall_walk', from: [-h - 0.15, height - 1.2, -h - 0.15], to: [h + 0.15, height - 0.9, h + 0.15], material: 'limestone' },
@@ -262,8 +276,8 @@ function towerSpec({ name, side, height, slits }) {
   for (const [ax, az, bx, bz] of [[-h, -h, h, -h], [h, -h, h, h], [h, h, -h, h], [-h, h, -h, -h]]) {
     primitives.push({ primitive: 'wall', from: [ax, height - 0.9, az], to: [bx, height - 0.9, bz], height: 0.9, thickness: 0.5, material: 'ashlar', crenellated: true, merlonWidth: 1.05, merlonGap: 0.75, merlonHeight: 0.85 });
   }
-  for (let k = 0; k < slits; k++) {
-    const y = 3 + k * (height - 6) / Math.max(1, slits);
+  for (let k = 1; k + 1 < stages; k++) {
+    const y = k * CITY_TOWER.stage + 0.8;
     for (const [x, z, w, d] of [[0, -h - 0.02, 0.2, 0.04], [0, h + 0.02, 0.2, 0.04], [-h - 0.02, 0, 0.04, 0.2], [h + 0.02, 0, 0.04, 0.2]]) {
       primitives.push({ primitive: 'box', name: 'arrow_slit', from: [x - w, y, z - d], to: [x + w, y + 1.5, z + d], material: 'recess' });
     }
@@ -271,39 +285,41 @@ function towerSpec({ name, side, height, slits }) {
   return { schemaVersion: '0.4', name, width: side, length: side, height, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false, primitives };
 }
 
-// A length of the town's wall or the castle's: a thick ashlar curtain, its wall-walk behind a
-// parapet of merlons. The parapet stands along the type's -x side; the plan turns that outward.
-export const CITY_CURTAIN = Object.freeze({ thick: 2.4, height: 8.5, short: 7, long: 10, parapet: 0.8, merlon: 1.3, rise: 1.15 });
-function curtainSpec({ name, length }) {
-  const t = CITY_CURTAIN.thick / 2, h = length / 2, top = CITY_CURTAIN.height, sill = 0.3;
+// A section of the town's wall or the castle's: a thick ashlar curtain `bays` bays long, its wall-walk behind a parapet
+// of a merlon and an embrasure to each bay. The parapet stands along the type's -x side; the plan turns that outward.
+// It is built to one of five heights: a weir's, a low wall's, a colony's, a town's and a castle's.
+export const CITY_CURTAIN = Object.freeze({ thick: 2.4, bay: 2.6, bays: Object.freeze([1, 2, 3, 4, 5]), heights: Object.freeze([3, 5.5, 7, 8.5, 10]), height: 8.5, parapet: 0.8, merlon: 1.3, rise: 1.15 });
+function curtainSpec({ bays, height }) {
+  const length = cityMetres(bays * CITY_CURTAIN.bay), t = CITY_CURTAIN.thick / 2, h = length / 2, sill = 0.3;
   return {
-    schemaVersion: '0.4', name, width: CITY_CURTAIN.thick, length, height: top, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false,
+    schemaVersion: '0.4', name: `Pano de muralha (a length of wall, ${bays} bay${bays > 1 ? 's' : ''}, ${height} m high)`, width: CITY_CURTAIN.thick, length, height, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false,
     primitives: [
       { primitive: 'box', partGroup: 'foundation_plinth', from: [-t, -FOOTING_M, -h], to: [t, 0, h], material: 'dark_stone' },
-      { primitive: 'box', name: 'curtain', from: [-t, 0, -h], to: [t, top, h], material: 'ashlar' },
-      { primitive: 'wall', name: 'curtain_parapet', from: [-t + CITY_CURTAIN.parapet / 2, top, -h], to: [-t + CITY_CURTAIN.parapet / 2, top, h], height: sill, thickness: CITY_CURTAIN.parapet, material: 'ashlar', crenellated: true, merlonWidth: CITY_CURTAIN.merlon, merlonGap: CITY_CURTAIN.merlon, merlonHeight: CITY_CURTAIN.rise - sill },
+      { primitive: 'box', name: 'curtain', from: [-t, 0, -h], to: [t, height, h], material: 'ashlar' },
+      { primitive: 'wall', name: 'curtain_parapet', from: [-t + CITY_CURTAIN.parapet / 2, height, -h], to: [-t + CITY_CURTAIN.parapet / 2, height, h], height: sill, thickness: CITY_CURTAIN.parapet, material: 'ashlar', crenellated: true, merlonWidth: CITY_CURTAIN.merlon, merlonGap: CITY_CURTAIN.merlon, merlonHeight: CITY_CURTAIN.rise - sill },
     ],
   };
 }
 
-// The castle's hall: two tall storeys of limewashed wall under a hipped roof, its door in the long front.
-export const CITY_HALL = Object.freeze({ width: 12, depth: 30, height: 10.5, roof: 3.2 });
-function hallSpec({ name }) {
-  const { width, depth, height, roof } = CITY_HALL, hw = width / 2, hd = depth / 2, th = 0.7, storey = height / 2;
+// The castle's hall: two tall storeys of limewashed wall under a hipped roof, its door in the long front; as long as
+// its bays, a window to each of each storey, and of a narrower or a broader range.
+export const CITY_HALL = Object.freeze({ bay: 4.2, widths: Object.freeze([10, 12]), bays: Object.freeze([4, 5, 6, 7]), height: 10.5, roof: 3.2 });
+function hallSpec({ width, bays }) {
+  const { height, roof } = CITY_HALL, depth = cityMetres(bays * CITY_HALL.bay), hw = width / 2, hd = depth / 2, th = 0.7, storey = height / 2;
   const primitives = [{ primitive: 'box', partGroup: 'foundation_plinth', from: [-hw, -FOOTING_M, -hd], to: [hw, 0, hd], material: 'ashlar' }];
   const sides = [[-hw, -hd + th / 2, hw, -hd + th / 2], [hw - th / 2, -hd, hw - th / 2, hd], [hw, hd - th / 2, -hw, hd - th / 2], [-hw + th / 2, hd, -hw + th / 2, -hd]];
   for (let level = 0; level < 2; level++) {
     sides.forEach(([ax, az, bx, bz], side) => {
-      const run = Math.hypot(bx - ax, bz - az), bays = Math.max(2, Math.round(run / 4.2)), openings = [];
-      for (let bay = 0; bay < bays; bay++) {
-        const offset = (bay + 0.5) * run / bays;
-        openings.push(level === 0 && side === 1 && bay === Math.floor(bays / 2) ? { offset, width: 1.8, height: 3.1, door: true } : { offset, width: 1, height: storey * 0.42, sill: storey * 0.3 });
+      const run = Math.hypot(bx - ax, bz - az), n = side & 1 ? bays : Math.max(2, Math.round(width / CITY_HALL.bay)), openings = [];
+      for (let bay = 0; bay < n; bay++) {
+        const offset = (bay + 0.5) * run / n;
+        openings.push(level === 0 && side === 1 && bay === Math.floor(n / 2) ? { offset, width: 1.8, height: 3.1, door: true } : { offset, width: 1, height: storey * 0.42, sill: storey * 0.3 });
       }
       primitives.push({ primitive: 'wall', name: `hall_wall_${level}_${side}`, from: [ax, level * storey, az], to: [bx, level * storey, bz], height: storey, thickness: th, material: 'stucco', openings });
     });
   }
   primitives.push({ primitive: 'roof', from: [-hw, height, -hd], to: [hw, height, hd], height: roof, style: 'hip', overhang: 0.4, material: 'roof_tile', wallMaterial: 'stucco' });
-  return { schemaVersion: '0.4', name, width, length: depth, height, foundationDepth: FOOTING_M, materialKind: 12, roofPitch: 3, waterfront: false, primitives };
+  return { schemaVersion: '0.4', name: `Paço (castle hall, ${bays} bays, ${width} m across)`, width, length: depth, height, foundationDepth: FOOTING_M, materialKind: 12, roofPitch: 3, waterfront: false, primitives };
 }
 
 // What stands and hangs in a street, as Castle and Commons' own towns have it: a pentice over a shop's open front,
@@ -313,88 +329,114 @@ function hallSpec({ name }) {
 // in them is painted cloth or board, and takes its colour from the instance's tint (js/wgsl/terrain.js). The builder
 // lays a plinth of its own under any type that names none: each names what it stands on or is fixed by.
 const cityFurnitureSpec = (name, width, length, height, primitives) => ({ schemaVersion: '0.4', name, width, length, height, foundationDepth: 0, materialKind: 10, roofPitch: 0, waterfront: false, primitives });
+// A pentice spans its front's bays but for a little at each end, a bracket at each bay line.
+export const CITY_PENTICE = Object.freeze({ bays: Object.freeze([2, 3, 4, 5, 6]), inset: 0.6 });
+const CITY_PENTICES = CITY_PENTICE.bays.map((bays) => {
+  const w = cityMetres(bays * CITY_BAY_M - CITY_PENTICE.inset), h = w / 2;
+  return cityFurnitureSpec(`Alpendre (pentice over a shop front of ${bays} bays)`, w, 1.4, 0.4, [
+    { primitive: 'box', name: 'pentice_cloth', from: [-h, 0, -1.4], to: [h, 0.1, 0], material: 'stucco' },
+    { primitive: 'box', name: 'pentice_valance', from: [-h, -0.24, -1.4], to: [h, 0, -1.35], material: 'stucco' },
+    ...Array.from({ length: bays + 1 }, (_, k) => Math.max(-h + 0.04, Math.min(h - 0.14, -h - CITY_PENTICE.inset / 2 + k * CITY_BAY_M - 0.05))).map((x, k) => (
+      { primitive: 'box', name: k === 0 ? 'pentice_bracket_left' : 'pentice_bracket', ...(k === 0 ? { partGroup: 'foundation_plinth' } : {}), from: [x, -0.12, -1.38], to: [x + 0.1, 0, 0], material: 'oak' })),
+  ]);
+});
 const CITY_STREET_FURNITURE = [
-  cityFurnitureSpec('Alpendre (pentice over a shop front)', 4, 1.4, 0.4, [
-    { primitive: 'box', name: 'pentice_cloth', from: [-2, 0, -1.4], to: [2, 0.1, 0], material: 'stucco' },
-    { primitive: 'box', name: 'pentice_valance', from: [-2, -0.24, -1.4], to: [2, 0, -1.35], material: 'stucco' },
-    { primitive: 'box', name: 'pentice_bracket_left', partGroup: 'foundation_plinth', from: [-1.96, -0.12, -1.38], to: [-1.86, 0, 0], material: 'oak' },
-    { primitive: 'box', name: 'pentice_bracket_right', from: [1.86, -0.12, -1.38], to: [1.96, 0, 0], material: 'oak' },
-  ]),
-  cityFurnitureSpec('Tabuleta (sign board on its bracket)', 0.2, 1.7, 1, [
+  ['SIGN', cityFurnitureSpec('Tabuleta (sign board on its bracket)', 0.2, 1.7, 1, [
     { primitive: 'box', name: 'sign_bracket', partGroup: 'foundation_plinth', from: [-0.07, 0, -1.6], to: [0.07, 0.14, 0], material: 'oak' },
     { primitive: 'box', name: 'sign_hanger_inner', from: [-0.02, -0.14, -0.88], to: [0.02, 0, -0.84], material: 'iron' },
     { primitive: 'box', name: 'sign_hanger_outer', from: [-0.02, -0.14, -1.56], to: [0.02, 0, -1.52], material: 'iron' },
     { primitive: 'box', name: 'sign_board', from: [-0.05, -0.86, -1.65], to: [0.05, -0.14, -0.75], material: 'stucco' },
     { primitive: 'box', name: 'sign_frame', from: [-0.065, -0.9, -1.68], to: [0.065, -0.86, -0.72], material: 'oak' },
-  ]),
-  cityFurnitureSpec('Ramo (the ale-stake and its bush)', 1.2, 2.6, 1.2, [
+  ])],
+  ['ALE_STAKE', cityFurnitureSpec('Ramo (the ale-stake and its bush)', 1.2, 2.6, 1.2, [
     { primitive: 'box', name: 'ale_stake', partGroup: 'foundation_plinth', from: [-0.06, 0, -2.1], to: [0.06, 0.12, 0], material: 'oak' },
     { primitive: 'cylinder', name: 'ale_bush', base: [0, -0.58, -2.02], height: 0.6, radius: 0.16, radiusTop: 0.34, segments: 7, material: 'stucco' },
     { primitive: 'cone', name: 'ale_bush_crown', base: [0, 0.02, -2.02], height: 0.3, radius: 0.34, radiusTop: 0.08, segments: 7, material: 'stucco' },
-  ]),
-  cityFurnitureSpec('Banca de mercado (market stall)', 2.8, 3.6, 2.5, [
+  ])],
+  ['STALL', cityFurnitureSpec('Banca de mercado (market stall)', 2.8, 3.6, 2.5, [
     { primitive: 'box', name: 'stall_board', from: [-1.1, 0.84, -1.5], to: [1.1, 0.94, 1.5], material: 'oak' },
     { primitive: 'box', name: 'stall_chest', partGroup: 'foundation_plinth', from: [-0.95, 0, -1.3], to: [0.95, 0.84, 1.3], material: 'wood' },
     ...[[-1.3, -1.7], [1.3, -1.7], [1.3, 1.7], [-1.3, 1.7]].map(([x, z], k) => ({ primitive: 'box', name: `stall_post_${k}`, from: [x - 0.05, -0.6, z - 0.05], to: [x + 0.05, 2.3, z + 0.05], material: 'timber' })),
     { primitive: 'box', name: 'stall_cloth', from: [-1.4, 2.3, -1.8], to: [1.4, 2.38, 1.8], material: 'stucco' },
     { primitive: 'box', name: 'stall_valance', from: [-1.4, 2.08, -1.8], to: [1.4, 2.3, -1.76], material: 'stucco' },
-  ]),
-  cityFurnitureSpec('Cruzeiro do mercado (market cross)', 3.2, 3.2, 5.2, [
+  ])],
+  ['MARKET_CROSS', cityFurnitureSpec('Cruzeiro do mercado (market cross)', 3.2, 3.2, 5.2, [
     { primitive: 'box', name: 'cross_step_low', partGroup: 'foundation_plinth', from: [-1.6, -1.2, -1.6], to: [1.6, 0.28, 1.6], material: 'ashlar' },
     { primitive: 'box', name: 'cross_step_high', from: [-1.05, 0.28, -1.05], to: [1.05, 0.58, 1.05], material: 'ashlar' },
     { primitive: 'box', name: 'cross_plinth', from: [-0.5, 0.58, -0.5], to: [0.5, 1.3, 0.5], material: 'limestone' },
     { primitive: 'cylinder', name: 'cross_shaft', base: [0, 1.3, 0], height: 3, radius: 0.22, radiusTop: 0.17, segments: 8, material: 'limestone' },
     { primitive: 'box', name: 'cross_head', from: [-0.1, 4.3, -0.09], to: [0.1, 5.2, 0.09], material: 'limestone' },
     { primitive: 'box', name: 'cross_arms', from: [-0.42, 4.66, -0.09], to: [0.42, 4.84, 0.09], material: 'limestone' },
-  ]),
-  cityFurnitureSpec('Poço (well under its roof)', 4.2, 4.2, 4.6, [
+  ])],
+  ['WELL', cityFurnitureSpec('Poço (well under its roof)', 4.2, 4.2, 4.6, [
     { primitive: 'cylinder', name: 'well_ring', partGroup: 'foundation_plinth', base: [0, -1.4, 0], height: 2.3, radius: 1.5, segments: 12, material: 'ashlar' },
     { primitive: 'cylinder', name: 'well_mouth', base: [0, 0.72, 0], height: 0.2, radius: 1.12, segments: 12, material: 'recess' },
     { primitive: 'box', name: 'well_post_left', from: [-1.38, 0.9, -0.08], to: [-1.22, 3, 0.08], material: 'oak' },
     { primitive: 'box', name: 'well_post_right', from: [1.22, 0.9, -0.08], to: [1.38, 3, 0.08], material: 'oak' },
     { primitive: 'box', name: 'well_windlass', from: [-1.3, 2.12, -0.07], to: [1.3, 2.26, 0.07], material: 'oak' },
     { primitive: 'cone', name: 'well_roof', base: [0, 3, 0], height: 1.6, radius: 2.1, radiusTop: 0.08, segments: 8, material: 'timber' },
-  ]),
+  ])],
 ];
 
-// The city's types, in the order their numbers are used by the plan and the renderer: the plain houses by their
-// storeys, eaves to the street and then gable to it; then every other manner of house; then the rest.
+/* ---- the catalogue: every family of types, in the order their numbers are used by the plan and the renderer ---- */
+// A family is one building at each of its sizes: `from` its first type, `count` of them, `canonical` the one its name
+// stands for (the size the plan asks for when it has no plot to fit).
+const cityFamilies = [], cityTypes = [];
+const cityFamily = (key, specs, canonical = 0) => {
+  const list = Array.isArray(specs) ? specs : [specs];
+  const family = Object.freeze({ key, from: cityTypes.length, count: list.length, canonical: cityTypes.length + canonical });
+  cityFamilies.push(family); cityTypes.push(...list);
+  return family.canonical;
+};
+
+// The houses: by their ridge, their storeys and their manner; each at every front and depth it is built to. The
+// plain house is first of each storeys and ridge, then the manners a house of that height may be built in besides,
+// with how often each is met with (the plain house counts three).
 const HOUSES = [
-  ['Casa térrea', 'single-storey house', 6.6, 9.5],
-  ['Sobrado', 'two-storey house', 6.4, 11],
-  ['Casa de três andares', 'three-storey house', 6.2, 12.5],
-  ['Casa de quatro andares', 'four-storey house', 6.2, 12.5],
-  ['Casa alta', 'five-storey house', 6.2, 13],
+  ['Casa térrea', 'single-storey house'], ['Sobrado', 'two-storey house'], ['Casa de três andares', 'three-storey house'],
+  ['Casa de quatro andares', 'four-storey house'], ['Casa alta', 'five-storey house'],
 ];
-// The manners a house of each height may be built in besides plainly, and how often each is met with (the plain
-// house counts three).
+// The bays of its front and its depths, by storeys: a low house may be broad, a tall one is a merchant's narrow front;
+// the depths are a single room, a room and a half and a double pile (WORKS_HOUSE_DEPTHS, as its ruin is).
+const HOUSE_SIZES = [
+  { bays: [2, 3, 4, 5, 6], depths: WORKS_HOUSE_DEPTHS.slice(0, 2) },
+  { bays: [2, 3, 4, 5, 6], depths: WORKS_HOUSE_DEPTHS },
+  { bays: [2, 3, 4, 5], depths: WORKS_HOUSE_DEPTHS },
+  { bays: [2, 3, 4], depths: WORKS_HOUSE_DEPTHS.slice(1) },
+  { bays: [2, 3, 4], depths: WORKS_HOUSE_DEPTHS.slice(1) },
+];
+// A gable is turned to the street by a narrow front only.
+const HOUSE_GABLE_BAYS = 4;
+export const CITY_HOUSE_DEPTHS = WORKS_HOUSE_DEPTHS;
 const HOUSE_MANNERS = [['loja', 'baixa'], ['ressalto', 'loja', 'cantaria'], ['ressalto', 'cantaria', 'arcada'], ['ressalto', 'arcada'], ['arcada']];
 const HOUSE_MANNER = Object.freeze({
-  plain: { share: 3 },
-  ressalto: { share: 3, words: ['de ressalto', 'timber-framed floors jettied over the street'] },
-  cantaria: { share: 1.5, words: ['de cantaria', 'dressed stone, tall windows on balconies'] },
-  loja: { share: 1.5, words: ['com loja', 'a shop below'] },
-  arcada: { share: 2.5, words: ['de arcada', 'the ground floor behind an arcade of columns'] },
-  baixa: { share: 2, words: ['de quatro águas', 'a hipped roof and a great chimney'] },
+  plain: { share: 3, words: ['', ''] },
+  ressalto: { share: 3, words: [' de ressalto', 'timber-framed floors jettied over the street, '] },
+  cantaria: { share: 1.5, words: [' de cantaria', 'dressed stone, tall windows on balconies, '] },
+  loja: { share: 1.5, words: [' com loja', 'a shop below, '] },
+  arcada: { share: 2.5, words: [' de arcada', 'the ground floor behind an arcade of columns, '] },
+  baixa: { share: 2, words: [' de quatro águas', 'a hipped roof and a great chimney, '] },
 });
 const HOUSE_RIDGES = [['street', '', 'eaves to the street'], ['depth', ' de empena', 'gable to the street']];
-const houseTypes = HOUSE_RIDGES.flatMap(([ridge, suffix, lie]) => HOUSES.map(([name, gloss, front, depth], k) => houseSpec({ name: `${name}${suffix} (${gloss}, ${lie})`, storeys: k + 1, front, depth, ridge })));
-// By ridge and storeys, the types a house may be: [type, share] with the plain one first.
-const HOUSE_CHOICES = HOUSE_RIDGES.map((_, r) => HOUSES.map((_, k) => [[r * HOUSES.length + k, HOUSE_MANNER.plain.share]]));
-HOUSE_RIDGES.forEach(([ridge, suffix, lie], r) => HOUSES.forEach(([name, gloss, front, depth], k) => HOUSE_MANNERS[k].forEach((manner, m) => {
-  const { share, words } = HOUSE_MANNER[manner];
-  HOUSE_CHOICES[r][k].push([houseTypes.length, share]);
-  houseTypes.push(houseSpec({ name: `${name} ${words[0]}${suffix} (${gloss}, ${words[1]}, ${lie})`, storeys: k + 1, front, depth, ridge, manner, seed: 0x5eed0000 + r * 4099 + k * 257 + m * 31 }));
+// By ridge and storeys, the families a house may be: [canonical type, share] with the plain one first.
+const HOUSE_CHOICES = HOUSE_RIDGES.map(([ridge, suffix, lie], r) => HOUSES.map(([name, gloss], k) => ['plain', ...HOUSE_MANNERS[k]].map((manner, m) => {
+  const { share, words } = HOUSE_MANNER[manner], size = HOUSE_SIZES[k], bays = size.bays.filter((n) => ridge === 'street' || n <= HOUSE_GABLE_BAYS);
+  const specs = bays.flatMap((n) => size.depths.map((depth) => houseSpec({
+    name: `${name}${words[0]}${suffix} (${gloss}, ${words[1]}${lie}; ${n} bays, ${depth} m deep)`, storeys: k + 1, bays: n, depth, ridge, manner,
+    seed: manner === 'plain' ? 0 : 0x5eed0000 + r * 4099 + k * 257 + (m - 1) * 31,
+  })));
+  // The size the name stands for: three bays, the middle depth.
+  return [cityFamily('HOUSE', specs, bays.indexOf(3) * size.depths.length + Math.floor(size.depths.length / 2)), share];
 })));
-export const CITY_HOUSE_TYPES = houseTypes.length;
-export const CITY_BUILDING_TYPES = Object.freeze([
-  ...houseTypes,
-  churchSpec({ name: 'Igreja paroquial (parish church, tower to the left)', ...CITY_CHURCH.parish, towers: [-1] }),
-  churchSpec({ name: 'Igreja paroquial (parish church, tower to the right)', ...CITY_CHURCH.parish, towers: [1] }),
-  churchSpec({ name: 'Sé (great church, two towers)', ...CITY_CHURCH.great, towers: [-1, 1], material: 'limestone' }),
-  towerSpec({ name: 'Torre da cerca (wall tower)', side: 6.2, height: 12.5, slits: 2 }),
-  towerSpec({ name: 'Torre de menagem (keep)', side: 13, height: 21, slits: 3 }),
-  (() => {
+export const CITY_HOUSE_TYPES = cityTypes.length;
+const CITY_TYPE_NAMED = {
+  HOUSE_EAVES: HOUSE_CHOICES[0][0][0][0], HOUSE_GABLE: HOUSE_CHOICES[1][0][0][0],
+  CHURCH_LEFT: cityFamily('CHURCH_LEFT', CITY_CHURCH.parish.flatMap((P) => CITY_CHURCH.parishBays.map((bays) => churchSpec({ name: `Igreja paroquial (parish church, tower to the left; ${bays} bays, ${P.width} m across)`, ...P, bays, towers: [-1] }))), 6),
+  CHURCH_RIGHT: cityFamily('CHURCH_RIGHT', CITY_CHURCH.parish.flatMap((P) => CITY_CHURCH.parishBays.map((bays) => churchSpec({ name: `Igreja paroquial (parish church, tower to the right; ${bays} bays, ${P.width} m across)`, ...P, bays, towers: [1] }))), 6),
+  CHURCH_GREAT: cityFamily('CHURCH_GREAT', CITY_CHURCH.greatBays.map((bays) => churchSpec({ name: `Sé (great church, two towers; ${bays} bays)`, ...CITY_CHURCH.great, bays, towers: [-1, 1], material: 'limestone' })), 3),
+  WALL_TOWER: cityFamily('WALL_TOWER', CITY_TOWER.sides.flatMap((side) => CITY_TOWER.stages.map((stages) => towerSpec({ name: `Torre da cerca (wall tower, ${side} m a side, ${stages} stages)`, side, stages }))), 4),
+  KEEP: cityFamily('KEEP', CITY_KEEP.sides.flatMap((side) => CITY_KEEP.stages.map((stages) => towerSpec({ name: `Torre de menagem (keep, ${side} m a side, ${stages} stages)`, side, stages }))), 3),
+  GATE: cityFamily('GATE', (() => {
     const h = CITY_GATE.span / 2, t = CITY_GATE.thick / 2, top = CITY_GATE.passage + CITY_GATE.chamber - 0.9;
     const parapet = { primitive: 'wall', height: 0.9, thickness: 0.5, material: 'ashlar', crenellated: true, merlonWidth: 1.05, merlonGap: 0.75, merlonHeight: 0.85 };
     return {
@@ -408,69 +450,99 @@ export const CITY_BUILDING_TYPES = Object.freeze([
         { ...parapet, name: 'gate_parapet_inner', from: [h, top, t - 0.25], to: [-h, top, t - 0.25] },
       ],
     };
-  })(),
-  curtainSpec({ name: 'Pano de muralha (short length of wall)', length: CITY_CURTAIN.short }),
-  curtainSpec({ name: 'Pano de muralha (long length of wall)', length: CITY_CURTAIN.long }),
-  hallSpec({ name: 'Paço (castle hall)' }),
-  ...CITY_STREET_FURNITURE,
-  // Whatever else Castle and Commons' model builds (js/old-world-works.js).
-  ...CITY_WORKS.map(([, spec]) => spec),
-]);
-
-const H = CITY_HOUSE_STOREYS, AFTER_HOUSES = CITY_HOUSE_TYPES;
-export const CITY_TYPE = Object.freeze({ HOUSE_EAVES: 0, HOUSE_GABLE: H, CHURCH_LEFT: AFTER_HOUSES, CHURCH_RIGHT: AFTER_HOUSES + 1, CHURCH_GREAT: AFTER_HOUSES + 2, WALL_TOWER: AFTER_HOUSES + 3, KEEP: AFTER_HOUSES + 4, GATE: AFTER_HOUSES + 5, CURTAIN_SHORT: AFTER_HOUSES + 6, CURTAIN_LONG: AFTER_HOUSES + 7, HALL: AFTER_HOUSES + 8,
-  PENTICE: AFTER_HOUSES + 9, SIGN: AFTER_HOUSES + 10, ALE_STAKE: AFTER_HOUSES + 11, STALL: AFTER_HOUSES + 12, MARKET_CROSS: AFTER_HOUSES + 13, WELL: AFTER_HOUSES + 14,
-  // The model's other works, by their names there: WINDMILL to RUBBLE, then the native houses BARK_LONGHOUSE to SWEAT_LODGE, stand on footings; FENCE_RAIL and after (to PALISADE) are the slighter things.
-  ...Object.fromEntries(CITY_WORKS.map(([key], k) => [key, AFTER_HOUSES + 15 + k])) });
+  })()),
+  CURTAIN: cityFamily('CURTAIN', CITY_CURTAIN.heights.flatMap((height) => CITY_CURTAIN.bays.map((bays) => curtainSpec({ bays, height }))), CITY_CURTAIN.heights.indexOf(CITY_CURTAIN.height) * CITY_CURTAIN.bays.length + 3),
+  HALL: cityFamily('HALL', CITY_HALL.widths.flatMap((width) => CITY_HALL.bays.map((bays) => hallSpec({ width, bays }))), CITY_HALL.bays.length + 3),
+  PENTICE: cityFamily('PENTICE', CITY_PENTICES, 1),
+  ...Object.fromEntries(CITY_STREET_FURNITURE.map(([key, spec]) => [key, cityFamily(key, spec)])),
+};
+// Whatever else Castle and Commons' model builds (js/old-world-works.js), each family by its name there: WINDMILL to
+// RUBBLE, then the native houses BARK_LONGHOUSE to SWEAT_LODGE, stand on footings; FENCE_RAIL and after (to PALISADE)
+// are the slighter things.
+CITY_WORKS.forEach(([key, specs, canonical = 0], k) => {
+  if (k === CITY_WORKS_BUILT) CITY_TYPE_NAMED.SLIGHT_FROM = cityTypes.length;
+  CITY_TYPE_NAMED[key] = cityFamily(key, specs, canonical);
+});
 // The first of the slighter works: from here on a type is written as large as it is, and asked for no footing.
-export const CITY_TYPE_SLIGHT_FROM = AFTER_HOUSES + 15 + CITY_WORKS_BUILT;
+export const CITY_TYPE_SLIGHT_FROM = CITY_TYPE_NAMED.SLIGHT_FROM;
+delete CITY_TYPE_NAMED.SLIGHT_FROM;
+export const CITY_BUILDING_TYPES = Object.freeze(cityTypes);
+export const CITY_FAMILIES = Object.freeze(cityFamilies);
+// Each type's family (an index into CITY_FAMILIES).
+const CITY_TYPE_FAMILY = new Uint16Array(cityTypes.length);
+cityFamilies.forEach((family, f) => CITY_TYPE_FAMILY.fill(f, family.from, family.from + family.count));
+// The type a family's name stands for (its canonical size); a house's by cityHouseType.
+export const CITY_TYPE = Object.freeze(CITY_TYPE_NAMED);
+export const cityFamilyOf = (type) => CITY_FAMILIES[CITY_TYPE_FAMILY[type]];
+const cityFamilyTypes = (...keys) => keys.flatMap((key) => {
+  const family = cityFamilyOf(CITY_TYPE[key]);
+  return Array.from({ length: family.count }, (_, k) => family.from + k);
+});
+
+/**
+ * The type of `type`'s family that best fits a plot `across` its front and `along` back from it, and `up` high (any
+ * may be null, not to be asked): as broad as it can be without standing more than CITY_FIT.across past the plot's
+ * front, and as deep within CITY_FIT.along of its back; failing that, the least past it. Never stretched: a plot is
+ * filled by choosing among sizes, not by changing one.
+ */
+export function cityVariant(type, across = null, along = null, up = null) {
+  const family = cityFamilyOf(type);
+  if (family.count === 1 || (across === null && along === null && up === null)) return type;
+  let best = family.canonical, least = Infinity;
+  for (let id = family.from; id < family.from + family.count; id++) {
+    const T = cityTypes[id];
+    let cost = 0;
+    if (across !== null) { const over = T.width - across; cost += Math.abs(over) + (over > CITY_FIT.across + 1e-6 ? 1000 + over : 0); }
+    if (along !== null) { const over = T.length - along; cost += 0.4 * Math.abs(over) + (over > CITY_FIT.along + 1e-6 ? 1000 + over : 0); }
+    if (up !== null) cost += Math.abs(T.height - up);
+    if (cost < least - 1e-9) { least = cost; best = id; }
+  }
+  return best;
+}
+
 // What hangs over a street from a front: whoever walks there passes under it.
-export const CITY_TYPES_OVERHEAD = Object.freeze(new Set([CITY_TYPE.PENTICE, CITY_TYPE.SIGN, CITY_TYPE.ALE_STAKE]));
+export const CITY_TYPES_OVERHEAD = Object.freeze(new Set(cityFamilyTypes('PENTICE', 'SIGN', 'ALE_STAKE')));
 // Bridges are destructible gunnery targets whose intact spans let walkers and caravans cross rivers cleanly.
-export const CITY_TYPES_BRIDGES = Object.freeze(new Set([CITY_TYPE.FOOTBRIDGE, CITY_TYPE.STONE_BRIDGE, CITY_TYPE.STONE_BRIDGE_SPAN]));
+export const CITY_TYPES_BRIDGES = Object.freeze(new Set(cityFamilyTypes('FOOTBRIDGE', 'STONE_BRIDGE', 'STONE_BRIDGE_SPAN')));
+// What stands in or over the water, never on the ground the land draws.
+export const CITY_TYPES_WATERSIDE = Object.freeze(new Set([...cityFamilyTypes('WHARF', 'WATERMILL'), ...CITY_TYPES_BRIDGES]));
 // What is too slight to be laid as a gun's target or to stop anyone walking: what hangs overhead, a fence,
 // graves, a cairn, a standard.
-export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, CITY_TYPE.FENCE_RAIL, CITY_TYPE.FENCE_STONE, CITY_TYPE.GRAVES, CITY_TYPE.CAIRN, CITY_TYPE.STANDARD]));
+export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, ...cityFamilyTypes('FENCE_RAIL', 'FENCE_POST', 'FENCE_STONE', 'GRAVES', 'CAIRN', 'STANDARD')]));
+// Of those, what is stone standing on the ground in its own right, and shatters when struck.
+export const CITY_TYPES_STONE_SLIGHT = Object.freeze(new Set(cityFamilyTypes('CAIRN', 'FENCE_STONE', 'GRAVES')));
 // The paints a front's cloth and boards take, as tints of the land shader's limewash: after its five washes.
 export const CITY_PAINT = Object.freeze({ LINEN: 1, RED: 5, BLUE: 6, GOLD: 7, GREEN: 8, BROWN: 9, DARK: 10 });
 // What a type is to the guns: the name its damage is kept under and reported by. The wall and
 // its towers, the keep and the gate are fortified stone (js/gunnery-control.js); the rest is masonry.
-const CITY_WORKS_TARGETS = Object.freeze({
+const CITY_TARGETS = Object.freeze({
+  HOUSE: { prefabId: 'city_house', label: 'Town house' }, CHURCH_LEFT: { prefabId: 'city_church', label: 'Parish church' }, CHURCH_RIGHT: { prefabId: 'city_church', label: 'Parish church' },
+  CHURCH_GREAT: { prefabId: 'city_church', label: 'Cathedral' }, WALL_TOWER: { prefabId: 'city_wall_tower', label: 'Wall tower' }, KEEP: { prefabId: 'city_keep', label: 'Castle keep' },
+  GATE: { prefabId: 'city_gate', label: 'City gate' }, CURTAIN: { prefabId: 'city_wall', label: 'City wall' }, HALL: { prefabId: 'city_castle_hall', label: 'Castle hall' },
+  PENTICE: { prefabId: 'city_shop_front', label: 'Shop front' }, SIGN: { prefabId: 'city_shop_front', label: 'Shop front' }, ALE_STAKE: { prefabId: 'city_shop_front', label: 'Shop front' },
+  STALL: { prefabId: 'city_market_stall', label: 'Market stall' }, MARKET_CROSS: { prefabId: 'city_market_cross', label: 'Market cross' }, WELL: { prefabId: 'city_well', label: 'Well' },
   WINDMILL: { prefabId: 'city_windmill', label: 'Windmill' }, WATERMILL: { prefabId: 'city_watermill', label: 'Watermill' }, GRANARY: { prefabId: 'city_granary', label: 'Granary' },
   SHED: { prefabId: 'city_outbuilding', label: 'Outbuilding' }, BARN: { prefabId: 'city_barn', label: 'Barn' }, DOVECOTE: { prefabId: 'city_dovecote', label: 'Dovecote' },
   TOLL: { prefabId: 'city_toll_house', label: 'Toll house' }, COT: { prefabId: 'city_hovel', label: 'Hovel' }, THATCH_HOUSE: { prefabId: 'city_hovel', label: 'Thatched house' }, THATCH_LONGHOUSE: { prefabId: 'city_hovel', label: 'Thatched longhouse' }, WINEPRESS: { prefabId: 'city_winepress', label: 'Winepress' },
   VATS: { prefabId: 'city_works', label: 'Tannery or dye works' }, STONE_HALL: { prefabId: 'city_stone_hall', label: 'Stone hall' }, CLOISTER: { prefabId: 'city_cloister', label: 'Cloister' },
   COURT: { prefabId: 'city_courtyard_house', label: 'Courtyard house' }, WHARF: { prefabId: 'city_wharf', label: 'Wharf' }, QUARRY: { prefabId: 'city_quarry', label: 'Quarry' },
-  RUIN: { prefabId: 'city_ruin', label: 'Ruin' }, RUBBLE: { prefabId: 'city_rubble', label: 'Rubble' }, FENCE_RAIL: { prefabId: 'city_fence', label: 'Fence' }, FENCE_STONE: { prefabId: 'city_fence', label: 'Dry-stone wall' },
+  RUIN: { prefabId: 'city_ruin', label: 'Ruin' }, RUBBLE: { prefabId: 'city_rubble', label: 'Rubble' }, FENCE_RAIL: { prefabId: 'city_fence', label: 'Fence' }, FENCE_POST: { prefabId: 'city_fence', label: 'Fence' }, FENCE_STONE: { prefabId: 'city_fence', label: 'Dry-stone wall' },
   FOOTBRIDGE: { prefabId: 'city_timber_bridge', label: 'Timber bridge' }, STONE_BRIDGE: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, STONE_BRIDGE_SPAN: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, GRAVES: { prefabId: 'city_graves', label: 'Graves' },
   CAIRN: { prefabId: 'city_cairn', label: 'Cairn' }, TENT: { prefabId: 'city_tent', label: 'Tent' }, STANDARD: { prefabId: 'city_standard', label: 'Standard' }, SCAFFOLD: { prefabId: 'city_scaffold', label: 'Scaffold' },
   ...NATIVE_WORKS_TARGETS,
 });
-export function cityTypeTarget(type) {
-  if (type < AFTER_HOUSES) return { prefabId: 'city_house', label: 'Town house' };
-  if (type === CITY_TYPE.CHURCH_GREAT) return { prefabId: 'city_church', label: 'Cathedral' };
-  if (type < CITY_TYPE.WALL_TOWER) return { prefabId: 'city_church', label: 'Parish church' };
-  if (type === CITY_TYPE.WALL_TOWER) return { prefabId: 'city_wall_tower', label: 'Wall tower' };
-  if (type === CITY_TYPE.KEEP) return { prefabId: 'city_keep', label: 'Castle keep' };
-  if (type === CITY_TYPE.GATE) return { prefabId: 'city_gate', label: 'City gate' };
-  if (type === CITY_TYPE.HALL) return { prefabId: 'city_castle_hall', label: 'Castle hall' };
-  if (CITY_TYPES_OVERHEAD.has(type)) return { prefabId: 'city_shop_front', label: 'Shop front' };
-  if (type === CITY_TYPE.STALL) return { prefabId: 'city_market_stall', label: 'Market stall' };
-  if (type === CITY_TYPE.MARKET_CROSS) return { prefabId: 'city_market_cross', label: 'Market cross' };
-  if (type === CITY_TYPE.WELL) return { prefabId: 'city_well', label: 'Well' };
-  const works = CITY_WORKS[type - CITY_TYPE.WINDMILL];
-  if (works) return CITY_WORKS_TARGETS[works[0]];
-  return { prefabId: 'city_wall', label: 'City wall' };
-}
-// Eight numbers to an instance of a type: x, floor height, z, turn; scale across, up and along; tone.
-export const CITY_TYPED_FLOATS = 8;
+for (const family of cityFamilies) if (!CITY_TARGETS[family.key]) throw Error(`The city's ${family.key} is no target the guns know`);
+export function cityTypeTarget(type) { return CITY_TARGETS[cityFamilyOf(type).key]; }
+// Five numbers to an instance of a type: x, floor height, z, turn; tone. It stands at its type's own size.
+export const CITY_TYPED_FLOATS = 5;
 // A plan's block that a type replaces near the camera carries its roof form plus this.
 export const CITY_TYPED_ROOF = 4;
 // And this besides where its roof is thatch: far off, its block is roofed in straw and not in tile.
 export const CITY_THATCH_ROOF = 8;
 
-// The type of a house of so many storeys, and its ridge. `pick` (0 to 1, the house's own throw) chooses its manner
-// among those a house of that height is built in; none asked, it is the plain house.
+// The family of a house of so many storeys, and its ridge (its canonical type; cityVariant fits it to a plot). `pick`
+// (0 to 1, the house's own throw) chooses its manner among those a house of that height is built in; none asked, it
+// is the plain house.
 export function cityHouseType(storeys, eavesToStreet, pick = 0) {
   const choices = HOUSE_CHOICES[eavesToStreet ? 0 : 1][Math.max(1, Math.min(CITY_HOUSE_STOREYS, storeys)) - 1];
   let all = 0;
@@ -495,14 +567,17 @@ export function cityHousePick(x, z) {
 // drawn first and the walls behind it fail the depth test before they are shaded.
 // Each type also keeps its `source`, the builder's own mesh and part catalogue with its bounds,
 // which js/city-targets.js stands in the world when shot comes near a building.
+// One type alone, as the bake and a struck building need it.
+export function compileCityBuildingType(id, buildGeometry) {
+  const spec = CITY_BUILDING_TYPES[id];
+  const built = buildGeometry({
+    singleBuildingPrefab: true,
+    instances: [{ prefabId: `city_type_${id}`, id: `city_type_${id}`, x: 0, y: 0, z: 0, yaw: 0, width: spec.width, length: spec.length, depth: spec.length, height: spec.height, foundationDepth: spec.foundationDepth, materialKind: spec.materialKind, roofPitch: spec.roofPitch, cairnSpec: spec }],
+  }, null);
+  return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, ...compileContinuumBody(built, spec) };
+}
 export function compileCityBuildingTypes(buildGeometry) {
-  return CITY_BUILDING_TYPES.map((spec, id) => {
-    const built = buildGeometry({
-      singleBuildingPrefab: true,
-      instances: [{ prefabId: `city_type_${id}`, id: `city_type_${id}`, x: 0, y: 0, z: 0, yaw: 0, width: spec.width, length: spec.length, depth: spec.length, height: spec.height, foundationDepth: spec.foundationDepth, materialKind: spec.materialKind, roofPitch: spec.roofPitch, cairnSpec: spec }],
-    }, null);
-    return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, ...compileContinuumBody(built, spec) };
-  });
+  return CITY_BUILDING_TYPES.map((_, id) => compileCityBuildingType(id, buildGeometry));
 }
 
 // One building as its builder made it (buildPortPrefabGeometry, a single instance at the origin, unturned), as the

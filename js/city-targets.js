@@ -8,31 +8,29 @@
 //
 // Nothing here runs unless a shot is in the air or being aimed, and then only for the buildings on its line.
 import { noteBuildingMesh } from './building-fracture.js';
-import { CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPES_BRIDGES, CITY_TYPES_SLIGHT, cityTypeTarget } from './old-world-buildings.js';
-
-const CITY_TYPES_STONE_SLIGHT = new Set([CITY_TYPE.CAIRN, CITY_TYPE.FENCE_STONE, CITY_TYPE.GRAVES]);
+import { CITY_BUILDING_TYPES, CITY_TYPED_FLOATS, CITY_TYPES_BRIDGES, CITY_TYPES_SLIGHT, CITY_TYPES_STONE_SLIGHT, cityTypeTarget } from './old-world-buildings.js';
 
 const CITY_TARGET_CELL_M = 32;
+// How far a type's builder may stand anything past its plot (a church's towers beside its nave, eaves, a portal).
+const CITY_TARGET_REACH_M = 6;
 // How many buildings a shot has passed near, and not struck, are kept standing ready.
 const CITY_TARGETS_READY = 48;
 const CITY_TARGET_NAME = /^city_(\d+)$/;
 const cityFraction = (value) => value - Math.floor(value);
 
-// A type's mesh as the builder made it, stood where the plan put this building: stretched, turned and moved,
-// in the form a port's own mesh has. A masonry kind carries the building's turn in its fraction, as
-// js/building-fracture.js writes the stone a breach lays bare; a window's carries its place in its pane.
-export function standCityBuildingMesh(source, x, floor, z, yaw, across, up, along) {
+// A type's mesh as the builder made it, stood where the plan put this building at its type's own size: turned and
+// moved, as the continuum draws it, in the form a port's own mesh has. A masonry kind carries the building's turn in
+// its fraction, as js/building-fracture.js writes the stone a breach lays bare; a window's carries its place in its pane.
+export function standCityBuildingMesh(source, x, floor, z, yaw) {
   const from = source.vertices, out = new Float32Array(from.length), c = Math.cos(yaw), s = Math.sin(yaw), turn = yaw / Math.PI;
   for (let at = 0; at < from.length; at += 8) {
-    const px = from[at] * across, pz = from[at + 2] * along;
+    const px = from[at], pz = from[at + 2], nx = from[at + 3], nz = from[at + 5];
     out[at] = x + px * c + pz * s;
-    out[at + 1] = floor + from[at + 1] * up;
+    out[at + 1] = floor + from[at + 1];
     out[at + 2] = z - px * s + pz * c;
-    const nx = from[at + 3] / across, ny = from[at + 4] / up, nz = from[at + 5] / along;
-    const keep = Math.hypot(from[at + 3], from[at + 4], from[at + 5]) / (Math.hypot(nx, ny, nz) || 1);
-    out[at + 3] = (nx * c + nz * s) * keep;
-    out[at + 4] = ny * keep;
-    out[at + 5] = (-nx * s + nz * c) * keep;
+    out[at + 3] = nx * c + nz * s;
+    out[at + 4] = from[at + 4];
+    out[at + 5] = -nx * s + nz * c;
     const kind = from[at + 6], material = Math.floor(kind + 0.01);
     out[at + 6] = material === 14 ? kind : material + 0.02 + 0.46 * cityFraction((kind - material - 0.02) / 0.46 + turn);
     out[at + 7] = from[at + 7];
@@ -41,15 +39,16 @@ export function standCityBuildingMesh(source, x, floor, z, yaw, across, up, alon
 }
 
 /**
- * The buildings of one city's plan, for one port. `types()` gives the compiled types with their sources
- * (compileCityBuildingTypes); `port` is the coast's own, whose list a struck building joins. `onStruck(index)` is
- * told of every real shot that strikes one and of every one a save names, so that it is cut finer from then on.
+ * The buildings of one city's plan, for one port. `types(id)` gives one compiled type with its source
+ * (compileCityBuildingType), made when first asked; `port` is the coast's own, whose list a struck building joins.
+ * `onStruck(index)` is told of every real shot that strikes one and of every one a save names, so that it is cut finer
+ * from then on.
  */
 export function createCityTargets({ city, types, port, onStruck = null }) {
   const typed = city?.typed, kinds = city?.typedTypes, count = city?.typedCount ?? 0, F = CITY_TYPED_FLOATS;
   const records = new Map(), ready = new Map();
-  let grid = null, turns = null, seen = null, sweeps = 0, catalogue = null;
-  const typeOf = (index) => (catalogue ??= types())[kinds[index]];
+  let grid = null, turns = null, seen = null, sweeps = 0;
+  const typeOf = (index) => types(kinds[index]);
   const cellKey = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
 
   // Which buildings stand over each cell of the ground. Made at the first shot.
@@ -59,16 +58,12 @@ export function createCityTargets({ city, types, port, onStruck = null }) {
       // What hangs from a house's front is no building: shot and whoever walks pass it by, and it goes with its house.
       // Stone cairns, dry-stone field walls and headstones stand on the ground in their own right and shatter when struck.
       if (CITY_TYPES_SLIGHT.has(kinds[index]) && !CITY_TYPES_STONE_SLIGHT.has(kinds[index])) continue;
-      const o = index * F, source = typeOf(index).source, c = Math.cos(typed[o + 3]), s = Math.sin(typed[o + 3]);
-      turns[index * 2] = c; turns[index * 2 + 1] = s;
-      const across = typed[o + 4], along = typed[o + 6];
-      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-      for (const lx of [source.min[0] * across, source.max[0] * across]) for (const lz of [source.min[2] * along, source.max[2] * along]) {
-        const wx = typed[o] + lx * c + lz * s, wz = typed[o + 2] - lx * s + lz * c;
-        if (wx < x0) x0 = wx; if (wx > x1) x1 = wx; if (wz < z0) z0 = wz; if (wz > z1) z1 = wz;
-      }
-      for (let cx = Math.floor((x0 - 1) / CITY_TARGET_CELL_M); cx <= Math.floor((x1 + 1) / CITY_TARGET_CELL_M); cx++) {
-        for (let cz = Math.floor((z0 - 1) / CITY_TARGET_CELL_M); cz <= Math.floor((z1 + 1) / CITY_TARGET_CELL_M); cz++) {
+      // Its cells from its type's plot and all its builder may stand past it, so that no type is built until shot comes.
+      const o = index * F, T = CITY_BUILDING_TYPES[kinds[index]], reach = Math.hypot(T.width, T.length) / 2 + CITY_TARGET_REACH_M;
+      turns[index * 2] = Math.cos(typed[o + 3]); turns[index * 2 + 1] = Math.sin(typed[o + 3]);
+      const x0 = typed[o] - reach, x1 = typed[o] + reach, z0 = typed[o + 2] - reach, z1 = typed[o + 2] + reach;
+      for (let cx = Math.floor(x0 / CITY_TARGET_CELL_M); cx <= Math.floor(x1 / CITY_TARGET_CELL_M); cx++) {
+        for (let cz = Math.floor(z0 / CITY_TARGET_CELL_M); cz <= Math.floor(z1 / CITY_TARGET_CELL_M); cz++) {
           const key = cellKey(cx, cz), list = grid.get(key);
           if (list) list.push(index); else grid.set(key, [index]);
         }
@@ -84,7 +79,7 @@ export function createCityTargets({ city, types, port, onStruck = null }) {
     const p = [ax * c - az * s, from[1] - typed[o + 1], ax * s + az * c], q = [bx * c - bz * s, to[1] - typed[o + 1], bx * s + bz * c];
     let enter = 0, leave = 1;
     for (let axis = 0; axis < 3; axis++) {
-      const scale = typed[o + 4 + axis], low = source.min[axis] * scale - radius, high = source.max[axis] * scale + radius, d = q[axis] - p[axis];
+      const low = source.min[axis] - radius, high = source.max[axis] + radius, d = q[axis] - p[axis];
       if (Math.abs(d) < 1e-9) { if (p[axis] < low || p[axis] > high) return false; continue; }
       let t0 = (low - p[axis]) / d, t1 = (high - p[axis]) / d;
       if (t0 > t1) [t0, t1] = [t1, t0];
@@ -99,11 +94,11 @@ export function createCityTargets({ city, types, port, onStruck = null }) {
   const meshOf = (record) => {
     if (record.world) return record.world;
     const o = record.index * F, source = typeOf(record.index).source;
-    record.world = standCityBuildingMesh(source, typed[o], typed[o + 1], typed[o + 2], typed[o + 3], typed[o + 4], typed[o + 5], typed[o + 6]);
+    record.world = standCityBuildingMesh(source, typed[o], typed[o + 1], typed[o + 2], typed[o + 3]);
     noteBuildingMesh(record.instance, {
       vertices: record.world, indices: source.indices, firstIndex: 0, endIndex: source.indices.length,
-      min: [source.min[0] * typed[o + 4], typed[o + 1] + source.min[1] * typed[o + 5], source.min[2] * typed[o + 6]],
-      max: [source.max[0] * typed[o + 4], typed[o + 1] + source.max[1] * typed[o + 5], source.max[2] * typed[o + 6]],
+      min: [source.min[0], typed[o + 1] + source.min[1], source.min[2]],
+      max: [source.max[0], typed[o + 1] + source.max[1], source.max[2]],
     });
     return record.world;
   };
@@ -117,14 +112,13 @@ export function createCityTargets({ city, types, port, onStruck = null }) {
       return record;
     }
     const o = index * F, type = kinds[index], T = typeOf(index), source = T.source, target = cityTypeTarget(type);
-    const across = typed[o + 4], up = typed[o + 5], along = typed[o + 6];
     const instance = {
       id: `city_${index}`, prefabId: target.prefabId, label: target.label,
       x: typed[o], y: typed[o + 1], baseY: typed[o + 1], z: typed[o + 2], yaw: typed[o + 3],
-      width: T.width * across, depth: T.length * along, length: T.length * along, height: T.height * up,
-      roofHeight: Math.max(0, source.max[1] - T.height) * up, foundationDepth: Math.max(0, -source.min[1]) * up,
+      width: T.width, depth: T.length, length: T.length, height: T.height,
+      roofHeight: Math.max(0, source.max[1] - T.height), foundationDepth: Math.max(0, -source.min[1]),
       // Its tint, which its pieces wear as the city's continuum wears it whole.
-      city: { index, type, tint: typed[o + 7] },
+      city: { index, type, tint: typed[o + 4] },
     };
     record = { index, instance, world: null, enrolled: false, port: { instances: [instance], center: { x: instance.x, z: instance.z } } };
     // What js/building-fracture.js cuts it from, made again if the town has rebuilt it since.
@@ -171,9 +165,10 @@ export function createCityTargets({ city, types, port, onStruck = null }) {
       if (!list) return false;
       for (const index of list) {
         if (CITY_TYPES_BRIDGES.has(kinds[index]) || CITY_TYPES_SLIGHT.has(kinds[index])) continue;
-        const o = index * F, source = typeOf(index).source, c = turns[index * 2], s = turns[index * 2 + 1], dx = x - typed[o], dz = z - typed[o + 2];
-        const lx = dx * c - dz * s, lz = dx * s + dz * c, across = typed[o + 4], along = typed[o + 6];
-        if (lx >= source.min[0] * across - margin && lx <= source.max[0] * across + margin && lz >= source.min[2] * along - margin && lz <= source.max[2] * along + margin) return true;
+        const o = index * F, dx = x - typed[o], dz = z - typed[o + 2], T = CITY_BUILDING_TYPES[kinds[index]];
+        if (Math.hypot(dx, dz) > Math.hypot(T.width, T.length) / 2 + CITY_TARGET_REACH_M + margin) continue;
+        const source = typeOf(index).source, c = turns[index * 2], s = turns[index * 2 + 1], lx = dx * c - dz * s, lz = dx * s + dz * c;
+        if (lx >= source.min[0] - margin && lx <= source.max[0] + margin && lz >= source.min[2] - margin && lz <= source.max[2] + margin) return true;
       }
       return false;
     },

@@ -1,12 +1,13 @@
 // What a city plan is made of, and the masons who stand it. An Old World city is its board's
 // (Castle and Commons' own generator, js/old-world-board.js); a colonial port is planned here
 // (planColonialStreets, buildColonialCityFabric). Either way the plan is made once, when the land
-// is built, and never per frame: a list of blocks (twelve numbers each) that the land renderer
-// draws as instances of one mesh, the streets as ways for the paving field, and answers about any
+// is built, and never per frame: a list of blocks (twelve numbers each), the plots buildings stand
+// on, which trees and grass keep off; the streets as ways for the paving field; and answers about any
 // point of ground: house, street, square, garden or yard, and whether a tree may stand there.
-// Each house, church, tower and gate is also given its type, a building written in Cairn
-// (js/old-world-buildings.js), which the renderer draws in place of the block close to.
-import { CITY_BUILDING_TYPES, CITY_CURTAIN, CITY_GATE, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHousePick, cityHouseType } from './old-world-buildings.js';
+// Each house, church, tower and gate is a building of a type written in Cairn (js/old-world-buildings.js),
+// stood at its own size and drawn by the one continuum (js/city-continuum-draw.js).
+import { CITY_BUILDING_TYPES, CITY_CURTAIN, CITY_GATE, CITY_TYPE, CITY_TYPED_ROOF, cityHousePick, cityHouseType, cityVariant } from './old-world-buildings.js';
+import { WORKS_FENCE } from './old-world-works.js';
 
 export const CITY_BLOCK_FLOATS = 12;
 export const CITY_ROOF = Object.freeze({ GABLE: 0, HIP: 1, PYRAMID: 2, FLAT: 3 });
@@ -14,8 +15,6 @@ export const CITY_ROOF = Object.freeze({ GABLE: 0, HIP: 1, PYRAMID: 2, FLAT: 3 }
 export const CITY_WALL = Object.freeze({ HOUSE: 19, STUCCO: 12, ASHLAR: 11 });
 export const CITY_GROUND = Object.freeze({ YARD: 0, STREET: 1, SQUARE: 2, HOUSE: 3, PARK: 4, CASTLE: 5 });
 export const CITY_TREES = Object.freeze({ NONE: 0, SQUARE: 1, PARK: 2, YARD: 3 });
-
-const WALL_THICK_M = CITY_CURTAIN.thick;
 
 export function mulberry(seed) {
   let a = seed >>> 0;
@@ -100,8 +99,9 @@ export function resampleCityLine(pts, step) {
 
 /**
  * The masons. How a plan's blocks and typed buildings are stood on ground that is not level, and how a wall, its
- * towers and its gates are built of them. `gates` are the openings a curtain leaves ({x, z, half}); `keep` marks
- * a footprint as taken; `rr` answers a number from 0 to 1.
+ * towers and its gates are built of them. `gates` are the openings a curtain leaves ({x, z}); `keep` marks a footprint
+ * as taken; `rr` answers a number from 0 to 1. Every building is stood at its type's own size (js/old-world-buildings.js
+ * cityVariant chooses the size of its family that fits its plot): nothing is stretched.
  */
 export function cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr }) {
   /* ---- how a block stands on ground that is not level: its floor at the height of its
@@ -118,51 +118,112 @@ export function cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, 
     blocks.push(f.x, floor, f.z, f.yaw, f.w, f.d, wallH, roofH, roof, wallKind, tone, plinth);
     return floor;
   };
-  // A building of a Cairn type: where it stands and how it is turned, and how far its type is
-  // stretched across, up and along to fill the plan's footprint. The blocks pushed just before
-  // it are its own (`own` of them): they stand in for it far off, and go when it is shot down.
-  const pushTyped = (type, x, floor, z, yaw, across, up, along, tone, own = 1) => {
-    const T = CITY_BUILDING_TYPES[type];
-    typed.push(x, floor, z, yaw, across / T.width, up / T.height, along / T.length, tone);
+  // A building of a Cairn type, at its own size: where it stands, how it is turned, and its tone. The blocks pushed
+  // just before it are its plot's (`own` of them), which keep trees and grass off it and go when it is shot down.
+  const pushTyped = (type, x, floor, z, yaw, tone, own = 1) => {
+    typed.push(x, floor, z, yaw, tone);
     typedTypes.push(type);
     typedBlocks.push(blocks.length / CITY_BLOCK_FLOATS - own, own);
   };
-
-  /* ---- the wall and the castle, built of blocks ---- */
-  const curtain = (ax, az, bx, bz, out, height, tone) => {
-    const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 11)), ux = (bx - ax) / L, uz = (bz - az) / L, yaw = Math.atan2(ux, uz);
-    for (let i = 0; i < n; i++) {
-      const mx = ax + (bx - ax) * (i + 0.5) / n, mz = az + (bz - az) * (i + 0.5) / n, len = L / n;
-      if (gates.some((q) => Math.hypot(q.x - mx, q.z - mz) < q.half + len / 2)) continue;
-      const f = footprint(mx, mz, WALL_THICK_M, len + 0.5, yaw), base = seatBlock(f);
-      pushBlock(f, height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, base);
-      keep(f);
-      // Merlons along the outward edge.
-      const side = (-uz * out[0] + ux * out[1]) >= 0 ? 1 : -1, ox = -uz * side * 0.8, oz = ux * side * 0.8, count = Math.floor(len / (2 * CITY_CURTAIN.merlon));
-      for (let m = 0; m < count; m++) {
-        const t = (m + 0.5) / count - 0.5;
-        blocks.push(mx + ux * len * t + ox, base.floor + height, mz + uz * len * t + oz, yaw, CITY_CURTAIN.parapet, CITY_CURTAIN.merlon, CITY_CURTAIN.rise, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, 0);
-      }
-      // Close to, a length of the wall's own type, its parapet turned outward.
-      const type = len + 0.5 < (CITY_CURTAIN.short + CITY_CURTAIN.long) / 2 ? CITY_TYPE.CURTAIN_SHORT : CITY_TYPE.CURTAIN_LONG;
-      pushTyped(type, mx, base.floor, mz, side > 0 ? yaw : yaw + Math.PI, WALL_THICK_M, height, len + 0.5, tone, 1 + count);
-    }
+  // The type of `type`'s family that fits plot `f` (`up` high, if asked), and the ground it stands on within it: the
+  // middle of its front, and back from the street as far as the plot's own front (`front`) or in the plot's middle.
+  const fit = (type, f, front = false, up = null) => {
+    const id = cityVariant(type, f.w, f.d, up), T = CITY_BUILDING_TYPES[id], [x, z] = local(f, 0, front ? (T.length - f.d) / 2 : 0);
+    return { type: id, T, at: footprint(x, z, T.width, T.length, f.yaw) };
   };
+
+  /* ---- a run of a modular work: a wall, a fence, a palisade ---- */
+  // The sections of a run from a to b of a work built in units of `unit` metres, a section of so many of them as
+  // `counts` has (in steps of one, from the least): as many units in all as the run is long, or as covers it and
+  // `past` beyond each end (`cover`), or as near that as a whole unit comes; each section no longer than lets it stand
+  // on its own ground within `sink` of it at either end, where the ground falls along the run. Each is
+  // { x, z, yaw, units, half, ux, uz }: its middle, its turn (+z along the run), and its half-length.
+  const sections = (ax, az, bx, bz, { unit, counts, past = 0, cover = false, sink = 0.25 }) => {
+    const L = Math.hypot(bx - ax, bz - az), out = [];
+    if (L < 1e-3) return out;
+    const ux = (bx - ax) / L, uz = (bz - az) / L, yaw = Math.atan2(ux, uz), least = counts[0], most = counts[counts.length - 1];
+    const units = Math.max(least, cover ? Math.ceil((L + 2 * past) / unit - 1e-6) : Math.round((L + 2 * past) / unit));
+    let fall = 0;
+    for (let k = 0, n = Math.max(1, Math.ceil(L / 2)); k < n; k++) {
+      const h0 = heightAt(ax + (bx - ax) * k / n, az + (bz - az) * k / n), h1 = heightAt(ax + (bx - ax) * (k + 1) / n, az + (bz - az) * (k + 1) / n);
+      fall = Math.max(fall, Math.abs(h1 - h0) * n / L);
+    }
+    const longest = Math.max(2 * least - 1, Math.min(most, Math.floor(2 * sink / Math.max(1e-3, fall) / unit)));
+    const n = Math.ceil(units / longest), each = Math.floor(units / n), extra = units % n;
+    let at = (L - units * unit) / 2;
+    for (let i = 0; i < n; i++) {
+      const count = each + (i < extra ? 1 : 0), half = count * unit / 2, mid = at + half;
+      out.push({ x: ax + ux * mid, z: az + uz * mid, yaw, units: count, half, ux, uz });
+      at += 2 * half;
+    }
+    return out;
+  };
+  // Where a section stands on its run: the higher of its ends' mean and a little below its middle, so that neither end
+  // hangs over a hollow.
+  const seatRun = ({ x, z, half, ux, uz }) => Math.max(0.5 * (heightAt(x - ux * half, z - uz * half) + heightAt(x + ux * half, z + uz * half)), heightAt(x, z) - 0.22);
+  // A field fence from a to b, of rails or dry stone (js/old-world-works.js WORKS_FENCE): its panels or courses laid in
+  // sections where `clear(x, z, half)` lets each stand, each rail section owning the post at its start and a post
+  // ending every stretch of them. Answers how many sections it laid.
+  const fence = (ax, az, bx, bz, stone, { tone = 0.5, clear = () => true } = {}) => {
+    const type = stone ? CITY_TYPE.FENCE_STONE : CITY_TYPE.FENCE_RAIL;
+    const list = sections(ax, az, bx, bz, stone ? { unit: WORKS_FENCE.course, counts: WORKS_FENCE.courses, past: 0.35 } : { unit: WORKS_FENCE.panel, counts: WORKS_FENCE.panels });
+    let laid = 0, open = null;
+    const post = () => { if (open) pushTyped(CITY_TYPE.FENCE_POST, open[0], heightAt(open[0], open[1]), open[1], open[2], tone, 0); open = null; };
+    for (const run of list) {
+      if (!clear(run.x, run.z, run.half)) { post(); continue; }
+      pushTyped(cityVariant(type, null, 2 * run.half), run.x, seatRun(run), run.z, run.yaw, tone, 0);
+      laid++;
+      open = stone ? null : [run.x + run.ux * run.half, run.z + run.uz * run.half, run.yaw];
+    }
+    post();
+    return laid;
+  };
+
+  /* ---- the wall and the castle ---- */
+  // A curtain from a to b, its parapet toward `out`, as high as the nearest of its heights to `height`: whole bays,
+  // covering the run and a little past each end into the towers and turns that close it, broken where a gate stands
+  // across it (to the middles of the gate's towers).
+  const curtain = (ax, az, bx, bz, out, height, tone) => {
+    const L = Math.hypot(bx - ax, bz - az);
+    if (L < 1) return;
+    const ux = (bx - ax) / L, uz = (bz - az) / L, yaw = Math.atan2(ux, uz), side = (-uz * out[0] + ux * out[1]) >= 0 ? 1 : -1;
+    const cuts = [];
+    for (const q of gates) {
+      const t = (q.x - ax) * ux + (q.z - az) * uz, off = Math.abs((q.z - az) * ux - (q.x - ax) * uz);
+      if (off < CITY_GATE.thick && t > -CITY_GATE.reach && t < L + CITY_GATE.reach) cuts.push([t - CITY_GATE.reach, t + CITY_GATE.reach]);
+    }
+    cuts.sort((p, q) => p[0] - q[0]);
+    const lay = (s0, s1) => {
+      if (s1 - s0 < 1) return;
+      for (const run of sections(ax + ux * s0, az + uz * s0, ax + ux * s1, az + uz * s1, { unit: CITY_CURTAIN.bay, counts: CITY_CURTAIN.bays, past: 0.25, cover: true, sink: 1 })) {
+        const type = cityVariant(CITY_TYPE.CURTAIN, null, 2 * run.half, height), f = footprint(run.x, run.z, CITY_CURTAIN.thick, 2 * run.half, yaw), base = seatBlock(f);
+        pushBlock(f, CITY_BUILDING_TYPES[type].height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, base);
+        keep(f);
+        pushTyped(type, run.x, base.floor, run.z, side > 0 ? yaw : yaw + Math.PI, tone);
+      }
+    };
+    let from = 0;
+    for (const [c0, c1] of cuts) { lay(from, Math.min(L, c0)); from = Math.max(from, c1); }
+    lay(from, L);
+  };
+  // A tower of the wall (or the keep) as near `side` broad and `height` high as its family has one. Answers its footprint.
   const tower = (x, z, side, height, tone, type = CITY_TYPE.WALL_TOWER) => {
-    const f = footprint(x, z, side, side, rr() * 0.3);
-    const floor = pushBlock(f, height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone);
-    pushTyped(type, x, floor, z, f.yaw, side, height, side, tone);
+    const id = cityVariant(type, side, side, height), T = CITY_BUILDING_TYPES[id], f = footprint(x, z, T.width, T.length, rr() * 0.3);
+    const floor = pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone);
+    pushTyped(id, x, floor, z, f.yaw, tone);
     keep(f);
+    return f;
   };
   // A gate in a wall running along (ux, uz): a tower to either side and an arched passage under a chamber between
-  // them. Far off, the chamber alone.
+  // them, each of its one size.
   const gate = (q, ux, uz) => {
-    for (const s of [-1, 1]) tower(q.x + ux * s * (q.half + 3.2), q.z + uz * s * (q.half + 3.2), 5.6, 13.5, 0.92);
-    const span = 2 * q.half + 0.8, floor = heightAt(q.x, q.z);
-    blocks.push(q.x, floor + CITY_GATE.passage, q.z, Math.atan2(ux, uz), CITY_GATE.thick, span, CITY_GATE.chamber, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, 0.9, 0);
-    pushTyped(CITY_TYPE.GATE, q.x, floor, q.z, Math.atan2(-uz, ux), span, CITY_GATE.passage + CITY_GATE.chamber, CITY_GATE.thick, 0.9);
+    for (const s of [-1, 1]) tower(q.x + ux * s * CITY_GATE.reach, q.z + uz * s * CITY_GATE.reach, CITY_GATE.tower, CITY_GATE.passage + CITY_GATE.chamber + 1, 0.92);
+    const floor = heightAt(q.x, q.z), yaw = Math.atan2(-uz, ux), f = footprint(q.x, q.z, CITY_GATE.span, CITY_GATE.thick, yaw);
+    blocks.push(q.x, floor, q.z, yaw, CITY_GATE.span, CITY_GATE.thick, CITY_GATE.passage + CITY_GATE.chamber, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, 0.9, 0);
+    keep(f);
+    pushTyped(CITY_TYPE.GATE, q.x, floor, q.z, yaw, 0.9);
   };
-  return { seatBlock, pushBlock, pushTyped, curtain, tower, gate };
+  return { seatBlock, pushBlock, pushTyped, fit, sections, seatRun, fence, curtain, tower, gate };
 }
 
 function hashColonialSeed(text) {
@@ -533,7 +594,7 @@ export function buildColonialCityFabric({
     const reach = Math.hypot(f.w, f.d) * 0.5;
     placed.add(f, f.x - reach, f.z - reach, f.x + reach, f.z + reach);
   };
-  const { seatBlock, pushBlock, pushTyped, curtain, tower, gate } = cityMasonry({
+  const { seatBlock, pushBlock, pushTyped, fit, curtain, tower, gate } = cityMasonry({
     heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr,
   });
 
@@ -646,18 +707,16 @@ export function buildColonialCityFabric({
             const dPlaza = Math.hypot(fx - plaza.x, fz - plaza.z);
             const rich = dPlaza < 85 || st.kind === 'quay';
             const storeys = stage === 'outpost' ? 1 : (rich && rr() < 0.68 ? 2 : rr() < 0.28 ? 2 : 1);
-            const wallH = storeys * CITY_STOREY_M + (rich ? 0.55 : 0.15) + rr() * 0.45;
+            rr(); // The throw that once raised its walls past its storeys, kept so the rest of the plan falls as it did.
             const eaves = manner !== 'timber' || rr() < 0.55;
-            const type = manner === 'timber'
-              ? cityHouseType(storeys, false, cityHousePick(fx, fz))
-              : cityHouseType(storeys, eaves, cityHousePick(fx, fz));
-            const T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
-            const rise = eaves ? 0.36 * T.length * 0.5 * up : 0.5 * T.width * 0.5 * up;
+            // Its own size of its kind, fronted on the street where its plot is.
+            const { type, T, at } = fit(cityHouseType(storeys, manner !== 'timber' && eaves, cityHousePick(fx, fz)), f, true);
+            const rise = eaves ? 0.36 * T.length * 0.5 : 0.5 * T.width * 0.5;
             const tone = manner === 'timber' ? 0.28 + rr() * 0.32 : 0.52 + rr() * 0.42;
             const wallKind = manner === 'timber' ? CITY_WALL.HOUSE : (rich ? CITY_WALL.STUCCO : CITY_WALL.HOUSE);
             const blockFp = eaves ? footprint(fx, fz, d, w, lotYaw + Math.PI * 0.5) : f;
-            const floor = pushBlock(blockFp, wallH, rise, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallKind, tone, base);
-            pushTyped(type, fx, floor, fz, lotYaw, w, wallH, d, tone, 1);
+            const floor = pushBlock(blockFp, T.height, rise, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallKind, tone, seatBlock(at, base.floor));
+            pushTyped(type, at.x, floor, at.z, lotYaw, tone, 1);
             keep(f);
             houses++;
           }

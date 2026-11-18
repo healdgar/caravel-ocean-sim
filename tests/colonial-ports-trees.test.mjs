@@ -11,7 +11,7 @@ import {
   terrainSurfaceSample,
 } from '../js/coastal-world.js';
 import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
-import { CITY_TYPE } from '../js/old-world-buildings.js';
+import { cityFamilyOf } from '../js/old-world-buildings.js';
 import { streetEdgeAt } from '../js/town-streets.js';
 import { createCityTargets } from '../js/city-targets.js';
 import { refreshOldWorldBoardCountry } from '../js/old-world.js';
@@ -84,8 +84,8 @@ test('Deliverable 1: procedural colonial ports generate distinct topography-adap
 
   // Fortified Havana (1615) encloses the landward traza with a multi-bay bastioned curtain + tower + gate circuit
   const havanaTypes = Array.from(havana.city.typedTypes);
-  const curtainBays = havanaTypes.filter((t) => t === CITY_TYPE.CURTAIN_LONG || t === CITY_TYPE.CURTAIN_SHORT).length;
-  const wallTowers = havanaTypes.filter((t) => t === CITY_TYPE.WALL_TOWER).length;
+  const curtainBays = havanaTypes.filter((t) => cityFamilyOf(t).key === 'CURTAIN').length;
+  const wallTowers = havanaTypes.filter((t) => cityFamilyOf(t).key === 'WALL_TOWER').length;
   assert.ok(curtainBays >= 4, `Expected continuous multi-bay landward wall circuit on fortified Havana, got ${curtainBays} bays`);
   assert.ok(wallTowers >= 3, `Expected projecting bastion/flanking towers on fortified Havana wall trace, got ${wallTowers}`);
 
@@ -109,9 +109,9 @@ test('Deliverable 1: procedural colonial ports generate distinct topography-adap
   for (const parcel of mocked.slice(0, 4)) {
     if (!growFrontierParcel(tropicalHinterlandPack, parcel, tropicalHinterlandPack.heights)) continue;
     grownCount++;
-    const types = Array.from(parcel.grownCity.typedTypes);
-    assert.equal(types.includes(CITY_TYPE.WINDMILL), false, 'Tropical Caribbean hinterland must not place European windmills');
-    assert.equal(types.includes(CITY_TYPE.THATCH_LONGHOUSE), false, 'Tropical Caribbean hinterland must not place European thatch longhouses');
+    const kinds = Array.from(parcel.grownCity.typedTypes, (t) => cityFamilyOf(t).key);
+    assert.equal(kinds.includes('WINDMILL'), false, 'Tropical Caribbean hinterland must not place European windmills');
+    assert.equal(kinds.includes('THATCH_LONGHOUSE'), false, 'Tropical Caribbean hinterland must not place European thatch longhouses');
     if (parcel.grownHerds?.length) {
       for (let k = 6; k < parcel.grownHerds.length; k += 8) {
         const sp = parcel.grownHerds[k];

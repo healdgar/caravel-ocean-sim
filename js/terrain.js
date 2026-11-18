@@ -21,7 +21,7 @@ import {createMeadowGrass} from './meadow-grass.js';
 import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
-import {CITY_TYPED_FLOATS,CITY_TYPE,CITY_TYPES_BRIDGES,compileCityBuildingTypes} from './old-world-buildings.js';
+import {CITY_TYPED_FLOATS,CITY_TYPES_WATERSIDE,compileCityBuildingType} from './old-world-buildings.js';
 import {cityContinuumMaterial} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,createCityContinuum} from './city-continuum-draw.js';
 import {requestContinuumPrograms,requestContinuumView,requestContinuumCapture} from './continuum-scene.js';
@@ -1010,8 +1010,6 @@ const GROUND_PATCHES_PER_FRAME = 8;
 // What stands no higher than this above the ground beneath it stands on the ground (CONTINUUM_GROUNDED); higher, it
 // stands on a quay, a pier or a deck.
 const GROUND_STANDING_M = 0.75;
-// A city's works that stand in or over the water: never stood on the ground the land draws.
-const CITY_WATERSIDE = new Set([CITY_TYPE.WHARF, CITY_TYPE.WATERMILL, ...CITY_TYPES_BRIDGES]);
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,oceanBridge=null,
   region:explicitRegion=null,placement=null,options={},
@@ -1219,7 +1217,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return Number.isFinite(ground)&&ground>0&&y-ground<=GROUND_STANDING_M&&!inlandWaterSampler?.(x,z)&&!(bridgeDeckYAt(x,z,proceduralPack?.port?.country?.bridges)>0);
   };
   // A struck building's pieces and stump stand where it stood: a boulder on the ground, a city's waterside works never.
-  const fractureGrounded=(instance,[x,y,z])=>Boolean(instance.boulder)||(!(instance.city&&CITY_WATERSIDE.has(instance.city.type))&&standsOnGround(x,y,z));
+  const fractureGrounded=(instance,[x,y,z])=>Boolean(instance.boulder)||(!(instance.city&&CITY_TYPES_WATERSIDE.has(instance.city.type))&&standsOnGround(x,y,z));
   const groundSample=(x,z)=>{
     const base=baseGroundSample(x,z);
     const deck=bridgeDeckYAt(x,z,proceduralPack?.port?.country?.bridges);
@@ -1249,8 +1247,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // A city's buildings are drawn through the one continuum (js/city-continuum-draw.js), and are no buildings of the
   // port until shot strikes one (js/city-targets.js). From then on it is one of the port's: its pieces are cut and
   // drawn by the port's fractures, and the continuum leaves it out.
-  let cityCatalogue=null;
-  const cityTypeCatalogue=()=>cityCatalogue??=compileCityBuildingTypes(buildPortPrefabGeometry);
+  // Each type is built when shot first comes near one of its buildings, and kept.
+  const cityCatalogue=[];
+  const cityTypeCatalogue=(id)=>cityCatalogue[id]??=compileCityBuildingType(id,buildPortPrefabGeometry);
   const cityTargetsFor=(city,port)=>city?.typedCount&&city.typedBlocks&&port&&search.get('cityTargets')!=='0'?createCityTargets({city,types:cityTypeCatalogue,port,onStruck:index=>cityBuildingHit(index)}):null;
   let activeCity=proceduralPack?.city??null,cityTargets=cityTargetsFor(activeCity,proceduralPack?.port);
   let cityContinuum=null,cityAim=null,prefabs=null;
@@ -1488,7 +1487,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const cityGrounded=city=>{
     const grounded=new Uint8Array(city.typedCount),attached=city.typedAttached;
     for(let i=0;i<city.typedCount;){
-      const at=i*CITY_TYPED_FLOATS,stands=!CITY_WATERSIDE.has(city.typedTypes[i])&&standsOnGround(city.typed[at],city.typed[at+1],city.typed[at+2]);
+      const at=i*CITY_TYPED_FLOATS,stands=!CITY_TYPES_WATERSIDE.has(city.typedTypes[i])&&standsOnGround(city.typed[at],city.typed[at+1],city.typed[at+2]);
       const n=1+(attached?.[i]??0);
       grounded.fill(stands?1:0,i,Math.min(city.typedCount,i+n));
       i+=n;

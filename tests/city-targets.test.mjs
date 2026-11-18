@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {buildPortPrefabGeometry} from '../js/coastal-world.js';
 import {oldWorldCountry} from '../js/old-world.js';
 import {CITY_BLOCK_FLOATS} from '../js/old-world-city.js';
-import {CITY_BUILDING_TYPES,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityTypeTarget,compileCityBuildingTypes} from '../js/old-world-buildings.js';
+import {CITY_BUILDING_TYPES,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityFamilyOf,cityHouseType,cityTypeTarget,compileCityBuildingTypes} from '../js/old-world-buildings.js';
 import {createCityTargets,standCityBuildingMesh} from '../js/city-targets.js';
 import {applyBuildingFractureEvents,buildingFractureStateOf,buildingKindWithYaw,buildingReach,prepareBuildingFracture} from '../js/building-fracture.js';
 import {applyBuildingImpactDamage,classifyBuildingMaterial,sweepBuildingSegment} from '../js/gunnery-control.js';
@@ -23,12 +23,12 @@ function shore(){
   }
   return {region,heights,port:{id:'test-port',center:{x:0,z:-30},clearRadius:150,instances:[]}};
 }
-const types=compileCityBuildingTypes(buildPortPrefabGeometry);
+const types=compileCityBuildingTypes(buildPortPrefabGeometry),typeOf=id=>types[id];
 const {region,heights,port:planPort}=shore(),plan=oldWorldCountry(region,heights,planPort).plan;
 const record=index=>plan.typed.subarray(index*CITY_TYPED_FLOATS,(index+1)*CITY_TYPED_FLOATS);
 const firstOf=wanted=>plan.typedTypes.findIndex(type=>wanted(type));
 // Straight down through the middle of a building, from well above its roof to below its floor.
-const plumb=index=>{const t=record(index),top=t[1]+types[plan.typedTypes[index]].source.max[1]*t[5];return [[t[0],top+40,t[2]],[t[0],t[1]-2,t[2]]];};
+const plumb=index=>{const t=record(index),top=t[1]+types[plan.typedTypes[index]].source.max[1];return [[t[0],top+40,t[2]],[t[0],t[1]-2,t[2]]];};
 const freshPort=()=>({id:'test-port',center:{x:0,z:-30},instances:[{id:'quay',prefabId:'stone_quay_seawall',x:0,z:-30,yaw:0}]});
 
 test('every block of the plan belongs to one typed building, and each type keeps the mesh it was built from',()=>{
@@ -37,7 +37,7 @@ test('every block of the plan belongs to one typed building, and each type keeps
   for(let i=0;i<plan.typedCount;i++){
     const first=plan.typedBlocks[i*2],own=plan.typedBlocks[i*2+1],t=record(i),source=types[plan.typedTypes[i]].source;
     assert.ok(own>=1&&first+own<=plan.count);
-    const reach=Math.hypot(Math.max(-source.min[0],source.max[0])*t[4],Math.max(-source.min[2],source.max[2])*t[6])+1.5;
+    const reach=Math.hypot(Math.max(-source.min[0],source.max[0]),Math.max(-source.min[2],source.max[2]))+1.5;
     for(let b=first;b<first+own;b++){
       assert.equal(owner[b],-1,'a block has one owner');owner[b]=i;
       const k=b*CITY_BLOCK_FLOATS;
@@ -51,11 +51,11 @@ test('every block of the plan belongs to one typed building, and each type keeps
     assert.equal(vertices.length%8,0);assert.equal(indices.length%3,0);
     assert.equal(partAssembly.trianglePartIds.length,indices.length/3);
     // A building stands on its footing; a thing of the street (a pentice, a sign, a stall, a well) has none.
-    if(type.id<CITY_TYPE.PENTICE)assert.ok(min[1]<-6&&max[1]>=type.height&&min[0]<0&&max[0]>0&&min[2]<0&&max[2]>0);
+    if(type.id<cityFamilyOf(CITY_TYPE.PENTICE).from)assert.ok(min[1]<-6&&max[1]>=type.height&&min[0]<0&&max[0]>0&&min[2]<0&&max[2]>0);
     else assert.ok(min.every(Number.isFinite)&&max.every(Number.isFinite)&&max[1]>min[1]);
   }
   // The wall and its towers are fortified stone to the guns; houses and churches are masonry.
-  assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.CURTAIN_LONG)),'fortified-stone');
+  assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.CURTAIN)),'fortified-stone');
   assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.KEEP)),'fortified-stone');
   assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.HOUSE_EAVES+2)),'masonry');
   assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.CHURCH_GREAT)),'masonry');
@@ -63,12 +63,14 @@ test('every block of the plan belongs to one typed building, and each type keeps
 
 test('a type stood in the world is the mesh the land shader would draw of it',()=>{
   const index=firstOf(type=>type<CITY_HOUSE_TYPES),t=record(index),source=types[plan.typedTypes[index]].source;
-  const world=standCityBuildingMesh(source,t[0],t[1],t[2],t[3],t[4],t[5],t[6]),c=Math.cos(t[3]),s=Math.sin(t[3]);
+  // At its type's own size: the plan's record is its place and its tint, and nothing else.
+  assert.equal(CITY_TYPED_FLOATS,5);
+  const world=standCityBuildingMesh(source,t[0],t[1],t[2],t[3]),c=Math.cos(t[3]),s=Math.sin(t[3]);
   assert.equal(world.length,source.vertices.length);
   let stone=0,glass=0;
   for(let at=0;at<world.length;at+=8){
-    const px=source.vertices[at]*t[4],pz=source.vertices[at+2]*t[6];
-    assert.ok(Math.abs(world[at]-(t[0]+px*c+pz*s))<1e-3&&Math.abs(world[at+1]-(t[1]+source.vertices[at+1]*t[5]))<1e-3&&Math.abs(world[at+2]-(t[2]-px*s+pz*c))<1e-3);
+    const px=source.vertices[at],pz=source.vertices[at+2];
+    assert.ok(Math.abs(world[at]-(t[0]+px*c+pz*s))<1e-3&&Math.abs(world[at+1]-(t[1]+source.vertices[at+1]))<1e-3&&Math.abs(world[at+2]-(t[2]-px*s+pz*c))<1e-3);
     assert.ok(Math.abs(Math.hypot(world[at+3],world[at+4],world[at+5])-1)<.02,'a unit normal');
     const kind=Math.floor(world[at+6]+.01);
     assert.equal(kind,Math.floor(source.vertices[at+6]+.01));
@@ -80,7 +82,7 @@ test('a type stood in the world is the mesh the land shader would draw of it',()
 });
 
 test('shot meets a city building, which only then becomes a building of the port',()=>{
-  const struck=[],port=freshPort(),targets=createCityTargets({city:plan,types:()=>types,port,onStruck:index=>struck.push(index)});
+  const struck=[],port=freshPort(),targets=createCityTargets({city:plan,types:typeOf,port,onStruck:index=>struck.push(index)});
   assert.equal(targets.count,plan.typedCount);
   const house=firstOf(type=>type<CITY_HOUSE_TYPES),[from,to]=plumb(house);
   // Over the sea, and high over the town: nothing, and nothing made ready.
@@ -103,12 +105,12 @@ test('shot meets a city building, which only then becomes a building of the port
   assert.equal(port.instances.length,2,'it joins once');
   // Every real hit is told, so that the city's cut draws it finer from then on (js/terrain.js cityBuildingHit).
   assert.deepEqual(struck,[house,house]);
-  // It is as large as the plan made it, and its reach is its mesh's.
+  // It is as large as its type is written (never stretched to its plot), and its reach is its mesh's.
   const T=types[plan.typedTypes[house]],reach=buildingReach(hit.building);
-  assert.ok(Math.abs(hit.building.width-T.width*t[4])<1e-3&&Math.abs(hit.building.height-T.height*t[5])<1e-3&&Math.abs(hit.building.depth-T.length*t[6])<1e-3);
+  assert.ok(hit.building.width===T.width&&hit.building.height===T.height&&hit.building.depth===T.length);
   assert.ok(reach.min[1]<t[1]-6&&reach.max[1]>t[1]+hit.building.height);
   // A tower of the wall, struck from the side, is fortified stone.
-  const tower=firstOf(type=>type===CITY_TYPE.WALL_TOWER),w=record(tower),y=w[1]+6;
+  const tower=firstOf(type=>cityFamilyOf(type).key==='WALL_TOWER'),w=record(tower),y=w[1]+6;
   const side=targets.sweep([w[0]-9,y,w[2]],[w[0]+9,y,w[2]],.08,null,sweepBuildingSegment);
   assert.equal(side.building.city.index,tower);assert.equal(classifyBuildingMaterial(side.building),'fortified-stone');
   assert.ok(side.fraction>.2&&side.fraction<.5,`met its face at ${side.fraction}`);
@@ -118,10 +120,10 @@ test('shot meets a city building, which only then becomes a building of the port
 });
 
 test('a struck city building breaks up as a port building does, and is put back from its record',()=>{
-  const port=freshPort(),targets=createCityTargets({city:plan,types:()=>types,port}),store=createPortDamageStore(null,{dateMs:Date.UTC(1580,5,1)});
+  const port=freshPort(),targets=createCityTargets({city:plan,types:typeOf,port}),store=createPortDamageStore(null,{dateMs:Date.UTC(1580,5,1)});
   // A plain house of three floors with nothing between it and a gun twenty metres up its street.
   const shot=index=>{const t=record(index),c=Math.cos(t[3]),s=Math.sin(t[3]),y=t[1]+4.4;return{t,c,s,y,from:[t[0]-20*s,y,t[2]-20*c],to:[t[0]+20*s,y,t[2]+20*c],d:[s,0,c]};};
-  const house=plan.typedTypes.findIndex((type,index)=>type===CITY_TYPE.HOUSE_EAVES+2&&(q=>targets.sweep(q.from,q.to,.08,null,sweepBuildingSegment)?.building?.city?.index===index)(shot(index)));
+  const house=plan.typedTypes.findIndex((type,index)=>cityFamilyOf(type)===cityFamilyOf(cityHouseType(3,true))&&(q=>targets.sweep(q.from,q.to,.08,null,sweepBuildingSegment)?.building?.city?.index===index)(shot(index)));
   assert.ok(house>=0,'a three-storey house with a clear street before it');
   // From the street, square on to its front, at its first floor.
   const{t,c,s,y,from,to,d}=shot(house);
@@ -150,7 +152,7 @@ test('a struck city building breaks up as a port building does, and is put back 
   store.capture(port);
   const names=store.recorded(port);
   assert.deepEqual(names,[`city_${house}`]);
-  const told=[],again=freshPort(),revived=createCityTargets({city:plan,types:()=>types,port:again,onStruck:index=>told.push(index)});
+  const told=[],again=freshPort(),revived=createCityTargets({city:plan,types:typeOf,port:again,onStruck:index=>told.push(index)});
   assert.equal(revived.revive([...names,'prop:3','city_99999999','quay']),1);
   assert.deepEqual(told,[house],'a building a save names is struck');
   assert.equal(again.instances.length,2);
@@ -165,15 +167,15 @@ test('a struck city building breaks up as a port building does, and is put back 
 });
 
 test('whoever walks the city is told where its buildings stand: within their walls, not in the street beside',()=>{
-  const targets=createCityTargets({city:plan,types:()=>types,port:freshPort()});
+  const targets=createCityTargets({city:plan,types:typeOf,port:freshPort()});
   let asked=0,streets=0;
   for(let i=0;i<plan.typedCount&&asked<40;i+=Math.max(1,Math.floor(plan.typedCount/40))){
     const t=record(i),source=types[plan.typedTypes[i]].source;asked++;
     // The middle of its floor is within it, however it is turned.
-    const c=Math.cos(t[3]),s=Math.sin(t[3]),mx=(source.min[0]+source.max[0])*.5*t[4],mz=(source.min[2]+source.max[2])*.5*t[6];
+    const c=Math.cos(t[3]),s=Math.sin(t[3]),mx=(source.min[0]+source.max[0])*.5,mz=(source.min[2]+source.max[2])*.5;
     assert.ok(targets.inside(t[0]+mx*c+mz*s,t[2]-mx*s+mz*c),`the middle of building ${i} is within it`);
     // Well beyond its farthest corner in one direction is either open ground or another building, never this one's doing.
-    const reach=Math.hypot(Math.max(-source.min[0],source.max[0])*t[4],Math.max(-source.min[2],source.max[2])*t[6])+60;
+    const reach=Math.hypot(Math.max(-source.min[0],source.max[0]),Math.max(-source.min[2],source.max[2]))+60;
     if(!targets.inside(t[0]+reach,t[2]))streets++;
   }
   assert.ok(asked>=20&&streets>=asked*.5,`${streets} of ${asked} points beyond a building are open ground`);

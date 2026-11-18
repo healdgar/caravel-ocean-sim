@@ -3,9 +3,9 @@
 // churches, towers, walls, gates, works and bridges, is baked by scripts/prepare-city-continuum.mjs from the mesh its
 // builder makes, part by part, into a cluster hierarchy the GPU cuts by projected error, a closed far body wrapped
 // round it that collapses one half-edge at a time to a few triangles, and a single splat. The bake is offline and per
-// type: the types are a fixed catalogue, every building of every plan is one of them placed, stretched and tinted, and
-// the browser then holds no simplifier. All of it is one atlas of the one format (js/continuum-format.js); this is
-// what a city puts in it: a vertex's kind, a far-body triangle's, a type's roof and walls, and how raw a face is.
+// type: the types are a fixed catalogue, every building of every plan is one of them placed at its own size and
+// tinted, and the browser then holds no simplifier. All of it is one atlas of the one format (js/continuum-format.js);
+// this is what a city puts in it: a vertex's kind, a far-body triangle's, a type's roof and walls, and how raw a face is.
 // js/wgsl/city-continuum.js is its material; js/city-continuum-draw.js places a city's buildings.
 import {
   CONTINUUM_ATLAS_VERSION, CONTINUUM_HEADER_WORDS, CONTINUUM_NEVER, CONTINUUM_TYPE, CONTINUUM_TYPE_SLIGHT, continuumFloatWord,

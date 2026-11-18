@@ -13065,8 +13065,9 @@ export function rebuildPackFrontierCity(pack) {
   return pack.city;
 }
 
-// Emit a contiguous closed polygonal farmyard / crofthold perimeter enclosure whose wall/fence bays
-// meet corner-to-corner around (cx, cz), leaving a single clean ~4.5 m entrance gateway facing baseYaw.
+// Emit a contiguous closed polygonal farmyard / crofthold perimeter enclosure whose sides meet corner-to-corner around
+// (cx, cz), leaving a single clean ~4.5 m entrance gateway facing baseYaw. Each side is laid by the masons' `fence`
+// (js/old-world-city.js cityMasonry): whole panels or courses of their own size, never stretched to the chord.
 function emitContiguousParcelEnclosure({
   cx,
   cz,
@@ -13075,12 +13076,11 @@ function emitContiguousParcelEnclosure({
   sides = 8,
   baseYaw = 0,
   gateWidth = 4.5,
-  maxBayLen = 7.2,
   wobble = 0,
   stoneOnly = false,
   heightAt,
   waterSampler,
-  pushTyped,
+  fence,
   rr,
 }) {
   const verts = [];
@@ -13104,25 +13104,10 @@ function emitContiguousParcelEnclosure({
   }
 
   let emittedBays = 0;
-  const emitChordSpan = (ax, az, bx, bz, fType, tone) => {
-    const sdx = bx - ax;
-    const sdz = bz - az;
-    const sLen = Math.hypot(sdx, sdz);
-    if (sLen < 1.2) return;
-    const yaw = Math.atan2(sdx, sdz);
-    const nBays = Math.max(1, Math.round(sLen / maxBayLen));
-    const T = CITY_BUILDING_TYPES[fType];
-    for (let b = 0; b < nBays; b++) {
-      const tm = (b + 0.5) / nBays;
-      const mx = ax + sdx * tm;
-      const mz = az + sdz * tm;
-      const mh = heightAt(mx, mz);
-      if (mh < 1.1 || waterSampler?.(mx, mz)) continue;
-      // 0.34 m miter overlap joins consecutive bays and polygon corners watertight with zero daylight gap
-      const bayLen = sLen / nBays + 0.34;
-      pushTyped(fType, mx, mh, mz, yaw, T.width, T.height, bayLen, tone, 0);
-      emittedBays++;
-    }
+  const clear = (x, z) => heightAt(x, z) >= 1.1 && !waterSampler?.(x, z);
+  const emitChordSpan = (ax, az, bx, bz, stone, tone) => {
+    if (Math.hypot(bx - ax, bz - az) < 1.2) return;
+    emittedBays += fence(ax, az, bx, bz, stone, { tone, clear });
   };
 
   for (let k = 0; k < sides; k++) {
@@ -13139,13 +13124,11 @@ function emitContiguousParcelEnclosure({
         const leaf = (edgeLen - gateWidth) * 0.5;
         const ux = dx / edgeLen;
         const uz = dz / edgeLen;
-        emitChordSpan(a.x, a.z, a.x + ux * leaf, a.z + uz * leaf, CITY_TYPE.FENCE_STONE, tone);
-        emitChordSpan(b.x - ux * leaf, b.z - uz * leaf, b.x, b.z, CITY_TYPE.FENCE_STONE, tone);
+        emitChordSpan(a.x, a.z, a.x + ux * leaf, a.z + uz * leaf, true, tone);
+        emitChordSpan(b.x - ux * leaf, b.z - uz * leaf, b.x, b.z, true, tone);
       }
     } else {
-      const fType =
-        stoneOnly || k === 0 || k === sides - 2 ? CITY_TYPE.FENCE_STONE : CITY_TYPE.FENCE_RAIL;
-      emitChordSpan(a.x, a.z, b.x, b.z, fType, tone);
+      emitChordSpan(a.x, a.z, b.x, b.z, stoneOnly || k === 0 || k === sides - 2, tone);
     }
   }
   return emittedBays;
@@ -13159,11 +13142,8 @@ function buildMockParcelCity(parcel, heights, region, waterSampler) {
   let sCount = 0;
   const rr = () => parcelHash(parcel.ix * 73856093 ^ parcel.iz * 19349663, ++sCount);
   const heightAt = (x, z) => terrainSurfaceSample(heights, x, z, region);
-  const { pushBlock, pushTyped } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates: [], keep: () => {}, rr });
-  const pushSlight = (type, x, z, yaw, len, tone = 0.5) => {
-    const T = CITY_BUILDING_TYPES[type];
-    pushTyped(type, x, heightAt(x, z), z, yaw, T.width, T.height, len ?? T.length, tone, 0);
-  };
+  const { pushBlock, pushTyped, fence } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates: [], keep: () => {}, rr });
+  const pushSlight = (type, x, z, yaw, tone = 0.5) => pushTyped(type, x, heightAt(x, z), z, yaw, tone, 0);
   const half = parcel.span * 0.42;
   const spots = [];
   for (let a = 0; a < 16 && spots.length < 4; a++) {
@@ -13184,7 +13164,7 @@ function buildMockParcelCity(parcel, heights, region, waterSampler) {
         const f = footprint(sp.x, sp.z, T.width, T.length, sp.yaw);
         const Far = footprint(sp.x, sp.z, f.d, f.w, sp.yaw + Math.PI / 2);
         const floor = pushBlock(Far, T.height, 0.95, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.5);
-        pushTyped(CITY_TYPE.SHED, sp.x, floor, sp.z, sp.yaw, f.w, T.height, f.d, 0.5, 1);
+        pushTyped(CITY_TYPE.SHED, sp.x, floor, sp.z, sp.yaw, 0.5, 1);
       }
       const enclosed = emitContiguousParcelEnclosure({
         cx: sp.x,
@@ -13194,19 +13174,16 @@ function buildMockParcelCity(parcel, heights, region, waterSampler) {
         sides: 6,
         baseYaw: sp.yaw,
         gateWidth: 4.5,
-        maxBayLen: 12.0,
         wobble: 0.06,
         stoneOnly: true,
         heightAt,
         waterSampler,
-        pushTyped,
+        fence,
         rr,
       });
-      if (!enclosed) {
-        pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw, CITY_BUILDING_TYPES[CITY_TYPE.CAIRN].length, 0.5);
-      }
+      if (!enclosed) pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw);
     } else {
-      pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw, CITY_BUILDING_TYPES[CITY_TYPE.CAIRN].length, 0.5);
+      pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw);
     }
   }
   return {
@@ -13311,7 +13288,7 @@ export function growFrontierParcel(pack, parcel, heights) {
   const typedBlocks = [];
   let sCount = 17;
   const rr = () => parcelHash((parcel.ix + 11) * 83492791 ^ (parcel.iz + 23) * 297121507, ++sCount);
-  const { pushBlock, pushTyped } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates: [], keep: () => {}, rr });
+  const { pushBlock, pushTyped, fence } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates: [], keep: () => {}, rr });
 
   // Locate flattest dry open pasture cluster hub & optional ridge crest for windmill
   const bGrid = pack.biome instanceof Uint8Array ? pack.biome : null;
@@ -13413,7 +13390,7 @@ export function growFrontierParcel(pack, parcel, heights) {
     const Far = ridgeAlong ? footprint(x, z, f.d, f.w, yaw + Math.PI / 2) : f;
     const tone = isTropicalHinterland ? 0.62 + rr() * 0.30 : 0.35 + rr() * 0.35;
     const floor = pushBlock(Far, T.height, rise, roofKind, wallKind, tone);
-    pushTyped(type, x, floor, z, yaw, f.w, T.height, f.d, tone, 1);
+    pushTyped(type, x, floor, z, yaw, tone, 1);
     placedLots.push({ x, z });
   }
   if (isTropicalHinterland) {
@@ -13432,13 +13409,13 @@ export function growFrontierParcel(pack, parcel, heights) {
       const byaw = baseYaw + rr() * Math.PI;
       const f = footprint(bx, bz, T.width, T.length, byaw);
       const floor = pushBlock(f, T.height, 1.55, CITY_ROOF.HIP + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.48);
-      pushTyped(bType, bx, floor, bz, byaw, f.w, T.height, f.d, 0.48, 1);
+      pushTyped(bType, bx, floor, bz, byaw, 0.48, 1);
     }
   } else if (!isAmericasColonial && crestH > 18 && Math.hypot(crestX - hubX, crestZ - hubZ) > 28 && !waterSampler?.(crestX, crestZ)) {
     const T = CITY_BUILDING_TYPES[CITY_TYPE.WINDMILL];
     const f = footprint(crestX, crestZ, T.width, T.length, baseYaw);
     const floor = pushBlock(f, T.height, 1.8, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 0.25);
-    pushTyped(CITY_TYPE.WINDMILL, crestX, floor, crestZ, baseYaw, f.w, T.height, f.d, 0.25, 1);
+    pushTyped(CITY_TYPE.WINDMILL, crestX, floor, crestZ, baseYaw, 0.25, 1);
   }
   emitContiguousParcelEnclosure({
     cx: hubX,
@@ -13448,12 +13425,11 @@ export function growFrontierParcel(pack, parcel, heights) {
     sides: 8,
     baseYaw,
     gateWidth: 4.5,
-    maxBayLen: 6.8,
     wobble: 0.1,
     stoneOnly: isTropicalHinterland,
     heightAt,
     waterSampler,
-    pushTyped,
+    fence,
     rr,
   });
 

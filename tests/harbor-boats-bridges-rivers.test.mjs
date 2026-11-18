@@ -10,7 +10,7 @@ import { oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
 import { buildPortPrefabGeometry } from '../js/coastal-world.js';
 import { layTownStreets } from '../js/town-streets.js';
 import { terrainSurfaceSample } from '../js/terrain-model.js';
-import { compileCityBuildingTypes } from '../js/old-world-buildings.js';
+import { CITY_TYPED_FLOATS, compileCityBuildingTypes } from '../js/old-world-buildings.js';
 import { createCityTargets } from '../js/city-targets.js';
 import {
   applyBuildingFractureEvents,
@@ -257,7 +257,7 @@ test('stone and timber bridges are cannon-destructible, let walkers cross, float
   }
 
   const compiledTypes = compileCityBuildingTypes(buildPortPrefabGeometry);
-  const targets = createCityTargets({ city: country.plan, types: () => compiledTypes, port });
+  const targets = createCityTargets({ city: country.plan, types: (id) => compiledTypes[id], port });
 
   const b0 = country.bridges.find((b) => !b.isStone) ?? country.bridges[0];
   const bStone = country.bridges.find((b) => b.isStone);
@@ -304,7 +304,7 @@ test('stone and timber bridges are cannon-destructible, let walkers cross, float
 
   // Verify stone bridge arch targeting as well
   if (bStone) {
-    const so = bStone.cityIndices[0] * 8;
+    const so = bStone.cityIndices[0] * CITY_TYPED_FLOATS;
     const sx = country.plan.typed[so], sy = country.plan.typed[so + 1], sz = country.plan.typed[so + 2];
     assert.equal(targets.inside(sx, sz, 0.4), false, 'intact stone bridge does not block street walkers');
     const stoneHit = targets.sweep([sx, sy + 6, sz], [sx, sy - 6, sz], 0.25, {}, sweepBuildingSegment);

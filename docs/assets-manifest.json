@@ -780,14 +780,14 @@
     "sha256": "230404cc6e431ee18b0683c1a680b90463e83ac02da9652c607387090c8cc12e"
   },
   "assets/city-continuum/manifest.json": {
-    "url": "assets/city-continuum/manifest.b3e3f0c77cb44cea.json",
-    "bytes": 114612,
-    "sha256": "b3e3f0c77cb44cea1d88e8799159311ac324481e091f65e81de30e82fcfc6f68"
+    "url": "assets/city-continuum/manifest.5acea73c1109aef1.json",
+    "bytes": 632577,
+    "sha256": "5acea73c1109aef194c066a04abd20cf275ea118ebe5278f3c24c8beeda5deaf"
   },
   "assets/city-continuum/atlas.bin.gz": {
-    "url": "assets/city-continuum/atlas.bin.9b8688b6ee01a668.gz",
-    "bytes": 4182391,
-    "sha256": "9b8688b6ee01a668c851cefeadf29aca1624a9eb4d0b4f1e42b997975f217bf1"
+    "url": "assets/city-continuum/atlas.bin.2a3d46fd882a86d1.gz",
+    "bytes": 24617186,
+    "sha256": "2a3d46fd882a86d1a53842c9f556f066ad71cde0a006182c9eb1ab776b0a1ccf"
   },
   "assets/animal-continuum/manifest.json": {
     "url": "assets/animal-continuum/manifest.88a58750962dfad1.json",
@@ -2215,9 +2215,9 @@
     "sha256": "861276eb8be54030e7b87c513a1d673cb91ea55f7dbd75dfaeb3845044972eb0"
   },
   "assets/continuum/bake-worker.js": {
-    "url": "assets/continuum/bake-worker.1d330e90a6e44c58.js",
-    "bytes": 194088,
-    "sha256": "1d330e90a6e44c58412ed152e3fbd3a052d1eef2a54ac81d01ff68898a9987a2"
+    "url": "assets/continuum/bake-worker.4214269530ccd376.js",
+    "bytes": 194587,
+    "sha256": "4214269530ccd376c0f91abb6a18455e8594f8a288a9284af2c7953801d8aee6"
   },
   "assets/prefab-continuum/manifest.json": {
     "url": "assets/prefab-continuum/manifest.c3ba17d27cd852b2.json",

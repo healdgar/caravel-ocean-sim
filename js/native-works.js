@@ -9,9 +9,10 @@
 //     a porch before it. Maloca (Tupinambá; Staden: "fourteen feet wide and a hundred and fifty long", vaulted to
 //     the ground): palm thatch from the ground over, a door at each end. The chief's long house and the charnel
 //     house (Powhatan) are vaults of bark and of mats; a sweat lodge a small dome.
-// And the palisade a town of them is ringed by, stood a length at a time: stakes set in a bank of earth, pointed,
+// And the palisade a town of them is ringed by, stood a section at a time: stakes set in a bank of earth, pointed,
 // bound with two rails. Each names the earth it stands on as its footing (partGroup 'foundation_plinth'). A type's
-// height is its eaves, as a work's is: far off, the block that stands for it rises from there by its rise (BOARD_WORKS).
+// height is its eaves, as a work's is. A house the model builds at many lengths (a longhouse by its hearths, a maloca
+// by its bays, an arbour house by its hoops) is written at each of them, never stretched to its plot.
 const NATIVE_FOOT_M = 4.5;
 const nativeSpec = (name, width, length, height, materialKind, primitives, foundationDepth = NATIVE_FOOT_M) => ({ schemaVersion: '0.4', name, width, length, height, foundationDepth, materialKind, roofPitch: 2, waterfront: false, primitives });
 const nativeBox = (name, from, to, material, more = {}) => ({ primitive: 'box', name, from, to, material, ...more });
@@ -61,44 +62,51 @@ function nativeDome(name, hw, hd, top, material, bands = 5) {
 }
 
 /* ---- the Iroquoian towns ---- */
-const NATIVE_BARK_LONGHOUSE = (() => {
-  const hw = 15, hd = 3.5, wall = 3.8, top = 7.5;
-  return nativeSpec('Bark longhouse (Iroquoian: a vault of elm bark, a door at each end, a hearth to each two families)', 30, 7, wall, 17, [
+// A longhouse grows a hearth at a time, each shared by the two families either side of it and this long.
+const NATIVE_HEARTH_M = 6;
+const NATIVE_BARK_LONGHOUSE = [3, 4, 5].map((hearths) => {
+  const hw = hearths * NATIVE_HEARTH_M / 2, hd = 3, wall = 3.4, top = 6.6;
+  return nativeSpec(`Bark longhouse (Iroquoian: a vault of elm bark, a door at each end, ${hearths} hearths, one to each two families)`, 2 * hw, 2 * hd, wall, 17, [
     nativeFoot(hw, hd),
     ...nativeVault('longhouse', hw, hd, wall, top, 'bark', { th: 0.16 }),
     // Poles lashed over the bark along its length, and the smoke holes of its hearths down the ridge.
     ...[-0.58, 0.58].map((t) => nativeBox('longhouse_pole', [-hw - 0.15, wall + (top - wall) * Math.cos(t) - 0.02, -hd * Math.sin(t) - 0.07], [hw + 0.15, wall + (top - wall) * Math.cos(t) + 0.12, -hd * Math.sin(t) + 0.07], 'timber')),
-    ...[-10, -5, 0, 5, 10].map((x) => nativeBox('longhouse_smoke_hole', [x - 0.45, top - 0.1, -0.45], [x + 0.45, top + 0.08, 0.45], 'recess')),
+    ...Array.from({ length: hearths }, (_, k) => -hw + (k + 0.5) * NATIVE_HEARTH_M).map((x) => nativeBox('longhouse_smoke_hole', [x - 0.45, top - 0.1, -0.45], [x + 0.45, top + 0.08, 0.45], 'recess')),
   ]);
-})();
+});
 
 /* ---- the Algonquian peoples of the coast ---- */
-const NATIVE_WETU = nativeSpec('Wetu (Massachusett: an oval dome of bark over bent saplings)', 5.5, 5, 1.4, 17, [
-  nativeFoot(2.75, 2.5),
-  ...nativeDome('wetu', 2.75, 2.5, 3.4, 'bark'),
+// Each house the size the model gives it.
+const NATIVE_WETU = nativeSpec('Wetu (Massachusett: an oval dome of bark over bent saplings)', 4.8, 4.3, 1.4, 17, [
+  nativeFoot(2.4, 2.15),
+  ...nativeDome('wetu', 2.4, 2.15, 3.1, 'bark'),
 ]);
-const NATIVE_ARBOUR_HOUSE = nativeSpec('Arbour house (Lenape and Powhatan: a long low vault of reed mats, "like garden arbors")', 14, 6, 2, 15, [
-  nativeFoot(7, 3),
-  ...nativeVault('arbour', 7, 3, 0.9, 5.6, 'reed', { th: 0.12, doors: [true, true] }),
-  ...[-0.7, 0.7].map((t) => nativeBox('arbour_binding', [-7.1, 0.9 + 4.7 * Math.cos(t) - 0.02, -3 * Math.sin(t) - 0.05], [7.1, 0.9 + 4.7 * Math.cos(t) + 0.08, -3 * Math.sin(t) + 0.05], 'timber')),
-  nativeBox('arbour_smoke_hole', [-0.4, 5.5, -0.35], [0.4, 5.66, 0.35], 'recess'),
+// An arbour house is as long as its hoops of bent poles, a pair of metres apart.
+const NATIVE_ARBOUR_HOUSE = [5, 6, 7].map((pairs) => {
+  const hw = pairs, hd = 2.6, wall = 0.9, top = 4.9, rise = top - wall;
+  return nativeSpec(`Arbour house (Lenape and Powhatan: a long low vault of reed mats, "like garden arbors"; ${2 * hw} m)`, 2 * hw, 2 * hd, 2, 15, [
+    nativeFoot(hw, hd),
+    ...nativeVault('arbour', hw, hd, wall, top, 'reed', { th: 0.12, doors: [true, true] }),
+    ...[-0.7, 0.7].map((t) => nativeBox('arbour_binding', [-hw - 0.1, wall + rise * Math.cos(t) - 0.02, -hd * Math.sin(t) - 0.05], [hw + 0.1, wall + rise * Math.cos(t) + 0.08, -hd * Math.sin(t) + 0.05], 'timber')),
+    nativeBox('arbour_smoke_hole', [-0.4, top - 0.1, -0.35], [0.4, top + 0.06, 0.35], 'recess'),
+  ]);
+});
+const NATIVE_CHIEF_HOUSE = nativeSpec('Long house of a chief (a vault of bark, his kin and his guard within)', 10.2, 6, 2.6, 17, [
+  nativeFoot(5.1, 3),
+  ...nativeVault('chief_house', 5.1, 3, 1.4, 5.8, 'bark', { th: 0.15 }),
+  ...[-0.6, 0.6].map((t) => nativeBox('chief_house_pole', [-5.22, 1.4 + 4.4 * Math.cos(t) - 0.02, -3 * Math.sin(t) - 0.06], [5.22, 1.4 + 4.4 * Math.cos(t) + 0.1, -3 * Math.sin(t) + 0.06], 'timber')),
+  ...[-2.2, 2.2].map((x) => nativeBox('chief_house_smoke_hole', [x - 0.4, 5.7, -0.38], [x + 0.4, 5.86, 0.38], 'recess')),
 ]);
-const NATIVE_CHIEF_HOUSE = nativeSpec('Long house of a chief (a vault of bark, his kin and his guard within)', 12, 7, 2.6, 17, [
-  nativeFoot(6, 3.5),
-  ...nativeVault('chief_house', 6, 3.5, 1.4, 6.2, 'bark', { th: 0.15 }),
-  ...[-0.6, 0.6].map((t) => nativeBox('chief_house_pole', [-6.12, 1.4 + 4.8 * Math.cos(t) - 0.02, -3.5 * Math.sin(t) - 0.06], [6.12, 1.4 + 4.8 * Math.cos(t) + 0.1, -3.5 * Math.sin(t) + 0.06], 'timber')),
-  ...[-2.5, 2.5].map((x) => nativeBox('chief_house_smoke_hole', [x - 0.4, 6.1, -0.38], [x + 0.4, 6.26, 0.38], 'recess')),
-]);
-const NATIVE_CHARNEL_HOUSE = nativeSpec('Charnel house (Powhatan: a vault of mats on a scaffold of poles, the dead of the chiefs within; carved posts before it)', 12, 5, 2.3, 15, [
-  nativeFoot(6, 2.5),
-  ...nativeVault('charnel_house', 6, 2.5, 1.2, 5.6, 'reed', { th: 0.12, doors: [true, false] }),
+const NATIVE_CHARNEL_HOUSE = nativeSpec('Charnel house (Powhatan: a vault of mats on a scaffold of poles, the dead of the chiefs within; carved posts before it)', 10.2, 4.3, 2.3, 15, [
+  nativeFoot(5.1, 2.15),
+  ...nativeVault('charnel_house', 5.1, 2.15, 1.2, 5.2, 'reed', { th: 0.12, doors: [true, false] }),
   // The carved posts at its door, at the end toward the lane.
-  ...[-1.2, 1.2].map((z) => ({ primitive: 'cylinder', name: 'charnel_posts', base: [-6.6, -0.8, z], height: 3.4, radius: 0.18, segments: 7, material: 'dark_wood' })),
+  ...[-1.1, 1.1].map((z) => ({ primitive: 'cylinder', name: 'charnel_posts', base: [-5.7, -0.8, z], height: 3.4, radius: 0.18, segments: 7, material: 'dark_wood' })),
 ]);
-const NATIVE_SWEAT_LODGE = nativeSpec('Sweat lodge (a small dome of bark, its stones heated at the door)', 2.5, 2.5, 0.8, 17, [
-  nativeFoot(1.25, 1.25),
-  ...nativeDome('sweat_lodge', 1.25, 1.25, 1.9, 'bark', 4),
-  { primitive: 'cone', name: 'sweat_stones', base: [0.9, 0.1, -1.7], height: 0.35, radius: 0.4, radiusTop: 0.12, segments: 6, material: 'stone' },
+const NATIVE_SWEAT_LODGE = nativeSpec('Sweat lodge (a small dome of bark, its stones heated at the door)', 2.2, 2.2, 0.8, 17, [
+  nativeFoot(1.1, 1.1),
+  ...nativeDome('sweat_lodge', 1.1, 1.1, 1.75, 'bark', 4),
+  { primitive: 'cone', name: 'sweat_stones', base: [0.8, 0.1, -1.55], height: 0.35, radius: 0.4, radiusTop: 0.12, segments: 6, material: 'stone' },
 ]);
 
 /* ---- the Taíno ---- */
@@ -125,28 +133,34 @@ const NATIVE_CANEY = (() => {
 })();
 
 /* ---- the Tupinambá ---- */
-const NATIVE_MALOCA = nativeSpec('Maloca (Tupinambá: a long house of many families, palm thatch vaulted from the ground, a door at each end)', 46, 5, 1.6, 15, [
-  nativeFoot(23, 2.5),
-  ...nativeVault('maloca', 23, 2.5, 0, 4.6, 'palm_thatch', { th: 0.2, endMaterial: 'palm_thatch' }),
-  ...[-0.55, 0.55].map((t) => nativeBox('maloca_binding', [-23.1, 4.6 * Math.cos(t) - 0.02, -2.5 * Math.sin(t) - 0.05], [23.1, 4.6 * Math.cos(t) + 0.08, -2.5 * Math.sin(t) + 0.05], 'timber')),
-]);
+// A maloca is as long as the families it houses, a bay of this length to each pair of them.
+const NATIVE_MALOCA_BAY_M = 6;
+const NATIVE_MALOCA = [5, 6, 7, 8].map((bays) => {
+  const hw = bays * NATIVE_MALOCA_BAY_M / 2, hd = 2.2, top = 4.2;
+  return nativeSpec(`Maloca (Tupinambá: a long house of many families, palm thatch vaulted from the ground, a door at each end; ${bays} bays)`, 2 * hw, 2 * hd, 1.6, 15, [
+    nativeFoot(hw, hd),
+    ...nativeVault('maloca', hw, hd, 0, top, 'palm_thatch', { th: 0.2, endMaterial: 'palm_thatch' }),
+    ...[-0.55, 0.55].map((t) => nativeBox('maloca_binding', [-hw - 0.1, top * Math.cos(t) - 0.02, -hd * Math.sin(t) - 0.05], [hw + 0.1, top * Math.cos(t) + 0.08, -hd * Math.sin(t) + 0.05], 'timber')),
+  ]);
+});
 
-// The houses, in the order they follow the Old World's works (CITY_WORKS); `key` is each one's name in CITY_TYPE.
+// The houses, in the order they follow the Old World's works (CITY_WORKS); `key` is each one's name in CITY_TYPE,
+// then its variants and the one the name stands for (as CITY_WORKS has them).
 export const NATIVE_WORKS = Object.freeze([
-  ['BARK_LONGHOUSE', NATIVE_BARK_LONGHOUSE], ['WETU', NATIVE_WETU], ['ARBOUR_HOUSE', NATIVE_ARBOUR_HOUSE], ['BOHIO', NATIVE_BOHIO], ['CANEY', NATIVE_CANEY],
-  ['MALOCA', NATIVE_MALOCA], ['CHIEF_HOUSE', NATIVE_CHIEF_HOUSE], ['CHARNEL_HOUSE', NATIVE_CHARNEL_HOUSE], ['SWEAT_LODGE', NATIVE_SWEAT_LODGE],
+  ['BARK_LONGHOUSE', NATIVE_BARK_LONGHOUSE, 1], ['WETU', NATIVE_WETU], ['ARBOUR_HOUSE', NATIVE_ARBOUR_HOUSE, 1], ['BOHIO', NATIVE_BOHIO], ['CANEY', NATIVE_CANEY],
+  ['MALOCA', NATIVE_MALOCA, 1], ['CHIEF_HOUSE', NATIVE_CHIEF_HOUSE], ['CHARNEL_HOUSE', NATIVE_CHARNEL_HOUSE], ['SWEAT_LODGE', NATIVE_SWEAT_LODGE],
 ]);
 
-/* ---- the palisade, a length at a time ---- */
-// A palisade is stood a length at a time, each this long before it is fitted to its run, and this high.
-export const NATIVE_PALISADE_M = 5;
-export const NATIVE_PALISADE_HIGH_M = 4.6;
-const NATIVE_PALISADE = (() => {
-  const half = NATIVE_PALISADE_M / 2, stakes = 15, high = NATIVE_PALISADE_HIGH_M - 0.45;
-  return nativeSpec('Palisade (stakes set in a bank of earth, pointed, bound with two rails; a length)', 1.1, NATIVE_PALISADE_M, NATIVE_PALISADE_HIGH_M, 10, [
-    nativeBox('palisade_bank', [-0.55, -1.3, -half - 0.02], [0.55, 0.2, half + 0.02], 'earth', { partGroup: 'foundation_plinth' }),
+/* ---- the palisade, a section at a time ---- */
+// A palisade is stood a section at a time, each a whole number of its stakes (three to the metre), from a metre to
+// five; and this high.
+export const NATIVE_PALISADE = Object.freeze({ stake: 1 / 3, stakes: [3, 6, 9, 12, 15], high: 4.6 });
+const NATIVE_PALISADES = NATIVE_PALISADE.stakes.map((stakes) => {
+  const length = stakes * NATIVE_PALISADE.stake, half = length / 2, high = NATIVE_PALISADE.high - 0.45;
+  return nativeSpec(`Palisade (stakes set in a bank of earth, pointed, bound with two rails; ${stakes} stakes)`, 1.1, length, NATIVE_PALISADE.high, 10, [
+    nativeBox('palisade_bank', [-0.55, -1.3, -half], [0.55, 0.2, half], 'earth', { partGroup: 'foundation_plinth' }),
     ...Array.from({ length: stakes }, (_, k) => {
-      const z = -half + (k + 0.5) * NATIVE_PALISADE_M / stakes, r = 0.14 + 0.02 * ((k * 7) % 3) / 2, h = high - 0.18 * ((k * 5) % 3);
+      const z = -half + (k + 0.5) * NATIVE_PALISADE.stake, r = 0.14 + 0.02 * ((k * 7) % 3) / 2, h = high - 0.18 * ((k * 5) % 3);
       return [
         { primitive: 'cylinder', name: 'palisade_stakes', base: [0, -1.2, z], height: h + 1.2, radius: r, segments: 7, material: 'timber' },
         { primitive: 'cone', name: 'palisade_points', base: [0, h, z], height: 0.45, radius: r, radiusTop: 0.04, segments: 7, material: 'timber' },
@@ -154,10 +168,10 @@ const NATIVE_PALISADE = (() => {
     }).flat(),
     ...[1.3, 3.2].map((y) => nativeBox('palisade_rail', [0.14, y, -half], [0.3, y + 0.16, half], 'dark_wood')),
   ], 1.3);
-})();
+});
 // The slighter works, after the Old World's: a palisade stops shot and whoever walks, so it is no slight thing to the
 // guns (it is not in CITY_TYPES_SLIGHT), only written as large as it is.
-export const NATIVE_SLIGHT_WORKS = Object.freeze([['PALISADE', NATIVE_PALISADE]]);
+export const NATIVE_SLIGHT_WORKS = Object.freeze([['PALISADE', NATIVE_PALISADES, NATIVE_PALISADES.length - 1]]);
 
 // What each is to the guns: the name its damage is kept under and reported by.
 export const NATIVE_WORKS_TARGETS = Object.freeze({

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildPortPrefabGeometry } from '../js/coastal-world.js';
-import { CITY_BUILDING_TYPES, CITY_HOUSE_STOREYS, CITY_HOUSE_TYPES, CITY_STOREY_M, CITY_TYPE, cityHousePick, cityHouseType, cityTypeTarget, compileCityBuildingTypes } from '../js/old-world-buildings.js';
+import { CITY_BAY_M, CITY_BUILDING_TYPES, CITY_HOUSE_STOREYS, CITY_HOUSE_TYPES, CITY_STOREY_M, CITY_TYPE, cityFamilyOf, cityHousePick, cityHouseType, cityTypeTarget, compileCityBuildingTypes } from '../js/old-world-buildings.js';
 import { oldWorldCountry } from '../js/old-world.js';
 
 const houses = CITY_BUILDING_TYPES.slice(0, CITY_HOUSE_TYPES);
@@ -20,8 +20,10 @@ test('every height of house is built in several manners, each a type of its own,
   for (let type = 0; type < CITY_BUILDING_TYPES.length; type++) assert.equal(cityTypeTarget(type).prefabId === 'city_house', type < CITY_HOUSE_TYPES);
   const manners = new Set();
   for (const eaves of [true, false]) for (let storeys = 1; storeys <= CITY_HOUSE_STOREYS; storeys++) {
+    // The plain house of a height is its family's canonical type: the one a lot is fitted from, by bays and depth.
     const plain = cityHouseType(storeys, eaves);
-    assert.equal(plain, (eaves ? CITY_TYPE.HOUSE_EAVES : CITY_TYPE.HOUSE_GABLE) + storeys - 1);
+    assert.equal(cityFamilyOf(plain).canonical, plain);
+    if (storeys === 1) assert.equal(plain, eaves ? CITY_TYPE.HOUSE_EAVES : CITY_TYPE.HOUSE_GABLE);
     assert.equal(CITY_BUILDING_TYPES[plain].manner, 'plain');
     const met = new Map();
     for (let k = 0; k < 4000; k++) { const type = cityHouseType(storeys, eaves, (k + 0.5) / 4000); met.set(type, (met.get(type) || 0) + 1); }
@@ -61,7 +63,7 @@ test('each manner is built by its rule: timber only above stone, jetties steppin
     if (spec.manner === 'ressalto') assert.ok(framed && named(spec, 'balcony').length === 0, spec.name);
     if (spec.manner === 'plain' || spec.manner === 'cantaria' || spec.manner === 'loja' || spec.manner === 'baixa') assert.ok(!framed, spec.name);
     if (spec.manner === 'arcada') {
-      const bays = Math.max(2, Math.round(spec.width / 2.4));
+      const bays = Math.round(spec.width / CITY_BAY_M);
       assert.equal(columns, bays + 1, `${spec.name}: a column to each bay line`);
       assert.ok(out[0] < -2 && storeys >= 3, `${spec.name}: the ground floor stands back behind them`);
       assert.ok(named(spec, 'arcade_beam').length === 1);
@@ -78,7 +80,7 @@ test('every house compiles to a mesh within its budget, stands on its plot, and 
   for (let id = 0; id < CITY_HOUSE_TYPES; id++) {
     const type = types[id], spec = CITY_BUILDING_TYPES[id], { min, max } = type.source, kinds = new Set();
     for (let k = 6; k < type.source.vertices.length; k += 8) kinds.add(Math.floor(type.source.vertices[k] + 0.01));
-    assert.ok(type.triangles > 600 && type.triangles < 4600, `${spec.name}: ${type.triangles} triangles`);
+    assert.ok(type.triangles > 600 && type.triangles < 1800 * Math.round(spec.width / CITY_BAY_M), `${spec.name}: ${type.triangles} triangles`);
     for (const kind of [10, 11, 12, 13, 14]) assert.ok(kinds.has(kind), `${spec.name} has material ${kind}`);
     assert.ok([...kinds].every((kind) => kind >= 10 && kind <= 18), `${spec.name}: materials ${[...kinds]}`);
     assert.ok(type.source.vertices.every(Number.isFinite));

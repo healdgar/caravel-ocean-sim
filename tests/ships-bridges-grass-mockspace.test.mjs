@@ -31,6 +31,7 @@ import {
   CITY_TYPED_FLOATS,
   CITY_TYPED_ROOF,
   CITY_TYPES_BRIDGES,
+  cityFamilyOf,
   cityTypeTarget,
 } from '../js/old-world-buildings.js';
 import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
@@ -151,8 +152,9 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp appr
 
   const multiSpans = [];
   for (let i = 0; i < country.plan.typedCount; i++) {
-    const t = country.plan.typedTypes[i];
-    if (t === CITY_TYPE.STONE_BRIDGE_SPAN) {
+    // Each arch is the span's variant of its arch and width; each fence section a whole number of panels or courses.
+    const t = country.plan.typedTypes[i], key = cityFamilyOf(t).key;
+    if (key === 'STONE_BRIDGE_SPAN') {
       multiSpans.push({
         x: country.plan.typed[i * CITY_TYPED_FLOATS],
         y: country.plan.typed[i * CITY_TYPED_FLOATS + 1],
@@ -160,7 +162,7 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp appr
         yaw: country.plan.typed[i * CITY_TYPED_FLOATS + 3],
       });
     }
-    if (t === CITY_TYPE.FENCE_STONE || t === CITY_TYPE.FENCE_RAIL) {
+    if (key === 'FENCE_STONE' || key === 'FENCE_RAIL') {
       const fx = country.plan.typed[i * CITY_TYPED_FLOATS];
       const fz = country.plan.typed[i * CITY_TYPED_FLOATS + 2];
       assert.ok(Math.hypot(fx, fz) >= 5.5, `fence spawned inside bridge crossing at (${fx.toFixed(1)}, ${fz.toFixed(1)})`);

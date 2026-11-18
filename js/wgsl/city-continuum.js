@@ -6,9 +6,8 @@
 // a module of its own, the land's source its prelude (the land shades it, but does not carry it).
 import { CITY_CONTINUUM_KIND_Y, CITY_CONTINUUM_MATERIAL } from '../city-continuum.js';
 
-// A record's identity word, as a city's building holds it (f32): its tint (fract its tone, floor its limewash), or a
-// fence's slope code, from -150 to -50, or below that CITY_CONTINUUM_AS_BUILT, worn as its builder made it (a coast's
-// prefab, a struck prefab's pieces).
+// A record's identity word, as a city's building holds it (f32): its tint (fract its tone, floor its limewash), or
+// CITY_CONTINUUM_AS_BUILT, worn as its builder made it (a coast's prefab, a struck prefab's pieces).
 export const CITY_CONTINUUM_AS_BUILT = -1000;
 // Where the scene's data binds in a city view: group 2, past the land's own group 2 bindings.
 export const CITY_CONTINUUM_DATA = Object.freeze({ group: 2, binding: 40 });
@@ -25,8 +24,8 @@ fn cityContinuumFarKind(packed:u32)->vec2f { return vec2f(f32(packed&255u)+f32((
 fn cityContinuumWorn(kind:vec2f,record:ContinuumRecord,height:f32)->CityContinuumWorn {
   let tint=bitcast<f32>(record.spare.x);
   let root=vec4f(record.place.xyz,continuumYaw(record));
-  let tone=select(fract(tint),0.5,tint< -50.0);
   let built=tint< -150.0;
+  let tone=select(fract(tint),0.5,built);
   let material=floor(kind.x+0.01);
   var out:CityContinuumWorn;
   out.kind=kind;
@@ -45,8 +44,8 @@ fn cityContinuumWorn(kind:vec2f,record:ContinuumRecord,height:f32)->CityContinuu
 // The material block of a type: its splat's roof share, its walls' kind and its roof's.
 fn cityContinuumBlockKind(model:u32,at:u32)->vec2f { return vec2f(continuumTypeF(model,at),continuumTypeF(model,at+1u)); }
 fn cityContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
-  let stretch=continuumStretch(s.record);
-  let height=s.local.y*stretch.y*s.record.place.w;
+  // Every building stands at its type's own size: its height above its floor is its type's, by the record's scale.
+  let height=s.local.y*s.record.place.w;
   if(s.what==CONTINUUM_SPLAT_ENTRY){
     let wall=cityContinuumWorn(cityContinuumBlockKind(s.model,${CITY_CONTINUUM_MATERIAL.wallKind}u),s.record,height);
     let roof=cityContinuumWorn(cityContinuumBlockKind(s.model,${CITY_CONTINUUM_MATERIAL.roofKind}u),s.record,height);

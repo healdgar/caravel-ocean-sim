@@ -53,7 +53,7 @@ export async function prefabContinuumPlan(port, { near = null, build = buildPort
     const away = near ? Math.hypot(instance.x - near.x, instance.z - near.z) : 0;
     bodies[type].away = Math.min(bodies[type].away, away);
     types[i] = type;
-    typed.set([instance.x, instance.y ?? 0, instance.z, instance.yaw ?? 0, 1, 1, 1, CITY_CONTINUUM_AS_BUILT], i * CITY_TYPED_FLOATS);
+    typed.set([instance.x, instance.y ?? 0, instance.z, instance.yaw ?? 0, CITY_CONTINUUM_AS_BUILT], i * CITY_TYPED_FLOATS);
   }
   return { instances, bodies, types, typed, index: new Map(instances.map((instance, i) => [instance, i])) };
 }
