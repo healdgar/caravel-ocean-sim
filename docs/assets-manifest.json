@@ -655,9 +655,14 @@
     "sha256": "9c6893a4d79e52a89fc2676f6ccb208ba00362b46f8d948f0ce520435d830204"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.94a2f923063c86a8.gz",
-    "bytes": 13009814,
-    "sha256": "94a2f923063c86a831b563c781353b13783acb22bcb8699bb03865b9aa4c5df6"
+    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.68c1f181375a66a1.gz",
+    "bytes": 84255733,
+    "sha256": "68c1f181375a66a1621595170063e4b780acb0012492306621d2132d21f38b8e"
+  },
+  "assets/ground-cover/tropical/meadows-gpu/atlas.bin.gz": {
+    "url": "assets/ground-cover/tropical/meadows-gpu/atlas.bin.45b5501a9f949d4d.gz",
+    "bytes": 60668081,
+    "sha256": "45b5501a9f949d4decb3bae58deecb591b616ca03c9bf4afca81237d04109a7c"
   },
   "assets/prefab-continuum/acapulco.bin.gz": {
     "url": "assets/prefab-continuum/acapulco.bin.8823a2919f54cfff.gz",
@@ -2075,9 +2080,14 @@
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.6aac960af7111818.json",
-    "bytes": 12594,
-    "sha256": "6aac960af7111818c604e60e87334b870b6705dc2e2d8b2447abdda96b7566e9"
+    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.f066b7b7bcd721a6.json",
+    "bytes": 19313,
+    "sha256": "f066b7b7bcd721a696dd7721a0a52360574d61ab25b7d6f113bc37228bf62085"
+  },
+  "assets/ground-cover/tropical/meadows-gpu/manifest.json": {
+    "url": "assets/ground-cover/tropical/meadows-gpu/manifest.52a4fd383e3ae50b.json",
+    "bytes": 19312,
+    "sha256": "52a4fd383e3ae50b7ff2cf753a3d5660047fde925a753fee0f7050ceb2dfcd35"
   },
   "assets/ships/continuum/trade-cog-underway/manifest.json": {
     "url": "assets/ships/continuum/trade-cog-underway/manifest.64a0dc44552b4362.json",
