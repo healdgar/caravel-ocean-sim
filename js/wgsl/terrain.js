@@ -665,7 +665,7 @@ fn sampleArchLayerGrad(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
   let lod=clamp(log2(max(foot,1.0)),0.0,5.0);
   let m0=u32(floor(lod));
   let m1=min(m0+1u,5u);
-  let aniso=maxL>minL*1.65&&m0<3u;
+  let aniso=maxL>minL*1.85&&m0<2u;
   var s0:vec4f;
   if(aniso){
     let major=select(ddy,ddx,lx>=ly);
@@ -673,9 +673,10 @@ fn sampleArchLayerGrad(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
   }else{
     s0=sampleArchLayerMip(uLayer,uv,m0);
   }
-  if(m0==m1){return s0;}
+  let frac=fract(lod);
+  if(m0==m1||m0>=2u||frac<0.08||frac>0.92){return s0;}
   let s1=sampleArchLayerMip(uLayer,uv,m1);
-  return mix(s0,s1,fract(lod));
+  return mix(s0,s1,frac);
 }
 fn sampleArchNormalMip(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
   let uLayer=u32(max(layer,0));
@@ -1045,8 +1046,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     let shadeAlbedo=0.52+0.48*portShade;
     let instYaw=clamp((fract(in.kind.x)-0.02)/0.46,0.0,1.0)*PI;
     let camDist=distance(world,F.camPos.xyz);
-    let microLodFade=(1.0-smoothstep(140.0,340.0,camDist))*detailFade;
-    let archLodFade=(1.0-smoothstep(320.0,900.0,camDist))*detailFade;
+    let microLodFade=(1.0-smoothstep(45.0,115.0,camDist))*detailFade;
+    let archLodFade=(1.0-smoothstep(95.0,240.0,camDist))*detailFade;
     var detailA=0.0;
     var detailB=0.0;
     if(archLodFade>0.01){detailA=landOrientedDetail(world,n,dx,dy,1.45);}
@@ -1369,15 +1370,16 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
             let midWeight=stoneMidFade*(1.0-stoneFineFade);
             var stonesFine=vec2f(0.0,1.0);
             if(stoneFineFade>0.0){
-              stonesFine=0.5*(landSetts((world.xz-majorXZ*0.25)*3.4)+landSetts((world.xz+majorXZ*0.25)*3.4));
+              if(roadFoot<0.048){
+                stonesFine=0.5*(landSetts((world.xz-majorXZ*0.25)*3.4)+landSetts((world.xz+majorXZ*0.25)*3.4));
+              }else{
+                stonesFine=landSetts(world.xz*3.4);
+              }
             }
             var stonesMid=vec2f(0.0,1.0);
             if(midWeight>0.0){
-              let p0=world.xz-majorXZ*0.25;
-              let p1=world.xz+majorXZ*0.25;
-              let qMid0=vec2f(p0.x*0.8-p0.y*0.6,p0.x*0.6+p0.y*0.8)*1.35+vec2f(17.3,41.7);
-              let qMid1=vec2f(p1.x*0.8-p1.y*0.6,p1.x*0.6+p1.y*0.8)*1.35+vec2f(17.3,41.7);
-              stonesMid=0.5*(landSetts(qMid0)+landSetts(qMid1));
+              let qMid=vec2f(world.x*0.8-world.z*0.6,world.x*0.6+world.z*0.8)*1.35+vec2f(17.3,41.7);
+              stonesMid=landSetts(qMid);
             }
             let toneMix=stonesFine.x*0.22*stoneFineFade+stonesMid.x*0.18*midWeight;
             let mortarMix=(1.0-stonesFine.y)*0.46*stoneFineFade+(1.0-stonesMid.y)*0.34*midWeight;

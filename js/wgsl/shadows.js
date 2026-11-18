@@ -124,7 +124,7 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   // bounds the nine-tap filter cost and prevents thin rigging washing out.
   let distance=max(p.z-blocker,0.0)*SH.sun.w;
   let radius=select(clamp(distance*0.004675/SH.texel.xy,vec2f(1.5),vec2f(6.0)),vec2f(LAND_SHADOW_TENT_TEXELS),isLand);
-  let tentRadius=min(radius,vec2f(2.5));let spread=max(radius/2.5,vec2f(1));
+  let tentRadius=min(radius,vec2f(1.5));let spread=max(radius/1.5,vec2f(1));
   let horizontal=shadowTentAxis(uv.x,f32(dim.x),tentRadius.x);
   let vertical=shadowTentAxis(uv.y,f32(dim.y),tentRadius.y);
   let reference=min(p.z-0.00002,0.99999);
@@ -151,7 +151,8 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
     let depth=min(reference+dot(slope,delta)-footprintBias,0.99999);
     let solid=textureSampleCompareLevel(solidShadow,shadowCompare,q,depth);
     let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,q,depth);
-    let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,q,0.0));
+    var transmission=vec3f(1);
+    if(cloth<0.999){transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,q,0.0));}
     result+=solid*mix(transmission,vec3f(1),cloth)*weight;
   }
   return result;

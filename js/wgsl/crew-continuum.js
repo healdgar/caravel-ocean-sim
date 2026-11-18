@@ -218,18 +218,22 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f)->ve
   let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
 
   // Smooth anatomical throat/neck mask (prevents stray shirt tags or white UV collar bleed on neck without hard steps).
-  let neckLineY=select(1.465,1.375,female);
-  let neckRad=length(vec2f(bodyPos.x*1.05,bodyPos.z+select(0.005,0.022,female)));
+  let neckLineY=select(1.465,1.370,female);
+  let neckRad=length(vec2f(bodyPos.x*1.02,bodyPos.z+select(0.005,0.036,female)));
   let neckSkinMask=select(0.0,
-    smoothstep(neckLineY-0.018,neckLineY+0.018,bodyPos.y)*(1.0-smoothstep(neckLineY+0.125,neckLineY+0.150,bodyPos.y))*(1.0-smoothstep(0.062,0.080,neckRad)),
+    smoothstep(neckLineY-0.016,neckLineY+0.016,bodyPos.y)*(1.0-smoothstep(neckLineY+0.130,neckLineY+0.155,bodyPos.y))*(1.0-smoothstep(0.072,0.094,neckRad)),
     skin.w>0.5);
 
-  // Smooth torso cloth override where fit-crew-body.py mislabeled dark shirt folds as region 4 (hair), 0 (paint), or 3 (skin).
-  let strayHairOnShirt=(region==4u||region==0u)&&bodyPos.y>0.86&&bodyPos.y<1.495&&abs(bodyPos.x)<0.44;
+  // Smooth torso/sleeve cloth override where fit-crew-body.py mislabeled shirt folds as region 4 (hair), 0 (paint), or 3 (skin),
+  // and bare forearm override on sailor-male past the rolled-up sleeve cuff (|x| > 0.50).
+  let sleeveLimit=select(0.48,0.62,female);
+  let strayHairOnShirt=(region==4u||region==0u)&&bodyPos.y>0.86&&bodyPos.y<1.495&&abs(bodyPos.x)<sleeveLimit;
   let strayHairOnTrousers=(region==4u||region==0u)&&bodyPos.y>=0.24&&bodyPos.y<=0.86;
-  let torsoSkinOnShirt=region==3u&&bodyPos.y>0.94&&bodyPos.y<select(1.40,1.335,female)&&abs(bodyPos.x)<0.26&&!( !female&&bodyPos.z>0.06&&abs(bodyPos.x)<0.055&&bodyPos.y>1.26 );
+  let torsoSkinOnShirt=region==3u&&bodyPos.y>0.94&&bodyPos.y<select(1.40,1.335,female)&&abs(bodyPos.x)<0.32&&!( !female&&bodyPos.z>0.06&&abs(bodyPos.x)<0.055&&bodyPos.y>1.26 );
+  let strayClothOnForearm=!female&&(region==1u||region==4u)&&bodyPos.y>1.00&&bodyPos.y<1.52&&abs(bodyPos.x)>0.50;
   var effRegion=region;
-  if(strayHairOnShirt||torsoSkinOnShirt){effRegion=1u;}
+  if(strayClothOnForearm){effRegion=3u;}
+  else if(strayHairOnShirt||torsoSkinOnShirt){effRegion=1u;}
   else if(strayHairOnTrousers){effRegion=2u;}
 
   let median=crewWear[min(effRegion,4u)];
@@ -239,8 +243,9 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f)->ve
       let worn=select(actor.trousers.rgb,actor.shirt.rgb,effRegion==1u);
       let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
       let dyed=worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2);
-      // Skin-border rescue applies ONLY at the 9.5cm collar opening around the neck and past the elbow/wrist (>0.44m) — never across shoulders!
-      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.030&&neckRad<0.095)||abs(bodyPos.x)>0.44),effRegion==1u);
+      // Skin-border rescue applies ONLY at the collar opening around the neck and past the actual cuff — never across sleeves!
+      let cuffX=select(0.46,0.62,female);
+      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.030&&neckRad<0.095)||abs(bodyPos.x)>cuffX),effRegion==1u);
       if(!atBorder||skin.w<=0.5){
         baseOut=vec4f(dyed,0.0);
       }else{
@@ -250,9 +255,14 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f)->ve
       }
     }
   }
-  if(neckSkinMask>0.001&&effRegion==1u){
-    let neckShade=clamp(bright/max(dot(median.xyz,vec3f(0.3333)),1e-3),0.68,1.08);
-    let cleanNeck=skin.xyz*(0.76*mix(1.0,neckShade,0.25));
+  // Clean both mislabeled shirt tags (effRegion==1u) and white blouse UV bleed baked into neck skin (effRegion==3u).
+  let maxC=max(max(picture.r,picture.g),picture.b);
+  let minC=min(min(picture.r,picture.g),picture.b);
+  let whiteNeckBleed=female&&effRegion==3u&&bright>0.28&&minC/max(maxC,1e-3)>0.68;
+  if(neckSkinMask>0.001&&(effRegion==1u||whiteNeckBleed)){
+    let neckRef=select(max(dot(median.xyz,vec3f(0.3333)),1e-3),skinBright,effRegion==3u);
+    let neckShade=clamp(bright/neckRef,0.72,1.06);
+    let cleanNeck=skin.xyz*(0.80*mix(1.0,neckShade,0.22));
     baseOut=vec4f(mix(baseOut.rgb,cleanNeck,neckSkinMask),mix(baseOut.w,1.0,neckSkinMask));
   }
   return baseOut;

@@ -6,11 +6,11 @@
   "words": 4159602,
   "headerWords": 32,
   "bytes": 16638408,
-  "sha256": "58933a0a11946f7fb81ca2bcd3664c8ca477afd39851ca2c9d9a4362885f9a50",
+  "sha256": "af7d933669bd9a19ee36fff1bdd28a54c12e11405a86519f8c6c76d0d9fd7a0c",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 7835655,
-   "sha256": "f42b29cbb476e7a0b46aa1911025e972c664c731f76db09c0e554c7ea391bb60"
+   "bytes": 7835938,
+   "sha256": "ed0cd3b1d1ec17aee8c158268c512313b4232634f9913f706f544a0bbde52f99"
   }
  },
  "types": [

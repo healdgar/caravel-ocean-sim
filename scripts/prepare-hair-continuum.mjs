@@ -757,8 +757,36 @@ for (const spec of HAIR_CONTINUUM_TYPES) {
   const baked = await bakeContinuumBody({ name: spec.id, welded, far: buildFarWrapInput(mesh) });
   const { clusters, far: farBody } = baked;
 
-  // Assign skin and wind to far-body vertices from the nearest strand vertex.
+  // Inflate the far-body hair shell outward along its normals so coarse far/mid steps sit cleanly outside the curved
+  // skull instead of cutting chords inside the 1.98M-triangle head mesh at 8–120 m.
+  const farInflate = spec.slot === 'beard' ? 0.005 : 0.011;
   const V = farBody.position.length / 3;
+  for (let i = 0; i < V; i++) {
+    farBody.position[i * 3] += farBody.normal[i * 3] * farInflate;
+    farBody.position[i * 3 + 1] += farBody.normal[i * 3 + 1] * farInflate;
+    farBody.position[i * 3 + 2] += farBody.normal[i * 3 + 2] * farInflate;
+  }
+
+  // Hand off from individual thin strand clusters to the closed solid far hair shell right as strand ribbons reach
+  // ~8 mm error (before thin strands collapse to sparse 30-tri slivers), using the full base shell (farFirst = 0)
+  // and strictly rising up to ~0.16 m across the collapse chain.
+  farBody.farFirst = 0;
+  const stepN = farBody.steps.length / 4;
+  if (stepN > 0) {
+    const stepFloats = new Float32Array(farBody.steps.buffer, farBody.steps.byteOffset, farBody.steps.length);
+    const eLo = spec.slot === 'beard' ? 0.007 : 0.008;
+    const eHi = Math.max(0.16, stepFloats[(stepN - 1) * 4 + 1]);
+    const origLo = stepFloats[1];
+    const origSpan = Math.max(stepFloats[(stepN - 1) * 4 + 1] - origLo, 1e-6);
+    for (let s = 0; s < stepN; s++) {
+      const u = stepN > 1 ? Math.max(s / (stepN - 1), (stepFloats[s * 4 + 1] - origLo) / origSpan) : 0;
+      let nextErr = eLo + (eHi - eLo) * (u * u);
+      if (s > 0) nextErr = Math.max(nextErr, stepFloats[(s - 1) * 4 + 1] * (1 + 4e-6) + 1e-7);
+      stepFloats[s * 4 + 1] = nextErr;
+    }
+  }
+
+  // Assign skin and wind to far-body vertices from the nearest strand vertex.
   const toStrand = triangleGrid(position, index, 0.02);
   const farSkin = new Array(V), farWind = new Uint32Array(V);
   for (let i = 0; i < V; i++) {

@@ -1122,6 +1122,24 @@ async function main() {
   const profilePanel=document.createElement('pre');profilePanel.id='gpu-profile-details';
   profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,deepTraceRow,profilePanel);
   const performanceSummary=document.createElement('pre');performanceSummary.id='performance-summary';performanceSummary.textContent=profileSummary;
+  let neuralPbrSavedStrength=P.neuralPbr>0?P.neuralPbr:1.0,neuralPbrSliderSync=null;
+  const neuralPbrButton=document.createElement('button');neuralPbrButton.type='button';neuralPbrButton.id='neural-pbr-toggle';
+  const syncNeuralPbrButton=()=>{
+    const on=P.neuralPbr>0.001;
+    neuralPbrButton.textContent=on?`Neural PBR: On (${P.neuralPbr.toFixed(2)})`:'Neural PBR: Off (0.00)';
+    neuralPbrButton.setAttribute('aria-pressed',on?'true':'false');
+    neuralPbrSliderSync?.(P.neuralPbr);
+  };
+  const setNeuralPbrEnabled=(enabled)=>{
+    const on=Boolean(enabled);
+    if(on){P.neuralPbr=neuralPbrSavedStrength>0.001?neuralPbrSavedStrength:1.0;}
+    else{if(P.neuralPbr>0.001)neuralPbrSavedStrength=P.neuralPbr;P.neuralPbr=0;}
+    neuralPbr.setStrength(P.neuralPbr);
+    syncNeuralPbrButton();
+    return P.neuralPbr>0.001;
+  };
+  neuralPbrButton.addEventListener('click',()=>setNeuralPbrEnabled(!(P.neuralPbr>0.001)));
+  syncNeuralPbrButton();
   let stageMeasureRequested=false,stageMeasuring=false,stageMeasurePendingResolve=null,lastTerrainCamera=null,lastHulls=[];
   const stageMeasureButton=document.createElement('button');stageMeasureButton.type='button';stageMeasureButton.id='stage-measure-btn';stageMeasureButton.textContent='Measure GPU stage breakdown';stageMeasureButton.disabled=!hasTS;
   const stageMeasureResult=document.createElement('pre');stageMeasureResult.id='stage-measurement';stageMeasureResult.setAttribute('role','status');
@@ -1136,7 +1154,7 @@ async function main() {
   const neuralMeasureResult=document.createElement('p');neuralMeasureResult.id='neural-measurement';neuralMeasureResult.setAttribute('role','status');
   neuralMeasureResult.textContent=hasTS?'Measures isolated 1/4-res neural light compute.':'Separate neural timing needs browser GPU timestamp support.';
   neuralMeasureButton.addEventListener('click',()=>{neuralMeasureRequested=true;delete neuralMeasureResult.dataset.measurement;neuralMeasureButton.disabled=true;neuralMeasureResult.textContent='Measuring neural pass alone…';});
-  performancePanel.querySelector('.panel-body').append(performanceSummary,stageMeasureButton,stageMeasureResult,bloomMeasureButton,bloomMeasureResult,neuralMeasureButton,neuralMeasureResult,profileDetails);document.body.append(performancePanel);
+  performancePanel.querySelector('.panel-body').append(performanceSummary,neuralPbrButton,stageMeasureButton,stageMeasureResult,bloomMeasureButton,bloomMeasureResult,neuralMeasureButton,neuralMeasureResult,profileDetails);document.body.append(performancePanel);
   const bloomProfileWrites=(_,name)=>profiler.writes(name);
   function encodeBloom(encoder,timestamps,mediumBand=bloomCameraMediumBand){
     for(let i=0;i<bloomPasses.length;i++){
@@ -3935,6 +3953,8 @@ async function main() {
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
   if (qs.has('neural') && Number.isFinite(Number(qs.get('neural')))) P.neuralLight = Math.max(0, Math.min(1.5, Number(qs.get('neural'))));
   if (qs.has('neuralPbr') && Number.isFinite(Number(qs.get('neuralPbr')))) P.neuralPbr = Math.max(0, Math.min(1.5, Number(qs.get('neuralPbr'))));
+  if (P.neuralPbr > 0.001) neuralPbrSavedStrength = P.neuralPbr;
+  syncNeuralPbrButton();
   if(LAND_STAGE&&terrain?.region&&terrain.region.id!=='saba'&&Number(qs.get('swellDir'))===22&&Number(qs.get('windDir'))===118){
     const naturalSea=coastalSeaForRegion(terrain.region,LAND_STAGE);
     P.swellDir=naturalSea.swellDir;P.windDir=naturalSea.windDir;
@@ -4196,8 +4216,10 @@ async function main() {
     Object.assign(inp, { type: 'range', min, max, step, value: P[key], id: 'sea-' + key });
     inp.setAttribute('aria-label', label);
     seaSliders.set(key, { input: inp, output: val });
+    if (key === 'neuralPbr') neuralPbrSliderSync = (v) => { inp.value = String(v); val.textContent = String(v); };
     inp.addEventListener('input', () => {
       P[key] = Number(inp.value); val.textContent = inp.value;
+      if(key==='neuralPbr'){if(P.neuralPbr>0.001)neuralPbrSavedStrength=P.neuralPbr;syncNeuralPbrButton();}
       if(key==='sunElev'||key==='sunAzim'){
         if(astronomy.mode!=='manual')applyAstronomy({mode:'manual'});
         skyMode.value='manual';
@@ -5361,6 +5383,12 @@ async function main() {
       profiler.setDeepTrace(Boolean(deep));deepTraceCheck.checked=profiler.deepTrace;
       setPerformanceOpen(Boolean(open));
       return profiler.snapshot();
+    },
+    setNeuralPbr(enabled){
+      return setNeuralPbrEnabled(enabled);
+    },
+    get neuralPbrEnabled(){
+      return P.neuralPbr>0.001;
     },
     measureStageBreakdown(){
       if(!hasTS)return Promise.reject(new Error('timestamp-query unsupported'));

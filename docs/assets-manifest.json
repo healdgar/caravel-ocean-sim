@@ -730,14 +730,14 @@
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
   "assets/crew/hair-continuum/manifest.json": {
-    "url": "assets/crew/hair-continuum/manifest.c0ba37d4b617717a.json",
+    "url": "assets/crew/hair-continuum/manifest.6c4ed6a2ede36913.json",
     "bytes": 11175,
-    "sha256": "c0ba37d4b617717a6155e97abdc8e7e01647f445a6844f946a5d49380539aec2"
+    "sha256": "6c4ed6a2ede369131729be8270ced0514f2f3849f22dfdea4e6f99b4effac93b"
   },
   "assets/crew/hair-continuum/atlas.bin.gz": {
-    "url": "assets/crew/hair-continuum/atlas.bin.f42b29cbb476e7a0.gz",
-    "bytes": 7835655,
-    "sha256": "f42b29cbb476e7a0b46aa1911025e972c664c731f76db09c0e554c7ea391bb60"
+    "url": "assets/crew/hair-continuum/atlas.bin.ed0cd3b1d1ec17ae.gz",
+    "bytes": 7835938,
+    "sha256": "ed0cd3b1d1ec17aee8c158268c512313b4232634f9913f706f544a0bbde52f99"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",
