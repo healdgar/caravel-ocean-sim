@@ -5,5 +5,6 @@
   "characters": 2944408,
   "sha256": "134a593cb3262fb5d90400a422f785552d654db066586065c1083312e2de6814",
   "tuned": 13,
-  "upstream": 28
+  "upstream": 28,
+  "native": 44
 }

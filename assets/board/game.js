@@ -430,7 +430,7 @@ function technologyKey(key){return TECH_ALIASES[key]||key;}
 function initTechnology(){
   if(W.technology)return W.technology;
   const ad=W.startAD||850,T=W.technology={version:1,openingAD:ad,known:{},pending:[],day:-1,sources:{},learning:0,learningTotal:0};
-  for(const key of TECH_KEYS){const r=TECH_RULES[key];if((r.year<=850||r.year<=(typeof globalThis.FURLONG_OPTIONS?.board?.lived==='number'&&globalThis.FURLONG_OPTIONS?.board.lived>0?Math.max(ad-30,START_AD):ad-30))&&r.needs.every(k=>T.known[k]))T.known[key]={day:0,at:-1,opening:true};else T.pending.push(key);}
+  const NK=realmKnows();for(const key of TECH_KEYS){const r=TECH_RULES[key];if(NK&&!NK.has(key)){T.pending.push(key);continue;}if((r.year<=850||r.year<=(typeof globalThis.FURLONG_OPTIONS?.board?.lived==='number'&&globalThis.FURLONG_OPTIONS?.board.lived>0?Math.max(ad-30,START_AD):ad-30))&&r.needs.every(k=>T.known[k]))T.known[key]={day:0,at:-1,opening:true};else T.pending.push(key);}
   return T;
 }
 function technologyPlace(s){
@@ -1322,7 +1322,7 @@ async function generateWorld(seed,progress){
   while(townRoles.length<nTowns)townRoles.push(chance('gen',0.35)?'fort':'market');
   townRoles.length=nTowns;
   const vilRoles=['farm',coastal?'fishing':'timber','farm','mining','timber','farm'];
-  const PS=directEra?1:0.35; // the founding is sparse; direct-era starts use the native place-size draws
+  const PS=(directEra?1:0.35)*realmScale(); // the founding is sparse; direct-era starts use the native place-size draws
   const wanted=[{kind:'capital',role:'seat',pop:Math.round((2200+randi('gen',700))*PS*(globalThis.FURLONG_OPTIONS?.board?.seat??1)),minD:0},
     ...Array.from({length:nTowns},(_,k)=>({kind:'town',role:townRoles[k],pop:Math.round((420+randi('gen',760))*PS),minD:850})),
     ...Array.from({length:nVill},(_,k)=>({kind:'village',role:vilRoles[k%vilRoles.length],pop:Math.max(40,Math.round((70+randi('gen',220))*(PS*1.3))),minD:520}))];
@@ -2170,11 +2170,11 @@ const ROLE_NAME={seat:'seat of the crown',fort:'fortress town',border:'border fo
    streets; sieges raze suburbs that grow back. Every town keeps its story. */
 function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out place's context (worldLoad): its closures are made again over it, and nothing is laid out
   const idx=saved?saved.idx:W.settlements.indexOf(s),rng=layoutRng(idx),rr=()=>rng(),rpick=a=>a[Math.floor(rng()*a.length)];
-  let isCap=saved?saved.isCap:s.kind==='capital',isTown=saved?saved.isTown:s.kind==='town',isVil=saved?saved.isVil:s.kind==='village';
+  const WAYS=waysOf(s);if(WAYS&&!saved&&!s.forceMode)s.forceMode=WAYS.layout;let isCap=saved?saved.isCap:s.kind==='capital',isTown=saved?saved.isTown:s.kind==='town',isVil=saved?saved.isVil:s.kind==='village'||!!WAYS;
   const role=saved?saved.role:s.role||(isCap?'seat':isTown?'market':'farm');if(!saved)s.role=role;
   const C=saved?saved.C:s.pos;let R0=saved?saved.R0:isCap?440*Math.sqrt(globalThis.FURLONG_OPTIONS?.board?.seat??1):isTown?310:170,Rmax=saved?saved.Rmax:R0; // the reach of the built-up town; it widens as the town outgrows it
-  const count=saved?saved.count:Math.min(isCap?Math.round(s.pop/4):Math.round(s.pop/4.2),isCap?Math.round(620*(globalThis.FURLONG_OPTIONS?.board?.seat??1)):isTown?280:48);
-  const HW=saved?saved.HW:isCap?3.4:isTown?3:2.4,RHW=saved?saved.RHW:isVil?3.2:4;
+  const count=saved?saved.count:WAYS?Math.max(2,Math.round(s.pop/WAYS.per)):Math.min(isCap?Math.round(s.pop/4):Math.round(s.pop/4.2),isCap?Math.round(620*(globalThis.FURLONG_OPTIONS?.board?.seat??1)):isTown?280:48);
+  const HW=saved?saved.HW:WAYS?WAYS.path:isCap?3.4:isTown?3:2.4,RHW=saved?saved.RHW:isVil?3.2:4;
   if(!saved)riverStrips();
   const cellOK=(x,z)=>{const ci=toCell(x),cj=toCell(z),i=cIdx(ci,cj);return !W.water[i]&&slopeAt(ci,cj)<0.35&&W.h[i]>1;};
   const buildable=(x,z)=>cellOK(x,z)&&!riverAt(x,z,1)&&!lakeAt(s,x,z,2);
@@ -2328,7 +2328,11 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
       if(placeOK(p,true)&&!nearStreet(p.x,p.z,gr*0.7)){addPlace(p,'green');oldVil=p;}
     }
   }
-  if(isVil){ // a green beside the road, where the first farms gathered
+  if(WAYS){ // a people of the Americas: the open place its houses face, and the lanes they stand along (nativeLanes)
+    const pr=WAYS.plaza.r*(isCap?1:isTown?0.8:0.6);let P=null;
+    for(const sc of[1,0.8,0.6]){const p=blob(C.x,C.z,pr*sc,pr*sc*0.9,rAng,0.15);if(placeOK(p)){addPlace(p,WAYS.plaza.kind);P=p;break;}}
+    nativeLanes(WAYS,{C,P:P||{x:C.x,z:C.z},rAng,Rmax,HW,count,addStreet,buildable,rr});
+  }else if(isVil){ // a green beside the road, where the first farms gathered
     const gr=11+rr()*6,px=-t0z,pz=t0x,side=rr()<0.5?1:-1;
     for(const off of[RHW+gr+2,RHW+gr+10,0]){
       const p=blob(C.x+px*side*off,C.z+pz*side*off,gr*1.2,gr*0.85,rAng,0.35);
@@ -2431,7 +2435,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
     }
   }}
   let keep=saved?saved.keep:s._hillKeep||null;if(!saved)delete s._hillKeep;
-  if(!saved){if(!keep&&(role==='seat'||role==='fort')){ // a tower keep on the highest ground near the crossing of the roads
+  if(!saved){if(!WAYS&&!keep&&(role==='seat'||role==='fort')){ // a tower keep on the highest ground near the crossing of the roads
     let best=null,bh=-1e9;
     if(motteAge){ // score the complete earthwork and courtyard on fixed samples, without consuming simulation RNG
       const castlePath=(P,future)=>{let out=P.map(p=>({...p}));
@@ -2515,7 +2519,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
     if(!foundLine)foundLine=keep?`Raised as a tower keep on the rise above ${roads.length>1?'the meeting of the roads':'the road'}; a hamlet gathered beneath its walls.`:'Founded as a crown hall where the roads meet.';
   }
   if(s.hillCastle)hist(0,'The lords built their castle on the hill above the town, where it could watch the roads for leagues.');
-  if(role==='port'||role==='fishing'){ // a quay along the shore nearest the nucleus
+  if(!WAYS&&(role==='port'||role==='fishing')){ // a quay along the shore nearest the nucleus
     const NA=72,coast=new Array(NA).fill(0);
     for(let k=0;k<NA;k++){const a=k/NA*Math.PI*2;for(let r=20;r<Rmax*0.8;r+=5){const x=C.x+Math.cos(a)*r,z=C.z+Math.sin(a)*r;if(W.water[cIdx(toCell(x),toCell(z))]===1){coast[k]=r;break;}}}
     let bk=-1,bd=1e9;for(let k=0;k<NA;k++)if(coast[k]&&coast[k]<bd){bd=coast[k];bk=k;}
@@ -2563,7 +2567,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
     s.canals=nCan;
     foundLine=`The bishop's cathedral and its burg stood on the dry rise; below, the count founded a merchants' town on the waterfront. For a generation they had two councils, then one.${nCan?' Canals — fleets — were dug from the harbour into the merchant quarter, so that lighters could unload at the warehouse doors.':''}`;
   }
-  if(s.river||s.canals){ // quays along the bank where a river or a canal runs close to the nucleus
+  if(!WAYS&&(s.river||s.canals)){ // quays along the bank where a river or a canal runs close to the nucleus
     const paths=[],nearQuay=(x,z)=>paths.some(P=>P.some((q,k)=>k&&segDist(x,z,P[k-1],q)<HW*0.9+1)); // runs proposed so far keep their ground as laid streets do
     for(const rs of W.rivStrips)for(const side of[-1,1]){
       let run=[];
@@ -2580,7 +2584,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
     layQuays(paths,HW*0.9);
     if(!foundLine)foundLine=role==='crossing'?'A hamlet grew up at the ford where the road crosses the river; a bridge replaced the ford in its second age.':'Settled on the riverbank for the water and the fishing.';
   }
-  if(!foundLine)foundLine=isVil?({farm:'A handful of farms about a green, where the plough-land is good.',timber:'A clearing of woodcutters and charcoal-burners at the forest’s edge.',mining:'Huts of miners under the scarp, where the ore comes near the surface.'}[role]||'A handful of farms about a green.')
+  if(WAYS)foundLine=WAYS.foundLine;if(!foundLine)foundLine=isVil?({farm:'A handful of farms about a green, where the plough-land is good.',timber:'A clearing of woodcutters and charcoal-burners at the forest’s edge.',mining:'Huts of miners under the scarp, where the ore comes near the surface.'}[role]||'A handful of farms about a green.')
     :'Farms and an alehouse about a green where the roads meet; a weekly market was granted in its second age.';}
   if(!saved&&origin.kind==='roman')foundLine=mode==='roman'?`Founded in Roman times about a forum${s.river?', on the rise above the river':''}. Parts of the ancient street grid survive in the core; medieval lanes and subdivided plots grew around them.`:'An older settlement grew into a town in Roman times. Its main routes survive, with irregular medieval lanes and plots shaped by the ground.';
   const vilName=saved?saved.vilName:oldVil?rpick(NAMEB.pfx).replace(/[aeiou]?$/,'')+rpick(['ingi','ithi','ede','heim','um']):'';
@@ -2596,7 +2600,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
     if(!church)church=aroundPlace('temple',isVil?1:2,isVil?0.7:0.85,isVil?0.65:0.8,'temple');
     if(!isVil){aroundPlace('tavern',1,1,1,'market');if(era>=1150)aroundPlace('hall',2,1,1,'market');} // no guildhall before there are guilds
   };
-  if(!saved&&!oldVil)foundTown();
+  if(!saved&&!oldVil){if(WAYS)nativeFound(WAYS,{aroundPlace,isCap,isTown});else foundTown();}
   /* ---- frontage: the lots along each street, and who builds there ---- */
   const candsOf=st=>{
     if(st.gone||st.planQ||st.kind==='alley')return []; // a planned street is not built along until it is opened; an alley is a way through, not a frontage
@@ -2614,7 +2618,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
      walk, the traffic of the realm passing along the road, travellers at the gate, boats at the quay), and it
      shares that custom with the rivals already near; noisome trades keep away from homes and the market.
      Everything else is a home. (Christaller's threshold and range, von Thünen's rents, at street scale.) */
-  const HOME=saved?saved.HOME:new Set(['house','longhouse','burgher']);
+  const HOME=saved?saved.HOME:new Set(['house','longhouse','burgher',...(WAYS?WAYS.homes:[])]);
   const nearN=(x,z,R,pred)=>{let n=0;for(const o of placed.near(x,z,R))if(!o.removed&&o.state!=='gone'&&pred(o)&&dist2d(x,z,o.x,o.z)<R)n++;return n;};
   const passing=st=>{const k=st.kind;
     if(k==='road')return st.ri!=null?0.2+0.8*(roadTraffic()[st.ri]||0):0.35;
@@ -2643,13 +2647,13 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
       wet:!!(riverAt(x,z,14)||lakeAt(s,x,z,10)),high:clamp((hAt(x,z)-hAt(C.x,C.z))/3,0,6),church:nearN(x,z,90,o=>o.arch==='temple')?1:0,
       bridge:st.kind==='road'&&riverAt(x,z,28)?1:0};
   };
-  const home=c=>{const d=c.d/Rmax;
+  const home=c=>{if(WAYS)return nativeLot(WAYS,rr);const d=c.d/Rmax;
     if(isVil)return rr()<(role==='fishing'?0.3:0.45)?'longhouse':'house';
     return d>0.6&&rr()<0.35?'longhouse':'house';};
   const tradeScores=(c,self)=>{
     const e=siteOf(c),yr=AD(),opts=[];
     for(const[t,T]of Object.entries(TRADES)){
-      if(yr<T.from||(T.town&&isVil))continue;
+      if(WAYS||yr<T.from||(T.town&&isVil))continue;
       const dem=T.dem(e);if(dem<=0)continue;
       const riv=nearN(c.mx,c.mz,T.R,o=>o.arch===t&&o!==self),sc=dem/(1+T.k*riv)/T.need;
       opts.push({t,sc,dem,riv});
@@ -2683,14 +2687,14 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
     }
     return changed;
   };
-  const tierFor=(c,e)=>{
+  const tierFor=(c,e)=>{if(WAYS)return 0;
     const cap=era<1000?0:era<1200?1:2;
     if(burnAt(c.mx,c.mz))return Math.min(cap,isVil?1:2); // rebuilt in stone after the fire
     let t=e<=1?1:0;if(!isVil&&c.d<Rmax*0.22)t=2;
     if(rr()<0.2)t=Math.max(0,t-1);
     return Math.min(cap,isVil?Math.min(1,t):t);
   };
-  const gapFor=c=>isVil?4.5:(burnAt(c.mx,c.mz)?0.3:c.d<Rmax*0.25?0.35:c.d<Rmax*0.5?1:2.2);
+  const gapFor=c=>WAYS?WAYS.gap:isVil?4.5:(burnAt(c.mx,c.mz)?0.3:c.d<Rmax*0.25?0.35:c.d<Rmax*0.5?1:2.2);
   const keyOf=c=>(focus?dist2d(c.mx,c.mz,focus.x,focus.z):c.d)+c.j+(c.st.neu?-120:0)+(c.st.kind==='road'?-22:c.st.market?-30:c.st.kind==='quay'?-12:0)
     +(s.wallRad&&wallSide(c.mx,c.mz)>0?140:0);
   let built=saved?saved.built:s.buildings.length;
@@ -2715,7 +2719,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
         gap=c.d<Rmax*0.3||c.st.neu?0.12:Math.min(gap,0.6);extra.back={x:px,z:pz};hm=0.95+rr()*0.3+(tier===2?0.15:0);
       }else{
         f=frontFoot(c,arch,tier,rr);
-        if(isVil){const k=1.5+rr()*3;f.x+=(-c.uz*c.side)*k;f.z+=(c.ux*c.side)*k;} // farmsteads stand back in their yards
+        if(isVil&&(!WAYS||WAYS.yards)){const k=1.5+rr()*3;f.x+=(-c.uz*c.side)*k;f.z+=(c.ux*c.side)*k;} // farmsteads stand back in their yards
       }
       if(!fits(f,gap,false,ownProject)||!roadAccessClear(s,f,{x:c.mx,z:c.mz}))return null;
       if(c._why&&!HOME.has(arch))extra.why=c._why;c._why=null;
@@ -2900,8 +2904,8 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
       }
     }
   };
-  const wallAges=saved?saved.wallAges:s.walls>0?(isCap?(mode==='roman'?[2,4]:[1,4]):role==='border'||role==='fort'?[2,4]:isTown?[2]:[1]):[];
-  const bastioned=saved?saved.bastioned:isCap||role==='border'||role==='fort'; // their last wall is built on the new Italian trace
+  const wallAges=saved?saved.wallAges:WAYS?(s.walls>0?[E-1]:[]):s.walls>0?(isCap?(mode==='roman'?[2,4]:[1,4]):role==='border'||role==='fort'?[2,4]:isTown?[2]:[1]):[];
+  const bastioned=saved?saved.bastioned:!WAYS&&(isCap||role==='border'||role==='fort'); // their last wall is built on the new Italian trace
   const citadel=e=>{ // Metz: a star citadel astride the wall, a quarter razed for it and its glacis
     const S=isCap?92:78,roadPts=s.streets.filter(t=>t.kind==='road'||t.kind==='mstreet').flatMap(t=>t.pts);
     let best=null,bs=-1e9;
@@ -3342,7 +3346,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
       const b=place('mill',1,sites[i],'artisan',1,{inst:true,millWater:sites[i].millWater});serviceAccess(b,plan);return s.mill=b;}
     return null;};
   // Flowing bank water already drives the wheel; a mill is not a licence to flood a valley.
-  if(!saved&&s.river)siteMill();
+  if(!saved&&s.river&&(!WAYS||WAYS.mills))siteMill();
   if(!saved)for(let i=0;i<s.places.length;i++){const p=s.places[i],r=placeFitRadii(p,(x,z)=>groundClear(x,z,p.kind==='green',p),1.45);
     if(!r)continue;p.r=r;const edge=s.streets.find(st=>st.kind==='edge'&&st.placeId===i);if(edge){edge.pts=placeEdge(p);edge.cands=null;}}
 }
@@ -3431,7 +3435,7 @@ const frand=()=>rand('folk');
 function fgauss(){let u=0;while(u===0)u=frand();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*frand());}
 function genome(ma,pa){const N=GENES.length,g=new Float32Array(N),e=new Float32Array(N);
   for(let k=0;k<N;k++){g[k]=ma&&pa?(ma[k]+pa[k])/2+fgauss()*Math.SQRT1_2:fgauss();e[k]=fgauss();}return {g,e};}
-function hairDraw(c){const w={norse:[1,3,5,1],celtic:[2,3,2,2],anglo:[2,4,3,1],german:[2,4,3,1],slavic:[3,4,2,1],french:[3,4,2,1],italian:[6,3,1,0.4],iberian:[6,3,1,0.4],portuguese:[6,3,1,0.4],dutch:[2,4,4,1]}[c]||[3,4,2,1];
+function hairDraw(c){const w=CULT[c]?.ways?.hair||{norse:[1,3,5,1],celtic:[2,3,2,2],anglo:[2,4,3,1],german:[2,4,3,1],slavic:[3,4,2,1],french:[3,4,2,1],italian:[6,3,1,0.4],iberian:[6,3,1,0.4],portuguese:[6,3,1,0.4],dutch:[2,4,4,1]}[c]||[3,4,2,1];
   let t=w.reduce((a,b)=>a+b,0)*frand();for(let i=0;i<4;i++){t-=w[i];if(t<=0)return i;}return 1;}
 function ageYrs(p){return (day()-(p.b!=null?p.b:p.birthDay))/360;}
 function trait(p,k){ // what shows: genotype and fortune weighed by heritability, plus a rich or a hungry childhood; age saps vigour
@@ -3458,8 +3462,8 @@ function tradesOf(s){
   for(const b of s.buildings||[])if(b.state!=='ruin'){const x=ARCH_TRADE[b.arch];if(x)t.push(...x);}
   for(let k=Math.round((s.res&&s.res.forest||0)/14);k>0;k--)t.push('woodcutter'); // the wood about the place wants axes
   if(s.quarry)t.push('quarryman','quarryman','mason'); // an open quarry wants hewers
-  const role={fishing:['fisher','boatman'],port:['boatman','roper','fisher'],timber:['forester','carpenter','woodcutter'],mining:['miner','smith'],crossing:['carter','boatman']}[s.role];if(role)t.push(...role,...role);
-  t.push(...(s.kind==='village'?['ploughman','ploughman','ploughman','ploughman','ploughman','herdsman','shepherd','thatcher','carpenter']
+  const role={fishing:['fisher','boatman'],port:['boatman','roper','fisher'],timber:['forester','carpenter','woodcutter'],mining:['miner','smith'],crossing:['carter','boatman']}[s.role];if(role&&!waysOf(s))t.push(...role,...role);
+  if(waysOf(s))t.push(...waysOf(s).trades);else t.push(...(s.kind==='village'?['ploughman','ploughman','ploughman','ploughman','ploughman','herdsman','shepherd','thatcher','carpenter']
     :['carpenter','mason','cooper','potter','weaver','butcher','carter','thatcher','roper','bowyer','fletcher','salter','wheelwright','hunter','cook','ploughman','ploughman','herdsman']));
   s._trades=t;s._tradeT=day()+360;return t;}
 function locFeature(s){ // the lie of the land the family's first house stood in
@@ -3482,7 +3486,7 @@ function surnameFor(kind,c,x){
 function newFamily(s,si,founder){
   const c=s.cult||W.crownCult,town=s.kind!=='village',tr=founder.tr,r=frand();
   const k=r<(town?0.42:0.18)&&tr&&!TILLERS.has(tr)||r<0.08?'occ':r<(town?0.62:0.5)?'loc':r<0.86?'nick':'patr';
-  const n=k==='occ'?surnameFor('occ',c,tr||'ploughman'):k==='loc'?surnameFor('loc',c,locFeature(s)):k==='nick'?surnameFor('nick',c,nickOf(founder)):surnameFor('patr',c,givenPick(c,'m',null));
+  const n=CULT[c]?.ways?nativeKin(c,s):k==='occ'?surnameFor('occ',c,tr||'ploughman'):k==='loc'?surnameFor('loc',c,locFeature(s)):k==='nick'?surnameFor('nick',c,nickOf(founder)):surnameFor('patr',c,givenPick(c,'m',null));
   W.fams.push({n,c,k,tr,home:si,b:day()});return W.fams.length-1;}
 const famName=p=>p&&p.sur?p.sur:p&&p.fam>=0&&W.fams[p.fam]?W.fams[p.fam].n:'';
 const folkName=p=>p.gn+(famName(p)?' '+famName(p):'');
@@ -4131,7 +4135,7 @@ function tickFolk(){
 /* every household under a roof: a married man's, a widow's or an unwed adult's; children under eighteen with their mother.
    A tradesman lives over his shop; a family keeps its house from year to year; when the town is full, lodgers double up. */
 const TRADE_ARCH={smith:'smithy',baker:'bakery',tanner:'tannery',glover:'tannery',dyer:'dyer',brewer:'tavern',cook:'inn',merchant:'shop',spicer:'shop',chandler:'shop',tailor:'shop',shoemaker:'shop',weaver:'burgher'};
-function capOf(b){return (1+(b.tier||0))*Math.max(1,Math.round((b.w||8)*(b.d||7)/60));} // households a building houses: its storeys, and its frontage (a terrace of several bays houses several)
+function capOf(b){const H=ARCH[b.arch]?.[5];if(H)return H;return (1+(b.tier||0))*Math.max(1,Math.round((b.w||8)*(b.d||7)/60));} // households a building houses: its storeys, and its frontage (a terrace of several bays houses several)
 /* Stable household accounts. Person-facing fields remain projections for the existing UI and trades;
    only the head exposes the purse, so a census never counts one family's silver twice. */
 const HH_FIELDS=['w','herd','bh','_debt','_owe','_inc','_fill','_keep','_strips','_crop','_ha','_owned'];
@@ -5469,7 +5473,7 @@ function institutionFoundationComplete(q,s){if(!institutionFoundationValidate(q,
   return b;
 }
 function institutionFoundationCommission(s,site,payer,ownerId,recipe,method,title){if(!site)return null;const land=planGroundQuote(site),q=fabricProjectCommission(s,null,{work:'foundation',site,payer,ownerId,authority:s.owner,extension:true,land,method,title,...recipe});if(q)emit('trade',3,site.f,`${s.name} commissions ${title}; ground, materials and ${Math.ceil(q.days)} working days must be paid before it opens.`);return q;}
-function institutionParishProposal(s,kind='parish'){
+function institutionParishProposal(s,kind='parish'){if(waysOf(s)?.church===false)return null;
   if(s.siegeBy||!s._lay?.live||institutionFoundationPending(s,kind)||kind==='parish'&&!(AD()>=1000&&s.pop>150&&parishNeed(s))||kind==='friary'&&!(s.kind!=='village'&&s.wallRad&&s.pop>1100&&!s.buildings.some(b=>b.friary&&!b.removed)))return null;
   const order=kind==='friary'?(constructionCapability(s,'franciscan').available?'franciscan':constructionCapability(s,'dominican').available?'dominican':null):null;if(kind==='friary'&&!order)return null;
   const payer=kind==='parish'&&parishOf(s)?parishOf(s):lordAcct(s),stone=constructionCapability(s,'churchMasonry').available,tier=stone?2:0,scale=kind==='parish'?.8:1,w=ARCH.temple[0]*scale,d=ARCH.temple[1]*scale,recipe=constructionRecipe(s,w*d*.8*PL(),60+w*d/4,w*d*(stone?.035:.1),stone?w*d*.25:0),method=order||(stone?'churchMasonry':null);
@@ -5811,7 +5815,7 @@ function levyMen(a,s,si,k){
   for(const p of pickK(pool,Math.min(k,pool.length),p=>(p.sp?0.6:1.4)*Math.exp(0.6*p.sk[KA]))){const i=s.folk.indexOf(p);if(i>=0)removeAt(s,i);p.home=si;a.men.push(p);life(p,`Called to arms with ${a.name}`);}} // the unwed and the practised are the first called
 function hireMen(a,k){ // sell-swords: their own tongue, their own names
   if(!a.men)a.men=[];const cs=CULT_DRAWN;
-  for(let i=0;i<k;i++){const c=cs[Math.floor(frand()*cs.length)],X=NX(c),G=genome();
+  const hs=realmWorld()==='old'?cs:cultsOfWorld();for(let i=0;i<k;i++){const c=hs[Math.floor(frand()*hs.length)],X=NX(c),G=genome();
     const p={id:PID++,sx:'m',b:day()-(20+frand()*18)*360,si:-1,home:-1,fam:-1,sk:new Float32Array(9),sp:null,tr:'soldier',fed:0,lb:-9999,merc:c,g:G.g,e:G.e,hair:hairDraw(c)};
     p.gn=givenPick(c,'m',null);p.sur=X?(frand()<0.5?X.patr(givenPick(c,'m',null)):X.nick[['tall','strong','bold','dark','red','young','quick','stout'][Math.floor(frand()*8)]]):'';
     p.sk[KA]=0.35+frand()*0.45;p.sk[KRi]=frand()*0.7;if(p.sk[KRi]>=0.45)a.horses=(a.horses||0)+1;a.men.push(p);}} // a sell-sword who rides brings his own horse
@@ -5869,8 +5873,153 @@ function tickTongues(){ // yearly: the court's speech seeps into a town its lord
       if(!W.prehistory)emit('fates',3,s.pos,vary('tongue_shift',[()=>`In ${s.name} the ${CULT[top].name} tongue is now heard more than the ${CULT[was].name}; the priest preaches in it.`,
         ()=>`${s.name} speaks ${CULT[top].name} now; only the old wives keep the ${CULT[was].name} of their mothers.`,
         ()=>`The market of ${s.name} haggles in ${CULT[top].name} these days, where it once spoke ${CULT[was].name}.`]));}}}
-const TONGUE_IDS=Object.keys(CULT),TONGUE_PAL={anglo:0xc0392b,french:0x2e5aac,german:0xe0a526,norse:0x3a9a8c,italian:0x5aa02c,slavic:0x8e44ad,celtic:0x2f7d32,iberian:0xd35400,portuguese:0x922b5e,dutch:0x5dade2};
-function refreshTongues(){if(!W.land||!W.land.F)return;for(const f of W.land.F)writeLord(f);G.houseTintsDirty=true;}
+/* ---- THE PEOPLES OF THE AMERICAS (c. 1550): tongues of another world, with ways of their own ----
+   A culture's 'world' (the Old World's when unsaid) is the world it is spoken in: a realm of that world hires its
+   sell-swords among its own world's tongues. A culture with 'ways' lays out, houses, farms, rules and keeps its year
+   by them wherever the program would otherwise assume the Old World's custom:
+     layout   'rows' (long houses side by side), 'ring' (round houses about the open place), 'square' (long houses on the
+              four sides of it) or 'dispersed' (houses spread along paths among the fields)
+     plaza    the open place its houses face: {kind, r} in metres for a chief's seat (less for a town, a village)
+     homes    the kinds of house its families live in; lots: what is built on a lot, by weight; found: [kind, [kinds of
+              place]] built about the open place when a place is founded
+     per      people to a house, on the mean; gap: metres between houses; path: a lane's half-width; yards: each house
+              stands back in a yard of its own, as a farmstead does (else in close order on its lane); clans: the clans
+              a household is known by, where the record names them (else it is known by its town, as its people were)
+     knows    the technologies it holds at the founding (TECH_RULES); scale: how many of its people to a place, of the
+              Old World's; hair: weights of dark, brown, fair and red
+     womenTill  women work the fields in spring and summer; beasts, fences, mills, castle, church, strips: false where
+              its people keep no herds, hedge no fields, raise no mill, castle or church, and plough no strips
+     titles   {monarch:[his, hers], head:[his, hers]} the words for a paramount and for the head of a great house
+     court    the words for the court's priest and for its other councillors; trades: the work of its people, by weight
+              ('planter' tends the fields, as the Old World's ploughman does)
+   The names are as recorded (see the sources in the vendoring's board-native.mjs); a place's name is one of its
+   people's towns, a realm's its land's own name where one is recorded, and a daughter village takes its founder's
+   name, as a chief and his town went by one name. */
+const AMERICAS_PEOPLES={
+  iroquoian:{name:'St Lawrence Iroquoian',adj:'Iroquoian',world:'americas',
+    m:['Donnacona','Domagaya','Taignoagny','Agona','Atironta','Anenkhiondic','Aenons','Endahiaconc','Ochasteguin','Chihwatenha','Teondechoren','Ahatsistari','Taratouan','Totiri','Soranhes','Amantacha','Ondakion'],
+    f:['Aonetta','Oionhaton','Gannendâris','Skanudharoua','Asenregéhaon'],
+    roots:['Stadacona','Hochelaga','Achelacy','Ajoaste','Starnatan','Tailla','Sitadin','Tequenonday','Thoagahen','Deganonda','Thegnignonde','Thegadechoalle','Tella','Stagoattem','Agouchonda','Tutonaguy','Honguedo'],
+    site:{farm:['*'],realm:['Canada']},
+    ways:{layout:'rows',plaza:{kind:'plaza',r:24},homes:['barkLonghouse'],lots:[['barkLonghouse',1]],found:[],per:48,gap:4,path:1.4,clans:['Turtle','Wolf','Bear','Deer','Beaver','Hawk','Porcupine','Snake'],
+      knows:['timberPalisade'],scale:0.6,titles:{monarch:['Agouhanna','Agouhanna'],head:['Agouhanna','Clan mother']},court:{priest:'Arendiwane',council:'Councillor'},
+      trades:['planter','planter','planter','planter','hunter','hunter','fisher','fisher','potter','weaver','bowyer','fletcher','woodcutter','carpenter'],
+      foundLine:'Bark longhouses, each of several families, laid in rows about an open square; the women’s fields of maize, beans and squash all about.'}},
+  massachusett:{name:'Massachusett',adj:'Massachusett',world:'americas',
+    m:['Ousamequin','Wamsutta','Metacom','Quadequina','Tisquantum','Hobbamock','Corbitant','Iyanough','Aspinet','Epenow','Chickatawbut','Obtakiest','Obbatinewat','Nanepashemet','Wonohaquaham','Montowampate','Winnepurkit','Cutshamekin','Wampatuck','Hiacoomes'],
+    f:['Weetamoo','Namumpum','Wootonekanuske','Awashonks','Wuttununohkomkooh','Assannooshque'],
+    roots:['Patuxet','Pokanoket','Sowams','Montaup','Nemasket','Mattapoisett','Pocasset','Sakonnet','Nauset','Cummaquid','Manomet','Monomoy','Mashpee','Noepe','Aquinnah','Shawmut','Neponset','Wessagusset','Mishawum','Naumkeag'],
+    site:{farm:['*'],realm:['*']},
+    ways:{layout:'dispersed',plaza:{kind:'dance',r:12},homes:['wetu','chiefHouse'],lots:[['wetu',10],['sweatLodge',0.3]],found:[['chiefHouse',['capital','town']]],per:7,gap:10,path:1.2,yards:true,
+      knows:['timberPalisade'],scale:0.3,titles:{monarch:['Sachem','Saunkskwa'],head:['Sachem','Saunkskwa']},court:{priest:'Powwaw',council:'Pniese'},
+      trades:['planter','planter','planter','planter','hunter','hunter','fisher','fisher','boatman','potter','weaver','bowyer','fletcher','woodcutter'],
+      foundLine:'Wetus of bark and mats scattered among the cornfields about a dancing ground, the sachem’s long house among them.'}},
+  lenape:{name:'Lenape',adj:'Lenape',world:'americas',
+    m:['Mattahorn','Singnos','Pemenetta','Pinna','Tamanend','Ockanickon','Swanpisse','Idquayhon','Janottowe','Merkekowen','Nannacussey','Tomackhickon','Kekerappamand','Oratam','Penhawitz','Tackapousha','Pacham','Sesseys','Seweckenamo','Pemmyrawech'],
+    f:['Mamanuchqua','Machequa','Sawshoota','Ojroqua','Necosshehesco','Menumheck','Matollionequay'],
+    roots:['Shackamaxon','Passyunk','Poaetquessingh','Pemickpacka','Wickquaquenscke','Wickquakonick','Nittabakonck','Manahatta','Sapohanikan','Marechkawick','Nechtanc','Canarsee','Rechqua Akie','Hackensack','Tappan','Navesink','Raritan','Minisink','Esopus','Tankiteke'],
+    site:{farm:['*'],realm:['*']},
+    ways:{layout:'dispersed',plaza:{kind:'dance',r:10},homes:['arbourHouse','wetu','chiefHouse'],lots:[['arbourHouse',3],['wetu',2],['sweatLodge',0.3]],found:[['chiefHouse',['capital']]],per:10,gap:9,path:1.2,yards:true,clans:['Turtle','Turkey','Wolf'],
+      knows:['timberPalisade'],scale:0.3,titles:{monarch:['Sakima','Sakima'],head:['Sakima','Sakima']},court:{priest:'Healer',council:'Councillor'},
+      trades:['planter','planter','planter','planter','hunter','hunter','fisher','fisher','boatman','potter','weaver','bowyer','fletcher','woodcutter'],
+      foundLine:'The bark houses of a clan’s families, scattered along the water among their fields of maize.'}},
+  powhatan:{name:'Powhatan',adj:'Powhatan',world:'americas',
+    m:['Wahunsenacawh','Opechancanough','Opitchapam','Kekataugh','Wowinchopunck','Paquiquineo','Parahunt','Pochins','Coquonasum','Nemattanew','Uttamatomakkin','Namontack','Machumps','Kocoum','Nantaquaus','Japazaws','Chanco','Necotowance','Totopotomoi','Kemps'],
+    f:['Matoaka','Amonute','Winganuske','Ashetoiske','Amopotoiske','Ottopomtacke','Attossomiske','Ponnoiske','Appomosiscut','Appimmoiske','Ortoughnoiske','Oweroughwough','Ottermiske','Memeoughquiske','Opussoquionuske','Oholasc','Cockacoeske'],
+    roots:['Paspahegh','Werowocomoco','Powhatan','Arrohateck','Appamattuck','Weanock','Kecoughtan','Chiskiack','Quiyoughcohannock','Warraskoyack','Nansemond','Chesepiooc','Pamunkey','Menapacunt','Youghtanund','Mattaponi','Chickahominy','Orapax','Uttamussak','Piankatank'],
+    site:{farm:['*'],realm:['Tsenacomoco']},
+    ways:{layout:'dispersed',plaza:{kind:'dance',r:12},homes:['arbourHouse','chiefHouse'],lots:[['arbourHouse',10],['sweatLodge',0.3]],found:[['chiefHouse',['capital','town']],['charnelHouse',['capital','town']]],per:10,gap:12,path:1.2,yards:true,
+      knows:['timberPalisade'],scale:0.3,titles:{monarch:['Mamanatowick','Mamanatowick'],head:['Weroance','Weroansqua']},court:{priest:'Quiyoughcosuck',council:'Cockarouse'},
+      trades:['planter','planter','planter','planter','hunter','hunter','fisher','fisher','boatman','potter','weaver','bowyer','fletcher','woodcutter'],
+      foundLine:'Arbour houses of bent saplings and bark mats, scattered among the cornfields and the trees; the weroance’s long house and the quioccasan, where the chiefs’ dead are kept, stand apart.'}},
+  taino:{name:'Taíno',adj:'Taíno',world:'americas',
+    m:['Guacanagarí','Caonabo','Manicaotex','Guarionex','Behechío','Mayobanex','Cayacoa','Cotubanamá','Guarocuya','Guatiguaná','Agüeybaná','Guaybana','Urayoán','Mabodamaca','Aymamón','Caguax','Hatuey','Guamá','Habaguanex','Ameyro'],
+    f:['Anacaona','Higüemota','Higuanamá','Yuisa','Casiguaya','Iguanamá','Catabano'],
+    roots:['Xaraguá','Yaguana','Maguana','Maguá','Marién','Higüey','Cibao','Bainoa','Bahoruco','Guaynía','Otoao','Yagüeca','Baracoa','Bayamo','Camagüey','Cueybá'],
+    site:{farm:['*'],realm:['Haití','Quisqueya','Borikén','Xaymaca']},
+    ways:{layout:'ring',plaza:{kind:'batey',r:26},homes:['bohio','caney'],lots:[['bohio',1]],found:[['caney',['capital','town','village']]],per:25,gap:4,path:1.4,
+      knows:[],scale:0.8,titles:{monarch:['Cacique','Cacica'],head:['Nitaíno','Nitaína']},court:{priest:'Behique',council:'Nitaíno'},
+      trades:['planter','planter','planter','planter','fisher','fisher','fisher','boatman','hunter','potter','weaver','carpenter','woodcutter'],
+      foundLine:'Round bohíos about the batey, the ball court and dancing ground, the cacique’s caney facing it.'}},
+  tupi:{name:'Tupinambá',adj:'Tupi',world:'americas',
+    m:['Cunhambebe','Aimberê','Pindobuçu','Koakira','Araraí','Guaixará','Cairuçu','Nhaêpepô-oaçu','Alkindar-miri','Ipiru-guaçu','Taparicá','Tibiriçá','Arariboia'],
+    f:['Guaibimpará','Bartira','Terebê'],
+    roots:['Uwattibi','Ariró','Iperoig','Uruçumirim','Kariók','Eiraîá','Akara’y','Sapopema','Ocarentin','Kouroumouré','Ûyraûasuunaé','Ke-ri-u','Sarapo-u','Ita-auc','Arasa-tuue','Usu-potuue'],
+    site:{farm:['*'],realm:['*']},
+    ways:{layout:'square',plaza:{kind:'ocara',r:30},homes:['maloca'],lots:[['maloca',1]],found:[],per:80,gap:8,path:1.4,
+      knows:['timberPalisade'],scale:0.5,titles:{monarch:['Morubixaba','Morubixaba'],head:['Morubixaba','Morubixaba']},court:{priest:'Pajé',council:'Elder'},
+      trades:['planter','planter','planter','planter','hunter','hunter','fisher','fisher','boatman','potter','weaver','bowyer','fletcher','woodcutter'],
+      foundLine:'Long malocas, each of many families, on the four sides of the ocara, the square of councils and feasts.'}},
+};
+for(const[k,c]of Object.entries(AMERICAS_PEOPLES)){ // what every tongue has: those the record does not give are their people's own customs
+  // drawn:false: spoken where a real map's region speaks it, never drawn by lot for a made-up realm (CULT_DRAWN)
+  Object.assign(c,{drawn:false,neu:['*'],house:p=>p,castle:p=>p,saints:[],church:(S,p)=>p,inns:[],trade:{}});
+  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false});
+  CULT[k]=c;KIN[k]={pre:/^(?!)/,suf:null,man:g=>g};
+  // no surnames: a household is known by its clan where the record names the clans, else by its town; a man by his kin
+  NAMEX[k]={m:[],f:[],roots:[],occ:{},loc:{},nick:{},patr:g=>'kin of '+g,origin:t=>'of '+t};}
+Object.assign(CULT_NEAR,{iroquoian:['iroquoian','massachusett','lenape'],massachusett:['massachusett','lenape','iroquoian'],lenape:['lenape','massachusett','powhatan'],
+  powhatan:['powhatan','lenape'],taino:['taino','tupi'],tupi:['tupi','taino']});
+const AMERICAS_PAL={iroquoian:0x8d5524,massachusett:0x4a7c59,lenape:0x6b8e23,powhatan:0xb5651d,taino:0x1f8a8a,tupi:0xc0a000}; // their colours on the map of tongues
+// Their houses and works: [w, d, h, roof, name, hearths]: hearths, where given, are the households a house holds.
+// Roof 3 is a barrel vault of bark or mats over bent poles, 4 a cone of thatch.
+Object.assign(ARCH,{
+  barkLonghouse:[30,7,7.5,3,'bark longhouse',8], wetu:[5.5,5,3.4,3,'wetu',1], arbourHouse:[14,6,5.6,3,'arbour house',2],
+  bohio:[8,8,7.5,4,'bohío',5], caney:[13,8,8,0,'caney',3], maloca:[46,5,4.6,3,'maloca',16],
+  chiefHouse:[12,7,6.2,3,'long house',2], charnelHouse:[12,5,5.6,3,'charnel house',0], sweatLodge:[2.5,2.5,1.9,3,'sweat lodge',0],
+});
+TILLERS.add('planter'); // the women who hill and tend the maize, beans and squash, or the manioc
+Object.assign(INST_NAMES,{
+  chiefHouse:{massachusett:p=>'the sachem’s house at '+p,lenape:p=>'the sakima’s house at '+p,powhatan:p=>'the weroance’s house at '+p,anglo:'the chief’s house'},
+  charnelHouse:{powhatan:p=>'the quioccasan of '+p,anglo:'the charnel house'},
+  caney:{taino:p=>'the caney of '+p,anglo:'the caney'},
+});
+function waysOf(s){return s&&CULT[s.cult]?.ways||null;} // how a place's people build, farm, rule and keep their year; null for the Old World's custom
+function realmCult(){return (W&&W.crownCult)||(typeof REALMAP!=='undefined'&&REALMAP?REALMAP.crown:null);}
+function realmWays(){return CULT[realmCult()]?.ways||null;}
+function realmWorld(){return CULT[realmCult()]?.world||'old';}
+function cultsOfWorld(w=realmWorld()){return Object.keys(CULT).filter(k=>(CULT[k].world||'old')===w);} // the tongues of a world, in the table's order
+function realmKnows(){const N=realmWays();return N?new Set(N.knows):null;}
+function realmScale(){return realmWays()?.scale||1;}
+function courtWord(role){const T=realmWays()?.court;return !T?role:role==='High Priest'||role==='Prophet'?T.priest:role==='Master of Coin'||role==='Master Smith'?T.council:role;} // a councillor of the court, in the realm's words
+function monarchWord(n){const T=realmWays()?.titles;return T?T.monarch[n.sex==='f'?1:0]:n.sex==='f'?'Queen':'King';}
+function nativeTitle(T,n){const f=n.sex==='f'?1:0,ep=n.epithet?' '+n.epithet:'';
+  if(n.role==='monarch')return T.monarch[f]+' '+n.name+ep;if(n.role==='head')return T.head[f]+' '+n.name+' of '+houseOf(n).name.replace('House ','');return n.name+ep;}
+function nativeKin(c,s){const K=CULT[c].ways.clans;return K?'of the '+K[Math.floor(frand()*K.length)]:NX(c).origin(s.name);} // a new household's name
+/* The map of tongues has eleven colours (uHouse): a realm's tongues take them in the table's order, only those it speaks,
+   so however many tongues the program knows, a realm of eleven or fewer is coloured whole. */
+let TONGUE_SLOTS=null,TONGUE_SLOTS_W=null;
+function tongueSlots(){if(TONGUE_SLOTS_W!==W||!TONGUE_SLOTS){const spoken=new Set((W.settlements||[]).map(s=>s.cult));TONGUE_SLOTS=TONGUE_IDS.filter(k=>spoken.has(k)).slice(0,11);TONGUE_SLOTS_W=W;}return TONGUE_SLOTS;}
+function nativeLot(N,rr){let t=0;for(const[,w]of N.lots)t+=w;let x=rr()*t;for(const[k,w]of N.lots){x-=w;if(x<=0)return k;}return N.lots[0][0];}
+function nativeLanes(N,k){ // the lanes a people's houses stand along, by its layout; k is the founding's kit (layoutSettlement)
+  // Every lane is reached from the open place's middle, where the road comes in: across the open ground, as a path is.
+  const{C,P,rAng,Rmax,HW,count,addStreet,buildable,rr}=k,a=ARCH[N.homes[0]],w=a[0],d=a[1];
+  const lay=pts=>{let run=[];const end=()=>{if(run.length>=3)addStreet(run,HW,'lane',{straight:true,neu:true});run=[];};for(const q of pts){if(buildable(q.x,q.z))run.push(q);else end();}end();};
+  const pr=P.r?Math.max(...P.r):8,ux=Math.cos(rAng),uz=Math.sin(rAng),vx=-uz,vz=ux,step=2*(HW+0.9+d)+N.gap+2;let have=0;
+  const at=(t,o)=>({x:C.x+ux*t+vx*o,z:C.z+uz*t+vz*o}),line=(p,q)=>{const n=Math.max(2,Math.ceil(dist2d(p.x,p.z,q.x,q.z)/8)),pts=[];for(let i=0;i<=n;i++)pts.push({x:lerp(p.x,q.x,i/n),z:lerp(p.z,q.z,i/n)});return pts;};
+  if(N.layout==='ring'){ // round houses in rings about the open place, their doors to it (the batey); a path out to them opposite the road
+    let R=pr+HW+1.5,last=R;for(let q=0;q<4&&have<count*1.15;q++){const n=Math.max(12,Math.round(2*Math.PI*R/6)),pts=[];
+      for(let i=0;i<=n;i++){const t=rAng+Math.PI+i/n*Math.PI*2;pts.push({x:C.x+Math.cos(t)*R,z:C.z+Math.sin(t)*R});}
+      lay(pts);have+=(q?2:1)*2*Math.PI*R/(w+N.gap);last=R;R+=step;}
+    lay(line(C,at(-last,0)));
+  }else if(N.layout==='square'){ // long houses on the four sides of the open place (the ocara), a wider square beyond as it grows
+    let h=Math.max(pr+HW+1.5,(w+N.gap)/2),last=h;for(let q=0;q<3&&have<count*1.15;q++){
+      lay(resample([[-1,0],[-1,1],[1,1],[1,-1],[-1,-1],[-1,0]].map(([t,o])=>at(t*h,o*h)),8));have+=(q?2:1)*4*Math.floor(2*h/(w+N.gap));last=h;h+=step;}
+    lay(line(C,at(-last,0)));
+  }else if(N.layout==='rows'){ // long houses side by side along parallel lanes running back from the open place, away from the road (Hochelaga)
+    const L=Math.max(w*3.2,Math.sqrt(count)*w*0.9),per=2*Math.max(1,Math.floor(L/(w+N.gap))),m=Math.min(11,Math.ceil(count*1.1/per)),t0=pr+HW+2,o0=(m-1)/2*step;
+    lay(line(C,at(-t0,0)));if(m>1)lay(line(at(-t0,-o0),at(-t0,o0))); // to the head of the rows, and along it
+    for(let i=0;i<m;i++){const o=i*step-o0;lay(line(at(-t0,o),at(-t0-L,o)));}
+  }else{ // dispersed: paths out from the open place among the fields, the houses spread along them
+    const n=3+Math.floor(rr()*3);for(let i=0;i<n;i++){let h=rAng+(i+0.5)/n*Math.PI*2+(rr()-0.5)*0.6,x=C.x,z=C.z;const pts=[];
+      for(let L=0;L<Rmax*0.75+pr;L+=8){pts.push({x,z});h+=(rr()-0.5)*0.35;x+=Math.cos(h)*8;z+=Math.sin(h)*8;}lay(pts);}
+  }
+}
+function nativeFound(N,k){ // the houses of its chief and of its dead about the open place, as the place's standing has them
+  const at=k.isCap?'capital':k.isTown?'town':'village';
+  for(const[arch,where]of N.found)if(where.includes(at))k.aroundPlace(arch,0,1,1,'residential',{chief:arch==='chiefHouse'||arch==='caney'});}
+const TONGUE_IDS=Object.keys(CULT),TONGUE_PAL={...AMERICAS_PAL,anglo:0xc0392b,french:0x2e5aac,german:0xe0a526,norse:0x3a9a8c,italian:0x5aa02c,slavic:0x8e44ad,celtic:0x2f7d32,iberian:0xd35400,portuguese:0x922b5e,dutch:0x5dade2};
+function refreshTongues(){TONGUE_SLOTS=null;if(!W.land||!W.land.F)return;for(const f of W.land.F)writeLord(f);G.houseTintsDirty=true;}
 function awayNow(p){return p.away&&day()<p.away.until?p.away:null;}
 function crewFor(c){ // the carter from the town the goods leave, or the master of the boat
   const o=W.settlements[c.origin];if(!o||!o.folk||!o.folk.length)return;
@@ -5952,7 +6101,7 @@ function townsfolkFor(s){ // who is about in this town, and where each goes: rea
     else if(a>=14&&(p.tr==='quarryman'||p.tr==='miner')){const q=p.tr==='quarryman'&&s.quarry&&!s.quarry.removed?s.quarry:rockNear(s,h);
       if(q){const an=H*6.283,r=4+H*6;work={x:q.x+Math.cos(an)*r,z:q.z+Math.sin(an)*r};fw={A:work,B:{x:q.x-Math.cos(an)*r,z:q.z-Math.sin(an)*r},flip:false};what=p.tr==='quarryman'?'cutting stone in the quarry':'digging ore at the mine-head';}
       else{work=h;what=p.tr==='miner'?'sorting ore':'dressing stone';inside=true;}}
-    else if(a>=14&&(TILLERS.has(p.tr)||p.tr==='woodcutter'||p.tr==='forester'||p.tr==='hunter'||p.tr==='fisher'||p.tr==='boatman'||(p.sx==='f'&&s.kind==='village'&&(season===1||season===2)))){ // out of doors: to the household's strips, the wood, the common, the water
+    else if(a>=14&&(TILLERS.has(p.tr)||p.tr==='woodcutter'||p.tr==='forester'||p.tr==='hunter'||p.tr==='fisher'||p.tr==='boatman'||(p.sx==='f'&&(s.kind==='village'||waysOf(s)?.womenTill)&&(season===1||season===2)))){ // out of doors: to the household's strips, the wood, the common, the water
       const kind=p.tr==='woodcutter'||p.tr==='forester'||p.tr==='hunter'?'wood':(p.tr==='shepherd'||p.tr==='herdsman')?'common':p.tr==='fisher'||p.tr==='boatman'?'water':'field';
       if(kind==='field'&&season===3){work=h;what='threshing in the barn';inside=true;}
       else if(kind==='water'){const w=waterNear(s,h);if(w){work=w;what=p.tr==='fisher'?'at the nets':'at the boats';}else{work=h;what='mending nets';inside=true;}}
@@ -6169,9 +6318,9 @@ function chooseLandUse(s,si,PM){ // once a year: corn, hay or a freeholder's gra
   landYield(s);}
 function tickTitles(){ // the annals note who held what, and from when
   for(const n of livingNotables()){if(!n.alive)continue;const k=n.role==='monarch'?'m0':n.role==='head'?'h'+n.house:'';if(!k||n._tk2===k)continue;n._tk2=k;
-    const H=W.houses[n.house],seat=H&&W.settlements[H.seat];(n.titles||(n.titles=[])).push({d:day(),t:n.role==='monarch'?`${n.sex==='f'?'Queen':'King'} of the realm`:`Head of ${H?H.name:'the house'}${seat?', at '+seat.name:''}`});}}
+    const H=W.houses[n.house],seat=H&&W.settlements[H.seat];(n.titles||(n.titles=[])).push({d:day(),t:n.role==='monarch'?`${monarchWord(n)} of the realm`:`Head of ${H?H.name:'the house'}${seat?', at '+seat.name:''}`});}}
 function houseOf(n){return W.houses[n.house];}
-function fullTitle(n){
+function fullTitle(n){const NT=realmWays()?.titles;if(NT&&n.role!=='justice')return nativeTitle(NT,n);
   if(n.role==='justice')return 'Justice '+n.name;
   if(n.role==='monarch')return (n.sex==='f'?'Queen ':'King ')+n.name+(n.epithet?' '+n.epithet:'');
   if(n.role==='head')return (n.sex==='f'?'Lady ':'Lord ')+n.name+' of '+houseOf(n).name.replace('House ','');
@@ -7565,7 +7714,7 @@ function detailMaterial(cyl=false){ // masonry on towers and church parts shares
   return mat;
 }
 function roofRise(b){ // pitch belongs to the covering and span, not to the number of storeys
-  return b.d*(b.roof===2?0.65:b.tier===0?0.55:0.45);
+  return b.d*(b.roof===2||b.roof===4?0.65:b.tier===0?0.55:0.45);
 }
 function gableGeom(){
   // unit gable roof: footprint 1×1 at y0, ridge along x at y1 (outward winding)
@@ -7873,7 +8022,7 @@ function casDesc(s){const R=casRing(s),c=casOf(s),k=casKeep(s),p=[];
 function casLvl(s){ // what the place is worth fortifying: a village's tower, a town's castle, a seat, the crown's own
   const seat=s.owner>0&&W.houses[s.owner]&&W.houses[s.owner].seat===W.settlements.indexOf(s);
   return s.kind==='capital'?3:seat||s.role==='seat'||s.kind!=='village'&&s.role==='border'?2:s.kind!=='village'||s.role==='border'||s.role==='fort'?1:0;}
-function castleFoundationAuthority(s,hi=s.owner){ // a real seat or defensive purpose, not every village held by a lord
+function castleFoundationAuthority(s,hi=s.owner){if(waysOf(s)?.castle===false)return false; // a real seat or defensive purpose, not every village held by a lord
   if(hi!==s.owner||hi>0&&!W.houses[hi])return false;
   return s===W.capital||hi>0&&W.settlements[W.houses[hi].seat]===s||['seat','fort','border'].includes(s.role);
 }
@@ -8789,9 +8938,9 @@ function projectBuildingInstance(b){
   if(compoundCourtGeometry(b))setInst(G.roofs,i,0,-500,0,0,.01,.01,.01);
   else if(b.arch==='court'&&!ruined){const fr=Math.min(6,b.d*0.36),[X,Z]=locW(b,0,b.d/2-fr/2);setInst(G.roofs,i,X,b.y+h,Z,b.rot,b.w*1.03,fr*0.6,fr*1.15);}
   else if(tL&&!ruined){const[X,Z]=locW(b,tL.nx,tL.naveZ);setInst(G.roofs,i,X,b.y+h,Z,b.rot+Math.PI/2,tL.nl*1.03,tL.nw*0.62,tL.nw*1.12);}
-  else if(b.roof===0&&!ruined){
+  else if((b.roof===0||b.roof===3)&&!ruined){
     setInst(G.roofs,i,b.x,b.y+h,b.z,b.rot,b.w*1.1,roofRise(b),b.d*1.16);
-  }else if(b.roof===2&&!ruined){
+  }else if((b.roof===2||b.roof===4)&&!ruined){
     setInst(G.roofs,i,b.x,b.y+h,b.z,b.rot,b.w*1.06,roofRise(b),b.d*1.06);
   }else{
     setInst(G.roofs,i,0,-500,0,0,0.01,0.01,0.01);
@@ -9400,7 +9549,7 @@ function rebuildFences(){
   if(VISUAL.defer('fences',()=>projectFences()))return;
   projectFences();
 }
-const fenceWorked=f=>f&&f.dom>=0&&(!!f.estateWild||(f.state===LS.TILLED||f.state===LS.PASTURE||f.state===LS.BURNT)&&f.kind!==LK.NONE);
+const fenceWorked=f=>f&&f.dom>=0&&waysOf(W.settlements[f.dom])?.fences!==false&&(!!f.estateWild||(f.state===LS.TILLED||f.state===LS.PASTURE||f.state===LS.BURNT)&&f.kind!==LK.NONE);
 function prepareFences(){
   for(const f of W.land.F)if(fenceWorked(f)){furlongPoly(f);fenceStone(W.settlements[f.dom]);}
 }
@@ -9807,7 +9956,7 @@ function featFlush(now,catchUp=false){ // apply pending changes a few tiles at a
 function writeLord(f){if(MODEL_ONLY||G.landView)(G.landDirty||(G.landDirty=new Set())).add(f);}
 function projectLord(f){
   if(!W.land||!G.landView?.lordTex)return;const d=G.landView.lordTex.image.data,o=f.k*4;
-  if(overlayMode==='tongue'){const s=f.dom>=0?W.settlements[f.dom]:null;d[o]=s&&s.cult?TONGUE_IDS.indexOf(s.cult)+1:0;d[o+1]=0;}
+  if(overlayMode==='tongue'){const s=f.dom>=0?W.settlements[f.dom]:null;d[o]=s&&s.cult?tongueSlots().indexOf(s.cult)+1:0;d[o+1]=0;}
   else{d[o]=f.lord+1;d[o+1]=f.held?255:0;}G.landView.lordTex.needsUpdate=true;
 }
 /* land nobody works goes back to nature, step by step: grass, then thorn and scrub by the fifth year,
@@ -10689,7 +10838,7 @@ function projectLakeWater(){ // Native reservoir geometry only; opening or drawi
 }
 function houseTints(){ // the land edged in each lord's own colour; the territory map uses colours chosen to be told apart at a glance
   if(!(W.land&&G.landView?.uni))return;const terr=overlayMode==='territory';
-  if(overlayMode==='tongue'){TONGUE_IDS.forEach((k,i)=>{if(i<11)G.landView.uni.uHouse.value[i+1].setHex(TONGUE_PAL[k]||0x888888);});return;}
+  if(overlayMode==='tongue'){tongueSlots().forEach((k,i)=>{if(i<11)G.landView.uni.uHouse.value[i+1].setHex(TONGUE_PAL[k]||0x888888);});return;}
   W.houses.forEach((h,i)=>{if(i<11){const c=G.landView.uni.uHouse.value[i+1];if(terr)c.setHex(TERR_PAL[i%TERR_PAL.length]);else c.setHex(h.sigilHue[0]);}});}
 
 function entityView(o){const m=G.entityViews||(G.entityViews=new WeakMap());let v=m.get(o);if(!v){v={};m.set(o,v);}return v;}
@@ -12361,7 +12510,7 @@ function hufeHeading(s){ // Waldhufen run back square from the village street
     const q=P.find(p=>dist2d(p.x,p.z,s.pos.x,s.pos.z)>60)||P[P.length-1];best=Math.atan2(q.z-s.pos.z,q.x-s.pos.x);break;}
   return (best??0)+Math.PI/2;
 }
-function shapeFurlong(f,s,kind){ // heading and strip width for its kind
+function shapeFurlong(f,s,kind){if(kind&&waysOf(s))kind=LK.FIELD; // heading and strip width for its kind
   f.kind=kind;f.rotation=typeof technologyRotation==='function'?technologyRotation(s):3;
   const gx=hAt(f.x+20,f.z)-hAt(f.x-20,f.z),gz=hAt(f.x,f.z+20)-hAt(f.x,f.z-20),down=Math.hypot(gx,gz)>0.8?Math.atan2(gz,gx):f.hash*Math.PI;
   if(kind===LK.HUFE){f.th=s.hufeTh??(s.hufeTh=hufeHeading(s));f.w=s.hufeW??(s.hufeW=56+(W.settlements.indexOf(s)*7)%16);}
@@ -12370,11 +12519,11 @@ function shapeFurlong(f,s,kind){ // heading and strip width for its kind
   else if(kind===LK.VINE){f.th=down;f.w=2.4;}
   else if(kind===LK.DEMESNE){f.th=down;f.w=34;}
   else if(kind===LK.CLOSE){f.th=down;f.w=0;}
-  else{f.th=down;f.w=11+Math.round(f.hash*8);}
+  else{f.th=down;f.w=waysOf(s)?.strips===false?0:11+Math.round(f.hash*8);}
   if(s.gfOff===undefined)s.gfOff=f.hash*Math.PI*2;
   f.gf=Math.floor((((Math.atan2(f.z-s.pos.z,f.x-s.pos.x)+s.gfOff)/(Math.PI*2))%1+1)%1*f.rotation)%f.rotation; // which great field in the place's actual rotation
 }
-function furlongKind(f,s,colonists){
+function furlongKind(f,s,colonists){if(waysOf(s))return f.ar<Math.max(1,f.n)*0.25||f.fl>Math.max(1,f.n)*0.35?LK.NONE:LK.FIELD;
   const n=Math.max(1,f.n),d=dist2d(f.x,f.z,s.pos.x,s.pos.z),core=s.extentR||s.radius||80;
   if(f.fl>n*0.35)return LK.MEADOW;
   if(s.kind!=='village'&&f.vi>n*0.45&&d<1300&&f.hash<0.75)return LK.VINE;
@@ -13170,7 +13319,7 @@ function tickLivestock(){
   const d=day();if(d%30!==18||!W.land)return;
   const winter=seasonIdx()===3,snow=W.weather&&W.weather.state==='snow';
   W.settlements.forEach((s,si)=>{
-    herdSync(s); // the month's calves, losses, sales and slaughter shared among the owners
+    if(waysOf(s)?.beasts===false)return;herdSync(s); // the month's calves, losses, sales and slaughter shared among the owners
     const St=s.stores,g=grazeOf(s),want=herdWant(s,g);s._graze=g;s._want=want;
     if(!s.hm){s.hm={press:0,murrain:0,murrainK:null};for(const k of BEASTS)St[k]=(St[k]||0)+want[k]*0.8;}
     if(St.wool==null)St.wool=0;
@@ -16645,6 +16794,7 @@ function settleParcels(targets=null){
    (hovel-built → timber-framed → stone-built). */
 const HOUSEHOLD=5; // souls to a roof; a storeyed town house holds lodgers and journeymen too
 const RESID=new Set(['court','cot','house','longhouse','burgher','shop','tavern','smithy','bakery','inn','tannery','dyer','hospital','toll']);
+for(const c of Object.values(AMERICAS_PEOPLES))for(const k of c.ways.homes)RESID.add(k);
 const LV_NATIVE={inputs:lvInputs,kernel:lvKernel,compose:lvCompose,same:lvSame,fear:lvFear,wallKey:lvWalls,jobs:lvJobs,bin:lvBin,resample,point:lerpPt,lerp,dist:dist2d,walls:inWalls,rad:wallRadAt,resid:RESID,has:RESID.has,roles:[...RESID],property:propValue,propertyField:propValueField,at:lvAt,atField:lvAtField,use:useOf};
 const LV_READ_NATIVE={field:lvField,at:lvAt,atField:lvAtField,property:propValue,propertyField:propValueField,use:useOf,lot:lotRentAt,home:homeScore,work:workOf,heads:heads_,headsOf,cap:capOf,random:frand,randomInt:randi};
 const VACANT_RESIDENTIALS=new WeakMap();
@@ -18365,7 +18515,7 @@ function reignHeader(n){
   if(W.prehistory)return;
   const num=W.reignNum[n.name]||1;
   const ORD=['first','second','third','fourth','fifth','sixth','seventh','eighth','ninth'];
-  const t=`Here begin the years of ${n.sex==='f'?'Queen':'King'} ${n.name}${num>1?', '+(ORD[num-1]||num+'th')+' of that name':''}.`;
+  const t=`Here begin the years of ${monarchWord(n)} ${n.name}${num>1?', '+(ORD[num-1]||num+'th')+' of that name':''}.`;
   allLines.push('\n=== '+t+' ===\n');if(typeof ANNAL_META!=='undefined')ANNAL_META[allLines.length-1]={d:day(),c:'crown',r:1};
   if(MODEL_ONLY){WORKER_PRESENTATION.events.push({day:day(),cat:'crown',pri:0,text:t,reign:true});return;}
   presentReign(t);
