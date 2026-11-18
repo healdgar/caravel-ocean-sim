@@ -330,7 +330,9 @@ fn continuumTry(slot:u32,i:u32)->u32 {
   let lod=continuumSphere(record,part,${atlasVec4('at')});
   if(lod.w<0.0){return 0u;}
   var tried=(triangles<<16u)|select(0u,256u,triangles<=${CONTINUUM_SMALL_CLUSTER}u);
-  let ownError=bitcast<f32>(continuumWord(at+12u))*cut.z;let parentError=bitcast<f32>(continuumWord(at+13u))*cut.z;
+  // A cluster of the finest level has nothing finer to hand over to: its own error (a skin's or a sway's pose slack)
+  // never keeps it from being drawn once its parent is too coarse, so an eye however near, or inside, draws the finest.
+  let ownError=select(bitcast<f32>(continuumWord(at+12u))*cut.z,0.0,((packed>>8u)&255u)==0u);let parentError=bitcast<f32>(continuumWord(at+13u))*cut.z;
   if(i<tries.x){
     let shift=continuumShift()-F.camPos.xyz+vec3f(0.0,continuumSlotLift[slot],0.0);
     let cull=continuumSphere(record,part,${atlasVec4('at+8u')});let cullAt=continuumPlace(record,cull.xyz)+shift;
@@ -783,13 +785,15 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
     : 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { if(F.screen.x>=0.0&&captureMode.x<.5){return colour;} return surfaceAir(colour,world); }\n';
   const body = material.prelude() + (material.core ? '' : CONTINUUM_CORE_WGSL) + continuumDataWGSL(material.data.group, material.data.binding, 'read', paging)
     + continuumCommonWGSL(paging) + continuumKindsWGSL() + continuumTouchWGSL(paging) + CONTINUUM_SPLAT + CONTINUUM_SURFACE + continuumVaryingWGSL(material) + air + material.wgsl();
+  // The samples a fragment keeps: its share of the handoff, and the material's mask and coverage where it has them.
+  const mask = `continuumMask(v.coverage,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''}${material.coverage ? `&${material.name}Coverage(v,front)` : ''}`;
   if (pass === 'view') {
     return body + /* wgsl */`
 @vertex fn continuumVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { return continuumVertex(vertex,listed,false); }
 @fragment fn continuumFS(v:ContinuumVarying,@builtin(front_facing) front:bool)->ContinuumCoverage {
   var out:ContinuumCoverage;
   out.colour=${material.name}Shade(v,front);
-  out.mask=continuumMask(v.coverage,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''}${material.coverage ? `&${material.name}Coverage(v,front)` : ''};
+  out.mask=${mask};
   return out;
 }
 `;
@@ -797,5 +801,14 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
   return capture.directive + body + /* wgsl */`
 @vertex fn continuumCaptureVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { return continuumVertex(vertex,listed,true); }
 fn waterCaptureMaterial(v:ContinuumVarying,front:bool)->vec4f { return ${material.name}Shade(v,front); }
-` + capture.tail({ fragment: '@fragment fn submergedFS(v:ContinuumVarying,@builtin(front_facing) front:bool)->@location(0) vec4f', args: 'v,front', world: 'v.world' });
+` + capture.tail({ fragment: 'fn continuumCaptured(v:ContinuumVarying,front:bool)->vec4f', args: 'v,front', world: 'v.world' }) + /* wgsl */`
+// Its one sample kept as the view keeps its samples: by the handoff's share and the material's mask and coverage (what
+// shot has holed, parted or torn), so what the view leaves out reads from below as from above.
+@fragment fn submergedFS(v:ContinuumVarying,@builtin(front_facing) front:bool)->ContinuumCoverage {
+  var out:ContinuumCoverage;
+  out.mask=${mask};
+  out.colour=continuumCaptured(v,front);
+  return out;
+}
+`;
 }

@@ -33,7 +33,6 @@ import {
 import {
   TRADE_VESSEL_ARCHETYPES,
   TRADE_VESSEL_CONTINUUM_MATERIAL,
-  TRADE_VESSEL_CONTINUUM_CAPTURE_MATERIAL,
   TRADE_VESSEL_WAVE_WGSL,
   computeSailingPolar,
   createTradeVessels,
@@ -50,7 +49,7 @@ import { WATER_CAPTURE_DIRECTIVE, waterCaptureWGSL } from '../js/water-optics.js
 // The trade vessels' material as the one cut composes it: its view, and its capture under water.
 const tradeVesselView = () => continuumModuleWGSL({ pass: 'view', material: TRADE_VESSEL_CONTINUUM_MATERIAL });
 const tradeVesselCapture = () => continuumModuleWGSL({
-  pass: 'capture', material: TRADE_VESSEL_CONTINUUM_CAPTURE_MATERIAL,
+  pass: 'capture', material: TRADE_VESSEL_CONTINUUM_MATERIAL,
   capture: { directive: WATER_CAPTURE_DIRECTIVE, tail: (options) => waterCaptureWGSL({ ...options, surfaceWaves: false }) },
 });
 import { openBoard } from '../scripts/board-host.mjs';
@@ -862,10 +861,10 @@ test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact
   const waveStorageCount = (TRADE_VESSEL_WAVE_WGSL.match(/var<storage\b/g) || []).length;
   assert.ok(waveStorageCount <= 8, `TRADE_VESSEL_WAVE_WGSL storage buffers (${waveStorageCount}) must stay <= 8`);
   // Under water a vessel is her own material composed through the water's capture (js/water-optics.js): single-sampled,
-  // it drops what lies past the sea's surface and, by her mask, what shot has holed, parted or torn, so her holes read
-  // from below as from above. Her view drops nothing.
+  // it drops what lies past the sea's surface and keeps its one sample, as her view keeps its samples, by her mask: what
+  // shot has holed, parted or torn is left out, so her holes read from below as from above. Her material drops nothing.
   assert.match(tradeVesselCapture(), /fn\s+continuumCaptureVS\(/, 'the capture composes the trade vessels\' material');
-  assert.match(TRADE_VESSEL_CONTINUUM_CAPTURE_MATERIAL.wgsl(), /if \(tradeVesselContinuumMask\(in, front\) == 0u\) \{ discard; \}/, 'the capture leaves out what shot took');
+  assert.match(tradeVesselCapture(), /fn submergedFS\(.*\)->ContinuumCoverage[^}]*out\.mask=continuumMask\(v\.coverage[^;]*&tradeVesselContinuumMask\(v,front\)/, 'the capture leaves out what shot took');
   assert.ok(!/\bdiscard\b/.test(TRADE_VESSEL_CONTINUUM_MATERIAL.wgsl()), 'the trade vessels\' material contains zero discard statements');
   // The hull is scaled proportionally on X/Y/Z: her record's one scale, her type's design scale (js/ship-continuum.js).
   assert.match(tradeVesselView(), /continuumTypeF\(s\.model,\s*\d+u\)/, 'the material reads her type\'s design scale');

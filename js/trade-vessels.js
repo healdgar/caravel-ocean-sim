@@ -4082,7 +4082,7 @@ const tradeVesselContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + SKY_
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
 `;
 
-const tradeVesselContinuumRawWGSL = (capture) => /* wgsl */ `
+const tradeVesselContinuumRawWGSL = () => /* wgsl */ `
 @group(1) @binding(0) var oakAlbedo: texture_2d<f32>;
 @group(1) @binding(1) var oakSampler: sampler;
 struct HullCrater { at: vec3f, packed: u32 };
@@ -4507,11 +4507,10 @@ fn tvFarShade(in: ContinuumVarying, front: bool) -> vec4f {
   return vec4f(continuumAir(in.colour * amb * 0.82 + direct + spec + envSpec, in.world), 1.0);
 }
 
-// Both shades in uniform control flow (the clusters' samples the oak and takes derivatives), the one drawn chosen.${capture ? `
-// The water's capture is single-sampled and leaves out what lies past its surface with discard; it leaves out what
-// shot has taken away with it, so her holes read from below as from above.` : ''}
-fn tradeVesselContinuumShade(in: ContinuumVarying, front: bool) -> vec4f {${capture ? `
-  if (tradeVesselContinuumMask(in, front) == 0u) { discard; }` : ''}
+// Both shades in uniform control flow (the clusters' samples the oak and takes derivatives), the one drawn chosen.
+// Under water the capture keeps her samples by her mask as her view does (js/wgsl/continuum-cut.js), so her holes
+// read from below as from above.
+fn tradeVesselContinuumShade(in: ContinuumVarying, front: bool) -> vec4f {
   let near = tvShadeFragment(in, front);
   let far = tvFarShade(in, front);
   return select(near, far, in.coverage.x != CONTINUUM_CLUSTER_ENTRY);
@@ -4532,19 +4531,17 @@ fn tradeVesselContinuumMask(in: ContinuumVarying, front: bool) -> u32 {
 `;
 
 // The trade vessels' material (js/wgsl/continuum-cut.js), its view drawn by requestContinuumView and, under water, its
-// capture by requestContinuumCapture. Each variant's shading is composed once, the neural material bank's evaluation
-// laid into it (js/wgsl/neural-pbr.js withNeuralPbrTradeVessels).
-const tradeVesselContinuumShading = [null, null];
-const tradeVesselContinuumMaterial = (capture) => Object.freeze({
+// capture by requestContinuumCapture. Its shading is composed once, the neural material bank's evaluation laid into it
+// (js/wgsl/neural-pbr.js withNeuralPbrTradeVessels).
+let tradeVesselContinuumShading = null;
+export const TRADE_VESSEL_CONTINUUM_MATERIAL = Object.freeze({
   name: 'tradeVesselContinuum', prelude: tradeVesselContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['state', 'vec2f'], ['colour', 'vec3f'], ['ids', 'vec4u', true], ['turn', 'vec4f', true]],
-  wgsl: () => (tradeVesselContinuumShading[capture ? 1 : 0] ??= withNeuralPbrTradeVessels(tradeVesselContinuumRawWGSL(capture))),
+  wgsl: () => (tradeVesselContinuumShading ??= withNeuralPbrTradeVessels(tradeVesselContinuumRawWGSL())),
   salt: 5,
   // Sails, awnings and planking are open shells, lit from whichever side is seen.
   cullMode: 'none', air: true, capture: true, mask: true,
 });
-export const TRADE_VESSEL_CONTINUUM_MATERIAL = tradeVesselContinuumMaterial(false);
-export const TRADE_VESSEL_CONTINUUM_CAPTURE_MATERIAL = tradeVesselContinuumMaterial(true);
 
 // Each archetype's DRAPED block (js/wgsl/ship-kinds.js), SHIP_DRAPED_BLOCK + 1 vec4f an archetype in archetype order:
 // her design scale and what moves on her; a row unread; her sixteen sails' yard rows (-1: none; 0: square, its yard's
@@ -5346,7 +5343,7 @@ export async function createTradeVessels({
     damagedPipesPromise,
   ]);
   // Seen from under the water, a vessel is her coarse cut (the shadow map's lists) through the water's own capture.
-  const capture = await requestContinuumCapture(resolvedWaterOptics?.capture ? resolvedWaterOptics : null, TRADE_VESSEL_CONTINUUM_CAPTURE_MATERIAL).catch((err) => {
+  const capture = await requestContinuumCapture(resolvedWaterOptics?.capture ? resolvedWaterOptics : null, TRADE_VESSEL_CONTINUUM_MATERIAL).catch((err) => {
     console.warn('[trade-vessels submerged]', err);
     return null;
   });
