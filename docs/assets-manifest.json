@@ -679,6 +679,16 @@
     "bytes": 3861873,
     "sha256": "2135c8d221f2df3641ef0e24966c29f9e0bbc357e7f146ee931a3d57e98d7fc0"
   },
+  "assets/animal-continuum/manifest.json": {
+    "url": "assets/animal-continuum/manifest.df8d20b349c9b097.json",
+    "bytes": 14654,
+    "sha256": "df8d20b349c9b0970cc8531e25891eede4d954885c5c46a9a13e832104ba923b"
+  },
+  "assets/animal-continuum/atlas.bin.gz": {
+    "url": "assets/animal-continuum/atlas.bin.d5780843be7fb5b2.gz",
+    "bytes": 1567961,
+    "sha256": "d5780843be7fb5b2d7ee5d6c06c34529c9ac68241a7beeb762e5c7a887e89ed1"
+  },
   "assets/wildlife/whale.glb": {
     "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",
     "bytes": 8319500,
@@ -783,11 +793,6 @@
     "url": "assets/props/jetty-planked.c8015f5c74ddbd43.glb",
     "bytes": 181268,
     "sha256": "c8015f5c74ddbd435cae3b08157e35cbcc79aac46bdc2d30c28f9f5ad984fb28"
-  },
-  "assets/wildlife/livestock-1550.bin": {
-    "url": "assets/wildlife/livestock-1550.ce0e88c2629c9968.bin",
-    "bytes": 293688,
-    "sha256": "ce0e88c2629c996841204d17b5f0ea353b725400ba7b42475f732f1d1a446cdd"
   },
   "assets/boards/lisbon-1550.json": {
     "url": "assets/boards/lisbon-1550.5a7250ee84c886db.json",
