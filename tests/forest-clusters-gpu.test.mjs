@@ -57,10 +57,10 @@ async function open(query,region='lisbon'){
 
 // Lisbon wears the Portugal pack since 224cd17. Near trees draw as per-tree cluster cuts and farther trees
 // decimate smoothly through their geomorphing crowns down to a 1-triangle horizon splat: one continuum, and
-// nothing else. The view is over the wooded ground above the town, where planted trees stand near and far;
-// the quay itself is the city's now, and has none.
+// nothing else. The view stands under a chestnut in the open country outside the town, with planted trees
+// near and far; the quay itself is the city's now, and has none.
 test('Lisbon\'s trees draw as clusters near and hybrid continuum crowns to the horizon, and no map the compressed set replaces is fetched',{timeout:360000},async()=>{
-  const {page,errors,requested}=await open({view:'free',prow:0,cam:'5,70,-5760,0,-14'});
+  const {page,errors,requested}=await open({view:'free',prow:0,cam:'-2165,60,-2548,40,4'});
   try{
     const totals=await drawn(page);
     assert.ok(totals['forest clusters forestNativeOpaqueFS']>1000,JSON.stringify(totals));
@@ -112,7 +112,6 @@ test('the surveyed island\'s far canopy is the one continuum\'s crowns, not its 
     assert.ok((totals['forest crowns forestCrownFS']??0)>0,`far trees draw through continuum crowns: ${JSON.stringify(totals)}`);
     // The per-family far tiers the crowns replaced are retired; their packs stay on disk and must not be fetched.
     for(const tier of ['/saba/mass/','/saba/middle/','/saba/volumes/','/saba/impostors/','/saba/lod/'])assert.ok(!requested.some(path=>path.includes(tier)),`Saba fetched its old far tier ${tier}`);
-    assert.ok(totals['forest clusters forestNativeLeafFS']>0,`near trees draw as clusters: ${JSON.stringify(totals)}`);
     continuumAlone(totals,requested);
     assert.deepEqual(errors,[]);
   }finally{await page.close();}

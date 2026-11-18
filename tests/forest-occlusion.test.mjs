@@ -23,7 +23,10 @@ test('terrain bounds cover both raster triangles at every pyramid level, includi
 });
 test('terrain occlusion joins the forest cull just before a tree takes its place on its visible list',()=>{
  const extended=withForestTerrainOcclusion(FOREST_CULL_WGSL);
- assert.ok(extended.includes('if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,forestCoastalStandSteps(world,r.rootScale,r.identity),parameters.z)){return;}\n let slot=atomicAdd(&visibleCounts[pi],1u);'));
+ assert.ok(extended.includes('if(forestTerrainHidden(world,radius)){return;}\n let slot=atomicAdd(&visibleCounts[pi],1u);'));
+ // Only terrain that certainly hides a tree removes it: no stand of trees is guessed to hide another, and no
+ // tree is dropped by distance or hash outside the continuum's own sub-pixel thinning.
+ assert.ok(!/forestCoastalStand|rootId&[13]u/.test(extended));
  assert.throws(()=>withForestTerrainOcclusion(extended),/mismatch/);
 });
 test('GPU terrain curtain keeps visible crowns, saddle apertures, near seams and underwater views',{timeout:120000},async t=>{

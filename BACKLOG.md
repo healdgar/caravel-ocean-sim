@@ -189,8 +189,8 @@ Wind (`forestWind`) is three motions at three speeds: the tree bends with height
 
 Still to do, largest first:
 
-- [x] **Old tiers retired** (2026-11-17): the native tiers (`js/forest-native-lod.js`), `?forestClusters=0`, the LOD pilot (`js/forest-lod-*.js`), the procedural tree ladder in `js/terrain.js` and the baked canopy fallback (`js/canopy-scenery.js`) are gone; the `lod/`, `middle/` and `volumes/` packs stay on disk, unloaded and unpublished. Remaining outside the continuum: the groves' baked canopy (`js/forest-groves.js`), whose trees are to be planted as forest roots, and `TREE_CULL` in `js/scenery-cull.js` with the tree geometry in `js/vegetation.js` it reads, now drawn by nothing.
-- **Mobile** skips native trees, so with the port's palms gone a phone sees only far models on tropical shores.
+- [x] **Old tiers retired** (2026-11-17): the native tiers (`js/forest-native-lod.js`), `?forestClusters=0`, the LOD pilot (`js/forest-lod-*.js`), the procedural tree ladder in `js/terrain.js`, the baked canopy fallback (`js/canopy-scenery.js`) and the coastal stand thinning that dropped trees by hash and distance behind a stand (`js/forest-occlusion.js`) are gone; only terrain that certainly hides a tree culls it; the `lod/`, `middle/` and `volumes/` packs stay on disk, unloaded and unpublished. Remaining outside the continuum: the groves' baked canopy (`js/forest-groves.js`), whose trees are to be planted as forest roots, and `TREE_CULL` in `js/scenery-cull.js` with the tree geometry in `js/vegetation.js` it reads, now drawn by nothing.
+- [x] **Mobile** no longer skips near trees: the native tiers it skipped are gone, and a phone draws the one continuum, with fewer roots planted.
 - **Upland tropics are palms and ceiba only.** With mangroves off the hills, nothing fills the understory, and a real tropical hillside would have many more species.
 - **The far crown shells cost 1.65 M triangles.** Clusters could do the same job for less, if the look holds.
 - **Occlusion culling** of clusters against a depth pyramid, which threejs-nanites reports saving a lot on the ground. We test trees against terrain only.

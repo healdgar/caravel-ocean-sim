@@ -75,66 +75,13 @@ fn forestTerrainHidden(centre:vec3f,radius:f32)->bool{
  }
  return false;
 }
-fn forestTerrainSampleBounds(p:vec2f)->vec2f{
- let fine=forestTerrainDomains.fine.xyz;let fineN=textureDimensions(forestTerrainFine,0).x;
- if(forestTerrainDomains.coarse.w>.5&&forestTerrainInside(p,p,fine,fineN)){
-  let cell=vec2i(floor((p-fine.xy)/fine.z));return textureLoad(forestTerrainFine,cell,0).rg;
- }
- let coarse=forestTerrainDomains.coarse.xyz;let coarseN=textureDimensions(forestTerrainCoarse,0).x;
- if(forestTerrainInside(p,p,coarse,coarseN)){
-  let cell=vec2i(floor((p-coarse.xy)/coarse.z));return textureLoad(forestTerrainCoarse,cell,0).rg;
- }
- return vec2f(-120.,-120.);
-}
-fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
- if(identity.z>-1.1){return 0u;}
- let camera=F.camPos.xyz;let toCam=camera.xz-centre.xz;let distXZ=length(toCam);
- if(camera.y<=1.5||distXZ<=45.){return 0u;}
- let dirToCam=toCam/distXZ;
- let crownHalfH=max(4.5,(centre.y-rootScale.y)*1.18);let treeTop=centre.y+crownHalfH;
- let probeDists=array<f32,5>(24.,50.,82.,118.,160.);
- var standSteps=0u;
- for(var i=0u;i<5u;i++){
-  let dFront=probeDists[i];
-  if(dFront>=distXZ-32.||dFront>=distXZ*0.68){break;}
-  let pXZ=centre.xz+dirToCam*dFront;
-  let bounds=forestTerrainSampleBounds(pXZ);
-  let t=1.-dFront/distXZ;
-  let rayTopY=mix(camera.y,treeTop,t);
-  if(bounds.r>max(1.6,rayTopY+.4)){return 99u;}
-  let flatStandGround=bounds.r>-0.5&&bounds.g>=max(1.2,rootScale.y-dFront*0.06);
-  let standCanopyH=max(20.0,crownHalfH*1.65);
-  if(flatStandGround&&rayTopY<bounds.g+standCanopyH){standSteps+=1u;}
- }
- return standSteps;
-}
-fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32,standSteps:u32,pixelError:f32)->bool{
- if(identity.z>-1.1){return false;}
- if(standSteps>=99u){return true;}
- let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
- // Thinning a stand is meant to go unseen, which a spyglass would undo.
- let lensZoom=0.5543/max(length(F.camUp.xyz),.0001);
- let budgetScale=clamp(3.0/max(pixelError,3.0),0.15,1.0)*select(1.0,min(lensZoom,6.0),lensZoom>1.5);
- let yFactor=clamp((camera.y-36.0)/24.0,0.0,1.0);
- if(standSteps>=4u&&distXZ>mix(190.0,380.0,yFactor)*budgetScale&&((rootId&3u)!=0u||yFactor<0.5)){return true;}
- if(standSteps>=3u&&distXZ>mix(240.0,480.0,yFactor)*budgetScale&&(rootId&select(3u,1u,yFactor>0.5))!=0u){return true;}
- if(yFactor<0.85){
-  if(standSteps>=2u&&distXZ>mix(290.0,460.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
-  if(standSteps>=1u&&distXZ>mix(380.0,580.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
-  if(pixelError>4.2&&standSteps>=1u&&distXZ>mix(220.0,360.0,yFactor)*budgetScale&&(rootId&1u)!=0u){return true;}
- }
- if(distXZ>880.*budgetScale&&standSteps>=1u&&(rootId&3u)!=0u){return true;}
- if(distXZ>1250.*budgetScale&&(rootId&1u)!=0u){return true;}
- if(distXZ>1950.*budgetScale&&(rootId&3u)!=0u){return true;}
- return false;
-}
 `;
 // Puts the terrain's tests into the forest's cull (FOREST_CULL_WGSL, js/forest-scenery.js) just before a tree
 // that passes the frustum takes its place on its species' visible list.
 export function withForestTerrainOcclusion(source){
  const marker='let slot=atomicAdd(&visibleCounts[pi],1u);';
  if(!source.includes(marker)||source.includes('fn forestTerrainHidden('))throw Error('Forest terrain occlusion source mismatch');
- return source.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,forestCoastalStandSteps(world,r.rootScale,r.identity),parameters.z)){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
+ return source.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
 }
 export function createForestTerrainOcclusion({device,heights,region,near=null}){
  const textures=[];let uniform=null;try{const coarse=forestTerrainPyramid(heights,region),fine=near?forestTerrainPyramid(near.heights,near.manifest.domain):null;

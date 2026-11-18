@@ -232,8 +232,8 @@ test('Deliverable 3 & Terrain Interface Hooks: Forest Modeler visual parity, Por
     'forestClusterVertex reduces isSubBroadleaf mid-range inflation from 0.48 to 0.18'
   );
   assert.ok(
-    FOREST_VERTEX_WGSL.includes('select(select(.03,.18,tierId==3u),select(.08,.22,tierId==3u),isSubBroadleaf)'),
-    'forestCanopyVertex reduces isSubBroadleaf mid-range inflation from 0.80 to 0.22'
+    !/tierId|forestCanopyVertex/.test(FOREST_VERTEX_WGSL),
+    'no native canopy tier inflates leaf cards: the cluster cut is the only near and mid representation'
   );
 
   // 4. Portugal prebaked crowns & groves un-attenuate arch.colour after SHA-256 verification
