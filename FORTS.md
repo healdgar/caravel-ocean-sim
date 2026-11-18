@@ -8,8 +8,30 @@ it as a building of the nearest place (a citadel being that place's castle on it
 builds each of the wall's own types (curtains, bastions, a gate, a hall or keep; the battery and watchtower types of
 `js/old-world-buildings.js`) and records its line, guns and gate; `portWorkBuildings` in `js/fort-plan.js` hands them
 to the guns and the garrison. A port with no record of a work has the walls and citadels its board raises, and no fort
-of its own. What follows below describes the siting by rule and the drawn traces that this replaced, kept for the
-record's history; `js/harbour-defences.js` keeps only the record's geography (positions, channels, shore normals).
+of its own. There is no other fort: the catalogue's sea bastion and star fort, and every drawing, gun list, garrison
+and siting rule that went with them, are gone. What follows below describes the siting by rule and the drawn traces
+that this replaced, kept for the record's history; `js/harbour-defences.js` keeps only the record's geography
+(positions, channels, shore normals).
+
+## A work as it stands
+
+A work takes the form its year allows (`standWorkOf` in `js/old-world-board.js`): a medieval tower or a gun tower
+before the bastion reached the coast, corner bastions after, a low battery along the water at any date. Its pieces are
+city types in the one city atlas, drawn by the one continuum, and each embrasure carries a gun on its carriage
+(`gunSpec` in `js/old-world-buildings.js`: a garrison cureña before 1600, a four-truck carriage from then on). The record
+names, for every gun, its piece and the platform it stands `on`, and the work's `bore` (trunnion height, muzzle and
+breech lengths, calibre), so the gun the game fires is the one that is drawn: laid from its trunnions, the ball
+leaving at its muzzle, its gunner beside the breech.
+
+A work is struck through its pieces (`strikeWorkThroughPiece` in `js/gunnery-control.js`). Behind the ashlar facing of
+a bastion, a battery's platform or a gun tower's talus lies earth, in clods two deep and within the piece's own solid
+(`js/building-fracture.js`), so a ball that opens the facing stops in it and a breach widens shot by shot. A ball that ruins a gun
+dismounts it; one that breaks a platform brings down every gun on it and every man standing there; a work whose guns
+are all down is silenced. What a work has lost is the sum of its pieces' damage, so a save that puts the pieces back
+puts the work back, and a town that rebuilds a piece remounts its gun and returns its men to their posts.
+
+The castle duel (`js/castle-duel.js`) is a place like any other: Havana in 1600, raised at open sea, La Punta against
+the Morro across the channel, each the work its record stands, fought with these guns and struck through these pieces.
 
 A port's forts stand where the harbour needs them. `js/harbour-geography.js` reads the coast from the terrain: the
 water a ship must cross from the sea to the anchorage, the narrow places on the way, and the ground that commands it.

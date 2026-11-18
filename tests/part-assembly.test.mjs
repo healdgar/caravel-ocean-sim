@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { portWorkBuildings } from '../js/fort-plan.js';
 import assert from 'node:assert/strict';
 
 import {
@@ -101,6 +102,15 @@ function createMockPartGPUDevice() {
     },
   };
 }
+
+// A fort as the board records it (js/old-world-board.js standWorkOf): 40 m square, its deck 5 m up, five guns along its
+// front wall looking out along -z.
+const WORK_FORT = Object.freeze({
+  kind: 'fort', form: 'bastioned', name: 'Fort', x: 0, y: 2, z: 0, turn: 0, w: 40, d: 40,
+  outline: [[-20, -20], [20, -20], [20, 20], [-20, 20]],
+  guns: [-12, -6, 0, 6, 12].map((x, i) => ({ x, y: 7, z: -19, nx: 0, nz: -1, wall: 0, on: 0, piece: 1 + i })),
+  salients: [], gate: null, types: [0, 6], bore: { axis: 1.07, muzzle: 1.74, breech: 1.26, calibre: 12 },
+});
 
 test('all 9 playable ship models expose hierarchical part-assembly catalogs and node manifests', () => {
   const modelIds = Object.keys(SHIP_MODELS);
@@ -396,7 +406,8 @@ test('cannonball impacts on ships and 1550 port buildings resolve hitPartId, hit
   });
   const heights = synthesizeCoastalTerrain(region);
   const port = placeCoastalPort(region, heights);
-  const bastion = port.instances.find((i) => i.prefabId === 'stone_sea_bastion');
+  // The port's stone quay: its forts are its board's works, struck through their pieces (js/city-targets.js).
+  const bastion = port.instances.find((i) => i.prefabId === 'stone_quay_seawall');
   assert.ok(bastion);
 
   const bFrom = [bastion.x, bastion.baseY + bastion.height * 0.5, bastion.z + 40];
@@ -1232,11 +1243,12 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   const portGeom = buildPortPrefabGeometry(port);
   assert.ok(portGeom.vertices.length > 0, 'buildPortPrefabGeometry generates 3D port building vertices');
 
-  const bastion = port.instances.find((i) => i.prefabId === 'stone_sea_bastion');
-  const fortress = port.instances.find((i) => i.prefabId === 'bastion_trace_fortress');
+  // Stone the port builds itself (its quay), and a fort as its board records one (js/fort-plan.js portWorkBuildings).
+  const bastion = port.instances.find((i) => i.prefabId === 'stone_quay_seawall');
+  const [fortress] = portWorkBuildings({ works: [WORK_FORT] });
   const pier = port.instances.find((i) => i.prefabId === 'timber_mole_pier');
   const warehouse = port.instances.find((i) => i.prefabId === 'casa_de_contratacion' || i.prefabId === 'royal_warehouse');
-  assert.ok(bastion && fortress && pier && warehouse, 'Port contains stone bastion, trace fortress, timber mole pier, and masonry building');
+  assert.ok(bastion && fortress && pier && warehouse, 'Port contains a stone quay, a fort, a timber mole pier, and a masonry building');
 
   // 1. Material classification & penetration resistance (fortified stone vs masonry vs timber)
   assert.equal(classifyBuildingMaterial(bastion), 'fortified-stone');
@@ -1296,10 +1308,10 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
 
   // 3. Polvorín (fort powder magazine) detonation when struck by penetrating round/hot shot
   createBuildingMagazineState(fortress);
-  assert.ok(fortress.magazine.initialPowderKg > 10000, 'Bastion trace fortress Polvorín stores >10,000 kg of black powder');
+  assert.ok(fortress.magazine.initialPowderKg > 10000, 'A fort\'s Polvorín stores >10,000 kg of black powder');
   const polvorinRep = applyBuildingImpactDamage(fortress, {
     ammo: 'hot',
-    hitPartId: 'bastion_trace_fortress:polvorin_magazine',
+    hitPartId: 'city_fort:polvorin_magazine',
     hitSubAssembly: 'roofs-and-superstructure',
     localPosition: [0, fortress.height + 0.5, fortress.depth * 0.16],
     position: [fortress.x, (fortress.baseY ?? 0) + fortress.height + 0.5, fortress.z + fortress.depth * 0.16],
@@ -1320,11 +1332,12 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
     instanceIndex: port.instances.indexOf(instance), instance,
     materialClass: instance.damageState?.materialClass ?? 'masonry', groundAt: () => instance.baseY ?? instance.y ?? 0,
   }).fracture;
-  const queued = [bastion, pier, fortress].map((b) => [b, b.damageState.pendingBakes.splice(0)]);
+  // A work's own explosion goes to its pieces (js/gunnery-control.js strikeWorkThroughPiece); the port's buildings are cut here.
+  assert.ok(fortress.damageState.pendingBakes.some((b) => b.kind === 'building-explosion'), 'Queues a building-explosion event');
+  const queued = [bastion, pier].map((b) => [b, b.damageState.pendingBakes.splice(0)]);
   const allBuildingBakes = queued.flatMap(([, bakes]) => bakes);
   assert.ok(allBuildingBakes.some((b) => b.kind === 'stone-crater'), 'Queues a stone-crater event');
   assert.ok(allBuildingBakes.some((b) => b.kind === 'timber-splinter'), 'Queues a timber-splinter event');
-  assert.ok(allBuildingBakes.some((b) => b.kind === 'building-explosion'), 'Queues a building-explosion event');
   for (const [building, bakes] of queued) {
     applyBuildingFractureEvents(fractureOf(building), building.damageState, bakes, 0);
     assert.ok(building.damageState.fracture.brokenCount > 0, `${building.prefabId} loses pieces to its hits`);
@@ -1332,20 +1345,8 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   assert.deepEqual(portGeom.vertices, portVertsCopy, 'No hit changes a vertex of the port mesh');
 
   // 5. Shore battery gunnery & return fire against an offshore warship
-  const freshBastion = {
-    ...bastion,
-    id: 'test-shore-bastion',
-    trace: null,
-    x: 0,
-    z: 0,
-    baseY: 2.0,
-    yaw: 0,
-    width: 16,
-    depth: 14,
-    height: 6.5,
-    damageState: null,
-    magazine: null,
-  };
+  // A battery as its board records one, its five guns on the platform looking out to sea (-z).
+  const [freshBastion] = portWorkBuildings({ works: [{ ...WORK_FORT, kind: 'battery', form: 'battery', name: 'Shore Battery' }] });
   const attackingShip = {
     id: 'invading-frigate',
     modelId: 'victory',
@@ -1371,7 +1372,7 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
       if (ev.type === 'impact' && ev.kind === 'ship') shoreHitsOnShip.push(ev);
     },
   });
-  assert.equal(shoreBattery.state.guns.length, 5, 'Stone sea bastion mounts 5 heavy 24-pdr embrasure cannons');
+  assert.equal(shoreBattery.state.guns.length, 5, 'the battery mounts the five guns drawn on its platform');
 
   const queuedReturnShots = shoreBattery.fireAtTarget(attackingShip, { ammo: 'hot' });
   assert.ok(queuedReturnShots >= 3, 'Shore battery aims and queues seaward embrasure guns at attacking ship');
@@ -1382,7 +1383,7 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   assert.ok((attackingShip.damage?.hits ?? 0) >= 1, 'Offshore warship receives hull/rig impact damage from shore battery');
   assert.ok((attackingShip.damage?.fires?.length ?? 0) >= 1, 'Shore battery hot shot ignites fire aboard the attacking ship');
 
-  // 6. 52-gun HMS Victory broadside against a stone bastion brings down masonry that lies at its foot
+  // 6. 52-gun HMS Victory broadside against the stone quay brings down masonry that lies at its foot
   const volleyBastion = {
     ...bastion,
     id: 'victory-52-volley-bastion',
@@ -1404,8 +1405,7 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
       energy: 185000,
     });
   }
-  assert.equal(volleyBastion.damageState.state, 'ruined', '52-gun HMS Victory broadside reduces stone fort to ruined state');
-  assert.equal(volleyBastion.damageState.silenced, true, '52-gun broadside silences all fort guns');
+  assert.equal(volleyBastion.damageState.state, 'ruined', '52-gun HMS Victory broadside reduces the stone quay to ruin');
   {
     const ground = volleyBastion.baseY ?? volleyBastion.y ?? 0;
     const fracture = prepareBuildingFracture({

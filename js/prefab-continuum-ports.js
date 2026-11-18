@@ -9,7 +9,6 @@ export const PREFAB_CONTINUUM_PORT_BODIES = Object.freeze({
   "callao": 'assets/prefab-continuum/callao.bin.gz',
   "campeche": 'assets/prefab-continuum/campeche.bin.gz',
   "cartagena": 'assets/prefab-continuum/cartagena.bin.gz',
-  "castle-duel": 'assets/prefab-continuum/castle-duel.bin.gz',
   "charleston": 'assets/prefab-continuum/charleston.bin.gz',
   "coro": 'assets/prefab-continuum/coro.bin.gz',
   "cumana": 'assets/prefab-continuum/cumana.bin.gz',

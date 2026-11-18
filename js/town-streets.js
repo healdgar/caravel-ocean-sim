@@ -44,12 +44,12 @@ const NOT_WALKED_ON = new Set(['timber_mole_pier', 'stone_quay_seawall', 'stone_
 const WITHOUT_DOORS = new Set(['stone_quay_seawall', 'stone_arch_bridge', 'indigenous_palisade_ring', 'english_triangular_palisade_fort', 'curtain_wall_and_gate', 'acueducto_de_piedra']);
 // Places in the open, where someone arriving stays in view rather than going indoors.
 const OPEN_AIR = new Set(['timber_mole_pier', 'open_lonja_loggia', 'indigenous_canoe_landing', 'taino_batey_court']);
-const DEFENCES = new Set(['bastion_trace_fortress', 'stone_sea_bastion', 'torreon_atalaya_farol']);
+const DEFENCES = new Set(['torreon_atalaya_farol']);
 // How often people have business at a place. Anything else counts for two.
 const PLACE_BUSINESS = Object.freeze({
   timber_mole_pier: 5, open_lonja_loggia: 6, casa_de_contratacion: 5, catedral_basilica: 6, mission_chapel: 4, royal_warehouse: 4,
-  royal_atarazanas_arsenal: 3, palacio_del_gobernador: 3, mosteiro_dos_jeronimos: 3, colonial_town_block: 3, bastion_trace_fortress: 1,
-  stone_sea_bastion: 1, torreon_atalaya_farol: 1, walled_mule_corral: 1, taino_batey_court: 5, taino_cacique_caney: 4, indigenous_canoe_landing: 4,
+  royal_atarazanas_arsenal: 3, palacio_del_gobernador: 3, mosteiro_dos_jeronimos: 3, colonial_town_block: 3,
+  torreon_atalaya_farol: 1, walled_mule_corral: 1, taino_batey_court: 5, taino_cacique_caney: 4, indigenous_canoe_landing: 4,
 });
 // People abroad at once at each size of town, before those indoors are taken off.
 const TOWNSFOLK_BY_STAGE = Object.freeze({
@@ -244,14 +244,6 @@ function chooseDoor(inst, grid, towards) {
     const head = grid.groundAt(a.x, a.z) < grid.groundAt(b.x, b.z) ? a : b;
     const cell = nearestFreeCell(grid, head.x, head.z);
     return cell < 0 ? null : { inst, cell, outside: head, inside: head };
-  }
-  if (inst.trace?.gate) {
-    // A fort is entered by its gate, from wherever its footprint ends in that direction.
-    const { x, z, nx, nz } = inst.trace.gate;
-    let out = 0;
-    while (Math.abs(x + nx * out) <= hw + WALL_CLEARANCE_M && Math.abs(z + nz * out) <= hl + WALL_CLEARANCE_M && out < 120) out += CELL_M * 0.5;
-    const outside = localToWorld(inst, x + nx * out, z + nz * out), cell = nearestFreeCell(grid, outside.x, outside.z);
-    if (cell >= 0 && Math.hypot(grid.x(cell) - outside.x, grid.z(cell) - outside.z) <= CELL_M * 2.5) return { inst, cell, outside, inside: localToWorld(inst, x - nx * 1.6, z - nz * 1.6) };
   }
   const sides = [[-1, 0], [1, 0], [0, -1], [0, 1]].map(([sx, sz]) => {
     const middle = localToWorld(inst, sx * hw, sz * hl);
@@ -610,7 +602,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
   for (const door of doors) if (onWay[door.cell]) joined.add(door);
   const reachable = doors.filter((door) => joined.has(door));
   // A fort or a lookout may stand off by itself on a point of land. Anything else with no way to it is a fault.
-  const strandedDoors = doors.filter((door) => !joined.has(door) && !door.inst.trace && door.inst.prefabId !== 'torreon_atalaya_farol').map((door) => door.inst.prefabId);
+  const strandedDoors = doors.filter((door) => !joined.has(door) && door.inst.prefabId !== 'torreon_atalaya_farol').map((door) => door.inst.prefabId);
   const stranded = strandedDoors.length;
 
   // A tree of ways sends people the long way round. Where two neighbours are far apart by road, link them.

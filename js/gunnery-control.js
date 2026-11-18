@@ -2640,8 +2640,6 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
 }
 
 const FORTIFIED_STONE_PREFABS = new Set([
-  'stone_sea_bastion',
-  'bastion_trace_fortress',
   'stone_quay_seawall',
   // A walled city's defences (js/old-world-buildings.js cityTypeTarget).
   'city_wall',
@@ -2708,8 +2706,8 @@ export function createBuildingMagazineState(building) {
   const prefabId = building.prefabId ?? '';
   // A work's store is by what it is (js/fort-plan.js portWorkBuildings): a fort's vaults, or a battery's.
   const workKind = building.work?.kind ?? null;
-  const isFortress = workKind === 'fort' || prefabId === 'bastion_trace_fortress';
-  const isBastion = workKind === 'battery' || prefabId === 'stone_sea_bastion';
+  const isFortress = workKind === 'fort';
+  const isBastion = workKind === 'battery';
   const isTimberFort = prefabId === 'english_triangular_palisade_fort';
   const isArsenal = prefabId === 'royal_atarazanas_arsenal';
   const isArmedPier = Boolean(building.armed || building.hasMagazine);
@@ -2759,9 +2757,9 @@ export function createBuildingDamageState(building) {
   if (!building) return null;
   const magazine = createBuildingMagazineState(building);
   const materialClass = classifyBuildingMaterial(building);
-  const prefabId = building.prefabId ?? '';
-  const isBastionOrFort = prefabId === 'stone_sea_bastion' || prefabId === 'bastion_trace_fortress';
-  const defaultMaxEnergy = isBastionOrFort
+  // A fort or battery as its board records it: rampart and terreplein, far heavier than any one wall.
+  const isWork = building.work?.kind === 'fort' || building.work?.kind === 'battery';
+  const defaultMaxEnergy = isWork
     ? 3200000
     : materialClass === 'fortified-stone'
       ? 1450000
@@ -3564,18 +3562,6 @@ export function createBuildingGunDefinitions(building) {
     });
   };
 
-  // The opening nearest a point along a crenellated wall of an untraced fort. The bays are the ones the fort is built
-  // with (coastal-world.js): `nominal` metres each, between corner merlons 1.6 m in from either end of the wall.
-  const nearestEmbrasure = (target, half, nominal) => {
-    const bays = Math.max(3, Math.round((half * 2 - 3.2) / nominal)), span = (half * 2 - 3.2) / bays;
-    let best = -half + 1.6 + 0.5 * span;
-    for (let m = 1; m < bays; m++) {
-      const at = -half + 1.6 + (m + 0.5) * span;
-      if (Math.abs(at - target) < Math.abs(best - target)) best = at;
-    }
-    return best;
-  };
-
   if (building.trace) {
     // A work's guns are the ones drawn on its platforms (js/old-world-board.js), each laid from its trunnions along its
     // bore, the ball leaving at its muzzle, over its own arc; its gunner beside the breech, clear of the wheel.
@@ -3586,29 +3572,6 @@ export function createBuildingGunDefinitions(building) {
       def.arcCos = TRACE_GUN_ARC_COS;
       def.station = [gun.x - gun.nx * WORK_GUNNER_BACK_M + gun.nz * WORK_GUNNER_BESIDE_M, gun.y, gun.z - gun.nz * WORK_GUNNER_BACK_M - gun.nx * WORK_GUNNER_BESIDE_M];
       def.floorDesign = gun.y;
-    }
-  } else if (prefabId === 'bastion_trace_fortress') {
-    const snapEx = (targetX) => nearestEmbrasure(targetX, hw, 4.6), snapEz = (targetZ) => nearestEmbrasure(targetZ, hl, 4.8);
-    for (let i = -1.5; i <= 1.5; i += 1.0) {
-      const gx = snapEx(i * (hw * 0.34));
-      addEmbrasureGun('port', -1, gx, yTop + 0.58, -hl + 0.8, [0, 0, -1], 32);
-    }
-    for (let i = -1.5; i <= 1.5; i += 1.0) {
-      const gx = snapEx(i * (hw * 0.34));
-      addEmbrasureGun('starboard', 1, gx, yTop + 0.58, hl - 0.8, [0, 0, 1], 32);
-    }
-    // The flank guns too: a side wall with an even count of bays has a merlon, not an opening, at its middle.
-    addEmbrasureGun('port', -1, -hw + 0.8, yTop + 0.58, snapEz(0), [-1, 0, 0], 24);
-    addEmbrasureGun('starboard', 1, hw - 0.8, yTop + 0.58, snapEz(0), [1, 0, 0], 24);
-  } else if (prefabId === 'stone_sea_bastion') {
-    const snapEx = (targetX) => nearestEmbrasure(targetX, hw, 4.6);
-    for (let i = -1; i <= 1; i++) {
-      const gx = snapEx(i * (hw * 0.48));
-      addEmbrasureGun('port', -1, gx, yTop + 0.58, -hl + 0.8, [0, 0, -1], 24);
-    }
-    for (let i = -0.5; i <= 0.5; i += 1.0) {
-      const gx = snapEx(i * (hw * 0.50));
-      addEmbrasureGun('starboard', 1, gx, yTop + 0.58, hl - 0.8, [0, 0, 1], 24);
     }
   } else if (prefabId === 'english_triangular_palisade_fort') {
     const yBulwark = 0.35 + Math.max(4.4, (building.height ?? 6.8) * 0.68) - 0.25;
@@ -3886,9 +3849,8 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
         // A fort answers the ships that fired on it, not whichever hull lies closest.
         const attackers = new Set();
         for (const inst of instances) for (const b of inst.damageState?.attackers ?? []) attackers.add(b);
-        const hasFriendlyIndigenousBattery = batteries.some((b) => b.building?.indigenous || b.building?.friendlyToPlayer);
         cooldown -= dt;
-        if (cooldown <= 0 && (portAttacked || hasFriendlyIndigenousBattery)) {
+        if (cooldown <= 0 && portAttacked) {
           const vessels = getVessels() ?? [];
           let nearestBoat = null;
           let nearestDist = Infinity;
@@ -3896,12 +3858,7 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
             const entry = vessels[vIdx];
             const boat = entry?.boat ?? entry;
             if (!boat || boat.damage?.sunk || boat.damage?.surrendered) continue;
-            const isHostileEnemy = entry?.faction === 'enemy' || boat?.faction === 'enemy';
-            if (attackers.size > 0 && !attackers.has(boat) && !hasFriendlyIndigenousBattery) continue;
-            // Allied Indigenous coastal batteries actively defend the harbor against hostile European vessels
-            // without firing on the allied player (vIdx === 0) unless the port was directly bombarded when no enemy is present.
-            if (hasFriendlyIndigenousBattery && !portAttacked && !isHostileEnemy) continue;
-            if (hasFriendlyIndigenousBattery && vIdx === 0 && vessels.some((v) => (v?.faction ?? v?.boat?.faction) === 'enemy')) continue;
+            if (attackers.size > 0 && !attackers.has(boat)) continue;
             for (const b of batteries) {
               const d = Math.hypot((boat.x ?? 0) - (b.building.x ?? 0), (boat.z ?? 0) - (b.building.z ?? 0));
               if (d < nearestDist) {
@@ -4948,7 +4905,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
           if(loc[0]*sideSign<=1.0)continue;
           const d=Math.hypot(loc[0],loc[2]);
           const isRuined=inst.damageState?.state==='ruined';
-          const isFort=inst.prefabId==='stone_sea_bastion'||inst.prefabId==='bastion_trace_fortress'||inst.prefabId==='english_triangular_palisade_fort'||Boolean(inst.gunnery?.guns?.length);
+          const isFort=inst.prefabId==='english_triangular_palisade_fort'||Boolean(inst.gunnery?.guns?.length);
           if(isFort&&!isRuined&&d<bestFortDist){
             bestFortDist=d;bestFortLocal=loc;
           }

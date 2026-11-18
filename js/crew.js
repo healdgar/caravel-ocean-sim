@@ -797,8 +797,6 @@ export const FORTIFICATION_PREFAB_IDS = Object.freeze([
   'city_fort',
   'city_battery',
   'city_watchtower',
-  'stone_sea_bastion',
-  'bastion_trace_fortress',
   'torreon_atalaya_farol',
   'curtain_wall_and_gate',
   'english_triangular_palisade_fort',
@@ -1761,69 +1759,6 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     for (const hand of [-1, 1]) {
       const gateX = gate.x - gate.nx * 3.2 + gate.ux * 2.6 * hand, gateZ = gate.z - gate.nz * 3.2 + gate.uz * 2.6 * hand;
       if (free(gateX, gateZ)) specs.push({ lx: gateX, ly: yDeck, lz: gateZ, routeZ: [gateZ, gateZ], localYaw: Math.atan2(gate.nx, gate.nz), role: 'Guardia de Puerta', stationKind: 'rampart' });
-    }
-  } else if (inst.prefabId === 'stone_sea_bastion') {
-    const yDeck = yTop - 0.85;
-    const yBanquette = yTop - 0.16;
-    const zSea = -hl + wallT + 0.55;
-    const zLand = hl - wallT - 0.55;
-    for (const [gIdx, k] of [-1, 0, 1].entries()) {
-      const lx = k * (hw * 0.48);
-      specs.push({ lx, ly: yBanquette, lz: zSea, routeZ: [zSea, zSea], localYaw: Math.PI, role: 'Artillero', stationKind: 'embrasure', gunIndex: gIdx });
-    }
-    for (const [gIdx, k] of [-0.5, 0.5].entries()) {
-      const lx = k * (hw * 0.50);
-      specs.push({ lx, ly: yBanquette, lz: zLand, routeZ: [zLand, zLand], localYaw: 0, role: 'Artillero', stationKind: 'embrasure', gunIndex: 3 + gIdx });
-    }
-    const zSpan0 = Math.max(-hl + 3.2, -hl * 0.78);
-    const zSpan1 = Math.min(-1.0, -hl * 0.18);
-    const zSpan2 = Math.max(1.0, hl * 0.18);
-    const zSpan3 = Math.min(hl - 3.2, hl * 0.78);
-    for (const sideX of [-1, 1]) {
-      const lx = sideX * Math.max(2.2, hw - wallT - 0.55);
-      specs.push({ lx, ly: yBanquette, lz: (zSpan0 + zSpan1) * 0.5, routeZ: [zSpan0, zSpan1], localYaw: 0, role: 'Centinela de Muralla', stationKind: 'rampart' });
-      specs.push({ lx, ly: yBanquette, lz: (zSpan2 + zSpan3) * 0.5, routeZ: [zSpan2, zSpan3], localYaw: Math.PI, role: 'Alabardero', stationKind: 'rampart' });
-    }
-    // 2 Seaward corner Garita lookouts visible on the flanking sentry turrets
-    for (const sx of [-1, 1]) {
-      const gx = sx * (hw + 0.35);
-      const gz = -(hl + 0.35);
-      specs.push({ lx: gx, ly: yTop - 0.10, lz: gz, routeZ: [gz, gz], localYaw: Math.PI, role: 'Vigía de Garita', stationKind: 'garita' });
-    }
-    const kw = Math.min(6.4, hw * 0.46);
-    specs.push({ lx: -kw - 1.15, ly: yDeck, lz: 0, routeZ: [-1.8, 1.8], localYaw: 0, role: 'Capitán de Presidio', stationKind: 'citadel' });
-  } else if (inst.prefabId === 'bastion_trace_fortress') {
-    const yDeck = yTop - 0.85;
-    const yBanquette = yTop - 0.16;
-    const bOut = 4.2;
-    const zSea = -hl + wallT + 0.55;
-    const zLand = hl - wallT - 0.55;
-    for (const [gIdx, k] of [-1.5, -0.5, 0.5, 1.5].entries()) {
-      const lx = k * (hw * 0.34);
-      specs.push({ lx, ly: yBanquette, lz: zSea, routeZ: [zSea, zSea], localYaw: Math.PI, role: 'Artillero', stationKind: 'embrasure', gunIndex: gIdx });
-    }
-    for (const [gIdx, k] of [-0.5, 0.5].entries()) {
-      const lx = k * (hw * 0.34);
-      specs.push({ lx, ly: yBanquette, lz: zLand, routeZ: [zLand, zLand], localYaw: 0, role: 'Artillero', stationKind: 'embrasure', gunIndex: 4 + gIdx });
-    }
-    // 4 Corner diamond bastions (top surface at yTop + 0.65)
-    const yBastion = yTop + 0.65;
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        const bx = sx * (hw + 0.3);
-        const bz = sz * (hl + 0.3);
-        specs.push({ lx: bx, ly: yBastion, lz: bz, routeZ: [bz - 1.25, bz + 1.25], localYaw: sz < 0 ? Math.PI : 0, role: 'Arcabucero de Baluarte', stationKind: 'bastion' });
-      }
-    }
-    // 2 Seaward ravelin guards (top surface at yTop - 1.3)
-    const yRavelin = yTop - 1.25;
-    const zRavelin = -hl - bOut - 4.5;
-    for (const sx of [-1, 1]) {
-      specs.push({ lx: sx * 2.4, ly: yRavelin, lz: zRavelin, routeZ: [zRavelin - 1.1, zRavelin + 1.1], localYaw: Math.PI, role: 'Guardia de Revellín', stationKind: 'ravelin' });
-    }
-    // 2 Flank rampart sentries patrolling the east and west curtain walls
-    for (const sx of [-1, 1]) {
-      specs.push({ lx: sx * (hw - wallT - 0.55), ly: yBanquette, lz: 0, routeZ: [-hl * 0.55, hl * 0.55], localYaw: sx < 0 ? 0 : Math.PI, role: 'Alabardero', stationKind: 'rampart' });
     }
   } else if (inst.prefabId === 'torreon_atalaya_farol') {
     const rBase = Math.min(hw, hl);

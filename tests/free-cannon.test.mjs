@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {FREE_CANNON_INTERVAL_S,createFreeCannon} from '../js/free-cannon.js';
-import {createBuildingGunDefinitions,createPortGunnery} from '../js/gunnery-control.js';
+import {createPortGunnery} from '../js/gunnery-control.js';
 import {createGunneryState} from '../js/gunnery-state.js';
 import {createNavalBattleGunDefinitions} from '../js/gunnery-models.js';
 import {boatHydrodynamics} from '../js/boat.js';
@@ -31,7 +31,6 @@ test('it is a 24-pounder like any other: same ball, same muzzle velocity, same f
   boat.hydrodynamics=boatHydrodynamics(56,15,30,0,'victory');
   const real=[
     ...createGunneryState(createNavalBattleGunDefinitions(boat)).guns.filter(g=>g.calibre===24),
-    ...createGunneryState(createBuildingGunDefinitions({prefabId:'stone_sea_bastion',width:28,length:34,height:11.5})).guns.filter(g=>g.calibre===24),
   ];
   assert.ok(real.length>10,`${real.length} real 24-pounders to compare`);
   for(const gun of real)for(const key of ['mass','diameter','muzzleSpeed','speedVariation','dispersion','dragCoefficient'])
@@ -54,7 +53,8 @@ test('its balls fly where the camera looks and do real damage',()=>{
 });
 
 test('no fort answers it by firing on a ship, nor on arrival at a port saved battered',()=>{
-  const fort={id:'fort',prefabId:'bastion_trace_fortress',x:0,z:-100,y:2,baseY:2,yaw:0,width:40,depth:40,height:7,damageState:null,magazine:null};
+  // The one fort still a building of its port (a board's works are struck through their pieces, js/city-targets.js).
+  const fort={id:'fort',prefabId:'english_triangular_palisade_fort',x:0,z:-100,y:2,baseY:2,yaw:0,width:40,depth:40,height:6.8,damageState:null,magazine:null};
   const ship={id:'ship',x:150,z:-100,heave:0,length:30,beam:8,heading:0,roll:0,pitch:0};
   const port={center:{x:0,z:0},instances:[fort]};
   const guns=createPortGunnery(port,{getVessels:()=>[ship],getTerrain:()=>({ports:[port]})});

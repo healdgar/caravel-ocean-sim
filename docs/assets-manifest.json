@@ -714,11 +714,6 @@
     "bytes": 794071,
     "sha256": "3b40d600d9e662814604a225e2bff8474727a0711e434a0af80a391d257c44a7"
   },
-  "assets/prefab-continuum/castle-duel.bin.gz": {
-    "url": "assets/prefab-continuum/castle-duel.bin.14b010b6d8ced532.gz",
-    "bytes": 795170,
-    "sha256": "14b010b6d8ced532eae25f86e57ca317d0b51675f9e7bf7f853c795a8779bb73"
-  },
   "assets/prefab-continuum/charleston.bin.gz": {
     "url": "assets/prefab-continuum/charleston.bin.2566d6f473f130ab.gz",
     "bytes": 607746,
@@ -2480,9 +2475,9 @@
     "sha256": "0096740849e6bd4dd7ff04831b2a5b0f0dddb153e814ca3b5ba314f992ed4c37"
   },
   "assets/prefab-continuum/manifest.json": {
-    "url": "assets/prefab-continuum/manifest.220aae5a4fefb4e3.json",
-    "bytes": 102066,
-    "sha256": "220aae5a4fefb4e32e7b2f9046ad2a0c9870c104f668d735129529cff3e90aa2"
+    "url": "assets/prefab-continuum/manifest.5276ecddac2ba4bf.json",
+    "bytes": 101288,
+    "sha256": "5276ecddac2ba4bf8fd92f8f09fa56fabba935158208367dd7630c626442f0dc"
   },
   "assets/world/saba/manifest.json": {
     "url": "assets/world/saba/manifest.2697c31e9c5d8c95.json",

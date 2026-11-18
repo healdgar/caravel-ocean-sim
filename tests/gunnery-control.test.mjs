@@ -166,11 +166,11 @@ test('cannonballs strike 16th-century port buildings and coastal land, recording
  const region=resolveGlobalCoastalRegion({id:'cartagena',name:'Cartagena',latitude:10.423,longitude:-75.548,size:65,biomeSize:64,albedoSize:64});
  const heights=synthesizeCoastalTerrain(region);
  const port=placeCoastalPort(region,heights);
- const bastion=port.instances.find(i=>i.prefabId==='stone_sea_bastion');
+ const bastion=port.instances.find(i=>i.prefabId==='casa_de_contratacion'||i.prefabId==='royal_warehouse');
  const shed=port.instances.find(i=>i.prefabId==='careening_shed')??port.instances.find(i=>i.prefabId==='timber_mole_pier');
  assert.ok(bastion&&shed);
 
- // Building OBB sweep & damage comparison (masonry bastion vs timber structure)
+ // Building OBB sweep & damage comparison (masonry house vs timber structure)
  const bFrom=[bastion.x,bastion.baseY+bastion.height*0.5,bastion.z+40];
  const bTo=[bastion.x,bastion.baseY+bastion.height*0.5,bastion.z-40];
  const bHit=sweepBuildingSegment(bFrom,bTo,0.08,port);
@@ -179,7 +179,7 @@ test('cannonballs strike 16th-century port buildings and coastal land, recording
  const shotEnergy=0.5*14.5*420*420;
  const bastionRep=applyBuildingImpactDamage(bastion,{velocity:[0,0,-420],mass:14.5,energy:shotEnergy});
  const shedRep=applyBuildingImpactDamage(shed,{velocity:[0,0,-420],mass:14.5,energy:shotEnergy});
- assert.ok(bastionRep.integrity>shedRep.integrity,'coral-limestone sea bastion resists roundshot better than timber structure');
+ assert.ok(bastionRep.integrity>shedRep.integrity,'coral-limestone masonry resists roundshot better than timber structure');
 
  // Terrain sweep & crater recording
  const fakeTerrain={
@@ -327,7 +327,7 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  const region=resolveGlobalCoastalRegion({id:'cartagena',name:'Cartagena',latitude:10.423,longitude:-75.548,size:65,biomeSize:64,albedoSize:64});
  const heights=synthesizeCoastalTerrain(region);
  const port=placeCoastalPort(region,heights);
- const bastion=port.instances.find(i=>i.prefabId==='stone_sea_bastion')??port.instances[0];
+ const bastion=port.instances.find(i=>i.prefabId==='casa_de_contratacion')??port.instances[0];
  const samplePalms=new Float32Array([
   bastion.x+28,2.2,bastion.z+12,3.4,9.5,0.4,0.02,-0.02,
   bastion.x+36,2.5,bastion.z+18,3.2,8.8,0.6,0.01,-0.01,
@@ -583,9 +583,10 @@ test('impact with shoals, reef, stone, and sand models substrate-scaled hull dam
 test('town fortifications (bastion, star fortress, watchtower, curtain wall & gate) are staffed with garrison soldiers who patrol ramparts and man embrasures',()=>{
  const pack=generateProceduralCoastalPack('cartagena',{size:65,biomeSize:64,albedoSize:64,vegetationCandidates:120});
  const pg=createPortGunnery(pack.port);
- assert.ok(pg.garrison&&pg.soldiers.length>=36,`expected at least 36 fortification soldiers, got ${pg.soldiers.length}`);
+ // The port's own towers and walls; its forts are its board's works (js/fort-plan.js portWorkBuildings).
+ assert.ok(pg.garrison&&pg.soldiers.length>=8,`expected at least 8 fortification soldiers, got ${pg.soldiers.length}`);
  const byPrefab=new Set(pg.soldiers.map(s=>s.buildingPrefabId));
- for(const prefabId of ['stone_sea_bastion','bastion_trace_fortress','torreon_atalaya_farol','curtain_wall_and_gate']){
+ for(const prefabId of ['torreon_atalaya_farol','curtain_wall_and_gate']){
   assert.ok(byPrefab.has(prefabId),`expected garrison soldiers on ${prefabId}`);
   const unit=pg.soldiers.filter(s=>s.buildingPrefabId===prefabId);
   assert.ok(unit.length>=4,`${prefabId} has ${unit.length} soldiers`);
@@ -1275,29 +1276,3 @@ test('the bed stops a sinking ship: a harbour wreck rests on it, a stranded one 
  assert.ok(sink(null).damage.sinkingDepth>=21,'and so does a sea with no chart under it');
 });
 
-test('every gun of an untraced fort looks out through an opening in its parapet, never through a merlon',()=>{
- // The catalog fortress is 42 m long: eight bays to a side wall, so the middle of that wall is a merlon.
- for(const prefabId of ['bastion_trace_fortress','stone_sea_bastion'])for(const size of [null,{length:30,width:26},{length:37,width:33},{length:47,width:41},{length:56,width:52}]){
-  const parts=size?getBuildingParts(prefabId,size):getBuildingParts(prefabId),{length,width,height}=parts.dimensions;
-  const merlons=parts.partAssembly.parts.filter(part=>part.partKey==='parapet_merlons').map(part=>part.bounds);
-  assert.ok(merlons.length>=8,`${prefabId} has a crenellated parapet (${merlons.length} merlons)`);
-  const guns=createBuildingGunDefinitions({prefabId,width,length,height});
-  assert.ok(guns.length>=5);
-  if(prefabId==='bastion_trace_fortress')assert.equal(guns.filter(gun=>gun.directionDesign[0]!==0).length,2,'a flank gun to either side');
-  for(const gun of guns){
-   // Her bore, from the breech to two metres beyond the wall: the slab test against each merlon's box.
-   const from=gun.breechDesign,dir=gun.directionDesign,reach=4;
-   const fouled=merlons.find(box=>{
-    let near=0,far=reach;
-    for(let axis=0;axis<3;axis++){
-     const lo=box.min[axis]-.12,hi=box.max[axis]+.12;
-     if(Math.abs(dir[axis])<1e-9){if(from[axis]<lo||from[axis]>hi)return false;continue;}
-     const a=(lo-from[axis])/dir[axis],b=(hi-from[axis])/dir[axis];
-     near=Math.max(near,Math.min(a,b));far=Math.min(far,Math.max(a,b));
-    }
-    return near<=far;
-   });
-   assert.equal(fouled,undefined,`${prefabId} ${width}x${length}: the gun at ${gun.localPosition.map(v=>v.toFixed(2))} firing ${dir} is behind the merlon ${JSON.stringify(fouled)}`);
-  }
- }
-});

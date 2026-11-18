@@ -1397,17 +1397,6 @@ export const PORT_PREFABS = Object.freeze({
     roofPitch: 0,
     waterfront: true,
   }),
-  stone_sea_bastion: Object.freeze({
-    id: 'stone_sea_bastion',
-    label: '16th-Century Stone Sea Bastion (Baluarte)',
-    length: 34,
-    width: 28,
-    height: 11.5,
-    foundationDepth: 6.0,
-    materialKind: 11,
-    roofPitch: 0,
-    waterfront: true,
-  }),
   casa_de_contratacion: Object.freeze({
     id: 'casa_de_contratacion',
     label: 'Casa de la Contratación (Royal Customhouse)',
@@ -1539,17 +1528,6 @@ export const PORT_PREFABS = Object.freeze({
     materialKind: 12,
     roofPitch: 1.9,
     waterfront: false,
-  }),
-  bastion_trace_fortress: Object.freeze({
-    id: 'bastion_trace_fortress',
-    label: 'Fuerte Abaluartado con Foso y Polvorín (Bastioned Star Fort)',
-    length: 42,
-    width: 38,
-    height: 9.8,
-    foundationDepth: 6.5,
-    materialKind: 11,
-    roofPitch: 0,
-    waterfront: true,
   }),
   torreon_atalaya_farol: Object.freeze({
     id: 'torreon_atalaya_farol',
@@ -1790,7 +1768,6 @@ const PREFAB_SITE_NEEDS = Object.freeze({
   indigenous_canoe_landing: 'beach',
   palafito_estuary_village: 'shore',
   // Sea defences may overhang the water, but their middle and most of their floor are on land.
-  stone_sea_bastion: 'waterline',
   torreon_atalaya_farol: 'waterline',
   timber_mole_pier: 'pier',
   stone_arch_bridge: 'bridge',
@@ -1909,8 +1886,6 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
         );
       const centerGroundY = sampleLocal(0, 0);
       const isFort =
-        inst.prefabId === 'stone_sea_bastion' ||
-        inst.prefabId === 'bastion_trace_fortress' ||
         inst.prefabId === 'torreon_atalaya_farol' ||
         inst.prefabId === 'curtain_wall_and_gate' ||
         inst.prefabId === 'english_triangular_palisade_fort';
@@ -1985,8 +1960,6 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
       );
     const hCenter = sampleLocal(0, 0);
     const isFort =
-      inst.prefabId === 'stone_sea_bastion' ||
-      inst.prefabId === 'bastion_trace_fortress' ||
       inst.prefabId === 'torreon_atalaya_farol' ||
       inst.prefabId === 'curtain_wall_and_gate' ||
       inst.prefabId === 'english_triangular_palisade_fort';
@@ -3639,7 +3612,6 @@ export function validateOrthophotoScale1550(regionSpec, satelliteData = null, pr
 
   if (Array.isArray(pre?.footprints) && pre.footprints.length >= 3) {
     const widths = pre.footprints
-      .filter((fp) => fp.prefabId !== 'stone_sea_bastion')
       .map((fp) => Number(fp.width) || 20)
       .sort((a, b) => a - b);
     const allWidths = (widths.length >= 2 ? widths : pre.footprints.map((fp) => Number(fp.width) || 20)).sort(
@@ -4908,7 +4880,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       const rClass = fp.roofClass ?? 1;
       const holeR = fp.holeRatio ?? (fp.width >= 21 && aspect <= 1.55 ? 0.38 : 0.08);
       const fillR = fp.fillRatio ?? 0.78;
-      let prefabId = fp.prefabId || null;
+      // A footprint naming a prefab the ports have not is classified by its shape like any other.
+      let prefabId = PORT_PREFABS[fp.prefabId] ? fp.prefabId : null;
 
       if (!prefabId || (fps.length > 4 && prefabId === 'colonial_town_block')) {
         if (!fp.prefabId && i === bastionIdx) {
@@ -4947,9 +4920,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       }
 
       const prefab = PORT_PREFABS[prefabId] || PORT_PREFABS.colonial_town_block;
-      const isFort = prefabId === 'stone_sea_bastion' || prefabId === 'bastion_trace_fortress';
-      const maxW = isFort ? 44 : prefabId === 'mission_chapel' ? 28 : 38;
-      const maxL = isFort ? 48 : prefabId === 'mission_chapel' ? 42 : 44;
+      const maxW = prefabId === 'mission_chapel' ? 28 : 38;
+      const maxL = prefabId === 'mission_chapel' ? 42 : 44;
       const minW = prefabId === 'curtain_wall_and_gate' || prefabId === 'stone_arch_bridge' ? 6.0 : 7.5;
       const scaleW = Math.min(maxW, Math.max(minW, fp.width));
       const scaleL = Math.min(maxL, Math.max(10, fp.length));
@@ -4959,11 +4931,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       const trueHeight =
         prefabId === 'mission_chapel' || prefabId === 'torreon_atalaya_farol'
           ? 10.2
-          : isFort
-            ? 9.8
-            : prefabId === 'casa_de_contratacion' || prefabId === 'royal_atarazanas_arsenal'
-              ? 9.4
-              : 7.8 + heightVar;
+          : prefabId === 'casa_de_contratacion' || prefabId === 'royal_atarazanas_arsenal'
+            ? 9.4
+            : 7.8 + heightVar;
       const truePitch =
         prefabId === 'mission_chapel'
           ? 3.2
@@ -4971,9 +4941,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
             ? 3.0
             : prefabId === 'casa_de_contratacion'
               ? 2.8
-              : isFort
-                ? 2.2
-                : 2.4;
+              : 2.4;
 
       const groundY = terrainSurfaceSample(heights, fp.x, fp.z, region);
       const y = Math.max(2.2, groundY);
@@ -5377,20 +5345,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
           indigenous: true,
           friendlyToPlayer: true,
           cultureId: indigenousSettlement.cultureId,
-        });
-      }
-      // Fortified Federation / Sovereign Indigenous Polity: add captured coastal earthwork & timber artillery battery
-      // manned by Native American artillerists, plus a Sovereign Trade Wharf when proclaimed sovereign!
-      if (indigenousSettlement.fortified || indigenousSettlement.isSovereignPolity) {
-        addPrefab('stone_sea_bastion', 92, 8, -14, 3.4, {
-          label: `${indigenousSettlement.shortName || indigenousSettlement.cultureName} Sovereign Coastal Artillery Redoubt`,
-          indigenous: true,
-          friendlyToPlayer: true,
-          cultureId: indigenousSettlement.cultureId,
-          materialKind: 10,
-          width: 24,
-          length: 28,
-          height: 7.8,
         });
       }
       if (indigenousSettlement.isSovereignPolity) {
@@ -6752,143 +6706,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         if (stairPositions.some((sx) => Math.abs(bx - sx) < 2.8)) continue;
         emitCylinder(toWorld, bx, -hl + 0.52, quayDeckY, quayDeckY + 0.64, 0.24, 0.20, 8, 11, 0.76, true);
         emitTripoDockCleat(pushTri, toWorld, bx, quayDeckY + 0.64, -hl + 0.52, 0.72, 0);
-      }
-    } else if (inst.prefabId === 'stone_sea_bastion' || inst.prefabId === 'bastion_trace_fortress') {
-      // 16th-Century Spanish Bastion & Star-Bastioned Trace-Italienne Fortress (Baluarte / Fuerte Abaluartado con Foso y Polvorín):
-      // Battered ashlar/coquina scarp walls + projecting diamond corner bastions (on bastion_trace_fortress) + iterated cannon embrasures
-      // + 4 corbeled domed sentry garitas + packed-earth terreplein + internal bay-iterated barracks & circular domed polvorín
-      const isStarFort = inst.prefabId === 'bastion_trace_fortress';
-      const yCordon = yTop - 1.5;
-      beginSection('foundation_scarp_walls');
-      emitBox(toWorld, -hw - 1.6, hw + 1.6, yBase, yCordon, -hl - 1.6, hl + 1.6, 11, 0.84, false, 1.6);
-      beginSection('scarp_cordon_cornice');
-      emitBox(toWorld, -hw - 0.42, hw + 0.42, yCordon, yCordon + 0.46, -hl - 0.42, hl + 0.42, 11, 0.93, true);
-      // Packed-earth / cobble terreplein gun deck (kind 16)
-      beginSection('terreplein_gun_deck');
-      emitBox(toWorld, -hw, hw, yCordon + 0.46, yTop - 0.85, -hl, hl, 16, 0.82);
-
-      // If star-bastioned trace fort (St. Augustine / San Juan de Ulúa), emit 4 projecting corner bastions & seaward V-ravelin
-      const bOut = isStarFort ? 4.2 : 0.0;
-      if (isStarFort) {
-        for (const sx of [-1, 1]) {
-          for (const sz of [-1, 1]) {
-            beginSection('corner_bastion');
-            const bx0 = sx < 0 ? -hw - bOut : hw - 3.6;
-            const bx1 = sx < 0 ? -hw + 3.6 : hw + bOut;
-            const bz0 = sz < 0 ? -hl - bOut : hl - 3.6;
-            const bz1 = sz < 0 ? -hl + 3.6 : hl + bOut;
-            emitBox(toWorld, bx0 - 0.9, bx1 + 0.9, yBase, yCordon, bz0 - 0.9, bz1 + 0.9, 11, 0.83, false, 0.95);
-            emitBox(toWorld, bx0 - 0.25, bx1 + 0.25, yCordon, yCordon + 0.44, bz0 - 0.25, bz1 + 0.25, 11, 0.92, true);
-            emitBox(toWorld, bx0, bx1, yCordon + 0.44, yTop + 0.65, bz0, bz1, 11, 0.86);
-            emitBox(toWorld, bx0 + 1.1, bx1 - 1.1, yCordon + 0.48, yTop - 0.35, bz0 + 1.1, bz1 - 1.1, 16, 0.80);
-          }
-        }
-        // Detached V-shaped seaward ravelin (revellín) + timber drawbridge spanning the moat
-        beginSection('seaward_ravelin_and_drawbridge');
-        const rZ0 = -hl - bOut - 7.8, rZ1 = -hl - bOut - 1.8;
-        emitBox(toWorld, -6.5, 6.5, yBase, yCordon - 1.2, rZ0, rZ1, 11, 0.82, false, 0.8);
-        emitBox(toWorld, -5.6, 5.6, yCordon - 1.2, yCordon + 0.2, rZ0 + 0.5, rZ1, 11, 0.88);
-        emitBox(toWorld, -1.6, 1.6, yCordon - 0.6, yCordon - 0.15, rZ1, -hl, 10, 0.76, true);
-      }
-
-      // Perimeter crenellated parapet walls iterating 4.6m cannon embrasure bays along X and Z
-      const wallT = 1.75;
-      const merlonY = yTop + 0.92;
-      const nBaysX = snapBays(inst.width - 3.2, 4.6, 3);
-      const baySpanX = (inst.width - 3.2) / nBaysX;
-      const merlonHalfX = Math.max(0.6, Math.min(1.35, baySpanX * 0.5 - 0.72));
-      for (const sideZ of [-1, 1]) {
-        const zOut = sideZ < 0 ? -hl : hl - wallT;
-        const zIn = sideZ < 0 ? -hl + wallT : hl;
-        beginSection('parapet_wall');
-        emitBox(toWorld, -hw, hw, yTop - 0.85, yTop, zOut, zIn, 11, 0.86);
-        // Interior firing banquette step along the rampart walk so cannons and gunners stand above the parapet
-        const bZ0 = sideZ < 0 ? zIn : zOut - 1.35;
-        const bZ1 = sideZ < 0 ? zIn + 1.35 : zOut;
-        emitBox(toWorld, -hw + wallT, hw - wallT, yTop - 0.85, yTop - 0.15, bZ0, bZ1, 11, 0.82);
-        for (let m = 0; m <= nBaysX; m++) {
-          const mx = -hw + 1.6 + m * baySpanX;
-          beginSection('parapet_merlons');
-          emitBox(toWorld, mx - merlonHalfX, mx + merlonHalfX, yTop, merlonY, zOut, zIn, 11, 0.90, false, 0.12);
-          if (m < nBaysX) {
-            const ex = mx + baySpanX * 0.5;
-            const cZ = sideZ < 0 ? zIn + 0.42 : zOut - 0.42;
-            beginSection('parapet_wall');
-            // Beveled stone embrasure sill apron between parapet merlons
-            emitBox(toWorld, ex - 0.62, ex + 0.62, yTop - 0.08, yTop + 0.08, zOut + 0.06, zIn - 0.06, 11, 0.84, true);
-            // Lathe-turned cast-iron 24-pounder fortress cannon on stepped oak garrison carriage
-            emitFortCannon(toWorld, ex, yTop - 0.15, cZ, 0, sideZ, 1.0);
-          }
-        }
-      }
-      const nBaysZ = snapBays(inst.length - 3.2, 4.8, 3);
-      const baySpanZ = (inst.length - 3.2) / nBaysZ;
-      const merlonHalfZ = Math.max(0.6, Math.min(1.45, baySpanZ * 0.5 - 0.72));
-      for (const sideX of [-1, 1]) {
-        const xOut = sideX < 0 ? -hw : hw - wallT;
-        const xIn = sideX < 0 ? -hw + wallT : hw;
-        beginSection('parapet_wall');
-        emitBox(toWorld, xOut, xIn, yTop - 0.85, yTop, -hl + wallT, hl - wallT, 11, 0.84);
-        const bX0 = sideX < 0 ? xIn : xOut - 1.35;
-        const bX1 = sideX < 0 ? xIn + 1.35 : xOut;
-        emitBox(toWorld, bX0, bX1, yTop - 0.85, yTop - 0.15, -hl + wallT + 1.35, hl - wallT - 1.35, 11, 0.82);
-        for (let m = 0; m <= nBaysZ; m++) {
-          const mz = -hl + 1.6 + m * baySpanZ;
-          beginSection('parapet_merlons');
-          emitBox(toWorld, xOut, xIn, yTop, merlonY, mz - merlonHalfZ, mz + merlonHalfZ, 11, 0.88, false, 0.12);
-          if (m < nBaysZ) {
-            const ez = mz + baySpanZ * 0.5;
-            const cX = sideX < 0 ? xIn + 0.42 : xOut - 0.42;
-            beginSection('parapet_wall');
-            emitBox(toWorld, xOut + 0.06, xIn - 0.06, yTop - 0.08, yTop + 0.08, ez - 0.62, ez + 0.62, 11, 0.84, true);
-            emitFortCannon(toWorld, cX, yTop - 0.15, ez, sideX, 0, 0.94);
-          }
-        }
-      }
-      // 4 Corner Cylindrical Bartizan Sentry Turrets (Garitas) with inverted-cone corbels & stone cupolas
-      for (const sx of [-1, 1]) {
-        for (const sz of [-1, 1]) {
-          beginSection('sentry_garita');
-          const gx = sx * (hw + bOut + 0.35), gz = sz * (hl + bOut + 0.35);
-          emitCylinder(toWorld, gx, gz, yCordon - 1.4, yCordon + 0.35, 0.35, 1.48, 8, 11, 0.78, false);
-          emitCylinder(toWorld, gx, gz, yCordon + 0.35, yCordon + 0.65, 1.58, 1.58, 8, 11, 0.92, true);
-          emitCylinder(toWorld, gx, gz, yCordon + 0.65, merlonY + 1.65, 1.38, 1.38, 8, 11, 0.90, true);
-          emitBox(toWorld, gx - 1.44, gx + 1.44, yCordon + 1.35, merlonY + 1.05, gz - 0.22, gz + 0.22, 14, 0.20);
-          emitBox(toWorld, gx - 0.22, gx + 0.22, yCordon + 1.35, merlonY + 1.05, gz - 1.44, gz + 1.44, 14, 0.20);
-          emitCylinder(toWorld, gx, gz, merlonY + 1.65, merlonY + 1.88, 1.52, 1.52, 8, 11, 0.94, true);
-          emitCylinder(toWorld, gx, gz, merlonY + 1.88, merlonY + 2.75, 1.42, 0.72, 8, 11, 0.95, false);
-          emitCylinder(toWorld, gx, gz, merlonY + 2.75, merlonY + 3.25, 0.72, 0.14, 8, 11, 0.97, true);
-        }
-      }
-      if (isStarFort) {
-        // Star fort interior: 2 narrow single-nave tiled barracks along the flanks + circular domed stone Polvorín (Portobelo / St. Augustine)
-        const barW = 4.8;
-        const barL = Math.max(10.0, (hl - wallT - 2.6) * 1.4);
-        const yBarEave = yTop + 3.2;
-        const yBarPeak = yBarEave + roofRise(barW);
-        for (const sideX of [-1, 1]) {
-          const bx0 = sideX < 0 ? -hw + wallT + 1.2 : hw - wallT - 1.2 - barW;
-          const bx1 = bx0 + barW;
-          beginSection('interior_barracks');
-          emitBox(toWorld, bx0, bx1, yTop - 0.85, yBarEave, -barL * 0.5, barL * 0.5, 12, 0.90);
-          emitRoof(toWorld, bx0, bx1, yBarEave, yBarPeak, -barL * 0.5, barL * 0.5, 0.52, 0.22, 12);
-        }
-        // Circular domed stone powder magazine (Polvorín) in the rear corner of the parade
-        const pR = Math.min(4.2, hw * 0.24);
-        const pZ = hl * 0.32;
-        beginSection('polvorin_magazine');
-        emitCylinder(toWorld, 0, pZ, yTop - 0.85, yTop + 3.0, pR + 0.25, pR, 10, 11, 0.88, true);
-        beginSection('polvorin_dome');
-        emitCylinder(toWorld, 0, pZ, yTop + 3.0, yTop + 4.8, pR + 0.15, pR * 0.46, 10, 11, 0.93, false);
-        emitCylinder(toWorld, 0, pZ, yTop + 4.8, yTop + 5.6, pR * 0.46, 0.18, 10, 11, 0.96, true);
-      } else {
-        // Headland Sea Bastion interior command keep / Gobernador's citadel with constant-pitch roof
-        const kw = Math.min(6.4, hw * 0.46), kl = Math.min(8.5, hl * 0.48), yKeep = merlonY + 4.2;
-        beginSection('citadel_keep');
-        emitBox(toWorld, -kw - 0.35, kw + 0.35, yTop - 0.85, yTop + 0.65, -kl - 0.35, kl + 0.35, 11, 0.84);
-        emitBox(toWorld, -kw, kw, yTop + 0.65, yKeep, -kl, kl, 12, 0.91);
-        emitStoneArchZ(toWorld, -kw, -1, yTop + 0.65, yTop + 2.4, 1.15, 0, 6);
-        emitRoof(toWorld, -kw, kw, yKeep, yKeep + roofRise(kw * 2), -kl, kl, 0.72, 0.26, 12);
       }
     } else if (inst.prefabId === 'casa_de_contratacion') {
       // Royal Customhouse (Casa de la Contratación): Bay-iterated radial stone voussoir waterfront loggia + 2nd-story cantilevered balcony

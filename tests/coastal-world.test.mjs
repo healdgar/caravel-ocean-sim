@@ -224,8 +224,8 @@ test('16th-century port prefabs place grounded waterfront piers, sea bastions an
   for (const required of ['timber_mole_pier', 'casa_de_contratacion', 'royal_warehouse', 'mission_chapel']) {
     assert.ok(prefabIds.has(required), `port includes ${required}`);
   }
-  // Which forts is Santo Domingo's record to say. It has at least one.
-  assert.ok(prefabIds.has('stone_sea_bastion') || prefabIds.has('bastion_trace_fortress'), 'port includes a fort');
+  // Its forts are its board's works (js/old-world-board.js), not prefabs of the port.
+  assert.ok(![...prefabIds].some((id) => /bastion|fortress/.test(id)), 'no prefab fort stands in the port');
 
   // Pier center blocks hull clearance, while open berth clears hull envelope
   const pier = port.instances.find((i) => i.prefabId === 'timber_mole_pier');
@@ -494,7 +494,7 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   const raw = fs.readFileSync(new URL('../assets/ports/1550/buildings-1550-lrm.bin', import.meta.url));
   const templates = decode1550BuildingLRMBundle(raw);
   assert.ok(templates, 'Expected WW3D bundle to decode');
-  for (const id of ['stone_sea_bastion', 'casa_de_contratacion', 'mission_chapel', 'colonial_town_block']) {
+  for (const id of ['casa_de_contratacion', 'mission_chapel', 'colonial_town_block']) {
     assert.ok(templates[id], `Missing LRM template ${id}`);
     assert.ok(templates[id].vertexCount >= 6000, `Expected >=6,000 unshared flat-normal vertices for high-detail ${id}, got ${templates[id].vertexCount}`);
     assert.ok(templates[id].indexCount >= 6000, `Expected >=2,000 plumb-rectified triangles for high-detail ${id}, got ${templates[id].indexCount}`);
@@ -510,7 +510,7 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   packWithFootprints.territory1550.clusterU = 0.42;
   packWithFootprints.territory1550.clusterV = 0.48;
   packWithFootprints.territory1550.footprints = [
-    { u: 0.41, v: 0.44, width: 128, length: 144, yaw: -0.22, prefabId: 'stone_sea_bastion', inlandM: 48 },
+    { u: 0.41, v: 0.44, width: 128, length: 144, yaw: -0.22, prefabId: 'royal_warehouse', inlandM: 48 },
     { u: 0.38, v: 0.50, width: 96, length: 120, yaw: -0.22, prefabId: 'casa_de_contratacion', inlandM: 88 },
     { u: 0.35, v: 0.47, width: 64, length: 112, yaw: -0.22, prefabId: 'mission_chapel', inlandM: 104 },
     { u: 0.40, v: 0.52, width: 84, length: 96, yaw: -0.22, prefabId: 'colonial_town_block', inlandM: 112 },
@@ -521,9 +521,9 @@ test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle a
   assert.ok(appliedFp.region.span >= 1350 && appliedFp.region.span <= 2300, `Expected AI 1550 orthophoto scale validation to adjust span into 1350..2300m, got ${appliedFp.region.span}`);
   const orthoInstances = appliedFp.port.instances.filter((inst) => inst.fromOrthophotoFootprint);
   assert.equal(orthoInstances.length, 4, `Expected 1:1 single building per footprint rectangle (zero pellet subdivision), got ${orthoInstances.length}`);
-  const bastionInst = orthoInstances.find((inst) => inst.prefabId === 'stone_sea_bastion');
-  assert.ok(bastionInst, 'Expected stone_sea_bastion placed from top-down footprint');
-  assert.equal(bastionInst.yaw, -0.22, 'Footprint yaw must match top-down map orientation');
+  const warehouseInst = orthoInstances.find((inst) => inst.prefabId === 'royal_warehouse');
+  assert.ok(warehouseInst, 'Expected royal_warehouse placed from top-down footprint');
+  assert.equal(warehouseInst.yaw, -0.22, 'Footprint yaw must match top-down map orientation');
   for (const inst of orthoInstances) {
     assert.ok(inst.height >= 7.5 && inst.height <= 11.0, `Expected true human/tree scale eave height (7.5m–11.0m vs 18m–22m trees), got ${inst.height} for ${inst.prefabId}`);
     assert.ok(inst.width <= 44 && inst.length <= 48, `Expected individual building footprint <=44m×48m, got ${inst.width}×${inst.length} for ${inst.prefabId}`);
@@ -543,7 +543,6 @@ test('bay-iterated 1550 port primitives iterate horizontal bays without stretchi
     'royal_atarazanas_arsenal',
     'open_lonja_loggia',
     'walled_mule_corral',
-    'bastion_trace_fortress',
     'torreon_atalaya_farol',
     'curtain_wall_and_gate',
     'stone_arch_bridge',
@@ -1379,15 +1378,9 @@ test('rogue liberator path strengthens Native American settlements through trade
     });
     assert.equal(sovPack.port.sovereignPolity, true);
     assert.equal(sovPack.port.stage, 'sovereign-polity');
-    assert.ok(sovPack.port.indigenousInstanceCount >= 12, 'Sovereign Indigenous Polity places expanded village + coastal artillery redoubt');
-    const redoubt = sovPack.port.instances.find(i => i.prefabId === 'stone_sea_bastion' && i.indigenous === true);
-    assert.ok(redoubt, 'Expected Sovereign Coastal Artillery Redoubt placed on harbor headland');
-    assert.equal(redoubt.friendlyToPlayer, true);
-
-    const sovGarrison = createFortGarrison(sovPack.port);
-    const artillerists = sovGarrison.soldiers.filter(s => s.buildingPrefabId === 'stone_sea_bastion');
-    assert.ok(artillerists.length >= 6, 'Sovereign coastal battery is manned by Native American artillerists');
-    assert.ok(artillerists.every(s => s.indigenous === true && (s.modelVariant === 'indigenous-male' || s.modelVariant === 'indigenous-female')));
+    assert.ok(sovPack.port.indigenousInstanceCount >= 11, 'Sovereign Indigenous Polity places an expanded village');
+    // Its works are the board's to found in its own manner: no prefab fort stands in for them.
+    assert.equal(sovPack.port.instances.some(i => i.indigenous === true && /bastion|fortress/.test(i.prefabId)), false);
 
     // 5. Verify Taíno Cacicazgo in Greater Antilles persists in 1550 when strengthened via quarantine & trade
     applyIndigenousSupportAction('taino-greater-antilles', 'share-medicine', sovState);
@@ -1630,8 +1623,6 @@ test('Jamestown (1610 & 1650) and Plymouth generate triangular timber palisade f
     'mission_chapel',
     'modular_patio_cloister',
     'thatched_bohio_palafito',
-    'stone_sea_bastion',
-    'bastion_trace_fortress',
   ]) {
     assert.equal(
       prefabs1610.has(spanishId),
@@ -1841,14 +1832,11 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
     vegetationCandidates: 300,
   });
   const garrison = createFortGarrison(cartagena.port);
-  const bastion = cartagena.port.instances.find((i) => i.prefabId === 'stone_sea_bastion');
-  const bastionSoldiers = garrison.soldiers.filter((s) => s.building === bastion);
-  assert.ok(bastionSoldiers.length >= 6, 'Stone sea bastion spawns >= 6 visible soldiers');
-  const yTop = bastion.y + bastion.height;
-  assert.ok(
-    bastionSoldiers.some((s) => s.baseLy >= yTop - 0.20),
-    'Bastion gunners and sentries stand raised on firing banquettes so heads/torsos clear the parapet'
-  );
+  const tower = cartagena.port.instances.find((i) => i.prefabId === 'torreon_atalaya_farol');
+  if (tower) {
+    const towerSoldiers = garrison.soldiers.filter((s) => s.building === tower);
+    assert.ok(towerSoldiers.length >= 1, 'the watchtower is manned');
+  }
   // Step garrison forward until patrol wait expires and verify smooth turning and walk distance progression
   for (const s of garrison.soldiers) s.wait = 0;
   stepFortGarrison(garrison, 0.05);
@@ -1966,7 +1954,7 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
   // 3. Verify fort prefabs emit multi-faceted lathe-turned cast-iron cannons (kind 18) with smooth radial normals and dark hollow bores
   assert.ok(TERRAIN.includes('let bareIron=clamp('), 'landOpaque shades kind 18 as dark sand-cast ordnance iron');
   assert.ok(TERRAIN.includes('let isMetal=wet<-0.01;'), 'landFinish applies conductor Fresnel reflectance for cast-iron ordnance');
-  for (const fortPrefab of ['stone_sea_bastion', 'bastion_trace_fortress', 'english_triangular_palisade_fort', 'torre_de_belem_manuelina']) {
+  for (const fortPrefab of ['english_triangular_palisade_fort', 'torre_de_belem_manuelina']) {
     const geom = getBuildingParts(fortPrefab);
     const v = geom.vertices;
     const idx = geom.indices;

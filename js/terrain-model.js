@@ -168,7 +168,7 @@ export function classifyGroundingSubstrate(arg0, arg1, arg2 = {}, arg3 = null, a
   }
   if (hitStructure) {
     const pid = hitStructure.prefabId ?? '';
-    if (pid === 'stone_sea_bastion' || pid === 'bastion_trace_fortress' || pid === 'stone_quay_seawall') {
+    if (pid === 'stone_quay_seawall') {
       return GROUNDING_SUBSTRATES.stone;
     }
     return GROUNDING_SUBSTRATES.shoal;
@@ -196,7 +196,7 @@ export function classifyGroundingSubstrate(arg0, arg1, arg2 = {}, arg3 = null, a
         const lz = dx * sinY + dz * cosY;
         if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) {
           const pid = inst.prefabId ?? '';
-          if (pid === 'stone_sea_bastion' || pid === 'bastion_trace_fortress' || pid === 'stone_quay_seawall') {
+          if (pid === 'stone_quay_seawall') {
             return GROUNDING_SUBSTRATES.stone;
           }
           return GROUNDING_SUBSTRATES.shoal;

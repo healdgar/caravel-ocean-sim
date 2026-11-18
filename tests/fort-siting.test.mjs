@@ -5,7 +5,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-import {HISTORICAL_COLONIAL_PORTS,buildPortPrefabGeometry,generateProceduralCoastalPack,getBuildingParts,placeCoastalPort,resolveGlobalCoastalRegion,smoothCoastlineAndForeshoreBeaches,synthesizeCoastalTerrain} from '../js/coastal-world.js';
+import {HISTORICAL_COLONIAL_PORTS,buildPortPrefabGeometry,generateProceduralCoastalPack,placeCoastalPort,resolveGlobalCoastalRegion,smoothCoastlineAndForeshoreBeaches,synthesizeCoastalTerrain} from '../js/coastal-world.js';
 import {FORT_RECORDS,fortRecordsFor} from '../js/fort-records.js';
 import {depthInOutline,enclosurePlan,fortLocalToWorld,traceWalls,triangularFortPlan,squareFortPlan} from '../js/fort-plan.js';
 import {buildingGunBears,buildingGunMuzzlePose,classifyBuildingMaterial,createBuildingGunDefinitions,createBuildingGunnery,sweepBuildingSegment} from '../js/gunnery-control.js';
@@ -17,7 +17,8 @@ import {readHarbourGeography} from '../js/harbour-geography.js';
 import {applyBuildingImpactDamage} from '../js/gunnery-control.js';
 import {terrainSurfaceSample} from '../js/terrain-model.js';
 
-const FORT_PREFABS=new Set(['bastion_trace_fortress','stone_sea_bastion','english_triangular_palisade_fort']);
+// The one fort still a prefab of its port: James Fort's palisade. Every other is a work of its board.
+const FORT_PREFABS=new Set(['english_triangular_palisade_fort']);
 const fixtures=new URL('./data/harbours/',import.meta.url);
 function coastOf(id){
   const all=zlib.gunzipSync(fs.readFileSync(new URL(`${id}.bin.gz`,fixtures))),length=all.readUInt32LE(0),header=JSON.parse(all.subarray(4,4+length).toString());
@@ -97,7 +98,7 @@ test('a sovereign Indigenous town keeps its own works, and a palisade town gets 
   for(const inst of pack.port.instances){
     assert.equal(inst.trace,undefined,`${inst.prefabId} was not drawn as a European trace`);
     if(!inst.indigenous)continue;
-    assert.ok(!['bastion_trace_fortress','english_triangular_palisade_fort'].includes(inst.prefabId));
+    assert.ok(inst.prefabId!=='english_triangular_palisade_fort');
   }
   assert.equal(pack.port.harbour,null,'and no one reads its harbour for forts');
 });
@@ -148,7 +149,6 @@ test('the record has what the game needs: every fort a place, a job and a date',
     }
   }
   assert.ok(Object.keys(FORT_RECORDS).length>=40);
-  assert.ok(getBuildingParts('bastion_trace_fortress').vertexCount>1000,'the catalog fort still builds with no trace');
 });
 
 // The forts, batteries and watchtowers of a coast are its board's: the bake gathers what the record stands on its

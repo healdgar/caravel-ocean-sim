@@ -10,14 +10,14 @@
   "deferSynthesis": false
  },
  "totals": {
-  "ports": 45,
-  "prefabs": 387,
-  "bodies": 345,
-  "sourceTriangles": 908573,
-  "bytes": 93755316,
-  "gzipBytes": 35577195,
-  "bakeSeconds": 1760.2,
-  "threads": 14
+  "ports": 44,
+  "prefabs": 385,
+  "bodies": 343,
+  "sourceTriangles": 862385,
+  "bytes": 91416416,
+  "gzipBytes": 34782025,
+  "bakeSeconds": 1719.1,
+  "threads": 1
  },
  "ports": {
   "saba": {
@@ -3627,35 +3627,7 @@
      "bakeMs": 4533
     }
    ]
-  },
-  "castle-duel": {
-   "file": "castle-duel.bin.gz",
-   "prefabs": 2,
-   "bytes": 2338900,
-   "sha256": "1f1b555e76850fc966338428b21666b29990182645be99b74672d5b325a921fd",
-   "gzip": {
-    "bytes": 795170,
-    "sha256": "14b010b6d8ced532eae25f86e57ca317d0b51675f9e7bf7f853c795a8779bb73"
-   },
-   "bodies": [
-    {
-     "fingerprint": "169033b349d6c2d4cedc4e08b70ed57bff81782e91b4fa0807f84bc34d4aad65",
-     "name": "bastion_trace_fortress",
-     "at": 0,
-     "words": 296505,
-     "sourceTriangles": 23094,
-     "bakeMs": 23877
-    },
-    {
-     "fingerprint": "51aa16987b0154e0e98337d86e7595bd034f98544e6982c997aee65d258ae34c",
-     "name": "bastion_trace_fortress",
-     "at": 296505,
-     "words": 288220,
-     "sourceTriangles": 23094,
-     "bakeMs": 17244
-    }
-   ]
   }
  },
- "wallSeconds": 92.9
+ "wallSeconds": 44.1
 }

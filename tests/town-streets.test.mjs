@@ -7,7 +7,7 @@ import {layTownStreets,streetEdgeAt,ROUTE_STEP_M,WALKER_WORDS} from '../js/town-
 const grid={size:257,biomeSize:64,albedoSize:64,vegetationCandidates:400};
 const packs=new Map();
 const pack=region=>{if(!packs.has(region))packs.set(region,generateProceduralCoastalPack(region,grid));return packs.get(region);};
-const AT_THE_WATER=new Set(['timber_mole_pier','stone_quay_seawall','stone_arch_bridge','careening_shed','astillero_and_moored_hull','thatched_bohio_palafito','indigenous_canoe_landing','palafito_estuary_village','stone_sea_bastion','torreon_atalaya_farol','english_triangular_palisade_fort','indigenous_palisade_ring']);
+const AT_THE_WATER=new Set(['timber_mole_pier','stone_quay_seawall','stone_arch_bridge','careening_shed','astillero_and_moored_hull','thatched_bohio_palafito','indigenous_canoe_landing','palafito_estuary_village','torreon_atalaya_farol','english_triangular_palisade_fort','indigenous_palisade_ring']);
 function wetShare(inst,heights,region){
   const c=Math.cos(inst.yaw),s=Math.sin(inst.yaw);let wet=0,total=0;
   for(let a=-1;a<=1;a+=.25)for(let b=-1;b<=1;b+=.25){
@@ -35,16 +35,11 @@ test('no building stands in the sea on a coast that curves away from the layout'
   syncPortInstancesToTerrain(port,heights,region,{gradePads:true});
   assert.ok(port.instances.length>=6,`only ${port.instances.length} placed`);
   for(const inst of port.instances){
-    // A fort drawn to its ground may have its feet in the water, so what matters is the line of its walls.
-    if(AT_THE_WATER.has(inst.prefabId)||inst.trace)continue;
+    if(AT_THE_WATER.has(inst.prefabId))continue;
     assert.equal(wetShare(inst,heights,region),0,`${inst.prefabId} at ${inst.x.toFixed(0)},${inst.z.toFixed(0)} is in the water`);
   }
-  for(const inst of port.instances.filter(i=>i.prefabId==='torreon_atalaya_farol'||(i.prefabId==='stone_sea_bastion'&&!i.trace))){
+  for(const inst of port.instances.filter(i=>i.prefabId==='torreon_atalaya_farol')){
     assert.ok(wetShare(inst,heights,region)<.5,`${inst.prefabId} should have most of its floor on land`);
-  }
-  for(const inst of port.instances.filter(i=>i.trace)){
-    const c=Math.cos(inst.yaw),s=Math.sin(inst.yaw),walls=inst.trace.outline,dry=walls.filter(([lx,lz])=>terrainSurfaceSample(heights,inst.x+lx*c+lz*s,inst.z-lx*s+lz*c,region)>=-.5);
-    assert.ok(dry.length>=walls.length*.34,`${inst.prefabId} has ${dry.length} of ${walls.length} walls on the land`);
   }
 });
 

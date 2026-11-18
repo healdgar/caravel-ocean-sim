@@ -2,8 +2,8 @@
 """
 1550 Spanish Main — High-Detail Plumb Architectural 3D Asset & Material Swatch Pipeline
 
-Builds the 4 canonical 1550 Spanish colonial port building archetypes (`stone_sea_bastion`,
-`casa_de_contratacion`, `mission_chapel`, `colonial_town_block`) with:
+Builds the canonical 1550 Spanish colonial port building archetypes (`casa_de_contratacion`, `mission_chapel`,
+`colonial_town_block`; a port's works are the board's, js/old-world-board.js) with:
 1. Paired Front-Oblique and Rear-Oblique 300mm telephoto architectural reference renders
    + denoised Depth Anything V2 depth/normal analysis.
 2. High-detail, strictly plumb 3D architectural geometry (2,000–3,600 triangles per archetype)
@@ -401,107 +401,7 @@ class PlumbArchitecturalMeshBuilder:
 def build_plumb_isometric_archetype(asset_id: str, relief_contrast: float = 1.0):
     b = PlumbArchitecturalMeshBuilder(relief_contrast=relief_contrast)
 
-    if asset_id == "stone_sea_bastion":
-        # 1. Battered coral-limestone scarp base + corner ashlar quoins + projecting semicircular cordon (bocel)
-        b.add_box(-0.46, 0.46, 0.0, 0.38, -0.46, 0.46, 11.0, 0.85, top_inset=0.052)
-        b.add_box(-0.422, 0.422, 0.375, 0.412, -0.422, 0.422, 11.0, 0.94, cap_bottom=True)
-        # Heavy battered corner quoin buttresses
-        for sx in (-1, 1):
-            for sz in (-1, 1):
-                b.add_box(
-                    sx * 0.43 - (0.045 if sx > 0 else 0.015),
-                    sx * 0.43 + (0.045 if sx < 0 else 0.015),
-                    0.0,
-                    0.375,
-                    sz * 0.43 - (0.045 if sz > 0 else 0.015),
-                    sz * 0.43 + (0.045 if sz < 0 else 0.015),
-                    11.0,
-                    0.89,
-                    top_inset=0.012,
-                )
-        # 2. Terreplein gun deck & crenellated parapet walls with 8 naval cannons
-        b.add_box(-0.40, 0.40, 0.412, 0.44, -0.40, 0.40, 11.0, 0.78)
-        wt = 0.055
-        for side_z in (-1, 1):
-            z0 = -0.40 if side_z < 0 else 0.40 - wt
-            z1 = -0.40 + wt if side_z < 0 else 0.40
-            b.add_box(-0.40, 0.40, 0.44, 0.50, z0, z1, 11.0, 0.87)
-            for m in (-1.5, -0.5, 0.5, 1.5):
-                mx = m * 0.19
-                b.add_box(mx - 0.055, mx + 0.055, 0.50, 0.565, z0, z1, 11.0, 0.92, top_inset=0.005)
-            for c_idx in (-1, 0, 1):
-                cx = c_idx * 0.19
-                cz = z1 + 0.032 if side_z < 0 else z0 - 0.032
-                b.add_box(cx - 0.022, cx + 0.022, 0.44, 0.50, cz - 0.035, cz + 0.035, 10.0, 0.70)
-                b.add_box(
-                    cx - 0.011,
-                    cx + 0.011,
-                    0.50,
-                    0.528,
-                    z0 - 0.045 if side_z < 0 else z0 - 0.01,
-                    z1 + 0.01 if side_z < 0 else z1 + 0.045,
-                    14.0,
-                    0.34,
-                    cap_bottom=True,
-                )
-        for side_x in (-1, 1):
-            x0 = -0.40 if side_x < 0 else 0.40 - wt
-            x1 = -0.40 + wt if side_x < 0 else 0.40
-            b.add_box(x0, x1, 0.44, 0.50, -0.40 + wt, 0.40 - wt, 11.0, 0.86)
-            for m in (-1.5, -0.5, 0.5, 1.5):
-                mz = m * 0.19
-                b.add_box(x0, x1, 0.50, 0.565, mz - 0.055, mz + 0.055, 11.0, 0.91, top_inset=0.005)
-
-        # 3. 4 Corner cylindrical corbeled domed sentry turrets (garitas)
-        for sx in (-1, 1):
-            for sz in (-1, 1):
-                gx, gz = sx * 0.408, sz * 0.408
-                b.add_cylinder(gx, gz, 0.29, 0.37, 0.016, 0.048, 8, 11.0, 0.78, cap_top=False)
-                b.add_cylinder(gx, gz, 0.37, 0.415, 0.048, 0.068, 8, 11.0, 0.84, cap_top=True)
-                b.add_cylinder(gx, gz, 0.415, 0.625, 0.062, 0.062, 8, 11.0, 0.91, cap_top=True)
-                b.add_box(gx - 0.067, gx + 0.067, 0.48, 0.57, gz - 0.010, gz + 0.010, 14.0, 0.28)
-                b.add_box(gx - 0.010, gx + 0.010, 0.48, 0.57, gz - 0.067, gz + 0.067, 14.0, 0.28)
-                b.add_cylinder(gx, gz, 0.625, 0.648, 0.068, 0.068, 8, 11.0, 0.94, cap_top=True)
-                b.add_cylinder(gx, gz, 0.648, 0.715, 0.062, 0.030, 8, 11.0, 0.95, cap_top=False)
-                b.add_cylinder(gx, gz, 0.715, 0.755, 0.030, 0.008, 8, 11.0, 0.97, cap_top=True)
-
-        # 4. Central 2-story Torre del Homenaje keep with stone quoins, arched portal, windows & hipped tile roof
-        kw = 0.215
-        b.add_box(-kw - 0.012, kw + 0.012, 0.44, 0.48, -kw - 0.012, kw + 0.012, 11.0, 0.85)
-        b.add_box(-kw, kw, 0.48, 0.80, -kw, kw, 12.0, 0.93)
-        b.add_box(-kw - 0.010, kw + 0.010, 0.63, 0.65, -kw - 0.010, kw + 0.010, 11.0, 0.89, cap_bottom=True)
-        for sx in (-1, 1):
-            for sz in (-1, 1):
-                for q in range(5):
-                    qy0 = 0.48 + q * 0.062
-                    q_span = 0.032 if q % 2 == 0 else 0.018
-                    b.add_box(
-                        sx * kw - (q_span if sx > 0 else 0.008),
-                        sx * kw + (q_span if sx < 0 else 0.008),
-                        qy0,
-                        qy0 + 0.050,
-                        sz * kw - (q_span if sz > 0 else 0.008),
-                        sz * kw + (q_span if sz < 0 else 0.008),
-                        11.0,
-                        0.86,
-                    )
-        b.add_arched_portal_z(-kw, -1, 0.48, 0.61, 0.0, 0.042, is_timber_door=True)
-        for wy in (0.51, 0.67):
-            for wx in (-0.095, 0.095):
-                b.add_recessed_window_z(-kw, -1, wx - 0.022, wx + 0.022, wy, wy + 0.065, has_shutters=True)
-                b.add_recessed_window_z(kw, 1, wx - 0.022, wx + 0.022, wy, wy + 0.065, has_shutters=True)
-                b.add_recessed_window_x(-kw, -1, wy, wy + 0.065, wx - 0.022, wx + 0.022, has_shutters=True)
-                b.add_recessed_window_x(kw, 1, wy, wy + 0.065, wx - 0.022, wx + 0.022, has_shutters=True)
-        b.add_hipped_roof(-kw, kw, 0.80, 0.96, -kw, kw, overhang=0.032, hip_ratio=0.45, wall_kind=12.0)
-        # Keep masonry chimney & watch turret
-        b.add_box(0.08, 0.13, 0.82, 0.99, 0.08, 0.13, 11.0, 0.88)
-
-        # 5. Landward (+Z) arched stone gatehouse portal, portcullis & drawbridge
-        b.add_wall_feature_z(0.42, 1, -0.13, 0.13, 0.0, 0.35, 11.0, 0.89, depth=0.055)
-        b.add_wall_feature_z(0.42, 1, -0.145, 0.145, 0.33, 0.37, 11.0, 0.93, depth=0.068)
-        b.add_arched_portal_z(0.475, 1, 0.0, 0.31, 0.0, 0.072, is_timber_door=True)
-
-    elif asset_id == "casa_de_contratacion":
+    if asset_id == "casa_de_contratacion":
         # 1. Cut-stone plinth + stepped entry stairs
         hw, hl = 0.34, 0.44
         b.add_box(-hw - 0.02, hw + 0.02, 0.0, 0.08, -hl - 0.02, hl + 0.02, 11.0, 0.84)

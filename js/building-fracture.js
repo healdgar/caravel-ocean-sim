@@ -15,7 +15,6 @@
 // The pieces are drawn through the one continuum as a broken instance (createFracturedContinuum): the cut and
 // the view pose every cluster from its piece's record on the GPU, so a ruin costs what its cut costs.
 
-import { depthInOutline } from './fort-plan.js';
 import { sampleVoronoiBlockCell } from './part-assembly.js';
 import { FRACTURE_GRAVITY, FRACTURE_RECORD_FLOATS, createShipFractureState, settleFinishedFlights, writeFlight } from './ship-fracture.js';
 import { SIM_CLOCK_LOOP_S } from './wgsl/common.js';
@@ -43,11 +42,11 @@ const TIMBER_KINDS = new Set([10, 15, 17]);
 const ROOF_KINDS = new Set([13, 15]);
 const STAYING_PLATE = /(^|_)(floor|plaza|terreplein|courtyard|cobble|apron|slipway|batey|earthwork|mounds?|sleepers|adarve)(_|$)/;
 const RAMPART_BODY = /scarp|bastion|retaining_wall|terreplein|adarve|earthwork|mounds?/;
-const SCARP_WALL = /scarp_walls|bastion_scarp|retaining_wall/;
+// The facing of a work's rampart, filled with earth to its terreplein (js/old-world-buildings.js: a bastion's faces and
+// flanks, a battery's platform, a gun tower's scarp).
+const SCARP_WALL = /^(bastion_faces|bastion_flanks|battery_platform|tower_scarp)$/;
 const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
-const GUN = /gun_barrel|fort_cannon|cannon_embrasure|bastion_ordnance_battery|bulwark_ordnance_guns/;
-// The outer edge of a traced fort's rampart walk, and its cordon: these go with the wall under them.
-const WALK_EDGE = /rampart_walk_edge|scarp_cordon_cornice/;
+const GUN = /gun_barrel|fort_cannon/;
 
 const PART_SMALL = 3.2, ISLAND_SMALL = 2.6, ONE_PIECE_LIMIT = 9;
 // Metres behind the face, by what the wall is made of. Thin walls are limited by their own thickness.
@@ -73,6 +72,37 @@ function surfaceOf(kind, fortified) {
 }
 
 // Which faces there are: the emitters' unshared quads, and any other triangles one by one.
+// Whether a clod of earth lies within the solid its facing belongs to: its middle, and each corner drawn a quarter of the
+// way in toward it, are each inside, a level line from it crossing the part's faces an odd number of times. The points
+// stand clear of the solid's top and foot, and the line runs level, so it never meets a cap edge on.
+function clodWithin(faces, vertices, corners) {
+  if (!faces?.length) return true;
+  const middle = [0, 1, 2].map((c) => (corners[0][c] + corners[1][c] + corners[2][c] + corners[3][c]) / 4);
+  const points = [middle, ...corners.map((q) => [0, 1, 2].map((c) => q[c] + (middle[c] - q[c]) * 0.25))];
+  return points.every((p) => solidCrossings(faces, vertices, p) % 2 === 1);
+}
+function solidCrossings(faces, vertices, p) {
+  const dx = 1, dz = 0.0131;
+  let crossings = 0;
+  for (const { v } of faces) for (let k = 1; k + 1 < v.length; k++) {
+    // The fan triangle (v0, vk, vk+1) against the line from p along (dx, 0, dz) (Moller-Trumbore).
+    const a = v[0] * STRIDE, b = v[k] * STRIDE, c = v[k + 1] * STRIDE;
+    const e1x = vertices[b] - vertices[a], e1y = vertices[b + 1] - vertices[a + 1], e1z = vertices[b + 2] - vertices[a + 2];
+    const e2x = vertices[c] - vertices[a], e2y = vertices[c + 1] - vertices[a + 1], e2z = vertices[c + 2] - vertices[a + 2];
+    const hx = -dz * e2y, hy = dz * e2x - dx * e2z, hz = dx * e2y;
+    const det = e1x * hx + e1y * hy + e1z * hz;
+    if (Math.abs(det) < 1e-9) continue;
+    const sx = p[0] - vertices[a], sy = p[1] - vertices[a + 1], sz = p[2] - vertices[a + 2];
+    const u = (sx * hx + sy * hy + sz * hz) / det;
+    if (u < 0 || u > 1) continue;
+    const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+    const w = (dx * qx + dz * qz) / det;
+    if (w < 0 || u + w > 1) continue;
+    if ((e2x * qx + e2y * qy + e2z * qz) / det > 0) crossings++;
+  }
+  return crossings;
+}
+
 function facesOfInstance(indices, vertices, trianglePartIds, firstTriangle, endTriangle) {
   const faces = [];
   for (let t = firstTriangle; t < endTriangle;) {
@@ -540,10 +570,6 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         const surface = surfaceOf(face.kind, fortified);
         if (staysBecauseLow(face.min, face.max, isBridgePart)) { stay(face); continue; }
         const n = faceNormal(face), horizontal = Math.abs(n[1]) > 0.7;
-        if (horizontal && instance.trace && WALK_EDGE.test(partKey) && face.v.length === 4) {
-          cutQuad(face, part, { ...surface, scale: Math.max(surface.scale, 1.6) }, 0.5, isBridgePart);
-          continue;
-        }
         if (fortified && !horizontal && platform && face.v.length === 4 && SCARP_WALL.test(partKey)) geometry[0].cores.push({ face, part });
         const longest = Math.max(face.max[0] - face.min[0], face.max[1] - face.min[1], face.max[2] - face.min[2]);
         // A paved floor at ground level stays, and the flat of a fort's rampart is cut into heavy slabs.
@@ -601,10 +627,10 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     };
     for (let layer = 0; layer < EARTH_LAYERS; layer++) for (let j = 0; j < cellsUp; j++) for (let i = 0; i < cellsAcross; i++) {
       const corners = [earthAt(i, j, layer), earthAt(i + 1, j, layer), earthAt(i + 1, j + 1, layer), earthAt(i, j + 1, layer)];
-      // In a fort drawn to its ground a wall may stand close across a bastion from another: earth stays inside the line.
-      if (instance.trace && corners.some((q) => { const [lx, , lz] = toLocal(q[0], q[1], q[2]); return depthInOutline(instance.trace.outline, lx, lz) < EARTH_THICK_M * 0.6; })) continue;
       const top = Math.max(corners[0][1], corners[1][1], corners[2][1], corners[3][1]);
       if (top < Math.max(groundAt(corners[0][0], corners[0][2]), -0.6) + 0.02) continue;
+      // Earth fills the work's own body and no more: behind a re-entrant angle a clod would stand out through the next face.
+      if (!clodWithin(facesByPart.get(face.part), vertices, corners)) continue;
       const clod = newShard(BUILDING_SHARD_KINDS.block, part, { timber: false, span: 1 });
       shards[clod].earth = true;
       geometry[clod].blocks.push({ corners, depth: EARTH_THICK_M / RAW_SURFACE });

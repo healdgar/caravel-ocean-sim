@@ -15,12 +15,12 @@ const label=process.argv[2]??'review',names=(process.argv[3]??'bastion').split('
 const outDir=process.env.OUT;if(!outDir)throw Error('Set OUT to the folder for the pictures');
 const WIDTH=1400,HEIGHT=900;
 const SCENES={
-  bastion:{prefab:'stone_sea_bastion',face:1,height:6,views:[{name:'front',yaw:-14,elevation:6,distance:58},{name:'close',yaw:16,elevation:12,distance:30}],
+  bastion:{prefab:'city_battery',face:1,height:6,views:[{name:'front',yaw:-14,elevation:6,distance:58},{name:'close',yaw:16,elevation:12,distance:30}],
     volleys:[{shots:6,mass:14.5,speed:330,minY:2,maxY:7,centre:-6,span:5,face:1},{shots:18,mass:14.5,speed:330,minY:1,maxY:8,centre:5,span:9,face:1}]},
   // Lighter shot, low on the wall, close in: a breach and what it brings down, with no magazine.
-  breach:{prefab:'stone_sea_bastion',face:1,height:5,views:[{name:'front',yaw:-20,elevation:9,distance:44},{name:'close',yaw:-8,elevation:12,distance:30}],
+  breach:{prefab:'city_battery',face:1,height:5,views:[{name:'front',yaw:-20,elevation:9,distance:44},{name:'close',yaw:-8,elevation:12,distance:30}],
     volleys:[{shots:2,mass:5.4,speed:380,minY:2,maxY:3,centre:-2,span:2,face:1,range:12},{shots:1,mass:5.4,speed:380,minY:2,maxY:3,centre:3,span:1,face:1,range:12}]},
-  fortress:{prefab:'bastion_trace_fortress',face:1,height:6,views:[{name:'front',yaw:15,elevation:8,distance:66},{name:'close',yaw:-18,elevation:14,distance:36}],
+  fortress:{prefab:'city_fort',face:1,height:6,views:[{name:'front',yaw:15,elevation:8,distance:66},{name:'close',yaw:-18,elevation:14,distance:36}],
     volleys:[{shots:6,mass:14.5,speed:330,minY:1,maxY:6,centre:-5,span:5,face:1},{shots:18,mass:14.5,speed:330,minY:1,maxY:8,centre:3,span:10,face:1}]},
   warehouse:{prefab:'royal_warehouse',face:-1,height:4,views:[{name:'front',yaw:20,elevation:8,distance:42},{name:'close',yaw:-15,elevation:12,distance:26}],
     volleys:[{shots:18,mass:14.5,speed:430,minY:1,maxY:6,centre:0,span:10,face:-1}]},

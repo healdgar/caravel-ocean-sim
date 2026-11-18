@@ -1,6 +1,6 @@
 # Model audit
 
-Compares the hand-written numbers that describe each ship and port building with the geometry actually drawn. Nine ships, 34 building prefabs, ten ports, nine forest tree species.
+Compares the hand-written numbers that describe each ship and port building with the geometry actually drawn. Nine ships, 32 building prefabs, ten ports, nine forest tree species.
 
 ```bash
 WEBGPU_BACKEND=metal node scripts/model-audit.mjs --report=MODEL_AUDIT.md
@@ -159,7 +159,6 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | Prefab | nominal w×h×l | drawn top m | mesh half m | reach square m | reach turned m | mesh | pieces square | pieces turned | max air m |
 |---|---|---|---|---|---|---|---|---|---|
 | timber_mole_pier | 7.5×2.8×68 | 10.3 | 34 | 34 | 34.1 | 332 / 0 / 0 / 0 | 472 / 0 / 0 / 0 | 332 / 0 / 0 / 0 | 0 |
-| stone_sea_bastion | 28×11.5×34 | 19.5 | 18.9 | 18.9 | 21.2 | 1248 / 0 / 0 / 0 | 1640 / 0 / 0 / 0 | 1072 / 149 / 0 / 41 | 2.9 |
 | casa_de_contratacion | 16×8.5×26 | 12 | 14.1 | 14.1 | 14.2 | 1332 / 0 / 0 / 0 | 1728 / 0 / 0 / 0 | 1332 / 0 / 0 / 0 | 0.1 |
 | royal_warehouse | 14×7.2×30 | 10.3 | 15.8 | 15.8 | 16 | 1332 / 0 / 0 / 0 | 1712 / 0 / 0 / 0 | 1332 / 0 / 0 / 2 | 0.3 |
 | careening_shed | 11×5.6×22 | 8.2 | 11.8 | 11.8 | 11.9 | 768 / 0 / 0 / 0 | 1072 / 0 / 0 / 0 | 773 / 0 / 0 / 3 | 0.3 |
@@ -172,7 +171,6 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | royal_atarazanas_arsenal | 26×8.2×36 | 10.4 | 18.8 | 18.8 | 19 | 1304 / 0 / 0 / 0 | 1764 / 0 / 0 / 16 | 1300 / 0 / 0 / 4 | 0.4 |
 | open_lonja_loggia | 13.5×7.4×26 | 10.4 | 13.9 | 13.9 | 14.1 | 1120 / 0 / 0 / 0 | 1516 / 0 / 0 / 0 | 1119 / 0 / 0 / 1 | 0.2 |
 | walled_mule_corral | 30×5.8×34 | 7.2 | 17.7 | 17.7 | 17.9 | 1053 / 0 / 0 / 0 | 1472 / 0 / 0 / 0 | 1053 / 0 / 0 / 0 | 0.2 |
-| bastion_trace_fortress | 38×9.8×42 | 15.4 | 33 | 33 | 36.1 | 1208 / 0 / 0 / 0 | 1462 / 0 / 0 / 16 | 951 / 253 / 0 / 35 | 2.8 |
 | torreon_atalaya_farol | 13×15.5×13 | 21.8 | 7.4 | 7.4 | 7.4 | 792 / 0 / 0 / 0 | 1064 / 0 / 0 / 0 | 792 / 0 / 0 / 0 | 0 |
 | curtain_wall_and_gate | 6.2×6.6×34 | 10.3 | 17.7 | 17.7 | 17.7 | 1009 / 0 / 0 / 0 | 1296 / 0 / 0 / 0 | 999 / 0 / 0 / 10 | 0.3 |
 | stone_arch_bridge | 7.2×4.6×32 | 4.6 | 16.2 | 16.2 | 16.6 | 800 / 0 / 0 / 0 | 848 / 0 / 0 / 116 | 755 / 0 / 0 / 47 | 0.5 |
@@ -326,8 +324,6 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 | Check | measured | limit | note |
 |---|---|---|---|
-| building.pieces-air-turned/bastion_trace_fortress | 20.42 | 2 | reach grows from 33 m to 36.1 m when turned; stops up to 2.8 m from it |
-| building.pieces-air-turned/stone_sea_bastion | 11.81 | 2 | reach grows from 18.9 m to 21.2 m when turned; stops up to 2.9 m from it |
 | gun.blocked/victory | 2 | 0 | gun.upper.port.38 into rig.standing.main at 0.08 m |
 | gun.station-off-floor/flying-cloud | 3.34 | 0.15 | battle.gun.port.3 |
 | gun.station-off-floor/oseberg | 0.22 | 0.15 | battle.archer.port.0 |

@@ -394,7 +394,7 @@ for (const scene of SCENES) {
   }
   await page.waitForTimeout(3500);
   if (scene.fort) {
-    await page.evaluate(aimAtBuilding, { prefab: 'stone_sea_bastion', face: 1, height: 6, yaw: -14, elevation: 6, distance: 58 });
+    await page.evaluate(aimAtBuilding, { prefab: 'city_battery', face: 1, height: 6, yaw: -14, elevation: 6, distance: 58 });
     await page.waitForTimeout(1500);
   }
 

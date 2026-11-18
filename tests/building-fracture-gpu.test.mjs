@@ -39,7 +39,7 @@ test('a live port pays nothing until hit, sends flights while pieces fall, then 
     const before=await page.evaluate(()=>buildingWrites.length);
     const hit=await page.evaluate(async()=>{
       const {applyBuildingImpactDamage}=await import('/js/gunnery-control.js');
-      const port=oceanFleet.terrain.port,building=port.instances.find(i=>i.prefabId==='stone_sea_bastion');
+      const port=oceanFleet.terrain.port,building=port.instances.find(i=>i.prefabId==='torreon_atalaya_farol');
       if(!building)return {missing:true};
       const half=(building.depth??building.length)*.5,cos=Math.cos(building.yaw),sin=Math.sin(building.yaw),base=building.baseY??building.y;
       for(let i=0;i<6;i++){
@@ -50,10 +50,10 @@ test('a live port pays nothing until hit, sends flights while pieces fall, then 
       window.fractureTarget=building;
       return {};
     });
-    assert.ok(!hit.missing,'Lisbon has its bastion');
+    assert.ok(!hit.missing,'Lisbon has its sea tower');
     await page.waitForFunction(()=>(fractureTarget.damageState.fracture?.brokenCount??0)>0,undefined,{timeout:60000,polling:100});
     const broken=await page.evaluate(()=>fractureTarget.damageState.fracture.brokenCount);
-    assert.ok(broken>=4,`the bastion loses blocks (${broken})`);
+    assert.ok(broken>=4,`the tower loses blocks (${broken})`);
     await frames(3);
     assert.ok(await page.evaluate(()=>struckAtlases)>0,'it stands as its pieces in the continuum');
     assert.ok(await page.evaluate(()=>flightWrites)>0,'its pieces\' flights are sent');
@@ -86,7 +86,7 @@ test('a share link brings a ruin back settled, and a town rebuilds it',{timeout:
     saved=await first.evaluate(async()=>{
       const {applyBuildingImpactDamage}=await import('/js/gunnery-control.js');
       const {encodeGameStateParam}=await import('/js/sharing.js');
-      const port=oceanFleet.terrain.port,building=port.instances.find(i=>i.prefabId==='stone_sea_bastion');
+      const port=oceanFleet.terrain.port,building=port.instances.find(i=>i.prefabId==='torreon_atalaya_farol');
       const half=(building.depth??building.length)*.5,cos=Math.cos(building.yaw),sin=Math.sin(building.yaw),base=building.baseY??building.y;
       for(let i=0;i<4;i++){
         const x=(i-1.5)*1.5,z=half,y=2+i%3;
@@ -102,7 +102,7 @@ test('a share link brings a ruin back settled, and a town rebuilds it',{timeout:
       for(let s=1;s<state.broken.length;s++)if(state.broken[s])poses.push([s,...evaluateShardFlight(state.records.subarray(s*16,s*16+16),1e6,state.fracture.shards[s].centroid,[1,1,1])]);
       return {link:encodeGameStateParam({v:1,portDamage:oceanFleet.portDamage.forLink(port)}),broken:state.brokenCount,integrity:building.damageState.integrity,hits:building.damageState.hits,poses};
     });
-    assert.ok(saved.broken>0,'the bastion lost blocks');
+    assert.ok(saved.broken>0,'the tower lost blocks');
     assert.ok(saved.link.length<16384,'the link is one a browser and decodeGameStateParam will take');
   }finally{await first.close();}
   const second=await ready(await browser.newPage({viewport:{width:320,height:240}}));
@@ -110,7 +110,7 @@ test('a share link brings a ruin back settled, and a town rebuilds it',{timeout:
     await start(second,`${scene}&state=${saved.link}`);
     const back=await second.evaluate(async()=>{
       const {evaluateShardFlight}=await import('/js/ship-fracture.js');
-      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='stone_sea_bastion'),d=building.damageState,state=d.fracture;
+      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='torreon_atalaya_farol'),d=building.damageState,state=d.fracture;
       const poses=[];
       for(let s=1;s<state.broken.length;s++)if(state.broken[s])poses.push([s,...evaluateShardFlight(state.records.subarray(s*16,s*16+16),1e6,state.fracture.shards[s].centroid,[1,1,1])]);
       window.fractureTarget=building;
@@ -160,7 +160,7 @@ test('the career save keeps a ruin, and continuing brings it back settled',{time
     await start(scene);
     const before=await page.evaluate(async()=>{
       const {applyBuildingImpactDamage}=await import('/js/gunnery-control.js');
-      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='stone_sea_bastion');
+      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='torreon_atalaya_farol');
       const half=(building.depth??building.length)*.5,cos=Math.cos(building.yaw),sin=Math.sin(building.yaw),base=building.baseY??building.y;
       for(let i=0;i<4;i++){
         const x=(i-1.5)*1.5,z=half,y=2+i%3;
@@ -174,12 +174,12 @@ test('the career save keeps a ruin, and continuing brings it back settled',{time
       const save=JSON.parse(localStorage.getItem('waterworld.career.v1'));
       return {broken:building.damageState.fracture.brokenCount,lastHit:building.damageState.lastHitDateMs,voyageDate:oceanVoyage.voyage?.dateMs??null,ports:Object.keys(save.portDamage??{}),buildings:Object.values(save.portDamage??{}).flatMap(p=>Object.keys(p)).length,key:building.id};
     });
-    assert.ok(before.broken>0,'the bastion lost blocks');
+    assert.ok(before.broken>0,'the tower lost blocks');
     assert.ok(before.ports.length>=1&&before.buildings>=1,`the career save holds its damage (${JSON.stringify(before)})`);
     assert.ok(Number.isFinite(before.lastHit),'dated in the game\'s calendar, for the town to rebuild from');
     await start(`${scene}&continue=1`);
     const back=await page.evaluate(()=>{
-      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='stone_sea_bastion'),state=building.damageState?.fracture;
+      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='torreon_atalaya_farol'),state=building.damageState?.fracture;
       return {broken:state?.brokenCount??0,flying:state?.flying.size??-1,hits:building.damageState?.hits??0};
     });
     assert.equal(back.broken,before.broken,'continuing brings the same pieces down');

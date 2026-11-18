@@ -137,7 +137,7 @@ test('crews douse one fire arrow, but several on one spot outrun them', () => {
 
 test('arrows striking a fort do no damage but mark who loosed them', () => {
   const source = makeBoat('taino-canoe');
-  const building = { prefabId: 'stone_sea_bastion', x: 0, z: 0, height: 8 };
+  const building = { prefabId: 'city_battery', x: 0, z: 0, height: 8 };
   assert.equal(resolveSolidGunneryImpact({ type: 'impact', kind: 'building', building, ammo: 'arrow', sourceBoat: source }), null);
   assert.equal(building.damageState.attackers.has(source), true);
   assert.equal(building.damageState.breaches ?? 0, 0);

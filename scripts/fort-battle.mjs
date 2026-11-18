@@ -4,7 +4,8 @@
 export async function fireOnBuilding({prefab,volleys,everyFrames=3}){
   const {applyBuildingImpactDamage,sweepBuildingSegment}=await import('/js/gunnery-control.js');
   const port=oceanFleet.terrain?.port;
-  const building=port?.instances?.find(i=>i.prefabId===prefab);
+  // A port's own building, or a work its board stands (js/fort-plan.js portWorkBuildings: city_fort, city_battery).
+  const building=port?.instances?.find(i=>i.prefabId===prefab)??port?.workBuildings?.list?.find(w=>w.prefabId===prefab);
   if(!building)throw Error('No '+prefab+' in this port');
   const cos=Math.cos(building.yaw??0),sin=Math.sin(building.yaw??0),base=building.baseY??building.y??0;
   const toWorld=(x,y,z)=>[building.x+x*cos+z*sin,base+y,building.z-x*sin+z*cos];
@@ -31,7 +32,7 @@ export async function fireOnBuilding({prefab,volleys,everyFrames=3}){
 // Aim the orbit camera at a building: yaw and elevation in degrees, measured from its own face.
 export async function aimAtBuilding({prefab,yaw,elevation,distance,height=5,face=-1}){
   const {DEFAULT_BOAT_LENGTH,vesselVerticalScale}=await import('/js/hull.js');
-  const port=oceanFleet.terrain?.port,building=port?.instances?.find(i=>i.prefabId===prefab);
+  const port=oceanFleet.terrain?.port,building=port?.instances?.find(i=>i.prefabId===prefab)??port?.workBuildings?.list?.find(w=>w.prefabId===prefab);
   if(!building)throw Error('No '+prefab+' in this port');
   const orbit=oceanFleet.orbit,boat=oceanFleet.vessels[0].boat;
   const size=Math.max(.7,Math.sqrt(boat.length/DEFAULT_BOAT_LENGTH));

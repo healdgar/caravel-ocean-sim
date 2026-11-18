@@ -165,7 +165,7 @@ for(const [label,extra,edits] of rows){
     await page.waitForTimeout(Number(process.env.BATTLE_SETTLE_MS??8000));
   }
   if(fort){
-    const prefab='stone_sea_bastion',shot={mass:14.5,speed:330,face:1};
+    const prefab='city_battery',shot={mass:14.5,speed:330,face:1};
     await page.evaluate(aimAtBuilding,{prefab,face:1,height:6,yaw:-14,elevation:6,distance:58});
     await page.waitForTimeout(1500);
     if(fort==='ruin'){

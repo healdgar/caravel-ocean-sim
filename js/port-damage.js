@@ -25,7 +25,6 @@ const DAMAGE_FLAGS = ['damageCollapseBaked', 'breachCollapseBaked', 'ruinCollaps
 const FOREST_RECORD_PREFIX = 'forest:';
 // A fort's plan, so that a save made when it had another shape does not put stones back on walls that are not there.
 const planKeyOf = (building) => {
-  if (building.trace) return `t${building.trace.outline.length}:${Math.round(building.width)}x${Math.round(building.length)}`;
   if (building.gateSide !== undefined || building.enclosureShape) return `e${building.enclosureShape ?? 'triangle'}${building.gateSide ?? 0}`;
   return null;
 };

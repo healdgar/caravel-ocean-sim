@@ -280,13 +280,13 @@ test('whoever stands a post of the port walks no street, and says where they sta
   assert.deepEqual(asked.people.map((one) => one.id), [1, 2, 3], 'the plan is left as it was asked');
   assert.deepEqual(boardFolkStreets({ plan: asked, origin, heightAt, base: ownStreets(), away: new Set() }).souls.map((soul) => soul.id), [1, 2, 3, 11, 12]);
 
-  const post = (more) => ({ soul: { id: 5, name: 'Aparicio Llano', of: 'watch' }, role: 'Artillero', stationKind: 'embrasure', buildingPrefabId: 'stone_sea_bastion', building: { label: 'Baluarte da Ribeira (Forte do Terreiro do Paço)' }, ...more });
+  const post = (more) => ({ soul: { id: 5, name: 'Aparicio Llano', of: 'watch' }, role: 'Artillero', stationKind: 'embrasure', buildingPrefabId: 'city_battery', building: { label: 'Baluarte da Ribeira (Forte do Terreiro do Paço)' }, ...more });
   assert.equal(watchDoing(post()), 'on watch at a gun of the Baluarte da Ribeira');
   assert.equal(watchDoing(post({ stationKind: 'crown', building: { label: 'Torre de Belém Watchtower & River Beacon' } })), 'on watch on the crown of the Torre de Belém');
   assert.equal(watchDoing(post({ stationKind: 'gate-roof', building: { label: 'Arco da Ribeira · Muralha Fernandina' } })), 'on watch over the gate of the Arco da Ribeira');
-  assert.equal(watchDoing(post({ stationKind: 'rampart', building: {} })), 'on watch on the walls of the sea bastion');
+  assert.equal(watchDoing(post({ stationKind: 'rampart', building: {} })), 'on watch on the walls of the battery');
   assert.equal(watchDoing(post({ soul: { id: 6, of: 'host', host: 'Host of Aviz' }, stationKind: 'gate-portal', building: {}, buildingPrefabId: 'curtain_wall_and_gate' })), 'on guard with Host of Aviz at the gate of the town wall');
-  assert.equal(watchDoing(post({ soul: { id: 7, of: 'office' }, stationKind: 'citadel', building: {}, buildingPrefabId: 'bastion_trace_fortress' })), 'holding the place in the yard of the fortress');
+  assert.equal(watchDoing(post({ soul: { id: 7, of: 'office' }, stationKind: 'citadel', building: {}, buildingPrefabId: 'city_fort' })), 'holding the place in the yard of the fort');
   // And it reads as their own words.
   assert.match(folkSpeech({ id: 5, name: 'Aparicio Llano', age: 21, role: 'baker' }, null, watchDoing(post())), /You find me on watch at a gun of the Baluarte da Ribeira\.$/);
 });

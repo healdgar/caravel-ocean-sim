@@ -256,11 +256,12 @@ test('a post the roll has no one for stands empty, and whoever holds the place h
   assert.equal(few.units[0].length, 3, 'the building\'s own men are those three');
   const none = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [tower()], watch: rollOf(0) });
   assert.equal(none.soldiers.length, 0);
-  // A work with a captain's post: the place's holder stands it, and no one else's post is his.
-  const bastion = () => ({ id: 'fort_2', prefabId: 'stone_sea_bastion', x: 0, y: 0, z: 0, width: 30, length: 34, height: 7, yaw: 0, damageState: { state: 'intact', craters: [], fires: [] } });
-  const plain = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [bastion()] }), captains = plain.soldiers.filter(isCaptainActor).length;
+  // A work as its board records it: the place's holder stands its captain's post where it has one, and no one else's.
+  const work = () => ({ kind: 'fort', form: 'bastioned', name: 'Fort', x: 0, y: 0, z: 0, turn: 0, w: 30, d: 34, outline: [[-15, -17], [15, -17], [15, 17], [-15, 17]],
+    guns: [-8, 0, 8].map((x, i) => ({ x, y: 5, z: -16, nx: 0, nz: -1, wall: 0, on: 0, piece: 1 + i })), salients: [], gate: null, types: [0, 4], bore: { axis: 1.07, muzzle: 1.74, breech: 1.26, calibre: 12 } });
+  const plain = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [], works: [work()] }), captains = plain.soldiers.filter(isCaptainActor).length;
   const holder = man(7, { of: 'office', office: 'warden of Lisboa', role: null });
-  const held = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [bastion()], watch: rollOf(plain.soldiers.length, { captain: holder }) });
+  const held = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [], works: [work()], watch: rollOf(plain.soldiers.length, { captain: holder }) });
   const his = held.soldiers.filter((s) => s.soul === holder);
   if (captains) { assert.equal(his.length, 1); assert.ok(isCaptainActor(his[0])); } else assert.equal(his.length, 0, 'no captain\'s post, and he stands none');
   assert.equal(new Set(held.soldiers.map((s) => s.soul.id)).size, held.soldiers.length);
