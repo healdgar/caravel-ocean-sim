@@ -900,7 +900,7 @@ async function main() {
     coastalGroup=terrain.waterGroup(coastalOcean.pipe);
     coastalDepthGroup=OCEAN_DEPTH?terrain.waterGroup(coastalOcean.depthPipe):null;
     if(typeof anchorEnvironment==='object'&&anchorEnvironment)anchorEnvironment.terrain=terrain;
-    terrain.setPixelError?.(setContinuumPixelError(polygons.pixelError));
+    setContinuumPixelError(polygons.pixelError);
     envFull=true;
     return terrain;
   }
@@ -976,7 +976,7 @@ async function main() {
     {initial:Math.sqrt(AUTO_START_PIXELS/Math.max(1,canvas.clientWidth*canvas.clientHeight*(window.devicePixelRatio||1)**2))});
   const fixedPolygons = fixedResolution && !qs.has('polygons');
   const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto', { minimum: 0.35 });
-  terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));
+  setContinuumPixelError(polygons.pixelError);
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView;
   let submergedColor,aboveWaterColor,submergedDepth;
@@ -4107,7 +4107,7 @@ async function main() {
   polygonInput.value=polygons.mode;polygonInput.disabled=fixedPolygons;
   const polygonStatus=document.createElement('p');polygonStatus.id='polygon-status';
   const updatePolygonStatus=()=>{polygonStatus.textContent=`${polygons.mode==='fixed'?'fixed by URL':Math.round(polygons.scale*100)+'% budget'} · ${polygons.pixelError.toFixed(1)} px LOD threshold${polygons.mode==='auto'?' · target '+polygons.targetFPS+' FPS':''}`;};
-  polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));updatePolygonStatus();});
+  polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);setContinuumPixelError(polygons.pixelError);updatePolygonStatus();});
   polygonLabel.append(polygonInput);
   seaBody.append(polygonLabel,polygonStatus);
   const neuralModeLabel=document.createElement('label');neuralModeLabel.className='resolution-control';neuralModeLabel.textContent='Neural light mode';
@@ -5220,10 +5220,10 @@ async function main() {
     // wait until the image is at half size, and come back before any sharpness does.
     const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
     if(resChanged)polygons.reset();
-    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));
+    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))setContinuumPixelError(polygons.pixelError);
     // Each new count of the scene's submitted triangles holds it to the one budget through the same scalar.
     const census=continuumCensus?.latest;
-    if(census&&census!==censusSeen){censusSeen=census;if(polygons.observeTriangles(census.total,census.budget))terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));}
+    if(census&&census!==censusSeen){censusSeen=census;if(polygons.observeTriangles(census.total,census.budget))setContinuumPixelError(polygons.pixelError);}
     resize();
     let camDt = Math.min(0.1, elapsed);
     last = now;
@@ -5494,7 +5494,7 @@ async function main() {
     if (nodeCount) device.queue.writeBuffer(instBuf, 0, instData, 0, nodeCount * 4);
 
     frameStages.mark('Effects');
-    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
+    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31),
       playerX:ashore.on?cam.x:boat.x,playerZ:ashore.on?cam.z:boat.z};
     terrain?.prepare(terrainCamera,frameF);

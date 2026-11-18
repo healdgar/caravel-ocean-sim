@@ -1,7 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-// Seeded vegetation and authored ground cover. Trees are the forest's (js/forest-scenery.js); the pixel
-// target named TREE_ is the one the boulders' cut is scaled by.
-export const TREE_PIXEL_ERROR=3;
+// Seeded vegetation and authored ground cover. Trees are the forest's (js/forest-scenery.js).
 const random = initial => {
   let seed=initial>>>0;
   return ()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};

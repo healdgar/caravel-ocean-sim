@@ -30,6 +30,7 @@ test('the land\'s cut covers every piece once and draws no crack across patches,
     const result = await page.evaluate(async () => {
       const { bakeLandContinuumPiece, landContinuumSeams, requestLandContinuumPipelines, createLandContinuum } = await import('/js/land-continuum.js');
       const W = await import('/js/wgsl/land-continuum.js');
+      const { setContinuumPixelError } = await import('/js/continuum-core.js');
       const { createContinuumCensus } = await import('/js/continuum-census.js');
       const device = await (await navigator.gpu.requestAdapter()).requestDevice(), errors = [];
       device.addEventListener('uncapturederror', (e) => errors.push(e.error.message));
@@ -101,7 +102,7 @@ test('the land\'s cut covers every piece once and draws no crack across patches,
         // A pit dug after the bake, as a strike digs one: raised in place, in every piece it reaches.
         if (pit && late) for (const p of scene.pieces) land.raise(p.key, pit.mark);
         frame.set([camera[0], camera[1], camera[2], 0], 16); device.queue.writeBuffer(frameUBO, 0, frame);
-        land.setPixelError(pixels);
+        setContinuumPixelError(pixels);
         const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass();
         land.encode(pass); pass.end(); device.queue.submit([encoder.finish()]);
         const cut = await land.readCut();

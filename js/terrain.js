@@ -1,6 +1,5 @@
 import { ISLAND, decodeIsland, decodeBiome, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
-import { TREE_PIXEL_ERROR,
-  GROUND_COVER, createGroundCoverPatches, groundCoverInstances } from './vegetation.js';
+import { GROUND_COVER, createGroundCoverPatches, groundCoverInstances } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT, COASTAL_FIELD_BAKE } from './wgsl/terrain.js';
 import { GROUND_DETAIL_BAKE } from './wgsl/ground-detail.js';
 import { createCoastalField } from './coastal-field.js';
@@ -1458,7 +1457,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     groundStats.resident=groundResident.size;
   }
-  let currentPixelError=TREE_PIXEL_ERROR;
   let lastCamera=null,lastView=null;
   // Where the player stood when the forest's sections were last held, and how many were let go for want of room
   // (retargetForestPackToProcedural): those are taken back as the player nears them.
@@ -1467,10 +1465,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let checkPlayerFrontierEntry=null;
   const retireGPU=(fn)=>{if(typeof device.queue?.onSubmittedWorkDone==='function')device.queue.onSubmittedWorkDone().then(fn).catch(()=>{});else fn();};
   function updateTrees(camera,viewProjection,allowStream=false){
-    if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0&&camera.pixelError!==currentPixelError){
-      currentPixelError=camera.pixelError;
-      forest?.setPixelError?.(currentPixelError);
-    }
     if(allowStream)checkPlayerFrontierEntry?.(camera);
     updateGroundResidency(camera);
     const localCam = {x:camera.x-worldOffset.x,z:camera.z-worldOffset.z};
@@ -2543,8 +2537,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
     continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['prefabs',prefabs],['land',landContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
-    // Every family but the forest reads the scene's one pixel error itself (js/continuum-core.js continuumPixelError).
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null},
     // The land's cut, read back: for tests. Per piece, the view's and the captures' lists of patches.
     readLandCut:()=>landContinuum?.readCut()??null,
