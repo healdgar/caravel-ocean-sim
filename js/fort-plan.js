@@ -377,18 +377,23 @@ export function traceWalls(trace) {
 // The works a port's board stands (js/old-world-board.js; port.works) as the buildings its guns and its garrison know:
 // each in its own frame (x across its front, -z out to the water), its line, guns, salients and gate as a trace is
 // written. Made once for the works the port has, and kept with it, so that each work is one building throughout.
+// A work is built of the city's types, and is struck through them (js/city-targets.js, js/gunnery-control.js
+// strikeWorkThroughPiece): each gun keeps the type it stands `on` and its own `piece`, and the `bore` its type has.
 const WORK_PREFAB = Object.freeze({ fort: 'city_fort', battery: 'city_battery', tower: 'city_watchtower' });
+// Where a work gun's gunner stands: back from its trunnions toward its breech, and out beside it clear of its wheel.
+export const WORK_GUNNER_BACK_M = 1.2;
+export const WORK_GUNNER_BESIDE_M = 1.25;
 export function portWorkBuildings(port) {
   if (!port) return [];
   if (port.workBuildings && port.workBuildings.works === port.works) return port.workBuildings.list;
-  const list = (port.works ?? []).filter((work) => work?.guns?.length && work.outline?.length >= 3).map((work) => {
+  const list = (port.works ?? []).filter((work) => work?.guns?.length && work.outline?.length >= 3 && work.bore).map((work) => {
     const c = Math.cos(work.turn ?? 0), s = Math.sin(work.turn ?? 0), y = work.y ?? 0;
     const toLocal = ([wx, wz]) => { const dx = wx - work.x, dz = wz - work.z; return [dx * c - dz * s, dx * s + dz * c]; };
     const outline = work.outline.map(toLocal), kinds = outline.map(() => 'curtain');
     const nearest = ([px, pz]) => outline.reduce((best, q, i) => (Math.hypot(q[0] - px, q[1] - pz) < Math.hypot(outline[best][0] - px, outline[best][1] - pz) ? i : best), 0);
     const guns = work.guns.map((gun) => {
       const [x, z] = toLocal([gun.x, gun.z]);
-      return { x, z, nx: gun.nx * c - gun.nz * s, nz: gun.nx * s + gun.nz * c, wall: gun.wall, y: gun.y - y };
+      return { x, z, nx: gun.nx * c - gun.nz * s, nz: gun.nx * s + gun.nz * c, wall: gun.wall, y: gun.y - y, on: gun.on, piece: gun.piece, bore: work.bore };
     });
     const walls = traceWalls({ outline, kinds });
     // Its gate in the wall nearest it, or, where it has none (a battery's open gorge), the wall that faces most landward.
@@ -398,7 +403,7 @@ export function portWorkBuildings(port) {
       : walls.reduce((best, w) => (w.nz > best.nz ? w : best));
     const deck = guns.reduce((sum, gun) => sum + gun.y, 0) / guns.length;
     const trace = {
-      outline, kinds, guns, buildings: [], lowZ: null, lowDrop: 0, earth: false, shortestWall: Math.min(...walls.map((w) => w.length)),
+      outline, kinds, guns,
       salients: work.salients?.length ? work.salients.map(nearest) : outline.map((_, i) => i),
       gate: { wall: wallTo.index, x: gateAt ? gateAt[0] : (wallTo.ax + wallTo.bx) / 2, z: gateAt ? gateAt[1] : (wallTo.az + wallTo.bz) / 2, nx: wallTo.nx, nz: wallTo.nz, ux: wallTo.ux, uz: wallTo.uz, halfWidth: TRACE_GATE_HALF_WIDTH_M },
     };
@@ -410,4 +415,23 @@ export function portWorkBuildings(port) {
   });
   port.workBuildings = { works: port.works, list };
   return list;
+}
+
+// The work a type of the city's belongs to, by its place in the city's count (js/old-world-board.js `types`), or null.
+export function portWorkOfPiece(port, index) {
+  if (!(index >= 0)) return null;
+  for (const building of portWorkBuildings(port)) {
+    const [first, after] = building.work.types ?? [0, 0];
+    if (index >= first && index < after) return building;
+  }
+  return null;
+}
+
+// Whether a man of a work's garrison, at `lx, lz` in the work's frame, stands on a piece of it (a struck type of the
+// city, js/city-targets.js): within its plot.
+export function workPieceUnder(piece, work, lx, lz) {
+  const cw = Math.cos(work.yaw ?? 0), sw = Math.sin(work.yaw ?? 0), cp = Math.cos(piece.yaw ?? 0), sp = Math.sin(piece.yaw ?? 0);
+  const dx = (work.x ?? 0) + lx * cw + lz * sw - (piece.x ?? 0), dz = (work.z ?? 0) - lx * sw + lz * cw - (piece.z ?? 0);
+  const px = dx * cp - dz * sp, pz = dx * sp + dz * cp;
+  return Math.abs(px) <= (piece.width ?? 0) / 2 && Math.abs(pz) <= (piece.depth ?? piece.length ?? 0) / 2;
 }

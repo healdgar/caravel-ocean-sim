@@ -16,7 +16,7 @@ import { shipMastSpecs, fracturePartsGone, shatterFloatingWreckageOnSegment, bla
 import { shipColliderCrossings, shipColliderIronFrame, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
 import { sweepJettySegment, applyJettyImpactDamage } from './port-props.js';
-import { TRACE_GUN_ARC_COS, enclosurePlan, portWorkBuildings } from './fort-plan.js';
+import { TRACE_GUN_ARC_COS, WORK_GUNNER_BACK_M, WORK_GUNNER_BESIDE_M, enclosurePlan, portWorkBuildings, workPieceUnder } from './fort-plan.js';
 import { HARBOUR_GUN_RANGE_M } from './harbour-geography.js';
 import { FOREST_LONG_FALLEN, buildForestTrunkGrid, foreshorePalmPlacement, forestTrunkShape, sweepForestTrunks } from './forest-trunks.js';
 import { landCraterSize } from './land-craters.js';
@@ -2667,6 +2667,8 @@ const TIMBER_BUILDING_PREFABS = new Set([
   'english_half_timber_hall',
   'english_timber_cottage',
   'city_timber_bridge',
+  // A gun's carriage (js/old-world-buildings.js gunSpec).
+  'city_gun',
 ]);
 
 export function classifyBuildingMaterial(building) {
@@ -2928,6 +2930,102 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
     powderFraction: +powderFrac.toFixed(4),
     yieldMj,
   };
+}
+
+/* ---- a work struck through its pieces ----
+   A work's pieces are the city's types (js/old-world-board.js), each stood as a building of the port when shot strikes
+   it and linked to its work (js/city-targets.js `workBuilding`). What a piece suffers reaches the work: the gun it is
+   goes off its carriage; the guns it bears go when it is breached, and any the ball strikes beside; the men on it come
+   down with it (js/crew.js); and whoever stands near where it struck feels it. A gun down is its own piece struck, and
+   is kept as that piece is (js/port-damage.js), so a work's guns come back from a save, and remount when the town has
+   rebuilt their carriages. */
+// How near a strike a gun goes off its carriage, from its trunnions.
+const WORK_GUN_SHAKEN_M = 2.8;
+const workPieceBroken = (d) => d?.state === 'breached' || d?.state === 'ruined';
+const buildingWorldToLocal = (building, [x, y, z]) => {
+  const c = Math.cos(building?.yaw ?? 0), s = Math.sin(building?.yaw ?? 0), dx = x - (building?.x ?? 0), dz = z - (building?.z ?? 0);
+  return [dx * c - dz * s, y - (building?.baseY ?? building?.y ?? 0), dx * s + dz * c];
+};
+// Which of a work's guns are down: kept with the work's damage, so that its gunnery, made before or after, has them.
+function setWorkGunDown(work, i, down) {
+  const wd = createBuildingDamageState(work), list = (wd.restoredGuns ??= []), at = list.indexOf(i);
+  if (down && at < 0) list.push(i);
+  if (!down && at >= 0) list.splice(at, 1);
+  const state = work.gunnery?.guns?.[i];
+  if (state) { state.dismounted = down; state.loading = false; state.queued = false; }
+  wd.dismountedGuns = list.length;
+  wd.silenced = list.length > 0 && list.length >= (work.trace?.guns?.length ?? 0);
+}
+// A work's gun knocked off its carriage: its own piece struck there, unless that is the piece the ball struck.
+function knockWorkGun(work, i, struck) {
+  const gun = work.trace.guns[i];
+  setWorkGunDown(work, i, true);
+  const own = struck?.city?.index === gun.piece ? struck : work.strikePiece?.(gun.piece);
+  if (!own) return;
+  const gd = createBuildingDamageState(own), at = buildingLocalToWorld(work, [gun.x, gun.y + gun.bore.axis, gun.z]);
+  const c = Math.cos(work.yaw ?? 0), s = Math.sin(work.yaw ?? 0), nx = gun.nx * c + gun.nz * s, nz = -gun.nx * s + gun.nz * c;
+  if (own !== struck) {
+    gd.hits++;
+    // Its carriage as broken as what threw it down, at the least.
+    gd.damageJoules = Math.max(gd.damageJoules, gd.maxEnergy * (1 - Math.min(0.4, struck?.damageState?.integrity ?? 0.4)));
+    gd.integrity = Math.max(0, 1 - gd.damageJoules / gd.maxEnergy);
+    gd.state = gd.integrity > 0.75 ? 'intact' : gd.integrity > 0.4 ? 'damaged' : gd.integrity > 0.1 ? 'breached' : 'ruined';
+  }
+  gd.pendingBakes.push({ kind: 'cannon-dismount', x: +at[0].toFixed(3), y: +at[1].toFixed(3), z: +at[2].toFixed(3), nx: +nx.toFixed(3), ny: 0, nz: +nz.toFixed(3), radius: 1.65, stepDepth: 0.65, severity: 1.15 });
+}
+// A work stands as its pieces do: what they have lost, shared over the pieces it is built of besides its guns.
+function workIntegrity(work, piece) {
+  const wd = createBuildingDamageState(work), index = piece.city?.index, guns = work.trace?.guns ?? [];
+  if (guns.some((gun) => gun.piece === index)) return;
+  const lost = (wd.piecesLost ??= {});
+  if (piece.damageState?.hits) lost[index] = 1 - (piece.damageState.integrity ?? 1); else delete lost[index];
+  const [first, after] = work.work?.types ?? [0, 0], count = Math.max(1, after - first - guns.length);
+  wd.integrity = Math.max(0, 1 - Object.values(lost).reduce((sum, v) => sum + v, 0) / count);
+  wd.state = wd.integrity > 0.75 ? 'intact' : wd.integrity > 0.4 ? 'damaged' : wd.integrity > 0.1 ? 'breached' : 'ruined';
+}
+// A piece of a work broken: its garrison sees to whoever stood on it (js/crew.js), once.
+function noteWorkPieceBroken(work, piece, settled) {
+  const list = (createBuildingDamageState(work).brokenPieces ??= []);
+  if (!list.some((entry) => entry.piece === piece)) list.push({ piece, settled, seen: false });
+}
+// After a piece of a work has taken a hit (applyBuildingImpactDamage).
+function strikeWorkThroughPiece(piece, d, worldHit) {
+  const work = piece.workBuilding, guns = work.trace?.guns ?? [], index = piece.city?.index, wd = createBuildingDamageState(work);
+  const local = buildingWorldToLocal(work, worldHit), crater = d.craters[d.craters.length - 1];
+  wd.hits++;
+  workIntegrity(work, piece);
+  if (crater) {
+    wd.craters.push({ ...crater, localPosition: local });
+    if (wd.craters.length > 32) wd.craters.shift();
+  }
+  const broken = workPieceBroken(d);
+  if (broken && !guns.some((gun) => gun.piece === index)) noteWorkPieceBroken(work, piece, false);
+  guns.forEach((gun, i) => {
+    if (wd.restoredGuns?.includes(i)) return;
+    const near = Math.hypot(gun.x - local[0], gun.y + gun.bore.axis - local[1], gun.z - local[2]) < WORK_GUN_SHAKEN_M;
+    if (gun.piece === index || (broken && gun.on === index) || near) knockWorkGun(work, i, piece);
+  });
+}
+// A piece of a work put back from a save (js/port-damage.js): a gun whose piece was struck is down, and the men on a
+// broken piece lie where it left them.
+export function workPieceRestored(piece) {
+  const work = piece?.workBuilding, d = piece?.damageState;
+  if (!work || !d) return;
+  const index = piece.city?.index, guns = work.trace?.guns ?? [];
+  guns.forEach((gun, i) => { if (gun.piece === index && d.hits) setWorkGunDown(work, i, true); });
+  if (workPieceBroken(d) && !guns.some((gun) => gun.piece === index)) noteWorkPieceBroken(work, piece, true);
+  workIntegrity(work, piece);
+}
+// A piece of a work the town has rebuilt (js/port-damage.js): its gun on its carriage again, and its men at their posts.
+export function workPieceRebuilt(piece, revive) {
+  const work = piece?.workBuilding;
+  if (!work) return;
+  const index = piece.city?.index;
+  (work.trace?.guns ?? []).forEach((gun, i) => { if (gun.piece === index) setWorkGunDown(work, i, false); });
+  workIntegrity(work, piece);
+  const wd = work.damageState;
+  if (wd?.brokenPieces) wd.brokenPieces = wd.brokenPieces.filter((entry) => entry.piece !== piece);
+  revive?.(work, (s) => workPieceUnder(piece, work, s.lx, s.lz));
 }
 
 export function applyBuildingImpactDamage(building, event) {
@@ -3297,6 +3395,7 @@ export function applyBuildingImpactDamage(building, event) {
   if (totalGunsCount > 0 && finalActiveGuns === 0) {
     d.silenced = true;
   }
+  if (building.workBuilding) strikeWorkThroughPiece(building, d, worldHitPos);
 
   d.revision = (d.revision ?? 0) + 1;
   event.materialClass = materialClass;
@@ -3439,7 +3538,7 @@ export function createBuildingGunDefinitions(building) {
   const hl = (building.depth ?? building.length ?? 16) * 0.5;
   const yTop = building.height ?? 6.0;
   const guns = [];
-  const addEmbrasureGun = (side, sideSign, lx, ly, lz, dirLocal, calibre = 24) => {
+  const addEmbrasureGun = (side, sideSign, lx, ly, lz, dirLocal, calibre = 24, muzzle = 0.55, breech = 0.45) => {
     guns.push({
       id: guns.length,
       side,
@@ -3447,8 +3546,8 @@ export function createBuildingGunDefinitions(building) {
       deck: 'parapet',
       meshGroup: `${prefabId}:embrasure:${guns.length}`,
       localPosition: [lx, ly, lz],
-      muzzleDesign: [lx + dirLocal[0] * 0.55, ly, lz + dirLocal[2] * 0.55],
-      breechDesign: [lx - dirLocal[0] * 0.45, ly, lz - dirLocal[2] * 0.45],
+      muzzleDesign: [lx + dirLocal[0] * muzzle, ly, lz + dirLocal[2] * muzzle],
+      breechDesign: [lx - dirLocal[0] * breech, ly, lz - dirLocal[2] * breech],
       directionDesign: [...dirLocal],
       station: [lx - dirLocal[0] * 0.85, Math.max(0, yTop - 0.15), lz - dirLocal[2] * 0.85],
       floorDesign: Math.max(0, yTop - 0.15),
@@ -3475,15 +3574,15 @@ export function createBuildingGunDefinitions(building) {
   };
 
   if (building.trace) {
-    // A fort drawn to its ground has its guns where its trace puts them, each with its own arc.
-    const drop = building.trace.lowDrop ?? 0, lowZ = building.trace.lowZ;
+    // A work's guns are the ones drawn on its platforms (js/old-world-board.js), each laid from its trunnions along its
+    // bore, the ball leaving at its muzzle, over its own arc; its gunner beside the breech, clear of the wheel.
     for (const gun of building.trace.guns) {
-      // A work's gun stands on its own deck (a bastion's, a battery's), a drawn trace's on the one rampart.
-      const deck = (gun.y ?? yTop) - (lowZ !== null && gun.z < lowZ ? drop : 0);
-      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x - gun.nx * 0.8, deck + 0.58, gun.z - gun.nz * 0.8, [gun.nx, 0, gun.nz], prefabId === 'stone_sea_bastion' ? 24 : 32);
+      const { axis, muzzle, breech, calibre } = gun.bore;
+      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x, gun.y + axis, gun.z, [gun.nx, 0, gun.nz], calibre, muzzle, breech);
       const def = guns[guns.length - 1];
       def.arcCos = TRACE_GUN_ARC_COS;
-      def.station[1] = def.floorDesign = Math.max(0, deck - 0.15);
+      def.station = [gun.x - gun.nx * WORK_GUNNER_BACK_M + gun.nz * WORK_GUNNER_BESIDE_M, gun.y, gun.z - gun.nz * WORK_GUNNER_BACK_M - gun.nx * WORK_GUNNER_BESIDE_M];
+      def.floorDesign = gun.y;
     }
   } else if (prefabId === 'bastion_trace_fortress') {
     const snapEx = (targetX) => nearestEmbrasure(targetX, hw, 4.6), snapEz = (targetZ) => nearestEmbrasure(targetZ, hl, 4.8);

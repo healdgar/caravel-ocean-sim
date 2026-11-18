@@ -8,6 +8,7 @@
 //
 // Nothing here runs unless a shot is in the air or being aimed, and then only for the buildings on its line.
 import { noteBuildingMesh } from './building-fracture.js';
+import { portWorkOfPiece } from './fort-plan.js';
 import { CITY_BUILDING_TYPES, CITY_TYPED_FLOATS, CITY_TYPES_BRIDGES, CITY_TYPES_SLIGHT, CITY_TYPES_STONE_SLIGHT, cityTypeTarget } from './old-world-buildings.js';
 
 const CITY_TARGET_CELL_M = 32;
@@ -123,6 +124,10 @@ export function createCityTargets({ city, types, port, onStruck = null }) {
     record = { index, instance, world: null, enrolled: false, port: { instances: [instance], center: { x: instance.x, z: instance.z } } };
     // What js/building-fracture.js cuts it from, made again if the town has rebuilt it since.
     instance.fractureSource = () => ({ vertices: meshOf(record), indices: source.indices, partAssembly: source.partAssembly });
+    // A piece of a work: what it suffers reaches the work's guns and men (js/gunnery-control.js strikeWorkThroughPiece),
+    // which may strike its other pieces in turn.
+    const work = portWorkOfPiece(port, index);
+    if (work) { instance.workBuilding = work; work.strikePiece = strikePiece; }
     records.set(index, record); ready.set(index, record);
     if (ready.size > CITY_TARGETS_READY) {
       const [oldest, gone] = ready.entries().next().value;
@@ -137,6 +142,14 @@ export function createCityTargets({ city, types, port, onStruck = null }) {
     ready.delete(record.index);
     if (!Array.isArray(port.instances)) port.instances = [];
     port.instances.push(record.instance);
+  };
+  // A building of the plan struck by no shot of its own (a gun its breached platform throws down): it joins the port.
+  const strikePiece = (index) => {
+    if (!(index >= 0 && index < count)) return null;
+    const record = stand(index);
+    enrol(record);
+    onStruck?.(index);
+    return record.instance;
   };
 
   // Every cell the line crosses on the ground, in order.

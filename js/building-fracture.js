@@ -45,7 +45,7 @@ const STAYING_PLATE = /(^|_)(floor|plaza|terreplein|courtyard|cobble|apron|slipw
 const RAMPART_BODY = /scarp|bastion|retaining_wall|terreplein|adarve|earthwork|mounds?/;
 const SCARP_WALL = /scarp_walls|bastion_scarp|retaining_wall/;
 const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
-const GUN = /fort_cannon|cannon_embrasure|bastion_ordnance_battery|bulwark_ordnance_guns/;
+const GUN = /gun_barrel|fort_cannon|cannon_embrasure|bastion_ordnance_battery|bulwark_ordnance_guns/;
 // The outer edge of a traced fort's rampart walk, and its cordon: these go with the wall under them.
 const WALK_EDGE = /rampart_walk_edge|scarp_cordon_cornice/;
 

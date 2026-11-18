@@ -1,5 +1,5 @@
 import { footingUnder, restingHeightUnder } from './building-fracture.js';
-import { enclosurePlan, insetOutline, portWorkBuildings, traceWalls } from './fort-plan.js';
+import { WORK_GUNNER_BACK_M, WORK_GUNNER_BESIDE_M, enclosurePlan, insetOutline, portWorkBuildings, traceWalls, workPieceUnder } from './fort-plan.js';
 import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
 import { gltfTRS, readGLB, gltfAccessor } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
@@ -1735,19 +1735,19 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
   const specs = [];
 
   if (inst.trace) {
-    // Gunners behind the guns the trace has, sentries on the points of its bastions and a captain in the yard.
-    const yDeck = yTop - 0.85, trace = inst.trace, lowAt = (z) => (trace.lowZ !== null && trace.lowZ !== undefined && z < trace.lowZ ? trace.lowDrop : 0);
+    // A work's garrison (js/fort-plan.js portWorkBuildings): a gunner beside each gun, sentries on its salients, on its
+    // longest walls and at its gate.
+    const yDeck = yTop - 0.85, trace = inst.trace;
     const inward = insetOutline(trace.outline, 2.6);
     // Nobody shares a post, at a sharp corner or where a beat crosses a gun.
     const free = (lx, lz) => specs.every((spec) => Math.hypot(spec.lx - lx, spec.lz - lz) > 1.6);
     trace.guns.forEach((gun, gunIndex) => {
-      let lx = gun.x - gun.nx * 2.5, lz = gun.z - gun.nz * 2.5;
-      if (!free(lx, lz)) { lx = gun.x - gun.nx * 1.3; lz = gun.z - gun.nz * 1.3; }
-      if (free(lx, lz)) specs.push({ lx, ly: (gun.y ?? yTop - yGround) + yGround - 0.16 - lowAt(gun.z), lz, routeZ: [lz, lz], localYaw: Math.atan2(gun.nx, gun.nz), role: 'Artillero', stationKind: 'embrasure', gunIndex });
+      const lx = gun.x - gun.nx * WORK_GUNNER_BACK_M + gun.nz * WORK_GUNNER_BESIDE_M, lz = gun.z - gun.nz * WORK_GUNNER_BACK_M - gun.nx * WORK_GUNNER_BESIDE_M;
+      if (free(lx, lz)) specs.push({ lx, ly: gun.y + yGround, lz, routeZ: [lz, lz], localYaw: Math.atan2(gun.nx, gun.nz), role: 'Artillero', stationKind: 'embrasure', gunIndex });
     });
     trace.salients.slice(0, 5).forEach((at) => {
       const [lx, lz] = inward[at];
-      if (free(lx, lz)) specs.push({ lx, ly: yDeck - lowAt(lz), lz, routeZ: [lz - 1.2, lz + 1.2], localYaw: Math.atan2(lx, lz), role: 'Vigía de Garita', stationKind: 'bastion' });
+      if (free(lx, lz)) specs.push({ lx, ly: yDeck, lz, routeZ: [lz - 1.2, lz + 1.2], localYaw: Math.atan2(lx, lz), role: 'Vigía de Garita', stationKind: 'bastion' });
     });
     // Sentries walk the longest walls with no guns on them. A beat runs along z, so one on a wall set across it is short.
     const gunWalls = new Set(trace.guns.map((gun) => gun.wall));
@@ -1755,15 +1755,13 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     beats.forEach((wall, beat) => {
       const lx = (wall.ax + wall.bx) * 0.5 - wall.nx * 3.2, lz = (wall.az + wall.bz) * 0.5 - wall.nz * 3.2;
       const run = Math.abs(wall.uz) > 0.85 ? Math.min(6, wall.length * 0.3) : 1.2;
-      if (free(lx, lz)) specs.push({ lx, ly: yTop - 0.16 - lowAt(lz), lz, routeZ: [lz - run, lz + run], localYaw: beat % 2 ? Math.PI : 0, role: beat % 2 ? 'Alabardero' : 'Centinela de Muralla', stationKind: 'rampart' });
+      if (free(lx, lz)) specs.push({ lx, ly: yTop - 0.16, lz, routeZ: [lz - run, lz + run], localYaw: beat % 2 ? Math.PI : 0, role: beat % 2 ? 'Alabardero' : 'Centinela de Muralla', stationKind: 'rampart' });
     });
     const gate = trace.gate;
     for (const hand of [-1, 1]) {
       const gateX = gate.x - gate.nx * 3.2 + gate.ux * 2.6 * hand, gateZ = gate.z - gate.nz * 3.2 + gate.uz * 2.6 * hand;
-      if (free(gateX, gateZ)) specs.push({ lx: gateX, ly: yDeck - lowAt(gate.z), lz: gateZ, routeZ: [gateZ, gateZ], localYaw: Math.atan2(gate.nx, gate.nz), role: 'Guardia de Puerta', stationKind: 'rampart' });
+      if (free(gateX, gateZ)) specs.push({ lx: gateX, ly: yDeck, lz: gateZ, routeZ: [gateZ, gateZ], localYaw: Math.atan2(gate.nx, gate.nz), role: 'Guardia de Puerta', stationKind: 'rampart' });
     }
-    const yard = trace.buildings.find((building) => building.kind === 'magazine');
-    if (yard && free(yard.x, yard.z - yard.radius - 2.4)) specs.push({ lx: yard.x, ly: yDeck - lowAt(yard.z), lz: yard.z - yard.radius - 2.4, routeZ: [yard.z - yard.radius - 3.4, yard.z - yard.radius - 1.4], localYaw: 0, role: 'Capitán de Presidio', stationKind: 'citadel' });
   } else if (inst.prefabId === 'stone_sea_bastion') {
     const yDeck = yTop - 0.85;
     const yBanquette = yTop - 0.16;
@@ -2173,6 +2171,13 @@ export function createFortGarrison(port) {
 function settleGarrisonOnWhatIsLeft(garrison) {
   for (const unit of garrison.units ?? garrison.byBuilding.values()) {
     const inst = unit[0]?.building, damage = inst?.damageState, state = damage?.fracture;
+    // A work is struck through its pieces (js/gunnery-control.js strikeWorkThroughPiece): whoever stood on one that
+    // is broken comes down from it; from a save, he lies where it left him.
+    for (const entry of damage?.brokenPieces ?? []) {
+      if (entry.seen) continue;
+      entry.seen = true;
+      for (const s of unit) if (workPieceUnder(entry.piece, inst, s.lx, s.lz)) garrisonSoldierFalls(null, s, inst, entry.settled, garrison);
+    }
     if (!state || state.brokenCount === (damage.garrisonSawBroken ?? 0)) continue;
     damage.garrisonSawBroken = state.brokenCount;
     // Nothing in the air means this is a saved ruin coming back: he is already where he fell.
@@ -2252,9 +2257,10 @@ export function garrisonSoldierFalls(state, s, inst = {}, settled = false, garri
   }
 }
 
-// A rebuilt building has its men back on its walls, as they were posted.
-export function reviveGarrisonSoldiers(building) {
+// A rebuilt building has its men back on its walls, as they were posted: all of them, or those `only` names.
+export function reviveGarrisonSoldiers(building, only = null) {
   for (const s of building?.garrisonSoldiers ?? []) {
+    if (only && !only(s)) continue;
     if (s.homeBaseLy !== undefined) s.baseLy = s.homeBaseLy;
     if (s.homeLxz) { s.lx = s.homeLxz[0]; s.lz = s.homeLxz[1]; }
     if (s.homeRouteZ) s.routeZ = s.homeRouteZ;

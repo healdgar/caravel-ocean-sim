@@ -671,8 +671,9 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   // the water, its gate in its back curtain, and a gun on the carriage of the realm's year (cityGunType) stands at
   // each embrasure its types open. Each is entered in `works` for the guns and the garrison: its line round its
   // salients and shoulders (`outline`), its guns (where each stands on its terreplein, `nx, nz` the way it looks out,
-  // `wall` the side of the outline it looks out of), its salients, its gate, and the types it is built of (`types`,
-  // the first and after the last of them in the order stood, its guns among them).
+  // `wall` the side of the outline it looks out of, `on` the type it stands on and `piece` its own, as the city's
+  // types are counted), its salients, its gate, the types it is built of (`types`, the first and after the last of
+  // them in the order stood, its guns among them) and its guns' bore (`bore`: the gun type's).
   const workRecords = [], workKey = (x, z) => `${Math.round(x)},${Math.round(z)}`, workAt = new Set();
   const workGun = cityGunType(region.year ?? board.year ?? 1550);
   const standWorkOf = (place, work) => {
@@ -682,10 +683,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const first = typedTypes.length, guns = [], outline = [], salients = [];
     let gateAt = null;
     // A type standing on its plot's middle (`at` its origin), turned `turn`, and the guns its embrasures hold: each
-    // gun's place and look turned with it, on its platform `floor` up.
+    // gun's place and look turned with it, on its platform `floor` up. The type is the last stood.
     const arm = (list, px, floor, pz, turn) => {
-      const tc = Math.cos(turn), ts = Math.sin(turn);
-      for (const g of list) guns.push({ x: px + g.x * tc + g.z * ts, y: floor + g.y, z: pz - g.x * ts + g.z * tc, nx: g.nx * tc + g.nz * ts, nz: -g.nx * ts + g.nz * tc, wall: 0 });
+      const tc = Math.cos(turn), ts = Math.sin(turn), on = typedTypes.length - 1;
+      for (const g of list) guns.push({ x: px + g.x * tc + g.z * ts, y: floor + g.y, z: pz - g.x * ts + g.z * tc, nx: g.nx * tc + g.nz * ts, nz: -g.nx * ts + g.nz * tc, wall: 0, on, piece: -1 });
     };
     const stand = (id, px, pz, turn = yaw) => {
       const T = CITY_BUILDING_TYPES[id], f = footprint(px, pz, T.width, T.length, turn);
@@ -706,10 +707,11 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
           const t = Math.max(0, Math.min(1, ((g.x - ax) * (bx - ax) + (g.z - az) * (bz - az)) / L2)), d = Math.hypot(ax + (bx - ax) * t - g.x, az + (bz - az) * t - g.z);
           if (d < best) { best = d; g.wall = i; }
         }
+        g.piece = typedTypes.length;
         pushTyped(workGun, g.x, g.y, g.z, Math.atan2(-g.nx, -g.nz), 0.8, 0);
       }
       keep(footprint(x, z, work.w, work.d, yaw));
-      return { kind: work.kind, form, name: work.name, place: place.name, role: work.role || '', side: work.side || '', x, y: heightAt(x, z), z, turn: yaw, w: work.w, d: work.d, outline, guns, salients, gate: gateAt, types: [first, typedTypes.length] };
+      return { kind: work.kind, form, name: work.name, place: place.name, role: work.role || '', side: work.side || '', x, y: heightAt(x, z), z, turn: yaw, w: work.w, d: work.d, outline, guns, salients, gate: gateAt, types: [first, typedTypes.length], bore: CITY_BUILDING_TYPES[workGun].bore };
     };
     const backGate = (lx, lz) => { const [gx, gz] = at(lx, lz), [nx, nz] = toward(0, 1); gateAt = { x: gx, z: gz, nx, nz }; };
 

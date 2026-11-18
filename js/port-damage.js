@@ -9,7 +9,7 @@
 // (js/port-props.js writes and replays the record). They are put back as a timber building is.
 import { encodeBuildingEvent } from './building-fracture.js';
 import { reviveGarrisonSoldiers } from './crew.js';
-import { classifyBuildingMaterial, createBuildingDamageState } from './gunnery-control.js';
+import { classifyBuildingMaterial, createBuildingDamageState, workPieceRebuilt, workPieceRestored } from './gunnery-control.js';
 import { jettyDamageRecord, restoreJettyDamage } from './port-props.js';
 
 const PORT_DAY_MS = 86400000;
@@ -92,6 +92,8 @@ function applyBuildingDamageRecord(building, record) {
     if (magazine.initialPowderKg > 0) magazine.powderFraction = magazine.powderKg / magazine.initialPowderKg;
     if (!magazine.powderKg) magazine.barrelsRemaining = 0;
   }
+  // A piece of a work: its gun down, its men fallen, as they were.
+  workPieceRestored(building);
 }
 
 /**
@@ -193,6 +195,7 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       createBuildingDamageState(building);
       for (const gun of building.gunnery?.guns ?? []) gun.dismounted = false;
       reviveGarrisonSoldiers(building);
+      workPieceRebuilt(building, reviveGarrisonSoldiers);
     },
     // Everything, for the career save. Undefined when nothing has been hit, so a save carries no empty record.
     snapshot(activePorts = []) {

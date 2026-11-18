@@ -496,22 +496,27 @@ function artilleryTowerSpec({ round, across, height }) {
 // de artillería, 1592); from then the low garrison carriage of four trucks, as aboard ship, took over in the works
 // (Cristóbal Lechuga, Discurso que trata del cargo de maestre de campo… y de la artillería, 1611). Bronze for the first,
 // iron for the second. It stands on its own plank platform, its axle at the origin, its muzzle out (-z).
-export const CITY_GUN = Object.freeze({ trucksFrom: 1600, deck: 0.08 });
+// Its ball is a demi-culverin's, of ten to twelve pounds (Collado).
+export const CITY_GUN = Object.freeze({ trucksFrom: 1600, deck: 0.08, calibre: 12 });
 const turnedCylinder = (name, [x, y, z], rotation, base, height, radius, radiusTop, material, segments = 12) => ({
-  primitive: 'group', name, position: [x, y, z], rotation, children: [{ primitive: 'cylinder', base, height, radius, radiusTop: radiusTop ?? radius, segments, material }],
+  primitive: 'group', ...(name ? { name } : {}), position: [x, y, z], rotation, children: [{ primitive: 'cylinder', base, height, radius, radiusTop: radiusTop ?? radius, segments, material }],
 });
 function gunSpec({ trucks }) {
   const D = CITY_GUN.deck, primitives = [];
-  // The barrel along its axis, breech (+z) to muzzle (-z): its reinforce, chase and muzzle swell, its cascabel, its trunnions across.
+  let bore = null;
+  // The barrel along its axis, breech (+z) to muzzle (-z): its reinforce, chase and muzzle swell, its cascabel, its
+  // trunnions across; one piece, cast so, which a ball knocks off its carriage whole (js/building-fracture.js).
   const barrel = (axis, trunnion, length, breech, muzzle, material) => {
     const back = trunnion + length * 0.42, down = [-90, 0, 0];
-    primitives.push(
-      turnedCylinder('gun_barrel', [0, axis, back], down, [0, 0, 0], length * 0.45, breech, breech * 0.9, material),
-      turnedCylinder('gun_barrel', [0, axis, back - length * 0.45], down, [0, 0, 0], length * 0.55, breech * 0.8, muzzle, material),
-      turnedCylinder('gun_barrel', [0, axis, back - length + 0.18], down, [0, 0, 0], 0.18, muzzle * 1.22, muzzle * 1.22, material),
-      turnedCylinder('gun_barrel', [0, axis, back + 0.2], down, [0, 0, 0], 0.2, breech * 0.3, breech * 0.5, material, 8),
-      turnedCylinder('gun_trunnions', [0, axis, trunnion], [0, 0, 90], [0, -breech - 0.14, 0], 2 * breech + 0.28, 0.08, 0.08, material, 8),
-    );
+    primitives.push({ primitive: 'group', name: 'gun_barrel', children: [
+      turnedCylinder(null, [0, axis, back], down, [0, 0, 0], length * 0.45, breech, breech * 0.9, material),
+      turnedCylinder(null, [0, axis, back - length * 0.45], down, [0, 0, 0], length * 0.55, breech * 0.8, muzzle, material),
+      turnedCylinder(null, [0, axis, back - length + 0.18], down, [0, 0, 0], 0.18, muzzle * 1.22, muzzle * 1.22, material),
+      turnedCylinder(null, [0, axis, back + 0.2], down, [0, 0, 0], 0.2, breech * 0.3, breech * 0.5, material, 8),
+      turnedCylinder(null, [0, axis, trunnion], [0, 0, 90], [0, -breech - 0.14, 0], 2 * breech + 0.28, 0.08, 0.08, material, 8),
+    ] });
+    // Where its ball leaves and its breech is, along its axis from the type's origin, for the guns that lay it.
+    bore = { axis, muzzle: length - back, breech: back, calibre: CITY_GUN.calibre };
   };
   if (!trucks) {
     // The cureña: two wheels of 1.3 m, an axle-tree, and two cheeks running back and down to the trail on the platform.
@@ -547,7 +552,7 @@ function gunSpec({ trucks }) {
   }
   return {
     schemaVersion: '0.4', name: trucks ? 'Peça em reparo de rodízios (a demi-culverin on a four-truck garrison carriage)' : 'Peça em cureña (a demi-culverin on a two-wheeled carriage with its trail)',
-    width: trucks ? 2.1 : 2.3, length: trucks ? 4 : 7.4, height: 1.4, foundationDepth: 0, materialKind: 10, roofPitch: 0, waterfront: false, primitives,
+    width: trucks ? 2.1 : 2.3, length: trucks ? 4 : 7.4, height: 1.4, foundationDepth: 0, materialKind: 10, roofPitch: 0, waterfront: false, bore, primitives,
   };
 }
 // The carriage a gun of the realm's `year` lies on: the family's first (the cureña) or its second (the trucks).
