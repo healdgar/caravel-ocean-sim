@@ -328,6 +328,40 @@ function bastionSpec({ bays, height }) {
   };
 }
 
+// A battery: a gun platform of ashlar filled with earth, its front (-z) to the water behind a gun parapet with an
+// embrasure to each gun, `gun` metres apart (two bays of the curtain), and low flanking walls back to its gorge (+z),
+// which is open. It is as broad as its guns and of one of two depths; the guns stand on its platform, `height` up.
+export const CITY_BATTERY = Object.freeze({ gun: 5.2, guns: Object.freeze([3, 4, 5, 6, 8]), depths: Object.freeze([12, 16]), height: 3.2, parapet: 1.8, sill: 0.9, rise: 2, embrasure: 1.4, flank: 0.8 });
+function batterySpec({ guns, depth }) {
+  const { gun, height, parapet, sill, rise, embrasure, flank } = CITY_BATTERY, width = cityMetres(guns * gun), hw = width / 2, hd = depth / 2, merlon = gun - embrasure;
+  const primitives = [
+    { primitive: 'box', partGroup: 'foundation_plinth', from: [-hw, -FOOTING_M, -hd], to: [hw, 0, hd], material: 'dark_stone' },
+    { primitive: 'box', name: 'battery_platform', from: [-hw, 0, -hd], to: [hw, height, hd], material: 'ashlar' },
+    { primitive: 'box', name: 'battery_parapet', from: [-hw, height, -hd], to: [hw, height + sill, -hd + parapet], material: 'ashlar' },
+    { primitive: 'box', name: 'battery_flank', from: [-hw, height, -hd + parapet], to: [-hw + flank, height + rise, hd], material: 'ashlar' },
+    { primitive: 'box', name: 'battery_flank', from: [hw - flank, height, -hd + parapet], to: [hw, height + rise, hd], material: 'ashlar' },
+  ];
+  // A merlon between each two guns and one at either end, so each gun's embrasure is in the middle of its bay.
+  for (let k = 0; k <= guns; k++) {
+    const x = -hw + k * gun;
+    primitives.push({ primitive: 'box', name: 'battery_merlon', from: [Math.max(-hw, x - merlon / 2), height + sill, -hd], to: [Math.min(hw, x + merlon / 2), height + rise, -hd + parapet], material: 'ashlar' });
+  }
+  return { schemaVersion: '0.4', name: `Bateria (a gun platform of ${guns} embrasures, ${depth} m deep)`, width, length: depth, height: height + rise, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false, primitives };
+}
+// Where a battery's guns stand, in its own frame: one to each embrasure, its muzzle at the parapet, looking out (-z).
+export function cityBatteryGuns(width, depth) {
+  const { gun, height, parapet } = CITY_BATTERY, guns = Math.round(width / gun);
+  return Array.from({ length: guns }, (_, k) => ({ x: -width / 2 + (k + 0.5) * gun, y: height, z: -depth / 2 + parapet + 0.8, nx: 0, nz: -1 }));
+}
+
+// A watchtower of the coast (atalaia): a square ashlar tower like the wall's, standing alone, its beacon on its roof.
+export const CITY_WATCHTOWER = Object.freeze({ sides: Object.freeze([4.6, 5.6]), stages: Object.freeze([3, 4, 5]) });
+function watchtowerSpec({ side, stages }) {
+  const spec = towerSpec({ name: `Atalaia (watchtower, ${side} m a side, ${stages} stages, its beacon on top)`, side, stages });
+  spec.primitives.push({ primitive: 'cylinder', name: 'beacon_brazier', base: [0, spec.height - 0.9, 0], height: 0.7, radius: 0.35, radiusTop: 0.6, segments: 8, material: 'iron' });
+  return spec;
+}
+
 // The castle's hall: two tall storeys of limewashed wall under a hipped roof, its door in the long front; as long as
 // its bays, a window to each of each storey, and of a narrower or a broader range.
 export const CITY_HALL = Object.freeze({ bay: 4.2, widths: Object.freeze([10, 12]), bays: Object.freeze([4, 5, 6, 7]), height: 10.5, roof: 3.2 });
@@ -480,6 +514,8 @@ const CITY_TYPE_NAMED = {
   })()),
   CURTAIN: cityFamily('CURTAIN', CITY_CURTAIN.heights.flatMap((height) => CITY_CURTAIN.bays.map((bays) => curtainSpec({ bays, height }))), CITY_CURTAIN.heights.indexOf(CITY_CURTAIN.height) * CITY_CURTAIN.bays.length + 3),
   BASTION: cityFamily('BASTION', CITY_BASTION.heights.flatMap((height) => CITY_BASTION.faces.map((bays) => bastionSpec({ bays, height }))), CITY_BASTION.heights.indexOf(CITY_CURTAIN.height) * CITY_BASTION.faces.length + 1),
+  BATTERY: cityFamily('BATTERY', CITY_BATTERY.depths.flatMap((depth) => CITY_BATTERY.guns.map((guns) => batterySpec({ guns, depth }))), CITY_BATTERY.guns.length - 1),
+  WATCHTOWER: cityFamily('WATCHTOWER', CITY_WATCHTOWER.sides.flatMap((side) => CITY_WATCHTOWER.stages.map((stages) => watchtowerSpec({ side, stages }))), 1),
   HALL: cityFamily('HALL', CITY_HALL.widths.flatMap((width) => CITY_HALL.bays.map((bays) => hallSpec({ width, bays }))), CITY_HALL.bays.length + 3),
   PENTICE: cityFamily('PENTICE', CITY_PENTICES, 1),
   ...Object.fromEntries(CITY_STREET_FURNITURE.map(([key, spec]) => [key, cityFamily(key, spec)])),
@@ -546,7 +582,8 @@ export const CITY_PAINT = Object.freeze({ LINEN: 1, RED: 5, BLUE: 6, GOLD: 7, GR
 const CITY_TARGETS = Object.freeze({
   HOUSE: { prefabId: 'city_house', label: 'Town house' }, CHURCH_LEFT: { prefabId: 'city_church', label: 'Parish church' }, CHURCH_RIGHT: { prefabId: 'city_church', label: 'Parish church' },
   CHURCH_GREAT: { prefabId: 'city_church', label: 'Cathedral' }, WALL_TOWER: { prefabId: 'city_wall_tower', label: 'Wall tower' }, KEEP: { prefabId: 'city_keep', label: 'Castle keep' },
-  GATE: { prefabId: 'city_gate', label: 'City gate' }, CURTAIN: { prefabId: 'city_wall', label: 'City wall' }, BASTION: { prefabId: 'city_bastion', label: 'Bastion' }, HALL: { prefabId: 'city_castle_hall', label: 'Castle hall' },
+  GATE: { prefabId: 'city_gate', label: 'City gate' }, CURTAIN: { prefabId: 'city_wall', label: 'City wall' }, BASTION: { prefabId: 'city_bastion', label: 'Bastion' },
+  BATTERY: { prefabId: 'city_battery', label: 'Battery' }, WATCHTOWER: { prefabId: 'city_watchtower', label: 'Watchtower' }, HALL: { prefabId: 'city_castle_hall', label: 'Castle hall' },
   PENTICE: { prefabId: 'city_shop_front', label: 'Shop front' }, SIGN: { prefabId: 'city_shop_front', label: 'Shop front' }, ALE_STAKE: { prefabId: 'city_shop_front', label: 'Shop front' },
   STALL: { prefabId: 'city_market_stall', label: 'Market stall' }, MARKET_CROSS: { prefabId: 'city_market_cross', label: 'Market cross' }, WELL: { prefabId: 'city_well', label: 'Well' },
   WINDMILL: { prefabId: 'city_windmill', label: 'Windmill' }, WATERMILL: { prefabId: 'city_watermill', label: 'Watermill' }, GRANARY: { prefabId: 'city_granary', label: 'Granary' },

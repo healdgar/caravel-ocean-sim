@@ -2648,6 +2648,8 @@ const FORTIFIED_STONE_PREFABS = new Set([
   'city_keep',
   'city_gate',
   'city_bastion',
+  'city_battery',
+  'city_watchtower',
 ]);
 
 const TIMBER_BUILDING_PREFABS = new Set([
