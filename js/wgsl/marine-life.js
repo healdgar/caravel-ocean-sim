@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Share moving-wave contact, atmosphere and the same wet skin lighting as the
-// dolphins, and their continuum. Impact water and exhalation have separate, finite parcel dynamics.
-import {DOLPHIN_SEA_WGSL,seaContinuumBodyWGSL} from './dolphins.js';
-import {CONTINUUM_CORE_WGSL} from '../continuum-core.js';
+// dolphins. Impact water and exhalation have separate, finite parcel dynamics.
+import {DOLPHIN_SEA_WGSL} from './dolphins.js';
 export const MARINE_MIST_COUNT=96;
 export const MARINE_BREATH_DROP_COUNT=64;
 export const MARINE_FALLOUT_COUNT=24;
@@ -98,14 +97,11 @@ marineSea=marineContract(marineSea,'dolphinHeight(q)+.035+rise*t*lobe','mix(dolp
 marineSea=marineContract(marineSea,'dolphinHeight(s.root.xy)+.08','marineBirthSea(s)+.08');
 marineSea=marineContract(marineSea,'let radius=dot(v.uv,v.uv);if(radius>.96){discard;}',
   'let radius=dot(v.uv,v.uv);if(radius>.96||v.world.y<=dolphinHeight(v.world.xz)){discard;}');
-// The sharks and the whale are drawn through the animal continuum (seaContinuumBodyWGSL), the whale with its own skin.
-export const MARINE_LIFE_RENDER=marineSea+CONTINUUM_CORE_WGSL+seaContinuumBodyWGSL(true)+MARINE_BREATH_DYNAMICS+MARINE_IMPACT_DYNAMICS+/* wgsl */ `
+// The sharks' and the whale's water. Their bodies are the one continuum's (js/wgsl/dolphins.js seaStandWGSL and
+// MARINE_CONTINUUM_MATERIAL_SPEC).
+export const MARINE_LIFE_RENDER=marineSea+MARINE_BREATH_DYNAMICS+MARINE_IMPACT_DYNAMICS+/* wgsl */ `
 @group(0) @binding(10) var<storage,read> marineOrigins:array<vec4f>;
 @group(0) @binding(11) var<storage,read> marineLandings:array<vec4f>;
-@group(0) @binding(12) var marineColor:texture_2d<f32>;
-@group(0) @binding(13) var marineNormal:texture_2d<f32>;
-@group(0) @binding(14) var marineRoughness:texture_2d<f32>;
-@group(0) @binding(15) var<storage,read> marineBones:array<mat4x4f>;
 @group(0) @binding(16) var<storage,read> marineSheetLandings:array<vec4f>;
 fn marineBirthSea(s:DolphinSplash)->f32 {
   let origin=marineOrigins[u32(s.motion.w)%48u];

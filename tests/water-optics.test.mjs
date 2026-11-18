@@ -158,12 +158,15 @@ test('the production water compositor bends silhouettes and suppresses them thro
 
 test('all opaque material families support capture and the capture clips to every wave cascade while preserving unfogged radiance and eye depth',{timeout:120000},async()=>{
   const result=await probePage(async()=>{
-    const {createSubmergedShader,createWaterOptics}=await import('/js/water-optics.js'),{FRAME_WGSL,CASCADES}=await import('/js/wgsl/common.js');
+    const {createSubmergedShader,createWaterOptics,waterCaptureWGSL,WATER_CAPTURE_DIRECTIVE}=await import('/js/water-optics.js'),{FRAME_WGSL,CASCADES}=await import('/js/wgsl/common.js');
     const {CARAVEL}=await import('/js/wgsl/caravel.js'),{CREW_RENDER}=await import('/js/wgsl/crew.js'),{ANCHOR_RENDER}=await import('/js/wgsl/anchor.js');
-    const {TERRAIN}=await import('/js/wgsl/terrain.js'),{DOLPHIN_RENDER}=await import('/js/wgsl/dolphins.js'),{MARINE_LIFE_RENDER}=await import('/js/wgsl/marine-life.js');
+    const {TERRAIN}=await import('/js/wgsl/terrain.js'),{DOLPHIN_CONTINUUM_MATERIAL_SPEC,MARINE_CONTINUUM_MATERIAL_SPEC}=await import('/js/wgsl/dolphins.js'),{continuumModuleWGSL}=await import('/js/wgsl/continuum-cut.js');
     const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
     const shader=async(code,label)=>{const module=device.createShaderModule({code,label}),info=await module.getCompilationInfo(),failures=info.messages.filter(m=>m.type==='error').map(m=>label+': '+m.message);errors.push(...failures);if(failures.length)throw Error(failures.join('\n'));return module;};
-    for(const [name,source,entry,world] of [['hull',CARAVEL,'fs','in.world'],['crew',CREW_RENDER,'fs','v.world'],['anchor',ANCHOR_RENDER,'fs','v.world'],['terrain',TERRAIN,'fs','in.world'],['dolphin',DOLPHIN_RENDER,'seaContinuumCaptureFS','v.world'],['whale/shark',MARINE_LIFE_RENDER,'seaContinuumCaptureFS','v.world']])await shader(createSubmergedShader(source,entry,world),name);
+    for(const [name,source,entry,world] of [['hull',CARAVEL,'fs','in.world'],['crew',CREW_RENDER,'fs','v.world'],['anchor',ANCHOR_RENDER,'fs','v.world'],['terrain',TERRAIN,'fs','in.world']])await shader(createSubmergedShader(source,entry,world),name);
+    // The sea's bodies are continuum families: their capture is composed whole by the cut, with the water's own tail.
+    for(const [name,material] of [['dolphin',DOLPHIN_CONTINUUM_MATERIAL_SPEC],['whale/shark',MARINE_CONTINUUM_MATERIAL_SPEC]])
+      await shader(continuumModuleWGSL({pass:'capture',material,capture:{directive:WATER_CAPTURE_DIRECTIVE,tail:o=>waterCaptureWGSL({...o,land:false})}}),name);
     const B=GPUBufferUsage,T=GPUTextureUsage,buffer=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
     const frameData=new Float32Array(96);frameData.set([0,10,0,0],16);frameData.set([0,-1,0,0],28);frameData.set([32,32,1/32,1/32],36);frameData.set([1,1,1,1,1,1],48);
     const frame=buffer(frameData,B.UNIFORM),height=buffer(new Float32Array([-.5,0,0,0]),B.UNIFORM);

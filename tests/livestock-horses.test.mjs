@@ -20,13 +20,11 @@ import {
   sweepHerdHit,
 } from '../js/herds.js';
 import {
-  HERD_CONTINUUM_BINDING,
+  HERD_CONTINUUM_MATERIAL_SPEC,
   HERD_FATE_FLOATS,
-  HERDS_RENDER_WGSL,
-  HERDS_SHADOW_WGSL,
   HERDS_STEP_WGSL,
 } from '../js/wgsl/herds.js';
-import { animalContinuumSelectWGSL } from '../js/wgsl/animal-continuum.js';
+import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
 import {
   CLIP_RIDE,
   HORSE_BARREL_MAX_RX,
@@ -98,17 +96,21 @@ function countBodyBoundaryEdges(sp, positions) {
 const animalManifest = JSON.parse(readFileSync(new URL('../assets/animal-continuum/manifest.json', import.meta.url), 'utf8'));
 
 test('Tripo H3.1 4K livestock bodies bake whole into the one continuum: RGB555 coats, crack-free manifolds, <= 8 storage buffers, no discard', () => {
-  const programs = [['step', HERDS_STEP_WGSL], ['view', HERDS_RENDER_WGSL], ['shadow', HERDS_SHADOW_WGSL], ['cut', animalContinuumSelectWGSL()]];
+  // The herds' view, the shadow and the select are the one cut's (js/wgsl/continuum-cut.js), the view in the herds'
+  // material; the step is their own.
+  const view = continuumModuleWGSL({ pass: 'view', material: HERD_CONTINUUM_MATERIAL_SPEC });
+  const programs = [['step', HERDS_STEP_WGSL], ['view', view], ['shadow', continuumModuleWGSL({ pass: 'shadow' })], ['cut', continuumModuleWGSL({ pass: 'select' })]];
   for (const [name, wgsl] of programs) {
     assert.doesNotMatch(wgsl, /\bdiscard\b/, `herd ${name} program has no discard`);
     assert.ok(countStorageBindings(wgsl) <= 8, `herd ${name} storage buffers <= 8 (${countStorageBindings(wgsl)})`);
   }
   assert.ok(countStorageBindings(TOWNSFOLK_RESET) <= 8, `townsfolk reset storage buffers <= 8`);
-  // The view reads the beasts' bodies from the animal atlas, the shadow map from the same, and the step writes only places.
-  assert.match(HERDS_RENDER_WGSL, new RegExp(`@group\\(0\\)\\s*@binding\\(${HERD_CONTINUUM_BINDING}\\)\\s*var<storage,\\s*read>\\s*animalAtlas`));
-  assert.match(HERDS_SHADOW_WGSL, /@group\(1\)\s*@binding\(0\)\s*var<storage,\s*read>\s*animalAtlas/);
-  assert.match(HERDS_STEP_WGSL, /@group\(0\)\s*@binding\(6\)\s*var<storage,\s*read_write>\s*places/);
-  assert.match(HERDS_RENDER_WGSL, /@fragment\s+fn\s+herdContinuumFS\s*\([^)]*\)\s*->\s*HerdFragOut/, 'one fragment entry, with the sample-mask handoff');
+  // The view reads the beasts' bodies from the scene's data (group 2: the atlas, the records, the lists, the view, the
+  // joints), and the step writes only the records and their joints.
+  assert.match(view, /@group\(2\)\s*@binding\(0\)\s*var<storage,\s*read>\s*continuumAtlas/);
+  assert.match(HERDS_STEP_WGSL, /@group\(0\)\s*@binding\(6\)\s*var<storage,\s*read_write>\s*herdRecords:\s*array<ContinuumRecord>/);
+  assert.match(HERDS_STEP_WGSL, /@group\(0\)\s*@binding\(7\)\s*var<storage,\s*read_write>\s*skinnedPoses/);
+  assert.match(view, /@fragment\s+fn\s+continuumFS\s*\([^)]*\)\s*->\s*ContinuumCoverage/, 'one fragment entry, with the sample-mask handoff');
 
   const expectedHeights = [0.82, 1.52, 0.66, 1.84];
   const triRanges = [[3300, 3500], [3700, 3900], [2900, 3100], [5800, 6400]];
@@ -516,7 +518,7 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
   for (let k = 0; k < 45; k++) townsfolk.follow([lisbonPort, tainoPort], { x: 5000, z: 0 });
   assert.equal(herds.streetMounts, 0);
   assert.equal(herds.count, 0);
-  assert.match(HERDS_RENDER_WGSL, /let\s+isVehicle\s*=\s*body\.slopeScale\.w\s*>=\s*3\.99\s*;/);
+  assert.match(HERDS_STEP_WGSL, /let\s+isVehicle\s*=\s*species\s*>=\s*4u\s*;/);
 
   // Maguana's own pair of bodies was asked for on the way in: it comes before the town is let go.
   await loadCrewContinuumBodies(device, townsfolkBodiesFor('caribbean'), { fetchAsset: fetchCrewContinuumAsset });

@@ -1,10 +1,17 @@
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// The sea's animals: the water they throw up, and their bodies through the one continuum (js/animal-continuum.js).
+// Each body is a record of the one format, of the SKINNED kind: the stand below sets it on the moving sea at its depth
+// and writes its joints (a dolphin's or shark's spine bent by its stroke, the whale's rig's bones), and the one cut
+// chooses its clusters, far body or splat, poses them by those joints and draws them in the sea's material below.
 import {FRAME_WGSL,ATMO_CORE_WGSL,CASCADES} from './common.js';
 import {SKY_RENDER_FUNCS} from './sky.js';
 import {VESSEL_LIGHTING} from './vessel.js';
+import {SHADOW_SAMPLE} from './shadows.js';
 import {DOLPHIN_SPLASH_SECONDS} from '../dolphin-state.js';
-import {CONTINUUM_CORE_WGSL} from '../continuum-core.js';
-import {ANIMAL_TYPE,ANIMAL_CONTINUUM_TYPE} from '../animal-continuum.js';
-import {ANIMAL_CONTINUUM_ENTRY,animalContinuumRenderWGSL} from './animal-continuum.js';
+import {CONTINUUM_KIND} from '../continuum-format.js';
+import {CONTINUUM_RECORD_WGSL} from './continuum-cut.js';
+import {SKINNED_POSE_WGSL} from './skinned-pose.js';
+import {ANIMAL_TYPE,ANIMAL_CONTINUUM_TYPES,ANIMAL_CONTINUUM_MATERIAL,ANIMAL_POSE_JOINTS,ANIMAL_POSE_VEC4S,ANIMAL_RIG_VEC4S,ANIMAL_SEA_STATIONS} from '../animal-continuum.js';
 
 export const DOLPHIN_RIPPLE_SEGMENTS=32;
 export const DOLPHIN_RIPPLE_RINGS=3;
@@ -12,11 +19,42 @@ export const DOLPHIN_RIPPLE_ROWS=2;
 export const DOLPHIN_SHEET_SEGMENTS=28;
 export const DOLPHIN_SHEET_ROWS=3;
 export const DOLPHIN_DROP_COUNT=24;
-// Where a sea pass binds the animal continuum's data in its group 0.
-export const SEA_CONTINUUM_BINDING=24;
 
-// What every sea animal's pass shares: the scene, the moving sea, the wet skin's light and the water each animal
-// throws up. Its bodies are drawn through the animal continuum (seaContinuumBodyWGSL below).
+// The moving sea's height under a point (F, displacement and seaSampler bound by the module that holds it).
+const DOLPHIN_SEA_HEIGHT=/* wgsl */ `
+fn dolphinSea(q:vec2f)->vec3f {
+  var d=vec3f(0);
+  for(var c=0u;c<${CASCADES}u;c++){d+=textureSampleLevel(displacement,seaSampler,q*F.cascInvL[c>>2u][c&3u],i32(c),0.0).xyz;}
+  return d;
+}
+fn dolphinHeight(p:vec2f)->f32 {var q=p;for(var k=0;k<2;k++){q=p-dolphinSea(q).xz;}return dolphinSea(q).y;}
+`;
+// A continuous water film adds a narrow sunlight glint over the softer skin reflection. Both lobes use the scene sun,
+// sky and atmospheric extinction, each seen through `shadow` (the land shadow set's, or 1). The skin's own roughness is
+// .32 unless its texture says otherwise (the whale's).
+const SEA_SKIN_WGSL=/* wgsl */ `
+fn seaSkinRadiance(world:vec3f,normal:vec3f,albedo:vec3f,rough:f32,shadow:vec3f)->vec3f {
+  let n=normalize(normal);let eye=normalize(F.camPos.xyz-world);let sun=F.sunDir.xyz;
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadow);
+  let moon=vec3f(sunVis[1])*lunarShadowVisibility(shadow);
+  let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),8.0).rgb;
+  let sea=textureSampleLevel(envCube,sampC,vec3f(0,-.4,1),8.0).rgb;
+  let f0=vec3f(.035);let coatRough=.11;let coatF0=vec3f(.0204);
+  let coatF=vesselFresnel(coatF0,max(dot(n,eye),0.0));
+  let diffuse=albedo*(vesselAmbient(n,sky,sea)+direct*max(dot(n,sun),0.0)/PI);
+  let reflected=textureSampleLevel(envCube,sampC,reflect(-eye,n),rough*8.0).rgb*vesselEnvironment(n,eye,rough,f0);
+  let spec=vesselSpecular(n,eye,sun,rough,f0)*direct*max(dot(n,sun),0.0);
+  let waterReflection=textureSampleLevel(envCube,sampC,reflect(-eye,n),coatRough*8.0).rgb*vesselEnvironment(n,eye,coatRough,coatF0);
+  let waterGlint=vesselSpecular(n,eye,sun,coatRough,coatF0)*direct*max(dot(n,sun),0.0);
+  let moonSkin=lunarSurface(n,eye,albedo,rough,f0,moon);
+  let moonCoat=lunarSurface(n,eye,vec3f(0),coatRough,coatF0,moon);
+  return (diffuse+reflected+spec+moonSkin)*(1.0-coatF)+waterReflection+waterGlint+moonCoat+lightningSurface(n,eye,albedo,coatRough);
+}
+fn dolphinSkinRadiance(world:vec3f,normal:vec3f,albedo:vec3f,rough:f32)->vec3f {return seaSkinRadiance(world,normal,albedo,rough,vec3f(1.0));}
+`;
+
+// What every sea animal's water shares: the scene, the moving sea, the wet skin's light and the water each animal
+// throws up. Their bodies are the one continuum's (seaStandWGSL, the sea's material, below).
 export const DOLPHIN_SEA_WGSL=FRAME_WGSL+ATMO_CORE_WGSL+VESSEL_LIGHTING+/* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var transLUT:texture_2d<f32>;
@@ -30,40 +68,8 @@ export const DOLPHIN_SEA_WGSL=FRAME_WGSL+ATMO_CORE_WGSL+VESSEL_LIGHTING+/* wgsl 
 // motion: swimming speed. Kind 0=surface trail, 1=emergence, 2=reentry.
 struct DolphinSplash {root:vec4f,shape:vec4f,motion:vec4f};
 @group(0) @binding(9) var<storage,read> splashes:array<DolphinSplash>;
-`+SKY_RENDER_FUNCS+/* wgsl */ `
-fn dolphinSea(q:vec2f)->vec3f {
-  var d=vec3f(0);
-  for(var c=0u;c<${CASCADES}u;c++){d+=textureSampleLevel(displacement,seaSampler,q*F.cascInvL[c>>2u][c&3u],i32(c),0.0).xyz;}
-  return d;
-}
-fn dolphinHeight(p:vec2f)->f32 {var q=p;for(var k=0;k<2;k++){q=p-dolphinSea(q).xz;}return dolphinSea(q).y;}
+`+SKY_RENDER_FUNCS+DOLPHIN_SEA_HEIGHT+SEA_SKIN_WGSL+/* wgsl */ `
 fn dolphinYaw(p:vec3f,heading:f32)->vec3f {let c=cos(heading);let s=sin(heading);return vec3f(c*p.x-s*p.z,p.y,s*p.x+c*p.z);}
-struct DolphinStroke {position:vec3f,normal:vec3f};
-// The peduncle and both flukes share one continuous bend. Its inverse-transpose
-// normal keeps the two water-coated skins lit throughout the stroke.
-fn dolphinStroke(p:vec3f,normal:vec3f,beat:f32)->DolphinStroke {
-  let tail=max(0.0,(p.z-.25)/1.35);
-  return DolphinStroke(p+vec3f(0,beat*.24*tail*tail,0),normalize(normal+vec3f(0,0,-normal.y*beat*.48*tail/1.35)));
-}
-// A continuous water film adds a narrow sunlight glint over the softer skin
-// reflection. Both lobes use the scene sun, sky and atmospheric extinction.
-// The skin's own roughness is .32 unless its texture says otherwise (the whale's).
-fn dolphinSkinRadiance(world:vec3f,normal:vec3f,albedo:vec3f,rough:f32)->vec3f {
-  let n=normalize(normal);let eye=normalize(F.camPos.xyz-world);let sun=F.sunDir.xyz;
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y);
-  let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),8.0).rgb;
-  let sea=textureSampleLevel(envCube,sampC,vec3f(0,-.4,1),8.0).rgb;
-  let f0=vec3f(.035);let coatRough=.11;let coatF0=vec3f(.0204);
-  let coatF=vesselFresnel(coatF0,max(dot(n,eye),0.0));
-  let diffuse=albedo*(vesselAmbient(n,sky,sea)+direct*max(dot(n,sun),0.0)/PI);
-  let reflected=textureSampleLevel(envCube,sampC,reflect(-eye,n),rough*8.0).rgb*vesselEnvironment(n,eye,rough,f0);
-  let spec=vesselSpecular(n,eye,sun,rough,f0)*direct*max(dot(n,sun),0.0);
-  let waterReflection=textureSampleLevel(envCube,sampC,reflect(-eye,n),coatRough*8.0).rgb*vesselEnvironment(n,eye,coatRough,coatF0);
-  let waterGlint=vesselSpecular(n,eye,sun,coatRough,coatF0)*direct*max(dot(n,sun),0.0);
-  let moonSkin=lunarSurface(n,eye,albedo,rough,f0,vec3f(sunVis[1]));
-  let moonCoat=lunarSurface(n,eye,vec3f(0),coatRough,coatF0,vec3f(sunVis[1]));
-  return (diffuse+reflected+spec+moonSkin)*(1.0-coatF)+waterReflection+waterGlint+moonCoat+lightningSurface(n,eye,albedo,coatRough);
-}
 fn dolphinCorner(i:u32)->vec2f {return array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(-1,1),vec2f(-1,1),vec2f(1,-1),vec2f(1,1))[i];}
 struct DolphinEffect {@builtin(position) pos:vec4f,@location(0) uv:vec2f,@location(1) world:vec3f,@location(2) data:vec4f};
 fn dolphinWaterColor(world:vec3f,normal:vec3f,foam:f32)->vec3f {
@@ -154,92 +160,115 @@ fn dolphinEffectData(s:DolphinSplash)->vec4f {return vec4f(s.root.z,s.root.w,s.s
 }
 `;
 
-// The sea's bodies through the animal continuum (js/wgsl/animal-continuum.js). Each animal's place, which its family's
-// state writes, stands on the moving sea under it at its depth; its points are bent by its stroke or, the whale's,
-// skinned by its rig's bones; and whatever the cut chose (clusters, far body, splat) is lit as wet skin. `marine`
-// brings the whale, whose bones and textures js/wgsl/marine-life.js binds.
-export function seaContinuumBodyWGSL(marine){
-  const T=ANIMAL_CONTINUUM_TYPE,E=ANIMAL_CONTINUUM_ENTRY,A=ANIMAL_TYPE;
-  return animalContinuumRenderWGSL(0,SEA_CONTINUUM_BINDING)+/* wgsl */ `
-struct SeaContinuumVertex {
-  @builtin(position) pos:vec4f,
-  @location(0) world:vec3f,
-  @location(1) normal:vec3f,
-  @location(2) albedo:vec3f,
-  @location(3) uv:vec2f,
-  @location(4) @interpolate(flat) coverage:vec4u, // what is drawn (1 clusters, 2 far body, 3 splat), handoff | splat << 8, the animal, samples
-  @location(5) @interpolate(flat) look:u32,        // 1 the whale's textured skin
-};
-struct SeaContinuumOut {@location(0) color:vec4f,@builtin(sample_mask) mask:u32};
-// Where the waves stand an animal: its root on the sea under it, at its depth; a shark near the surface pitched with
-// the wave it rides.
-fn seaPlaced(place:AnimalPlace,archetype:u32)->AnimalPlace {
-  var p=place;
-  p.root.y=dolphinHeight(place.root.xz)+place.root.y;
-  if(archetype==${A.shark}u){
-    let forward=animalRotY(vec3f(0,0,-4.8*.32),place.root.w).xz;
-    let wave=clamp(atan2(dolphinHeight(place.root.xz+forward)-dolphinHeight(place.root.xz-forward),4.8*.64),-.28,.28);
-    p.frame.x+=wave*(1.0-smoothstep(-.5,2.0,place.root.y));
-  }
-  return p;
+// The dolphins' water: their ripples, crowns and spray.
+export const DOLPHIN_RENDER=DOLPHIN_SEA_WGSL;
+
+// What a sea family's state writes for each animal (SEA_PLACE_VEC4S vec4f): where it swims, its depth under the sea and
+// its yaw (the continuum's turns the other way from its heading); its pitch, roll, scale and its stroke's phase
+// (radians); its type (below 0: none) and its seed (u32 bits).
+export const SEA_PLACE_VEC4S=3;
+
+// The stand: each animal's record set on the moving sea under it at its depth and turned, afloat and important (a
+// breach, a fin, a blow is what the player watches); a shark near the surface pitched with the wave it rides. Its
+// joints are written as scripts/prepare-animal-continuum.mjs measured them: a dolphin's or shark's spine stations
+// bent by its stroke or, `marine`, the whale's rig's bones as its state poses them (column-major, to rows).
+export function seaStandWGSL(marine){
+  const A=ANIMAL_TYPE;
+  return FRAME_WGSL+CONTINUUM_RECORD_WGSL+SKINNED_POSE_WGSL+/* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var<storage,read> seaPlaces:array<vec4f>;
+@group(0) @binding(2) var<storage,read_write> seaRecords:array<ContinuumRecord>;
+@group(0) @binding(3) var<storage,read_write> skinnedPoses:array<vec4f>;
+@group(0) @binding(4) var<uniform> seaRig:array<vec4f,${ANIMAL_CONTINUUM_TYPES.length*ANIMAL_RIG_VEC4S}>;
+${marine?'@group(0) @binding(5) var<storage,read> marineBones:array<mat4x4f>;':''}
+@group(0) @binding(6) var displacement:texture_2d_array<f32>;
+@group(0) @binding(7) var seaSampler:sampler;
+`+DOLPHIN_SEA_HEIGHT+/* wgsl */ `
+const SEA_POSE_VEC4S:u32=${ANIMAL_POSE_VEC4S}u;
+const SEA_RIG_VEC4S:u32=${ANIMAL_RIG_VEC4S}u;
+const SEA_STATIONS:u32=${ANIMAL_SEA_STATIONS}u;
+fn seaRigAt(model:u32,k:u32)->vec4f {return seaRig[model*SEA_RIG_VEC4S+k];}
+// Station k of a spine reaching 'reach' along its bend, bent by the stroke's beat: a dolphin's flukes up and down, a
+// shark's tail from side to side.
+fn seaStation(model:u32,k:u32,reach:f32,beat:f32)->SkinnedJoint {
+  let dolphin=model==${A.dolphin}u;
+  let start=select(.15,.25,dolphin);let run=select(2.4,1.35,dolphin);let amplitude=select(.42,.24,dolphin);
+  let t=f32(k)/f32(SEA_STATIONS-1u)*reach;let z=start+run*t;
+  let bend=beat*amplitude*t*t;let slope=atan(beat*amplitude*2.0*t/run);
+  if(dolphin){return skinnedThen(skinnedTranslate(vec3f(0.0,bend,0.0)),skinnedAbout(vec3f(0.0,0.0,z),skinnedRotX(-slope)));}
+  return skinnedThen(skinnedTranslate(vec3f(bend,0.0,0.0)),skinnedAbout(vec3f(0.0,0.0,z),skinnedRotY(slope)));
 }
-struct SeaPosed {position:vec3f,normal:vec3f};
-// A point bent by its animal's stroke (or skinned by the whale's bones), then stood where its place stands it.
-fn seaPose(point:AnimalPoint,place:AnimalPlace,archetype:u32)->SeaPosed {
-  var p=point.position;var n=point.normal;
-  if(archetype==${A.dolphin}u){
-    let swim=dolphinStroke(p,n,sin(F.reserved.w*8.0+place.pose.x));p=swim.position;n=swim.normal;
-  }else if(archetype==${A.shark}u){
-    let tail=clamp((p.z-.15)/2.4,0.0,1.0);let beat=sin(F.reserved.w*4.2+place.pose.x);
-    p.x+=beat*.42*tail*tail;n=normalize(n+vec3f(0,0,-n.x*beat*.35*tail));
-  }${marine?`else if(archetype==${A.whale}u){
-    let j=point.skin.w;let w=unpack4x8unorm(point.skin4);
-    let skin=marineBones[j&255u]*w.x+marineBones[(j>>8u)&255u]*w.y+marineBones[(j>>16u)&255u]*w.z+marineBones[j>>24u]*w.w;
-    p=(skin*vec4f(p,1.0)).xyz;n=normalize((skin*vec4f(n,0.0)).xyz);
+@compute @workgroup_size(64) fn seaStandCS(@builtin(global_invocation_id) id:vec3u) {
+  let idx=id.x;
+  if(idx>=arrayLength(&seaRecords)||idx*${SEA_PLACE_VEC4S}u+2u>=arrayLength(&seaPlaces)){return;}
+  let at=idx*SEA_POSE_VEC4S;
+  let a=seaPlaces[idx*3u];let b=seaPlaces[idx*3u+1u];let c=seaPlaces[idx*3u+2u];
+  if(c.x<0.0){seaRecords[idx]=ContinuumRecord(vec4f(0.0),vec4f(0.0,0.0,0.0,1.0),vec4u(CONTINUUM_GONE,at,idx,0u),vec4u(0u));return;}
+  let model=u32(c.x);
+  var pitch=b.x;
+  if(model==${A.shark}u){
+    let forward=vec2f(sin(a.w),cos(a.w))*(-4.8*.32);
+    let wave=clamp(atan2(dolphinHeight(a.xz+forward)-dolphinHeight(a.xz-forward),4.8*.64),-.28,.28);
+    pitch+=wave*(1.0-smoothstep(-.5,2.0,a.y));
+  }
+  seaRecords[idx]=ContinuumRecord(vec4f(a.x,dolphinHeight(a.xz)+a.y,a.z,b.z),skinnedTurn(a.w,pitch,b.y),
+    vec4u(model|(${CONTINUUM_KIND.SKINNED}u<<CONTINUUM_KIND_SHIFT)|CONTINUUM_SEA|CONTINUUM_IMPORTANT_FLAG,at,bitcast<u32>(c.y),0u),vec4u(0u));
+  let head=seaRigAt(model,2u);let count=min(u32(head.x),${ANIMAL_POSE_JOINTS}u);let slack=head.y;
+  skinnedWriteHead(at,count,slack);${marine?`
+  if(model==${A.whale}u){
+    for(var j=0u;j<count;j++){
+      let m=marineBones[j];
+      skinnedWriteJoint(at,count,j,SkinnedJoint(vec4f(m[0].x,m[1].x,m[2].x,m[3].x),vec4f(m[0].y,m[1].y,m[2].y,m[3].y),vec4f(m[0].z,m[1].z,m[2].z,m[3].z)),seaRigAt(model,3u+j),slack,false);
+    }
+    return;
   }`:''}
-  return SeaPosed(animalFrame(p,place),normalize(animalFrameTurn(n,place)));
+  let beat=select(sin(F.reserved.w*4.2+b.w),sin(F.reserved.w*8.0+b.w),model==${A.dolphin}u);
+  for(var k=0u;k<count;k++){skinnedWriteJoint(at,count,k,seaStation(model,k,head.w,beat),seaRigAt(model,3u+k),slack,false);}
 }
-fn seaColour(point:AnimalPoint)->vec3f {return vec3f(unpack2x16unorm(point.skin.x),unpack2x16unorm(point.skin.y).x);}
-fn seaUV(point:AnimalPoint)->vec2f {return unpack2x16unorm(point.skin.z);}
-// One vertex of whatever the cut chose for a sea animal: a cluster's corner or a far-body corner, each end posed and
-// the two mixed by the collapse's morph; or a corner of its splat, facing the eye.
-@vertex fn seaContinuumVS(@builtin(vertex_index) vertex:u32,listed:AnimalContinuumEntry)->SeaContinuumVertex {
-  let touched=animalContinuumBindings();
-  let animal=listed.entry.x;let kind=listed.entry.y>>28u;let item=listed.entry.y&0x0fffffffu;
-  let given=animalPlaceOf(animal);let archetype=animalTypeOf(given);
-  let place=seaPlaced(given,archetype);
-  let state=animalState(animal);
-  var o:SeaContinuumVertex;
-  o.coverage=vec4u(kind,state.x&0xffffu,animal,animalView.counts.y);
-  if(kind==${E.splat}u){
-    let s=animalSplatCorner(archetype,place,vertex,bitcast<f32>(state.w),F.camPos.xyz);
-    o.world=s.world;
+`;
+}
+
+// The sea's material (js/wgsl/continuum-cut.js): wet skin, its colour each point's own (a far triangle's the nearest
+// the bake found; a splat's its type's mean), lit through the land's shadow set; `marine`, the whale's by its own
+// textures at the place each of its points carries. Seen under water too, through the water's own capture.
+function seaContinuumMaterial(name,marine){
+  const W=ANIMAL_TYPE.whale,M=ANIMAL_CONTINUUM_MATERIAL;
+  const prelude=()=>FRAME_WGSL+ATMO_CORE_WGSL+VESSEL_LIGHTING+SHADOW_SAMPLE+SKY_RENDER_FUNCS+SEA_SKIN_WGSL+/* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var transLUT:texture_2d<f32>;
+@group(0) @binding(2) var skyLUT:texture_2d<f32>;
+@group(0) @binding(3) var sampC:sampler;
+@group(0) @binding(4) var envCube:texture_cube<f32>;
+@group(0) @binding(5) var<storage,read> sunVis:array<f32,4>;
+${marine?`@group(0) @binding(7) var marineSampler:sampler;
+@group(0) @binding(12) var marineColor:texture_2d<f32>;
+@group(0) @binding(13) var marineNormal:texture_2d<f32>;
+@group(0) @binding(14) var marineRoughness:texture_2d<f32>;`:''}
+`;
+  const wgsl=()=>/* wgsl */ `
+fn ${name}Varying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
+  (*v).uv=vec2f(0.5);(*v).look=0u;
+  if(s.what==CONTINUUM_SPLAT_ENTRY){
     // A dome over the outline: its corners lean out, its middle faces the eye.
-    o.normal=normalize(s.right*(s.corner.x*.55)+s.up*(s.corner.y*.65)+s.toward*.2828);
-    o.albedo=max(animalTypeV(archetype,${T.splatColour}u),vec3f(0.0));
-    ${marine?`if(archetype==${A.whale}u){o.albedo*=textureSampleLevel(marineColor,seaSampler,vec2f(.5),16.0).rgb;}`:''}
-  }else{
-    var c:AnimalCorner;
-    if(kind==${E.cluster}u){c=animalClusterCorner(archetype,item,vertex);}
-    else{c=animalFarCorner(archetype,item,vertex,state.y&65535u,bitcast<f32>(state.z));}
-    if(!c.shown){o.pos=ANIMAL_CONTINUUM_HIDDEN;return o;}
-    let a=seaPose(c.a,place,archetype);let b=seaPose(c.b,place,archetype);
-    o.world=mix(a.position,b.position,c.morph);
-    o.normal=normalize(mix(a.normal,b.normal,c.morph));
-    o.albedo=mix(seaColour(c.a),seaColour(c.b),c.morph);
-    o.uv=mix(seaUV(c.a),seaUV(c.b),c.morph);
-    o.look=select(0u,1u,archetype==${A.whale}u);
+    let toward=s.normal;
+    let lift=continuumQuat(s.record.turn,vec3f(0.0,1.0,0.0));
+    let up=normalize(lift-toward*dot(lift,toward)+vec3f(0.0,1e-4,0.0));
+    let right=normalize(cross(up,toward));
+    let corner=s.corner*0.5;
+    (*v).normal=normalize(right*(corner.x*.55)+up*(corner.y*.65)+toward*.2828);
+    (*v).albedo=max(vec3f(continuumTypeF(s.model,${M.colour}u),continuumTypeF(s.model,${M.colour + 1}u),continuumTypeF(s.model,${M.colour + 2}u)),vec3f(0.0));${marine?`
+    if(s.model==${W}u){(*v).albedo*=textureSampleLevel(marineColor,marineSampler,vec2f(.5),16.0).rgb;}`:''}
+    return;
   }
-  o.world+=vec3f(touched);
-  o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1.0);
-  return o;
+  (*v).albedo=vec3f(f32((s.word>>16u)&255u),f32((s.word>>8u)&255u),f32(s.word&255u))/255.0;${marine?`
+  if(s.model==${W}u){(*v).uv=continuumUV(s.vertex);(*v).look=1u;}`:''}
 }
-fn seaContinuumColour(v:SeaContinuumVertex)->vec3f {
+fn ${name}Shade(v:ContinuumVarying,front:bool)->vec4f {
   var n=normalize(v.normal);var albedo=v.albedo;var rough=.32;${marine?`
   // The whale's own skin, its colour, relief and roughness, read in uniform control flow.
-  let base=textureSample(marineColor,seaSampler,v.uv).rgb;
-  let map=textureSample(marineNormal,seaSampler,v.uv).xyz*2.0-1.0;
-  let gloss=textureSample(marineRoughness,seaSampler,v.uv).g;
+  let base=textureSample(marineColor,marineSampler,v.uv).rgb;
+  let map=textureSample(marineNormal,marineSampler,v.uv).xyz*2.0-1.0;
+  let gloss=textureSample(marineRoughness,marineSampler,v.uv).g;
   let dx=dpdx(v.world);let dy=dpdy(v.world);let du=dpdx(v.uv);let dv=dpdy(v.uv);
   let determinant=du.x*dv.y-du.y*dv.x;
   if(v.look==1u){
@@ -249,21 +278,16 @@ fn seaContinuumColour(v:SeaContinuumVertex)->vec3f {
       n=normalize(t*map.x+b*map.y+n*map.z);
     }
   }`:''}
-  return surfaceAir(dolphinSkinRadiance(v.world,n,albedo,rough),v.world);
-}
-// Every sample of a pixel is drawn by exactly one of an animal's clusters, far body and splat (animalContinuumMask).
-@fragment fn seaContinuumFS(v:SeaContinuumVertex)->SeaContinuumOut {
-  return SeaContinuumOut(vec4f(seaContinuumColour(v),1.0),animalContinuumMask(v.coverage,v.pos.xy));
-}
-// The water's picture of what lies under it (js/water-optics.js) has one sample a pixel: it is drawn by whichever of
-// the three owns that sample.
-@fragment fn seaContinuumCaptureFS(v:SeaContinuumVertex)->@location(0) vec4f {
-  let colour=seaContinuumColour(v);
-  if((animalContinuumMask(vec4u(v.coverage.xyz,1u),v.pos.xy)&1u)==0u){discard;}
-  return vec4f(colour,1.0);
+  return vec4f(continuumAir(seaSkinRadiance(v.world,n,albedo,rough,vesselShadow(v.world,n)),v.world),1.0);
 }
 `;
+  return Object.freeze({
+    name,prelude,core:false,data:Object.freeze({group:2,binding:0}),
+    varyings:[['albedo','vec3f'],['uv','vec2f'],['look','u32',true]],wgsl,salt:13,
+    // Open fins and flukes are lit from whichever side is seen.
+    cullMode:'none',air:true,capture:true,
+  });
 }
+export const DOLPHIN_CONTINUUM_MATERIAL_SPEC=seaContinuumMaterial('dolphinContinuum',false);
+export const MARINE_CONTINUUM_MATERIAL_SPEC=seaContinuumMaterial('marineContinuum',true);
 
-// The dolphins' pass: the sea, their water, and their bodies through the animal continuum.
-export const DOLPHIN_RENDER=DOLPHIN_SEA_WGSL+CONTINUUM_CORE_WGSL+seaContinuumBodyWGSL(false);

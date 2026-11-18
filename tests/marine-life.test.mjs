@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createMarineLifeState,marinePoseAt,marineSurfaceBounds,MARINE_ANIMAL_LIMIT,MARINE_EFFECT_LIMIT,MARINE_EFFECT_SECONDS,MARINE_ENCOUNTER_SECONDS} from '../js/marine-life-state.js';
-import {createMarineMesh} from '../js/marine-life.js';
+import {createMarineMesh} from '../js/marine-mesh.js';
 const vessel=()=>({x:0,z:0,heading:0,length:20,beam:6,surgeVelocity:2});
 function marineSeeded(){let seed=62471;return()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};}
 

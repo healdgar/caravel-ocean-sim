@@ -571,7 +571,7 @@ async function main() {
   const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
   const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.STORAGE|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
   const seaShadowsPromise=createSeaShadows({device,computePipe,sceneShadows,count:fleetCount});
-  const dolphinsPromise=Promise.all([surfaceWavesPromise,waterOpticsPromise]).then(([surfaceWaves,waterOptics])=>createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA}));
+  const dolphinsPromise=Promise.all([surfaceWavesPromise,waterOpticsPromise]).then(([surfaceWaves,waterOptics])=>createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shadows:landShadows,shader,format:HDR,samples:MSAA}));
   const gunEffectsPromise=surfaceWavesPromise.then(surfaceWaves=>createGunneryEffects({surfaceWaves,hulls:fleetHullUBO,hullCount:fleetCount,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA}));
   const gunSeaPromise=surfaceWavesPromise.then(surfaceWaves=>createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe}));
   const gunportSafetyPromise=surfaceWavesPromise.then(surfaceWaves=>createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0}));
@@ -913,7 +913,7 @@ async function main() {
     if(typeof anchorEnvironment==='object'&&anchorEnvironment)anchorEnvironment.terrain=null;
     envFull=true;
   }
-  const marineLife=createDeferredMarineLife({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
+  const marineLife=createDeferredMarineLife({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shadows:landShadows,shader,format:HDR,samples:MSAA});
   dolphins.state.onSurfaceEvent=event=>surfaceWaves.emit(event);
   marineLife.state.onSurfaceEvent=event=>surfaceWaves.emit(event);
   const impactDetector=createImpactDetector();
@@ -5589,6 +5589,8 @@ async function main() {
         props?.drawShadow?.(pass);
         townsfolk?.drawShadow?.(pass);
         fortSoldiers?.drawShadow?.(pass);mateSoldiers?.drawShadow?.(pass);
+        // A dolphin's leap or a whale's breach shades what it rises beside.
+        dolphins.drawShadow(pass);marineLife.drawShadow(pass);
       });
     }
     frameStages.mark('Scenery');

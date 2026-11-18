@@ -177,10 +177,10 @@ export function packContinuumCluster({ lod, parentLod, cull, error, parentError,
 // in them counted from the body's own start, so that an atlas is assembled from bodies baked anywhere by moving them.
 // `packing` is its family's: `triangles` its source triangle count, `flags` its type's, `material` its block (up to
 // CONTINUUM_MATERIAL_WORDS words), `vertex(v)` a welded vertex's { high, word }, `farWord(t)` a far triangle's word,
-// `streams` a stream's words for a welded vertex (`{ uv: (v) => [word] }`; a far vertex reads zeros), each packed
-// only where some vertex's words are not all zero, and `splatArea` the outline's area (an ellipse's if not given).
-// `farStreams` gives a far vertex's words the same way (`{ rider: (i) => [word] }`), for a family whose far body is
-// posed by what its vertices ride.
+// `streams` a stream's words for a welded vertex (`{ uv: (v) => [word] }`), `farStreams` the same for far vertex i
+// (`{ rider: (i) => [word] }` for a far body posed by what its vertices ride; a skinned body's far points wear the
+// skin of the source nearest them; a far vertex without reads zeros), each packed only where some vertex's words are
+// not all zero, and `splatArea` the outline's area (an ellipse's if not given).
 export function packContinuumBody(packing, { welded, clusters, far }) {
   const { triangles = 0, flags = 0, material = [], vertex = () => ({}), farWord = () => 0, streams = {}, farStreams = {}, splat = far.splat } = packing;
   if (material.length > CONTINUUM_MATERIAL_WORDS) throw Error(`A continuum material block holds ${material.length} words`);

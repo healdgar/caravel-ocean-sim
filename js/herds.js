@@ -2,16 +2,18 @@
 // GPU pasture herds, 1550 mounted riders & road caravans manager: uploads static herd, caravan,
 // and street-mount seeds once per coast/update, dispatches closed-form GPU pasture, caravan hitch,
 // street-mount, stampede & casualty compute, and draws all 7 species (sheep, cattle, swine,
-// Lusitano horses + sela à gineta tack, covered wain, coach, cargo ox-cart) through the one animal
-// continuum (js/animal-continuum-draw.js): the step writes each one's place, the shared cut chooses its
-// clusters, far body or splat, and one pipeline poses and shades whatever it chose.
+// Lusitano horses + sela à gineta tack, covered wain, coach, cargo ox-cart) through the one continuum
+// (js/animal-continuum.js): the step stands each one's record and writes its joints, the one cut chooses its
+// clusters, far body or splat and casts its shadow, and the herds' material shades whatever it chose.
 import { requestOnce } from './gpu-program-cache.js';
-import { createAnimalContinuumSet, requestAnimalContinuumAtlas, requestAnimalContinuumPipelines } from './animal-continuum-draw.js';
-import { ANIMAL_CONTINUUM_ENTRY_LAYOUT } from './wgsl/animal-continuum.js';
+import { ANIMAL_CONTINUUM_TYPES } from './animal-continuum.js';
+import { requestAnimalContinuumAtlas, createAnimalScene } from './animal-scene.js';
+import { requestContinuumPrograms, requestContinuumView } from './continuum-scene.js';
+import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { ROUTE_STEP_M, WALKER_WORDS } from './town-streets.js';
 import { continuumGroundView } from './continuum-ground.js';
 import {
-  HERD_CONTINUUM_BINDING,
+  HERD_CONTINUUM_MATERIAL_SPEC,
   HERD_FATE_FLOATS,
   HERD_ROUTE_HEADER,
   HERD_SEED_FLOATS,
@@ -20,8 +22,6 @@ import {
   HERD_SHOTS_WORDS,
   HERD_SPECIES,
   HERD_STAMPEDE_RADIUS_M,
-  HERDS_RENDER_WGSL,
-  HERDS_SHADOW_WGSL,
   HERDS_STEP_WGSL,
 } from './wgsl/herds.js';
 
@@ -717,39 +717,16 @@ export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to,
   return best;
 }
 
-// The herds' programs: the step that places every beast, the view's one pipeline over the continuum's four lists,
-// and the land shadow map's over its fifth.
+// The herds' programs: the step that stands every beast and writes its joints, the one cut's select and shadow, and
+// the herds' material's view.
 export function requestHerdsPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
   return requestOnce(device, `livestock herds continuum ${format} ${samples}`, async () => {
-    const [renderMod, shadowMod, stepMod] = await Promise.all([
-      shader(HERDS_RENDER_WGSL, 'livestock herds'),
-      shader(HERDS_SHADOW_WGSL, 'livestock herds shadow'),
-      shader(HERDS_STEP_WGSL, 'livestock herds step'),
+    const [programs, view, step] = await Promise.all([
+      requestContinuumPrograms({ device, shader, shadowFormat: LAND_SHADOW_FORMAT }),
+      requestContinuumView({ device, shader, material: HERD_CONTINUUM_MATERIAL_SPEC, format, samples }),
+      shader(HERDS_STEP_WGSL, 'livestock herds step').then((module) => device.createComputePipelineAsync({ label: 'livestock herds step', layout: 'auto', compute: { module, entryPoint: 'main' } })),
     ]);
-    const [view, shadow, step] = await Promise.all([
-      device.createRenderPipelineAsync({
-        label: 'livestock herds',
-        layout: 'auto',
-        vertex: { module: renderMod, entryPoint: 'herdContinuumVS', buffers: ANIMAL_CONTINUUM_ENTRY_LAYOUT },
-        fragment: { module: renderMod, entryPoint: 'herdContinuumFS', targets: [{ format }] },
-        primitive: { topology: 'triangle-list', cullMode: 'back' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-        multisample: { count: samples },
-      }),
-      device.createRenderPipelineAsync({
-        label: 'livestock herds shadow',
-        layout: 'auto',
-        vertex: { module: shadowMod, entryPoint: 'animalContinuumShadowVS', buffers: ANIMAL_CONTINUUM_ENTRY_LAYOUT },
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
-      }),
-      device.createComputePipelineAsync({
-        label: 'livestock herds step',
-        layout: 'auto',
-        compute: { module: stepMod, entryPoint: 'main' },
-      }),
-    ]);
-    return { view, shadow, step };
+    return { programs, view, step };
   });
 }
 
@@ -775,12 +752,12 @@ export async function createLivestockHerds({
     if (data.byteLength) device.queue.writeBuffer(buf, 0, data);
     return buf;
   };
-  const [pipelines, atlas, cut] = await Promise.all([
+  const [pipelines, atlas] = await Promise.all([
     requestHerdsPipelines({ device, shader, format, samples }),
     requestAnimalContinuumAtlas(device),
-    requestAnimalContinuumPipelines({ device, shader }),
   ]);
-  const cloudGroup = clouds.bindVolume(pipelines.view);
+  const cloudGroup = clouds.bindVolume(pipelines.view.pipeline);
+  const herdTypes = ANIMAL_CONTINUUM_TYPES.map((_, t) => t).filter((t) => t < HERD_SPECIES);
 
   const shotsBytes = new ArrayBuffer(HERD_SHOTS_WORDS * 4);
   const shotsU32 = new Uint32Array(shotsBytes);
@@ -823,15 +800,7 @@ export async function createLivestockHerds({
   function rebuildGroups() {
     if (!state) return;
     const baseEntries = activeResources.filter(([id]) => wantedBindings.has(id)).map(([binding, resource]) => ({ binding, resource }));
-    state.viewGroup = device.createBindGroup({
-      label: 'livestock herds',
-      layout: pipelines.view.getBindGroupLayout(0),
-      entries: [...baseEntries, ...state.animals.entries(HERD_CONTINUUM_BINDING)],
-    });
-    state.shadowGroups = [
-      device.createBindGroup({ label: 'livestock shadow frame', layout: pipelines.shadow.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: landShadowUniform } }] }),
-      device.createBindGroup({ label: 'livestock shadow continuum', layout: pipelines.shadow.getBindGroupLayout(1), entries: state.animals.entries(0) }),
-    ];
+    state.viewGroup = device.createBindGroup({ label: 'livestock herds', layout: pipelines.view.pipeline.getBindGroupLayout(0), entries: baseEntries });
   }
 
   function resetFatesRange(startIdx = 0, endIdx = MAX_HERDS) {
@@ -920,8 +889,8 @@ export async function createLivestockHerds({
     const routes = mkBuf('caravan routes', combinedRoutes, B.STORAGE);
     clockU[0] = count;
     const cfg = mkBuf('livestock config', clock, B.UNIFORM);
-    // Every beast's place, which the step writes and the continuum's cut reads.
-    const animals = createAnimalContinuumSet({ device, atlas, pipelines: cut, frame: frameUBO, shadowUniform: landShadowUniform, capacity: count, samples, label: 'livestock' });
+    // Every beast's record and joints, which the step writes and the one cut reads.
+    const animals = createAnimalScene({ device, atlas, programs: pipelines.programs, view: pipelines.view, count, types: herdTypes, frame: frameUBO, shadowUniform: landShadowUniform, samples, label: 'livestock' });
     animals.setCount(count);
 
     const stepGroup = device.createBindGroup({
@@ -934,7 +903,9 @@ export async function createLivestockHerds({
         { binding: 3, resource: elevation.createView() },
         { binding: 4, resource: { buffer: cfg } },
         { binding: 5, resource: { buffer: seeds } },
-        { binding: 6, resource: { buffer: animals.places } },
+        { binding: 6, resource: { buffer: animals.records } },
+        { binding: 7, resource: { buffer: animals.poses } },
+        { binding: 8, resource: { buffer: atlas.rig } },
         { binding: 9, resource: { buffer: routes } },
         { binding: 10, resource: { buffer: shotsBuf } },
         { binding: 11, resource: { buffer: fatesBuf } },
@@ -956,7 +927,6 @@ export async function createLivestockHerds({
       cpuRoutes: combinedRoutes,
       stepGroup,
       viewGroup: null,
-      shadowGroups: [],
     };
     rebuildGroups();
   }
@@ -1070,24 +1040,18 @@ export async function createLivestockHerds({
       pass.dispatchWorkgroups(Math.ceil(state.count / 64));
       state.animals.encode(pass);
     },
-    // The continuum's four lists, one pipeline.
+    // The view's four lists, one pipeline.
     draw(pass) {
       if (!state) return;
-      pass.setPipeline(pipelines.view);
-      pass.setBindGroup(0, state.viewGroup);
-      pass.setBindGroup(1, cloudGroup);
-      state.animals.drawView(pass);
+      state.animals.draw(pass, state.viewGroup, cloudGroup);
     },
     // The main pass's indirect draws for the continuum census (js/continuum-census.js).
     continuumDraws() { return state ? state.animals.continuumDraws() : []; },
-    // The beasts' continuum set (js/animal-continuum-draw.js): their places and the lists the cut fills.
+    // The beasts' scene of the one cut: their records, joints and the lists the cut fills.
     get animals() { return state?.animals ?? null; },
-    // The beasts' far bodies at the steps the cut chose for the land's shadow map.
+    // The beasts' cut for the land's shadow map, by the one cut's shadow program.
     drawShadow(pass) {
       if (!state) return;
-      pass.setPipeline(pipelines.shadow);
-      pass.setBindGroup(0, state.shadowGroups[0]);
-      pass.setBindGroup(1, state.shadowGroups[1]);
       state.animals.drawShadow(pass);
     },
     destroy() {

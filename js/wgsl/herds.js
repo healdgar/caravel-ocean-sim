@@ -5,19 +5,21 @@
 //   species 4 = carreta (4-wheel covered wain),
 //   species 5 = coche (4-wheel passenger/merchant coach),
 //   species 6 = carro de bois (2-wheel heavy cargo ox-cart).
-// Every beast and vehicle is drawn through the one continuum (js/animal-continuum.js): the step below writes each
-// one's place, the shared cut (js/wgsl/animal-continuum.js) chooses its clusters, far body or splat, and the passes
-// here pose what it chose by the herd rig and shade it. Also: atomic coupled hitch culling & hitch destruction,
-// ballistic vehicle shard flight, livestock felling & 38 m stampedes.
+// Every beast and vehicle is drawn through the one continuum (js/animal-continuum.js): the step below stands each one's
+// record (16 words, of the SKINNED kind) and writes its joints, and the one cut (js/wgsl/continuum-cut.js) chooses its
+// clusters, far body or splat, poses them by those joints, casts its shadow and draws it in the herds' material below.
+// Also: atomic coupled hitch culling & hitch destruction, ballistic vehicle shard flight, livestock felling & 38 m
+// stampedes.
 import { FRAME_WGSL, ATMO_CORE_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
-import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
 import { continuumGroundWGSL } from '../continuum-ground.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 import { SHADOW_FRAME } from './shadows.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
-import { ANIMAL_CONTINUUM_TYPE, ANIMAL_PLACE_CODE, ANIMAL_PLACE_SEED, ANIMAL_PLACE_EXACT, ANIMAL_PLACE_SHATTERED } from '../animal-continuum.js';
-import { ANIMAL_CONTINUUM_ENTRY, animalContinuumRenderWGSL, animalContinuumShadowWGSL } from './animal-continuum.js';
+import { CONTINUUM_KIND } from '../continuum-format.js';
+import { CONTINUUM_RECORD_WGSL } from './continuum-cut.js';
+import { SKINNED_POSE_WGSL } from './skinned-pose.js';
+import { ANIMAL_CONTINUUM_TYPES, ANIMAL_CONTINUUM_MATERIAL, ANIMAL_POSE_VEC4S, ANIMAL_RIG_VEC4S } from '../animal-continuum.js';
 
 export const HERD_SEED_FLOATS = 8;
 export const HERD_FATE_FLOATS = 8;
@@ -27,235 +29,123 @@ export const HERD_SHOTS_WORDS = 4 + HERD_SHOT_LIMIT * HERD_SHOT_FLOATS;
 export const HERD_SPECIES = 7;
 export const HERD_ROUTE_HEADER = 1;
 export const HERD_STAMPEDE_RADIUS_M = 38.0;
-// Where a herd pass binds the animal continuum's data in its group 0.
-export const HERD_CONTINUUM_BINDING = 24;
 
-const HERD_RIG_FN = /* wgsl */ `
-struct HerdBody {
-  posYaw: vec4f,     // the drawn (shifted) world x, ground y, world z, yaw
-  animCoat: vec4f,   // walkPhase, walkAmp, grazeAmt_or_tongueYaw, coatSeed
-  slopeScale: vec4f, // slopePitch, scale, tailPhase_or_tonguePitch, species
-  extra: vec4f,      // unused, flags (1=tack, 2=felled, 4=shattered, 8=halted), hitAge, hitDirAngle
-};
+// The herd rig as joints (js/animal-continuum.js ANIMAL_JOINT; mirrored by scripts/prepare-animal-continuum.mjs, whose
+// bake measures every cluster and far step in these very poses). A beast: its body; its neck and head pitched about the
+// withers while it grazes (or lifted in alarm); four legs swung in a four-beat walk about the shoulder and hip, or
+// folded when felled; each leg's foot lifted as it swings forward; its tail whisking; its saddle and bridle, gathered to
+// nothing and hidden on a beast without tack. Felled, the whole rolls onto its flank. A road vehicle: a joint a shard,
+// its wheels turned by the distance rolled and its pole swung toward its team; shattered, each shard on its own
+// ballistic flight. Each joint is written with its bound (the sphere about its points at rest, from the rig table).
+const HERD_JOINTS_WGSL = SKINNED_POSE_WGSL + /* wgsl */ `
+const HERD_POSE_VEC4S: u32 = ${ANIMAL_POSE_VEC4S}u;
+const HERD_RIG_VEC4S: u32 = ${ANIMAL_RIG_VEC4S}u;
+fn herdRigAt(species: u32, k: u32) -> vec4f { return herdRig[species * HERD_RIG_VEC4S + k]; }
+fn herdJointBound(species: u32, j: u32) -> vec4f { return herdRig[species * HERD_RIG_VEC4S + 3u + j]; }
 
-struct HerdSpeciesRig {
-  neck: vec4f, // livestock: (pivotX, pivotY, pivotZ, maxGrazePitch); vehicles: (frontWheelR, tonguePivY, tonguePivZ, 0)
-  legs: vec4f, // livestock: (legY, frontZ, backZ, height); vehicles: (rearWheelR, frontAxleZ, rearAxleZ, height)
-};
-
-struct HerdPosed {
-  localPos: vec3f,
-  localNrm: vec3f,
-};
-
-fn rotX3(v: vec3f, a: f32) -> vec3f {
-  let c = cos(a);
-  let s = sin(a);
-  return vec3f(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
-}
-
-fn rotY3(v: vec3f, a: f32) -> vec3f {
-  let c = cos(a);
-  let s = sin(a);
-  return vec3f(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
-}
-
-fn rotZ3(v: vec3f, a: f32) -> vec3f {
-  let c = cos(a);
-  let s = sin(a);
-  return vec3f(v.x * c - v.y * s, v.x * s + v.y * c, v.z);
-}
-
-fn poseLivestockVertex(pos: vec3f, nrm: vec3f, part: f32, shardId: u32, body: HerdBody, rig: HerdSpeciesRig) -> HerdPosed {
-  var p = pos;
-  var n = nrm;
-  let walkPhase = body.animCoat.x;
-  let walkAmp = body.animCoat.y;
-  let grazeOrTongueYaw = body.animCoat.z;
-  let tailOrTonguePitch = body.slopeScale.z;
-  let isVehicle = body.slopeScale.w >= 3.99;
-  let flags = u32(body.extra.y + 0.5);
-  let hasTack = (flags & 1u) != 0u;
-  let isFelled = (flags & 2u) != 0u;
-  let isShattered = (flags & 4u) != 0u;
-  let hitAge = max(0.0, body.extra.z);
-  let localHitAngle = body.extra.w - body.posYaw.w;
-
-  // Shattered 1550 road vehicle (carreta, coche, carro de bois): deterministic per-piece rigid ballistic flight.
-  if (isVehicle && isShattered) {
-    let sF = f32(shardId);
-    let h0 = fract(sin(sF * 12.9898 + body.animCoat.w * 78.233) * 43758.5453);
-    let h1 = fract(sin(sF * 39.3467 + body.animCoat.w * 19.19) * 24634.6345);
-    var piv = vec3f(0.0, 0.95, 0.0);
-    if (part >= 7.5) {
-      piv = vec3f(0.0, rig.neck.y + 0.24, 2.75);
-    } else if (part >= 6.5) {
-      let sideS = select(-0.86, 0.86, (shardId & 1u) != 0u);
-      let frontS = (shardId & 2u) != 0u;
-      let rW = max(0.2, select(rig.legs.x, rig.neck.x, frontS));
-      let zW = select(rig.legs.z, rig.legs.y, frontS);
-      piv = vec3f(sideS, rW, zW);
+// walk: walk phase, walk amount, graze (or the pole's yaw), tail phase (or the pole's pitch); hit: hit age, the hit's
+// bearing about the beast's own heading, the coat seed.
+fn herdWriteJoints(at: u32, species: u32, flags: u32, walk: vec4f, hit: vec3f) {
+  let neck = herdRigAt(species, 0u);
+  let legs = herdRigAt(species, 1u);
+  let head = herdRigAt(species, 2u);
+  let count = u32(head.x);
+  let slack = head.y;
+  skinnedWriteHead(at, count, slack);
+  let tack = (flags & 1u) != 0u;
+  let felled = (flags & 2u) != 0u;
+  let shattered = (flags & 4u) != 0u;
+  let walkPhase = walk.x;
+  let walkAmp = walk.y;
+  let graze = walk.z;
+  let tail = walk.w;
+  let hitAge = max(0.0, hit.x);
+  if (species >= 4u) {
+    let bob = skinnedTranslate(vec3f(0.0, 0.005 * abs(sin(walkPhase * 2.7)) * walkAmp, 0.0));
+    for (var shard = 0u; shard < count; shard++) {
+      let wheel = shard < 4u;
+      let pole = shard == 4u;
+      let front = (shard & 2u) != 0u;
+      var m = bob;
+      if (!shattered) {
+        if (wheel) {
+          let r = max(0.2, select(legs.x, neck.x, front));
+          m = skinnedThen(bob, skinnedAbout(vec3f(0.0, r, select(legs.z, legs.y, front)), skinnedRotX(walkPhase / r)));
+        } else if (pole) {
+          m = skinnedThen(bob, skinnedAbout(vec3f(0.0, neck.y, neck.z), skinnedThen(skinnedRotY(graze), skinnedRotX(tail))));
+        }
+      } else {
+        // Shattered 1550 road vehicle (carreta, coche, carro de bois): deterministic per-piece rigid ballistic flight.
+        let sF = f32(shard);
+        let h0 = fract(sin(sF * 12.9898 + hit.z * 78.233) * 43758.5453);
+        let h1 = fract(sin(sF * 39.3467 + hit.z * 19.19) * 24634.6345);
+        var piv = vec3f(select(-0.44, 0.44, (shard & 1u) != 0u), select(0.92, 1.46, (shard & 4u) != 0u), select(-0.68, 0.68, front));
+        if (pole) { piv = vec3f(0.0, neck.y + 0.24, 2.75); }
+        else if (wheel) { piv = vec3f(select(-0.86, 0.86, (shard & 1u) != 0u), max(0.2, select(legs.x, neck.x, front)), select(legs.z, legs.y, front)); }
+        let hitDirL = vec2f(sin(hit.y), cos(hit.y));
+        let radDirL = select(vec2f(h0 - 0.5, h1 - 0.5), normalize(piv.xz), length(piv.xz) > 0.08);
+        let horizDir = normalize(radDirL * 0.72 + hitDirL * 0.68 + vec2f(1e-4, 0.0));
+        let horizSpeed = (2.7 + 3.9 * h0) * select(1.0, 1.25, wheel);
+        let vy0 = 2.9 + 3.3 * h1;
+        let g = 9.81;
+        let dropH = max(0.05, piv.y - select(0.14, 0.08, wheel || pole));
+        let tImpact = (vy0 + sqrt(vy0 * vy0 + 2.0 * g * dropH)) / g;
+        let flyT = min(hitAge, tImpact);
+        let groundT = max(0.0, hitAge - tImpact);
+        let slideT = select(0.0, (1.0 - exp(-groundT * 4.5)) * 0.18, groundT > 0.0);
+        let dispXZ = horizDir * horizSpeed * (flyT + slideT);
+        var dy = vy0 * flyT - 0.5 * g * flyT * flyT;
+        if (hitAge >= tImpact) { dy = -dropH + select(0.0, sin((groundT / 0.34) * 3.14159265) * 0.22 * (0.5 + 0.5 * h1), groundT < 0.34); }
+        let spinT = flyT + slideT * 0.5;
+        let spinX = (2.4 + 3.5 * h0) * spinT * select(1.0, -1.0, h1 < 0.5);
+        let spinZ = mix((1.8 + 2.8 * h1) * spinT, select(-1.46, 1.46, piv.x >= 0.0), smoothstep(tImpact * 0.7, tImpact + 0.25, hitAge));
+        m = skinnedThen(skinnedTranslate(vec3f(dispXZ.x, dy, dispXZ.y)), skinnedAbout(piv, skinnedThen(skinnedRotZ(spinZ), skinnedRotX(spinX))));
+      }
+      skinnedWriteJoint(at, count, shard, m, herdJointBound(species, shard), slack, false);
+    }
+    return;
+  }
+  let fall = smoothstep(0.0, 0.38, hitAge);
+  var whole = skinnedTranslate(vec3f(0.0, 0.014 * abs(sin(walkPhase)) * walkAmp, 0.0));
+  if (felled) {
+    // Felled livestock roll 90 degrees onto their flank, resting physically on the ground.
+    let barrelY = legs.x * 1.05;
+    let flank = 0.28 * legs.x + 0.08;
+    let hop = select(0.0, sin((hitAge / 0.36) * 3.14159265) * 0.16, hitAge < 0.36);
+    let roll = select(-1.0, 1.0, sin(hit.y) >= 0.0) * 1.5707963 * fall;
+    whole = skinnedThen(skinnedTranslate(vec3f(0.0, -(barrelY - flank) * fall + hop, 0.0)), skinnedAbout(vec3f(0.0, barrelY, 0.0), skinnedRotZ(roll)));
+  }
+  let nibble = 0.055 * sin(tail * 3.4) * max(0.0, graze);
+  let neckM = skinnedAbout(neck.xyz, skinnedThen(skinnedRotY(select(0.14 * sin(tail * 0.73) * graze, 0.0, felled)), skinnedRotX(select(graze * neck.w + nibble, 0.26, felled))));
+  skinnedWriteJoint(at, count, 0u, whole, herdJointBound(species, 0u), slack, false);
+  skinnedWriteJoint(at, count, 1u, skinnedThen(whole, neckM), herdJointBound(species, 1u), slack, false);
+  for (var leg = 0u; leg < 4u; leg++) {
+    let piv = vec3f(0.0, legs.x, select(legs.z, legs.y, leg < 2u));
+    var m: SkinnedJoint;
+    var foot: SkinnedJoint;
+    if (felled) {
+      m = skinnedAbout(piv, skinnedThen(skinnedScale(vec3f(1.0, 1.0 - 0.42 * fall, 1.0)), skinnedRotX(select(-0.72, 0.72, leg < 2u) * fall)));
+      foot = m;
     } else {
-      let qx = select(-0.44, 0.44, (shardId & 1u) != 0u);
-      let qz = select(-0.68, 0.68, (shardId & 2u) != 0u);
-      let qy = select(0.92, 1.46, (shardId & 4u) != 0u);
-      piv = vec3f(qx, qy, qz);
+      let ph = walkPhase + array<f32, 4>(0.0, 3.14159265, 4.71238898, 1.57079633)[leg];
+      m = skinnedAbout(piv, skinnedRotX(sin(ph) * 0.36 * walkAmp));
+      foot = skinnedThen(skinnedTranslate(vec3f(0.0, max(0.0, cos(ph)) * 0.045 * walkAmp, 0.0)), m);
     }
-    let hitDirL = vec2f(sin(localHitAngle), cos(localHitAngle));
-    let radDirL = select(vec2f(h0 - 0.5, h1 - 0.5), normalize(piv.xz), length(piv.xz) > 0.08);
-    let horizDir = normalize(radDirL * 0.72 + hitDirL * 0.68 + vec2f(1e-4, 0.0));
-    let isWheelShard = part >= 6.5 && part < 7.5;
-    let horizSpeed = (2.7 + 3.9 * h0) * select(1.0, 1.25, isWheelShard);
-    let vy0 = 2.9 + 3.3 * h1;
-    let g = 9.81;
-    let restY = select(0.14, 0.08, part >= 6.5);
-    let dropH = max(0.05, piv.y - restY);
-    let tImpact = (vy0 + sqrt(vy0 * vy0 + 2.0 * g * dropH)) / g;
-    let flyT = min(hitAge, tImpact);
-    let groundT = max(0.0, hitAge - tImpact);
-    let bounceSpan = 0.34;
-    let slideT = select(0.0, (1.0 - exp(-groundT * 4.5)) * 0.18, groundT > 0.0);
-    let dispXZ = horizDir * horizSpeed * (flyT + slideT);
-    var dy = vy0 * flyT - 0.5 * g * flyT * flyT;
-    if (hitAge >= tImpact) {
-      let bY = select(0.0, sin((groundT / bounceSpan) * 3.14159265) * 0.22 * (0.5 + 0.5 * h1), groundT < bounceSpan);
-      dy = -dropH + bY;
-    }
-    let spinT = flyT + slideT * 0.5;
-    let endTiltZ = select(-1.46, 1.46, piv.x >= 0.0);
-    let spinX = (2.4 + 3.5 * h0) * spinT * select(1.0, -1.0, h1 < 0.5);
-    let spinZ = mix((1.8 + 2.8 * h1) * spinT, endTiltZ, smoothstep(tImpact * 0.7, tImpact + 0.25, hitAge));
-    let relS = rotZ3(rotX3(p - piv, spinX), spinZ);
-    var nrmS = rotZ3(rotX3(n, spinX), spinZ);
-    p = (piv + relS + vec3f(dispXZ.x, dy, dispXZ.y)) * body.slopeScale.y;
-    p.y = max(0.02, p.y);
-    p = rotX3(p, body.slopeScale.x);
-    nrmS = rotX3(nrmS, body.slopeScale.x);
-    p = rotY3(p, body.posYaw.w);
-    nrmS = normalize(rotY3(nrmS, body.posYaw.w));
-    return HerdPosed(p + body.posYaw.xyz, nrmS);
+    skinnedWriteJoint(at, count, 2u + leg, skinnedThen(whole, m), herdJointBound(species, 2u + leg), slack, false);
+    skinnedWriteJoint(at, count, 6u + leg, skinnedThen(whole, foot), herdJointBound(species, 6u + leg), slack, false);
   }
-
-  if (!isVehicle && part >= 8.5) {
-    // 1550 Iberian sela à gineta saddle & alforjas (part == 9) + headstall bridle, curb bit & reins (part in [10, 11)).
-    if (!hasTack) {
-      p = vec3f(0.0, rig.legs.x, 0.0);
-    } else if (part >= 9.95 && part < 11.0) {
-      let rw = clamp(part - 10.0, 0.0, 1.0);
-      let w = rw * rw * (3.0 - 2.0 * rw);
-      let nibble = 0.055 * sin(tailOrTonguePitch * 3.4) * max(0.0, grazeOrTongueYaw);
-      let pitch = select(grazeOrTongueYaw * rig.neck.w + nibble, 0.26, isFelled) * w;
-      let yawTurn = select(0.14 * sin(tailOrTonguePitch * 0.73) * grazeOrTongueYaw * w, 0.0, isFelled);
-      let piv = rig.neck.xyz;
-      var rel = rotX3(p - piv, pitch);
-      rel = rotY3(rel, yawTurn);
-      p = piv + rel;
-      n = rotY3(rotX3(n, pitch), yawTurn);
-    }
-  } else if (!isVehicle && part >= 1.0 && part < 1.995) {
-    // Smoothly weighted neck & head pitch around chest/withers pivot while cropping grass (or lifted in alarm).
-    let rw = clamp(part - 1.0, 0.0, 1.0);
-    let w = rw * rw * (3.0 - 2.0 * rw);
-    let nibble = 0.055 * sin(tailOrTonguePitch * 3.4) * max(0.0, grazeOrTongueYaw);
-    let pitch = select(grazeOrTongueYaw * rig.neck.w + nibble, 0.26, isFelled) * w;
-    let yawTurn = select(0.14 * sin(tailOrTonguePitch * 0.73) * grazeOrTongueYaw * w, 0.0, isFelled);
-    let piv = rig.neck.xyz;
-    var rel = rotX3(p - piv, pitch);
-    rel = rotY3(rel, yawTurn);
-    p = piv + rel;
-    n = rotY3(rotX3(n, pitch), yawTurn);
-  } else if (!isVehicle && part >= 1.995 && part < 5.5) {
-    // 4-beat lateral walk/gallop, or inward leg fold when felled by gunfire.
-    let legIdx = i32(round(part));
-    var beat = 0.0;
-    var pivZ = rig.legs.y;
-    if (legIdx == 3) { beat = 3.14159265; pivZ = rig.legs.y; }
-    else if (legIdx == 4) { beat = 4.71238898; pivZ = rig.legs.z; }
-    else if (legIdx == 5) { beat = 1.57079633; pivZ = rig.legs.z; }
-    let piv = vec3f(p.x, rig.legs.x, pivZ);
-    if (isFelled) {
-      let fallT = smoothstep(0.0, 0.38, hitAge);
-      let foldAng = select(-0.72, 0.72, legIdx <= 3) * fallT;
-      var relL = rotX3(p - piv, foldAng);
-      relL.y = relL.y * (1.0 - 0.42 * fallT);
-      p = piv + relL;
-      n = rotX3(n, foldAng);
-    } else {
-      let ph = walkPhase + beat;
-      let swing = sin(ph) * 0.36 * walkAmp;
-      let lift = max(0.0, cos(ph)) * 0.045 * walkAmp * clamp(1.0 - p.y / max(0.2, rig.legs.x), 0.0, 1.0);
-      p = piv + rotX3(p - piv, swing) + vec3f(0.0, lift, 0.0);
-      n = rotX3(n, swing);
-    }
-  } else if (isVehicle && part >= 7.5) {
-    // Articulated draft pole + yoke / horse harness (part == 8): turns & pitches cleanly toward the draft team (or roadbed if halted).
-    let piv = vec3f(0.0, rig.neck.y, rig.neck.z);
-    var rel = rotX3(p - piv, tailOrTonguePitch);
-    rel = rotY3(rel, grazeOrTongueYaw);
-    p = piv + rel;
-    n = rotY3(rotX3(n, tailOrTonguePitch), grazeOrTongueYaw);
-  } else if (isVehicle && part >= 6.5) {
-    // Spoked wooden wheel (part == 7), turned around its front or rear axle by the distance rolled.
-    let midAxleZ = 0.5 * (rig.legs.y + rig.legs.z);
-    let front = p.z > midAxleZ;
-    let r = max(0.2, select(rig.legs.x, rig.neck.x, front));
-    let az = select(rig.legs.z, rig.legs.y, front);
-    let piv = vec3f(p.x, r, az);
-    let turn = walkPhase / r;
-    p = piv + rotX3(p - piv, turn);
-    n = rotX3(n, turn);
-  } else if (!isVehicle && part >= 5.5) {
-    // Gentle fly-whisking tail sway while standing or walking.
-    let sway = select(0.18 * sin(tailOrTonguePitch * 2.1), 0.0, isFelled);
-    let piv = vec3f(0.0, rig.legs.x * 1.15, rig.legs.z - 0.18);
-    let d = p - piv;
-    let c = cos(sway);
-    let s = sin(sway);
-    p = piv + vec3f(d.x * c - d.y * s, d.x * s + d.y * c, d.z);
-  }
-
-  // Felled livestock roll 90 degrees onto their flank resting physically on groundY.
-  if (!isVehicle && isFelled) {
-    let fallT = smoothstep(0.0, 0.38, hitAge);
-    let rollSign = select(-1.0, 1.0, sin(localHitAngle) >= 0.0);
-    let rollAng = rollSign * 1.5707963 * fallT;
-    let barrelY = rig.legs.x * 1.05;
-    let flankHalfW = 0.28 * rig.legs.x + 0.08;
-    let hopY = select(0.0, sin((hitAge / 0.36) * 3.14159265) * 0.16, hitAge < 0.36);
-    p = vec3f(0.0, barrelY, 0.0) + rotZ3(p - vec3f(0.0, barrelY, 0.0), rollAng);
-    p.y = p.y - (barrelY - flankHalfW) * fallT + hopY;
-    n = rotZ3(n, rollAng);
-  }
-
-  // Subtle breathing & gait bounce on torso/head, or gentle road-rut jounce on vehicle springs/bed.
-  let bob = select(0.014 * abs(sin(walkPhase)), 0.005 * abs(sin(walkPhase * 2.7)), isVehicle) * walkAmp * select(1.0, 0.0, isFelled);
-  p = p * body.slopeScale.y + vec3f(0.0, bob * body.slopeScale.y, 0.0);
-
-  // Align to terrain/axle slope along facing direction, then turn to world yaw.
-  p = rotX3(p, body.slopeScale.x);
-  n = rotX3(n, body.slopeScale.x);
-  p = rotY3(p, body.posYaw.w);
-  n = normalize(rotY3(n, body.posYaw.w));
-  return HerdPosed(p + body.posYaw.xyz, n);
-}
-
-// A beast's place in the animal continuum as the rig reads it: the body its step wrote, and its type's rig.
-fn herdBodyOf(place: AnimalPlace) -> HerdBody {
-  return HerdBody(place.root, place.pose, vec4f(place.frame.x, place.frame.z, place.more.x, f32(animalTypeOf(place))), vec4f(0.0, place.more.y, place.more.z, place.more.w));
-}
-fn herdRigOf(archetype: u32) -> HerdSpeciesRig {
-  return HerdSpeciesRig(
-    vec4f(animalTypeV(archetype, ${ANIMAL_CONTINUUM_TYPE.neck}u), animalTypeF(archetype, ${ANIMAL_CONTINUUM_TYPE.neck + 3}u)),
-    vec4f(animalTypeV(archetype, ${ANIMAL_CONTINUUM_TYPE.legs}u), animalTypeF(archetype, ${ANIMAL_CONTINUUM_TYPE.legs + 3}u)),
-  );
-}
-// A point of the continuum posed by the rig: its skin holds its part (f32 bits), its coat and its shard.
-fn herdPosePoint(point: AnimalPoint, body: HerdBody, rig: HerdSpeciesRig) -> HerdPosed {
-  return poseLivestockVertex(point.position, point.normal, bitcast<f32>(point.skin.x), point.skin.z, body, rig);
+  let tailM = skinnedAbout(vec3f(0.0, legs.x * 1.15, legs.z - 0.18), skinnedRotZ(select(0.18 * sin(tail * 2.1), 0.0, felled)));
+  skinnedWriteJoint(at, count, 10u, skinnedThen(whole, tailM), herdJointBound(species, 10u), slack, false);
+  // A 1550 Iberian sela à gineta saddle and alforjas, and the headstall bridle, curb bit and reins, which ride the neck.
+  var saddle = skinnedGather(vec3f(0.0, legs.x, 0.0));
+  var bridle = saddle;
+  if (tack) { saddle = whole; bridle = skinnedThen(whole, neckM); }
+  skinnedWriteJoint(at, count, 11u, saddle, herdJointBound(species, 11u), slack, !tack);
+  skinnedWriteJoint(at, count, 12u, bridle, herdJointBound(species, 12u), slack, !tack);
 }
 `;
 
-export const HERDS_STEP_WGSL = FRAME_WGSL + /* wgsl */ `
+export const HERDS_STEP_WGSL = FRAME_WGSL + CONTINUUM_RECORD_WGSL + /* wgsl */ `
 struct HerdLand { domain: vec4f };
 struct HerdNearDomain { domain: vec4f, grid: vec4f };
 struct HerdConfig {
@@ -291,20 +181,26 @@ const HERD_STAMPEDE_SPAN_S: f32 = 14.0;
 @group(0) @binding(3) var elevation: texture_2d<f32>;
 @group(0) @binding(4) var<uniform> cfg: HerdConfig;
 @group(0) @binding(5) var<storage, read> seeds: array<HerdSeed>;
-// Each beast's place in the animal continuum (js/animal-continuum.js ANIMAL_PLACE_FLOATS), which the cut reads next.
-@group(0) @binding(6) var<storage, read_write> places: array<vec4f>;
+// Each beast's record in the one continuum, and its joints in the scene's pose buffer, which the cut reads next; and
+// each type's rig (js/animal-continuum.js animalRigTable).
+@group(0) @binding(6) var<storage, read_write> herdRecords: array<ContinuumRecord>;
+@group(0) @binding(7) var<storage, read_write> skinnedPoses: array<vec4f>;
+@group(0) @binding(8) var<uniform> herdRig: array<vec4f, ${ANIMAL_CONTINUUM_TYPES.length * ANIMAL_RIG_VEC4S}>;
 @group(0) @binding(9) var<storage, read> routes: array<vec4f>;
 @group(0) @binding(10) var<uniform> shots: HerdShots;
 @group(0) @binding(11) var<storage, read_write> fates: array<HerdFate>;
-` + continuumGroundWGSL(0, 12) + /* wgsl */ `
+` + continuumGroundWGSL(0, 12) + HERD_JOINTS_WGSL + /* wgsl */ `
 
-// root (drawn world x, y, z, yaw), frame (pitch, roll, scale, code), pose (walk phase, walk amount, graze or pole
-// yaw, coat seed), more (tail phase or pole pitch, flags, hit age, hit direction). Scale 0 is not drawn.
-fn herdPlace(idx: u32, root: vec4f, frame: vec4f, pose: vec4f, more: vec4f) {
-  places[idx * 4u] = root;
-  places[idx * 4u + 1u] = frame;
-  places[idx * 4u + 2u] = pose;
-  places[idx * 4u + 3u] = more;
+// Not drawn this frame.
+fn herdGone(idx: u32) {
+  herdRecords[idx] = ContinuumRecord(vec4f(0.0), vec4f(0.0, 0.0, 0.0, 1.0), vec4u(CONTINUUM_GONE, idx * HERD_POSE_VEC4S, idx, 0u), vec4u(0u));
+}
+// Stood at the drawn (shifted) world place, turned to its heading and pitched to its slope, at its scale; its joints
+// posed by its walk and its fate; its spare words its coat seed and its herd flags (1 tack), for its material.
+fn herdStand(idx: u32, species: u32, at: vec3f, yaw: f32, pitch: f32, scale: f32, flags: u32, seed: u32, herdFlags: u32, walk: vec4f, hit: vec3f) {
+  herdRecords[idx] = ContinuumRecord(vec4f(at, scale), skinnedTurn(yaw, pitch, 0.0),
+    vec4u(species | (${CONTINUUM_KIND.SKINNED}u << CONTINUUM_KIND_SHIFT) | flags, idx * HERD_POSE_VEC4S, seed, 0u), vec4u(bitcast<u32>(hit.z), herdFlags, 0u, 0u));
+  herdWriteJoints(idx * HERD_POSE_VEC4S, species, herdFlags, walk, hit);
 }
 
 struct HerdRouteSample { pos: vec2f, dir: vec2f, deckY: f32 };
@@ -387,8 +283,8 @@ fn pastureWalkTime(t: f32, phase: f32) -> vec2f {
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let idx = gid.x;
   if (idx >= cfg.count) { return; }
-  // Not drawn unless it is placed below.
-  herdPlace(idx, vec4f(0.0), vec4f(0.0), vec4f(0.0), vec4f(0.0));
+  // Not drawn unless it is stood below.
+  herdGone(idx);
   let seed = seeds[idx];
   let species = min(${HERD_SPECIES - 1}u, u32(round(seed.traits.z)));
   let isVehicle = species >= 4u;
@@ -754,52 +650,38 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let roadPhase = select(rolled * 6.2831853 / select(1.6, 2.2, hasTack) + phase * 6.2831853, rolled, isVehicle);
   let walkPhase = select(tau * walkFreq + phase * 6.2831853, roadPhase, travelling || isStreetMount);
   let tailPhase = t * (1.2 + 0.35 * fract(phase * 7.13)) + phase * 9.1;
-  // Where it is drawn: its place in the animal continuum, which the cut reads next (js/wgsl/animal-continuum.js).
-  // A felled beast is exact (its rig's standing slack does not hold it); a shattered vehicle's pieces fly apart and
-  // are never handed to a far body.
-  var placeFlags = 0u;
-  if ((flags & 2u) != 0u) { placeFlags = ${ANIMAL_PLACE_EXACT}u; }
-  if ((flags & 4u) != 0u) { placeFlags = ${ANIMAL_PLACE_EXACT | ANIMAL_PLACE_SHATTERED}u; }
+  // Where it is drawn: its record in the one continuum, which the cut reads next. A felled beast is wounded and a
+  // shattered vehicle's pieces fly apart: each is cut as clusters alone (its far body was never measured in those
+  // poses); a stampeding beast or a halted hitch is what the eye is on, and is cut finer.
+  var continuumFlags = 0u;
+  if (isPanicking || (flags & 8u) != 0u) { continuumFlags = CONTINUUM_IMPORTANT_FLAG; }
+  if ((flags & 2u) != 0u) { continuumFlags = CONTINUUM_DAMAGED; }
+  if ((flags & 4u) != 0u) { continuumFlags = CONTINUUM_SHATTERED; }
   // An intact hitch thins at the horizon as one, keyed by its route and place in the train.
   let useHitchMid = isHitch && (flags & 14u) == 0u && !isPanicking;
-  let thinSeed = select(idx, u32(max(floor(seed.anchor.x * 131.0 + seed.anchor.y * 17.0), 0.0)), useHitchMid) & 4095u;
-  let code = f32(species + ${ANIMAL_PLACE_CODE}u * placeFlags + ${ANIMAL_PLACE_SEED}u * thinSeed);
-  herdPlace(idx,
-    vec4f(worldXZ.x + shiftXZ.x, wy, worldXZ.y + shiftXZ.y, walkYaw),
-    vec4f(slopePitch, 0.0, scale, code),
-    vec4f(walkPhase, moveAmt, select(grazeAmt, tongueYaw, isVehicle), coatSeed),
-    vec4f(select(tailPhase, tonguePitch, isVehicle), f32(flags), hitAge, hitDirAngle),
-  );
+  let thinSeed = select(idx, u32(max(floor(seed.anchor.x * 131.0 + seed.anchor.y * 17.0), 0.0)), useHitchMid);
+  herdStand(idx, species, vec3f(worldXZ.x + shiftXZ.x, wy, worldXZ.y + shiftXZ.y), walkYaw, slopePitch, scale, continuumFlags, thinSeed, flags,
+    vec4f(walkPhase, moveAmt, select(grazeAmt, tongueYaw, isVehicle), select(tailPhase, tonguePitch, isVehicle)),
+    vec3f(hitAge, hitDirAngle - walkYaw, coatSeed));
 }
 `;
 
-export const HERDS_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + CONTINUUM_CORE_WGSL + /* wgsl */ `
+// The herds' material in the one continuum's pipeline family (js/wgsl/continuum-cut.js): how a beast's coat and a
+// vehicle's timber and cloth are worn and lit. Group 0: the frame, the sky's light and the land's shadow map; group 1
+// the clouds' volume (their shadow); group 2 the scene's data.
+const herdContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var envCube: texture_cube<f32>;
-` + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + HERD_RIG_FN + animalContinuumRenderWGSL(0, HERD_CONTINUUM_BINDING) + /* wgsl */ `
+` + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
+`;
 
-struct HerdVertexOut {
-  @builtin(position) pos: vec4f,
-  @location(0) world: vec3f,
-  @location(1) normal: vec3f,
-  @location(2) coatInfo: vec4f, // coat code (zone, or 16 + rgb15), ao, coat seed, species
-  @location(3) localXZ: vec2f,  // a body's rest z and y; a splat's corner
-  @location(4) texColor: vec3f, // linear RGB from the RGB555 coat (or -1 for the zone path)
-  @location(5) @interpolate(flat) coverage: vec4u, // what is drawn (1 clusters, 2 far body, 3 splat), handoff | splat << 8, the beast, samples
-  @location(6) @interpolate(flat) flags: u32,      // the herd's flags (1 tack)
-};
-
-struct HerdFragOut {
-  @location(0) color: vec4f,
-  @builtin(sample_mask) mask: u32,
-};
-
+const HERD_CONTINUUM_MATERIAL_WGSL = () => /* wgsl */ `
 
 fn herdShadowVis(world: vec3f, normal: vec3f) -> f32 {
   if (landSH.origin.w < 0.5) { return 1.0; }
@@ -1021,7 +903,6 @@ fn shadeHerdSurface(world: vec3f, n: vec3f, albedo: vec3f, ao: f32, species: u32
   return surfaceAir(col, world);
 }
 
-fn herdCoat(point: AnimalPoint) -> f32 { return bitcast<f32>(point.skin.y); }
 fn herdTexColor(coat: f32) -> vec3f {
   if (coat < 16.0) { return vec3f(-1.0); }
   let rgb15 = u32(round(coat - 16.0));
@@ -1029,85 +910,64 @@ fn herdTexColor(coat: f32) -> vec3f {
   return base * base;
 }
 
-// One vertex of whatever the cut chose for a beast: a cluster's corner or a far-body corner, each end posed by the
-// rig and the two mixed by the collapse's morph; or a corner of its splat, facing the eye.
-@vertex fn herdContinuumVS(@builtin(vertex_index) vertex: u32, listed: AnimalContinuumEntry) -> HerdVertexOut {
-  let touched = animalContinuumBindings();
-  let animal = listed.entry.x;
-  let kind = listed.entry.y >> 28u;
-  let item = listed.entry.y & 0x0fffffffu;
-  let place = animalPlaceOf(animal);
-  let archetype = animalTypeOf(place);
-  let state = animalState(animal);
-  var o: HerdVertexOut;
-  o.coverage = vec4u(kind, state.x & 0xffffu, animal, animalView.counts.y);
-  o.flags = u32(place.more.y + 0.5);
-  if (kind == ${ANIMAL_CONTINUUM_ENTRY.splat}u) {
-    let s = animalSplatCorner(archetype, place, vertex, bitcast<f32>(state.w), F.camPos.xyz);
-    o.world = s.world + vec3f(touched);
-    // A dome over the outline: its corners lean out, its middle faces the eye.
-    o.normal = normalize(s.right * (s.corner.x * 0.55) + s.up * (s.corner.y * 0.65) + s.toward * 0.2828);
-    let colour = animalTypeV(archetype, ${ANIMAL_CONTINUUM_TYPE.splatColour}u);
-    o.coatInfo = vec4f(select(0.0, 16.0, colour.x >= 0.0), 0.5, place.pose.w, f32(archetype));
-    o.texColor = colour;
-    o.localXZ = s.corner;
-  } else {
-    var c: AnimalCorner;
-    if (kind == ${ANIMAL_CONTINUUM_ENTRY.cluster}u) { c = animalClusterCorner(archetype, item, vertex); }
-    else { c = animalFarCorner(archetype, item, vertex, state.y & 65535u, bitcast<f32>(state.z)); }
-    if (!c.shown) { o.pos = ANIMAL_CONTINUUM_HIDDEN; return o; }
-    let body = herdBodyOf(place);
-    let rig = herdRigOf(archetype);
-    let a = herdPosePoint(c.a, body, rig);
-    let b = herdPosePoint(c.b, body, rig);
-    o.world = mix(a.localPos, b.localPos, c.morph) + vec3f(touched);
-    o.normal = normalize(mix(a.localNrm, b.localNrm, c.morph));
-    let coatA = herdCoat(c.a);
-    let coatB = herdCoat(c.b);
-    let rest = mix(c.a.position, c.b.position, c.morph);
-    var coat = floor(coatA + 0.001);
-    var ao = clamp(coatA - coat, 0.08, 0.98);
-    var tex = vec3f(-1.0);
-    if (coatA >= 16.0) {
-      coat = coatA;
-      ao = clamp(0.42 + 0.33 * clamp(rest.y / max(rig.legs.w, 0.4), 0.0, 1.0) + 0.23 * (0.5 + 0.5 * o.normal.y), 0.12, 0.96);
-      tex = select(herdTexColor(coatA), mix(herdTexColor(coatA), herdTexColor(coatB), c.morph), coatB >= 16.0);
-    }
-    o.coatInfo = vec4f(coat, ao, place.pose.w, f32(archetype));
-    o.texColor = tex;
-    o.localXZ = vec2f(rest.z, rest.y);
+// A corner of whatever the cut chose for a beast: its coat (a cluster point's own, a far triangle's the nearest the
+// bake found; zone + shade, or 16 + RGB555), its height at rest; a splat's colour (its type's mean, or -1 for a coat
+// by zones) and its corner, about a dome over its outline whose corners lean out and whose middle faces the eye.
+fn herdContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>) {
+  let species = min(${HERD_SPECIES - 1}u, s.model);
+  let seed = bitcast<f32>(s.record.spare.x);
+  (*v).flags = s.record.spare.y;
+  if (s.what == CONTINUUM_SPLAT_ENTRY) {
+    let toward = s.normal;
+    let lift = continuumQuat(s.record.turn, vec3f(0.0, 1.0, 0.0));
+    let up = normalize(lift - toward * dot(lift, toward) + vec3f(0.0, 1e-4, 0.0));
+    let right = normalize(cross(up, toward));
+    let corner = s.corner * 0.5;
+    (*v).normal = normalize(right * (corner.x * 0.55) + up * (corner.y * 0.65) + toward * 0.2828);
+    let colour = vec3f(continuumTypeF(s.model, ${ANIMAL_CONTINUUM_MATERIAL.colour}u), continuumTypeF(s.model, ${ANIMAL_CONTINUUM_MATERIAL.colour + 1}u), continuumTypeF(s.model, ${ANIMAL_CONTINUUM_MATERIAL.colour + 2}u));
+    (*v).coatInfo = vec4f(select(0.0, 16.0, colour.x >= 0.0), 0.5, seed, f32(species));
+    (*v).texColor = colour;
+    (*v).localXZ = corner;
+    return;
   }
-  o.pos = F.viewProj * vec4f(earthCurve(o.world - F.camPos.xyz, F.camPos.y), 1.0);
-  return o;
+  let coatA = bitcast<f32>(s.word);
+  let rest = continuumPointAt(s.model, s.vertex).position;
+  var coat = floor(coatA + 0.001);
+  var ao = clamp(coatA - coat, 0.08, 0.98);
+  if (coatA >= 16.0) {
+    coat = coatA;
+    ao = clamp(0.42 + 0.33 * clamp(rest.y / max(continuumTypeF(s.model, ${ANIMAL_CONTINUUM_MATERIAL.height}u), 0.4), 0.0, 1.0) + 0.23 * (0.5 + 0.5 * s.normal.y), 0.12, 0.96);
+  }
+  (*v).coatInfo = vec4f(coat, ao, seed, f32(species));
+  (*v).texColor = herdTexColor(coatA);
+  (*v).localXZ = vec2f(rest.z, rest.y);
 }
 
-// Every sample of a pixel is drawn by exactly one of a beast's clusters, far body and splat (animalContinuumMask).
-@fragment fn herdContinuumFS(in: HerdVertexOut) -> HerdFragOut {
-  let species = min(${HERD_SPECIES - 1}u, u32(round(in.coatInfo.w)));
-  var coatCode = in.coatInfo.x;
-  var ao = in.coatInfo.y;
+fn herdContinuumShade(v: ContinuumVarying, front: bool) -> vec4f {
+  let species = min(${HERD_SPECIES - 1}u, u32(round(v.coatInfo.w)));
+  var coatCode = v.coatInfo.x;
+  var ao = v.coatInfo.y;
   var zone = select(u32(round(coatCode)), 0u, coatCode >= 16.0);
-  var localXZ = in.localXZ;
-  if (in.coverage.x == ${ANIMAL_CONTINUUM_ENTRY.splat}u) {
+  var localXZ = v.localXZ;
+  if (v.coverage.x == CONTINUUM_SPLAT_ENTRY) {
     // A splat's upper half is a vehicle's tilt or roof (zone 2); a saddled horse's crest, its saddlecloth (zone 6).
-    let uv = in.localXZ;
+    let uv = v.localXZ;
     if (coatCode < 16.0) {
       zone = select(0u, 2u, species >= 4u && uv.y > -0.05);
-      if ((in.flags & 1u) != 0u && uv.y > 0.15 && abs(uv.x) < 0.45) { zone = 6u; }
+      if ((v.flags & 1u) != 0u && uv.y > 0.15 && abs(uv.x) < 0.45) { zone = 6u; }
       coatCode = f32(zone);
     }
     ao = clamp(0.56 + 0.34 * uv.y, 0.25, 0.95);
     localXZ = uv * 0.5;
   }
-  let albedo = livestockCoatAlbedo(species, coatCode, in.texColor, in.coatInfo.z, localXZ);
-  let colour = shadeHerdSurface(in.world, normalize(in.normal), albedo, ao, species, zone);
-  return HerdFragOut(vec4f(colour, 1.0), animalContinuumMask(in.coverage, in.pos.xy));
+  let albedo = livestockCoatAlbedo(species, coatCode, v.texColor, v.coatInfo.z, localXZ);
+  return vec4f(shadeHerdSurface(v.world, normalize(v.normal), albedo, ao, species, zone), 1.0);
 }
 `;
 
-// The land's shadow map takes each beast's far body at the step the cut chose for it, posed by the same rig.
-export const HERDS_SHADOW_WGSL = animalContinuumShadowWGSL(HERD_RIG_FN + /* wgsl */ `
-fn animalShadowPose(corner: AnimalPoint, place: AnimalPlace, archetype: u32) -> vec3f {
-  return herdPosePoint(corner, herdBodyOf(place), herdRigOf(archetype)).localPos;
-}
-`);
+// The herds' material (js/wgsl/continuum-cut.js). Their bodies are closed and wound outward.
+export const HERD_CONTINUUM_MATERIAL_SPEC = Object.freeze({
+  name: 'herdContinuum', prelude: herdContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
+  varyings: [['coatInfo', 'vec4f'], ['localXZ', 'vec2f'], ['texColor', 'vec3f'], ['flags', 'u32', true]],
+  wgsl: HERD_CONTINUUM_MATERIAL_WGSL, salt: 11, cullMode: 'back', air: false, capture: false,
+});

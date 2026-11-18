@@ -717,9 +717,11 @@ test('modular 3D character components pack 15-bit masks losslessly in f32, keep 
   };
   const TOWNSFOLK_OPAQUE=['crewContinuumFS','crewContinuumFarFS','crewContinuumMask','crewContinuumPictured','crewShade'].map(fnBody).join('\n');
   const {INLAND_WATER_WGSL}=await import('../js/wgsl/inland-water.js');
-  const {HERDS_RENDER_WGSL}=await import('../js/wgsl/herds.js');
+  const {HERD_CONTINUUM_MATERIAL_SPEC}=await import('../js/wgsl/herds.js');
+  const {continuumModuleWGSL}=await import('../js/wgsl/continuum-cut.js');
+  const HERDS_VIEW=continuumModuleWGSL({pass:'view',material:HERD_CONTINUUM_MATERIAL_SPEC});
 
-  for(const [name,src] of [['crew',CREW_WGSL],['townsfolk',TOWNSFOLK_OPAQUE],['inland-water',INLAND_WATER_WGSL],['herds',HERDS_RENDER_WGSL]]){
+  for(const [name,src] of [['crew',CREW_WGSL],['townsfolk',TOWNSFOLK_OPAQUE],['inland-water',INLAND_WATER_WGSL],['herds',HERDS_VIEW]]){
     assert.equal(/\bdiscard\b/.test(src),false,`${name} opaque WGSL contains zero discard`);
   }
 

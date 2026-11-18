@@ -23,13 +23,14 @@
 //            [the frame time at which the flight clock read zero, shard count n, 0, 0], then four a shard (pivot and
 //            release time; velocity and settle time; spin and the age it is hidden at; hinge, gravity, sink and what
 //            holds it: -2 standing, -1 in flight, else the age it stopped at), then ceil(n / 4) of wear, a float a shard.
+//   SKINNED  skinned bodies (people, animals). Pose data: [joint count j, pose slack in metres, 0, 0], then j joints
+//            of three vec4f (the rows of the 3x4 matrix taking the bind pose to the posed one, in the type's frame), then
+//            j posed spheres (a vec4f each: where joint k's bound lies and its radius, slack included; a radius below 0
+//            hides the joint, and every point it carries most). A point reads the skin stream (four joints, four unorm
+//            weights; all zero: joint 0 alone). A cluster's part is its dominant joint: its spheres are carried by that
+//            joint's matrix and grown by the slack; WHOLE bounds the posed joint spheres. A count of 0 is the type as
+//            baked. js/wgsl/skinned-pose.js writes this data.
 // Hook points, declared for the families that bring them (a kind without its functions is never drawn):
-//   SKINNED  skinned bodies (crew, animals). Pose data: [joint count j, pose slack in metres, 0, 0], then j joints of
-//            three vec4f (the rows of the 3x4 matrix taking the bind pose to the posed one, in the type's frame), then j
-//            posed spheres (a vec4f each: where joint k's bound lies and its radius, slack included). A point reads the
-//            skin stream (four joints, four unorm weights; all zero for a far-body point: joint 0 alone). A cluster's
-//            part is its dominant joint: its spheres are carried by that joint's matrix and grown by the slack; WHOLE is
-//            the union of the posed joint spheres.
 //   RIDER    things that ride another body's posed surface: a ship on her own posed assembly, her lines and let-go
 //            iron with her. A point reads the rider stream (the source vertex it rides) and is placed where that vertex
 //            is posed. Brought by the ships: js/wgsl/ship-kinds.js has its pose data.
@@ -41,7 +42,7 @@
 //            are cut by their own select over a height grid (js/land-continuum.js), never through this dispatch.
 import { FRACTURE_GRAVITY } from '../ship-fracture.js';
 import { SIM_CLOCK_LOOP_S } from './common.js';
-import { CONTINUUM_KIND } from '../continuum-format.js';
+import { CONTINUUM_KIND, CONTINUUM_HEADER, CONTINUUM_STREAMS } from '../continuum-format.js';
 
 const continuumKindsDefined = new Map();
 // A kind's two functions, named continuum<Name>Pose and continuum<Name>Sphere in `wgsl` (a function, written when a
@@ -120,4 +121,58 @@ fn continuumShardedSphere(record:ContinuumRecord,data:u32,part:u32,sphere:vec4f)
   return vec4f(posed.position,select(sphere.w,-1.0,posed.hidden));
 }
 `,
+});
+
+defineContinuumKind(CONTINUUM_KIND.SKINNED, {
+  name: 'Skinned',
+  wgsl: () => {
+    const skin = CONTINUUM_STREAMS.find((s) => s.name === 'skin');
+    return /* wgsl */`
+// Joint j's matrix, its three rows as the columns of a mat3x4f, so that vec4f(p, 1) * m is the posed point.
+fn continuumSkinnedJoint(data:u32,count:u32,j:u32)->mat3x4f {
+  let at=data+1u+min(j,count-1u)*3u;
+  return mat3x4f(continuumPoses[at],continuumPoses[at+1u],continuumPoses[at+2u]);
+}
+fn continuumSkinnedPose(record:ContinuumRecord,data:u32,part:u32,vertex:u32,p:ContinuumPosed)->ContinuumPosed {
+  let count=u32(continuumPoses[data].x);
+  if(count==0u){return p;}
+  let joints=continuumStreamWord(${CONTINUUM_HEADER.skin}u,${skin.bit}u,${skin.words}u,vertex,0u);
+  let packed=continuumStreamWord(${CONTINUUM_HEADER.skin}u,${skin.bit}u,${skin.words}u,vertex,1u);
+  let weights=select(unpack4x8unorm(packed),vec4f(1.0,0.0,0.0,0.0),packed==0u);
+  var m=mat3x4f(vec4f(0.0),vec4f(0.0),vec4f(0.0));
+  var lead=0u;
+  for(var k=0u;k<4u;k++){
+    if(weights[k]>0.0){m+=continuumSkinnedJoint(data,count,(joints>>(8u*k))&255u)*weights[k];}
+    if(weights[k]>weights[lead]){lead=k;}
+  }
+  m=m*(1.0/max(weights.x+weights.y+weights.z+weights.w,1e-6));
+  var out=p;
+  out.position=vec4f(p.position,1.0)*m;
+  out.normal=normalize(vec4f(p.normal,0.0)*m);
+  out.hidden=continuumPoses[data+1u+count*3u+min((joints>>(8u*lead))&255u,count-1u)].w<0.0;
+  return out;
+}
+// A part's sphere rides its joint, as far as the joint's matrix stretches it, grown by the pose slack; the whole is the
+// sphere about the posed joints' spheres.
+fn continuumSkinnedSphere(record:ContinuumRecord,data:u32,part:u32,sphere:vec4f)->vec4f {
+  let count=u32(continuumPoses[data].x);
+  if(count==0u){return sphere;}
+  let spheres=data+1u+count*3u;
+  if(part==CONTINUUM_WHOLE){
+    var lo=vec3f(1e30);var hi=vec3f(-1e30);
+    for(var k=0u;k<count;k++){let s=continuumPoses[spheres+k];if(s.w>=0.0){lo=min(lo,s.xyz-vec3f(s.w));hi=max(hi,s.xyz+vec3f(s.w));}}
+    if(lo.x>hi.x){return vec4f(sphere.xyz,-1.0);}
+    let centre=(lo+hi)*0.5;
+    var radius=0.0;
+    for(var k=0u;k<count;k++){let s=continuumPoses[spheres+k];if(s.w>=0.0){radius=max(radius,distance(s.xyz,centre)+s.w);}}
+    return vec4f(centre,radius);
+  }
+  let j=min(part,count-1u);
+  if(continuumPoses[spheres+j].w<0.0){return vec4f(sphere.xyz,-1.0);}
+  let m=continuumSkinnedJoint(data,count,j);
+  let stretch=max(max(length(vec3f(m[0].x,m[1].x,m[2].x)),length(vec3f(m[0].y,m[1].y,m[2].y))),length(vec3f(m[0].z,m[1].z,m[2].z)));
+  return vec4f(vec4f(sphere.xyz,1.0)*m,sphere.w*stretch+continuumPoses[data].y);
+}
+`;
+  },
 });

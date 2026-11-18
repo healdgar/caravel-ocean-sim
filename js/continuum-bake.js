@@ -648,27 +648,33 @@ const APERTURES = new Set([14, 16, 18]);
 const ROOFS = new Set([13, 15]);
 
 // ------------------------------------------------------------------------------------------------ the drawn mesh
-// The drawn mesh welded where corners agree in everything and lie in one part.
+// The drawn mesh welded where corners agree in everything and lie in one part. A body may name each corner's source
+// (`corners`, one number a corner: a skinned body's source vertex, whose skin a corner keeps): corners of different
+// sources are then never welded, and each welded vertex keeps its source (`corner`).
 function weldDrawn(type) {
-  const F = type.vertices, T = type.triangles, map = new Map(), position = [], normal = [], kind = [], part = [], index = new Uint32Array(T * 3);
+  const F = type.vertices, T = type.triangles, ids = type.corners ?? null, map = new Map(), position = [], normal = [], kind = [], part = [], corner = [], index = new Uint32Array(T * 3);
   for (let t = 0; t < T; t++) for (let k = 0; k < 3; k++) {
-    const at = (t * 3 + k) * 8, key = `${Array.from(F.subarray(at, at + 8)).join(',')}|${type.parts[t]}`;
+    const at = (t * 3 + k) * 8, key = `${Array.from(F.subarray(at, at + 8)).join(',')}|${type.parts[t]}${ids ? `|${ids[t * 3 + k]}` : ''}`;
     let v = map.get(key);
     if (v === undefined) {
       v = position.length / 3;
       map.set(key, v);
       position.push(F[at], F[at + 1], F[at + 2]); normal.push(F[at + 3], F[at + 4], F[at + 5]); kind.push(F[at + 6], F[at + 7]); part.push(type.parts[t]);
+      if (ids) corner.push(ids[t * 3 + k]);
     }
     index[t * 3 + k] = v;
   }
-  return { position: Float32Array.from(position), normal: Float32Array.from(normal), kind: Float32Array.from(kind), part: Uint32Array.from(part), index, count: position.length / 3 };
+  return { position: Float32Array.from(position), normal: Float32Array.from(normal), kind: Float32Array.from(kind), part: Uint32Array.from(part), index, count: position.length / 3, corner: ids ? Uint32Array.from(corner) : null };
 }
 
 // ------------------------------------------------------------------------------------------------ clusters
-async function bakeClusters(w) {
+// `groupError`, if given, measures a group's error in place of the builder (a skinned body's, in every pose its rig
+// takes: (children, simplified, error) => metres).
+async function bakeClusters(w, { groupError = null } = {}) {
   const dag = await buildDag({
     id: 0, bark: { pos: w.position, nrm: w.normal, uv: w.kind, idx: w.index },
     leaves: { pos: new Float32Array(0), nrm: new Float32Array(0), uv: new Float32Array(0), vpl: 8 }, barkParts: w.part,
+    ...(groupError ? { barkGroupError: groupError } : {}),
   });
   const count = dag.meta.length / 4, records = [];
   for (let c = 0; c < count; c++) {
@@ -996,10 +1002,13 @@ function bakeFar(type, welded) {
 
 
 // One body baked: its drawn mesh welded, its clusters, its far body and splat, and the step from which the far body
-// takes over (the first no heavier than the clusters' coarsest cut, their roots; finer steps are the clusters').
+// takes over (the first no heavier than the clusters' coarsest cut, their roots; finer steps are the clusters'). A
+// skinned body may bring `groupError(welded)` (its clusters' error measured posed, bakeClusters) and `far`, the body
+// its far body is wrapped round when that is less than all of it (a horse's tack, which a beast without it hides).
 export async function bakeContinuumBody(body) {
   await MeshoptSimplifier.ready;
-  const welded = weldDrawn(body), clusters = await bakeClusters(welded), far = bakeFar(body, welded);
+  const welded = weldDrawn(body), clusters = await bakeClusters(welded, { groupError: body.groupError?.(welded) ?? null });
+  const far = body.far ? bakeFar(body.far, weldDrawn(body.far)) : bakeFar(body, welded);
   const rootTriangles = clusters.records.reduce((n, record) => n + (record.parentError === Infinity ? record.triangles : 0), 0);
   far.farFirst = 0;
   while (far.farFirst < far.chain.steps.length && far.steps[far.farFirst * CONTINUUM_STEP_WORDS] > rootTriangles) far.farFirst++;

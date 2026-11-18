@@ -42,7 +42,7 @@ import {
   sweepHerdHit,
 } from '../js/herds.js';
 import { ANIMAL_CONTINUUM_GRAZE_PITCH } from '../js/animal-continuum.js';
-import { HERD_FATE_FLOATS, HERDS_RENDER_WGSL, HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
+import { HERD_FATE_FLOATS, HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -437,5 +437,7 @@ test('all 7 livestock & caravan vehicle species (0..6) are physically destructib
 
   assert.match(HERDS_STEP_WGSL, /@binding\(10\)\s+var<uniform>\s+shots:\s*HerdShots/);
   assert.match(HERDS_STEP_WGSL, /@binding\(11\)\s+var<storage,\s*read_write>\s+fates:\s*array<HerdFate>/);
-  assert.match(HERDS_RENDER_WGSL, /isVehicle\s*&&\s*isShattered/);
+  // A shattered vehicle's record is SHATTERED (its clusters alone, cut finer) and each of its shards flies on its joint.
+  assert.match(HERDS_STEP_WGSL, /if \(\(flags & 4u\) != 0u\) \{ continuumFlags = CONTINUUM_SHATTERED; \}/);
+  assert.match(HERDS_STEP_WGSL, /for \(var shard = 0u; shard < count; shard\+\+\)[\s\S]*if \(!shattered\)/);
 });

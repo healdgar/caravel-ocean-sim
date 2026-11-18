@@ -354,8 +354,8 @@ test('8. Build & GPU contract: zero aliased ES imports in js/*.js and P2 D3D12 f
 
   assert.match(readRepoFile('js/meadow-grass.js'), /pow\(clamp\(1\.0 - max\(dot\(n, v\), 0\.0\), 0\.0, 1\.0\), 2\.3\)/);
   assert.match(readRepoFile('js/wgsl/inland-water.js'), /select\(0\.0, atan2\(d\.y, d\.x\), dot\(d, d\) > 1e-8\)/);
-  // Animal splats face the eye by its direction, with no azimuth to take at a degenerate vector.
-  assert.doesNotMatch(readRepoFile('js/wgsl/animal-continuum.js'), /\batan2\(/);
+  // Continuum splats (animals among them) face the eye by its direction, with no azimuth to take at a degenerate vector.
+  assert.doesNotMatch(readRepoFile('js/wgsl/continuum-kinds.js'), /\batan2\(/);
   assert.match(readRepoFile('js/wgsl/ground-detail.js'), /select\(0\.0,atan2\(turned\.y,turned\.x\),dot\(turned,turned\)>1e-8\)/);
   assert.match(readRepoFile('js/wgsl/land-craters.js'), /select\(0\.0,atan2\(q\.y,q\.x\),dot\(q,q\)>1e-8\)/);
   assert.match(readRepoFile('js/wgsl/caravel.js'), /select\(0\.0, atan2\(paneUV\.y, paneUV\.x\), dot\(paneUV, paneUV\) > 1e-8\)/);
