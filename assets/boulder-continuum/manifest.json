@@ -1,0 +1,452 @@
+{
+ "format": "waterworld.boulder-continuum",
+ "version": 2,
+ "generator": "scripts/prepare-boulder-continuum.mjs",
+ "layout": {
+  "atlasVersion": 2,
+  "header": {
+   "magic": 0,
+   "version": 1,
+   "typeCount": 2,
+   "typesAt": 3,
+   "clustersAt": 4,
+   "clusterCount": 5,
+   "verticesAt": 6,
+   "vertexCount": 7,
+   "indicesAt": 8,
+   "indexCount": 9,
+   "chainsAt": 10,
+   "words": 11,
+   "hops": 12,
+   "chunkTriangles": 13,
+   "clusterTriangles": 14,
+   "streams": 15,
+   "skin": 16,
+   "uv": 17,
+   "rider": 18,
+   "wind": 19,
+   "surface": 20
+  },
+  "material": {
+   "archetype": 24
+  },
+  "streams": 0
+ },
+ "totals": {
+  "types": 6,
+  "clusters": 6,
+  "vertices": 856,
+  "indices": 1212,
+  "sourceTriangles": 404,
+  "farTriangles": 404
+ },
+ "types": [
+  {
+   "id": 0,
+   "name": "boulder-0",
+   "fingerprint": "d8cd6746c74410b38a17dbe742c01131c6350eeb52eaa7ca9d43536e4dddd758",
+   "sourceTriangles": 60,
+   "quantization": {
+    "low": [
+     -0.90452,
+     -0.2,
+     -0.63127
+    ],
+    "span": 1.75981
+   },
+   "sphere": [
+    -0.0246,
+    0.3,
+    0.0001,
+    1.1073
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 60,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 60,
+    "baseTriangles": 60,
+    "baseVertices": 32,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 27,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.6272
+    ],
+    "inflateMax": 0.1759,
+    "rootTriangles": 60,
+    "farFirst": 0,
+    "farFirstTriangles": 60,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     -0.0246,
+     0.4,
+     0.0001
+    ],
+    "rx": 0.7392,
+    "ry": 0.4,
+    "area": 0.928906
+   },
+   "bakeMs": 173
+  },
+  {
+   "id": 1,
+   "name": "boulder-1",
+   "fingerprint": "8611a4d29c41495cf6553fc7a2db9e5dfaf6d321c78053ef6744f892b4d5a4b2",
+   "sourceTriangles": 76,
+   "quantization": {
+    "low": [
+     -0.82238,
+     -0.2,
+     -0.78086
+    ],
+    "span": 1.63325
+   },
+   "sphere": [
+    -0.0058,
+    0.3,
+    -0.033,
+    1.1061
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 76,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 76,
+    "baseTriangles": 76,
+    "baseVertices": 40,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 35,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.5498
+    ],
+    "inflateMax": 0.1632,
+    "rootTriangles": 76,
+    "farFirst": 0,
+    "farFirstTriangles": 76,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     -0.0058,
+     0.4,
+     -0.033
+    ],
+    "rx": 0.7335,
+    "ry": 0.4,
+    "area": 0.921743
+   },
+   "bakeMs": 339
+  },
+  {
+   "id": 2,
+   "name": "boulder-2",
+   "fingerprint": "599b1683e9b39c76d10df4e9a5522fc18c0c6eee13eeebb6afa6ee4228bc9e9c",
+   "sourceTriangles": 72,
+   "quantization": {
+    "low": [
+     -0.80631,
+     -0.2,
+     -0.87669
+    ],
+    "span": 1.70117
+   },
+   "sphere": [
+    0.0211,
+    0.3,
+    -0.0261,
+    1.1159
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 72,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 72,
+    "baseTriangles": 72,
+    "baseVertices": 38,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 33,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.6454
+    ],
+    "inflateMax": 0.17,
+    "rootTriangles": 72,
+    "farFirst": 0,
+    "farFirstTriangles": 72,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0.0211,
+     0.4,
+     -0.0261
+    ],
+    "rx": 0.7153,
+    "ry": 0.4,
+    "area": 0.898872
+   },
+   "bakeMs": 286
+  },
+  {
+   "id": 3,
+   "name": "boulder-3",
+   "fingerprint": "9af48eacdadac4aa42d2b3d2eafd9e731789e91b7e4a188dbe745321120dfbb5",
+   "sourceTriangles": 60,
+   "quantization": {
+    "low": [
+     -0.84568,
+     -0.2,
+     -0.84984
+    ],
+    "span": 1.73017
+   },
+   "sphere": [
+    0.0194,
+    0.3,
+    -0.016,
+    1.1351
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 60,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 60,
+    "baseTriangles": 60,
+    "baseVertices": 32,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 27,
+    "coreTriangles": 6,
+    "depth": 4,
+    "errorRange": [
+     0,
+     0.7534
+    ],
+    "inflateMax": 0.1729,
+    "rootTriangles": 60,
+    "farFirst": 0,
+    "farFirstTriangles": 60,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0.0194,
+     0.4,
+     -0.016
+    ],
+    "rx": 0.7719,
+    "ry": 0.4,
+    "area": 0.969998
+   },
+   "bakeMs": 241
+  },
+  {
+   "id": 4,
+   "name": "boulder-4",
+   "fingerprint": "4b212baf46ee330eb75d70fbef394703c1452c1d9d73602db90156c024799ed0",
+   "sourceTriangles": 72,
+   "quantization": {
+    "low": [
+     -0.89158,
+     -0.2,
+     -0.73608
+    ],
+    "span": 1.80335
+   },
+   "sphere": [
+    0.0101,
+    0.3,
+    0.0495,
+    1.1353
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 72,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 72,
+    "baseTriangles": 72,
+    "baseVertices": 38,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 33,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.4999
+    ],
+    "inflateMax": 0.1802,
+    "rootTriangles": 72,
+    "farFirst": 0,
+    "farFirstTriangles": 72,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0.0101,
+     0.4,
+     0.0495
+    ],
+    "rx": 0.7827,
+    "ry": 0.4,
+    "area": 0.98357
+   },
+   "bakeMs": 258
+  },
+  {
+   "id": 5,
+   "name": "boulder-5",
+   "fingerprint": "3c524068adc0d5c50da4ff3536a0d6e6b859a3548953d36185c5209c30e1d5f3",
+   "sourceTriangles": 64,
+   "quantization": {
+    "low": [
+     -0.91998,
+     -0.2,
+     -0.67722
+    ],
+    "span": 1.77964
+   },
+   "sphere": [
+    -0.0302,
+    0.3,
+    0.0305,
+    1.1187
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.5767
+    ],
+    "inflateMax": 0.1779,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     -0.0302,
+     0.4,
+     0.0305
+    ],
+    "rx": 0.7863,
+    "ry": 0.4,
+    "area": 0.988094
+   },
+   "bakeMs": 233
+  }
+ ],
+ "atlas": {
+  "words": 7546,
+  "bytes": 30184,
+  "sha256": "41fcf9ab573bab7e4c7acd20af3bbd2d0e54a8b20b18241ac1cddcc286840776",
+  "gzip": {
+   "file": "atlas.bin.gz",
+   "bytes": 13764,
+   "sha256": "861276eb8be54030e7b87c513a1d673cb91ea55f7dbd75dfaeb3845044972eb0"
+  }
+ },
+ "bakeSeconds": 1.6
+}

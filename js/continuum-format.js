@@ -100,9 +100,10 @@ export const CONTINUUM_KIND_SHIFT = 16;
 //   DAMAGED    holed, flooding or wounded: drawn as clusters alone (no simplified surface spans its parts), cut finer.
 //   STRETCHED  stretched along its type's axes before it is turned: its pose data begins with one vec4f (x, y, z,
 //              and the shear of y along z), and its kind's own data follows.
-//   GROUNDED   stands on the land: raised at its anchor by how far the land draws its ground above the true ground
-//              there (js/continuum-ground.js), in the view and its shadow by the view's cut, under water by the
-//              captures'. Never set for what stands on water, a quay or a bridge.
+//   GROUNDED   (1 << 29) stands on the land: raised at its anchor by how far the land draws its ground above the
+//              true ground there, in the view and its shadow by the view's cut, under water by the captures'. Never
+//              set for what stands on water, a quay or a bridge. It is the drawn ground's own (js/continuum-ground.js
+//              CONTINUUM_GROUNDED), kept out of this file so that the bake, which never reads it, keeps its version.
 export const CONTINUUM_GONE = 1 << 20;
 export const CONTINUUM_STRUCK = 1 << 21;
 export const CONTINUUM_BROKEN = 1 << 22;
@@ -112,7 +113,6 @@ export const CONTINUUM_IMPORTANT_FLAG = 1 << 25;
 export const CONTINUUM_SHATTERED = 1 << 26;
 export const CONTINUUM_DAMAGED = 1 << 27;
 export const CONTINUUM_STRETCHED = 1 << 28;
-export const CONTINUUM_GROUNDED = 1 << 29;
 
 // The lists an instance can be entered in, each with its own indirect draw, the vertices of one entry, and the
 // triangles one full entry submits. The view's lists come first; the shadow map's (and an under-water capture's) are

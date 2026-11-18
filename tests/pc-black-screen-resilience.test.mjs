@@ -318,15 +318,15 @@ test('7. #err HUD banner, post-startup device.lost recovery, swapchain/init-flag
   assert.match(mainSrc, /!heights\.every\(\(val\) => Number\.isFinite\(val\) && Math\.abs\(val\) < 1e4\)/);
   assert.match(mainSrc, /Number\.isFinite\(exposure\) && exposure > 0 \? exposure : 1\.0/);
 
-  // Verify boulder-continuum uses async pipeline compilation (with sync fallback only when *Async is absent on mock test devices)
+  // Boulders compile no pipelines of their own: they are records of the one cut, whose programs and views are made
+  // asynchronously by js/continuum-scene.js.
   const boulderSrc = readRepoFile('js/boulder-continuum.js');
-  assert.match(boulderSrc, /export async function createBoulderContinuum/);
-  assert.match(boulderSrc, /typeof device\.createComputePipelineAsync === 'function'/);
-  assert.match(boulderSrc, /typeof device\.createRenderPipelineAsync === 'function'/);
-  assert.equal((boulderSrc.match(/device\.createComputePipeline\s*\(/g) ?? []).length, 1, 'sync compute pipeline used only inside makeComputeAsync fallback');
-  assert.equal((boulderSrc.match(/device\.createRenderPipeline\s*\(/g) ?? []).length, 1, 'sync render pipeline used only inside makeRenderAsync fallback');
-  assert.match(boulderSrc, /device\.createComputePipelineAsync\s*\(/);
-  assert.match(boulderSrc, /device\.createRenderPipelineAsync\s*\(/);
+  assert.match(boulderSrc, /export function createBoulderContinuum/);
+  assert.match(boulderSrc, /createContinuumScene\(/);
+  assert.doesNotMatch(boulderSrc, /device\.create(Compute|Render)Pipeline/);
+  const sceneSrc = readRepoFile('js/continuum-scene.js');
+  assert.doesNotMatch(sceneSrc, /device\.create(Compute|Render)Pipeline\s*\(/);
+  assert.match(sceneSrc, /device\.createRenderPipelineAsync\s*\(/);
 
   // The forest's wind keeps no simulated state that could run away: each tree's gust is closed-form and bounded, and
   // a blast's wave whips a tree for a few seconds and is gone (js/wgsl/forest-continuum.js forestStandRoots).

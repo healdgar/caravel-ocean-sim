@@ -19,6 +19,7 @@ import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FORE
 import { CREW_CONTINUUM_ASSETS, crewContinuumMissingMessage } from './js/crew-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
 import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
+import { BOULDER_CONTINUUM_ASSETS } from './js/boulder-continuum.js';
 import { SHIP_CONTINUUM_ASSETS } from './js/ship-continuum.js';
 import { ANIMAL_CONTINUUM_ASSETS } from './js/animal-continuum.js';
 import { PREFAB_CONTINUUM_ASSETS } from './js/prefab-continuum.js';
@@ -101,7 +102,7 @@ order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js');
 // The fleet's own ships in the same continuum (js/vessel-continuum.js), drawn by main.js.
 order.splice(order.indexOf('js/main.js'),0,'js/vessel-continuum.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
-order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/continuum-scene.js','js/city-continuum-draw.js','js/prefab-continuum-ports.js','js/prefab-continuum.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/wgsl/boulder-continuum.js','js/continuum-scene.js','js/city-continuum-draw.js','js/prefab-continuum-ports.js','js/prefab-continuum.js');
 // The land's continuum: its programs ahead of the land shader its drawing is appended to, its bake and cut ahead of the land.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
 wgslModules.push('js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
@@ -192,6 +193,9 @@ for(const file of Object.values(CITY_CONTINUUM_ASSETS))runtimeAssetTypes.set(fil
 // The prop continuum's atlas (scripts/prepare-prop-continuum.mjs), kept in git: port props and round shot are drawn
 // from nothing else.
 for(const file of Object.values(PROP_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
+// The boulder continuum's atlas (scripts/prepare-boulder-continuum.mjs), kept in git: ground-cover rocks are drawn
+// from nothing else.
+for(const file of Object.values(BOULDER_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The animal continuum's atlas (scripts/prepare-animal-continuum.mjs), kept in git: every animal is drawn from nothing else.
 for(const file of Object.values(ANIMAL_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The one simplifier (js/continuum-bake.js) bundled for the page's bake workers (js/continuum-bake-worker.js), written
@@ -284,7 +288,7 @@ write('ocean.html', page.replace(SCRIPT_TAG, () => `<script type="module">\n${co
 // WGSL has no string literals, so comments and whitespace can be removed safely. Spaces are
 // kept around + - / so that e.g. "a - -b" or "x / *p" never fuse into other tokens.
 const TIGHT_WGSL_RELS = new Set([
-  'js/trade-vessels.js', 'js/meadow-grass.js', 'js/wgsl/meadow-continuum.js', 'js/boulder-continuum.js',
+  'js/trade-vessels.js', 'js/meadow-grass.js', 'js/wgsl/meadow-continuum.js', 'js/wgsl/boulder-continuum.js',
   'js/wgsl/herds.js', 'js/wgsl/townsfolk.js', 'js/wgsl/gunnery.js',
   'js/wgsl/crew-solve.js', 'js/wgsl/inland-water.js', 'js/wgsl/hull-flood.js',
   'js/wgsl/land-craters.js', 'js/wgsl/part-assembly.js',

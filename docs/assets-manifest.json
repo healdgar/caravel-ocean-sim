@@ -2209,6 +2209,16 @@
     "bytes": 93259,
     "sha256": "a3d49e04e58ce15cf10558c799b14e7d882656e562598eef66c5560345de55c2"
   },
+  "assets/boulder-continuum/manifest.json": {
+    "url": "assets/boulder-continuum/manifest.de45734cb854e88e.json",
+    "bytes": 7554,
+    "sha256": "de45734cb854e88ed01b813fc9804d1aa2cd876935f64ac741e6a733d21044e8"
+  },
+  "assets/boulder-continuum/atlas.bin.gz": {
+    "url": "assets/boulder-continuum/atlas.bin.861276eb8be54030.gz",
+    "bytes": 13764,
+    "sha256": "861276eb8be54030e7b87c513a1d673cb91ea55f7dbd75dfaeb3845044972eb0"
+  },
   "assets/continuum/bake-worker.js": {
     "url": "assets/continuum/bake-worker.1d330e90a6e44c58.js",
     "bytes": 194088,

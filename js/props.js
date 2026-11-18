@@ -15,6 +15,7 @@ import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { PROP_CONTINUUM_SHOT, PROP_CONTINUUM_TYPES, PROP_CONTINUUM_PIGMENT_SIZE, loadPropContinuum } from './prop-continuum.js';
 import { PROP_CONTINUUM_MATERIAL_SPEC } from './wgsl/prop-continuum.js';
 import { CONTINUUM_BROKEN, CONTINUUM_GONE, CONTINUUM_KIND, continuumRoom } from './continuum-format.js';
+import { CONTINUUM_GROUNDED } from './continuum-ground.js';
 import { requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, createContinuumScene } from './continuum-scene.js';
 
 const PROP_REACH_M = 3000;
@@ -115,13 +116,15 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
   const ownerGone = (inst) => { const state = inst?.damageState?.state; return state === 'ruined' || state === 'breached'; };
   const ownerStateOf = (item) => item.inst?.damageState?.state ?? null;
   // A prop as it now stands: gone with what it stood on or when nothing of it is left; broken, its shards flying on
-  // their own records, once a shot has moved any; and how far past its model's sphere its timber may lie.
+  // their own records, once a shot has moved any; and how far past its model's sphere its timber may lie. One laid on
+  // the land itself (`grounded`) stands on the ground the land draws; none laid today is (js/port-props.js: cleats on
+  // piers and quays, jetties over the water).
   function placeProp(item) {
     const { prop, at } = item, model = kit.models[prop.model], radius = propDrawRadius(prop, model, ownerStateOf(item)), broken = Boolean(prop.fracture?.damaged);
     scene.continuum.place(at, {
       position: [prop.x, prop.y ?? model.standsAt, prop.z], yaw: prop.yaw ?? 0, type: prop.model,
       kind: broken ? CONTINUUM_KIND.SHARDED : CONTINUUM_KIND.RIGID,
-      flags: (radius > 0 ? 0 : CONTINUUM_GONE) | (broken ? CONTINUUM_BROKEN : 0),
+      flags: (radius > 0 ? 0 : CONTINUUM_GONE) | (broken ? CONTINUUM_BROKEN : 0) | (prop.grounded ? CONTINUUM_GROUNDED : 0),
       pose: item.block / 4, reach: Math.max(0, radius - model.radius), seed: at,
     });
   }

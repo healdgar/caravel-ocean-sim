@@ -18,6 +18,7 @@ import {
   landContinuumFinest, landGroundWriteWGSL, LAND_GROUND_ROOM, LAND_GROUND_WORK_WORDS,
 } from './wgsl/land-continuum.js';
 import { continuumGroundField, continuumGroundForget, CONTINUUM_GROUND_TEXELS, CONTINUUM_GROUND_CUTS, CONTINUUM_GROUND_LEVELS } from './continuum-ground.js';
+import { continuumPixelError } from './continuum-core.js';
 
 // How much a parent's error stands above its children's, so that a parent and its child are never both drawn.
 const LAND_CONTINUUM_RISE = 1.01;
@@ -510,13 +511,14 @@ export function createLandContinuum({ device, pipelines: P, view: viewPipeline, 
     regrid(next) { grid = next; for (const piece of pieces.values()) release(piece); pieces.clear(); },
     // The land's group 0 for a piece changed (its textures were made again), with the same ground.
     rebind(key, land, captureLand = null) { const piece = pieces.get(key); if (piece) { piece.land = land; piece.captureLand = captureLand; } },
-    // The scene's one pixel error, which every family's cut reads (js/continuum-core.js); the captures' is coarser.
-    setPixelError(pixels) { setView(0, pixels); setView(1, pixels * LAND_CONTINUUM_CAPTURE_COARSENING); },
     setWorldOffset(x, z) { setView(2, x); setView(3, z); },
     // In the frame's compute pass, before any family that stands on the ground: every list emptied, then every piece
     // cut, then the drawn ground's field emptied and written from what each cut kept.
     encode(pass) {
       if (destroyed) return;
+      // The scene's one pixel error, which every family's cut reads (js/continuum-core.js); the captures' is coarser.
+      const pixels = continuumPixelError();
+      setView(0, pixels); setView(1, pixels * LAND_CONTINUUM_CAPTURE_COARSENING);
       if (viewChanged) { device.queue.writeBuffer(viewBuffer, 0, viewFloats); viewChanged = false; }
       pass.setPipeline(P.reset); pass.setBindGroup(0, resetGroup);
       pass.dispatchWorkgroups(Math.ceil(Math.max(LAND_CONTINUUM_RECORDS, LAND_CONTINUUM_SLOTS * LAND_GROUND_WORK_WORDS) / 64));

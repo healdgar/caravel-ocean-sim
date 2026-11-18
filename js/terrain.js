@@ -22,8 +22,7 @@ import {createMeadowGrass} from './meadow-grass.js';
 import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
-import {CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
-import {continuumPixelError} from './continuum-core.js';
+import {CITY_TYPED_FLOATS,CITY_TYPE,CITY_TYPES_BRIDGES,compileCityBuildingTypes} from './old-world-buildings.js';
 import {cityContinuumMaterial} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,createCityContinuum} from './city-continuum-draw.js';
 import {requestContinuumPrograms,requestContinuumView} from './continuum-scene.js';
@@ -39,7 +38,8 @@ import {sharedGroundDetail} from './ground-detail.js';
 import {sharedNeuralPbrBank} from './neural-pbr.js';
 import {withNeuralPbrTerrain} from './wgsl/neural-pbr.js';
 import {createLandShadows} from './shadows.js';
-import {createBoulderContinuum} from './boulder-continuum.js';
+import {createBoulderContinuum,requestBoulderContinuumAtlas} from './boulder-continuum.js';
+import {BOULDER_CONTINUUM_MATERIAL_SPEC} from './wgsl/boulder-continuum.js';
 
 import {
   buildPortPrefabGeometry,
@@ -1009,6 +1009,11 @@ const GROUND_RESIDENT_M = 1200;
 const GROUND_RESIDENT_RELEASE = 1.15;
 const GROUND_RESIDENCY_MOVE_M = 16;
 const GROUND_PATCHES_PER_FRAME = 8;
+// What stands no higher than this above the ground beneath it stands on the ground (CONTINUUM_GROUNDED); higher, it
+// stands on a quay, a pier or a deck.
+const GROUND_STANDING_M = 0.75;
+// A city's works that stand in or over the water: never stood on the ground the land draws.
+const CITY_WATERSIDE = new Set([CITY_TYPE.WHARF, CITY_TYPE.WATERMILL, ...CITY_TYPES_BRIDGES]);
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,oceanBridge=null,
   region:explicitRegion=null,placement=null,options={},
@@ -1071,6 +1076,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // A city's buildings, through the one continuum: the city's material, shaded by the land's own surfaces, in a view
   // of its own (js/wgsl/city-continuum.js).
   const cityViewPromise=requestContinuumView({device,shader,material:cityContinuumMaterial(terrainSource),format,samples});
+  // The ground cover's rocks, through the one continuum: their stone, lit by the land's light (js/wgsl/boulder-continuum.js).
+  const boulderViewPromise=requestContinuumView({device,shader,material:BOULDER_CONTINUUM_MATERIAL_SPEC,format,samples});
+  boulderViewPromise.catch(()=>{});
   const terrainPipesPromise=modulePromise.then(module=>Promise.all([
     computePipe(TERRAIN_LIGHT,'island sunlight'),
     module,
@@ -1206,6 +1214,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     return sampleTerrainNear(nearTile,heights,x,z);
   };
+  // What stands on the land itself, and so is stood on the ground the land draws (CONTINUUM_GROUNDED): at the ground's
+  // own height on dry land; not on the sea's or an inland water's bed, a bridge's deck, or a quay or pier raised over it.
+  const standsOnGround=(x,y,z)=>{
+    const ground=baseGroundSample(x,z);
+    return Number.isFinite(ground)&&ground>0&&y-ground<=GROUND_STANDING_M&&!inlandWaterSampler?.(x,z)&&!(bridgeDeckYAt(x,z,proceduralPack?.port?.country?.bridges)>0);
+  };
+  // A struck building's pieces and stump stand where it stood: a boulder on the ground, a city's waterside works never.
+  const fractureGrounded=(instance,[x,y,z])=>Boolean(instance.boulder)||(!(instance.city&&CITY_WATERSIDE.has(instance.city.type))&&standsOnGround(x,y,z));
   const groundSample=(x,z)=>{
     const base=baseGroundSample(x,z);
     const deck=bridgeDeckYAt(x,z,proceduralPack?.port?.country?.bridges);
@@ -1315,7 +1331,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // A save names the city's struck buildings; they are stood first, so that their records find them.
     if(targets&&damageStore)targets.revive(damageStore.recorded(port));
     damageStore?.restore(port);
-    return createPortFractures({device,port,geometry:own?geometry:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,continuum:fractureContinuum,
+    return createPortFractures({device,port,geometry:own?geometry:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,continuum:fractureContinuum,grounded:fractureGrounded,
       onStruck:portBuildingHit,onFractured:portBuildingStruck,onRebuilt:portBuildingRebuilt});
   };
   let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,cityTargets);
@@ -1323,7 +1339,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const ensureBoulderFracturePort=()=>{
     const targetPort=proceduralPack?(proceduralPack.port??=(transientBoulderPort={regionId:activeRegion.id??'coast',name:activeRegion.name??'Coast',instances:[],transient:true})):(transientBoulderPort??={regionId:activeRegion.id??'saba',name:activeRegion.name??'Saba',instances:[],transient:true});
     const geometry=proceduralPack?.portGeometry?.partAssembly?proceduralPack.portGeometry:null;
-    portFractures??=createPortFractures({device,port:targetPort,geometry,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,continuum:fractureContinuum,
+    portFractures??=createPortFractures({device,port:targetPort,geometry,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,continuum:fractureContinuum,grounded:fractureGrounded,
       onStruck:portBuildingHit,onFractured:portBuildingStruck,onRebuilt:portBuildingRebuilt});
     return targetPort;
   };
@@ -1455,7 +1471,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0&&camera.pixelError!==currentPixelError){
       currentPixelError=camera.pixelError;
       forest?.setPixelError?.(currentPixelError);
-      boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/currentPixelError);
     }
     if(allowStream)checkPlayerFrontierEntry?.(camera);
     updateGroundResidency(camera);
@@ -1475,6 +1490,18 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // (js/city-continuum-draw.js). The atlas and the cut's programs are asked for once a coast has a city. Those
   // shot down stand as pieces (js/building-fracture.js) and are left out.
   let cityContinuumMade=0;
+  // Which of a city's buildings stand on the land: all but its waterside works, by standsOnGround, and what hangs from a
+  // building as that building does.
+  const cityGrounded=city=>{
+    const grounded=new Uint8Array(city.typedCount),attached=city.typedAttached;
+    for(let i=0;i<city.typedCount;){
+      const at=i*CITY_TYPED_FLOATS,stands=!CITY_WATERSIDE.has(city.typedTypes[i])&&standsOnGround(city.typed[at],city.typed[at+1],city.typed[at+2]);
+      const n=1+(attached?.[i]??0);
+      grounded.fill(stands?1:0,i,Math.min(city.typedCount,i+n));
+      i+=n;
+    }
+    return grounded;
+  };
   const setCityBuildings=async pack=>{
     const made=++cityContinuumMade;
     const old=cityContinuum;cityContinuum=null;if(old)retireGPU(()=>old.destroy());
@@ -1482,7 +1509,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(!city?.typedCount)return;
     const [atlas,programs]=await Promise.all([requestCityContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format})]);
     if(made!==cityContinuumMade||terrainDisposed)return;
-    cityContinuum=createCityContinuum({device,atlas,programs,view:cityView,typed:city.typed,types:city.typedTypes,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'city'});
+    cityContinuum=createCityContinuum({device,atlas,programs,view:cityView,typed:city.typed,types:city.typedTypes,grounded:cityGrounded(city),frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'city'});
     cityContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
     for(const index of cityStruckIndices)cityContinuum.hide(index,1+(city.typedAttached?.[index]??0),true);
     for(const index of cityHitIndices)cityContinuum.strike(index,1+(city.typedAttached?.[index]??0),true);
@@ -1510,7 +1537,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const landing=await landPrefabs(port);
     if(!landing||made!==prefabsMade||terrainDisposed)return;
     const atlas=buffer(landing.atlas,GPUBufferUsage.STORAGE,'prefab continuum atlas');
-    const continuum=createCityContinuum({device,atlas:{buffer:atlas,types:continuumAtlasTypes(landing.atlas)},programs:landing.programs,view:cityView,typed:landing.plan.typed,types:landing.plan.types,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'prefabs'});
+    const grounded=landing.plan.instances.map(instance=>standsOnGround(instance.x,instance.y??0,instance.z));
+    const continuum=createCityContinuum({device,atlas:{buffer:atlas,types:continuumAtlasTypes(landing.atlas)},programs:landing.programs,view:cityView,typed:landing.plan.typed,types:landing.plan.types,grounded,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'prefabs'});
     const release=continuum.destroy;
     prefabs=Object.assign(continuum,{plan:landing.plan,destroy(){release();atlas.destroy();}});
     prefabs.setWorldOffset(worldOffset.x,worldOffset.z);prefabs.setAim(cityAim);
@@ -1637,26 +1665,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   landCentre(proceduralPack?.port?.riverCut);
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
+  // The ground cover's rocks, every one a record of the one cut, stood on the ground the land draws
+  // (js/boulder-continuum.js); a rock shot apart stands as its pieces in the coast's struck buildings.
   try {
-    boulderContinuum=await createBoulderContinuum(device,{
-      frameUBO,
-      resources:nearResources,
-      landShadowUniform:activeLandShadows.uniform,
-      capacity:groundBlocks*groundBlock,
-      colorFormat:format,
-      depthFormat:'depth32float',
-      depthCompare:'greater',
-      sampleCount:samples,
-      shadowDepthFormat:activeLandShadows.format,
-      shadowDepthCompare:'less',
+    const [atlas,programs,view]=await Promise.all([requestBoulderContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}),boulderViewPromise]);
+    boulderContinuum=createBoulderContinuum({
+      device,atlas,programs,view,frame:frameUBO,shadowUniform:activeLandShadows.uniform,resources:nearResources,capacity:groundBlocks*groundBlock,samples,
       getPort:()=>ensureBoulderFracturePort(),
       groundAt:(x,z)=>baseGroundSample(x,z),
       waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,
     });
-    boulderContinuum.setPixelScale(TREE_PIXEL_ERROR/currentPixelError);
+    boulderContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
   } catch (error) {
-    console.warn('Boulder continuum unavailable:', error);
-    boulderContinuum = null;
+    console.error('boulder continuum',error);
+    boulderContinuum=null;
   }
   let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
@@ -2497,7 +2519,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const landShared=()=>[...craters.resources(),...landBanks.resources()];
   landContinuum=createLandContinuum({device,pipelines:await requestLandContinuumPipelines({device,shader}),view:landPipe,capture:submerged??null,frame:frameUBO,grid:landGrid,shared:landShared()});
   landClouds=clouds.bindVolume(landPipe);
-  landContinuum.setPixelError(currentPixelError);landContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
+  landContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
   craters.onReallocate(()=>landContinuum?.setShared(landShared()));
   landBanks.onChange(()=>landContinuum?.setShared(landShared()));
   landFlush();
@@ -2522,7 +2544,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
     continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['prefabs',prefabs],['land',landContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);landContinuum?.setPixelError(next);}},
+    // Every family but the forest reads the scene's one pixel error itself (js/continuum-core.js continuumPixelError).
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null},
     // The land's cut, read back: for tests. Per piece, the view's and the captures' lists of patches.
     readLandCut:()=>landContinuum?.readCut()??null,
@@ -2970,14 +2993,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     encode(pass,changed=false,frame=null){
       if(frame)coastalField.encode(pass,frame);
       // The land first: its cut writes the ground it draws (js/continuum-ground.js), which everything after stands on.
-      landFlush();landContinuum?.setPixelError(currentPixelError);landContinuum?.encode(pass);
+      landFlush();landContinuum?.encode(pass);
       // Every building shot down, cut as its pieces at the scene's one pixel error.
       portFractures?.setWorldOffset(worldOffset.x,worldOffset.z);portFractures?.encode(pass);
       for(const sec of loadedSections.values()){
         if(!sec.portFractures)continue;
         sec.portFractures.setWorldOffset(worldOffset.x,worldOffset.z);sec.portFractures.encode(pass);
       }
-      boulderContinuum?.prepare(pass);
+      boulderContinuum?.encode(pass);
       // The city's and the prefabs' cuts read the scene's one pixel error themselves (js/continuum-scene.js).
       cityContinuum?.encode(pass);
       prefabs?.encode(pass);

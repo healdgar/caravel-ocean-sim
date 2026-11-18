@@ -23,6 +23,7 @@ import { CITY_CONTINUUM_AS_BUILT } from './wgsl/city-continuum.js';
 import { packCityContinuumPieces } from './city-continuum.js';
 import { CONTINUUM_BROKEN, CONTINUUM_KIND, assembleContinuumAtlas, continuumAtlasTypes, continuumFinestClusters, continuumRoom } from './continuum-format.js';
 import { createContinuumScene, uploadContinuumAtlas } from './continuum-scene.js';
+import { CONTINUUM_GROUNDED } from './continuum-ground.js';
 import { bakeFracturePieces } from './prefab-continuum.js';
 
 export const BUILDING_SHARD_KINDS = Object.freeze({ block: 1, whole: 2, cell: 3, gun: 4 });
@@ -1408,8 +1409,10 @@ export function replayBuildingFracture(fracture, damage, log, now = 0) {
 // cluster rides its piece's flight from the instance's block of shard records, which are written only when a piece
 // moves, and wears its piece's scorch from the block's wear, written only when it changes. `continuum()` gives the
 // cut's programs, the city material's view, the frame and the land's shadow uniform, or nothing until they are made.
+// `grounded(instance, root)` says whether a building stood on the land, so that its pieces and stump stand on the
+// ground the land draws (CONTINUUM_GROUNDED), as it did.
 const FRACTURE_PIECES_REACH = 24;
-function createFracturedContinuum({ device, continuum }) {
+function createFracturedContinuum({ device, continuum, grounded = null }) {
   const entries = new Map(), R = FRACTURE_RECORD_FLOATS;
   let scene = null, atlas = null, shards = null, stale = false, offsetX = 0, offsetZ = 0, destroyed = false;
   const release = () => { scene?.destroy(); atlas?.destroy(); shards?.destroy(); scene = atlas = shards = null; };
@@ -1446,7 +1449,7 @@ function createFracturedContinuum({ device, continuum }) {
       copyRecords(entry, 0, entry.shardCount);
       copyWear(entry);
       device.queue.writeBuffer(shards, entry.block * 16, entry.data);
-      scene.place(i, { position: entry.root, type: i, kind: CONTINUUM_KIND.SHARDED, flags: CONTINUUM_BROKEN, pose: entry.block, reach: FRACTURE_PIECES_REACH, seed: i, identity: entry.word });
+      scene.place(i, { position: entry.root, type: i, kind: CONTINUUM_KIND.SHARDED, flags: CONTINUUM_BROKEN | (entry.grounded ? CONTINUUM_GROUNDED : 0), pose: entry.block, reach: FRACTURE_PIECES_REACH, seed: i, identity: entry.word });
     });
     scene.send(0, list.length);
     scene.setCount(list.length);
@@ -1465,7 +1468,7 @@ function createFracturedContinuum({ device, continuum }) {
       }
       const welded = { position, normal, kind, part: Uint32Array.from(fracture.vertexShards), index: indices, count: V };
       const entry = {
-        instance, state, fracture, root, shardCount: fracture.shardCount, block: 0,
+        instance, state, fracture, root, shardCount: fracture.shardCount, block: 0, grounded: Boolean(grounded?.(instance, root)),
         // A city's house wears its own limewash and tiles; a prefab and a boulder are drawn as they were built.
         word: instance.city?.tint ?? CITY_CONTINUUM_AS_BUILT,
         body: packCityContinuumPieces({ triangles: T }, { welded, clusters: continuumFinestClusters(welded) }).words,
@@ -1536,8 +1539,8 @@ function createFracturedContinuum({ device, continuum }) {
  * pieces (createFracturedContinuum, given `continuum`): `encode` cuts them in the frame's compute pass, and `draw` (with
  * the city view's groups 0 and 1) and `drawShadow` draw them.
  */
-export function createPortFractures({ device, port, geometry, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, continuum = null, onStruck = null, onFractured = null, onRebuilt = null }) {
-  const live = new Map(), building = new Map(), drawn = createFracturedContinuum({ device, continuum });
+export function createPortFractures({ device, port, geometry, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, continuum = null, grounded = null, onStruck = null, onFractured = null, onRebuilt = null }) {
+  const live = new Map(), building = new Map(), drawn = createFracturedContinuum({ device, continuum, grounded });
   let frame = 0, lastNow = 0;
   noteBuildingMeshes(port, geometry);
   const finish = (instance, prepared) => {

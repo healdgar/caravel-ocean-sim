@@ -6,6 +6,7 @@
 import { CITY_TYPED_FLOATS } from './old-world-buildings.js';
 import { loadCityContinuum } from './city-continuum.js';
 import { CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_STRETCHED, continuumRoom } from './continuum-format.js';
+import { CONTINUUM_GROUNDED } from './continuum-ground.js';
 import { createContinuumScene, requestContinuumAtlas } from './continuum-scene.js';
 
 if (CITY_TYPED_FLOATS !== 8) throw Error('A city building\'s plan is its place, its stretch and its tint');
@@ -20,8 +21,9 @@ const citySlope = (tint) => (tint < -50 && tint > -150 ? Math.max(-0.95, Math.mi
 
 // One city, or a coast's prefabs. `typed` and `types` are its plan's (CITY_TYPED_FLOATS a building: x, y, z, yaw, its
 // stretch along x, y and z, and its tint; and its type), written once. `atlas` is the city's (requestCityContinuumAtlas)
-// or a coast's prefab bodies' ({ buffer, types }); `view` the city material's view (js/continuum-scene.js).
-export function createCityContinuum({ device, atlas, programs, view = null, typed, types, frame, shadowUniform, samples = 4, label = 'city' }) {
+// or a coast's prefab bodies' ({ buffer, types }); `view` the city material's view (js/continuum-scene.js); `grounded`
+// whether each building stands on the land (CONTINUUM_GROUNDED: it is stood on the ground the land draws), or none.
+export function createCityContinuum({ device, atlas, programs, view = null, typed, types, grounded = null, frame, shadowUniform, samples = 4, label = 'city' }) {
   const count = types.length, counts = new Array(atlas.types.length).fill(0);
   for (let i = 0; i < count; i++) counts[types[i]]++;
   const { room } = continuumRoom(atlas.types, counts);
@@ -30,7 +32,7 @@ export function createCityContinuum({ device, atlas, programs, view = null, type
   for (let i = 0; i < count; i++) {
     const at = i * CITY_TYPED_FLOATS, tint = typed[at + 7];
     stretches.set([typed[at + 4], typed[at + 5], typed[at + 6], citySlope(tint)], i * 4);
-    scene.place(i, { position: [typed[at], typed[at + 1], typed[at + 2]], yaw: typed[at + 3], type: types[i], flags: CONTINUUM_STRETCHED, pose: i, identity: tint });
+    scene.place(i, { position: [typed[at], typed[at + 1], typed[at + 2]], yaw: typed[at + 3], type: types[i], flags: CONTINUUM_STRETCHED | (grounded?.[i] ? CONTINUUM_GROUNDED : 0), pose: i, identity: tint });
   }
   scene.writePoses(0, stretches);
   scene.send(0, count);

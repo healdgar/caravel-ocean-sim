@@ -14,6 +14,9 @@
 // in the bundle, before the land and every family that reads it.
 import { CONTINUUM_HANDOFF_BAND } from './continuum-core.js';
 
+// A record's flag (js/continuum-format.js, the bit beside CONTINUUM_STRETCHED): it stands on the land, and is stood
+// on the ground the land draws at its anchor (js/wgsl/continuum-cut.js continuumLift).
+export const CONTINUUM_GROUNDED = 1 << 29;
 // Texels across a level, and the spacing of the finest, in metres.
 export const CONTINUUM_GROUND_TEXELS = 256;
 export const CONTINUUM_GROUND_TEXEL_M = 0.5;
