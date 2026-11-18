@@ -13,6 +13,20 @@
 //   tongues Portuguese and Dutch, each entered wherever the program lists its tongues. They are spoken only where a
 //           real map's region speaks them (REALMAPS, built by that game's tools/realmap.py, or a host's own map); a
 //           realm made up from a seed is never drawn in them, nor are its sell-swords (CULT_DRAWN).
+//
+// Two more go back with these, each kept in a table of its own since each is a whole people's custom, not a fix:
+//   native   the peoples of the Americas and their ways (scripts/board-native.mjs)
+//   colonial the towns the crowns planted overseas (scripts/board-colonial.mjs), changing the simulation so:
+//            - a real map may name the manner a tongue's towns on it were planted by (REALMAP.manners), its colony's
+//              year (REALMAP.founded) and how settled its country was (REALMAP.settled); none named, nothing changes
+//            - settlementOrigin: a planted town's founding is its colony's year (its seat) or some years on, drawn
+//              from a stream of its own, with its manner for its layout (MANNERS: traza, ladeira)
+//            - the founding of the realm founds only REALMAP.settled of the towns and villages it would
+//            - layoutSettlement: a planted town is laid out in one stroke by plantTown (its plaza or largo, its
+//              lattice of streets, its church; a ladeira town's upper and lower towns and the ladeiras between); it
+//              has no castle on the hill, no burgage rows where its manner has none, no new town planted beside it,
+//              no market charter's history, and its quay does not tell its founding; its lots are
+//              taken nearest its plaza or largo first
 export const BOARD_UPSTREAM = Object.freeze([
   // Fixes.
   {

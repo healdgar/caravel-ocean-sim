@@ -8,7 +8,9 @@
 //   scripts/board-upstream.mjs, the extensions: changes to the simulation itself (new tongues, fixes), written as that
 //     game's own code so they can be copied back into it and both games run one simulation. Applied after this table.
 //   scripts/board-native.mjs, the peoples of the Americas: extensions of the same kind, with ways of their own (how
-//     they lay out, house, farm and rule a place). Applied last.
+//     they lay out, house, farm and rule a place). Applied after the extensions.
+//   scripts/board-colonial.mjs, the towns the crowns planted overseas: the manners they were laid out by, read from a
+//     real map. Applied last.
 //
 // What the host sets, read from FURLONG_OPTIONS.board before the program runs:
 //   spanMetres  the side of the ground, in metres (the source offers whole kilometres from 4 to 15)
@@ -24,6 +26,7 @@
 //               is cut into ground whose valleys are already real.
 import { BOARD_UPSTREAM } from './board-upstream.mjs';
 import { BOARD_NATIVE } from './board-native.mjs';
+import { BOARD_COLONIAL } from './board-colonial.mjs';
 
 const BOARD = 'globalThis.FURLONG_OPTIONS?.board';
 
@@ -100,6 +103,7 @@ export const BOARD_TABLES = Object.freeze([
   { name: 'tuned', table: BOARD_TUNING },
   { name: 'upstream', table: BOARD_UPSTREAM },
   { name: 'native', table: BOARD_NATIVE },
+  { name: 'colonial', table: BOARD_COLONIAL },
 ]);
 
 // The source's program with the tables applied.

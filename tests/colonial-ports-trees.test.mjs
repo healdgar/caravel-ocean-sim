@@ -13,7 +13,8 @@ import {
 import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
 import { cityFamilyOf } from '../js/old-world-buildings.js';
 import { streetEdgeAt } from '../js/town-streets.js';
-import { createCityTargets } from '../js/city-targets.js';
+import { COLONIAL_TOWNS } from '../js/colonial-towns.js';
+import { BAKED_BOARDS } from '../js/board-model.js';
 import { refreshOldWorldBoardCountry } from '../js/old-world.js';
 import { retargetForestPackToProcedural } from '../js/terrain.js';
 import { forestPackRoots } from '../js/forest-scenery.js';
@@ -25,69 +26,47 @@ const localFetch = async (relPath) => {
   return new Response(bytes, { status: 200 });
 };
 
-test('Deliverable 1: procedural colonial ports generate distinct topography-adapted street plans, subdivided solares, bastioned wall circuits, and tropical hinterlands', () => {
-  const gridOpts = { size: 65, biomeSize: 32, albedoSize: 32, vegetationCandidates: 900 };
-
-  const santoDomingo = generateProceduralCoastalPack({ id: 'santo-domingo', year: 1550, ...gridOpts });
-  const havana = generateProceduralCoastalPack({ id: 'havana', year: 1615, ...gridOpts });
-  const salvador = generateProceduralCoastalPack({
-    id: 'salvador-da-bahia',
-    name: 'Salvador da Bahia',
-    latitude: -12.9714,
-    longitude: -38.5014,
-    year: 1585,
-    ...gridOpts,
-  });
-  const jamestown = generateProceduralCoastalPack({ id: 'jamestown', year: 1615, ...gridOpts });
-
-  // 1. Zero monolithic colonial_town_block stamps and zero isolated floating single-segment walls
-  for (const pack of [santoDomingo, havana, salvador, jamestown]) {
-    const prefabIds = pack.port.instances.map((i) => i.prefabId);
-    assert.equal(
-      prefabIds.includes('colonial_town_block'),
-      false,
-      `${pack.region.id} must not stamp monolithic colonial_town_block`
-    );
-    assert.equal(
-      prefabIds.includes('curtain_wall_and_gate'),
-      false,
-      `${pack.region.id} must not stamp an isolated floating curtain_wall_and_gate prefab`
-    );
-    assert.ok(pack.city && pack.city.typedCount > 0, `${pack.region.id} emits subdivided Cairn lots in pack.city`);
-    const baseCity = pack._baseCity ?? pack.city;
-    assert.ok(baseCity.count >= baseCity.typedCount, `${pack.region.id} pairs colonial Cairn lots with GPU CITY_BLOCK_FLOATS continuum blocks`);
-    assert.ok(Array.isArray(pack.port.plannedStreets) && pack.port.plannedStreets.length >= 2, `${pack.region.id} traces procedural streets`);
-
-    // Every port building & subdivided city lot/wall is physically targetable
-    const targets = createCityTargets(pack.city, pack.port);
-    assert.ok(targets, `${pack.region.id} enrols subdivided lots & walls into cityTargets`);
+test('Deliverable 1: every town Spain and Portugal planted by 1550 is a board founded on its real ground by its crown\'s manner, with no colonial street planner left', () => {
+  // The towns are boards (js/colonial-towns.js, scripts/board-colonial.mjs), baked on their ground by
+  // scripts/bake-board.mjs: a Spanish town by the ordinances' traza (a square plaza, its church, a lattice of grid
+  // streets), a Portuguese one by the ladeira (an upper town about a largo, a lower town at the landing, ladeiras
+  // between). The game's own colonial planner (planColonialStreets, buildColonialCityFabric) is gone.
+  const coastal = fs.readFileSync('js/coastal-world.js', 'utf8');
+  const city = fs.readFileSync('js/old-world-city.js', 'utf8');
+  for (const gone of ['planColonialStreets', 'buildColonialCityFabric', 'plannedStreets', 'colonialCity']) {
+    assert.equal(coastal.includes(gone) || city.includes(gone), false, `${gone} is gone: a planted town is its board`);
+  }
+  for (const town of COLONIAL_TOWNS) {
+    const file = BAKED_BOARDS[`${town.port}:1550`];
+    assert.ok(file && fs.existsSync(file), `${town.port} has its board baked for 1550`);
+    const baked = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(baked.request.manner, town.manner, `${town.port} is founded by its crown's manner`);
+    assert.equal(baked.request.founded, town.founded, `${town.port} is founded in its recorded year`);
+    const seat = baked.board.places[0];
+    assert.equal(seat.founded.kind, 'planted', `${town.port}'s seat was planted, not grown`);
+    assert.equal(seat.founded.layout, town.manner, `${town.port}'s seat is laid out by its manner`);
+    assert.ok(seat.streets.filter((street) => street.kind === 'grid').length >= 4, `${town.port} has its lattice of streets`);
+    assert.ok(seat.squares.length >= 1, `${town.port} has its plaza or largo`);
+    const { buildings, arches } = baked.board;
+    let temples = 0;
+    for (let k = 0; k < buildings.count; k++) if (buildings.kinds[k * 6] === 0 && arches[buildings.kinds[k * 6 + 1]] === 'temple') temples++;
+    assert.ok(temples >= 1, `${town.port}'s seat has its church`);
   }
 
-  // 2. Distinct street geometry across Spanish traza (Santo Domingo vs Havana), Portuguese Cidade Baixa/Alta (Salvador), and Tidewater (Jamestown)
-  const streetSignature = (pack) => {
-    const ways = pack.port.plannedStreets;
-    const pts = ways.flatMap((w) => w.points);
-    const meanElev = pts.reduce((acc, [x, z]) => acc + terrainSurfaceSample(pack.heights, x, z, pack.region), 0) / Math.max(1, pts.length);
-    return `${ways.length}:${pts.length}:${meanElev.toFixed(2)}`;
-  };
-  const sigSD = streetSignature(santoDomingo);
-  const sigHV = streetSignature(havana);
-  const sigSV = streetSignature(salvador);
-  const sigJT = streetSignature(jamestown);
-  assert.notEqual(sigSD, sigHV, 'Santo Domingo and Havana produce distinct street graphs from their local topography and stage');
-  assert.notEqual(sigSD, sigSV, 'Spanish damero traza and Portuguese Cidade Baixa/Alta produce distinct street graphs');
-  assert.notEqual(sigSD, sigJT, 'Spanish Indies and English Tidewater produce distinct street graphs');
+  // The ladeira climbs: Salvador's upper town stands above its landing, the ladeiras between them.
+  const salvador = JSON.parse(fs.readFileSync(BAKED_BOARDS['salvador-da-bahia:1550'], 'utf8')).board.places[0];
+  assert.ok(salvador.streets.some((street) => street.kind === 'alley'), 'Salvador\'s ladeiras climb from the landing');
+  assert.ok(salvador.squares.length >= 2, 'Salvador has its largo above and its praça below');
 
-  // Mounted street riders emitted for colonial towns
-  assert.ok(havana.port.streets?.mounts?.seeds?.length >= 8, 'Havana streets emit mounted horseman seeds');
-  assert.equal(havana.port.streets.mounts.seeds[6], 3, 'Mounted street riders use horse species = 3');
-
-  // Fortified Havana (1615) encloses the landward traza with a multi-bay bastioned curtain + tower + gate circuit
-  const havanaTypes = Array.from(havana.city.typedTypes);
-  const curtainBays = havanaTypes.filter((t) => cityFamilyOf(t).key === 'CURTAIN').length;
-  const wallTowers = havanaTypes.filter((t) => cityFamilyOf(t).key === 'WALL_TOWER').length;
-  assert.ok(curtainBays >= 4, `Expected continuous multi-bay landward wall circuit on fortified Havana, got ${curtainBays} bays`);
-  assert.ok(wallTowers >= 3, `Expected projecting bastion/flanking towers on fortified Havana wall trace, got ${wallTowers}`);
+  // A colonial coast stamps no town of prefabs and traces no streets of its own.
+  const gridOpts = { size: 65, biomeSize: 32, albedoSize: 32, vegetationCandidates: 900 };
+  for (const id of ['santo-domingo', 'havana', 'salvador-da-bahia']) {
+    const pack = generateProceduralCoastalPack({ id, year: 1550, ...gridOpts });
+    const prefabIds = pack.port.instances.map((i) => i.prefabId);
+    assert.equal(prefabIds.includes('colonial_town_block'), false, `${id} stamps no colonial_town_block`);
+    assert.equal(prefabIds.includes('curtain_wall_and_gate'), false, `${id} stamps no floating curtain_wall_and_gate`);
+    assert.equal(pack.port.plannedStreets, undefined, `${id} traces no streets of its own`);
+  }
 
   // 3. Biogeographically accurate tropical colonial hinterlands (estancias, ingenios, cattle/horses, conucos; zero windmills/sheep/longhouses)
   const tropicalHinterlandPack = generateProceduralCoastalPack({

@@ -278,7 +278,7 @@ export function retargetForestPackToProcedural(
     // Tended country: trees stand where a farmer set them, apart and kept small.
     const country = oldWorldCountry(region, secPack.heights, port);
     const secWaterAt = createInlandWaterSampler(port?.country ?? country, { margin: 3.8 });
-    const secCityBlocked = buildCityBlockTester(secPack.city ?? country?.plan ?? port?.colonialCity, 2.6);
+    const secCityBlocked = buildCityBlockTester(secPack.city ?? country?.plan, 2.6);
     const tendedKinds = new Map();
     const tendedPrototypes = (tended) => {
       let ids = tendedKinds.get(tended);
@@ -812,7 +812,7 @@ export function retargetForestPackToProcedural(
     forestGroveOccupy(cover, size, { ...region, span }, plantedFlat, groveReach);
     const country = oldWorldCountry(region, heights, port);
     const waterAt = createInlandWaterSampler(port?.country ?? country, { margin: 3.8 });
-    const cityBlocked = buildCityBlockTester(secPack.city ?? country?.plan ?? port?.colonialCity, 2.6);
+    const cityBlocked = buildCityBlockTester(secPack.city ?? country?.plan, 2.6);
     const half = span * 0.5 - 0.01;
     const ground = (wx, wz) => heights && region?.size
       ? terrainSurfaceSample(heights, Math.max(region.x - half, Math.min(region.x + half, wx)), Math.max(region.z - half, Math.min(region.z + half, wz)), region)
@@ -869,7 +869,7 @@ export function retargetForestPackToProcedural(
 
   const basePort = proceduralPack.port ?? null;
   const baseWaterAt = createInlandWaterSampler(basePort?.country ?? basePort?._resolvedCountry ?? null, { margin: 3.8 });
-  const baseCityBlocked = buildCityBlockTester(proceduralPack.city ?? basePort?.colonialCity ?? basePort?._resolvedCountry?.plan, 2.6);
+  const baseCityBlocked = buildCityBlockTester(proceduralPack.city ?? basePort?._resolvedCountry?.plan, 2.6);
   const isBaseClearForTree = (px, pz) => {
     if (baseWaterAt?.(px, pz) || baseCityBlocked?.(px, pz)) return false;
     if (basePort && (basePort.clearRadius > 0 || basePort.instances?.length > 0)) {

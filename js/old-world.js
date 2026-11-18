@@ -12,6 +12,7 @@
 import { CITY_TREES } from './old-world-city.js';
 import { layBoardCountry } from './old-world-board.js';
 import { nativeTownHeld } from './native-towns.js';
+import { colonialTownHeld } from './colonial-towns.js';
 
 const DEG = Math.PI / 180;
 const OLD_WORLD_METRES_PER_DEGREE = 111195;
@@ -111,10 +112,11 @@ export function oldWorldCityHeld(region) {
   return best;
 }
 
-// The town a region's ground holds and its board founds: an Old World city, or a town of the peoples of the Americas
-// in its own year (js/native-towns.js).
+// The town a region's ground holds and its board founds: an Old World city, a town of the peoples of the Americas in
+// its own year (js/native-towns.js), or a town Spain or Portugal planted overseas, from its founding on
+// (js/colonial-towns.js).
 export function boardTownHeld(region) {
-  return oldWorldCityHeld(region) ?? nativeTownHeld(region);
+  return oldWorldCityHeld(region) ?? nativeTownHeld(region) ?? colonialTownHeld(region);
 }
 
 // The city whose country this spot lies in, or none.
@@ -250,7 +252,7 @@ function unbakedCity(city, region, baked) {
 // One is made per elevation field and kept, since land cover, ground colour and planting all ask.
 export function oldWorldCountry(region, heights, port = null) {
   if (!region || !heights || !Number.isFinite(region.latitude) || !Number.isFinite(region.longitude)) return null;
-  if (!inIberia(region.latitude, region.longitude) && !nativeTownHeld(region)) return null;
+  if (!inIberia(region.latitude, region.longitude) && !boardTownHeld(region)) return null;
   const kept = countries.get(heights);
   if (kept && kept.port === port) return kept.country;
   const country = makeCountry(region, heights, port);
@@ -259,7 +261,7 @@ export function oldWorldCountry(region, heights, port = null) {
 }
 
 export function refreshOldWorldBoardCountry(nextBoardJson, region, heights, port = null, surveyHeights = null) {
-  if (!nextBoardJson || !region || !heights || !inIberia(region.latitude, region.longitude) && !nativeTownHeld(region)) return null;
+  if (!nextBoardJson || !region || !heights || !inIberia(region.latitude, region.longitude) && !boardTownHeld(region)) return null;
   if (surveyHeights instanceof Float32Array && surveyHeights.length === heights.length && !uncarvedSurveys.has(heights)) {
     uncarvedSurveys.set(heights, surveyHeights.slice());
   }
