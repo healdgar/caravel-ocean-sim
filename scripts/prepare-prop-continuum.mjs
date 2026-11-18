@@ -14,7 +14,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import zlib from 'node:zlib';
 import { MeshoptSimplifier } from 'meshoptimizer';
-import { weldDrawn, bakeClusters, bakeFar } from './prepare-city-continuum.mjs';
+import { bakeContinuumBody } from '../js/continuum-bake.js';
 import {
   CITY_CONTINUUM_HEADER, CITY_CONTINUUM_HEADER_WORDS, CITY_CONTINUUM_TYPE_WORDS, CITY_CONTINUUM_CLUSTER_WORDS, CITY_CONTINUUM_VERTEX_WORDS,
   CITY_CONTINUUM_STEP_WORDS, CITY_CONTINUUM_TRIANGLE_WORDS, CITY_CONTINUUM_NEVER, CITY_CONTINUUM_HOPS, packCityContinuumCluster, cityContinuumSourceBytes,
@@ -44,15 +44,12 @@ async function main() {
   await MeshoptSimplifier.ready;
   const started = Date.now(), sources = propContinuumSources(), baked = [];
   for (const source of sources) {
-    const { type } = source, t0 = Date.now(), welded = weldDrawn(type), clusters = await bakeClusters(welded), far = bakeFar(type, welded);
-    // The far body takes over no sooner than it is as light as the clusters' coarsest cut, as a building's does.
-    const rootTriangles = clusters.records.reduce((n, record) => n + (record.parentError === Infinity ? record.triangles : 0), 0);
-    far.farFirst = 0;
-    while (far.farFirst < far.chain.steps.length && far.steps[far.farFirst * CITY_CONTINUUM_STEP_WORDS] > rootTriangles) far.farFirst++;
+    // The one bake every body takes (js/continuum-bake.js): the far body takes over no sooner than it is as light as
+    // the clusters' coarsest cut, as a building's does.
+    const { type } = source, t0 = Date.now(), { welded, clusters, far } = await bakeContinuumBody(type), rootTriangles = far.stats.rootTriangles;
     // A building stands on its floor, and its splat is what shows above it. A ball has none: its outline is its
     // great circle, all round its centre.
     if (source.sphere) Object.assign(far.splat, { centre: [0, 0, 0], rx: 1, ry: 1, roofShare: 0 });
-    Object.assign(far.stats, { rootTriangles, farFirst: far.farFirst, farFirstTriangles: far.steps[far.farFirst * CITY_CONTINUUM_STEP_WORDS], handoffError: +new Float32Array(far.steps.buffer)[far.farFirst * CITY_CONTINUUM_STEP_WORDS + 1].toFixed(4) });
     baked.push({ source, welded, clusters, far, ms: Date.now() - t0 });
     console.log(`${String(type.id).padStart(2)} ${type.name.padEnd(16)} ${String(type.triangles).padStart(5)} tris, ${new Set(type.parts).size} shards · ${String(clusters.count).padStart(3)} clusters ${clusters.levels} levels, root ${clusters.rootError.toFixed(4)} m · wrap ${far.stats.cell} m, ${far.stats.baseTriangles} → ${far.stats.coreTriangles} in ${far.stats.steps} steps (depth ${far.stats.depth}), ${far.stats.errorRange.join('–')} m, handoff at step ${far.farFirst} (${far.stats.farFirstTriangles} ≤ ${rootTriangles}) · ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   }

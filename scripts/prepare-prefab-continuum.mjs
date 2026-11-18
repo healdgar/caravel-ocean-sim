@@ -3,7 +3,9 @@
 // Bakes the prefabs of every historical port, on its own ground as the game first makes it (no real elevation), and the
 // castle duel's two castles, into the bodies the page ships (js/prefab-continuum.js), so those ports stand at once:
 //   node scripts/prepare-prefab-continuum.mjs [--ports=lisbon,havana] [--threads=12] [--out=assets/prefab-continuum]
-// With --ports, the ports already baked by the same version are kept beside those baked now.
+// With --ports, the ports already baked by the same version are kept beside those baked now. Each body is kept as it is
+// baked (node_modules/.cache/prefab-continuum/<version>/), so a run cut short, or one a body failed in, is taken up
+// again where it stopped; a body that fails is named, and nothing is written until every body is baked.
 // Each prefab is taken as the page takes it (prefabContinuumBody), baked by the one simplifier (js/continuum-bake.js)
 // in worker threads, packed as the page's bake worker packs it, and kept under its fingerprint and the bake's version
 // (the digest of the page's bake worker, scripts/continuum-bake-worker-bundle.mjs). A port on real elevation, or one
@@ -23,11 +25,11 @@ export const PREFAB_CONTINUUM_GROUND = Object.freeze({ size: 513, biomeSize: 512
 if (!isMainThread) {
   const { bakeContinuumBody } = await import(pathToFileURL(path.join(root, 'js/continuum-bake.js')).href);
   const { packCityContinuumBody } = await import(pathToFileURL(path.join(root, 'js/city-continuum.js')).href);
-  parentPort.on('message', async ({ id, body }) => {
+  parentPort.on('message', async ({ body }) => {
     try {
       const started = performance.now(), words = packCityContinuumBody({ triangles: body.triangles }, await bakeContinuumBody(body)).words;
-      parentPort.postMessage({ id, words, ms: Math.round(performance.now() - started) }, [words.buffer]);
-    } catch (error) { parentPort.postMessage({ id, error: String(error?.stack ?? error) }); }
+      parentPort.postMessage({ words, ms: Math.round(performance.now() - started) }, [words.buffer]);
+    } catch (error) { parentPort.postMessage({ error: String(error?.stack ?? error) }); }
   });
 } else {
   const args = process.argv.slice(2), option = (name, fallback) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
@@ -37,7 +39,7 @@ if (!isMainThread) {
   const { CASTLE_DUEL_PORT_ID, castleDuelCastles } = await import(pathToFileURL(path.join(root, 'js/castle-duel.js')).href);
   // A port as the game first stands it: a historical port on its own ground, or the duel's strait.
   const portOf = (id) => (id === CASTLE_DUEL_PORT_ID ? { regionId: id, instances: castleDuelCastles({ x: 0, z: 0 }) } : generateProceduralCoastalPack(id, PREFAB_CONTINUUM_GROUND).port);
-  const OUT = path.join(root, option('out', path.dirname(PREFAB_CONTINUUM_ASSETS['manifest.json'])));
+  const OUT = path.resolve(root, option('out', path.dirname(PREFAB_CONTINUUM_ASSETS['manifest.json'])));
   const started = Date.now(), { version } = await bundleContinuumBakeWorker(root);
   const ports = option('ports', null)?.split(',') ?? [...new Set([...HISTORICAL_1550_PORTS, ...HISTORICAL_COLONIAL_PORTS].map((port) => port.id)), CASTLE_DUEL_PORT_ID];
   // Every body the ports need, once.
@@ -54,25 +56,45 @@ if (!isMainThread) {
   }
   const wanted = [...bodies.values()].sort((a, b) => (a.fingerprint < b.fingerprint ? -1 : 1));
   console.log(`${ports.length} ports · ${[...prefabs.values()].reduce((n, c) => n + c, 0)} prefabs · ${wanted.length} bodies, ${wanted.reduce((n, b) => n + b.body.triangles, 0)} triangles · version ${version.slice(0, 16)}`);
-  // Baked in threads.
-  const threads = Math.max(1, Math.min(Number(option('threads', Math.max(1, os.cpus().length - 2))), wanted.length));
-  const pool = Array.from({ length: threads }, () => new Worker(fileURLToPath(import.meta.url)));
+  // Bodies this version has baked before, then the rest in threads, each kept as it lands.
+  const cache = path.join(root, 'node_modules/.cache/prefab-continuum', version);
+  fs.mkdirSync(cache, { recursive: true });
+  for (const entry of wanted) {
+    try {
+      const kept = fs.readFileSync(path.join(cache, `${entry.fingerprint}.bin`)), ms = JSON.parse(fs.readFileSync(path.join(cache, `${entry.fingerprint}.json`), 'utf8')).ms;
+      Object.assign(entry, { words: new Uint32Array(kept.buffer.slice(kept.byteOffset, kept.byteOffset + kept.byteLength)), ms });
+    } catch { /* not baked yet */ }
+  }
+  const todo = wanted.filter((entry) => !entry.words), failed = [];
+  if (todo.length < wanted.length) console.log(`${wanted.length - todo.length} bodies kept from an earlier run`);
+  const threads = Math.max(1, Math.min(Number(option('threads', Math.max(1, os.cpus().length - 2))), Math.max(1, todo.length)));
+  const pool = Array.from({ length: Math.min(threads, todo.length) }, () => new Worker(fileURLToPath(import.meta.url)));
   let next = 0, done = 0;
   await Promise.all(pool.map((worker) => new Promise((resolve, reject) => {
     const give = () => {
-      if (next >= wanted.length) { worker.terminate(); resolve(); return; }
-      const id = next++, { body } = wanted[id];
+      if (next >= todo.length) { worker.terminate(); resolve(); return; }
+      const entry = todo[next++], { body } = entry;
       worker.once('message', (reply) => {
-        if (reply.error) { reject(Error(`${wanted[id].fingerprint}: ${reply.error}`)); return; }
-        Object.assign(wanted[id], { words: reply.words, ms: reply.ms });
-        console.log(`${String(++done).padStart(4)}/${wanted.length} ${body.name.padEnd(30)} ${String(body.triangles).padStart(6)} tris · ${(reply.ms / 1000).toFixed(1)} s`);
+        if (reply.error) {
+          failed.push(entry);
+          console.log(`FAILED ${entry.fingerprint.slice(0, 16)} ${body.name}: ${reply.error.split('\n')[0]}`);
+        } else {
+          Object.assign(entry, { words: reply.words, ms: reply.ms });
+          fs.writeFileSync(path.join(cache, `${entry.fingerprint}.bin`), Buffer.from(reply.words.buffer, reply.words.byteOffset, reply.words.byteLength));
+          fs.writeFileSync(path.join(cache, `${entry.fingerprint}.json`), JSON.stringify({ name: body.name, ms: reply.ms }));
+          console.log(`${String(++done).padStart(4)}/${todo.length} ${body.name.padEnd(30)} ${String(body.triangles).padStart(6)} tris · ${(reply.ms / 1000).toFixed(1)} s`);
+        }
         give();
       });
-      worker.postMessage({ id, body: { name: body.name, vertices: body.vertices, parts: body.parts, triangles: body.triangles } });
+      worker.postMessage({ body: { name: body.name, vertices: body.vertices, parts: body.parts, triangles: body.triangles } });
     };
     worker.once('error', reject);
     give();
   })));
+  if (failed.length) {
+    console.error(`${failed.length} of ${wanted.length} bodies failed (the rest are kept for the next run): ${failed.map((entry) => `${entry.body.name} in ${entry.ports.join(', ')}`).join('; ')}`);
+    process.exit(1);
+  }
   // One file a port, of every body it needs, and the receipt of them all.
   const sha256 = (b) => createHash('sha256').update(b).digest('hex'), byPrint = new Map(wanted.map((entry) => [entry.fingerprint, entry]));
   fs.mkdirSync(OUT, { recursive: true });

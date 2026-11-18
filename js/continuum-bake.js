@@ -9,7 +9,8 @@
 //              shot part's own triangles are always its own.
 //   far body   the body's outside, wrapped: its triangles are stood in a grid of cells, the cells within closed,
 //              gaps narrower than a few cells bridged, the grid made well-composed and its faces taken as a closed
-//              manifold surface, simplified within a cell and collapsed one half-edge at a time to a few triangles.
+//              manifold surface, simplified within a cell and collapsed one half-edge at a time to one closed core of
+//              a few triangles, however many shells or holes it began with.
 //              Each triangle wears the kind of the body's surface nearest it; each step's error is measured against
 //              the wrap, and the wrap's against what of the body can be seen from outside it, so a filled yard or
 //              a bridged eave is counted. What a collapse takes off the outline is given back along the normals.
@@ -165,6 +166,9 @@ export function collapseChain(position, index, least) {
     return [e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]];
   };
   let living = T;
+  const hasCorner = (t, w) => corners[t * 3] === w || corners[t * 3 + 1] === w || corners[t * 3 + 2] === w;
+  // A triangle's corners as one number, whichever way round it is wound.
+  const cornerKey = (a, b, c) => { const lo = Math.min(a, b, c), hi = Math.max(a, b, c); return (lo * V + (a + b + c - lo - hi)) * V + hi; };
   // Folds are refused while the body has triangles to spare; near the core, only a triangle turned right over is.
   const valid = (u, v) => {
     const fold = living > 400 ? 0.2 : living > 60 ? -0.3 : -0.9;
@@ -180,6 +184,14 @@ export function collapseChain(position, index, least) {
       const before = normalOf(a, b, c), after = normalOf(a === u ? v : a, b === u ? v : b, c === u ? v : c);
       const lb = Math.hypot(...before), la = Math.hypot(...after);
       if (la < 1e-10 || (lb > 1e-10 && (before[0] * after[0] + before[1] * after[1] + before[2] * after[2]) / (lb * la) < fold)) return false;
+    }
+    // Nor one that would lay two triangles on the same corners (a tetrahedron's last edge): they enclose nothing.
+    const about = new Set();
+    for (const t of fans[v]) if (alive[t] && !hasCorner(t, u)) about.add(cornerKey(corners[t * 3], corners[t * 3 + 1], corners[t * 3 + 2]));
+    for (const t of fans[u]) {
+      if (!alive[t] || hasCorner(t, v)) continue;
+      const key = cornerKey(...[0, 1, 2].map((k) => (corners[t * 3 + k] === u ? v : corners[t * 3 + k])));
+      if (about.has(key)) return false;
     }
     return true;
   };
@@ -208,6 +220,90 @@ export function collapseChain(position, index, least) {
     for (const w of neighbours) stamp[w]++;
     offer(v);
     for (const w of neighbours) offer(w);
+  }
+  // Where the link condition stops it short of the core, the body is in several shells (a jetty's pilings, a tower
+  // apart from its church) or has a hole through it (an arch, a cloister's garth). Then each shell but the largest is
+  // drawn in on itself and taken into the nearest point of the rest, smallest first; and what is left is collapsed
+  // without the link condition, cheapest first. A collapse is a simplicial map, so every edge keeps an even number of
+  // triangles: the body stays closed, and comes down to one core of `least` triangles or fewer, never under four.
+  const force = (u, v) => {
+    // Only into a vertex still standing: a chain must never come round on itself.
+    if (dieStep[u] >= 0 || dieStep[v] >= 0 || u === v) throw Error(`collapse ${u} → ${v} of a vertex already gone`);
+    const step = steps.length;
+    steps.push({ u, v });
+    dieStep[u] = step; target[u] = v;
+    for (const t of fans[u]) {
+      if (!alive[t]) continue;
+      if (corners[t * 3] === v || corners[t * 3 + 1] === v || corners[t * 3 + 2] === v) { alive[t] = 0; death[t] = step + 1; living--; continue; }
+      for (let k = 0; k < 3; k++) if (corners[t * 3 + k] === u) corners[t * 3 + k] = v;
+      fans[v].push(t);
+    }
+    for (let k = 0; k < 10; k++) Q[v * 10 + k] += Q[u * 10 + k];
+    // Two triangles on the same corners enclose nothing: both go.
+    const seen = new Map();
+    for (const t of fans[v]) {
+      if (!alive[t]) continue;
+      const key = cornerKey(corners[t * 3], corners[t * 3 + 1], corners[t * 3 + 2]), twin = seen.get(key);
+      if (twin === undefined) { seen.set(key, t); continue; }
+      alive[t] = 0; alive[twin] = 0; death[t] = death[twin] = step + 1; living -= 2; seen.delete(key);
+    }
+  };
+  const shells = () => {
+    const root = new Int32Array(V).map((_, v) => v), find = (v) => { while (root[v] !== v) v = root[v] = root[root[v]]; return v; };
+    for (let t = 0; t < T; t++) if (alive[t]) for (let k = 1; k < 3; k++) { const a = find(corners[t * 3]), b = find(corners[t * 3 + k]); if (a !== b) root[a] = b; }
+    const byRoot = new Map();
+    for (let t = 0; t < T; t++) {
+      if (!alive[t]) continue;
+      const r = find(corners[t * 3]);
+      if (!byRoot.has(r)) byRoot.set(r, { triangles: [], vertices: new Set(), area: 0 });
+      const shell = byRoot.get(r);
+      shell.triangles.push(t); shell.area += surfaceArea(corners, [t], position);
+      for (let k = 0; k < 3; k++) shell.vertices.add(corners[t * 3 + k]);
+    }
+    return [...byRoot.values()].sort((a, b) => a.area - b.area);
+  };
+  if (living > least) {
+    const all = shells();
+    for (let i = 0; i < all.length - 1; i++) {
+      // Into the shells still standing: those no smaller than it.
+      const shell = all[i], rest = all.slice(i + 1).flatMap((other) => [...other.vertices]);
+      let at = -1, into = -1, best = Infinity;
+      for (const u of shell.vertices) for (const w of rest) { const d = (p(u, 0) - p(w, 0)) ** 2 + (p(u, 1) - p(w, 1)) ** 2 + (p(u, 2) - p(w, 2)) ** 2; if (d < best) { best = d; at = u; into = w; } }
+      // Drawn in on its point nearest the rest, farthest first, then that point taken in.
+      const order = [...shell.vertices].filter((u) => u !== at).sort((a, b) => ((p(b, 0) - p(at, 0)) ** 2 + (p(b, 1) - p(at, 1)) ** 2 + (p(b, 2) - p(at, 2)) ** 2) - ((p(a, 0) - p(at, 0)) ** 2 + (p(a, 1) - p(at, 1)) ** 2 + (p(a, 2) - p(at, 2)) ** 2));
+      for (const u of order) force(u, at);
+      force(at, into);
+    }
+  }
+  while (living > least) {
+    let pick = null;
+    for (const strict of [true, false]) {
+      for (let t = 0; t < T; t++) {
+        if (!alive[t]) continue;
+        for (let k = 0; k < 3; k++) for (const [u, v] of [[corners[t * 3 + k], corners[t * 3 + ((k + 1) % 3)]], [corners[t * 3 + ((k + 1) % 3)], corners[t * 3 + k]]]) {
+          let dying = 0, flips = false;
+          // What survives about v once u is taken into it, by corners: a pair on the same corners goes too.
+          const about = new Map();
+          for (const f of fans[v]) if (alive[f] && !hasCorner(f, u)) { const k = cornerKey(corners[f * 3], corners[f * 3 + 1], corners[f * 3 + 2]); about.set(k, (about.get(k) ?? 0) + 1); }
+          for (const f of fans[u]) {
+            if (!alive[f]) continue;
+            const [a, b, c] = [corners[f * 3], corners[f * 3 + 1], corners[f * 3 + 2]];
+            if (a === v || b === v || c === v) { dying++; continue; }
+            const k = cornerKey(a === u ? v : a, b === u ? v : b, c === u ? v : c);
+            about.set(k, (about.get(k) ?? 0) + 1);
+            const before = normalOf(a, b, c), after = normalOf(a === u ? v : a, b === u ? v : b, c === u ? v : c), lb = Math.hypot(...before), la = Math.hypot(...after);
+            if (la < 1e-10 || (lb > 1e-10 && (before[0] * after[0] + before[1] * after[1] + before[2] * after[2]) / (lb * la) < -0.9)) flips = true;
+          }
+          for (const n of about.values()) dying += n - (n % 2);
+          if (living - dying < 4 || (strict && flips)) continue;
+          const c = cost(u, v);
+          if (!pick || c < pick[0]) pick = [c, u, v];
+        }
+      }
+      if (pick) break;
+    }
+    if (!pick) break;
+    force(pick[1], pick[2]);
   }
   return { dieStep, target, death, steps, living };
 }
@@ -248,8 +344,8 @@ const WRAP_CELLS = 80, WRAP_FINEST = 0.04, WRAP_COARSEST = 0.3;
 const WRAP_MOST_TRIANGLES = 4096;
 // Gaps up to about twice this many cells wide are bridged before the surface is taken.
 const WRAP_CLOSING = 2;
-// The far body stops collapsing here: a closed body needs four; one of several pieces, or with a hole through it
-// (an arch, a cloister's garth), stops where it must.
+// The far body's core: it collapses until no more than this many triangles are left, one closed body (a closed body
+// needs four), whatever shells or holes it began with (collapseChain).
 const CHAIN_LEAST_TRIANGLES = 6;
 // What a far-body triangle never wears: glass, the dark of a recess, iron. They are too small to be seen there.
 const APERTURES = new Set([14, 16, 18]);
@@ -438,8 +534,9 @@ function normalsOf(position, index) {
 // ------------------------------------------------------------------------------------------------ far body
 function bakeFar(type, welded) {
   let wrapped, base;
+  // A wrap the simplifier cannot bring down and keep manifold is taken again in coarser cells.
   for (let coarser = 1; ; coarser *= 1.5) {
-    wrapped = wrap(type, coarser); base = simplifyWrap(type.name, wrapped);
+    try { wrapped = wrap(type, coarser); base = simplifyWrap(type.name, wrapped); } catch (error) { if (coarser > 5) throw error; continue; }
     if (base.index.length / 3 <= WRAP_MOST_TRIANGLES || coarser > 5) break;
   }
   const position = base.position, index = base.index;

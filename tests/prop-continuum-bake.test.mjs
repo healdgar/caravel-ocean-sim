@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 import zlib from 'node:zlib';
 import { MeshoptSimplifier } from 'meshoptimizer';
-import { weldDrawn, bakeClusters } from '../scripts/prepare-city-continuum.mjs';
+import { weldDrawn, bakeClusters } from '../js/continuum-bake.js';
 import { propContinuumSources } from '../scripts/prepare-prop-continuum.mjs';
 import {
   CITY_CONTINUUM_CLUSTER_TRIANGLES, CITY_CONTINUUM_CLUSTER_WORDS, CITY_CONTINUUM_HEADER, CITY_CONTINUUM_HOPS, CITY_CONTINUUM_NEVER,
