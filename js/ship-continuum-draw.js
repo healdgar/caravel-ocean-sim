@@ -4,7 +4,7 @@
 // bodies and its ships' instance records; how they are cut, handed off and counted is here and in the shared core.
 import { SHIP_CONTINUUM_ASSETS, SHIP_CONTINUUM_FAR_VERTEX_WORDS, shipContinuumStreams, shipContinuumSourceKey, shipContinuumSurface, shipContinuumSurfaceMatches, validateShipContinuumManifest } from './ship-continuum.js';
 import {
-  SHIP_CONTINUUM_LISTS, SHIP_CONTINUUM_INSTANCE_VERTICES, SHIP_CONTINUUM_DRAW_BYTES, SHIP_CONTINUUM_DAMAGED_LIST, SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST,
+  SHIP_CONTINUUM_LISTS, SHIP_CONTINUUM_INSTANCE_VERTICES, SHIP_CONTINUUM_DRAW_BYTES, SHIP_CONTINUUM_DAMAGED_LIST, SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST, SHIP_CONTINUUM_LINE_LIST,
   SHIP_CONTINUUM_BODY_LIMIT, SHIP_CONTINUUM_BODY_BYTES, SHIP_CONTINUUM_CUT_BYTES, shipContinuumCutWGSL,
 } from './wgsl/ship-continuum.js';
 import { CONTINUUM_TRIANGLE_BUDGET, continuumPixelError } from './continuum-core.js';
@@ -36,7 +36,8 @@ async function shipContinuumCheckSource(manifest, source) {
 // built here, checked against what each body was baked from. A trade vessel draws the vertices it was baked with
 // (`assemblies`: 9 floats a vertex, position, normal, material, uv; and each vertex's fracture shard). A player's
 // ship draws her own mesh as built here: her clusters' corners and her far body's riders are renumbered onto it,
-// corner by corner of the assembly (the same triangles in the same order, whatever an engine's welding).
+// corner by corner of the assembly (the same triangles in the same order, whatever an engine's welding), and carries
+// the line vertices of her detail layer (js/vessel-detail.js), which ride her clusters.
 export async function loadShipContinuum(device, ids, sources, { fetchAsset = fetch, label = 'ship continuum' } = {}) {
   if (ids.length > SHIP_CONTINUUM_BODY_LIMIT) throw Error(`A ship continuum holds at most ${SHIP_CONTINUUM_BODY_LIMIT} bodies`);
   const loaded = await Promise.all(ids.map(async (id, b) => {
@@ -63,7 +64,7 @@ export async function loadShipContinuum(device, ids, sources, { fetchAsset = fet
       vertices = new Float32Array(stream['vertices.bin'].buffer, stream['vertices.bin'].byteOffset, stream['vertices.bin'].byteLength / 4);
       vertexShards = words('shards.bin');
     }
-    return { manifest, clusters: stream['clusters.bin'], index, far, vertices, vertexShards, vertexCount: vertices.length / 9 };
+    return { manifest, clusters: stream['clusters.bin'], index, far, vertices, vertexShards, vertexCount: vertices.length / 9, lines: source.detail?.lineVertexCount ?? 0 };
   }));
   let shapeWords = 0, meshWords = 0, vertexCount = 0;
   const places = loaded.map(({ clusters, index, far, vertexCount: count }) => {
@@ -77,7 +78,7 @@ export async function loadShipContinuum(device, ids, sources, { fetchAsset = fet
   const shape = made('cut and far bodies', shapeWords * 4, B.STORAGE), mesh = made('cluster corners', meshWords * 4, B.STORAGE);
   const vertices = made('assemblies', vertexCount * 36, B.STORAGE), bodies = made('bodies', SHIP_CONTINUUM_BODY_LIMIT * SHIP_CONTINUUM_BODY_BYTES, B.UNIFORM);
   const table = new ArrayBuffer(SHIP_CONTINUUM_BODY_LIMIT * SHIP_CONTINUUM_BODY_BYTES), f = new Float32Array(table), u = new Uint32Array(table);
-  loaded.forEach(({ manifest, clusters, index, far, vertices: source, vertexCount: count }, b) => {
+  loaded.forEach(({ manifest, clusters, index, far, vertices: source, vertexCount: count, lines }, b) => {
     const at = places[b], o = (b * SHIP_CONTINUUM_BODY_BYTES) / 4, { far: chain, splat, bound } = manifest;
     device.queue.writeBuffer(shape, at.clusters * 4, clusters);
     device.queue.writeBuffer(shape, at.far * 4, far);
@@ -90,6 +91,7 @@ export async function loadShipContinuum(device, ids, sources, { fetchAsset = fet
     f.set([...bound.centre, bound.radius], o + 16);
     f.set([...splat.colour, chain.triangleCount], o + 20);
     f.set([...manifest.source.designScale, count], o + 24);
+    u.set([lines, 0, 0, 0], o + 28);
   });
   device.queue.writeBuffer(bodies, 0, table);
   const manifests = loaded.map((l) => l.manifest);
@@ -100,6 +102,8 @@ export async function loadShipContinuum(device, ids, sources, { fetchAsset = fet
     // Most 128-triangle pieces any body's far body is cut into, and most clusters any body has.
     farChunks: Math.max(...manifests.map((m) => Math.ceil(m.far.triangleCount / 128))),
     clusterMost: Math.max(...manifests.map((m) => m.clusterCount)),
+    // Most 128-triangle pieces any body's detail layer is cut into.
+    linePieces: Math.max(0, ...loaded.map((l) => Math.ceil(l.lines / 384))),
     destroy() { for (const buffer of [shape, mesh, vertices, bodies]) buffer.destroy(); },
   };
 }
@@ -115,8 +119,8 @@ export function requestShipContinuumCut({ device, shader }) {
 export function createShipContinuumCut({ device, pipeline, data, instances, capacity, frame, offset, shadowFrame, samples = 4, label = 'ship continuum' }) {
   const B = GPUBufferUsage, L = SHIP_CONTINUUM_LISTS.length;
   // Room in each list: the scene's whole budget of clusters, seen and casting shadows; every ship's far body, twice
-  // (seen and shadow); a splat each; and each damaged ship every cluster it has.
-  const room = SHIP_CONTINUUM_LISTS.map((name, i) => (i === 0 || i === SHIP_CONTINUUM_SHADOW_CLUSTER_LIST ? Math.ceil(CONTINUUM_TRIANGLE_BUDGET / 128) : i === 1 || i === 3 ? capacity * data.farChunks : i === 2 ? capacity : data.clusterMost));
+  // (seen and shadow); a splat each; each damaged ship every cluster it has; and every ship's lines.
+  const room = SHIP_CONTINUUM_LISTS.map((name, i) => (i === 0 || i === SHIP_CONTINUUM_SHADOW_CLUSTER_LIST ? Math.ceil(CONTINUUM_TRIANGLE_BUDGET / 128) : i === 1 || i === 3 ? capacity * data.farChunks : i === 2 ? capacity : i === SHIP_CONTINUUM_LINE_LIST ? Math.max(1, capacity * (data.linePieces ?? 0)) : data.clusterMost));
   const lists = [];
   let first = capacity * 2;
   for (const size of room) { lists.push([first, size]); first += size; }
@@ -166,12 +170,14 @@ export function createShipContinuumCut({ device, pipeline, data, instances, capa
       pass.drawIndirect(draws, index * SHIP_CONTINUUM_DRAW_BYTES);
     },
     damagedList: (slot) => SHIP_CONTINUUM_DAMAGED_LIST + Math.min(slot, SHIP_CONTINUUM_DAMAGED_SLOTS - 1),
-    // What the census reads of the scene pass: the clusters, far bodies and splats, and each damaged ship's clusters
-    // twice (their surviving depth, then their shade). The shadow lists are drawn in the shadow map, not counted here.
+    // What the census reads of the scene pass: the clusters, far bodies and splats, each damaged ship's clusters
+    // twice (their surviving depth, then their shade), and the lines. The shadow lists are drawn in the shadow map, not
+    // counted here.
     continuumDraws: () => [
       { buffer: draws, offset: 0, records: 3, stride: 4 },
       { buffer: draws, offset: SHIP_CONTINUUM_DAMAGED_LIST * SHIP_CONTINUUM_DRAW_BYTES, records: SHIP_CONTINUUM_DAMAGED_SLOTS, stride: 4 },
       { buffer: draws, offset: SHIP_CONTINUUM_DAMAGED_LIST * SHIP_CONTINUUM_DRAW_BYTES, records: SHIP_CONTINUUM_DAMAGED_SLOTS, stride: 4 },
+      { buffer: draws, offset: SHIP_CONTINUUM_LINE_LIST * SHIP_CONTINUUM_DRAW_BYTES, records: 1, stride: 4 },
     ],
     destroy() { for (const buffer of [list, draws, cut]) buffer.destroy(); },
   };

@@ -9,11 +9,12 @@
 //   2. Pier docking & ship-to-ship mooring line sequences: throwing bow, stern,
 //      and spring lines onto piers or adjacent vessels, making fast, holding
 //      station with spring-damped mooring physics, and casting off.
-//   3. 3D world-space catenary hemp line & oak gangplank geometry builder for
-//      the ship-colors WebGPU renderer (modes 4 and 5).
+//   3. The compact mooring state her detail pass draws her lines and gangplanks
+//      from (mooringLinesState; js/vessel-detail.js).
 // ============================================================================
 
 import { modelDeck, modelDeckWidth, vesselHull } from './hull.js';
+import { VESSEL_PIER_LINES, VESSEL_ALONGSIDE_LINES, vesselPierLineFast, vesselAlongsideLineFast } from './vessel-detail.js';
 import { clearCrewWounds } from './crew-wounds.js';
 import { repairVessel, refloatVessel, stopVesselLeaks, setVesselHullIntegrity } from './vessel-damage.js';
 import { applyPirateCrewAttire } from './crew.js';
@@ -304,28 +305,19 @@ function buildLineDescriptorsForPier(boat, pier, side = 'port') {
   const halfBeam = Math.max(1.8, (boat.beam ?? 3.6) * 0.5);
   const pierDist = halfBeam + 5.2;
 
-  // 4 classic mooring lines: Bow line, Forward spring, Aft spring, Stern line
-  const specs = [
-    { name: 'Bow line', shipZ: 3.3, pierAlong: 4.4 },
-    { name: 'Fore spring', shipZ: 1.6, pierAlong: -0.9 },
-    { name: 'Aft spring', shipZ: -1.5, pierAlong: 1.1 },
-    { name: 'Stern fast', shipZ: -3.4, pierAlong: -4.2 },
-  ];
-
   const basePierX = pier?.x ?? ((boat.x ?? 0) + rightX * pierSign * pierDist);
   const basePierZ = pier?.z ?? ((boat.z ?? 0) + rightZ * pierSign * pierDist);
   const basePierY = pier?.y ?? 1.35;
 
-  return specs.map((sp, i) => {
-    const hb = Math.max(0.55, modelDeckWidth(boat, sp.shipZ) - 0.08);
-    const deckY = modelDeck(boat, sp.shipZ) + 0.34;
+  // 4 classic mooring lines: Bow line, Forward spring, Aft spring, Stern line
+  return VESSEL_PIER_LINES.map((sp, i) => {
     const wantX = basePierX + fwdX * sp.pierAlong, wantZ = basePierZ + fwdZ * sp.pierAlong;
     // Each line lands on the pier itself, however she lies to it.
     const bollard = pier?.closestPoint?.(wantX, wantZ) ?? { x: wantX, z: wantZ };
     return {
       name: sp.name,
       index: i,
-      shipLocal: [sideSign * hb, deckY, sp.shipZ],
+      shipLocal: vesselPierLineFast(boat, sp.shipZ, sideSign),
       pierWorld: [bollard.x, basePierY, bollard.z],
     };
   });
@@ -339,25 +331,12 @@ function buildLineDescriptorsForShip(boat, targetBoat, side = 'starboard') {
   const toPlayerZ = (boat.z ?? 0) - (targetBoat.z ?? 0);
   const targetSideSign = (toPlayerX * tRightX + toPlayerZ * tRightZ) >= 0 ? 1 : -1;
 
-  const specs = [
-    { name: 'Fore grappling hook', shipZ: 3.1, targetZ: 3.0 },
-    { name: 'Forward spring line', shipZ: 1.2, targetZ: 1.1 },
-    { name: 'Waist grappling hook', shipZ: -1.1, targetZ: -1.1 },
-    { name: 'Quarter fast line', shipZ: -3.1, targetZ: -3.0 },
-  ];
-
-  return specs.map((sp, i) => {
-    const hb1 = Math.max(0.55, modelDeckWidth(boat, sp.shipZ) - 0.06);
-    const y1 = modelDeck(boat, sp.shipZ) + 0.38;
-    const hb2 = Math.max(0.55, modelDeckWidth(targetBoat, sp.targetZ) - 0.06);
-    const y2 = modelDeck(targetBoat, sp.targetZ) + 0.38;
-    return {
-      name: sp.name,
-      index: i,
-      shipLocal: [sideSign * hb1, y1, sp.shipZ],
-      targetLocal: [targetSideSign * hb2, y2, sp.targetZ],
-    };
-  });
+  return VESSEL_ALONGSIDE_LINES.map((sp, i) => ({
+    name: sp.name,
+    index: i,
+    shipLocal: vesselAlongsideLineFast(boat, sp.shipZ, sideSign),
+    targetLocal: vesselAlongsideLineFast(targetBoat, sp.targetZ, targetSideSign),
+  }));
 }
 
 export function createDockingBoardingState(boat, options = {}) {
@@ -1548,10 +1527,6 @@ export function createDockingBoardingState(boat, options = {}) {
     applyMooringPhysics(dt);
   }
 
-  function buildVertices() {
-    return buildMooringAndGangplankVertices(state, boat);
-  }
-
   return {
     state,
     dockAtPier,
@@ -1563,183 +1538,30 @@ export function createDockingBoardingState(boat, options = {}) {
     resolvePrizeDisposition,
     castOff,
     step,
-    buildVertices,
     findNearestBoardableVessel,
     computePlayerStrength: () => computeBoardingStrength({ boat, company: state.company }),
   };
 }
 
-// Push a 3-sided prism tube segment along p0 -> p1 (mode 4 = braided hemp rope)
-function pushRopeSegment(out, p0, p1, radius, u0, u1, lineIndex) {
-  const dx = p1[0] - p0[0];
-  const dy = p1[1] - p0[1];
-  const dz = p1[2] - p0[2];
-  const len = Math.hypot(dx, dy, dz) || 1e-4;
-  const tx = dx / len, ty = dy / len, tz = dz / len;
-
-  // Orthonormal frame around tangent
-  let ux = -tz, uy = 0, uz = tx;
-  const uLen = Math.hypot(ux, uz);
-  if (uLen < 1e-3) {
-    ux = 1; uy = 0; uz = 0;
-  } else {
-    ux /= uLen; uz /= uLen;
-  }
-  const vx = ty * uz - tz * uy;
-  const vy = tz * ux - tx * uz;
-  const vz = tx * uy - ty * ux;
-
-  const sides = 3;
-  for (let s = 0; s < sides; s++) {
-    const a0 = (s / sides) * Math.PI * 2;
-    const a1 = ((s + 1) / sides) * Math.PI * 2;
-    const c0 = Math.cos(a0), s0 = Math.sin(a0);
-    const c1 = Math.cos(a1), s1 = Math.sin(a1);
-
-    const n0x = ux * c0 + vx * s0;
-    const n0y = uy * c0 + vy * s0;
-    const n0z = uz * c0 + vz * s0;
-
-    const n1x = ux * c1 + vx * s1;
-    const n1y = uy * c1 + vy * s1;
-    const n1z = uz * c1 + vz * s1;
-
-    const v00 = [p0[0] + n0x * radius, p0[1] + n0y * radius, p0[2] + n0z * radius];
-    const v01 = [p0[0] + n1x * radius, p0[1] + n1y * radius, p0[2] + n1z * radius];
-    const v10 = [p1[0] + n0x * radius, p1[1] + n0y * radius, p1[2] + n0z * radius];
-    const v11 = [p1[0] + n1x * radius, p1[1] + n1y * radius, p1[2] + n1z * radius];
-
-    // Triangle 1
-    out.push(
-      v00[0], v00[1], v00[2], n0x, n0y, n0z, u0, 0, 4, lineIndex,
-      v10[0], v10[1], v10[2], n0x, n0y, n0z, u1, 0, 4, lineIndex,
-      v11[0], v11[1], v11[2], n1x, n1y, n1z, u1, 1, 4, lineIndex,
-    );
-    // Triangle 2
-    out.push(
-      v00[0], v00[1], v00[2], n0x, n0y, n0z, u0, 0, 4, lineIndex,
-      v11[0], v11[1], v11[2], n1x, n1y, n1z, u1, 1, lineIndex === -1 ? 4 : 4, lineIndex,
-      v01[0], v01[1], v01[2], n1x, n1y, n1z, u0, 1, 4, lineIndex,
-    );
-  }
-}
-
-// Push a weathered oak boarding gangplank (mode 5) bridging startWorld -> endWorld
-function pushGangplankBox(out, startW, endW, width = 0.68, thickness = 0.09) {
-  const dx = endW[0] - startW[0];
-  const dy = endW[1] - startW[1];
-  const dz = endW[2] - startW[2];
-  const len = Math.hypot(dx, dz) || 1e-4;
-  const rx = -dz / len * (width * 0.5);
-  const rz = dx / len * (width * 0.5);
-
-  const p00 = [startW[0] - rx, startW[1] + thickness, startW[2] - rz];
-  const p01 = [startW[0] + rx, startW[1] + thickness, startW[2] + rz];
-  const p10 = [endW[0] - rx, endW[1] + thickness, endW[2] - rz];
-  const p11 = [endW[0] + rx, endW[1] + thickness, endW[2] + rz];
-
-  // Top plank surface
-  out.push(
-    p00[0], p00[1], p00[2], 0, 1, 0, 0, 0, 5, 0,
-    p10[0], p10[1], p10[2], 0, 1, 0, 1, 0, 5, 0,
-    p11[0], p11[1], p11[2], 0, 1, 0, 1, 1, 5, 0,
-
-    p00[0], p00[1], p00[2], 0, 1, 0, 0, 0, 5, 0,
-    p11[0], p11[1], p11[2], 0, 1, 0, 1, 1, 5, 0,
-    p01[0], p01[1], p01[2], 0, 1, 0, 0, 1, 5, 0,
-  );
-}
-
-export function buildMooringAndGangplankVertices(stateOrController, boatArg = null) {
+// Her mooring as the compact state her detail pass (js/vessel-detail.js writeVesselDetailState) runs her lines and
+// gangplanks from, or null when she lies to nothing: how far the lines are thrown or cast off and how taut, how far
+// the gangplanks are run out, her side, and where each line lands (on the pier in world metres, or at the other
+// vessel's rail in her design units, with `target` the vessel).
+export function mooringLinesState(stateOrController) {
   const state = stateOrController?.state ?? stateOrController;
-  const boat = boatArg ?? state?.boat;
-  if (!state || !boat || state.mooringPhase === 'clear' || !state.lines?.length) {
-    return new Float32Array(0);
-  }
-
-  const out = [];
-  const progress = bdClamp(state.lineProgress ?? 0, 0, 1);
-  const tension = bdClamp(state.lineTension ?? 0, 0, 1);
-  const segs = 10;
-  const ropeRadius = 0.042;
-
-  for (let i = 0; i < state.lines.length; i++) {
-    const line = state.lines[i];
-    const startW = boatWorldPoint(boat, line.shipLocal[0], line.shipLocal[1], line.shipLocal[2]);
-    let fullEndW;
-    if (state.mooringTargetKind === 'vessel' && state.targetVessel?.boat && line.targetLocal) {
-      fullEndW = boatWorldPoint(
-        state.targetVessel.boat,
-        line.targetLocal[0],
-        line.targetLocal[1],
-        line.targetLocal[2],
-      );
-    } else if (line.pierWorld) {
-      fullEndW = line.pierWorld;
-    } else {
-      continue;
-    }
-
-    // Stagger each line slightly during throwing/casting off
-    const stagger = i * 0.08;
-    const lp = bdClamp((progress - stagger) / (1 - stagger * 0.5), 0.04, 1.0);
-
-    // When throwing (< 1 in 'throwing-lines'), the rope end arcs upward through the air toward the bollard/rail;
-    // when casting off ('casting-off'), it drops slack off the bollard and coils back aboard;
-    // when landed (== 1), it sags in a natural catenary that pulls taut as tension -> 1.
-    const isCastingOff = state.mooringPhase === 'casting-off';
-    const throwArcLift = (!isCastingOff && lp < 1.0)
-      ? Math.sin(lp * Math.PI) * 1.45
-      : isCastingOff
-      ? -0.45 * Math.sin(lp * Math.PI)
-      : 0.0;
-    const curEndW = [
-      startW[0] + (fullEndW[0] - startW[0]) * lp,
-      startW[1] + (fullEndW[1] - startW[1]) * lp + throwArcLift,
-      startW[2] + (fullEndW[2] - startW[2]) * lp,
-    ];
-
-    const span = Math.hypot(curEndW[0] - startW[0], curEndW[2] - startW[2]);
-    const sag = isCastingOff
-      ? bdClamp(span * 0.18, 0.16, 1.35)
-      : lp >= 0.99
-      ? bdClamp(span * (0.14 - 0.095 * tension), 0.12, 1.45)
-      : -0.35 * Math.sin(lp * Math.PI);
-
-    let prevPt = startW;
-    for (let s = 1; s <= segs; s++) {
-      const t = s / segs;
-      const u0 = (s - 1) / segs;
-      const u1 = t;
-      const catenary = -4 * sag * t * (1 - t);
-      const pt = [
-        startW[0] + (curEndW[0] - startW[0]) * t,
-        startW[1] + (curEndW[1] - startW[1]) * t + catenary,
-        startW[2] + (curEndW[2] - startW[2]) * t,
-      ];
-      pushRopeSegment(out, prevPt, pt, ropeRadius, u0, u1, i);
-      prevPt = pt;
-    }
-  }
-
-  // Add oak boarding gangplanks when grappled to a vessel
-  const gp = bdClamp(state.gangplankProgress ?? 0, 0, 1);
-  if (gp > 0.05 && state.mooringTargetKind === 'vessel' && state.targetVessel?.boat) {
-    const tb = state.targetVessel.boat;
-    const plankPairs = [1, 2]; // Fore-waist and aft-waist gangplanks
-    for (const idx of plankPairs) {
-      const line = state.lines[idx];
-      if (!line || !line.targetLocal) continue;
-      const startW = boatWorldPoint(boat, line.shipLocal[0], line.shipLocal[1] + 0.06, line.shipLocal[2]);
-      const fullEndW = boatWorldPoint(tb, line.targetLocal[0], line.targetLocal[1] + 0.06, line.targetLocal[2]);
-      const curEndW = [
-        startW[0] + (fullEndW[0] - startW[0]) * gp,
-        startW[1] + (fullEndW[1] - startW[1]) * gp,
-        startW[2] + (fullEndW[2] - startW[2]) * gp,
-      ];
-      pushGangplankBox(out, startW, curEndW, 0.72, 0.08);
-    }
-  }
-
-  return new Float32Array(out);
+  if (!state || state.mooringPhase === 'clear' || !state.lines?.length) return null;
+  const target = state.mooringTargetKind === 'vessel' ? state.targetVessel?.boat ?? null : null;
+  const far = state.lines.map((line) => (target ? line.targetLocal : line.pierWorld));
+  if (far.some((p) => !p)) return null;
+  return {
+    lines: Math.min(4, state.lines.length),
+    vessel: !!target,
+    side: Math.sign(state.lines[0].shipLocal[0]) || 1,
+    progress: bdClamp(state.lineProgress ?? 0, 0, 1),
+    tension: bdClamp(state.lineTension ?? 0, 0, 1),
+    castingOff: state.mooringPhase === 'casting-off',
+    gangplank: bdClamp(state.gangplankProgress ?? 0, 0, 1),
+    far,
+    target,
+  };
 }

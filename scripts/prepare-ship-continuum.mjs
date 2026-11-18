@@ -34,6 +34,8 @@ import {
 import { getTradeVesselArchetype, poseTradeVesselPoint, tradeMaterialLinearColor } from '../js/trade-vessels.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
 import { vesselHull } from '../js/hull.js';
+import { anchorEquipment } from '../js/anchor-state.js';
+import { VESSEL_ENSIGN_MATERIAL, VESSEL_PENNANT_MATERIAL } from '../js/wgsl/ship-colours.js';
 import {
   SHIP_CONTINUUM_FORMAT, SHIP_CONTINUUM_VERSION, SHIP_CONTINUUM_CLUSTER_WORDS, SHIP_CONTINUUM_FAR_VERTEX_WORDS, SHIP_CONTINUUM_STEP_WORDS,
   SHIP_CONTINUUM_NEVER, SHIP_CONTINUUM_MAX_DEPTH, SHIP_CONTINUUM_BODIES,
@@ -53,10 +55,10 @@ const CHAIN_BASE_TRIANGLES = Number(option('chain', 8000));
 const CHAIN_LEAST_TRIANGLES = 4;
 // Cordage: the far body leaves it out (the clusters keep every strand).
 const ROPE = new Set([2, 12, 19]);
-// Canvas: the far body's second piece (see bakeFar).
-const CANVAS = new Set([9, 13]);
+// Canvas, and her colours' bunting: the far body's second piece (see bakeFar).
+const CANVAS = new Set([9, 13, VESSEL_ENSIGN_MATERIAL, VESSEL_PENNANT_MATERIAL]);
 // What a far-body vertex is, for the collapses to keep borders between: wood, canvas, iron and paint, the rest.
-const materialClass = (m) => { const k = Math.floor(m); return k === 9 || k === 13 ? 1 : (k === 3 || k === 4 || k === 8 || k === 11 || k === 20 || k === 22) ? 2 : k >= 21 && k <= 26 ? 3 : 0; };
+const materialClass = (m) => { const k = Math.floor(m); return CANVAS.has(k) ? 1 : (k === 3 || k === 4 || k === 8 || k === 11 || k === 20 || k === 22) ? 2 : k >= 21 && k <= 26 ? 3 : 0; };
 // Where a sphere's points stray outside the poses measured, this margin covers it (metres).
 const SPHERE_MARGIN = 0.01;
 
@@ -276,7 +278,8 @@ function bakeFar(arch, body, poses, lap) {
   const archIndex = arch.index, s = arch.designScale, V0 = arch.vertices.length / 9;
   // The far body's pieces: what is rigid, and the canvas, which brails up its yard. Each piece rides only ship
   // vertices of its own kind, so canvas going aloft never drags the hull or a mast with it.
-  const kindOf = (t) => { const m = Math.floor(arch.vertices[arch.indices[t * 3] * 9 + 6]); return ROPE.has(m) ? -1 : CANVAS.has(m) ? 1 : 0; };
+  // Her working anchor's iron is let go from her (js/vessel-detail.js): the far body leaves it out.
+  const kindOf = (t) => { const m = Math.floor(arch.vertices[arch.indices[t * 3] * 9 + 6]); return ROPE.has(m) || arch.letGo?.[arch.indices[t * 3]] ? -1 : CANVAS.has(m) ? 1 : 0; };
   const keep = [[], []];
   for (const t of body.drawn) { const k = kindOf(t); if (k >= 0) keep[k].push(t); }
   // The ship in metres, and the voxels: CELLS along her longest side.
@@ -463,22 +466,27 @@ const asBytes = (typed) => Buffer.from(typed.buffer, typed.byteOffset, typed.byt
 const shipAssets = createShipAssetCache();
 // A ship the player sails, in the terms the bake takes: her assembly as js/ship-mesh.js builds it, in metres by the
 // hull transform's own scale (js/wgsl/caravel.js: beam over 3.6, the frame's vertical scale, length over 12).
+// Her working anchor's iron (js/vessel-detail.js) is marked by vertex: once let go it lies as far from her as her
+// longest rode.
 function playerAssembly(modelId) {
   const asset = shipAssets.get(modelId), model = asset.model, frame = vesselHull(modelId).frame;
+  const letGo = new Uint8Array(asset.vertices.length / 9);
+  for (const g of asset.groups) if (g.id === 'anchor.port.iron') for (let i = g.firstVertex; i < g.firstVertex + g.vertexCount; i++) letGo[asset.indices[i]] = 1;
   return {
+    letGo, rode: anchorEquipment({ modelId })?.maxRode ?? 0,
     index: -1, label: model.name, length: model.runtime.length,
     designScale: Float32Array.of(model.runtime.beam / frame.beam, frame.verticalScale, model.runtime.length / frame.length),
     vertices: asset.vertices, indices: asset.indices, groups: asset.groups, fracture: asset.fracture,
     vertexCount: asset.vertices.length / 9, indexCount: asset.indices.length, triangleCount: asset.indices.length / 3,
   };
 }
-// How far each point of a player's ship can move from rest (metres): canvas, cordage, spars, oars and the helm swing
-// with the rig, a yard's end as far as six tenths of her length; the rest (guns run in and out, hatches, the rudder)
-// a metre and a half.
-const RIGGED = new Set([2, 9, 10, 12, 13, 16, 19, 28]);
+// How far each point of a player's ship can move from rest (metres): canvas, her colours, cordage, spars, oars and the
+// helm swing with the rig, a yard's end as far as six tenths of her length; her anchor's iron as far as its rode runs;
+// the rest (guns run in and out, hatches, the rudder) a metre and a half.
+const RIGGED = new Set([2, 9, 10, 12, 13, 16, 19, 28, VESSEL_ENSIGN_MATERIAL, VESSEL_PENNANT_MATERIAL]);
 function playerSlack(arch, body) {
   const slack = new Float32Array(body.count), rig = 0.6 * arch.length;
-  for (let v = 0; v < body.count; v++) slack[v] = RIGGED.has(Math.floor(body.material[v])) ? rig : 1.5;
+  for (let v = 0; v < body.count; v++) slack[v] = arch.letGo[body.source[v]] ? arch.rode : RIGGED.has(Math.floor(body.material[v])) ? rig : 1.5;
   return slack;
 }
 
@@ -495,8 +503,8 @@ async function bake(entry) {
   lap(`${clusters.count} clusters, ${clusters.levels} levels, root error ${clusters.rootError.toFixed(3)} m`);
   const far = bakeFar(arch, body, poses, lap);
 
-  // The ship's bound, in every pose, cordage and all.
-  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], drawnVertices = [...new Set(body.index)];
+  // The ship's bound, in every pose, cordage and all; her anchor let go is bound by its own clusters, not hers.
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], drawnVertices = [...new Set(body.index)].filter((v) => !arch.letGo?.[body.source[v]]);
   for (const X of body.posed) for (const v of drawnVertices) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], X[v * 3 + k]); hi[k] = Math.max(hi[k], X[v * 3 + k]); }
   const centre = lo.map((l, k) => (l + hi[k]) / 2);
   let radius = 0;

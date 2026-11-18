@@ -15,9 +15,9 @@ import { SHIP_CONTINUUM_CLUSTER_WORDS, SHIP_CONTINUUM_FAR_VERTEX_WORDS, SHIP_CON
 // Ships a frame can hold that are damaged at once, each with its own list (and its fracture's posed vertices).
 export const SHIP_CONTINUUM_DAMAGED_SLOTS = 16;
 // The lists a ship can be entered in, each with its own indirect draw: clusters, the far body, the splat, the far body
-// at the shadow map's step (shadows and the underwater capture), each damaged ship's clusters, and the clusters that
-// cast a shadow finer than the far body can.
-export const SHIP_CONTINUUM_LISTS = Object.freeze(['clusters', 'far', 'splat', 'shadow', ...Array.from({ length: SHIP_CONTINUUM_DAMAGED_SLOTS }, (_, i) => `damaged${i}`), 'shadowClusters']);
+// at the shadow map's step (shadows and the underwater capture), each damaged ship's clusters, the clusters that
+// cast a shadow finer than the far body can, and the lines of her detail layer.
+export const SHIP_CONTINUUM_LISTS = Object.freeze(['clusters', 'far', 'splat', 'shadow', ...Array.from({ length: SHIP_CONTINUUM_DAMAGED_SLOTS }, (_, i) => `damaged${i}`), 'shadowClusters', 'lines']);
 // The far bodies at the shadow map's step (shadows, and ships seen from under the water), and the first damaged list.
 export const SHIP_CONTINUUM_SHADOW_LIST = 3;
 export const SHIP_CONTINUUM_DAMAGED_LIST = 4;
@@ -25,6 +25,12 @@ export const SHIP_CONTINUUM_DAMAGED_LIST = 4;
 // holds (a ship near the eye): her far body is still entered at the shadow list for the water's capture, flagged in
 // her state (shipContinuumClustersCast) so no shadow is cast twice.
 export const SHIP_CONTINUUM_SHADOW_CLUSTER_LIST = SHIP_CONTINUUM_DAMAGED_LIST + SHIP_CONTINUUM_DAMAGED_SLOTS;
+// A ship's detail layer (js/vessel-detail.js): lines thinner than a ball, posed on her parts (the connectors of her rig,
+// her mooring lines and gangplanks, her anchor's rode). They ride her finest cut: wherever her clusters are entered,
+// whole or damaged, her lines are entered too, in pieces of 128 triangles, and take her clusters' samples.
+export const SHIP_CONTINUUM_LINE_LIST = SHIP_CONTINUUM_SHADOW_CLUSTER_LIST + 1;
+// A line list entry's piece carries this bit, so the program that draws her clusters knows it for a piece of her lines.
+export const SHIP_CONTINUUM_LINE_PIECE = 0x80000000;
 // The bit of a ship's state word x that says her shadow is cast by her clusters.
 export const SHIP_CONTINUUM_CLUSTERS_CAST = 1 << 24;
 // Vertices per list instance.
@@ -49,7 +55,7 @@ export const SHIP_CONTINUUM_SHADOW_TEXELS = 1.5;
 export const SHIP_CONTINUUM_INSTANCE_FLOATS = 12;
 // The bodies a family loads, one uniform record each (js/ship-continuum-draw.js writes them).
 export const SHIP_CONTINUUM_BODY_LIMIT = 8;
-export const SHIP_CONTINUUM_BODY_BYTES = 112;
+export const SHIP_CONTINUUM_BODY_BYTES = 128;
 export const SHIP_CONTINUUM_CUT_BYTES = 32 + SHIP_CONTINUUM_LISTS.length * 16;
 
 export const SHIP_CONTINUUM_STRUCTS = /* wgsl */`
@@ -61,6 +67,7 @@ struct ShipContinuumBody {
   bound:vec4f,     // centre (m) and radius (m) of every pose
   colour:vec4f,    // splat colour, the far body's triangles
   scale:vec4f,     // design units to metres, vertices
+  lines:vec4u,     // her detail layer's line vertices (0 for a family with none), unused
 };
 struct ShipContinuumCut {
   counts:vec4u,    // ships, samples a pixel, 1 when shadows are drawn, unused
@@ -216,7 +223,7 @@ fn shipContinuumChunks(list:u32,ship:u32,step:u32){
 @compute @workgroup_size(64) fn shipContinuumSelect(@builtin(workgroup_id) group:vec3u,@builtin(local_invocation_index) lane:u32){
   let ship=group.x;
   if(lane==0u){
-    var candidates=0u;var list=0u;var share=0u;var shadowCandidates=0u;var castBit=0u;
+    var candidates=0u;var list=0u;var share=0u;var shadowCandidates=0u;var castBit=0u;var lined=false;
     let inst=shipInstances[ship];
     let orders=u32(max(round(inst.anim.z),0.0));
     let damaged=(orders>>${SHIP_CONTINUUM_DAMAGED_SHIFT}u)&31u;
@@ -241,6 +248,7 @@ fn shipContinuumChunks(list:u32,ship:u32,step:u32){
       if(!shipContinuumOutside(centre,reach*2.0+20.0)){
         candidates=shipContinuumPrefix(0u,shipCutBody.clusters.y,pixels*nearest/(focal*scale));
         list=${SHIP_CONTINUUM_DAMAGED_LIST}u+min(damaged-1u,${SHIP_CONTINUUM_DAMAGED_SLOTS - 1}u);
+        lined=true;
       }
     } else {
       // The far body, coarse enough for the shadow map, casts every shadow, seen or not, and stands for the ship under
@@ -274,8 +282,14 @@ fn shipContinuumChunks(list:u32,ship:u32,step:u32){
             shipContinuumChunks(1u,ship,step);
           }
         }
-        if(share<255u){candidates=shipContinuumPrefix(0u,shipCutBody.clusters.y,pixels*nearest/(focal*scale));list=0u;}
+        if(share<255u){candidates=shipContinuumPrefix(0u,shipCutBody.clusters.y,pixels*nearest/(focal*scale));list=0u;lined=true;}
       }
+    }
+    // Her lines ride her clusters, whole or damaged.
+    if(lined&&shipCutBody.lines.x>0u){
+      let pieces=(shipCutBody.lines.x+383u)/384u;
+      let at=shipContinuumAppend(${SHIP_CONTINUUM_LINE_LIST}u,pieces);
+      if(at!=0xffffffffu){for(var c=0u;c<pieces;c++){shipList[at+c]=vec2u(ship,c|${SHIP_CONTINUUM_LINE_PIECE >>> 0}u);}}
     }
     shipList[ship*2u]=vec2u(seed|(share<<8u)|(splatShare<<16u)|castBit,step|(shadowStep<<16u));
     shipList[ship*2u+1u]=vec2u(bitcast<u32>(morph),bitcast<u32>(splatScale));

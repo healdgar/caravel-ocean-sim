@@ -19,16 +19,21 @@ test('gunnery tools cannot restore a CPU triangle-animation backend',()=>{
   assert.throws(()=>assertGPUToolRuntime(source.replace('writeGunneryToolInstances(company, boat, records, placed)','buildGunneryToolVertices(company, boat, vertices)')),/CPU tessellator|compact tool/);
 });
 
-function assertGPUAnchorRuntime(source){
-  const renderer=source.slice(source.indexOf('export function requestAnchorPipelines')),update=renderer.slice(renderer.indexOf('update(state,boat)'),renderer.indexOf('drawSubmerged(pass)'));
-  assert.ok(update.length>200);assert.match(renderer,/shader\(ANCHOR_GPU_RENDER/,'anchor draws must use the GPU expansion shader');assert.match(update,/writeAnchorGPUState\(/,'anchor updates contain physical commands');
-  assert.doesNotMatch(update,/\b(?:triangle|tube)\s*\(|vertices\.set\s*\(/,'anchor updates must not tessellate geometry on CPU');assert.doesNotMatch(update,/writeBuffer\(\s*buffer\s*,/,'anchor updates must not upload animated vertices');
+// A ship's lines, colours and anchor are her detail layer (js/vessel-detail.js): static records her pose pass reads,
+// with her compact state the only thing a frame uploads.
+function assertGPUDetailRuntime(source){
+  const runtime=source.slice(source.indexOf('export async function createVesselDetailGPU')),update=runtime.slice(runtime.indexOf('update(values)'),runtime.indexOf('encodeStations(pass)'));
+  assert.ok(update.length>20);assert.match(update,/writeBuffer\(\s*state\s*,\s*0\s*,\s*values\s*\)/,'detail updates carry only her compact state');
+  assert.doesNotMatch(update,/\b(?:triangle|tube|catenary)\s*\(|vertices\.set\s*\(/,'detail updates must not tessellate geometry on CPU');
 }
 
-test('anchor updates cannot restore per-frame CPU tessellation or dynamic triangle uploads',()=>{
-  const source=readFileSync(new URL('../js/anchor.js',import.meta.url),'utf8');assertGPUAnchorRuntime(source);
-  assert.throws(()=>assertGPUAnchorRuntime(source.replace('writeAnchorGPUState(state,boat,values)','triangle(a,b,c,0)')),/physical commands|tessellate/);
-  assert.throws(()=>assertGPUAnchorRuntime(source.replace('device.queue.writeBuffer(stateBuffer,0,values)','device.queue.writeBuffer(buffer,0,vertices)')),/animated vertices/);
+test('a ship\'s lines, colours and anchor cannot restore per-frame CPU tessellation or dynamic triangle uploads',()=>{
+  const source=readFileSync(new URL('../js/vessel-detail.js',import.meta.url),'utf8');assertGPUDetailRuntime(source);
+  assert.throws(()=>assertGPUDetailRuntime(source.replace('device.queue.writeBuffer(state, 0, values)','device.queue.writeBuffer(model, 0, vertices)')),/compact state/);
+  const splash=readFileSync(new URL('../js/anchor.js',import.meta.url),'utf8'),update=splash.slice(splash.indexOf('update(state, boat)'),splash.indexOf('draw(pass)'));
+  assert.match(update,/writeAnchorSplashState\(/,'the splash uploads its compact state');assert.doesNotMatch(update,/vertices|triangle|tube/,'the splash builds no geometry on the CPU');
+  const main=readFileSync(new URL('../js/main.js',import.meta.url),'utf8');
+  assert.doesNotMatch(main,/buildVertices\(|updateMooringVertices|buildMooringAndGangplankVertices/,'mooring lines are never built on the CPU');
 });
 
 // The tools are pieces of the props' atlas, drawn through the one continuum: a frame's upload is a record a piece and

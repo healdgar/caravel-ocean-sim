@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { TERRAIN as TERRAIN_RENDER } from '../js/wgsl/terrain.js';
 import { CARAVEL as CARAVEL_RENDER } from '../js/wgsl/caravel.js';
-import { SHIP_COLORS_RENDER } from '../js/ship-colors.js';
 import { TOWN_CASUALTY_STAY_S } from '../js/wgsl/townsfolk.js';
 import { GARRISON_CASUALTY_STAY_S } from '../js/crew.js';
 
@@ -91,7 +90,7 @@ test('shader source audit: cobblestone, shoreline, and rope shaders enforce deri
     'TERRAIN_RENDER must include landDetailWeight derivative filtering on beach & shoreline ripples'
   );
 
-  // 2. 3-strand laid hemp hawser in caravel.js and ship-colors.js
+  // 2. 3-strand laid hemp hawser in caravel.js, which shades her rigging and her detail layer's lines alike
   assert.ok(
     CARAVEL_RENDER.includes('ropeLayFade') &&
       CARAVEL_RENDER.includes('ropeYarnFade') &&
@@ -99,8 +98,8 @@ test('shader source audit: cobblestone, shoreline, and rope shaders enforce deri
     'CARAVEL_RENDER must include 3-strand cylindrical hawser lay (strandValleyAO) and derivative band-limiting (ropeLayFade, ropeYarnFade)'
   );
   assert.ok(
-    SHIP_COLORS_RENDER.includes('strandCrown') && SHIP_COLORS_RENDER.includes('layFade'),
-    'SHIP_COLORS_RENDER must include 3-strand cylindrical hawser lay and layFade derivative filtering'
+    CARAVEL_RENDER.includes('strandCrown') && CARAVEL_RENDER.includes('ropeLayFade'),
+    'CARAVEL_RENDER must lay the 3-strand cylindrical hawser (strandCrown) with ropeLayFade derivative filtering on every line it shades'
   );
 });
 

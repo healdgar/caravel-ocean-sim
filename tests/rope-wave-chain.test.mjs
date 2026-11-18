@@ -21,12 +21,7 @@ import { createShipAssetCache } from '../js/ship-mesh.js';
 import { createAdditionalAssetPose } from '../js/additional-ships.js';
 import { proceduralRigContext } from '../js/additional-rig.js';
 import { createRigGPUFrame, writeRigGPUFrame } from '../js/rig-gpu-data.js';
-import {
-  buildVesselRigConnectors,
-  createShipColorsRenderer,
-  rigConnectorTopology,
-  writeRigConnectorAnchors,
-} from '../js/ship-colors.js';
+import { createVesselDetailGPU, writeVesselDetailState, VESSEL_DETAIL_STATE_FLOATS } from '../js/vessel-detail.js';
 
 // CPU oracle of the Victory running-line shader (victoryRopePoint in js/wgsl/victory.js). The
 // game evaluates these lines on the GPU alone, so the oracle lives with its test. It is passed
@@ -247,32 +242,15 @@ test('Niña, HMS Victory, descriptor-driven vessels, and stern outlicker sheets 
   }
   assert.ok(maxRopeDiff > 0.04, `expected Pinta running rigging vertices to sway with boat roll, got maxRopeDiff=${maxRopeDiff}`);
 
-  // 4. Stern outlicker catenary sheets & full-fleet spar-to-mast rig connectors
-  const connA = buildVesselRigConnectors(boatPort, 1.0, 9.0);
-  const connB = buildVesselRigConnectors(boatStarboard, 1.0, 9.0);
-  assert.equal(connA.length, connB.length);
-  let connDiff = 0;
-  for (let i = 0; i < connA.length; i += 10) {
-    connDiff = Math.max(connDiff, Math.hypot(connA[i] - connB[i], connA[i + 1] - connB[i + 1], connA[i + 2] - connB[i + 2]));
-  }
-  assert.ok(connDiff > 0.005, 'stern outlicker sheets sway with boat motion');
-
+  // 4. Stern outlicker catenary sheets & full-fleet spar-to-mast rig connectors: tubes of each ship's detail layer
+  // (js/vessel-detail.js), held by the parts they join and swung on the GPU by her rope chain.
   for (const modelId of ['nina', 'victory', 'pinta', 'santa-maria', 'flying-cloud', 'gipsy-moth-iv', 'oseberg', 'lusoria']) {
-    const connBraceA = buildVesselRigConnectors({ modelId, sailState: { squareYaw: -0.32, lateenYaw: -0.35 } }, 1.0, 8.0);
-    const connBraceB = buildVesselRigConnectors({ modelId, sailState: { squareYaw: 0.32, lateenYaw: 0.35 } }, 1.0, 8.0);
-    assert.ok(connBraceA.length >= 300, `${modelId} must generate spar-to-mast rig connectors (got ${connBraceA.length})`);
-    assert.equal(connBraceA.length, connBraceB.length, `${modelId} connector vertex count stays stable across sail bracing`);
-    assert.ok(connBraceA.every(Number.isFinite), `${modelId} connector vertices must be finite`);
-    if (modelId === 'victory' || modelId === 'flying-cloud' || modelId === 'gipsy-moth-iv' || modelId === 'santa-maria') {
-      let braceShift = 0;
-      for (let i = 0; i < connBraceA.length; i += 10) {
-        braceShift = Math.max(
-          braceShift,
-          Math.hypot(connBraceA[i] - connBraceB[i], connBraceA[i + 1] - connBraceB[i + 1], connBraceA[i + 2] - connBraceB[i + 2]),
-        );
-      }
-      assert.ok(braceShift > 0.01, `${modelId} spar-to-mast connectors must track live sailState bracing (got ${braceShift})`);
-    }
+    const { model, tubeCount } = cache.get(modelId).detail;
+    const tubesAt = model[5];
+    let rig = 0;
+    for (let i = 0; i < tubeCount; i++) rig += model[(tubesAt + i * 4 + 3) * 4 + 3] === 0 ? 1 : 0;
+    assert.ok(rig >= 10, `${modelId} must carry spar-to-mast rig connectors in her detail (got ${rig} tubes)`);
+    assert.ok(model.every(Number.isFinite), `${modelId} detail records must be finite`);
   }
 });
 
@@ -307,106 +285,32 @@ test('a running line is drawn in enough straight pieces to curve: no halyard, ta
   }
 });
 
-test('rig connectors are a static mesh: a steady rig uploads nothing but the pose, and the picture is the one the old builder drew', async () => {
-  // Frozen from the JavaScript builder this mesh replaced, which rebuilt and uploaded every
-  // vertex every frame: [vertices, hemp vertices, sum x, sum y, sum z, sum(|x| + y/2 + |z|/4)]
-  // for one braced, part-furled, heeled state per model. A full comparison at the changeover
-  // agreed to 2.3e-6 m over nine models, four rig states and two times.
-  const frozen = {
-    nina: [1884, 1350, 1.312, 8798.426, 6004.037, 6632.309],
-    victory: [4536, 3150, 71.691, 35407.529, 3982.784, 21136.018],
-    pinta: [2244, 1710, -74.025, 13456.583, 3717.746, 9241.379],
-    'santa-maria': [3396, 2610, -53.371, 19132.133, -579.876, 13547.606],
-    'flying-cloud': [10098, 7830, -13.958, 56308.488, 7576.567, 36902.873],
-    'gipsy-moth-iv': [1032, 780, 85.888, 1183.075, 1093.015, 1242.765],
-    oseberg: [576, 450, -0.242, 3102.77, 11.374, 1834.231],
-    lusoria: [576, 450, -0.182, 2813.84, -67.776, 1651.163],
-    'taino-canoe': [0, 0, 0, 0, 0, 0],
-  };
-  const rigged = () => ({
-    sailState: {
-      squareYaw: 0.3, lateenYaw: 0.35, windSide: 4, windForward: 5, set: [1, 0.6, 0.3],
-      rig: [
-        { side: 1, opening: 0.3, dip: 0.05, fill: 0.8, deployed: 1, pressure: 1 },
-        { side: 1, opening: 0.25, dip: 0, fill: 0.6, deployed: 0.6, pressure: 1 },
-        { side: -1, opening: 0.3, dip: 0.1, fill: 0.3, deployed: 0.3, pressure: 0.8 },
-      ],
-    },
-    roll: 0.2,
-    pitch: -0.1,
-  });
-  for (const [modelId, [count, hemp, sx, sy, sz, weight]] of Object.entries(frozen)) {
-    const v = buildVesselRigConnectors({ modelId, ...rigged() }, 3.7, 14);
-    const got = [0, 0, 0, 0, 0];
-    for (let i = 0; i < v.length; i += 10) {
-      got[0] += v[i + 8] === 7 ? 1 : 0;
-      got[1] += v[i];
-      got[2] += v[i + 1];
-      got[3] += v[i + 2];
-      got[4] += Math.abs(v[i]) + v[i + 1] * 0.5 + Math.abs(v[i + 2]) * 0.25;
-    }
-    assert.equal(v.length / 10, count, `${modelId} connector vertex count`);
-    assert.equal(got[0], hemp, `${modelId} hemp vertex count`);
-    for (const [k, want] of [sx, sy, sz, weight].entries()) assert.ok(Math.abs(got[k + 1] - want) < 0.02, `${modelId} connector geometry moved: sum ${k} is ${got[k + 1]}, was ${want}`);
-    // The same anchors whatever the rig is doing, or tubes would join the wrong points.
-    const topology = rigConnectorTopology(modelId);
-    for (const boat of [{ modelId }, { modelId, ...rigged() }, { modelId, damage: { mastState: { fore: 2, main: 1, mizzen: 2 } } }]) {
-      assert.equal(writeRigConnectorAnchors(boat, 1, 9, new Float32Array(topology.anchorCount * 4)), true, `${modelId} anchors`);
-    }
-  }
-
-  // The renderer against a recording device.
+test('a ship\'s detail layer is static records: a frame uploads her compact state and nothing else', async () => {
   globalThis.GPUBufferUsage ??= { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, VERTEX: 32, UNIFORM: 64, STORAGE: 128 };
   const created = [], writes = [];
   const device = {
     createBuffer: (d) => { const buffer = { label: d.label, size: d.size, destroyed: false, destroy() { this.destroyed = true; } }; created.push(buffer); return buffer; },
     queue: { writeBuffer: (buffer, offset, data, dataOffset, size) => writes.push({ label: buffer.label, bytes: size ?? data.byteLength }) },
     createBindGroup: (d) => ({ entries: d.entries }),
-    createRenderPipelineAsync: async () => ({ getBindGroupLayout: () => ({}) }),
   };
-  const renderer = await createShipColorsRenderer({
-    device, frameUBO: {}, transView: {}, skyView: {}, sampClamp: {}, envCubeView: {}, sunVisBuf: {},
-    shadows: { bind: () => ({}) }, shader: async () => ({}), format: 'rgba16float', samples: 4, maxVessels: 3,
-  });
-  const victory = { modelId: 'victory', x: 0, z: 0, heading: 20, roll: 0.05, pitch: 0.01, ...rigged() };
-  const consort = { modelId: 'victory', x: 80, z: 10, heading: 200, ...rigged() };
-  const nina = { modelId: 'nina', x: -60, z: 5, heading: 90, ...rigged() };
-  const frame = (time) => {
-    writes.length = 0;
-    renderer.updateVessel(0, victory, time, 0.7, 0.7, 9);
-    renderer.updateVessel(1, consort, time, 0.7, 0.7, 9);
-    renderer.updateVessel(2, nina, time, 0.7, 0.7, 9);
-    return writes.map((w) => w.label + ':' + w.bytes);
-  };
-  const first = frame(0);
-  assert.equal(first.filter((w) => w.startsWith('ship rig connector mesh victory')).length, 1, 'two Victories share one static mesh ' + first);
-  assert.equal(first.filter((w) => w.startsWith('ship rig connector anchors')).length, 3, 'each vessel uploads its anchors once');
-  // Steady frames: time, heel and position change, the rig does not.
-  for (let i = 1; i <= 5; i++) {
-    victory.roll = 0.05 * Math.cos(i);
-    victory.x += 1;
-    assert.deepEqual(frame(i / 60), ['ship colors pose 0:144', 'ship colors pose 1:144', 'ship colors pose 2:144'], 'a steady rig uploads only the three pose uniforms');
-  }
-  // Trimming the spanker moves anchors on that ship alone, and only anchors: 38 of them, 608 bytes.
-  victory.sailState.lateenYaw = -0.2;
-  assert.deepEqual(frame(0.2), ['ship colors pose 0:144', 'ship rig connector anchors 0:' + rigConnectorTopology('victory').anchorCount * 16, 'ship colors pose 1:144', 'ship colors pose 2:144']);
-  assert.equal(rigConnectorTopology('victory').anchorCount * 16, 608);
-  assert.deepEqual(frame(0.3), ['ship colors pose 0:144', 'ship colors pose 1:144', 'ship colors pose 2:144']);
-  // No buffer scales with a per-slot worst case any more (it was 491,520 bytes a slot).
-  const perSlot = created.filter((b) => /anchors \d|pose \d/.test(b.label));
-  assert.ok(perSlot.length === 6 && perSlot.every((b) => b.size <= 608), 'per-vessel buffers are the pose and the anchors alone');
-  assert.equal(created.filter((b) => b.label.startsWith('ship rig connector mesh')).length, 2, 'one mesh per model');
-  // A slot given another ship rebinds to that model's mesh; a hidden vessel costs nothing.
-  renderer.updateVessel(1, { modelId: 'taino-canoe', x: 0, z: 0 }, 1, 0.7, 0.7, 9);
+  const computePipe = async (code, label) => ({ label, getBindGroupLayout: () => ({}) });
+  const detail = createShipAssetCache().get('victory').detail;
+  const make = (shared) => createVesselDetailGPU({ device, computePipe, posedBuffer: {}, sourceBuffer: {}, hullUBO: {}, detail, shared });
+  const first = await make(null), consort = await make(first.assets);
+  assert.equal(created.filter((b) => b.label === 'victory detail records').length, 1, 'two Victories share one set of detail records');
+  const state = new Float32Array(VESSEL_DETAIL_STATE_FLOATS);
   writes.length = 0;
-  renderer.updateVessel(1, { modelId: 'taino-canoe', x: 0, z: 0 }, 1.1, 0.7, 0.7, 9);
-  renderer.updateVessel(2, null, 1.1, 0.7, 0.7, 9);
-  assert.deepEqual(writes.map((w) => w.label + ':' + w.bytes), ['ship colors pose 1:144']);
-  const draws = [];
-  renderer.draw({ setPipeline() {}, setBindGroup() {}, setVertexBuffer: (slot, buffer) => draws.push(buffer.label), draw: (count) => draws.push(count) });
-  assert.deepEqual(draws.filter((d) => typeof d === 'string' && d.includes('connector')), ['ship rig connector mesh victory'], 'only the Victory still draws connectors');
-  assert.ok(draws.includes(4536));
-  renderer.destroy();
+  for (let i = 0; i < 5; i++) {
+    const boat = { modelId: 'victory', x: i, z: 0, heading: 20, roll: 0.05 * Math.cos(i) };
+    first.update(writeVesselDetailState(state, { boat, code: 5, wind: [0.7, 0.7, 9] }));
+    consort.update(writeVesselDetailState(state, { boat: { ...boat, x: 80 }, code: 6, wind: [0.7, 0.7, 9] }));
+  }
+  assert.ok(writes.every((w) => w.label === 'victory detail state' && w.bytes === VESSEL_DETAIL_STATE_FLOATS * 4), 'a frame uploads each ship\'s compact state alone ' + JSON.stringify(writes[0]));
+  const dispatched = [];
+  const pass = { setPipeline: (p) => dispatched.push(p.label), setBindGroup() {}, dispatchWorkgroups: (n) => dispatched.push(n) };
+  first.encodeStations(pass); first.encodeLines(pass);
+  assert.deepEqual(dispatched, ['vessel detail stations', Math.ceil(detail.stationCount / 64), 'vessel detail lines', Math.ceil(detail.lineVertexCount / 64)]);
+  consort.destroy(); first.destroy();
   assert.ok(created.every((b) => b.destroyed), 'every buffer is released');
 });
 
@@ -436,7 +340,6 @@ test('GPU compute shaders match CPU wave-equation and chain-pendulum rope sway a
       const { victoryPose, victoryClothPoint, victoryYardPoint } = await import('/js/victory-motion.js');
       const { RIG_LINES, lateenRopePoint, writeLateenUniform } = await import('/js/lateen.js');
       const { standingRopePoint } = await import('/js/rigging.js');
-      const { rigConnectorTopology, writeRigConnectorAnchors, rigConnectorSway, expandRigConnectors, RIG_CONNECTOR_WGSL } = await import('/js/ship-colors.js');
       const victoryRopeOracle = new Function('return ' + victoryRopeOracleSource)();
       const victoryRopeDeps = { VICTORY_RUNNING_LINES, VICTORY_SAILS, victoryPose, victoryClothPoint, victoryYardPoint, evaluateRopeWaveDisplacement };
 
@@ -669,64 +572,9 @@ test('GPU compute shaders match CPU wave-equation and chain-pendulum rope sway a
         if (gathered) gatheredInboard = Math.min(gatheredInboard, line.side * (nVals[i * 4] - still[0]));
       }
 
-      // 4. Rig connectors: the vertex function the ship colours shader poses the static mesh with,
-      // against its CPU mirror, for a stepped vessel of each rig family.
-      const connectorPipe = await computePipe(
-        ROPE_WAVE_WGSL +
-          RIG_CONNECTOR_WGSL +
-          `
-        struct ConnectorParams { sway: vec2f, time: f32, wind: f32 };
-        @group(0) @binding(0) var<uniform> params: ConnectorParams;
-        @group(0) @binding(1) var<storage, read> tubes: array<RigTube>;
-        @group(0) @binding(2) var<storage, read> anchors: array<vec4f>;
-        @group(0) @binding(3) var<storage, read> verts: array<f32>;
-        @group(0) @binding(4) var<storage, read_write> res: array<vec4f>;
-        @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
-          let i = id.x;
-          if (i * 2u >= arrayLength(&res)) { return; }
-          let tube = tubes[u32(verts[i * 10u])];
-          let point = rigConnectorVertex(tube, anchors[u32(tube.a.w)], anchors[u32(tube.b.w)], anchors[u32(tube.shape.z)].w,
-            verts[i * 10u + 1u], verts[i * 10u + 2u], params.sway, params.time, params.wind);
-          res[i * 2u] = vec4f(point.position, point.visible);
-          res[i * 2u + 1u] = vec4f(point.normal, 0.0);
-        }`,
-        'rig connector vertex test',
-      );
-      const connectors = {};
-      const paramBuffer = device.createBuffer({ size: 16, usage: B.UNIFORM | B.COPY_DST });
-      for (const modelId of ['nina', 'victory', 'santa-maria', 'flying-cloud', 'gipsy-moth-iv', 'oseberg']) {
-        const topology = rigConnectorTopology(modelId);
-        const cBoat = {
-          modelId,
-          roll: 0.21,
-          pitch: -0.09,
-          rollVelocity: 0.3,
-          pitchVelocity: 0.15,
-          sailState: { squareYaw: 0.27, lateenYaw: -0.31, windSide: 3, windForward: 5, set: [1, 0.7, 0.4], rig: nPoses },
-        };
-        for (let i = 0; i < 30; i++) stepVesselRopeChain(cBoat, 1 / 60);
-        const anchors = new Float32Array(topology.anchorCount * 4);
-        const described = writeRigConnectorAnchors(cBoat, 5.2, 12.5, anchors);
-        const sway = rigConnectorSway(cBoat);
-        const expected = expandRigConnectors(topology, anchors, sway[0], sway[1], 5.2, 12.5);
-        device.queue.writeBuffer(paramBuffer, 0, new Float32Array([sway[0], sway[1], 5.2, 12.5]));
-        const tubeBuffer = storage(topology.tubes), anchorBuffer = storage(anchors), vertexBuffer = storage(topology.vertices);
-        const values = await runCompute(connectorPipe, [paramBuffer, tubeBuffer, anchorBuffer, vertexBuffer], topology.vertexCount * 8, topology.vertexCount, 64);
-        tubeBuffer.destroy();
-        anchorBuffer.destroy();
-        vertexBuffer.destroy();
-        let maxPosition = 0, maxNormal = 0, hidden = 0;
-        for (let i = 0; i < topology.vertexCount; i++) {
-          if (values[i * 8 + 3] < 0.5) hidden++;
-          maxPosition = Math.max(maxPosition, Math.hypot(values[i * 8] - expected[i * 10], values[i * 8 + 1] - expected[i * 10 + 1], values[i * 8 + 2] - expected[i * 10 + 2]));
-          maxNormal = Math.max(maxNormal, Math.hypot(values[i * 8 + 4] - expected[i * 10 + 3], values[i * 8 + 5] - expected[i * 10 + 4], values[i * 8 + 6] - expected[i * 10 + 5]));
-        }
-        connectors[modelId] = { described, vertices: topology.vertexCount, expected: expected.length / 10, hidden, maxPosition, maxNormal };
-      }
-      paramBuffer.destroy();
       hull.destroy();
       device.destroy();
-      return { errors, ropeVertCount, maxSurfaceRopeErr, maxVictoryRopeErr, maxNinaRopeErr, maxNinaSway, gatheredInboard, ninaSamples: nSamples.length, connectors };
+      return { errors, ropeVertCount, maxSurfaceRopeErr, maxVictoryRopeErr, maxNinaRopeErr, maxNinaSway, gatheredInboard, ninaSamples: nSamples.length };
     }, victoryRopeOracle.toString());
     t.diagnostic(JSON.stringify(result));
     assert.deepEqual(result.errors, []);
@@ -737,12 +585,6 @@ test('GPU compute shaders match CPU wave-equation and chain-pendulum rope sway a
     assert.ok(result.maxNinaRopeErr < 5e-4, `Niña GPU/CPU rope wave parity error ${result.maxNinaRopeErr}`);
     assert.ok(result.maxNinaSway > 0.02, `Niña shader ropes must actually sway (max ${result.maxNinaSway})`);
     assert.ok(result.gatheredInboard > -5e-5, `a gathered Niña pendant swung ${-result.gatheredInboard} m inboard through its mast on the GPU`);
-    for (const [modelId, c] of Object.entries(result.connectors)) {
-      assert.equal(c.described, true, `${modelId} anchors describe the model`);
-      assert.ok(c.vertices > 500 && c.expected === c.vertices && c.hidden === 0, `${modelId} connector mesh is drawn whole ${JSON.stringify(c)}`);
-      assert.ok(c.maxPosition < 2e-4, `${modelId} connector vertex shader is ${c.maxPosition} m off its CPU mirror`);
-      assert.ok(c.maxNormal < 2e-3, `${modelId} connector normal is ${c.maxNormal} off its CPU mirror`);
-    }
   } finally {
     await browser?.close();
     await new Promise((resolve) => server.close(resolve));

@@ -111,6 +111,11 @@ order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');
 order.splice(order.indexOf('js/gunnery-audio.js'), 0, 'js/world-audio-assets.js');
 order.splice(order.indexOf('js/rigging.js'), 0, 'js/rope-wave.js');
 order.splice(order.indexOf('js/gunnery-control.js'), 0, 'js/ship-colors.js', 'js/boarding-docking.js');
+// A ship's detail layer (lines, colours, crow's nest, anchor): its passes and her colours' weave ahead of her hull
+// shader, its assembly and compact state ahead of her mesh.
+order.splice(order.indexOf('js/wgsl/caravel.js'), 0, 'js/wgsl/ship-colours.js', 'js/wgsl/vessel-detail.js');
+wgslModules.push('js/wgsl/ship-colours.js', 'js/wgsl/vessel-detail.js');
+order.splice(order.indexOf('js/ship-mesh.js'), 0, 'js/vessel-detail.js');
 order.splice(
   order.indexOf('js/main.js'),
   0,
@@ -280,7 +285,7 @@ const TIGHT_WGSL_RELS = new Set([
   'js/wgsl/vessel-recoil.js', 'js/wgsl/deck.js', 'js/wgsl/wetness.js',
   'js/forest-clusters.js', 'js/forest-crowns.js',
   'js/forest-surfaces.js',
-  'js/forest-wind.js', 'js/forest-trunks.js', 'js/ship-colors.js',
+  'js/forest-wind.js', 'js/forest-trunks.js',
   'js/building-fracture.js', 'js/ship-fracture.js',
   'js/wgsl/terrain.js', 'js/wgsl/caravel.js', 'js/wgsl/prop-continuum.js',
   'js/wgsl/vessel.js', 'js/wgsl/neural-post.js', 'js/wgsl/ground-detail.js', 'js/wgsl/lateen.js',

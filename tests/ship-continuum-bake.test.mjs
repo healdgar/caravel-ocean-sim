@@ -150,11 +150,9 @@ for (const entry of SHIP_CONTINUUM_BODIES) {
     assert.ok(splat.ry > 0 && splat.rxSide > 0 && splat.rxEnd > 0 && splat.colour.every((c) => Number.isFinite(c) && c >= 0), `${id} splat`);
   });
 
-  // The far end of the chain is a minimal core (AGENTS.md rule 3.3). Bodies of many handles (a ship-rigged hull's
-  // shrouds, ratlines and oar ports) keep cores of hundreds of triangles until the shared bake
-  // (js/continuum-bake.js) collapses a multi-shell far body to its core: those are to do, not let off.
-  const LARGE_CORES = new Set(['player-victory', 'player-oseberg', 'player-lusoria', 'player-flying-cloud']);
-  test(`${id} far body ends in a core of a few triangles`, { todo: LARGE_CORES.has(id) && 'the shared bake does not yet collapse a body of many handles to its core' }, () => {
+  // The far end of the chain is a minimal core (AGENTS.md rule 3.3), bodies of many handles (a ship-rigged hull's
+  // shrouds, ratlines and oar ports) included: the shared bake (js/continuum-bake.js) collapses them all.
+  test(`${id} far body ends in a core of a few triangles`, () => {
     const { far } = manifestOf(id);
     assert.ok(far.coreTriangles < far.triangleCount / 50, `${id} core is a few triangles (${far.coreTriangles})`);
   });

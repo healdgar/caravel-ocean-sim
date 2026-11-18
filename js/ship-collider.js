@@ -13,6 +13,7 @@ import { rigSurfacePose, surfaceClothPoint, surfaceRestPoint, surfaceYardPoint }
 import { proceduralRigContext } from './additional-rig.js';
 import { resolveShipTransform } from './ship-parts.js';
 import { SHARD_KINDS, shipMastSpecs } from './ship-fracture.js';
+import { VESSEL_ENSIGN_MATERIAL, VESSEL_PENNANT_MATERIAL } from './wgsl/ship-colours.js';
 
 // Cloth, rope, and the bolt rope sewn to a sail's edge.
 const SHIP_COLLIDER_CLOTH = new Set([9, 13]), SHIP_COLLIDER_BOLT_ROPE = 19, SHIP_COLLIDER_ROPE = new Set([2, 12]);
@@ -268,6 +269,8 @@ export function createShipCollider({ model, vertices, indices, groups, fracture 
       continue;
     }
     if (SHIP_COLLIDER_CLOTH.has(kind) || kind === SHIP_COLLIDER_BOLT_ROPE) continue;
+    // Her colours' bunting, flown to the wind on the GPU, is thinner than a ball.
+    if (kind === VESSEL_ENSIGN_MATERIAL || kind === VESSEL_PENNANT_MATERIAL) continue;
     // Running rope is moved line by line on the GPU, and a ball parts it only by luck. Standing rope stays put.
     if (kind === 12 && vertices[at + 7] >= SHIP_COLLIDER_RUNNING_ROPE_UV && !/shroud|stay/.test(id)) continue;
     const mastPart = /^mast\./.test(id);

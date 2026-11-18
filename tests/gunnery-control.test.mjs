@@ -8,7 +8,8 @@ import {GUNNERY_ORDER_SECONDS} from '../js/gunnery-audio.js';
 import {boatHydrodynamics} from '../js/boat.js';
 import {createFollower,steerFollower,stepVesselCombatAI} from '../js/follower.js';
 import {createCompany,stepCompany} from '../js/crew.js';
-import {SHIP_COLORS,setVesselColors,strikeVesselColors,buildShipColorsGeometry} from '../js/ship-colors.js';
+import {SHIP_COLORS,setVesselColors,strikeVesselColors} from '../js/ship-colors.js';
+import {createShipAssetCache} from '../js/ship-mesh.js';
 import {advanceSails,sailingState,sailMastCap,sailCanvasTarget,sailLosingCanvas} from '../js/sailing.js';
 import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort,buildPortPrefabGeometry,generateProceduralCoastalPack,getBuildingParts} from '../js/coastal-world.js';
 import {applyBuildingFractureEvents,prepareBuildingFracture} from '../js/building-fracture.js';
@@ -608,8 +609,8 @@ test('town fortifications (bastion, star fortress, watchtower, curtain wall & ga
 test('ship colors, human crew casualties, battle morale, and surrender signalling work across gunnery and AI',()=>{
  // 1. Historical ship colors & 3D crow's nest + ensign geometry
  assert.ok(SHIP_COLORS.portugal && SHIP_COLORS.castile && SHIP_COLORS.france && SHIP_COLORS['jolly-roger'] && SHIP_COLORS.surrender);
- const geom=buildShipColorsGeometry();
- assert.ok(geom instanceof Float32Array && geom.length>=1000,'builds 3D crow’s nest basket, flagstaff, stern ensign and masthead pennant vertices');
+ const nina=createShipAssetCache().get('nina'),stationed=id=>nina.groups.find(g=>g.id===id)?.vertexCount??0;
+ assert.ok(stationed('lookout.crows-nest')>=500&&stationed('flag.colours')>=500&&stationed('rig.pennant')>=100,'her assembly carries the 3D crow’s nest basket, flagstaff, stern ensign and masthead pennant');
 
  // 2. Grape shot inflicts heavier human casualties than solid round shot and marks 3D crew actors wounded/fallen
  const makeTarget=()=>{
@@ -782,7 +783,7 @@ test('full sail raises all canvas across procedural and multi-mast ships and URL
 
 test('pirates wear brown and black clothing, women and men have equal boarding strength, and ships can dock/cast off and board/capture surrendered or fighting vessels',async ()=>{
  const {PIRATE_SHIRTS,PIRATE_TROUSERS,isPirateVessel,applyPirateCrewAttire}=await import('../js/crew.js');
- const {createDockingBoardingState,computeBoardingStrength,FEMALE_BOARDING_STRENGTH,MALE_BOARDING_STRENGTH}=await import('../js/boarding-docking.js');
+ const {createDockingBoardingState,computeBoardingStrength,mooringLinesState,FEMALE_BOARDING_STRENGTH,MALE_BOARDING_STRENGTH}=await import('../js/boarding-docking.js');
 
  // 1. Women and men have identical strength (1.0)
  assert.equal(FEMALE_BOARDING_STRENGTH,1.0);
@@ -841,8 +842,8 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
  assert.equal(dockRes.ok,true);
  assert.equal(db.state.mooringPhase,'throwing-lines');
  assert.equal(playerBoat.mooringActive,true);
- let verts=db.buildVertices();
- assert.ok(verts.length>0,'generates 3D catenary mooring line vertices while throwing lines');
+ let moored=mooringLinesState(db);
+ assert.ok(moored&&moored.lines===4&&!moored.vessel&&moored.far.every(p=>p.every(Number.isFinite)),'her detail pass is given 4 catenary mooring lines to the pier while throwing lines');
 
  // Test changing your mind while hauling in and casting off:
  // advance into making-fast (hauling in), record lateral progress toward pier, then castOff()
@@ -876,7 +877,7 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
  assert.equal(db.state.mooringPhase,'casting-off');
  for(let i=0;i<25;i++)db.step(0.15);
  assert.equal(db.state.mooringPhase,'clear','lines coiled aboard after casting off');
- assert.equal(db.buildVertices().length,0,'no mooring vertices when clear');
+ assert.equal(mooringLinesState(db),null,'no mooring lines when clear');
 
  // 4. Board a surrendered vessel and take her as a prize
  const surrBoat={id:'prize',modelId:'nina',name:'San Mateo',length:20,beam:6,heading:0,x:18,z:2,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'surrender'};
@@ -906,8 +907,8 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
  for(let i=0;i<80&&db.state.boardingPhase!=='captured';i++){
   db.step(0.2);
   if(i===15){
-   const gangplankVerts=db.buildVertices();
-   assert.ok(gangplankVerts.length>100,'renders 3D grappling lines and boarding gangplanks during melee');
+   const grappled=mooringLinesState(db);
+   assert.ok(grappled&&grappled.vessel&&grappled.target===pirateBoat&&grappled.far.length===4,'her detail pass draws grappling lines (and gangplanks once run out) to the enemy during melee');
   }
  }
  assert.equal(db.state.boardingPhase,'captured','higher-morale/strength crew wins boarding combat and captures vessel');

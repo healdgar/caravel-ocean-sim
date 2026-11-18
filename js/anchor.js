@@ -1,100 +1,57 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// The splash a let-go anchor throws up. Her iron, its ring and its rode are her own assembly and detail lines,
+// placed in her pose pass from her compact anchor state (js/vessel-detail.js).
 import { requestOnce } from './gpu-program-cache.js';
-import { ANCHOR_IRON } from './anchor-iron.js';
-import {ANCHOR_GPU_RENDER} from './wgsl/anchor.js';
-import {anchorFairlead,anchorRodePoints,anchorEquipment,anchorEyeOffset} from './anchor-state.js';
-import {boatRotate} from './boat.js';
+import { ANCHOR_SPLASH_RENDER, ANCHOR_SPLASH_RING_VERTICES, ANCHOR_SPLASH_DROP_VERTICES } from './wgsl/anchor.js';
+import { anchorEquipment } from './anchor-state.js';
 
-export const ANCHOR_GPU_RODE_SPANS=48;
-export const ANCHOR_GPU_STATE_FLOATS=(4+ANCHOR_GPU_RODE_SPANS+1)*4;
+export const ANCHOR_SPLASH_FLOATS = 8;
+export const ANCHOR_SPLASH_SECONDS = 1.6;
+const ANCHOR_SPLASH_DROP_SECONDS = 0.75;
 
-// Asset construction only. Unit iron triangles retain the previous shape;
-// tube/splash records are immutable parameters expanded by the vertex shader.
-export function createAnchorGPUTemplate(){
-  const data=[];
-  const add=(p,n,kind)=>data.push(...p,...n,kind,1);
-  // Every corner of the baked anchor, in its own frame. All iron: this anchor's stock is an iron bar.
-  for(let i=0;i<ANCHOR_IRON.length;i+=6)add([ANCHOR_IRON[i],ANCHOR_IRON[i+1],ANCHOR_IRON[i+2]],[ANCHOR_IRON[i+3],ANCHOR_IRON[i+4],ANCHOR_IRON[i+5]],0);
-  const ironCount=data.length/8;
-  const templateTube=(segment,sides,kind)=>{
-    for(let j=0;j<sides;j++){
-      const a=j*Math.PI*2/sides,b=(j+1)*Math.PI*2/sides;
-      for(const [endpoint,angle]of [[0,a],[0,b],[1,a],[1,a],[0,b],[1,b]])add([segment,endpoint,angle],[a,0,0],kind);
-    }
-  };
-  for(let i=0;i<ANCHOR_GPU_RODE_SPANS;i++)templateTube(i,5,4);
-  for(let i=0;i<10;i++)templateTube(i,4,5);
-  const solidCount=data.length/8;
-  for(let i=0;i<24;i++)for(let corner=0;corner<6;corner++)add([i,corner,0],[0,0,0],6);
-  const ringCount=data.length/8-solidCount;
-  for(let i=0;i<16;i++)for(let corner=0;corner<3;corner++)add([i,corner,0],[0,0,0],7);
-  return Object.freeze({vertices:new Float32Array(data),ironCount,solidCount,ringCount,totalCount:data.length/8});
+// The splash's compact state: where the iron struck and how long ago, and the anchor's scale. Returns how many
+// vertices to draw: none once it has settled, the ring alone once its drops have fallen.
+export function writeAnchorSplashState(state, boat, target) {
+  if (!(target instanceof Float32Array) || target.length !== ANCHOR_SPLASH_FLOATS) throw Error('Anchor splash state has wrong shape');
+  const splash = state.phase === 'stowed' ? null : state.splash, age = splash ? state.time - splash.at : -1;
+  if (!splash || age < 0 || age >= ANCHOR_SPLASH_SECONDS) return 0;
+  target.set([splash.x, splash.y, splash.z, age, anchorEquipment(boat).renderScale, 0, 0, 0]);
+  return ANCHOR_SPLASH_RING_VERTICES + (age < ANCHOR_SPLASH_DROP_SECONDS ? ANCHOR_SPLASH_DROP_VERTICES : 0);
 }
 
-// Coordinates remain exactly the physical anchor/catenary values. Stowed data
-// lives in hull-local metres; the unchanged 64-byte actor pose places it.
-export function writeAnchorGPUState(state,boat,target){
-  if(!(target instanceof Float32Array)||target.length!==ANCHOR_GPU_STATE_FLOATS)throw Error('Anchor GPU state has wrong shape');
-  const equipment=anchorEquipment(boat),stowed=state.phase==='stowed';
-  if(stowed){
-    boat={...boat,x:0,z:0,heave:0,heading:0,pitch:0,roll:0};const p=anchorFairlead(boat);
-    state={...state,position:{x:p.x,y:p.y-anchorEyeOffset(boat),z:p.z},splash:null};
-  }
-  const fairlead=anchorFairlead(boat),p=state.position,age=state.splash?state.time-state.splash.at:-1;
-  const active=!!state.splash&&age>=0&&age<1.6;
-  target.set([equipment.renderScale,equipment.rodeRadius,(stowed?0:state.worldHeading??0)*Math.PI/180,Number(stowed),
-    p.x,p.y,p.z,age,fairlead.x,fairlead.y,fairlead.z,Number(active),state.splash?.x??0,state.splash?.y??0,state.splash?.z??0,0]);
-  const knots=anchorRodePoints(state,boat,ANCHOR_GPU_RODE_SPANS);
-  for(let i=0;i<knots.length;i++){const q=knots[i];target.set([q.x,q.y,q.z,0],16+i*4);}
-  return active?(age<.75?192:144):0;
-}
-
-const ANCHOR_VERTICES=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}];
-// The anchor, its rode and its splash, asked for once a device and shared by the fleet.
-export function requestAnchorPipelines({device,shader,format,samples,waterOptics=null}){
-  return requestOnce(device,`anchor ${format} ${samples}`,async()=>{
-    Promise.resolve(waterOptics).then(optics=>optics?.capture({source:ANCHOR_GPU_RENDER,vertex:{buffers:ANCHOR_VERTICES},groups:2})).catch(()=>{});
-    const module=await shader(ANCHOR_GPU_RENDER,'anchor and hemp rode');
-    return Promise.all([false,true].map(transparent=>device.createRenderPipelineAsync({label:transparent?'anchor splash':'anchor and rode',layout:'auto',
-    vertex:{module,entryPoint:'vs',buffers:ANCHOR_VERTICES},fragment:{module,entryPoint:'fs',targets:[{format,...(transparent?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
-    primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:!transparent,depthCompare:'greater'},multisample:{count:samples}})));
+// The splash's program, asked for once a device and shared by the fleet: blended over the sea, writing no depth.
+export function requestAnchorSplashPipeline({ device, shader, format, samples }) {
+  return requestOnce(device, `anchor splash ${format} ${samples}`, async () => {
+    const module = await shader(ANCHOR_SPLASH_RENDER, 'anchor splash');
+    const blend = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' };
+    return device.createRenderPipelineAsync({
+      label: 'anchor splash', layout: 'auto',
+      vertex: { module, entryPoint: 'vs' },
+      fragment: { module, entryPoint: 'fs', targets: [{ format, blend: { color: blend, alpha: blend } }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' },
+      multisample: { count: samples },
+    });
   });
 }
-export async function createAnchorRenderer({device,frameUBO,transView,skyView,sampler,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics=null}){
-  const template=createAnchorGPUTemplate();
-  const buffer=device.createBuffer({label:'anchor immutable templates',size:template.vertices.byteLength,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
-  device.queue.writeBuffer(buffer,0,template.vertices);
-  const poseBuffer=device.createBuffer({label:'anchor pose',size:64,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-  const stateBuffer=device.createBuffer({label:'anchor compact physical state',size:ANCHOR_GPU_STATE_FLOATS*4,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
-  const pose=new Float32Array(16),values=new Float32Array(ANCHOR_GPU_STATE_FLOATS),axis=[0,0,0];let solidCount=0,totalCount=0,stowedCache='';
-  const layout=ANCHOR_VERTICES,pipes=await requestAnchorPipelines({device,shader,format,samples,waterOptics});
-  const resources=[{buffer:frameUBO},transView,skyView,sampler,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer},{buffer:stateBuffer}];
-  const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))}));
-  const shadowGroups=pipes.map(pipe=>shadows.bind(pipe));
-  const submerged=waterOptics?await waterOptics.capture({source:ANCHOR_GPU_RENDER,pipeline:pipes[0],vertex:{buffers:layout},groups:2}):null;
-  const submergedGroup=submerged?.bindGroup(resources),submergedShadows=submerged?shadows.bind(submerged.pipeline):null;
+
+export async function createAnchorSplashRenderer({ device, frameUBO, transView, skyView, sampler, envCubeView, sunVisBuf, shadows, shader, format, samples }) {
+  const pipe = await requestAnchorSplashPipeline({ device, shader, format, samples });
+  const buffer = device.createBuffer({ label: 'anchor splash', size: ANCHOR_SPLASH_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const values = new Float32Array(ANCHOR_SPLASH_FLOATS);
+  const resources = [[0, { buffer: frameUBO }], [1, transView], [2, skyView], [3, sampler], [4, envCubeView], [5, { buffer: sunVisBuf }], [7, { buffer }]];
+  const group = device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map(([binding, resource]) => ({ binding, resource })) });
+  const shadowGroup = shadows.bind(pipe);
+  let count = 0;
   return {
-    update(state,boat){
-      if(state.phase==='stowed'){
-        const heading=(boat.heading??0)*Math.PI/180;
-        boatRotate(axis,1,0,0,heading,boat.pitch??0,boat.roll??0);pose.set(axis,0);
-        boatRotate(axis,0,1,0,heading,boat.pitch??0,boat.roll??0);pose.set(axis,4);
-        boatRotate(axis,0,0,1,heading,boat.pitch??0,boat.roll??0);pose.set(axis,8);
-        pose.set([boat.x??0,boat.heave??0,boat.z??0,1],12);device.queue.writeBuffer(poseBuffer,0,pose);
-        const key=`${boat.modelId??'nina'}/${boat.length}/${boat.beam}/${anchorEquipment(boat).renderScale}`;
-        if(stowedCache===key)return;stowedCache=key;
-      }else{stowedCache='';pose.fill(0);device.queue.writeBuffer(poseBuffer,0,pose);}
-      solidCount=template.solidCount;totalCount=solidCount+writeAnchorGPUState(state,boat,values);
-      device.queue.writeBuffer(stateBuffer,0,values);
+    update(state, boat) {
+      count = writeAnchorSplashState(state, boat, values);
+      if (count) device.queue.writeBuffer(buffer, 0, values);
     },
-    drawSubmerged(pass,above=false){
-      if(!submerged||!solidCount)return;
-      submerged.bind(pass,above);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedShadows);pass.setVertexBuffer(0,buffer);pass.draw(solidCount);
+    draw(pass) {
+      if (!count) return;
+      pass.setPipeline(pipe); pass.setBindGroup(0, group); pass.setBindGroup(1, shadowGroup); pass.draw(count);
     },
-    draw(pass){
-      pass.setVertexBuffer(0,buffer);
-      for(let i=0;i<2;i++){const count=i?totalCount-solidCount:solidCount;if(!count)continue;pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);pass.setBindGroup(1,shadowGroups[i]);pass.draw(count,1,i?solidCount:0);}
-    },
-    destroy(){buffer.destroy();poseBuffer.destroy();stateBuffer.destroy();},
+    destroy() { buffer.destroy(); },
   };
 }

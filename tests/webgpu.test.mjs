@@ -2666,8 +2666,8 @@ test('captain anchor orders connect voices, depth, retrieval and debug dolphin r
     assert.equal(await page.locator('#err').textContent(),'');
     const advance=async count=>page.evaluate(async count=>{
       check.now??=performance.now();
-      for(let i=0;i<count;i++){check.now+=100;check.render={};check.callback(check.now);await check.device.queue.onSubmittedWorkDone();}
-      return {render:check.render,phase:encounterFixture.anchor.phase,errors:check.errors};
+      for(let i=0;i<count;i++){check.now+=100;check.render={};check.compute={};check.callback(check.now);await check.device.queue.onSubmittedWorkDone();}
+      return {render:check.render,compute:check.compute,phase:encounterFixture.anchor.phase,errors:check.errors};
     },count);
     await advance(8);
     await page.getByRole('button',{name:'Captain',exact:true}).click();
@@ -2687,7 +2687,8 @@ test('captain anchor orders connect voices, depth, retrieval and debug dolphin r
     });
     assert.equal(grounded.phase,'anchored');assert.ok(grounded.depth>0&&Math.abs(grounded.depth-grounded.expectedDepth)<.005,'sounding follows the authored seabed at the actual anchor');
     assert.match(await page.locator('#anchor-status').textContent(),/fathoms \(simulated sounding\)/);
-    const drawn=await advance(1);assert.equal(drawn.render['anchor and rode'],1);assert.deepEqual(drawn.errors,[]);
+    // Her iron and rode are her own detail layer (js/vessel-detail.js): placed and laid in her pose pass, drawn with her.
+    const drawn=await advance(1);assert.ok(drawn.compute['vessel detail stations']?.length>=1&&drawn.compute['vessel detail lines']?.length>=1,'her pose pass places the iron and lays the rode');assert.deepEqual(drawn.errors,[]);
     await page.getByRole('button',{name:'Weigh anchor',exact:true}).click();
     await advance(1);assert.ok((await page.evaluate(()=>encounterFixture.orders)).includes('weigh-anchor'));
     await page.evaluate(()=>{const f=encounterFixture;for(let i=0;i<4000&&f.anchor.active;i++)f.anchor.step(.1,f.boat,{terrain:f.terrain,settings:f.P});f.updateAnchorUI();});

@@ -13,8 +13,9 @@ import { SHIP_CONTINUUM_ASSETS, SHIP_CONTINUUM_STEP_WORDS } from '../js/ship-con
 import {
   SHIP_CONTINUUM_DAMAGED_LIST, SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_INSTANCE_VERTICES, SHIP_CONTINUUM_LISTS,
   SHIP_CONTINUUM_SHADOW_LIST, SHIP_CONTINUUM_ORDER_IMPORTANT, SHIP_CONTINUUM_DAMAGED_SHIFT,
-  SHIP_CONTINUUM_SHADOW_CLUSTER_LIST, SHIP_CONTINUUM_CLUSTERS_CAST,
+  SHIP_CONTINUUM_SHADOW_CLUSTER_LIST, SHIP_CONTINUUM_CLUSTERS_CAST, SHIP_CONTINUUM_LINE_LIST, SHIP_CONTINUUM_LINE_PIECE,
 } from '../js/wgsl/ship-continuum.js';
+import { createShipAssetCache } from '../js/ship-mesh.js';
 
 const at = (file) => new URL(`../${file}`, import.meta.url);
 // A body's cluster count and, for each step of its far body, the triangles alive.
@@ -24,6 +25,9 @@ function body(model) {
   const alive = Array.from({ length: manifest.far.stepCount + 1 }, (_, s) => words[manifest.far.offsets.steps + s * SHIP_CONTINUUM_STEP_WORDS]);
   return { clusters: manifest.clusterCount, alive };
 }
+// The pieces of her detail layer's lines (js/vessel-detail.js), as her line list names them: each 384 vertices.
+const shipAssets = createShipAssetCache();
+const linePieces = (model) => Array.from({ length: Math.ceil(shipAssets.get(model).detail.lineVertexCount / 384) }, (_, c) => [0, (SHIP_CONTINUUM_LINE_PIECE | c) >>> 0]);
 
 let browser, server, base;
 before(async () => {
@@ -100,6 +104,7 @@ function check(cut, { damaged = false } = {}) {
     assert.ok(holed.length > 0, 'a holed vessel in view draws her clusters from her own list');
     for (const [ship, cluster] of holed) assert.ok(ship === 0 && cluster < model.clusters, 'each entry is one of her clusters');
     for (const L of [0, 1, 2, SHIP_CONTINUUM_SHADOW_LIST, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST]) assert.equal(draws[L * 4 + 1], 0, `a holed vessel draws nothing from ${SHIP_CONTINUUM_LISTS[L]}`);
+    assert.deepEqual(entries(SHIP_CONTINUUM_LINE_LIST), linePieces(cut.model), 'a holed vessel\'s lines ride her clusters');
     return { clusters: holed.length };
   }
   // Near the eye her clusters, cut to the shadow map's texel, cast her shadow; else none are entered for it.
@@ -114,6 +119,8 @@ function check(cut, { damaged = false } = {}) {
   const clusters = entries(0);
   for (const [ship, cluster] of clusters) assert.ok(ship === 0 && cluster < model.clusters, 'each entry is one of her clusters');
   if (share < 255) assert.ok(clusters.length > 0, `${cut.model} in view draws her clusters`);
+  // Her lines, colours' halyards, mooring lines and rode ride her clusters: every piece wherever her clusters are cut.
+  assert.deepEqual(entries(SHIP_CONTINUUM_LINE_LIST), share < 255 ? linePieces(cut.model) : [], `${cut.model}'s lines ride her clusters`);
   const far = entries(1);
   if (share > 0) assert.deepEqual(far, Array.from({ length: Math.ceil(model.alive[step] / 128) }, (_, c) => [0, c]), 'her far body across the handoff');
   else assert.equal(far.length, 0, 'no far body before the handoff');

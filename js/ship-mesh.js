@@ -11,6 +11,7 @@ import { deepFreeze } from './rig-definition.js';
 import { createPartAssemblyCatalog } from './part-assembly.js';
 import { prepareShipFracture } from './ship-fracture.js';
 import { createShipCollider } from './ship-collider.js';
+import { appendVesselStations, buildVesselDetail } from './vessel-detail.js';
 
 // CPU geometry is immutable model data; transforms, crew poses, moisture and
 // wake state remain per vessel. Consumers may share these buffers for uploads.
@@ -29,7 +30,8 @@ export function createShipAssetCache() {
           for(const id of Object.keys(ROWING_DESIGNS))builders[id]=options=>createRowingShipMesh(id,options);
           for(const id of Object.keys(LATER_SAIL_DESIGNS))builders[id]=options=>createLaterSailShipMesh(id,options);
           if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
-          const groups = [], raw = builders[model.id]({ groups });
+          // Her stations' geometry (crow's nest, colours, working anchor) is part of her assembly like any other part.
+          const groups = [], raw = appendVesselStations(model, builders[model.id]({ groups }), groups);
           const indexed = indexCaravelMesh(raw);
           const { vertices, indices, groups: fracturedGroups, fracture } = prepareShipFracture({ modelId: model.id, model, vertices: indexed.vertices, indices: indexed.indices, groups });
           const partAssembly = createPartAssemblyCatalog({
@@ -41,7 +43,9 @@ export function createShipAssetCache() {
             groups: fracturedGroups,
           });
           const collider = createShipCollider({ model, vertices, indices, groups: fracturedGroups, fracture });
-          const shared={ model, vertices, indices, groups: deepFreeze(fracturedGroups), partAssembly, fracture, collider, gpuPose:true };
+          // Her detail layer: what is thinner than a ball, held by the parts it rides (js/vessel-detail.js).
+          const detail = buildVesselDetail({ model, vertices, indices, groups: fracturedGroups });
+          const shared={ model, vertices, indices, groups: deepFreeze(fracturedGroups), partAssembly, fracture, collider, detail, gpuPose:true };
           if(model.rig?.backend==='surfaces-v1'){
             shared.rigGPUData=createRigGPUData(shared);
           }

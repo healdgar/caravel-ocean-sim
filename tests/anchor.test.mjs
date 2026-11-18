@@ -7,7 +7,7 @@ import { boatHydrodynamics, stepBoatSurge, stepBoatSteering } from '../js/boat.j
 import { decodeIsland, terrainSample, LANDFALL_VIEWS } from '../js/terrain-model.js';
 import { createCaravelMesh } from '../js/caravel.js';
 import { anchorCathead, HULL_VERTICAL_SCALE } from '../js/hull.js';
-import { createAnchorRenderer } from '../js/anchor.js';
+import { writeVesselDetailState, VESSEL_DETAIL_STATE_FLOATS } from '../js/vessel-detail.js';
 
 const anchorBoat=()=>({x:-2300,z:-3700,length:20,beam:6,heading:0,heave:0,pitch:0,roll:0,eye:5,
   propulsion:'sail',sailFore:0,sailMain:0,sailMizzen:0,speed:0,surgeVelocity:0,leewayVelocity:0,
@@ -175,27 +175,18 @@ test('working anchor fairlead meets the actual port cathead mesh at every hull a
   }
 });
 
-test('deployed anchor retains its world orientation while the moored hull yaws',async()=>{
-  const previous=globalThis.GPUBufferUsage;globalThis.GPUBufferUsage={VERTEX:1,COPY_DST:2,UNIFORM:4,STORAGE:8};
-  let commands;
-  const device={createBuffer:({label})=>({label,destroy(){}}),
-    createRenderPipelineAsync:async()=>({getBindGroupLayout(){}}),createBindGroup:()=>({}),
-    queue:{writeBuffer(buffer,offset,data,start=0,count=data.length){
-      if(buffer.label==='anchor compact physical state')commands=data.slice(start,start+count);
-    }}};
-  let renderer;
-  try{
-    renderer=await createAnchorRenderer({device,shader:async()=>({}),shadows:{bind(){}}});
-    const boat=anchorBoat(),state=createAnchorState(boat);boat.heading=27;
-    state.drop(boat,anchorEnv);stepAnchor(state,boat,25);renderer.update(state,boat);
-    // The GPU owns triangle expansion. Scale, heading and anchor origin must
-    // remain fixed while fairlead/catenary commands follow the yawing hull.
-    // anchor-expansion-gpu.test.mjs also checks the actual expanded triangles.
-    const ironCommands=commands.slice(0,7),rodeCommands=commands.slice(8),position={...state.position};
-    boat.heading=154;state.step(1/60,boat,anchorEnv);renderer.update(state,boat);
-    assert.equal(state.worldHeading,27);assert.deepEqual(state.position,position);
-    assert.deepEqual(commands.slice(0,7),ironCommands,'GPU anchor commands preserve the seabed orientation; splash age may advance');
-    assert.notDeepEqual(commands.slice(8),rodeCommands,'the physical fairlead and rode continue to follow the hull');
-    state.weigh();state.step(1/60,boat,anchorEnv);assert.equal(state.worldHeading,27);
-  }finally{renderer?.destroy();globalThis.GPUBufferUsage=previous;}
+test('deployed anchor retains its world orientation while the moored hull yaws',()=>{
+  const boat=anchorBoat(),state=createAnchorState(boat);boat.heading=27;
+  state.drop(boat,anchorEnv);stepAnchor(state,boat,25);
+  // Her detail pass places the let-go iron from her compact state alone, and runs the rode from her fairlead as her
+  // hull is posed (js/wgsl/vessel-detail.js): the iron's place and heading stay put while she yaws about it.
+  const values=new Float32Array(VESSEL_DETAIL_STATE_FLOATS),anchorState=()=>writeVesselDetailState(values,{boat,anchor:state}).slice(8,16);
+  const iron=anchorState(),position={...state.position};
+  assert.equal(iron[3],1,'the iron is let go');
+  boat.heading=154;state.step(1/60,boat,anchorEnv);
+  assert.equal(state.worldHeading,27);assert.deepEqual(state.position,position);
+  const yawed=anchorState();
+  assert.deepEqual(yawed.slice(0,5),iron.slice(0,5),'the iron keeps its seabed place and orientation');
+  assert.equal(yawed[4],Math.fround(27*Math.PI/180));
+  state.weigh();state.step(1/60,boat,anchorEnv);assert.equal(state.worldHeading,27);
 });

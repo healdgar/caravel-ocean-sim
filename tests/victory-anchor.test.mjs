@@ -5,7 +5,8 @@ import {ANCHOR_LIMITS,VICTORY_ANCHOR_LIMITS,anchorEquipment,anchorEyeOffset,anch
   anchorEligibility,anchorTetherForce,anchorRodePoints,createAnchorState} from '../js/anchor-state.js';
 import {boatHydrodynamics,boatRotate} from '../js/boat.js';
 import {VICTORY_DESIGN,victoryHullHalfWidth} from '../js/models/victory.js';
-import {createAnchorRenderer,createAnchorGPUTemplate} from '../js/anchor.js';
+import {createShipAssetCache} from '../js/ship-mesh.js';
+import {vesselHull} from '../js/hull.js';
 import {decodeIsland,terrainSample,LANDFALL_VIEWS,safeLandfallStart} from '../js/terrain-model.js';
 
 const boat=()=>({modelId:'victory',...VICTORY_DESIGN.runtime,x:-2300,z:-3700,heave:0,pitch:0,roll:0,
@@ -65,27 +66,26 @@ test('Victory drops and retrieves its larger anchor continuously with matching e
     assert.ok(distance({x:state.position.x+eye[0],y:state.position.y+eye[1],z:state.position.z+eye[2]},anchorFairlead(b))<1e-9);
   }
 });
-test('rendered Victory shank, stock and iron thickness scale together independently of the rode',async()=>{
-  const before=globalThis.GPUBufferUsage;globalThis.GPUBufferUsage={VERTEX:1,COPY_DST:2,UNIFORM:4,STORAGE:8};let commands,renderer;
-  const device={createBuffer:({label})=>({label,destroy(){}}),createRenderPipelineAsync:async()=>({getBindGroupLayout(){}}),createBindGroup:()=>({}),
-    queue:{writeBuffer(buffer,offset,data,start=0,count=data.length){if(buffer.label==='anchor compact physical state')commands=data.slice(start,start+count);}}};
-  try{
-    renderer=await createAnchorRenderer({device,shader:async()=>({}),shadows:{bind(){}}});
-    const state={phase:'anchored',worldHeading:0,position:{x:0,y:0,z:0},rode:70,bed:-16,time:0,splash:null};
-    const b=boat(),template=createAnchorGPUTemplate();renderer.update(state,{...b,modelId:'nina',length:20,beam:6});const small=commands.slice();
-    renderer.update(state,b);const large=commands.slice(),scale=anchorEquipment(b).renderScale;
-    assert.equal(small[0],1);assert.equal(large[0],Math.fround(scale));assert.equal(large[1],Math.fround(anchorEquipment(b).rodeRadius));
-    for(let i=0;i<72*8;i+=8)for(let axis=0;axis<3;axis++)assert.ok(Math.abs((template.vertices[i+axis]*large[0]+large[4+axis])-(template.vertices[i+axis]*small[0]+small[4+axis])*scale)<2e-6);
-    assert.ok(commands.every(Number.isFinite));
-    renderer.update(createAnchorState(b),b);
-    assert.equal(commands[3],1,'housed anchor uses the hull-local GPU actor pose');
-    // Preserve the actual iron/stock bow-clearance gate against the immutable
-    // geometry and physical commands. Native GPU expansion is independently
-    // checked against this same geometry in anchor-expansion-gpu.test.mjs.
-    for(let i=0;i<template.ironCount*8;i+=8){
-      const p=[0,1,2].map(axis=>template.vertices[i+axis]*commands[0]+commands[4+axis]);
-      const width=victoryHullHalfWidth(p[2]/(b.length/12),p[1]/VICTORY_DESIGN.frame.verticalScale)*b.beam/3.6;
-      if(width>0)assert.ok(Math.abs(p[0])-width>.02,'housed iron and timber stock clear the actual bow skin');
+test('rendered Victory shank, stock and iron thickness scale together independently of the rode',()=>{
+  // Her working anchor's iron is part of her assembly (js/vessel-detail.js), in her design units, hung by its eye below
+  // her fairlead; her detail pass places it from there once let go.
+  const cache=createShipAssetCache(),b=boat();
+  const iron=modelId=>{
+    const asset=cache.get(modelId),g=asset.groups.find(x=>x.id==='anchor.port.iron'),f=vesselHull(modelId).frame,r=asset.model.runtime;
+    const s=[r.beam/f.beam,f.verticalScale,r.length/f.length],lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity],points=[];
+    for(let i=g.firstVertex;i<g.firstVertex+g.vertexCount;i++){
+      const v=asset.indices[i]*9,d=[asset.vertices[v],asset.vertices[v+1],asset.vertices[v+2]];points.push({d,s});
+      for(let k=0;k<3;k++){lo[k]=Math.min(lo[k],d[k]*s[k]);hi[k]=Math.max(hi[k],d[k]*s[k]);}
     }
-  }finally{renderer?.destroy();globalThis.GPUBufferUsage=before;}
+    return {extent:hi.map((h,k)=>h-lo[k]),points};
+  };
+  const small=iron('nina'),large=iron('victory'),scale=anchorEquipment(b).renderScale;
+  assert.equal(anchorEquipment({modelId:'nina'}).renderScale,1);
+  for(let k=0;k<3;k++)assert.ok(Math.abs(large.extent[k]-small.extent[k]*scale)<2e-4,`Victory's iron is ${scale} times the Niña's along axis ${k}`);
+  assert.ok(anchorEquipment(b).rodeRadius>anchorEquipment({modelId:'nina'}).rodeRadius,'her rode is her own, not her iron scaled');
+  // The housed iron and its iron stock clear the actual bow skin.
+  for(const {d,s} of large.points){
+    const width=victoryHullHalfWidth(d[2],d[1]);
+    if(width>0)assert.ok((Math.abs(d[0])-width)*s[0]>.02,'housed iron and stock clear the actual bow skin');
+  }
 });

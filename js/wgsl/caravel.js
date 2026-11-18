@@ -6,6 +6,7 @@ import { SHADOW_SAMPLE } from './shadows.js';
 import { ADDITIONAL_DESIGNS } from '../models/additional.js';
 import { LATER_SAIL_DESIGNS } from '../models/later-sail.js';
 import { vesselDeck } from '../hull.js';
+import { VESSEL_COLOURS_WGSL, VESSEL_COLOURS_MATERIAL } from './ship-colours.js';
 
 // Rules that decide which finish a fragment of a vessel receives, kept as functions of plain
 // values so a test can ask them questions without drawing a ship.
@@ -109,7 +110,7 @@ fn vesselIronTransmission(film:f32,nv:f32,nl:f32)->f32 {
 // Two shaders from one source. A whole ship has no damage code at all: no discard, so the GPU
 // shades only what the eye can see of her. A damaged ship lays depth with `surviving`, which
 // decides what shot and tearing have taken away, then `fs` shades just the surface that is left.
-function vesselSource(damaged) { return FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + VESSEL_MATERIAL_MEDIUM + IRON_SURFACE + VESSEL_FINISH_RULES + /* wgsl */ `
+function vesselSource(damaged) { return FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + VESSEL_MATERIAL_MEDIUM + IRON_SURFACE + VESSEL_FINISH_RULES + VESSEL_COLOURS_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -361,6 +362,8 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let clothSeam=sailClothSeam(in.uv.x);
   let clothAA=max(fwidth(clothSeam),0.001);
   let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
+  // A flag's weave fades where a pixel spans its threads.
+  let flagWeave=1.0-smoothstep(0.35,1.2,max(fwidth(in.uv.x*140.0),fwidth(in.uv.y*95.0)));
   let clothEdge=vesselClothEdge(in.uv,in.material);
   let edgeAA=max(fwidth(clothEdge),0.0005);
   let reefDist=min(abs(in.uv.y-0.26),abs(in.uv.y-0.52));
@@ -556,6 +559,14 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
       }
     }`:''}
   }
+  // A ship's colours: her ensign's and pennant's bunting, woven in the pattern of the colours she wears (the hull
+  // program's material is her colours' material plus their code, plus 16 on the pennant; js/vessel-continuum.js).
+  if(in.material >= ${VESSEL_COLOURS_MATERIAL}u) {
+    let colours = in.material - ${VESSEL_COLOURS_MATERIAL}u;
+    albedo = vesselColoursPattern(clamp(in.uv.x,0.0,1.0), clamp(in.uv.y,0.0,1.0), i32(colours % 16u), colours >= 16u, flagWeave);
+    n = normalize(in.normal)*select(-1.0,1.0,front);
+    rough = 0.86; metal = 0.0;
+  }
   var windowPaneMask = 1.0;
   var windowHoleMask = 0.0;
   var windowShardRim = 0.0;
@@ -618,6 +629,8 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
     albedo*=mix(1.0,.58,wet.x);rough=mix(rough,.65,wet.x);
   }else if(in.material==9u || in.material==13u){
     albedo*=mix(1.0,.72,wet.x);rough=mix(.93,.82,wet.x);
+  }else if(in.material>=${VESSEL_COLOURS_MATERIAL}u){
+    albedo*=mix(1.0,.72,wet.x);rough=mix(.86,.82,wet.x);
   }else if(in.material!=3u && in.material!=4u && in.material!=8u && in.material!=11u && !isCopper && !isGilt){
     // Absorbed moisture darkens coarse timber without varnishing it. Only the
     // transient surface film glints; grain valleys retain more water than ridges.
@@ -901,7 +914,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   var col=(diffuse/PI+spec)*direct*nl*directTransmission;
   col+=(diffuseAmbient*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0))*environmentTransmission;
   // Grazing-angle flax & hemp micro-fibre fuzz rim sheen on sails and ropes
-  if(in.material==2u || in.material==12u || in.material==19u || in.material==9u || in.material==13u){
+  if(in.material==2u || in.material==12u || in.material==19u || in.material==9u || in.material==13u || in.material>=${VESSEL_COLOURS_MATERIAL}u){
     let grazing=1.0-clamp(dot(n,v),0.0,1.0);
     let g2=grazing*grazing;
     let isRopeMat = in.material==2u || in.material==12u || in.material==19u;

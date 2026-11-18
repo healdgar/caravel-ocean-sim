@@ -46,7 +46,7 @@ import { createGunRecoilMap } from './gunnery-models.js';
 import { isArrowAmmo } from './gunnery-state.js';
 import { CREW_VOICES } from './voice-assets.js';
 import { createAnchorState } from './anchor-state.js';
-import { createAnchorRenderer, requestAnchorPipelines } from './anchor.js';
+import { createAnchorSplashRenderer, requestAnchorSplashPipeline } from './anchor.js';
 import { createDolphins } from './dolphins.js';
 import { createDolphinControls } from './dolphin-ui.js';
 import { createDeferredMarineLife } from './marine-loader.js';
@@ -123,8 +123,9 @@ import { createHullFlood, requestHullFloodPipelines, HULL_DAMAGE_UNIFORM_BYTES }
 import { hullHoleDepth } from './hull-holes.js';
 import { loseHandInGale } from './crew-overboard.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
-import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer, requestShipColorsPipeline } from './ship-colors.js';
-import { createDockingBoardingState, computeBoardingStrength } from './boarding-docking.js';
+import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors } from './ship-colors.js';
+import { createDockingBoardingState, computeBoardingStrength, mooringLinesState } from './boarding-docking.js';
+import { writeVesselDetailState, VESSEL_DETAIL_STATE_FLOATS } from './vessel-detail.js';
 import { createFreeCannon } from './free-cannon.js';
 import { createCastleDuelController, CASTLE_DUEL_DISTANCE_M } from './castle-duel.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
@@ -589,14 +590,13 @@ async function main() {
     requestCrestSprayPipeline({device,shader}),
     requestWeatherPipelines({device,shader,format:HDR,samples:MSAA}),
     requestTownsfolkPipelines({device,shader}),
-    requestShipColorsPipeline({device,shader,format:HDR,samples:MSAA}),
     requestUnderwaterPipeline({device,shader,format:HDR,samples:MSAA,cameraProbe:true,surfaceWaves:true,shadows:true,skipAir:true}),
     requestNeuralLightPipelines({device,shader,swapFormat,samples:MSAA,mode:INITIAL_NEURAL_MODE}),
     requestHullFloodPipelines({device,shader,format:HDR,samples:MSAA}),
     computePipe(HULL_CONTACT_QUERY,'underside incident sea contact'),
     computePipe(PART_ASSEMBLY_POSE_UPDATE,'shared part assembly deformation'),
     computePipe(SHIP_FRACTURE_POSE_UPDATE,'ship fracture'),
-    ...(fleetSpecs.some(spec=>getShipParts(spec.modelId).equipment.anchor!==null)?[requestAnchorPipelines({device,shader,format:HDR,samples:MSAA,waterOptics:waterOpticsPromise})]:[]),
+    ...(fleetSpecs.some(spec=>getShipParts(spec.modelId).equipment.anchor!==null)?[requestAnchorSplashPipeline({device,shader,format:HDR,samples:MSAA})]:[]),
   ];
   for(const p of startupPrograms)p.catch(()=>{});
 
@@ -773,7 +773,7 @@ async function main() {
     const interactionPromise=createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
     const rowingWaterPromise=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
     interactionPromise.catch(()=>{});rowingWaterPromise?.catch(()=>{});
-    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,mesh,pristineMesh:asset.vertices,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap,partAssembly:asset.partAssembly??null,fracture:asset.fracture??null});
+    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,mesh,pristineMesh:asset.vertices,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap,partAssembly:asset.partAssembly??null,fracture:asset.fracture??null,detail:asset.detail??null});
     if(pose)render.poseAssets=pose.assets;
     const wetnessPromise=createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length+Object.keys(asset.model.supplementalCrewStations??{}).length,posed:pose});
     const shadowsPromise=wetnessPromise.then(wetness=>createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,wetness,targets:sceneShadows.layer(index)}));
@@ -833,12 +833,11 @@ async function main() {
   const spindriftPromise=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
   const weatherRendererPromise=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   const hullContactProbePromise=createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
-  const noAnchorRenderer=Object.freeze({update(){},draw(){},drawSubmerged(){}});
-  const anchorsPromise=Promise.all(vessels.map(async v=>{v.anchorRenderer=getShipParts(v.modelId).equipment.anchor===null?noAnchorRenderer:await createAnchorRenderer({waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
-  const shipColorsPromise=createShipColorsRenderer({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA,maxVessels:Math.max(4,vessels.length)});
-  for(const p of [spindriftPromise,weatherRendererPromise,hullContactProbePromise,anchorsPromise,shipColorsPromise])p.catch(()=>{});
+  // Her anchor's iron and rode are her own (js/vessel-detail.js); this is the splash it throws up when let go.
+  const noAnchorSplash=Object.freeze({update(){},draw(){}});
+  const anchorsPromise=Promise.all(vessels.map(async v=>{v.anchorSplash=getShipParts(v.modelId).equipment.anchor===null?noAnchorSplash:await createAnchorSplashRenderer({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
+  for(const p of [spindriftPromise,weatherRendererPromise,hullContactProbePromise,anchorsPromise])p.catch(()=>{});
   const spindrift=await spindriftPromise;
-  const shipColorsRenderer=await shipColorsPromise.catch(()=>null);
   for(const v of vessels)v.wetness.connect(v.interaction,spindrift,fullArr(dispTex),samplerSim);
   const wakeIndices=[0,1,2,3],wakeIndex=()=>wakePool.current+2*surfaceWaves.current;
   const bgFoamUpd=[0,1].map(i=>wakeIndices.map(w=>bg(foamUpdPipe,[{buffer:foamUBO},lvl(foamW[1-i],0),lvl(foamW[i],0),
@@ -5400,8 +5399,14 @@ async function main() {
         v.pose.updateRecoil(v.gunnery.state.guns,ship);
         v.pose.updateDamage?.(ship);
       }
-      if(!index||followerEnabled)v.pose.update(ship,simTime,settlingBake?0:P.windSpeed);
-      if(ship.showProw&&!settlingBake)v.anchorRenderer.update(v.anchor,ship);
+      if(!index||followerEnabled){
+        v.pose.update(ship,simTime,settlingBake?0:P.windSpeed);
+        // Her detail's compact state: the colours she wears, the wind, her anchor and, for the player's ship, her mooring.
+        v.pose.updateDetail(writeVesselDetailState(v.detailState??=new Float32Array(VESSEL_DETAIL_STATE_FLOATS),{boat:ship,
+          code:getShipColorsInfo(ship.damage?.surrendered?'surrender':ship.colors??DEFAULT_SHIP_COLORS).code,surrendered:!!ship.damage?.surrendered,
+          wind:[Math.cos(P.windDir*D2R),Math.sin(P.windDir*D2R),settlingBake?0:P.windSpeed],anchor:v.anchor,mooring:index?null:mooringLinesState(dockingBoarding)}));
+      }
+      if(ship.showProw&&!settlingBake)v.anchorSplash.update(v.anchor,ship);
       if(settlingBake){
         const savedEffects=ship.effects;ship.effects=false;
         v.interaction.update(ship,0,simTime,frameIndex,0,0,true,0);
@@ -5605,7 +5610,6 @@ async function main() {
       if(v.bakedWreck&&v.entirelySubmerged&&Math.hypot((v.boat.x??0)-cam.x,(v.boat.z??0)-cam.z)>350)continue;
       v.continuum.drawCapture(underwater,false,capture=>vesselCaptureGroups(v,capture));
       if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(underwater);
-      if(!v.bakedWreck)v.anchorRenderer.drawSubmerged(underwater);
     }
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
     if(cam.y<waterH+Math.min(HB,1.5)){
@@ -5615,7 +5619,6 @@ async function main() {
         if(!v.boat.showProw||(v.bakedWreck&&v.entirelySubmerged))continue;
         v.continuum.drawCapture(aboveWater,true,capture=>vesselCaptureGroups(v,capture));
         if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(aboveWater,true);
-        if(!v.bakedWreck)v.anchorRenderer.drawSubmerged(aboveWater,true);
       }
       dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
     }
@@ -5678,16 +5681,9 @@ async function main() {
     if(drawProw){
       for(const v of hulls){
         if(vesselHasVisibleCrew(v))v.crew?.drawCut(rp);
-        if(!v.bakedWreck)v.anchorRenderer.draw(rp);
+        if(!v.bakedWreck)v.anchorSplash.draw(rp);
         if(!v.boat.damage?.sunk)v.flood?.draw(rp);
       }
-      for(let i=0;i<vessels.length;i++){
-        const v=vessels[i];
-        const visible=Boolean(v.boat.showProw&&!(v.bakedWreck&&v.entirelySubmerged)&&!v.boat.damage?.sunk);
-        shipColorsRenderer?.updateVessel(i,visible?v.boat:null,simTime,Math.cos(P.windDir*D2R),Math.sin(P.windDir*D2R),P.windSpeed);
-      }
-      shipColorsRenderer?.updateMooringVertices(dockingBoarding.buildVertices());
-      shipColorsRenderer?.draw(rp,vessels.length);
     }
     if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(rp);
     dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);weatherRenderer.draw(rp);

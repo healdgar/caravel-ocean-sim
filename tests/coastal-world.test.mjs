@@ -1412,7 +1412,7 @@ test('rogue liberator path strengthens Native American settlements through trade
 
 test('Santa María stern colors clear rear mizzen-lateen sail across all wind angles and port building geometry/shaders prevent interference stripes', async () => {
   const { sternEnsignDesignStation, crowsNestDesignStation } = await import('../js/boat.js');
-  const { buildShipColorsGeometry } = await import('../js/ship-colors.js');
+  const { createShipAssetCache } = await import('../js/ship-mesh.js');
   const { TERRAIN, TERRAIN_FILTERING } = await import('../js/wgsl/terrain.js');
 
   // 1. Verify Santa María, Pinta, Niña, and Victory stern ensign stations sit abaft the aftmost sail clew
@@ -1454,13 +1454,12 @@ test('Santa María stern colors clear rear mizzen-lateen sail across all wind an
     }
   }
 
-  // 4. Verify stern flagstaff geometry (mode 1) has the matching 0.58 aft rake
-  const colorVerts = buildShipColorsGeometry();
-  let maxStaffZ = 0;
-  for (let i = 0; i < colorVerts.length; i += 10) {
-    if (Math.round(colorVerts[i + 8]) === 1) {
-      maxStaffZ = Math.max(maxStaffZ, colorVerts[i + 2]);
-    }
+  // 4. Verify the stern flagstaff in her assembly (oak, in her colours' group) has the matching 0.58 aft rake
+  const sm = createShipAssetCache().get('santa-maria'), colours = sm.groups.find((g) => g.id === 'flag.colours');
+  let maxStaffZ = -Infinity;
+  for (let i = colours.firstVertex; i < colours.firstVertex + colours.vertexCount; i++) {
+    const v = sm.indices[i] * 9;
+    if (Math.floor(sm.vertices[v + 6]) === 1) maxStaffZ = Math.max(maxStaffZ, sm.vertices[v + 2] - smStern.z);
   }
   assert.ok(maxStaffZ >= 1.40, `Stern flagstaff top reaches z >= 1.40 aft of base (got ${maxStaffZ.toFixed(2)})`);
 
@@ -1862,7 +1861,7 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
 
 test('Crow’s nest, masthead pennant, stern outlicker, yard parrels, and rear mizzen sail connect cleanly to masts and hulls across all ships', async () => {
   const { crowsNestDesignStation, sternEnsignDesignStation } = await import('../js/boat.js');
-  const { buildVesselRigConnectors } = await import('../js/ship-colors.js');
+  const { vesselRigAtRest } = await import('../js/vessel-detail.js');
   const { RIG_MASTS, mastPoint } = await import('../js/rigging.js');
   const { VICTORY_MASTS, victoryMastPoint } = await import('../js/models/victory.js');
   const { proceduralRigContext } = await import('../js/additional-rig.js');
@@ -1906,17 +1905,20 @@ test('Crow’s nest, masthead pennant, stern outlicker, yard parrels, and rear m
   for (const [modelId, hullEndZ] of [['nina', 5.60], ['pinta', 6.0], ['santa-maria', 6.0]]) {
     const stern = sternEnsignDesignStation({ modelId });
     assert.ok(stern.z - stern.outlickerSpan <= hullEndZ - 0.15, `${modelId} stern outlicker bracket extends forward into hull transom (${hullEndZ})`);
-    const verts = buildVesselRigConnectors({ modelId, heading: 0, sailSet: 1 }, 0, 8);
-    assert.ok(verts.length >= 600, `${modelId} generates rig connector vertices (${verts.length / 10} verts)`);
+    // Her rig's connectors at rest (js/vessel-detail.js): oak and iron spars (material 1, 3), hemp (12).
+    const { anchors, tubes } = vesselRigAtRest(modelId);
+    assert.ok(tubes.length >= 60, `${modelId} generates rig connectors (${tubes.length} tubes)`);
     let hasInboardSpar = false;
     let hasAftOutlickerTip = false;
     let hasAftMizzenSheet = false;
-    for (let i = 0; i < verts.length; i += 10) {
-      const z = verts[i + 2];
-      const mode = Math.round(verts[i + 8]);
-      if (mode === 6 && z <= hullEndZ - 0.15 && z >= hullEndZ - 0.6) hasInboardSpar = true;
-      if (mode === 6 && z >= stern.aftSailZ + 0.10) hasAftOutlickerTip = true;
-      if (mode === 7 && z >= stern.aftSailZ - 0.05) hasAftMizzenSheet = true;
+    for (const tube of tubes) {
+      const spar = tube.shape[2] !== 12;
+      for (const end of [tube.a, tube.b]) {
+        const z = anchors[end[3]].p[2] + end[2];
+        if (spar && z <= hullEndZ - 0.15 && z >= hullEndZ - 0.6) hasInboardSpar = true;
+        if (spar && z >= stern.aftSailZ + 0.10) hasAftOutlickerTip = true;
+        if (!spar && z >= stern.aftSailZ - 0.05) hasAftMizzenSheet = true;
+      }
     }
     assert.ok(hasInboardSpar, `${modelId} stern outlicker spar roots inside the hull transom (z <= ${hullEndZ})`);
     assert.ok(hasAftOutlickerTip, `${modelId} stern outlicker spar reaches abaft the overhanging rear sail clew (${stern.aftSailZ})`);

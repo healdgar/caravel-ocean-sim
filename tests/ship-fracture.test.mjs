@@ -12,7 +12,6 @@ import { crewClearsRail, crewRailAboveDeck } from '../js/crew-overboard.js';
 import { modelDeck } from '../js/hull.js';
 import { locatePartAtLocalPoint } from '../js/part-assembly.js';
 import { repairVessel, vesselDamageSnapshot, restoreVesselDamageSnapshot, raiseVesselRig, refloatVessel } from '../js/vessel-damage.js';
-import { buildVesselRigConnectors } from '../js/ship-colors.js';
 import { SHARD_KINDS, FRACTURE_RECORD_FLOATS, applyFractureEvents, evaluateShardFlight, fracturePartsGone, settleFinishedFlights, shipFractureStateOf, shipMastSpecs, syncFractureWithDamage, releaseSinkingWreckage, brokenShardList, evaluateBrokenShardWorldPivot, shatterFloatingWreckageOnSegment, blastFloatingWreckageAt, shipSeaLevel, createShipFractureGPU } from '../js/ship-fracture.js';
 
 const cache = createShipAssetCache();
@@ -344,15 +343,24 @@ test('a magazine blast and a broken back take pieces off, and leave her decks wh
 });
 
 test('parrels and the outlicker sheet go with the mast they served', () => {
+  // A rig connector of her detail layer (js/vessel-detail.js) is drawn while every corner of the triangles holding its
+  // two ends is aboard (js/wgsl/vessel-detail.js vesselDetailAnchor): it goes with any mast that holds it.
   for (const modelId of ['nina', 'pinta', 'santa-maria']) {
-    const verts = (mastState) => buildVesselRigConnectors({ modelId, length: 20, beam: 6, damage: { mastState } }).length;
-    const whole = verts({ fore: 0, main: 0, mizzen: 0 });
-    const noMizzen = verts({ fore: 0, main: 0, mizzen: 2 });
-    const noMasts = verts({ fore: 2, main: 2, mizzen: 2 });
+    const { detail, fracture } = cache.get(modelId), m = detail.model, anchorsAt = m[4], tubesAt = m[5];
+    const mastsOf = (anchor) => [0, 1, 2].map((k) => fracture.shards[fracture.vertexShards[m[(anchorsAt + anchor * 2) * 4 + k]]]?.mast ?? 'hull');
+    let whole = 0, mizzen = 0, masted = 0;
+    for (let i = 0; i < detail.tubeCount; i++) {
+      const t = (tubesAt + i * 4) * 4;
+      if (m[t + 15] !== 0) continue; // her rig's connectors, not her mooring lines, gangplanks or rode
+      const rides = [...mastsOf(m[t + 3]), ...mastsOf(m[t + 7])];
+      whole++;
+      if (rides.includes('mizzen')) mizzen++;
+      if (rides.some((r) => r !== 'hull')) masted++;
+    }
     assert.ok(whole > 0, modelId);
-    assert.ok(noMizzen < whole, `${modelId} loses the mizzen's connectors`);
-    assert.ok(noMasts < noMizzen, `${modelId} loses them all with her masts`);
-    assert.ok(noMasts > 0, `${modelId} keeps her stern outlicker, which stands on the hull`);
+    assert.ok(mizzen > 0, `${modelId} loses the mizzen's connectors`);
+    assert.ok(masted > mizzen, `${modelId} loses them all with her masts`);
+    assert.ok(whole > masted, `${modelId} keeps her stern outlicker, which stands on the hull`);
   }
 });
 

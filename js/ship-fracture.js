@@ -1304,6 +1304,8 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
   };
   return {
     assets,
+    // Each shard's flight (record 3's w below -1.5 while it is aboard), read by her detail's lines (js/vessel-detail.js).
+    records,
     get active() { return active; },
     apply(damage, events, now, boat = null) {
       const count = applyFractureEvents(fracture, damage, events, now);
