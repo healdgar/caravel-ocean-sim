@@ -24,7 +24,7 @@ import { createVesselDamageState, stepVesselDamage } from './gunnery-control.js'
 import { HULL_DAMAGE_UNIFORM_BYTES, writeHullFloodUniform, writeHullCraters } from './hull-flood.js';
 import { addHullHole, stepHullHoles } from './hull-holes.js';
 import { packCrewCompMask, packCrewFaceW } from './crew-components.js';
-import { colonialGroomMask, createIndigenousCrewModels, reconcileColonialGroomAndComp, CREW_ACTOR_FLOATS } from './crew.js';
+import { colonialGroomMask, reconcileColonialGroomAndComp, CREW_ACTOR_FLOATS } from './crew.js';
 import { DRESS_MASK_SCALE } from './indigenous-dress.js';
 import {
   createCrewContinuumBatch, createCrewContinuumPoser, createCrewContinuumWorldHull, crewContinuumBodyFor, crewContinuumRestPlaces,
@@ -4943,12 +4943,9 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
 const DECK_CREW_BODY_LIMIT = 8;
 // Each body's run of slots begins where a bind group may (256 bytes of joints and actors).
 const DECK_CREW_SLOT_ALIGNMENT = 16;
-// The counts the placing pass keeps: each body's indirect dispatch (count, 1, 1, unused), then the indexed draw its
-// old body would take (index count, instances, 0, 0, 0).
+// The counts the placing pass keeps: each body's indirect dispatch (count, 1, 1, unused).
 export const DECK_CREW_DISPATCH_WORDS = 4;
-export const DECK_CREW_FALLBACK_AT = DECK_CREW_BODY_LIMIT * DECK_CREW_DISPATCH_WORDS;
-export const DECK_CREW_FALLBACK_WORDS = 5;
-export const DECK_CREW_COUNT_WORDS = DECK_CREW_FALLBACK_AT + DECK_CREW_BODY_LIMIT * DECK_CREW_FALLBACK_WORDS;
+export const DECK_CREW_COUNT_WORDS = DECK_CREW_BODY_LIMIT * DECK_CREW_DISPATCH_WORDS;
 // A station: where on the deck and which way (4 floats), what it does (4 words), and who stands there (4 words).
 export const DECK_CREW_STATION_WORDS = 12;
 // The pass's uniform: its counts (4 words), and each body's first slot, room, and work clip (4 words each).
@@ -5252,7 +5249,6 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
 
 @compute @workgroup_size(${DECK_CREW_BODY_LIMIT}) fn deckCrewReset(@builtin(local_invocation_index) body: u32) {
   atomicStore(&counts[body * ${DECK_CREW_DISPATCH_WORDS}u], 0u);
-  atomicStore(&counts[${DECK_CREW_FALLBACK_AT}u + body * ${DECK_CREW_FALLBACK_WORDS}u + 1u], 0u);
 }
 
 @compute @workgroup_size(64) fn deckCrewPlace(@builtin(global_invocation_id) id: vec3u) {
@@ -5323,7 +5319,6 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
 
   let rank = atomicAdd(&counts[body * ${DECK_CREW_DISPATCH_WORDS}u], 1u);
   if (rank >= run.y) { return; }
-  atomicAdd(&counts[${DECK_CREW_FALLBACK_AT}u + body * ${DECK_CREW_FALLBACK_WORDS}u + 1u], 1u);
   // The people of a vessel taking water are cut finer, as anything damaged is.
   let important = select(0u, ${CREW_CONTINUUM_ORDER_IMPORTANT}u, inst.animSink.z > 0.001);
   placed[run.x + rank] = CrewPlaced(
@@ -5661,16 +5656,15 @@ export async function createTradeVessels({
   let activeWaveVesselCount = 0;
 
   // What the people continuum draws deck hands with (setPeople: the scene's frame, lights and shadow set), the crew's
-  // shared assets (the old bodies, and their programs for the fallback), and this device's deck-crew programs.
+  // shared assets (the painted faces' picture and its sampler), and this device's deck-crew programs.
   let deckDrawing = null;
   let deckShared = null;
   let deckPrograms = null;
   let deckProgramsAsked = null;
-  // Each continuum body by id once fetched: null while it comes, false if it cannot be had (the old body stands in).
+  // Each continuum body by id once fetched: null while it comes, false if it cannot be had (its people are not drawn).
   const deckBodies = new Map();
-  // Each rig's deck clips and rest places, baked once; the old bodies' geometry, uploaded once.
+  // Each rig's deck clips and rest places, baked once.
   const deckRigs = new Map();
-  const deckOldGeometry = new Map();
   const deckOwned = [];
   let deckHull = null;
   // The company drawn: each body's run of slots, its buffers, batches and passes. Laid again when the runs change.
@@ -5692,10 +5686,7 @@ export async function createTradeVessels({
       device.createComputePipelineAsync({ label: 'trade deck crew place', layout: 'auto', compute: { module, entryPoint: 'deckCrewPlace' } }),
       device.createComputePipelineAsync({ label: 'trade deck crew reset', layout: 'auto', compute: { module, entryPoint: 'deckCrewReset' } }),
       requestCrewContinuumPose({ device, shader }),
-      requestCrewContinuumPipelines({ device, shader, format, samples }).catch((error) => {
-        console.warn('Trade deck crews: the continuum is unavailable; the old bodies stand in', error);
-        return null;
-      }),
+      requestCrewContinuumPipelines({ device, shader, format, samples }),
     ]);
     return { place, reset, pose, continuum };
   });
@@ -5709,34 +5700,12 @@ export async function createTradeVessels({
         deckBodies.set(id, body);
         crewStationsDirty = true;
       }).catch((error) => {
+        // People are drawn through the continuum alone: a body that cannot be had is said, and its people not drawn.
         deckBodies.set(id, false);
-        console.warn(`Trade deck crews: the ${id} body cannot be had; the old one stands in`, error);
+        console.error(`Trade deck crews: the ${id} body cannot be had, so its people are not drawn`, error);
       });
     }
     return deckBodies.get(id) || null;
-  };
-  // The old body standing in for a continuum one: the crew's sailor, woman or captain, or the island pair.
-  const deckOldModelOf = (id) => {
-    const models = deckShared?.models;
-    if (!Array.isArray(models) || !models.length) return null;
-    const female = id.endsWith('female');
-    if (id.startsWith('caribbean') && models.length >= 2) return createIndigenousCrewModels(models, null)[female ? 1 : 0];
-    if (id === 'captain') return models[2] ?? models[0];
-    return models[female ? 1 : 0] ?? models[0];
-  };
-  const deckOldGeometryOf = (model) => {
-    if (deckOldGeometry.has(model)) return deckOldGeometry.get(model);
-    const index = deckShared.models.indexOf(model);
-    const given = index >= 0 ? deckShared.geometry?.[index] : null;
-    const levels = given?.lods ?? (model.lods ?? [{ indices: model.indices }]).map((tier) => ({ indexCount: tier.indexCount ?? tier.indices.length, indices: tier.indices }));
-    const level = levels[Math.min(1, levels.length - 1)];
-    const entry = {
-      vertex: given?.vertex ?? deckOwnedBuffer('trade deck crew old vertices', model.vertices, U_VERTEX),
-      index: level.buffer ?? deckOwnedBuffer('trade deck crew old indices', level.indices, U_INDEX),
-      indexCount: level.indexCount,
-    };
-    deckOldGeometry.set(model, entry);
-    return entry;
   };
   const deckRigOf = (animator) => {
     let rig = deckRigs.get(animator);
@@ -5767,7 +5736,7 @@ export async function createTradeVessels({
       : DECK_CREW_SHIRTS[Math.floor(h1 * DECK_CREW_SHIRTS.length) % DECK_CREW_SHIRTS.length];
     const trousers = DECK_CREW_TROUSERS[Math.floor(h2 * DECK_CREW_TROUSERS.length) % DECK_CREW_TROUSERS.length];
 
-    // The pieces the old bodies put on (hair, hat, beard, garment), for where they stand in.
+    // The pieces they put on (hair, hat, beard, garment), packed with the face.
     const hairPool = female ? [2, 3, 4, 5] : [0, 1, 2, 3];
     const hair = hairPool[Math.floor(h3 * hairPool.length) % hairPool.length];
     let hat = 0;
@@ -5887,7 +5856,7 @@ export async function createTradeVessels({
     activeDeckSoulCount = souls.length;
 
     // Each body's run of slots, in order of its first wearer, and the rig its clips are baked from: the continuum
-    // body's own once it has come, else the old body standing in for it. Without either, its people are not drawn.
+    // body's own. Until it has come, its people are not drawn.
     const runs = [];
     const runOf = new Map();
     let slots = 0;
@@ -5897,9 +5866,8 @@ export async function createTradeVessels({
       if (!runOf.has(soul.body)) {
         if (runs.length >= DECK_CREW_BODY_LIMIT) { runOf.set(soul.body, null); continue; }
         const body = deckBodyOf(soul.body);
-        const old = body ? null : deckOldModelOf(soul.body);
-        const animator = body?.standIn?.animator ?? old?.animator ?? null;
-        const run = animator ? { id: soul.body, index: runs.length, body, old, rig: deckRigOf(animator), people: 0 } : null;
+        const animator = body?.standIn?.animator ?? null;
+        const run = animator ? { id: soul.body, index: runs.length, body, rig: deckRigOf(animator), people: 0 } : null;
         runOf.set(soul.body, run);
         if (run) runs.push(run);
       }
@@ -5949,20 +5917,19 @@ export async function createTradeVessels({
     }
     if (looks) device.queue.writeBuffer(crewLooksBuffer, 0, crewLooksF32, 0, looks * DECK_CREW_LOOK_WORDS);
 
-    const key = runs.map((run) => `${run.id}:${run.capacity}:${run.body ? 'continuum' : 'old'}`).join('|');
+    const key = runs.map((run) => `${run.id}:${run.capacity}`).join('|');
     if (!runs.length) disposeDeckCompany();
     else if (deckCompany?.key !== key) buildDeckCompany(runs, slots, key);
   }
 
   function disposeDeckCompany() {
     if (!deckCompany) return;
-    for (const b of [deckCompany.placed, deckCompany.joints, deckCompany.actors, ...deckCompany.orders]) b?.destroy?.();
+    for (const b of [deckCompany.placed, deckCompany.joints, deckCompany.actors]) b.destroy();
     for (const made of [...deckCompany.posers, ...deckCompany.batches]) made?.destroy?.();
     deckCompany = null;
   }
 
-  // The company's buffers and passes: one continuum batch a body, cut and drawn on the GPU, or where its body has
-  // not come, the old body at one level, posed by the same pass.
+  // The company's buffers and passes: one continuum batch a body, posed, cut and drawn on the GPU.
   function buildDeckCompany(runs, slots, key) {
     disposeDeckCompany();
     const d = deckDrawing;
@@ -5972,11 +5939,7 @@ export async function createTradeVessels({
     const joints = device.createBuffer({ label: 'trade deck crew joints', size: slots * DECK_CREW_JOINT_BYTES, usage: U_STORAGE });
     const actors = device.createBuffer({ label: 'trade deck crew actors', size: slots * DECK_CREW_ACTOR_BYTES, usage: U_STORAGE });
     const countWords = new Uint32Array(DECK_CREW_COUNT_WORDS);
-    for (let b = 0; b < DECK_CREW_BODY_LIMIT; b++) {
-      countWords.set([0, 1, 1, 0], b * DECK_CREW_DISPATCH_WORDS);
-      const old = runs[b]?.old;
-      countWords[DECK_CREW_FALLBACK_AT + b * DECK_CREW_FALLBACK_WORDS] = old ? deckOldGeometryOf(old).indexCount : 0;
-    }
+    for (let b = 0; b < DECK_CREW_BODY_LIMIT; b++) countWords.set([0, 1, 1, 0], b * DECK_CREW_DISPATCH_WORDS);
     device.queue.writeBuffer(crewCountsBuffer, 0, countWords);
     deckHull ??= createCrewContinuumWorldHull(device, 'trade deck crew world frame');
     const main = [
@@ -5985,31 +5948,16 @@ export async function createTradeVessels({
       { binding: 13, resource: shared.captainTexView }, { binding: 14, resource: shared.captainSampler },
     ];
     const countedOf = (b) => ({ buffer: crewCountsBuffer, offset: b * DECK_CREW_DISPATCH_WORDS * 4 });
-    const batches = runs.map((run, b) => (run.body && P.continuum
-      ? createCrewContinuumBatch({
-          device, pipelines: P.continuum, body: run.body, capacity: run.capacity, first: run.first, samples,
-          frame: d.frameUBO, hull: deckHull, bones: joints, actor: actors, main, shadows: d.shadows, counted: countedOf(b),
-        })
-      : null));
-    const orders = runs.map((run, b) => (batches[b] ? null : device.createBuffer({ label: 'trade deck crew old orders', size: Math.max(16, run.capacity * 4), usage: U_STORAGE })));
+    const batches = runs.map((run, b) => createCrewContinuumBatch({
+      device, pipelines: P.continuum, body: run.body, capacity: run.capacity, first: run.first, samples,
+      frame: d.frameUBO, hull: deckHull, bones: joints, actor: actors, main, shadows: d.shadows, counted: countedOf(b),
+    }));
     const posers = runs.map((run, b) => createCrewContinuumPoser({
       device, pipeline: P.pose, placed, palettes: run.rig.palette, looks: crewLooksBuffer, rest: run.rig.rest, joints, actors,
-      orders: batches[b]?.orders ?? orders[b], first: run.first, counted: countedOf(b),
+      orders: batches[b].orders, first: run.first, counted: countedOf(b),
     }));
-    // The old bodies' draws, each from the slice of joints and actors its people were posed into.
-    const slice = (buffer, bytes, run) => ({ buffer, offset: run.first * bytes, size: run.capacity * bytes });
-    const groupOf = (pipeline, resources) => device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: resources.map((resource, binding) => (resource?.resource !== undefined ? resource : { binding, resource })),
-    });
-    const fallback = runs.map((run) => (run.old && shared.pipeline && shared.shadowPipeline ? {
-      geometry: deckOldGeometryOf(run.old),
-      group: groupOf(shared.pipeline, [main[0], main[1], slice(joints, DECK_CREW_JOINT_BYTES, run), slice(actors, DECK_CREW_ACTOR_BYTES, run), ...main.slice(4)]),
-      shadowGroup: groupOf(shared.shadowPipeline, [{ buffer: d.shadows.uniform }, main[1], slice(joints, DECK_CREW_JOINT_BYTES, run), slice(actors, DECK_CREW_ACTOR_BYTES, run)]),
-    } : null));
     deckCompany = {
-      key, runs, placed, joints, actors, orders, batches, posers, fallback, shared,
-      lighting: fallback.some(Boolean) ? d.shadows.bind(shared.pipeline) : null,
+      key, runs, placed, joints, actors, batches, posers,
       resetGroup: device.createBindGroup({ label: 'trade deck crew reset', layout: P.reset.getBindGroupLayout(0), entries: [{ binding: 6, resource: { buffer: crewCountsBuffer } }] }),
       placeGroup: null,
     };
@@ -6033,25 +5981,6 @@ export async function createTradeVessels({
         { binding: 7, resource: byBinding.get(19) },
         { binding: 8, resource: { buffer: crewMoistureBuffer } },
       ],
-    });
-  }
-
-  // The old bodies of a company whose continuum bodies have not come, each from its slice.
-  function drawDeckFallback(pass, shadow) {
-    const c = deckCompany;
-    const pipeline = shadow ? c.shared.shadowPipeline : c.shared.pipeline;
-    let set = false;
-    c.fallback.forEach((f, b) => {
-      if (!f) return;
-      if (!set) {
-        pass.setPipeline(pipeline);
-        if (!shadow && c.lighting) pass.setBindGroup(1, c.lighting);
-        set = true;
-      }
-      pass.setBindGroup(0, shadow ? f.shadowGroup : f.group);
-      pass.setVertexBuffer(0, f.geometry.vertex);
-      pass.setIndexBuffer(f.geometry.index, 'uint32');
-      pass.drawIndexedIndirect(crewCountsBuffer, (DECK_CREW_FALLBACK_AT + b * DECK_CREW_FALLBACK_WORDS) * 4);
     });
   }
 
@@ -7760,8 +7689,7 @@ export async function createTradeVessels({
 
       // Deck hands, opaque with the rest: no discard, so the GPU shades only what shows.
       if (crewEncoded && deckCompany) {
-        for (const batch of deckCompany.batches) batch?.drawOpaque(pass);
-        drawDeckFallback(pass, false);
+        for (const batch of deckCompany.batches) batch.drawOpaque(pass);
       }
     },
     // The indirect draws draw() and drawDamaged() submit in the main scene pass this frame, for the continuum census
@@ -7775,13 +7703,13 @@ export async function createTradeVessels({
     },
     // The deck hands' own draws, for the census's one family of people (js/main.js).
     peopleDraws() {
-      return crewEncoded && deckCompany ? deckCompany.batches.flatMap((batch) => batch?.continuumDraws() ?? []) : [];
+      return crewEncoded && deckCompany ? deckCompany.batches.flatMap((batch) => batch.continuumDraws()) : [];
     },
-    // Whether the deck hands are drawn through the continuum (each body that has come), and the counts their placing
-    // pass keeps, for whoever reads them back.
+    // The deck hands' bodies (each that has come, drawn through the continuum), and the counts their placing pass
+    // keeps, for whoever reads them back.
     get deckCrew() {
       return deckCompany
-        ? { bodies: deckCompany.runs.map((run) => ({ id: run.id, continuum: Boolean(deckCompany.batches[run.index]), first: run.first, capacity: run.capacity })), counts: crewCountsBuffer }
+        ? { bodies: deckCompany.runs.map((run) => ({ id: run.id, continuum: true, first: run.first, capacity: run.capacity })), counts: crewCountsBuffer }
         : null;
     },
     // Each vessel drawn damaged: its clusters from its own list, their surviving depth laid first (holed timber, parted
@@ -7811,8 +7739,7 @@ export async function createTradeVessels({
         shipCut.draw(pass, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST);
       }
       if (crewEncoded && deckCompany) {
-        for (const batch of deckCompany.batches) batch?.drawShadow(pass);
-        drawDeckFallback(pass, true);
+        for (const batch of deckCompany.batches) batch.drawShadow(pass);
       }
       if (damagedAssets?.dmgShadowPipe && totalIntact > 0) {
         damagedSlots.forEach((v, slot) => {

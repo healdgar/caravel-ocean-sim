@@ -1,7 +1,7 @@
 import { footingUnder, restingHeightUnder } from './building-fracture.js';
 import { enclosurePlan, insetOutline, traceWalls } from './fort-plan.js';
 import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
-import { loadCrewGLB, gltfTRS, readGLB, gltfAccessor } from './gltf.js';
+import { gltfTRS, readGLB, gltfAccessor } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer } from './lateen.js';
@@ -13,7 +13,7 @@ import { crewClearsRail, crewOpenEdgeInset, crewFeetAwash, sendCrewOverboard, st
 import { crewLoseHandsAloft, stepCrewAloftFall } from './crew-aloft.js';
 import { createGunneryTools, requestGunneryToolPipelines } from './gunnery-tools.js';
 import { requestOnce } from './gpu-program-cache.js';
-import { CREW_RENDER, CREW_SHADOW, CREW_POSE_BLEND } from './wgsl/crew.js';
+import { CREW_POSE_BLEND } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
 import { VICTORY_DESIGN } from './models/victory.js';
 import { requirePlayableShipModel } from './ship-models.js';
@@ -27,7 +27,7 @@ import { crewDeckField, crewDeckRoom } from './crew-deck.js';
 import { crewCompanyDistance, crewPoseInterval, fortPoseStride, crewApparentDistance, crewLensZoom, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-pose-cadence.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 import { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
-import { attachCrewComponents, crewComponentMaskForActor, ensureCrewComponentPacks, packCrewFaceW } from './crew-components.js';
+import { crewComponentMaskForActor, packCrewFaceW } from './crew-components.js';
 import { CREW_JOINT_COUNT, CREW_SLOT } from './crew-skeleton.js';
 import { CREW_CONTINUUM_ORDER_CUT, CREW_CONTINUUM_ORDER_IMPORTANT, createCrewContinuumBatch, loadCrewContinuumBodies, requestCrewContinuumPipelines } from './crew-continuum-draw.js';
 
@@ -548,7 +548,6 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   return s;
 }
 
-let preloadedCrewModels=null;
 export function isCaptainActor(s){
   if(!s||s.indigenous)return false;
   return s.role==='Captain'||Boolean(s.roles?.includes('captain'))||s.role==='Capitán de Presidio'||s.role==='Captain of the Guard';
@@ -556,101 +555,19 @@ export function isCaptainActor(s){
 // The whole part of an actor's skin.w, which tells the shader whose body it is drawing: a man's, a woman's, or the
 // captain's worn by a woman, whose painted beard is then painted out. `own` is a body of its batch's own sex.
 export const crewBodyKind=(s,own)=>own?Number(s.sex==='female'):s.sex==='female'?2:0;
-export const CAPTAIN_TEXTURE_PX=2048;
-async function uploadCaptainTexture(device,model){
-  if(!model?.image||typeof createImageBitmap!=='function'){
-    const texture=device.createTexture({label:'captain pigment fallback',size:[1,1],format:'rgba8unorm-srgb',usage:(globalThis.GPUTextureUsage?.TEXTURE_BINDING??4)|(globalThis.GPUTextureUsage?.COPY_DST??2)});
-    device.queue.writeTexture?.({texture},new Uint8Array([180,140,110,255]),{bytesPerRow:4},[1,1]);
-    return texture;
-  }
-  const blob=new Blob([model.image],{type:model.mime||'image/jpeg'});
-  let bitmap=await createImageBitmap(blob,{colorSpaceConversion:'none'});
-  // One figure of a few thousand triangles, never more than a screen high: a texel of this is finer than a pixel
-  // of him at any distance the camera reaches, and it is a quarter of the memory the painted file would take.
-  const longest=Math.max(bitmap.width,bitmap.height);
-  if(longest>CAPTAIN_TEXTURE_PX){
-    const scale=CAPTAIN_TEXTURE_PX/longest,full=bitmap;
-    bitmap=await createImageBitmap(full,{resizeWidth:Math.max(1,Math.round(full.width*scale)),resizeHeight:Math.max(1,Math.round(full.height*scale)),resizeQuality:'high',colorSpaceConversion:'none'});
-    full.close();
-  }
-  const levels=Math.floor(Math.log2(Math.max(bitmap.width,bitmap.height)))+1;
-  const texture=device.createTexture({label:'captain pigment',size:[bitmap.width,bitmap.height],mipLevelCount:levels,format:'rgba8unorm-srgb',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT});
-  for(let level=0;level<levels;level++){
-    const width=Math.max(1,bitmap.width>>level),height=Math.max(1,bitmap.height>>level);
-    const source=level?await createImageBitmap(bitmap,{resizeWidth:width,resizeHeight:height,resizeQuality:'high',colorSpaceConversion:'none'}):bitmap;
-    device.queue.copyExternalImageToTexture({source},{texture,mipLevel:level},[width,height]);
-    if(level)source.close();
-  }
-  bitmap.close();
+// The picture a company's group 0 names at bindings 13 and 14. The continuum binds it and never reads it: a texel.
+function placeholderCaptainTexture(device){
+  const texture=device.createTexture({label:'captain pigment (unread)',size:[1,1],format:'rgba8unorm-srgb',usage:(globalThis.GPUTextureUsage?.TEXTURE_BINDING??4)|(globalThis.GPUTextureUsage?.COPY_DST??2)});
+  device.queue.writeTexture?.({texture},new Uint8Array([180,140,110,255]),{bytesPerRow:4},[1,1]);
   return texture;
 }
-async function fetchCrewModels(){
-  const loadGLB=async path=>{const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable: '+path);return loadCrewGLB(await response.arrayBuffer());};
-  const loadRaw=async path=>{const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable: '+path);return response.arrayBuffer();};
-  const [
-    rawMale,rawFemale,rawCaptain,rawSoldier,groomBytes,
-    algMale,algFemale,carMale,carFemale,mayMale,mayFemale,andMale,andFemale,
-  ]=await Promise.all([
-    loadGLB('assets/crew/sailor.glb'),
-    loadGLB('assets/crew/sailor-female.glb'),
-    loadGLB('assets/crew/captain.glb'),
-    loadGLB('assets/crew/soldier-1550.glb'),
-    loadRaw('assets/crew/groom-pack.glb'),
-    loadGLB('assets/crew/indigenous-algonquian-male.glb'),
-    loadGLB('assets/crew/indigenous-algonquian-female.glb'),
-    loadGLB('assets/crew/indigenous-caribbean-male.glb'),
-    loadGLB('assets/crew/indigenous-caribbean-female.glb'),
-    loadGLB('assets/crew/indigenous-maya-male.glb'),
-    loadGLB('assets/crew/indigenous-maya-female.glb'),
-    loadGLB('assets/crew/indigenous-andean-male.glb'),
-    loadGLB('assets/crew/indigenous-andean-female.glb'),
-    ensureCrewComponentPacks(),
-  ]);
-  const groomPack=loadGroomPackGLB(groomBytes);
-  const male=attachCrewComponents(attachColonialGroomModel(rawMale,groomPack,'male'),'male');
-  const female=attachCrewComponents(attachColonialGroomModel(rawFemale,groomPack,'female'),'female');
-  const captain=attachColonialGroomModel(rawCaptain,groomPack,'captain');
-  const soldierMale=attachCrewComponents(attachColonialGroomModel(rawSoldier,groomPack,'soldier'),'male');
-  for(const m of [algMale,algFemale,carMale,carFemale,mayMale,mayFemale,andMale,andFemale])m.groomPack=groomPack;
-  male.groomPack=groomPack;female.groomPack=groomPack;
-  male.soldierMale=soldierMale;
-  male.indigenousBase=carMale;female.indigenousBase=carFemale;
-  male.indigenousArchetypes=Object.freeze({
-    algonquian:Object.freeze([algMale,algFemale]),
-    caribbean:Object.freeze([carMale,carFemale]),
-    maya:Object.freeze([mayMale,mayFemale]),
-    andean:Object.freeze([andMale,andFemale]),
-  });
-  return [male,female,captain];
-}
-export function preloadCrewModels(){
-  if(!preloadedCrewModels&&typeof fetch==='function'){
-    preloadedCrewModels=fetchCrewModels().catch(err=>{preloadedCrewModels=null;throw err;});
-  }
-  return preloadedCrewModels;
-}
-
-// How an old body's vertices are read, for the two programs below.
-const CREW_BODY_VERTICES=[{arrayStride:60,attributes:[
-  {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
-  {shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'uint16x4'},
-  {shaderLocation:4,offset:44,format:'float32x4'},
-]}];
 // Every program a company is posed with, asked for once a device. Startup asks before it waits on anything, so they
 // compile beside the ocean's; the first company to be made finds them compiling or done. People are drawn through the
 // one continuum (js/crew-continuum-draw.js), whose programs are its own.
-// `pipeline` and `shadowPipeline` draw an old body whole. Nothing of the crew, the garrison or the townsfolk draws with
-// them: they are compiled, and handed on in the crew's shared assets, only because js/trade-vessels.js still stands old
-// bodies in for deck hands whose continuum body has not come. They go when that does.
 export function requestCrewPipelines({device,shader,format='rgba16float',samples=4,waterOptics=null}){
   return requestOnce(device,`crew ${format} ${samples}`,async()=>{
     const tools=requestGunneryToolPipelines({device,shader,format,samples,waterOptics});tools.catch(()=>{});
-    const [pipeline,shadowPipeline,poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline]=await Promise.all([
-      shader(CREW_RENDER,'crew').then(module=>device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:CREW_BODY_VERTICES},
-        fragment:{module,entryPoint:'crewFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
-        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}})),
-      shader(CREW_SHADOW,'crew shadow').then(module=>device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module,entryPoint:'vs',buffers:CREW_BODY_VERTICES},primitive:{topology:'triangle-list',cullMode:'none'},
-        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})),
+    const [poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline]=await Promise.all([
       shader(CREW_POSE_BLEND,'crew pose blend').then(module=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module,entryPoint:'main'}})),
       createCrewClipPipeline(device,shader),
       // One solver for the device: every company and garrison on it is solved together.
@@ -658,7 +575,7 @@ export function requestCrewPipelines({device,shader,format='rgba16float',samples
       createCrewArrowPipeline(device,shader),
       createCrewTurnPipeline(device,shader),
     ]);
-    return {pipeline,shadowPipeline,poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline};
+    return {poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline};
   });
 }
 
@@ -679,21 +596,14 @@ function loadCrewContinuum({device,shader,format,samples,waterOptics},ids){
 }
 
 export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina',waterOptics=null}) {
-  const modelsPromise=shared?.models?Promise.resolve(shared.models):(preloadedCrewModels??fetchCrewModels());
-  modelsPromise.catch(()=>{});
   const B=GPUBufferUsage,state=createCompany(undefined,modelId,{fullWatch:true});
   // Built now, at loading, rather than the first time anyone has to step aside.
   crewDeckField({modelId,...requirePlayableShipModel(modelId).runtime});
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   // Hands by sex and the captain; an indigenous company its own culture's pair.
   const continuumIds=[...(state.indigenousAttire?['caribbean-male','caribbean-female']:['sailor-male','villager-female']),'captain'];
-  const [models,requested,{bodies,pipelines}]=await Promise.all([modelsPromise,requestCrewPipelines({device,shader,format,samples,waterOptics}),loadCrewContinuum({device,shader,format,samples,waterOptics},continuumIds)]);
-  // The old bodies are drawn by none of the crew. They are loaded, and their painted captain and programs handed on in
-  // the shared assets, only for js/trade-vessels.js's deck hands (requestCrewPipelines).
-  if(models.some(m=>m.animator.joints.length!==CREW_JOINT_COUNT))throw Error(`Crew expects the prepared ${CREW_JOINT_COUNT}-joint rigs`);
-  const [pipeline,shadowPipeline,captainTexture]=await Promise.all([shared?.pipeline??requested.pipeline,
-    shared?.shadowPipeline??requested.shadowPipeline,
-    shared?.captainTexture?Promise.resolve(shared.captainTexture):uploadCaptainTexture(device,models[2])]);
+  const [requested,{bodies,pipelines}]=await Promise.all([requestCrewPipelines({device,shader,format,samples,waterOptics}),loadCrewContinuum({device,shader,format,samples,waterOptics},continuumIds)]);
+  const captainTexture=shared?.captainTexture??placeholderCaptainTexture(device);
   // The crew's group 0 names the captain's picture (bindings 13 and 14); the continuum binds it and never reads it.
   const captainTexView=shared?.captainTexView??captainTexture.createView();
   const captainSampler=shared?.captainSampler??device.createSampler({label:'captain pigment',magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',addressModeU:'repeat',addressModeV:'repeat',maxAnisotropy:8});
@@ -751,7 +661,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     anyCut=false;
     for(const part of everyPart){if(!part.continuum)continue;part.continuum.update(part.people,crewContinuumOrder,true);anyCut||=part.people.some(s=>s.visible!==false&&s.cutShader);}
   };
-  return {state,assets:{models,pipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets},
+  return {state,assets:{poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets},
     // The finest cut is each body whole; what is drawn of it is the GPU's to choose.
     triangles:everyPart.reduce((n,part)=>n+part.body.triangles*part.people.length,0),
     get posed(){return posed;},
@@ -2672,7 +2582,7 @@ export async function createFortSoldiers({
   const { bodies, pipelines } = await loadCrewContinuum({ device, shader, format, samples }, ['soldier', 'villager-female', 'captain']);
   // The crew's group 0 names the captain's picture (bindings 13 and 14). The continuum binds it and never reads it, so
   // a garrison of its own holds a single texel.
-  const captainTexture = shared?.captainTexture ?? await uploadCaptainTexture(device, null);
+  const captainTexture = shared?.captainTexture ?? placeholderCaptainTexture(device);
   const captainTexView = shared?.captainTexView ?? captainTexture.createView();
   const captainSampler = shared?.captainSampler ?? device.createSampler({ label: 'captain pigment', magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   const hullData = new Float32Array(52);

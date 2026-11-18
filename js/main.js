@@ -104,7 +104,7 @@ import {getShipParts} from './ship-parts.js';
 import {ARCHETYPE_SCALE_PRESETS, computeArchetypeScaleSpec} from './ship-part-taxonomy.js';
 import {vesselVerticalScale} from './hull.js';
 import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
-import { createCrew, createFortSoldiers, preloadCrewModels, requestCrewPipelines, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
+import { createCrew, createFortSoldiers, requestCrewPipelines, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
 import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
 import { createBoardLife } from './board-life.js';
 import { BOARD_KEEP_CAREER, forgetKeptBoards, keepBoard, keptBoard } from './board-keep.js';
@@ -500,7 +500,6 @@ async function main() {
     return createImageBitmap(b);
   });
   oakImagePromise.catch(() => {});
-  preloadCrewModels()?.catch(() => {});
   const rgba8MipPipePromise = computePipe(RGBA8_MIPS, 'rgba8 mips');
   const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });

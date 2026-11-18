@@ -533,8 +533,7 @@ test('the swimming and floating loops are the pose a swimmer is solved with, bak
 });
 
 test('captain GLB carries its embedded high-resolution texture, UV sentinels, crew-skeleton rig and decimated LODs',async()=>{
-  const {CAPTAIN_TEXTURE_PX,loadGroomPackGLB,attachColonialGroomModel}=await import('../js/crew.js');
-  assert.equal(CAPTAIN_TEXTURE_PX,2048,'captain texture uploads at full 2048x2048 resolution');
+  const {loadGroomPackGLB,attachColonialGroomModel}=await import('../js/crew.js');
   const captainBytes=fs.readFileSync(new URL('../assets/crew/captain.glb',import.meta.url));
   assert.ok(captainBytes.length<3_000_000);
   const captain=loadCrewGLB(captainBytes);
@@ -544,7 +543,7 @@ test('captain GLB carries its embedded high-resolution texture, UV sentinels, cr
   assert.equal(captain.mime,'image/jpeg');
   assert.equal(captain.image[0],0xff);assert.equal(captain.image[1],0xd8,'valid JPEG header');
   assert.ok(captain.indices.length/3<=19500&&captain.indices.length/3>=18000,'base mesh preserves un-decimated high-res geometry');
-  assert.equal(captain.lods,undefined,'and is drawn whole where the continuum is absent');
+  assert.equal(captain.lods,undefined,'the continuum is its only simplification');
   const f=new Float32Array(captain.vertices.buffer,captain.vertices.byteOffset,captain.vertexCount*15);
   let skinVerts=0,clothVerts=0,uvSeamCrossTris=0;
   for(let i=0;i<captain.vertexCount;i++){

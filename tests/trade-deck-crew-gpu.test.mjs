@@ -8,9 +8,9 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 import {CREW_CONTINUUM_LISTS} from '../js/wgsl/crew-continuum.js';
-import {DECK_CREW_DISPATCH_WORDS,DECK_CREW_FALLBACK_AT,DECK_CREW_FALLBACK_WORDS,deckCrewBodyFor} from '../js/trade-vessels.js';
+import {DECK_CREW_DISPATCH_WORDS,deckCrewBodyFor} from '../js/trade-vessels.js';
 
-// The bodies' streams are published, not committed: a checkout without them draws the old bodies.
+// The bodies' streams are published, not committed: a checkout without them cannot draw people at all.
 const baked=[deckCrewBodyFor('crew',false),deckCrewBodyFor('captain',false)].every(id=>fs.existsSync(new URL(`../assets/crew/continuum/${id}/vertices.bin.gz`,import.meta.url)));
 let browser,server,base;
 before(async()=>{
@@ -37,7 +37,7 @@ async function open(query){
   return {page,errors};
 }
 // Who the placing pass kept for each body, and how many instances each of the continuum's lists drew, over a frame.
-const shown=page=>page.evaluate(async({lists,dispatchWords,fallbackAt,fallbackWords})=>{
+const shown=page=>page.evaluate(async({lists,dispatchWords})=>{
   await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
   const device=window.deckDevice,ships=window.oceanTradeVessels,deck=ships.deckCrew;
   const read=async(buffer,bytes)=>{
@@ -46,14 +46,14 @@ const shown=page=>page.evaluate(async({lists,dispatchWords,fallbackAt,fallbackWo
     await copy.mapAsync(GPUMapMode.READ);const words=new Uint32Array(copy.getMappedRange().slice(0));copy.destroy();return words;
   };
   const counts=deck?await read(deck.counts,deck.counts.size):null;
-  const bodies=(deck?.bodies??[]).map((body,b)=>({...body,kept:counts[b*dispatchWords],old:counts[fallbackAt+b*fallbackWords+1]}));
+  const bodies=(deck?.bodies??[]).map((body,b)=>({...body,kept:counts[b*dispatchWords]}));
   const drawn=Object.fromEntries(lists.map(name=>[name,0]));
   for(const {buffer,records} of ships.peopleDraws()){
     const words=await read(buffer,records*16);
     lists.forEach((name,i)=>{drawn[name]+=words[i*4+1];});
   }
   return {aboard:ships.deckCrewCount,bodies,drawn,census:window.oceanContinuumCensus?.latest?.families??null};
-},{lists:CREW_CONTINUUM_LISTS,dispatchWords:DECK_CREW_DISPATCH_WORDS,fallbackAt:DECK_CREW_FALLBACK_AT,fallbackWords:DECK_CREW_FALLBACK_WORDS});
+},{lists:CREW_CONTINUUM_LISTS,dispatchWords:DECK_CREW_DISPATCH_WORDS});
 
 test('hands aboard passing vessels are placed on the GPU and cut and drawn through the continuum',{skip:!baked&&'continuum bodies not baked here',timeout:600000},async()=>{
   // First where the vessels lie, then an eye on the nearest with anyone aboard, from a little off its beam.

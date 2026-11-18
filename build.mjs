@@ -134,22 +134,7 @@ const runtimeAssetTypes = new Map([
   ['assets/board/runtime.js','text/javascript'],
   ['assets/caravel-oak-albedo.webp','image/webp'],
   ['assets/wildlife/whale.glb','model/gltf-binary'],
-  ['assets/crew/sailor.glb','model/gltf-binary'],
-  ['assets/crew/sailor-female.glb','model/gltf-binary'],
-  ['assets/crew/captain.glb','model/gltf-binary'],
-  ['assets/crew/soldier-1550.glb','model/gltf-binary'],
-  ['assets/crew/groom-pack.glb','model/gltf-binary'],
-  ['assets/crew/components-1550.json','application/json'],
-  ['assets/crew/indigenous-algonquian-male.glb','model/gltf-binary'],
-  ['assets/crew/indigenous-algonquian-female.glb','model/gltf-binary'],
-  ['assets/crew/indigenous-caribbean-male.glb','model/gltf-binary'],
-  ['assets/crew/indigenous-caribbean-female.glb','model/gltf-binary'],
-  ['assets/crew/indigenous-maya-male.glb','model/gltf-binary'],
-  ['assets/crew/indigenous-maya-female.glb','model/gltf-binary'],
-  ['assets/crew/indigenous-andean-male.glb','model/gltf-binary'],
-  ['assets/crew/indigenous-andean-female.glb','model/gltf-binary'],
-  ['assets/crew/sailor-classic.glb','model/gltf-binary'],
-  ['assets/crew/sailor-female-classic.glb','model/gltf-binary'],
+  // People are drawn through the continuum alone (CREW_CONTINUUM_ASSETS, below): the old crew bodies are not shipped.
   ['assets/props/cleat.glb','model/gltf-binary'],
   ['assets/props/jetty-weathered.glb','model/gltf-binary'],
   ['assets/props/jetty-planked.glb','model/gltf-binary'],
@@ -530,8 +515,7 @@ for(const [file,record]of pagesAssets){
 fs.writeFileSync(path.join(root,'docs','assets-manifest.json'),JSON.stringify(Object.fromEntries(pagesAssets),null,2)+'\n');
 // Only sailing essentials preload. Marine encounters load their whale asset
 // on demand, keeping optional downloads off the first-frame critical path.
-const startupPreloads=['assets/caravel-oak-albedo.webp','assets/crew/sailor.glb',
-  'assets/crew/sailor-female.glb','assets/crew/captain.glb','assets/crew/soldier-1550.glb','assets/crew/groom-pack.glb','assets/crew/components-1550.json']
+const startupPreloads=['assets/caravel-oak-albedo.webp']
   .map(file=>`<link rel="preload" as="fetch" href="${pagesAssets.get(file).url}" crossorigin="anonymous">`).join('');
 write('docs/index.html', minifyPage(pagesJs).replace('</head>','<meta name="robots" content="noindex, nofollow, noarchive">'+startupPreloads+'</head>')
   .replace('<script type="module">', pagesBootstrap + '<script type="module">'));
