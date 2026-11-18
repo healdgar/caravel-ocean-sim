@@ -1,5 +1,5 @@
 import { footingUnder, restingHeightUnder } from './building-fracture.js';
-import { enclosurePlan, insetOutline, traceWalls } from './fort-plan.js';
+import { enclosurePlan, insetOutline, portWorkBuildings, traceWalls } from './fort-plan.js';
 import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
 import { gltfTRS, readGLB, gltfAccessor } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
@@ -793,6 +793,10 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
 }
 
 export const FORTIFICATION_PREFAB_IDS = Object.freeze([
+  // The works a board stands (js/fort-plan.js portWorkBuildings).
+  'city_fort',
+  'city_battery',
+  'city_watchtower',
   'stone_sea_bastion',
   'bastion_trace_fortress',
   'torreon_atalaya_farol',
@@ -1739,7 +1743,7 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     trace.guns.forEach((gun, gunIndex) => {
       let lx = gun.x - gun.nx * 2.5, lz = gun.z - gun.nz * 2.5;
       if (!free(lx, lz)) { lx = gun.x - gun.nx * 1.3; lz = gun.z - gun.nz * 1.3; }
-      if (free(lx, lz)) specs.push({ lx, ly: yTop - 0.16 - lowAt(gun.z), lz, routeZ: [lz, lz], localYaw: Math.atan2(gun.nx, gun.nz), role: 'Artillero', stationKind: 'embrasure', gunIndex });
+      if (free(lx, lz)) specs.push({ lx, ly: (gun.y ?? yTop - yGround) + yGround - 0.16 - lowAt(gun.z), lz, routeZ: [lz, lz], localYaw: Math.atan2(gun.nx, gun.nz), role: 'Artillero', stationKind: 'embrasure', gunIndex });
     });
     trace.salients.slice(0, 5).forEach((at) => {
       const [lx, lz] = inward[at];
@@ -2131,7 +2135,8 @@ export function garrisonEnlist(s, person) {
 }
 
 export function createFortGarrison(port) {
-  const instances = port?.instances ?? [];
+  // The port's own buildings and the works its board stands (js/fort-plan.js portWorkBuildings).
+  const instances = [...(port?.instances ?? []), ...portWorkBuildings(port)];
   const origin = [port?.center?.x ?? 0, 0, port?.center?.z ?? 0];
   const soldiers = [];
   // `units` is every building's men. `byBuilding` is by name, and two buildings of one plan may share a name.

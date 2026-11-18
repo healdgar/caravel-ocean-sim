@@ -4539,6 +4539,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       cairnSpec,
       ...(overrides?.baseY !== undefined ? { baseY: overrides.baseY } : {}),
       ...(overrides?.isQuayRibbon ? { isQuayRibbon: true } : {}),
+      // A pier or quay asked to carry guns, or a magazine, keeps the asking.
+      ...(overrides?.armed !== undefined ? { armed: Boolean(overrides.armed) } : {}),
+      ...(overrides?.hasMagazine !== undefined ? { hasMagazine: Boolean(overrides.hasMagazine) } : {}),
       ...(tracePayload ? { trace: tracePayload } : {}),
       ...(overrides?.guards ? { guards: overrides.guards } : {}),
       ...(overrides?.enclosureShape ? { enclosureShape: overrides.enclosureShape } : {}),

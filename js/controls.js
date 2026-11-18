@@ -149,12 +149,6 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     }
     if(!best){
       const port=battleContext?.getPortGunnery?.();
-      if(port?.forts?.length){
-        for(const f of port.forts){
-          const d=Math.hypot((f.x??0)-(boat.x??0),(f.z??0)-(boat.z??0));
-          if(d<bestDist){bestDist=d;best={x:f.x??0,z:f.z??0,name:f.name??'Shore battery',faction:'enemy',dist:d,hull:f.integrity??1};}
-        }
-      }
       if(port?.batteries?.length){
         for(const b of port.batteries){
           const f=b.building;

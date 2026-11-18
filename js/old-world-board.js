@@ -677,7 +677,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const at = (lx, lz) => [x + lx * c + lz * s, z - lx * s + lz * c], toward = (lx, lz) => [lx * c + lz * s, -lx * s + lz * c];
     const first = typedTypes.length, guns = [], outline = [], salients = [];
     let gateAt = null;
-    const record = () => ({ kind: work.kind, name: work.name, place: place.name, role: work.role || '', side: work.side || '', x, z, turn: yaw, w: work.w, d: work.d, outline, guns, salients, gate: gateAt, types: [first, typedTypes.length] });
+    const record = () => ({ kind: work.kind, name: work.name, place: place.name, role: work.role || '', side: work.side || '', x, y: heightAt(x, z), z, turn: yaw, w: work.w, d: work.d, outline, guns, salients, gate: gateAt, types: [first, typedTypes.length] });
     if (work.kind === 'battery') {
       const id = cityVariant(CITY_TYPE.BATTERY, work.w, work.d), T = CITY_BUILDING_TYPES[id], f = footprint(x, z, T.width, T.length, yaw);
       const floor = pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone);

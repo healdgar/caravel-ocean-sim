@@ -191,7 +191,7 @@ export function folkDoing(soul, stride, length) {
 }
 
 // What one of the model's people at a port's post is at, in words that may follow "You find me".
-const WATCH_WORKS = Object.freeze({ stone_sea_bastion: 'the sea bastion', torreon_atalaya_farol: 'the watchtower', bastion_trace_fortress: 'the fortress', curtain_wall_and_gate: 'the town wall' });
+const WATCH_WORKS = Object.freeze({ city_fort: 'the fort', city_battery: 'the battery', city_watchtower: 'the watchtower', stone_sea_bastion: 'the sea bastion', torreon_atalaya_farol: 'the watchtower', bastion_trace_fortress: 'the fortress', curtain_wall_and_gate: 'the town wall' });
 const WATCH_POSTS = Object.freeze({ embrasure: 'at a gun of', crown: 'on the crown of', 'gate-roof': 'over the gate of', 'gate-portal': 'at the gate of', plinth: 'at the foot of', parade: 'before the gate of', citadel: 'in the yard of' });
 export function watchDoing(soldier) {
   const soul = soldier?.soul ?? {}, work = soldier?.building ?? {};

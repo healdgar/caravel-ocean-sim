@@ -16,7 +16,7 @@ import { shipMastSpecs, fracturePartsGone, shatterFloatingWreckageOnSegment, bla
 import { shipColliderCrossings, shipColliderIronFrame, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
 import { sweepJettySegment, applyJettyImpactDamage } from './port-props.js';
-import { TRACE_GUN_ARC_COS, enclosurePlan } from './fort-plan.js';
+import { TRACE_GUN_ARC_COS, enclosurePlan, portWorkBuildings } from './fort-plan.js';
 import { HARBOUR_GUN_RANGE_M } from './harbour-geography.js';
 import { FOREST_LONG_FALLEN, buildForestTrunkGrid, foreshorePalmPlacement, forestTrunkShape, sweepForestTrunks } from './forest-trunks.js';
 import { landCraterSize } from './land-craters.js';
@@ -2648,6 +2648,7 @@ const FORTIFIED_STONE_PREFABS = new Set([
   'city_keep',
   'city_gate',
   'city_bastion',
+  'city_fort',
   'city_battery',
   'city_watchtower',
 ]);
@@ -3476,9 +3477,12 @@ export function createBuildingGunDefinitions(building) {
     // A fort drawn to its ground has its guns where its trace puts them, each with its own arc.
     const drop = building.trace.lowDrop ?? 0, lowZ = building.trace.lowZ;
     for (const gun of building.trace.guns) {
-      const y = yTop + 0.58 - (lowZ !== null && gun.z < lowZ ? drop : 0);
-      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x - gun.nx * 0.8, y, gun.z - gun.nz * 0.8, [gun.nx, 0, gun.nz], prefabId === 'stone_sea_bastion' ? 24 : 32);
-      guns[guns.length - 1].arcCos = TRACE_GUN_ARC_COS;
+      // A work's gun stands on its own deck (a bastion's, a battery's), a drawn trace's on the one rampart.
+      const deck = (gun.y ?? yTop) - (lowZ !== null && gun.z < lowZ ? drop : 0);
+      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x - gun.nx * 0.8, deck + 0.58, gun.z - gun.nz * 0.8, [gun.nx, 0, gun.nz], prefabId === 'stone_sea_bastion' ? 24 : 32);
+      const def = guns[guns.length - 1];
+      def.arcCos = TRACE_GUN_ARC_COS;
+      def.station[1] = def.floorDesign = Math.max(0, deck - 0.15);
     }
   } else if (prefabId === 'bastion_trace_fortress') {
     const snapEx = (targetX) => nearestEmbrasure(targetX, hw, 4.6), snapEz = (targetZ) => nearestEmbrasure(targetZ, hl, 4.8);
@@ -3714,7 +3718,8 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
 
 export function createPortGunnery(port, { onEvent = () => {}, getVessels = () => [], getTerrain = () => null, autoReturnFire = true, returnFireRange = HARBOUR_GUN_RANGE_M } = {}) {
   const batteries = [];
-  const instances = port?.instances ?? [];
+  // The port's own buildings and the works its board stands (js/fort-plan.js portWorkBuildings).
+  const instances = [...(port?.instances ?? []), ...portWorkBuildings(port)];
   for (const inst of instances) {
     createBuildingDamageState(inst);
     const defs = createBuildingGunDefinitions(inst);

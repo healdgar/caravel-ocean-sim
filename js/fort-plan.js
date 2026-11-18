@@ -758,3 +758,41 @@ export function traceWalls(trace) {
     return { index: i, ax: p[0], az: p[1], bx: q[0], bz: q[1], ux, uz, nx: uz, nz: -ux, length, kind: kinds[i] };
   });
 }
+
+// The works a port's board stands (js/old-world-board.js; port.works) as the buildings its guns and its garrison know:
+// each in its own frame (x across its front, -z out to the water), its line, guns, salients and gate as a trace is
+// written. Made once for the works the port has, and kept with it, so that each work is one building throughout.
+const WORK_PREFAB = Object.freeze({ fort: 'city_fort', battery: 'city_battery', tower: 'city_watchtower' });
+export function portWorkBuildings(port) {
+  if (!port) return [];
+  if (port.workBuildings?.works === port.works) return port.workBuildings.list;
+  const list = (port.works ?? []).filter((work) => work?.guns?.length && work.outline?.length >= 3).map((work) => {
+    const c = Math.cos(work.turn ?? 0), s = Math.sin(work.turn ?? 0), y = work.y ?? 0;
+    const toLocal = ([wx, wz]) => { const dx = wx - work.x, dz = wz - work.z; return [dx * c - dz * s, dx * s + dz * c]; };
+    const outline = work.outline.map(toLocal), kinds = outline.map(() => 'curtain');
+    const nearest = ([px, pz]) => outline.reduce((best, q, i) => (Math.hypot(q[0] - px, q[1] - pz) < Math.hypot(outline[best][0] - px, outline[best][1] - pz) ? i : best), 0);
+    const guns = work.guns.map((gun) => {
+      const [x, z] = toLocal([gun.x, gun.z]);
+      return { x, z, nx: gun.nx * c - gun.nz * s, nz: gun.nx * s + gun.nz * c, wall: gun.wall, y: gun.y - y };
+    });
+    const walls = traceWalls({ outline, kinds });
+    // Its gate in the wall nearest it, or, where it has none (a battery's open gorge), the wall that faces most landward.
+    const gateAt = work.gate ? toLocal([work.gate.x, work.gate.z]) : null;
+    const wallTo = gateAt
+      ? walls.reduce((best, w) => (Math.hypot((w.ax + w.bx) / 2 - gateAt[0], (w.az + w.bz) / 2 - gateAt[1]) < Math.hypot((best.ax + best.bx) / 2 - gateAt[0], (best.az + best.bz) / 2 - gateAt[1]) ? w : best))
+      : walls.reduce((best, w) => (w.nz > best.nz ? w : best));
+    const deck = guns.reduce((sum, gun) => sum + gun.y, 0) / guns.length;
+    const trace = {
+      outline, kinds, guns, buildings: [], lowZ: null, lowDrop: 0, earth: false, shortestWall: Math.min(...walls.map((w) => w.length)),
+      salients: work.salients?.length ? work.salients.map(nearest) : outline.map((_, i) => i),
+      gate: { wall: wallTo.index, x: gateAt ? gateAt[0] : (wallTo.ax + wallTo.bx) / 2, z: gateAt ? gateAt[1] : (wallTo.az + wallTo.bz) / 2, nx: wallTo.nx, nz: wallTo.nz, ux: wallTo.ux, uz: wallTo.uz, halfWidth: TRACE_GATE_HALF_WIDTH_M },
+    };
+    return {
+      id: `work:${work.name}`, prefabId: WORK_PREFAB[work.kind] ?? 'city_fort', label: work.name, work, trace,
+      x: work.x, z: work.z, y, baseY: y, yaw: work.turn ?? 0, width: work.w, depth: work.d, length: work.d, height: deck,
+      armed: true, hasMagazine: work.kind === 'fort',
+    };
+  });
+  port.workBuildings = { works: port.works, list };
+  return list;
+}
