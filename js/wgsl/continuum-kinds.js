@@ -30,14 +30,13 @@
 //            skin stream (four joints, four unorm weights; all zero for a far-body point: joint 0 alone). A cluster's
 //            part is its dominant joint: its spheres are carried by that joint's matrix and grown by the slack; WHOLE is
 //            the union of the posed joint spheres.
-//   RIDER    things that ride another body's posed surface (rigging on a heeling hull, a figure on a cart). Pose data:
-//            [the offset, in vec4f, of the posed source buffer region it reads from, its vertex count, 0, 0]. A point
-//            reads the rider stream (the source vertex it rides) and is carried by that vertex's posed offset (a vec4f
-//            a source vertex in the pose buffer: displacement and its normal's turn as an angle about the source normal).
+//   RIDER    things that ride another body's posed surface: a ship on her own posed assembly, her lines and let-go
+//            iron with her. A point reads the rider stream (the source vertex it rides) and is placed where that vertex
+//            is posed. Brought by the ships: js/wgsl/ship-kinds.js has its pose data.
 //   WIND     foliage and cloth that sway. Pose data: [gust phase, gust strength, stiffness, 0]. A point reads the wind
 //            stream (sway weight | branch phase << 16) and is displaced along the wind (F.windP) by both.
-//   DRAPED   sails and flags hung from spars. Pose data: [furl (0 set, 1 furled), billow, luff phase, 0], then the
-//            yard's two ends; a point reads the UV stream for where it hangs (u along the yard, v down the drop).
+//   DRAPED   a whole vessel posed per vertex from her record alone: canvas brailed to its yards by her furl, oars swept
+//            through their stroke, helm swung. Brought by the ships: js/wgsl/ship-kinds.js has its pose data.
 //   HEIGHTFIELD  the land. Shares only the core test, the scene scalar, the census and the pipeline family: its pieces
 //            are cut by their own select over a height grid (js/land-continuum.js), never through this dispatch.
 import { FRACTURE_GRAVITY } from '../ship-fracture.js';
