@@ -484,6 +484,36 @@
     "bytes": 14695139,
     "sha256": "7106ee2f3f3af9be38823ffa1dee923fd590508f8c991a5665838f007f770b3e"
   },
+  "assets/boards/cadiz-1550.world": {
+    "url": "assets/boards/cadiz-1550.71ebb4161d4625cf.world",
+    "bytes": 4342397,
+    "sha256": "71ebb4161d4625cfbec5b54d1c1455886ae86dc409c3018ed397ebac211ea3be"
+  },
+  "assets/boards/sanlucar-1550.world": {
+    "url": "assets/boards/sanlucar-1550.3e60c76126b1b617.world",
+    "bytes": 7371684,
+    "sha256": "3e60c76126b1b617adaab274a847d718de5be34c1edc8da44d10a64351b997e6"
+  },
+  "assets/boards/palos-huelva-1550.world": {
+    "url": "assets/boards/palos-huelva-1550.1e2881c57c398942.world",
+    "bytes": 6757378,
+    "sha256": "1e2881c57c39894239665de15c2e605e17311d5aaa6fe96580dac66f2bf85efb"
+  },
+  "assets/boards/huelva-1550.world": {
+    "url": "assets/boards/huelva-1550.2bdebe9383bdb767.world",
+    "bytes": 5920976,
+    "sha256": "2bdebe9383bdb767561c13af011fba932b87fd809dc0b57da0a0a7d4cab8ac6f"
+  },
+  "assets/boards/la-coruna-1550.world": {
+    "url": "assets/boards/la-coruna-1550.e843bb16e09c15c9.world",
+    "bytes": 5624384,
+    "sha256": "e843bb16e09c15c9d1ef131226bb11973ee4086d1dc8022b49d5161fe01f25b5"
+  },
+  "assets/boards/setubal-1550.world": {
+    "url": "assets/boards/setubal-1550.6b83010c4665edfd.world",
+    "bytes": 7396046,
+    "sha256": "6b83010c4665edfd6cfc6d7ea508b5ba8f72eb1aa5870390c0a924759575240e"
+  },
   "assets/board/game.js": {
     "url": "assets/board/game.4666394ccfdb0467.js",
     "bytes": 2948142,
@@ -963,6 +993,36 @@
     "url": "assets/boards/lisbon-1550.5a7250ee84c886db.json",
     "bytes": 1589476,
     "sha256": "5a7250ee84c886db94e5885cd49afbd8ba78fec5269ff9bc600748a37d615d30"
+  },
+  "assets/boards/cadiz-1550.json": {
+    "url": "assets/boards/cadiz-1550.5170b097e1fcb549.json",
+    "bytes": 776571,
+    "sha256": "5170b097e1fcb5491fde6f10235537ac320c2f5cf8a77d5ead5026ddfac18690"
+  },
+  "assets/boards/sanlucar-1550.json": {
+    "url": "assets/boards/sanlucar-1550.a8dffab7879f3d76.json",
+    "bytes": 1010012,
+    "sha256": "a8dffab7879f3d76237098b0893a3cfbdf1023a4e0231a256aa1764cd5505ad7"
+  },
+  "assets/boards/palos-huelva-1550.json": {
+    "url": "assets/boards/palos-huelva-1550.254036cd07dec695.json",
+    "bytes": 1035674,
+    "sha256": "254036cd07dec695ab226cb3009e7bf8f5428f21a64c817528915b032915269c"
+  },
+  "assets/boards/huelva-1550.json": {
+    "url": "assets/boards/huelva-1550.9dd6435aa2f7d259.json",
+    "bytes": 932895,
+    "sha256": "9dd6435aa2f7d259978a3d323afedb6fe8c3f31288a425776d983905f771539b"
+  },
+  "assets/boards/la-coruna-1550.json": {
+    "url": "assets/boards/la-coruna-1550.fc7b8df80c8d0cf8.json",
+    "bytes": 864096,
+    "sha256": "fc7b8df80c8d0cf8bba85e16c0063df99d0ddef2755cb635339f2e4c0b153fc0"
+  },
+  "assets/boards/setubal-1550.json": {
+    "url": "assets/boards/setubal-1550.b140f3c3f934ef81.json",
+    "bytes": 1098000,
+    "sha256": "b140f3c3f934ef8116ce71d920674948d2e1652eeeab5e870762f6f3cab56ae7"
   },
   "assets/ports/1550/buildings-1550-lrm.bin": {
     "url": "assets/ports/1550/buildings-1550-lrm.070f343b9c5ba729.bin",
