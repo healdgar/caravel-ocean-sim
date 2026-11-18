@@ -8960,6 +8960,8 @@ export function synthesizeCoastalAlbedo(
   const beachData = beaches ?? synthesizeCoastalBeaches(region, heights, satelliteData, distInfo);
   const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement, satelliteData);
   const rgba = new Uint8Array(size * size * 4);
+  // A board's country shows its 1550 geography, not what a satellite sees there today.
+  const country = portPlacement?._resolvedCountry ?? oldWorldCountry(region, heights, portPlacement);
 
   for (let j = 0; j < size; j++) {
     const v = (j + 0.5) / size;
