@@ -28,7 +28,7 @@
   "quantile": 0.5,
   "errorQuantile": 0.9,
   "rim": {
-   "height": 0.093,
+   "height": 0.2881,
    "cover": 0.5269,
    "colour": [
     0.11935,
@@ -38,8 +38,8 @@
   }
  },
  "organErrorShare": 0.35,
- "farError": 0.496,
- "canopy": 0.0992,
+ "farError": 0.35016,
+ "canopy": 0.2826,
  "frame": {
   "low": [
    -0.63,
@@ -118,14 +118,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.30621,
-    "firstError": 0.496,
-    "lastError": 0.82397,
-    "hops": 6,
-    "knots": 16
+    "baseError": 0.29038,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
+    "hops": 7,
+    "knots": 9
    },
    "splat": {
-    "canopy": 0.072,
+    "canopy": 0.2745,
     "seenAlong": 0.7986,
     "headShare": 0.1184,
     "topColour": [
@@ -142,7 +142,7 @@
      1.9895,
      0.6966,
      2.1148,
-     3.7214
+     3.6735
     ]
    }
   },
@@ -215,14 +215,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.29769,
-    "firstError": 0.496,
-    "lastError": 0.85786,
+    "baseError": 0.28736,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
     "hops": 7,
-    "knots": 16
+    "knots": 10
    },
    "splat": {
-    "canopy": 0.0801,
+    "canopy": 0.2734,
     "seenAlong": 0.799,
     "headShare": 0.1206,
     "topColour": [
@@ -239,7 +239,7 @@
      1.9885,
      0.6963,
      2.1146,
-     3.7782
+     3.7191
     ]
    }
   },
@@ -312,14 +312,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.2897,
-    "firstError": 0.496,
-    "lastError": 0.83161,
-    "hops": 9,
-    "knots": 13
+    "baseError": 0.28894,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
+    "hops": 7,
+    "knots": 11
    },
    "splat": {
-    "canopy": 0.091,
+    "canopy": 0.2736,
     "seenAlong": 0.8004,
     "headShare": 0.1285,
     "topColour": [
@@ -336,7 +336,7 @@
      1.9841,
      0.6909,
      2.111,
-     3.7535
+     3.6945
     ]
    }
   },
@@ -409,14 +409,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.29628,
-    "firstError": 0.496,
-    "lastError": 0.88644,
+    "baseError": 0.28984,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
     "hops": 7,
-    "knots": 17
+    "knots": 8
    },
    "splat": {
-    "canopy": 0.0932,
+    "canopy": 0.2804,
     "seenAlong": 0.799,
     "headShare": 0.1207,
     "topColour": [
@@ -433,7 +433,7 @@
      1.9876,
      0.6971,
      2.1151,
-     3.7442
+     3.6753
     ]
    }
   },
@@ -506,14 +506,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.496,
-    "firstError": 0.496,
-    "lastError": 0.78673,
-    "hops": 9,
+    "baseError": 0.35016,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
+    "hops": 7,
     "knots": 12
    },
    "splat": {
-    "canopy": 0.102,
+    "canopy": 0.2972,
     "seenAlong": 0.8167,
     "headShare": 0.2355,
     "topColour": [
@@ -530,7 +530,7 @@
      2.0853,
      0.6885,
      1.9946,
-     3.714
+     3.6808
     ]
    }
   },
@@ -603,14 +603,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.48122,
-    "firstError": 0.496,
-    "lastError": 0.78673,
+    "baseError": 0.33636,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
     "hops": 7,
-    "knots": 12
+    "knots": 11
    },
    "splat": {
-    "canopy": 0.1137,
+    "canopy": 0.2942,
     "seenAlong": 0.8164,
     "headShare": 0.2328,
     "topColour": [
@@ -627,7 +627,7 @@
      2.0854,
      0.6443,
      1.9953,
-     3.6684
+     3.6206
     ]
    }
   },
@@ -700,14 +700,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.48755,
-    "firstError": 0.496,
-    "lastError": 0.78673,
-    "hops": 11,
-    "knots": 16
+    "baseError": 0.34377,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
+    "hops": 7,
+    "knots": 9
    },
    "splat": {
-    "canopy": 0.1099,
+    "canopy": 0.3008,
     "seenAlong": 0.8171,
     "headShare": 0.2381,
     "topColour": [
@@ -724,7 +724,7 @@
      2.0855,
      0.6412,
      1.9965,
-     3.667
+     3.6338
     ]
    }
   },
@@ -797,14 +797,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.48119,
-    "firstError": 0.496,
-    "lastError": 0.78673,
-    "hops": 6,
+    "baseError": 0.34254,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
+    "hops": 7,
     "knots": 11
    },
    "splat": {
-    "canopy": 0.1186,
+    "canopy": 0.2864,
     "seenAlong": 0.8153,
     "headShare": 0.225,
     "topColour": [
@@ -821,7 +821,7 @@
      2.0868,
      0.6472,
      1.9932,
-     3.6708
+     3.623
     ]
    }
   },
@@ -894,14 +894,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.36488,
-    "firstError": 0.496,
-    "lastError": 0.78673,
-    "hops": 8,
-    "knots": 13
+    "baseError": 0.30135,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
+    "hops": 7,
+    "knots": 10
    },
    "splat": {
-    "canopy": 0.105,
+    "canopy": 0.2793,
     "seenAlong": 0.8043,
     "headShare": 0.1517,
     "topColour": [
@@ -918,7 +918,7 @@
      2.0147,
      0.6735,
      2.0052,
-     3.8242
+     3.7763
     ]
    }
   },
@@ -991,14 +991,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.36553,
-    "firstError": 0.496,
-    "lastError": 0.78673,
-    "hops": 6,
-    "knots": 16
+    "baseError": 0.30348,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
+    "hops": 7,
+    "knots": 9
    },
    "splat": {
-    "canopy": 0.1022,
+    "canopy": 0.2781,
     "seenAlong": 0.8046,
     "headShare": 0.1535,
     "topColour": [
@@ -1015,7 +1015,7 @@
      2.0151,
      0.6786,
      1.997,
-     3.8081
+     3.7602
     ]
    }
   },
@@ -1088,14 +1088,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.37183,
-    "firstError": 0.496,
-    "lastError": 0.78673,
+    "baseError": 0.29629,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
     "hops": 7,
-    "knots": 12
+    "knots": 13
    },
    "splat": {
-    "canopy": 0.0987,
+    "canopy": 0.2786,
     "seenAlong": 0.8036,
     "headShare": 0.1479,
     "topColour": [
@@ -1112,7 +1112,7 @@
      2.015,
      0.6707,
      2.0019,
-     3.8301
+     3.7822
     ]
    }
   },
@@ -1185,14 +1185,14 @@
     "steps": 154,
     "coreTriangles": 12,
     "farFirst": 0,
-    "baseError": 0.35876,
-    "firstError": 0.496,
-    "lastError": 0.80183,
+    "baseError": 0.29353,
+    "firstError": 0.35016,
+    "lastError": 0.55541,
     "hops": 7,
-    "knots": 15
+    "knots": 10
    },
    "splat": {
-    "canopy": 0.1045,
+    "canopy": 0.2753,
     "seenAlong": 0.8044,
     "headShare": 0.1523,
     "topColour": [
@@ -1209,7 +1209,7 @@
      2.0149,
      0.6716,
      2.0061,
-     3.8477
+     3.7998
     ]
    }
   }
@@ -1217,15 +1217,15 @@
  "atlas": {
   "words": 99068121,
   "bytes": 396272484,
-  "sha256": "bec443e924b9a7bb805ef31e35056abb7755c3726dc742bea457a9a93d706f7f",
+  "sha256": "4b2e1cdb9ffb48f00708cf74c442d60872b41efcd0c0ee3cf8d7ae96f59dba64",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 194990083,
-   "sha256": "4039a083eb8a24cd31ed5e8f8ac931d6117568af13029dc9fe8753f26e809548"
+   "bytes": 194984318,
+   "sha256": "03aaf54ab80423583f43d4e35ec6ae7c6c5056bf0e3fb1a76637709184d699dc"
   },
   "clusters": 95138,
   "vertices": 12721249,
   "indices": 33904728
  },
- "bakeSeconds": 62
+ "bakeSeconds": 60
 }

@@ -328,8 +328,8 @@ function bakeSward({ V, I, variant }) {
     add(side, area * (1 - up) * Math.max(y, 0));
   }
   const mean = (sum, fallback) => (sum[3] > 0 ? sum.slice(0, 3).map((v) => v / sum[3]) : fallback);
-  // The body's grid: at each vertex (wrapped, as the tiles repeat), over the metre round it, the height half the view
-  // from above lies below, the share it covers and the colour it shows.
+  // The body's grid: at each vertex (wrapped, as the tiles repeat), over the metre round it, the height half the
+  // covered sward seen from above lies below, the share of ground it covers and the colour it shows.
   const G = BODY_CELLS, window = RASTER / G, gridHeight = new Float32Array(G * G), gridCover = new Float32Array(G * G), gridColour = new Float32Array(G * G * 3);
   const heights = new Float32Array(window * window * 4);
   for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
@@ -337,10 +337,10 @@ function bakeSward({ V, I, variant }) {
     const colour = [0, 0, 0];
     for (let y = j * window - window; y < j * window + window; y++) for (let x = i * window - window; x < i * window + window; x++) {
       const at = (((y % RASTER) + RASTER) % RASTER) * RASTER + (((x % RASTER) + RASTER) % RASTER);
-      heights[n++] = visible[at];
-      if (above.owner[at] >= 0) { hidden++; for (let k = 0; k < 3; k++) colour[k] += seen[at * 3 + k]; }
+      n++;
+      if (above.owner[at] >= 0) { heights[hidden++] = visible[at]; for (let k = 0; k < 3; k++) colour[k] += seen[at * 3 + k]; }
     }
-    gridHeight[j * G + i] = quantileOf(heights, BODY_QUANTILE);
+    gridHeight[j * G + i] = hidden ? quantileOf(heights.subarray(0, hidden), BODY_QUANTILE) : 0;
     gridCover[j * G + i] = hidden / n;
     for (let k = 0; k < 3; k++) gridColour[(j * G + i) * 3 + k] = hidden ? colour[k] / hidden : topColour[k];
   }
@@ -496,7 +496,7 @@ function bakeBody(sward, rim) {
   // along the stalk, so a wall is shaded as the edge it stands under and no seam shows.
   const slabPosition = [], slabNormal = [], slabColour = [], slabAlong = [], slabCover = [], slabIndex = [];
   for (const layer of [0, 1]) for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) {
-    slabPosition.push(i * step, layer ? BODY_FLOOR : heightAt(i, j), j * step);
+    slabPosition.push(i * step, layer ? 0 : Math.max(heightAt(i, j), 0.01), j * step);
     if (layer) { slabNormal.push(0, -1, 0); slabColour.push(rim.colour); slabAlong.push(sward.seenAlong); slabCover.push(rim.cover); continue; }
     if (isRim(i, j)) slabNormal.push(0, 1, 0);
     else {
@@ -604,7 +604,7 @@ function bakeBody(sward, rim) {
   const far = {
     position: lifted, normal: Float32Array.from(slabN), index: Uint32Array.from(index), order, chain, farFirst,
     stats: { inflateMax: Math.max(...inflates) },
-    splat: { centre: [P / 2, BODY_FLOOR * 2 + canopy / 2, P / 2], ry, rx, area: 3 * Math.sqrt(3) * rx * ry },
+    splat: { centre: [P / 2, BODY_FLOOR + canopy / 2, P / 2], ry, rx, area: 3 * Math.sqrt(3) * rx * ry },
   };
   // Its optical moments (js/continuum-bake.js packFarOptics), known without casting for them: a sward is a thin layer
   // of blades at every angle over the ground, seen a little way into where it stands thick, the sky shut out of its

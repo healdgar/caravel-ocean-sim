@@ -665,14 +665,14 @@
     "sha256": "33d3f4a848dcb82cb5b092d7e2eb6481da4a33cc14bb73ea3e83fa037456c14c"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.4039a083eb8a24cd.gz",
-    "bytes": 194990083,
-    "sha256": "4039a083eb8a24cd31ed5e8f8ac931d6117568af13029dc9fe8753f26e809548"
+    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.03aaf54ab8042358.gz",
+    "bytes": 194984318,
+    "sha256": "03aaf54ab80423583f43d4e35ec6ae7c6c5056bf0e3fb1a76637709184d699dc"
   },
   "assets/ground-cover/tropical/meadows-gpu/atlas.bin.gz": {
-    "url": "assets/ground-cover/tropical/meadows-gpu/atlas.bin.add9e9e63a81e1d5.gz",
-    "bytes": 147439294,
-    "sha256": "add9e9e63a81e1d5f3462bb5468c664dcc832cd8cc8b22dd822682ea18027636"
+    "url": "assets/ground-cover/tropical/meadows-gpu/atlas.bin.a9010146ecdf6063.gz",
+    "bytes": 147441086,
+    "sha256": "a9010146ecdf606301632f209fbecec0cc739509ef40eb019fea8e6c5514d394"
   },
   "assets/world/hyg-stars.bin": {
     "url": "assets/world/hyg-stars.e648341c03cb753b.bin",
@@ -1955,14 +1955,14 @@
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.020ec9a96e60bc06.json",
-    "bytes": 20669,
-    "sha256": "020ec9a96e60bc068c7535c1119dce1f7cd032a234b02001e37cb54163c7da2d"
+    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.fd0bf7f0f907039e.json",
+    "bytes": 20699,
+    "sha256": "fd0bf7f0f907039e8362ed6ab1b0b29519bc2202d925850a47e52a8c6d829cdd"
   },
   "assets/ground-cover/tropical/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/tropical/meadows-gpu/manifest.5fd69be7e5bade99.json",
-    "bytes": 20692,
-    "sha256": "5fd69be7e5bade992a385e76c5bb4776b6f1d69053f3b819d5061f683b20c620"
+    "url": "assets/ground-cover/tropical/meadows-gpu/manifest.d028dff1467195f5.json",
+    "bytes": 20686,
+    "sha256": "d028dff1467195f510fd09251808d8a406f1d7748b8265e4d2fbdd84a180c044"
   },
   "assets/ships/continuum/trade-cog-underway/manifest.json": {
     "url": "assets/ships/continuum/trade-cog-underway/manifest.d48de66d0f072323.json",
