@@ -480,59 +480,59 @@
     "sha256": "7bb0dd5949280010ee43702453ed62116a5aef953b1db6934a75381ee2191662"
   },
   "assets/boards/lisbon-1550.world": {
-    "url": "assets/boards/lisbon-1550.c3bd3920a9229ba2.world",
-    "bytes": 14476634,
-    "sha256": "c3bd3920a9229ba2c99fa7431f348cb4269f4fd55a3a5052e585fab1067e8a50"
+    "url": "assets/boards/lisbon-1550.2103f43699e162bd.world",
+    "bytes": 14664874,
+    "sha256": "2103f43699e162bd67985117925ab4d626bcc855806ffb83a70a4cc5abcd2292"
   },
   "assets/boards/cadiz-1550.world": {
-    "url": "assets/boards/cadiz-1550.f96f25d5619520fd.world",
-    "bytes": 4342518,
-    "sha256": "f96f25d5619520fd561a236f75aff65c3feb9b0db63024df765c5ee5ad5eb0b7"
+    "url": "assets/boards/cadiz-1550.fb1895c128bad1ce.world",
+    "bytes": 4342335,
+    "sha256": "fb1895c128bad1ce1d23360f397e5bccbcf116c59ceed43090fdbfef474e16db"
   },
   "assets/boards/sanlucar-1550.world": {
-    "url": "assets/boards/sanlucar-1550.7e3a9a9d40b79b91.world",
-    "bytes": 7371812,
-    "sha256": "7e3a9a9d40b79b91cb67503fc3610a8010f7120d957560aeeb62b24eac2b03e8"
+    "url": "assets/boards/sanlucar-1550.01bd5c1c1081ec6c.world",
+    "bytes": 7371913,
+    "sha256": "01bd5c1c1081ec6c6ef60d2f8b5d3427cbe3d88c448bc498cf3c4d3cf5a725a6"
   },
   "assets/boards/palos-huelva-1550.world": {
-    "url": "assets/boards/palos-huelva-1550.2c97446777e1c4fe.world",
-    "bytes": 6757205,
-    "sha256": "2c97446777e1c4fec49d0e0ccfe9f7989a14d7e108db92b837920f19e78c19fe"
+    "url": "assets/boards/palos-huelva-1550.3d62061bd3ae8db3.world",
+    "bytes": 6757259,
+    "sha256": "3d62061bd3ae8db35ac7103eb37cb3cc0a075d1dbe36785fe831961f0dc45536"
   },
   "assets/boards/huelva-1550.world": {
-    "url": "assets/boards/huelva-1550.06c3273671efe24a.world",
-    "bytes": 5934384,
-    "sha256": "06c3273671efe24a6f07ac88d06d904acc139ffbba70262cfce395fde0b6793b"
+    "url": "assets/boards/huelva-1550.576e3d440bc43550.world",
+    "bytes": 5934393,
+    "sha256": "576e3d440bc435504fbe8373b53a501feffc4e77782763a89ffaa89bb8696e5b"
   },
   "assets/boards/la-coruna-1550.world": {
-    "url": "assets/boards/la-coruna-1550.9a16c29a0430a0af.world",
-    "bytes": 5624534,
-    "sha256": "9a16c29a0430a0aff0fb6f5eda7cf8c3a2391cffeb8cb773969e9b1dced10286"
+    "url": "assets/boards/la-coruna-1550.ba1f59a3410e355c.world",
+    "bytes": 5624474,
+    "sha256": "ba1f59a3410e355c8ab39a3cb1a305a5765b4e112af9d7a364e86b257815fc4e"
   },
   "assets/boards/setubal-1550.world": {
-    "url": "assets/boards/setubal-1550.6c7b868bedcf5124.world",
-    "bytes": 7392813,
-    "sha256": "6c7b868bedcf51245929d73c499d913733a91e84a8287d2450218607b9282d5c"
+    "url": "assets/boards/setubal-1550.32a2772a9e4c3dad.world",
+    "bytes": 7392937,
+    "sha256": "32a2772a9e4c3dad82c09b9d660fef2e9190064e7d74eac959c1e297080056e0"
   },
   "assets/boards/seville-1550.world": {
-    "url": "assets/boards/seville-1550.0f87ebcbaaf5e4a3.world",
-    "bytes": 14815654,
-    "sha256": "0f87ebcbaaf5e4a3a1c924a1fa2cdc94c6c2575ee724d32ec5abf2e4f841ae5d"
+    "url": "assets/boards/seville-1550.b7319a2f8b3cd9a8.world",
+    "bytes": 14815335,
+    "sha256": "b7319a2f8b3cd9a80cd9dd3d40cc4c7984d4700072b2f206eeed011d31a52c2f"
   },
   "assets/boards/porto-1550.world": {
-    "url": "assets/boards/porto-1550.40ddf939d86b2424.world",
-    "bytes": 6462542,
-    "sha256": "40ddf939d86b2424bc7c021bab2251bb2f61b1bd84364684f27d2b51aab7d7a0"
+    "url": "assets/boards/porto-1550.0c15dc2a1f75af10.world",
+    "bytes": 6462685,
+    "sha256": "0c15dc2a1f75af1006573df0893dc5cdbc6c8f0bc704e863ff68e35ee6406255"
   },
   "assets/boards/cadiz-sanlucar-1550.world": {
-    "url": "assets/boards/cadiz-sanlucar-1550.805967b92b96c70b.world",
-    "bytes": 4252569,
-    "sha256": "805967b92b96c70b4dea8bc8c03701ce82affc83b7fc10e608902a1ac54c7f3e"
+    "url": "assets/boards/cadiz-sanlucar-1550.69de56fa3e11ead0.world",
+    "bytes": 4252296,
+    "sha256": "69de56fa3e11ead08ac2dbe6ae6d7069ad941967f50b2e9df3a1d7271b97ad75"
   },
   "assets/board/game.js": {
-    "url": "assets/board/game.aa66319a3221b517.js",
-    "bytes": 2960788,
-    "sha256": "aa66319a3221b5175eb4855945c482357d5acb560b52f045aec9073dace80c93"
+    "url": "assets/board/game.f54a273ea35af6a7.js",
+    "bytes": 2961140,
+    "sha256": "f54a273ea35af6a7633deb6503e0530b01fd449da750a1cd8c950074894b5c0a"
   },
   "assets/board/runtime.js": {
     "url": "assets/board/runtime.04999d84517c43ea.js",
@@ -540,9 +540,9 @@
     "sha256": "04999d84517c43ea7733f20cd18f623e6af8cddd2d5073b1c8207490479055f8"
   },
   "assets/boards/partner-ports-1550.json": {
-    "url": "assets/boards/partner-ports-1550.3a962b244fd70134.json",
-    "bytes": 704068,
-    "sha256": "3a962b244fd7013443d61e0477ec59a4853e379e777fb0d50af494c6d6bc6553"
+    "url": "assets/boards/partner-ports-1550.c2f3349eda0fa2dc.json",
+    "bytes": 712248,
+    "sha256": "c2f3349eda0fa2dcabfa1b585137a50929a621a74bbe2016226c5eda55a4f55a"
   },
   "assets/forest-scenery/saba/wind/weights.bin.gz": {
     "url": "assets/forest-scenery/saba/wind/weights.bin.910b239ed5e6ed02.gz",
@@ -1005,54 +1005,54 @@
     "sha256": "c8015f5c74ddbd435cae3b08157e35cbcc79aac46bdc2d30c28f9f5ad984fb28"
   },
   "assets/boards/lisbon-1550.json": {
-    "url": "assets/boards/lisbon-1550.4c332ac33ab652f7.json",
-    "bytes": 1503503,
-    "sha256": "4c332ac33ab652f7394bbe66bcb0f9155995166b824b2db480235098b20459c6"
+    "url": "assets/boards/lisbon-1550.419d8183a2439dea.json",
+    "bytes": 1514377,
+    "sha256": "419d8183a2439dea5d31ae4fcd493aac0c1968b2eb8b5facb0fea3fcabd44736"
   },
   "assets/boards/cadiz-1550.json": {
-    "url": "assets/boards/cadiz-1550.56b4496e0e775942.json",
-    "bytes": 776518,
-    "sha256": "56b4496e0e77594299af7edce17d5c7b6dde4cd8a083cc48603595c7220cd5e9"
+    "url": "assets/boards/cadiz-1550.f998810b352f115e.json",
+    "bytes": 776571,
+    "sha256": "f998810b352f115eac4df7a6cf35ba582cc17f4ff466464d007e8477519a4f02"
   },
   "assets/boards/sanlucar-1550.json": {
-    "url": "assets/boards/sanlucar-1550.52a6e490d061ca0a.json",
-    "bytes": 1009897,
-    "sha256": "52a6e490d061ca0af57f4962082099919319c1b5f7bd18d310d40bb035cb0b02"
+    "url": "assets/boards/sanlucar-1550.4b6c07ca3c71ce14.json",
+    "bytes": 1010012,
+    "sha256": "4b6c07ca3c71ce1409391ff469180f7e5e98a081adb619d5bb53fd4716837a0b"
   },
   "assets/boards/palos-huelva-1550.json": {
-    "url": "assets/boards/palos-huelva-1550.de0434d89ba51bca.json",
-    "bytes": 1035670,
-    "sha256": "de0434d89ba51bca8ab522dca60c65a4ef5cf071144be92d9078d068f970f634"
+    "url": "assets/boards/palos-huelva-1550.6c2214b30c130bce.json",
+    "bytes": 1035674,
+    "sha256": "6c2214b30c130bce82b0cd5b2206df19c7c00deaf8023d4d281c43a784966ee3"
   },
   "assets/boards/huelva-1550.json": {
-    "url": "assets/boards/huelva-1550.80560cbe2280e29c.json",
-    "bytes": 933480,
-    "sha256": "80560cbe2280e29c82369a52f2802af195637289a7fce5343120f98a166997be"
+    "url": "assets/boards/huelva-1550.1115e1cfd52ad8a6.json",
+    "bytes": 933425,
+    "sha256": "1115e1cfd52ad8a60d7f8a307130877fb832fb66a23bba90dc765291c4adeb2b"
   },
   "assets/boards/la-coruna-1550.json": {
-    "url": "assets/boards/la-coruna-1550.ef0fc0386aefe5d9.json",
-    "bytes": 864009,
-    "sha256": "ef0fc0386aefe5d9a882ed3cf57dd30cc35c7e9a885719a34602c5b013a3b7df"
+    "url": "assets/boards/la-coruna-1550.163ca1f61ca56ae9.json",
+    "bytes": 864096,
+    "sha256": "163ca1f61ca56ae9c3fa8b2bf649ce3ec33ff80eed2af464b5c9a186142fb131"
   },
   "assets/boards/setubal-1550.json": {
-    "url": "assets/boards/setubal-1550.2e8d08565ed43568.json",
-    "bytes": 1095699,
-    "sha256": "2e8d08565ed43568684de3aa1fa49a1d56dc5dabc950b70d769048cb32967ff2"
+    "url": "assets/boards/setubal-1550.b5945a627b1f137f.json",
+    "bytes": 1095653,
+    "sha256": "b5945a627b1f137f25cde329638a1382db92fa2fd75967563558766a0f87892d"
   },
   "assets/boards/seville-1550.json": {
-    "url": "assets/boards/seville-1550.13403dcd480c34d6.json",
-    "bytes": 1637899,
-    "sha256": "13403dcd480c34d64a5da75a5d57145cd943d43355f8fe7258f3f6b2f191dc09"
+    "url": "assets/boards/seville-1550.d68736ebc5655f7e.json",
+    "bytes": 1637907,
+    "sha256": "d68736ebc5655f7e926fc58481d1adafc8d7e20546c898720885d6a318801266"
   },
   "assets/boards/porto-1550.json": {
-    "url": "assets/boards/porto-1550.f6098138bc027427.json",
-    "bytes": 965302,
-    "sha256": "f6098138bc027427ffff441326ffdc480c5be64d2fb596b7f4d52413e4d67a99"
+    "url": "assets/boards/porto-1550.215ace94ba75ddce.json",
+    "bytes": 965243,
+    "sha256": "215ace94ba75ddce2e651915ec6bd2148c76e7040553c8a2e3520bece6658fa6"
   },
   "assets/boards/cadiz-sanlucar-1550.json": {
-    "url": "assets/boards/cadiz-sanlucar-1550.9d997f574da75021.json",
-    "bytes": 767871,
-    "sha256": "9d997f574da7502124a45ab9a9a69d79a37aa37e73bc6ad88a6c6ad8e97c01a6"
+    "url": "assets/boards/cadiz-sanlucar-1550.bf8c4ed5b02cfd66.json",
+    "bytes": 768007,
+    "sha256": "bf8c4ed5b02cfd66455a59615517d2819a470be6261208118a1e20a822359304"
   },
   "assets/ports/1550/buildings-1550-lrm.bin": {
     "url": "assets/ports/1550/buildings-1550-lrm.070f343b9c5ba729.bin",
