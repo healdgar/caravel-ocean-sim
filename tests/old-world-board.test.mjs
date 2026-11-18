@@ -269,11 +269,8 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   stamp.uses.forEach((use, k) => { if (tables.parcels[(k + 1) * 8 + 3] > 0) tinted++; else wild++; });
   assert.ok(tinted > 50 && wild > 0, `furlongs tinted ${tinted}, left to the ground's own colour ${wild}`);
 
-  // A year with no board founded for it: the city has no town, and none is grown in its place.
-  const unbaked = oldWorldCountry(region({ year: 1650 }), ground(), port());
-  assert.equal(unbaked.board, null);
-  assert.equal(unbaked.plan, null, 'no town is grown here');
-  assert.equal(unbaked.town, null);
+  // A year with no board founded for it: the city has no town and its ground no country; none is grown in its place.
+  assert.equal(oldWorldCountry(region({ year: 1650 }), ground(), port()), null, 'no town is grown here');
 });
 
 test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and its real places', () => {

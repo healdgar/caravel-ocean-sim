@@ -36,7 +36,7 @@ import {
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
 import { readCrossingRiver } from './river-water.js';
-import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityHeld, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
+import { bakedBoardFor, oldWorldCountry, oldWorldCityHeld, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
 import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, buildColonialCityFabric, cityMasonry, footprint, planColonialStreets } from './old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 import { boardRoadCrossings, widenBoardRiverHalfWidth, widenBoardRivers } from './old-world-board.js';
@@ -8960,7 +8960,6 @@ export function synthesizeCoastalAlbedo(
   const beachData = beaches ?? synthesizeCoastalBeaches(region, heights, satelliteData, distInfo);
   const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement, satelliteData);
   const rgba = new Uint8Array(size * size * 4);
-  const country = portPlacement?._resolvedCountry ?? oldWorldCountry(region, heights, portPlacement);
 
   for (let j = 0; j < size; j++) {
     const v = (j + 0.5) / size;
@@ -9016,16 +9015,10 @@ export function synthesizeCoastalAlbedo(
         lushG = (60 + canopyMottle * 11 + speciesHue * 14 + Math.max(0, crownSunSlope) * 18 + fineGrain * 0.36) * crownShade;
         lushB = (26 + canopyMottle * 5 + (1 - speciesHue) * 7 + fineGrain * 0.22) * crownShade;
       }
-      let forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
-      let forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
-      let forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
-      // Tilled and grazed country shows its own ground; only its woods keep the forest's colours.
-      const land = country && h > 0.6 ? country.landAt(x, z, slope) : null;
-      if (land && land.r !== undefined && land.kind !== OLD_WORLD_LAND.WOOD) {
-        forestR = land.r;
-        forestG = land.g;
-        forestB = land.b;
-      }
+      // A board's country is stamped over these colours on the GPU (js/board-stamp.js).
+      const forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
+      const forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
+      const forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
       const cloudCliffShift =
         region.coastalArchetype === 'volcanic-island' ? coastalSmoothstep(130, 360, h) * 0.22 : 0;
       const cliffWeight = coastalSmoothstep(0.34 + cloudCliffShift, 0.70 + cloudCliffShift, slope) * (1 - canopyBlend * 0.55);
