@@ -106,7 +106,7 @@
      0.90351
     ]
    },
-   "bakeMs": 2563
+   "bakeMs": 2859
   },
   {
    "id": 1,
@@ -181,7 +181,7 @@
      0.93601
     ]
    },
-   "bakeMs": 2328
+   "bakeMs": 3002
   },
   {
    "id": 2,
@@ -256,7 +256,7 @@
      1
     ]
    },
-   "bakeMs": 1720
+   "bakeMs": 2168
   },
   {
    "id": 3,
@@ -331,7 +331,7 @@
      0.99604
     ]
    },
-   "bakeMs": 1973
+   "bakeMs": 2466
   },
   {
    "id": 4,
@@ -406,7 +406,7 @@
      0.91314
     ]
    },
-   "bakeMs": 1902
+   "bakeMs": 2440
   },
   {
    "id": 5,
@@ -481,7 +481,7 @@
      1
     ]
    },
-   "bakeMs": 3028
+   "bakeMs": 4067
   },
   {
    "id": 6,
@@ -556,7 +556,7 @@
      0.92982
     ]
    },
-   "bakeMs": 3076
+   "bakeMs": 3061
   },
   {
    "id": 7,
@@ -631,7 +631,7 @@
      1
     ]
    },
-   "bakeMs": 1671
+   "bakeMs": 1720
   },
   {
    "id": 8,
@@ -706,7 +706,7 @@
      0.98995
     ]
    },
-   "bakeMs": 1330
+   "bakeMs": 1449
   },
   {
    "id": 9,
@@ -781,7 +781,7 @@
      0.98665
     ]
    },
-   "bakeMs": 1566
+   "bakeMs": 1938
   },
   {
    "id": 10,
@@ -856,7 +856,7 @@
      0.87646
     ]
    },
-   "bakeMs": 3188
+   "bakeMs": 3848
   },
   {
    "id": 11,
@@ -931,7 +931,7 @@
      0.87876
     ]
    },
-   "bakeMs": 1907
+   "bakeMs": 2269
   },
   {
    "id": 12,
@@ -1006,7 +1006,7 @@
      0.93742
     ]
    },
-   "bakeMs": 2614
+   "bakeMs": 3193
   },
   {
    "id": 13,
@@ -1081,7 +1081,7 @@
      0.9712
     ]
    },
-   "bakeMs": 4518
+   "bakeMs": 4626
   },
   {
    "id": 14,
@@ -1156,7 +1156,7 @@
      0.96945
     ]
    },
-   "bakeMs": 5858
+   "bakeMs": 6158
   },
   {
    "id": 15,
@@ -1231,7 +1231,7 @@
      0.9495
     ]
    },
-   "bakeMs": 2353
+   "bakeMs": 2462
   },
   {
    "id": 16,
@@ -1306,7 +1306,7 @@
      0.91008
     ]
    },
-   "bakeMs": 1619
+   "bakeMs": 2338
   },
   {
    "id": 17,
@@ -1350,12 +1350,12 @@
     "outward": 0.5238,
     "inward": 0.6062,
     "simplifyError": 0.0753,
-    "steps": 1192,
-    "coreTriangles": 48,
+    "steps": 1205,
+    "coreTriangles": 6,
     "depth": 9,
     "errorRange": [
      0.6062,
-     9.2495
+     9.25
     ],
     "inflateMax": 1.8609,
     "rootTriangles": 1949,
@@ -1381,7 +1381,7 @@
      0.90947
     ]
    },
-   "bakeMs": 3016
+   "bakeMs": 4676
   },
   {
    "id": 18,
@@ -1456,7 +1456,7 @@
      0.94449
     ]
    },
-   "bakeMs": 2269
+   "bakeMs": 3164
   },
   {
    "id": 19,
@@ -1500,12 +1500,12 @@
     "outward": 0.6222,
     "inward": 0.6219,
     "simplifyError": 0.0875,
-    "steps": 897,
-    "coreTriangles": 44,
-    "depth": 7,
+    "steps": 908,
+    "coreTriangles": 4,
+    "depth": 9,
     "errorRange": [
      0.6222,
-     8.0276
+     8.5298
     ],
     "inflateMax": 2.163,
     "rootTriangles": 2738,
@@ -1531,7 +1531,7 @@
      0.94113
     ]
    },
-   "bakeMs": 2656
+   "bakeMs": 4285
   },
   {
    "id": 20,
@@ -1575,12 +1575,12 @@
     "outward": 0.7564,
     "inward": 0.7569,
     "simplifyError": 0.0786,
-    "steps": 930,
-    "coreTriangles": 46,
+    "steps": 942,
+    "coreTriangles": 6,
     "depth": 10,
     "errorRange": [
      0.7569,
-     7.1845
+     9.0286
     ],
     "inflateMax": 2.4588,
     "rootTriangles": 3292,
@@ -1606,7 +1606,7 @@
      0.97791
     ]
    },
-   "bakeMs": 3247
+   "bakeMs": 6420
   },
   {
    "id": 21,
@@ -1681,7 +1681,7 @@
      0.89143
     ]
    },
-   "bakeMs": 4785
+   "bakeMs": 6437
   },
   {
    "id": 22,
@@ -1756,7 +1756,7 @@
      0.91149
     ]
    },
-   "bakeMs": 2584
+   "bakeMs": 3149
   },
   {
    "id": 23,
@@ -1831,7 +1831,7 @@
      0.92008
     ]
    },
-   "bakeMs": 2700
+   "bakeMs": 3989
   },
   {
    "id": 24,
@@ -1906,7 +1906,7 @@
      0.96272
     ]
    },
-   "bakeMs": 2717
+   "bakeMs": 4130
   },
   {
    "id": 25,
@@ -1981,7 +1981,7 @@
      0.95033
     ]
    },
-   "bakeMs": 2806
+   "bakeMs": 3907
   },
   {
    "id": 26,
@@ -2056,7 +2056,7 @@
      0.91418
     ]
    },
-   "bakeMs": 1734
+   "bakeMs": 2650
   },
   {
    "id": 27,
@@ -2131,7 +2131,7 @@
      0.92041
     ]
    },
-   "bakeMs": 1119
+   "bakeMs": 1746
   },
   {
    "id": 28,
@@ -2175,12 +2175,12 @@
     "outward": 0.5443,
     "inward": 0.4975,
     "simplifyError": 0.048,
-    "steps": 1018,
-    "coreTriangles": 44,
-    "depth": 7,
+    "steps": 1029,
+    "coreTriangles": 6,
+    "depth": 9,
     "errorRange": [
      0.5443,
-     8.9513
+     8.9517
     ],
     "inflateMax": 1.8528,
     "rootTriangles": 2074,
@@ -2206,7 +2206,7 @@
      1
     ]
    },
-   "bakeMs": 2950
+   "bakeMs": 6036
   },
   {
    "id": 29,
@@ -2281,7 +2281,7 @@
      1
     ]
    },
-   "bakeMs": 1671
+   "bakeMs": 4138
   },
   {
    "id": 30,
@@ -2325,12 +2325,12 @@
     "outward": 0.6887,
     "inward": 0.8024,
     "simplifyError": 0.0692,
-    "steps": 831,
-    "coreTriangles": 42,
-    "depth": 8,
+    "steps": 840,
+    "coreTriangles": 6,
+    "depth": 9,
     "errorRange": [
      0.8024,
-     7.4466
+     9.0381
     ],
     "inflateMax": 2.1386,
     "rootTriangles": 3172,
@@ -2356,7 +2356,7 @@
      0.93375
     ]
    },
-   "bakeMs": 2585
+   "bakeMs": 6415
   },
   {
    "id": 31,
@@ -2376,7 +2376,7 @@
     -0.0359,
     5.65,
     -0.2661,
-    16.1685
+    16.8685
    ],
    "clusters": {
     "count": 160,
@@ -2400,14 +2400,14 @@
     "outward": 0.6839,
     "inward": 0.685,
     "simplifyError": 0.0629,
-    "steps": 1014,
-    "coreTriangles": 48,
+    "steps": 1027,
+    "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
      0.685,
-     8.9636
+     9.2284
     ],
-    "inflateMax": 1.7288,
+    "inflateMax": 2.4288,
     "rootTriangles": 3542,
     "farFirst": 0,
     "farFirstTriangles": 2076,
@@ -2431,7 +2431,7 @@
      0.94172
     ]
    },
-   "bakeMs": 3144
+   "bakeMs": 8783
   },
   {
    "id": 32,
@@ -2506,7 +2506,7 @@
      0.99111
     ]
    },
-   "bakeMs": 2319
+   "bakeMs": 5936
   },
   {
    "id": 33,
@@ -2581,7 +2581,7 @@
      0.91816
     ]
    },
-   "bakeMs": 2095
+   "bakeMs": 4594
   },
   {
    "id": 34,
@@ -2656,7 +2656,7 @@
      0.94438
     ]
    },
-   "bakeMs": 5215
+   "bakeMs": 10240
   },
   {
    "id": 35,
@@ -2731,7 +2731,7 @@
      0.50536
     ]
    },
-   "bakeMs": 931
+   "bakeMs": 1689
   },
   {
    "id": 36,
@@ -2806,7 +2806,7 @@
      0.52356
     ]
    },
-   "bakeMs": 1496
+   "bakeMs": 2250
   },
   {
    "id": 37,
@@ -2850,12 +2850,12 @@
     "outward": 0.4179,
     "inward": 0.5637,
     "simplifyError": 0.1206,
-    "steps": 390,
-    "coreTriangles": 16,
+    "steps": 395,
+    "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
      0.5637,
-     13.3006
+     13.3009
     ],
     "inflateMax": 1.9076,
     "rootTriangles": 516,
@@ -2881,7 +2881,7 @@
      0.67959
     ]
    },
-   "bakeMs": 624
+   "bakeMs": 952
   },
   {
    "id": 38,
@@ -2925,8 +2925,8 @@
     "outward": 0.5731,
     "inward": 0.4419,
     "simplifyError": 0.1046,
-    "steps": 184,
-    "coreTriangles": 10,
+    "steps": 185,
+    "coreTriangles": 4,
     "depth": 8,
     "errorRange": [
      0.5731,
@@ -2956,7 +2956,7 @@
      0.5854
     ]
    },
-   "bakeMs": 368
+   "bakeMs": 501
   },
   {
    "id": 39,
@@ -3000,18 +3000,18 @@
     "outward": 0.5731,
     "inward": 0.5253,
     "simplifyError": 0.067,
-    "steps": 313,
-    "coreTriangles": 18,
+    "steps": 312,
+    "coreTriangles": 4,
     "depth": 8,
     "errorRange": [
      0.5731,
-     7.5272
+     7.5275
     ],
     "inflateMax": 1.6546,
     "rootTriangles": 330,
     "farFirst": 157,
     "farFirstTriangles": 330,
-    "handoffError": 0.779
+    "handoffError": 0.8209
    },
    "splat": {
     "centre": [
@@ -3031,7 +3031,7 @@
      0.87294
     ]
    },
-   "bakeMs": 764
+   "bakeMs": 976
   },
   {
    "id": 40,
@@ -3106,7 +3106,7 @@
      0.91544
     ]
    },
-   "bakeMs": 1563
+   "bakeMs": 2682
   },
   {
    "id": 41,
@@ -3181,7 +3181,7 @@
      0.92375
     ]
    },
-   "bakeMs": 124
+   "bakeMs": 188
   },
   {
    "id": 42,
@@ -3225,8 +3225,8 @@
     "outward": 0.0721,
     "inward": 0.0418,
     "simplifyError": 0.0084,
-    "steps": 57,
-    "coreTriangles": 18,
+    "steps": 61,
+    "coreTriangles": 6,
     "depth": 4,
     "errorRange": [
      0.0721,
@@ -3256,7 +3256,7 @@
      6.4796
     ]
    },
-   "bakeMs": 169
+   "bakeMs": 371
   },
   {
    "id": 43,
@@ -3331,7 +3331,7 @@
      6.74619
     ]
    },
-   "bakeMs": 2889
+   "bakeMs": 6660
   },
   {
    "id": 44,
@@ -3375,9 +3375,9 @@
     "outward": 0.095,
     "inward": 0.076,
     "simplifyError": 0.0118,
-    "steps": 387,
-    "coreTriangles": 6,
-    "depth": 6,
+    "steps": 390,
+    "coreTriangles": 4,
+    "depth": 8,
     "errorRange": [
      0.095,
      3.1101
@@ -3406,7 +3406,7 @@
      6.75113
     ]
    },
-   "bakeMs": 1043
+   "bakeMs": 2276
   },
   {
    "id": 45,
@@ -3481,7 +3481,7 @@
      0.90383
     ]
    },
-   "bakeMs": 438
+   "bakeMs": 728
   },
   {
    "id": 46,
@@ -3525,12 +3525,12 @@
     "outward": 0.3721,
     "inward": 0.2011,
     "simplifyError": 0.0553,
-    "steps": 1362,
-    "coreTriangles": 26,
+    "steps": 1367,
+    "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
      0.3721,
-     3.4189
+     3.419
     ],
     "inflateMax": 0.6241,
     "rootTriangles": 50,
@@ -3556,7 +3556,7 @@
      0.89675
     ]
    },
-   "bakeMs": 4825
+   "bakeMs": 7401
   },
   {
    "id": 47,
@@ -3631,7 +3631,7 @@
      0.6715
     ]
    },
-   "bakeMs": 2723
+   "bakeMs": 3837
   },
   {
    "id": 48,
@@ -3676,7 +3676,7 @@
     "inward": 1.2188,
     "simplifyError": 0.089,
     "steps": 1043,
-    "coreTriangles": 6,
+    "coreTriangles": 4,
     "depth": 9,
     "errorRange": [
      1.2188,
@@ -3706,7 +3706,7 @@
      0.99648
     ]
    },
-   "bakeMs": 4000
+   "bakeMs": 6050
   },
   {
    "id": 49,
@@ -3781,7 +3781,7 @@
      0.89858
     ]
    },
-   "bakeMs": 2052
+   "bakeMs": 4227
   },
   {
    "id": 50,
@@ -3825,12 +3825,12 @@
     "outward": 0.3506,
     "inward": 0.3107,
     "simplifyError": 0.0325,
-    "steps": 806,
-    "coreTriangles": 16,
+    "steps": 809,
+    "coreTriangles": 6,
     "depth": 9,
     "errorRange": [
      0.3506,
-     7.7085
+     8.1536
     ],
     "inflateMax": 1.0049,
     "rootTriangles": 368,
@@ -3856,7 +3856,7 @@
      0.83814
     ]
    },
-   "bakeMs": 2342
+   "bakeMs": 4015
   },
   {
    "id": 51,
@@ -3931,7 +3931,7 @@
      0.8917
     ]
    },
-   "bakeMs": 4614
+   "bakeMs": 8038
   },
   {
    "id": 52,
@@ -4006,7 +4006,7 @@
      0.90489
     ]
    },
-   "bakeMs": 3529
+   "bakeMs": 4231
   },
   {
    "id": 53,
@@ -4081,7 +4081,7 @@
      1
     ]
    },
-   "bakeMs": 1825
+   "bakeMs": 2748
   },
   {
    "id": 54,
@@ -4126,7 +4126,7 @@
     "inward": 1.4192,
     "simplifyError": 0.0277,
     "steps": 1170,
-    "coreTriangles": 6,
+    "coreTriangles": 4,
     "depth": 9,
     "errorRange": [
      1.4192,
@@ -4156,7 +4156,7 @@
      0.92412
     ]
    },
-   "bakeMs": 3193
+   "bakeMs": 5605
   },
   {
    "id": 55,
@@ -4231,7 +4231,7 @@
      0.90037
     ]
    },
-   "bakeMs": 5605
+   "bakeMs": 7527
   },
   {
    "id": 56,
@@ -4306,7 +4306,7 @@
      0.89774
     ]
    },
-   "bakeMs": 3852
+   "bakeMs": 4539
   },
   {
    "id": 57,
@@ -4350,12 +4350,12 @@
     "outward": 0.6,
     "inward": 0.5482,
     "simplifyError": 0.0475,
-    "steps": 1373,
-    "coreTriangles": 52,
+    "steps": 1386,
+    "coreTriangles": 4,
     "depth": 9,
     "errorRange": [
      0.6,
-     8.2093
+     10.006
     ],
     "inflateMax": 1.2451,
     "rootTriangles": 783,
@@ -4381,7 +4381,7 @@
      0.96882
     ]
    },
-   "bakeMs": 6295
+   "bakeMs": 7771
   },
   {
    "id": 58,
@@ -4425,12 +4425,12 @@
     "outward": 0.7512,
     "inward": 0.4752,
     "simplifyError": 0.0897,
-    "steps": 1080,
-    "coreTriangles": 38,
+    "steps": 1090,
+    "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
      0.7512,
-     9.8042
+     10.4316
     ],
     "inflateMax": 1.5049,
     "rootTriangles": 817,
@@ -4456,7 +4456,7 @@
      0.88441
     ]
    },
-   "bakeMs": 3716
+   "bakeMs": 4536
   },
   {
    "id": 59,
@@ -4531,7 +4531,7 @@
      1
     ]
    },
-   "bakeMs": 5656
+   "bakeMs": 7392
   },
   {
    "id": 60,
@@ -4606,7 +4606,7 @@
      0.98573
     ]
    },
-   "bakeMs": 1805
+   "bakeMs": 2517
   },
   {
    "id": 61,
@@ -4681,7 +4681,7 @@
      1
     ]
    },
-   "bakeMs": 6496
+   "bakeMs": 8795
   },
   {
    "id": 62,
@@ -4756,7 +4756,7 @@
      6.8042
     ]
    },
-   "bakeMs": 1984
+   "bakeMs": 3026
   },
   {
    "id": 63,
@@ -4831,7 +4831,7 @@
      0.6058
     ]
    },
-   "bakeMs": 2214
+   "bakeMs": 4792
   },
   {
    "id": 64,
@@ -4875,12 +4875,12 @@
     "outward": 0.3313,
     "inward": 0.2309,
     "simplifyError": 0.0275,
-    "steps": 1393,
-    "coreTriangles": 28,
-    "depth": 8,
+    "steps": 1400,
+    "coreTriangles": 6,
+    "depth": 9,
     "errorRange": [
      0.3313,
-     6.7868
+     6.787
     ],
     "inflateMax": 1.0626,
     "rootTriangles": 375,
@@ -4906,7 +4906,7 @@
      0.61322
     ]
    },
-   "bakeMs": 5028
+   "bakeMs": 9203
   },
   {
    "id": 65,
@@ -4981,7 +4981,7 @@
      0.59936
     ]
    },
-   "bakeMs": 5203
+   "bakeMs": 7818
   },
   {
    "id": 66,
@@ -5001,7 +5001,7 @@
     0.0208,
     -0.0111,
     0.0314,
-    2.871
+    3.3758
    ],
    "clusters": {
     "count": 14,
@@ -5025,14 +5025,14 @@
     "outward": 0.1036,
     "inward": 0.0687,
     "simplifyError": 0.0322,
-    "steps": 94,
-    "coreTriangles": 36,
+    "steps": 103,
+    "coreTriangles": 4,
     "depth": 6,
     "errorRange": [
      0.1036,
-     1.7066
+     1.7067
     ],
-    "inflateMax": 0.0042,
+    "inflateMax": 0.509,
     "rootTriangles": 94,
     "farFirst": 65,
     "farFirstTriangles": 94,
@@ -5056,7 +5056,7 @@
      2.52996
     ]
    },
-   "bakeMs": 111
+   "bakeMs": 310
   },
   {
    "id": 67,
@@ -5131,7 +5131,7 @@
      0.63846
     ]
    },
-   "bakeMs": 315
+   "bakeMs": 609
   },
   {
    "id": 68,
@@ -5151,7 +5151,7 @@
     -0.0375,
     -2.3688,
     0.0563,
-    6.1919
+    6.838
    ],
    "clusters": {
     "count": 70,
@@ -5175,14 +5175,14 @@
     "outward": 0.2675,
     "inward": 0.275,
     "simplifyError": 0.0236,
-    "steps": 1257,
-    "coreTriangles": 90,
+    "steps": 1283,
+    "coreTriangles": 6,
     "depth": 9,
     "errorRange": [
      0.275,
-     5.8233
+     6.0584
     ],
-    "inflateMax": 0.2647,
+    "inflateMax": 0.9108,
     "rootTriangles": 251,
     "farFirst": 1177,
     "farFirstTriangles": 250,
@@ -5206,7 +5206,7 @@
      6.80411
     ]
    },
-   "bakeMs": 3337
+   "bakeMs": 6009
   },
   {
    "id": 69,
@@ -5281,7 +5281,7 @@
      0.63038
     ]
    },
-   "bakeMs": 3307
+   "bakeMs": 5812
   },
   {
    "id": 70,
@@ -5356,7 +5356,7 @@
      0.92517
     ]
    },
-   "bakeMs": 3152
+   "bakeMs": 4846
   },
   {
    "id": 71,
@@ -5400,12 +5400,12 @@
     "outward": 0.175,
     "inward": 0.1317,
     "simplifyError": 0.0175,
-    "steps": 1063,
-    "coreTriangles": 10,
-    "depth": 8,
+    "steps": 1073,
+    "coreTriangles": 4,
+    "depth": 10,
     "errorRange": [
      0.175,
-     2.1109
+     3.8707
     ],
     "inflateMax": 0.5481,
     "rootTriangles": 150,
@@ -5431,7 +5431,7 @@
      0.89663
     ]
    },
-   "bakeMs": 3354
+   "bakeMs": 4867
   },
   {
    "id": 72,
@@ -5506,7 +5506,7 @@
      0.60524
     ]
    },
-   "bakeMs": 2111
+   "bakeMs": 2588
   },
   {
    "id": 73,
@@ -5581,7 +5581,7 @@
      0.62379
     ]
    },
-   "bakeMs": 5930
+   "bakeMs": 7470
   },
   {
    "id": 74,
@@ -5656,7 +5656,7 @@
      0.88115
     ]
    },
-   "bakeMs": 36
+   "bakeMs": 39
   },
   {
    "id": 75,
@@ -5676,7 +5676,7 @@
     -0.0525,
     2.6425,
     -0.095,
-    5.3345
+    5.8402
    ],
    "clusters": {
     "count": 42,
@@ -5700,14 +5700,14 @@
     "outward": 0.24,
     "inward": 0.1121,
     "simplifyError": 0.0091,
-    "steps": 1161,
-    "coreTriangles": 108,
-    "depth": 6,
+    "steps": 1202,
+    "coreTriangles": 6,
+    "depth": 9,
     "errorRange": [
      0.24,
-     3.8135
+     5.2756
     ],
-    "inflateMax": 0.1825,
+    "inflateMax": 0.6882,
     "rootTriangles": 254,
     "farFirst": 1088,
     "farFirstTriangles": 254,
@@ -5731,18 +5731,18 @@
      4.80962
     ]
    },
-   "bakeMs": 3145
+   "bakeMs": 3863
   }
  ],
  "atlas": {
-  "words": 2759972,
-  "bytes": 11039888,
-  "sha256": "8b0ddb033d222eac0c92553eff6b1f123351a1c8749ea90421016dc2741c6785",
+  "words": 2760792,
+  "bytes": 11043168,
+  "sha256": "578185a520c38434fa616e3585f8bac3dd151a0e4332d30ab0e237aab493c97f",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 3861873,
-   "sha256": "2135c8d221f2df3641ef0e24966c29f9e0bbc357e7f146ee931a3d57e98d7fc0"
+   "bytes": 3863707,
+   "sha256": "768680c45c6470daa51278711a0e1fae435b925be8e2a76f8bba81780d47d76e"
   }
  },
- "bakeSeconds": 207
+ "bakeSeconds": 312.9
 }
