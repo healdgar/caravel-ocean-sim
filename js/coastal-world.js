@@ -1,25 +1,14 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Procedural Coastal World Generator (Spanish Main ~1550 -> Global Scale).
-// Synthesizes metric 3D terrain + bathymetry, sandy beaches, biome-appropriate
-// vegetation, and modular 16th-century port prefabs within several kilometres
-// of shore for curated 1550s Caribbean ports or any global (lat, lon) landfall.
+// Synthesizes metric 3D terrain + bathymetry, sandy beaches and biome-appropriate vegetation within several
+// kilometres of shore for curated ports or any global (lat, lon) landfall. Every town, work and waterfront on that
+// ground is its board's (js/old-world.js), drawn as the city atlas's types (buildCityTypeGeometry builds each one).
 
 import { layTownStreets, paveCityStreets, streetEdgeAt } from './town-streets.js';
 import { layPortProps, pierBentStations, pierBrowStations, pierCraneStation } from './port-props.js';
 import { emitTripoHarborCrane, emitTripoDockCleat } from './tripo-pier-assets.js';
-import {
-  bastionBayIsEmbrasure,
-  enclosureGroundPoints,
-  enclosureSiteIsClear,
-  footprintFitsEnclosures,
-  fortLocalToWorld,
-  palisadeRingPlan,
-  ringPostIsGate,
-  triangularFortPlan,
-  enclosurePlan,
-} from './fort-plan.js';
 import { readHarbourGeography } from './harbour-geography.js';
-import { carveRecordedChannel, shoreNormal, worldOfPosition } from './harbour-defences.js';
+import { carveRecordedChannel, worldOfPosition } from './harbour-defences.js';
 import { fortRecordsFor } from './fort-records.js';
 import {
   terrainSample,
@@ -28,18 +17,10 @@ import {
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
 import { readCrossingRiver } from './river-water.js';
-import { bakedBoardFor, boardTownHeld, oldWorldCountry, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
-import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, cityMasonry, footprint } from './old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
-import { boardRoadCrossings, widenBoardRiverHalfWidth, widenBoardRivers } from './old-world-board.js';
+import { boardTownHeld, oldWorldCountry, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
+import { CITY_BLOCK_FLOATS } from './old-world-city.js';
 import { createInlandWaterSampler } from './inland-water.js';
-import {
-  BUILDING_SUB_ASSEMBLIES,
-  PART_CUTAWAY_MODES,
-  createPartAssemblyCatalog,
-  createPartAssemblyState,
-  locatePartAtLocalPoint,
-} from './part-assembly.js';
+import { createPartAssemblyCatalog } from './part-assembly.js';
 import {
   SOVEREIGN_INDIGENOUS_POLITIES,
   createIndigenousSovereigntyState,
@@ -1385,601 +1366,8 @@ export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 155
   });
 }
 
-export const PORT_PREFABS = Object.freeze({
-  timber_mole_pier: Object.freeze({
-    id: 'timber_mole_pier',
-    label: 'Timber Mole & Mooring Pier',
-    length: 68,
-    width: 7.5,
-    height: 2.8,
-    foundationDepth: 8.5,
-    materialKind: 10,
-    roofPitch: 0,
-    waterfront: true,
-  }),
-  casa_de_contratacion: Object.freeze({
-    id: 'casa_de_contratacion',
-    label: 'Casa de la Contratación (Royal Customhouse)',
-    length: 26,
-    width: 16,
-    height: 8.5,
-    foundationDepth: 3.5,
-    materialKind: 12,
-    roofPitch: 2.6,
-    waterfront: false,
-  }),
-  royal_warehouse: Object.freeze({
-    id: 'royal_warehouse',
-    label: 'Almacén Real (King’s Storehouses)',
-    length: 30,
-    width: 14,
-    height: 7.2,
-    foundationDepth: 3.0,
-    materialKind: 12,
-    roofPitch: 2.2,
-    waterfront: false,
-  }),
-  careening_shed: Object.freeze({
-    id: 'careening_shed',
-    label: 'Careening Beach Shed & Pitch Works',
-    length: 22,
-    width: 11,
-    height: 5.6,
-    foundationDepth: 2.5,
-    materialKind: 10,
-    roofPitch: 2.0,
-    waterfront: true,
-  }),
-  mission_chapel: Object.freeze({
-    id: 'mission_chapel',
-    label: 'Iglesia & Bell Tower',
-    length: 28,
-    width: 13,
-    height: 12.0,
-    foundationDepth: 3.5,
-    materialKind: 12,
-    roofPitch: 3.4,
-    waterfront: false,
-  }),
-  colonial_town_block: Object.freeze({
-    id: 'colonial_town_block',
-    label: 'Walled Adobe & Tile Town Block',
-    length: 24,
-    width: 18,
-    height: 6.4,
-    foundationDepth: 3.0,
-    materialKind: 12,
-    roofPitch: 2.0,
-    waterfront: false,
-  }),
-  stone_quay_seawall: Object.freeze({
-    id: 'stone_quay_seawall',
-    label: 'Malecón y Muelle de Piedra (Stone Seawall & Wharf)',
-    length: 12,
-    width: 84,
-    height: 1.85,
-    foundationDepth: 6.5,
-    materialKind: 11,
-    roofPitch: 0,
-    waterfront: true,
-  }),
-  single_nave_solar: Object.freeze({
-    id: 'single_nave_solar',
-    label: 'Casa de Una Nave / Barracón (Single-Span Hall)',
-    length: 22,
-    width: 9.5,
-    height: 7.2,
-    foundationDepth: 3.5,
-    materialKind: 12,
-    roofPitch: 2.0,
-    waterfront: false,
-  }),
-  l_wing_u_wing_solar: Object.freeze({
-    id: 'l_wing_u_wing_solar',
-    label: 'Casa Solariega en L / U con Corral (Corner Courtyard House)',
-    length: 24,
-    width: 17,
-    height: 7.4,
-    foundationDepth: 3.5,
-    materialKind: 12,
-    roofPitch: 2.1,
-    waterfront: false,
-  }),
-  modular_patio_cloister: Object.freeze({
-    id: 'modular_patio_cloister',
-    label: 'Casa de Patio / Convento Claustral (Arcaded Courtyard Cloister)',
-    length: 30,
-    width: 26,
-    height: 8.2,
-    foundationDepth: 4.0,
-    materialKind: 12,
-    roofPitch: 2.3,
-    waterfront: false,
-  }),
-  royal_atarazanas_arsenal: Object.freeze({
-    id: 'royal_atarazanas_arsenal',
-    label: 'Reales Atarazanas / Almacenes de Naves Paralelas (Multi-Gable Arsenal)',
-    length: 36,
-    width: 26,
-    height: 8.2,
-    foundationDepth: 4.5,
-    materialKind: 11,
-    roofPitch: 2.5,
-    waterfront: true,
-  }),
-  open_lonja_loggia: Object.freeze({
-    id: 'open_lonja_loggia',
-    label: 'Lonja de Mercaderes / Feria Porticada (Open Market Loggia)',
-    length: 26,
-    width: 13.5,
-    height: 7.4,
-    foundationDepth: 3.5,
-    materialKind: 11,
-    roofPitch: 2.3,
-    waterfront: true,
-  }),
-  walled_mule_corral: Object.freeze({
-    id: 'walled_mule_corral',
-    label: 'Corral del Rey / Caballerizas Reales (Walled Stable Compound)',
-    length: 34,
-    width: 30,
-    height: 5.8,
-    foundationDepth: 3.0,
-    materialKind: 12,
-    roofPitch: 1.9,
-    waterfront: false,
-  }),
-  torreon_atalaya_farol: Object.freeze({
-    id: 'torreon_atalaya_farol',
-    label: 'Torre del Homenaje / Torreón y Atalaya (Watchtower & Beacon)',
-    length: 13,
-    width: 13,
-    height: 15.5,
-    foundationDepth: 5.5,
-    materialKind: 11,
-    roofPitch: 0,
-    waterfront: true,
-  }),
-  curtain_wall_and_gate: Object.freeze({
-    id: 'curtain_wall_and_gate',
-    label: 'Muralla Real y Puerta de la Ciudad (Curtain Wall & Gatehouse)',
-    length: 34,
-    width: 6.2,
-    height: 6.6,
-    foundationDepth: 4.5,
-    materialKind: 11,
-    roofPitch: 0,
-    waterfront: false,
-  }),
-  stone_arch_bridge: Object.freeze({
-    id: 'stone_arch_bridge',
-    label: 'Puente de Piedra con Tajamares (Multi-Arch Cutwater Bridge)',
-    length: 32,
-    width: 7.2,
-    height: 4.6,
-    foundationDepth: 6.5,
-    materialKind: 11,
-    roofPitch: 0,
-    waterfront: true,
-  }),
-  thatched_bohio_palafito: Object.freeze({
-    id: 'thatched_bohio_palafito',
-    label: 'Bohío / Caney de Palma y Palafito (Palm-Thatch House & Stilt Hut)',
-    length: 14,
-    width: 8.5,
-    height: 4.8,
-    foundationDepth: 4.5,
-    materialKind: 15,
-    roofPitch: 3.0,
-    waterfront: false,
-  }),
-  astillero_and_moored_hull: Object.freeze({
-    id: 'astillero_and_moored_hull',
-    label: 'Astillero con Carabela en Grada / Barco de Puerto (Slipway & Hull)',
-    length: 23,
-    width: 8.2,
-    height: 5.2,
-    foundationDepth: 3.5,
-    materialKind: 10,
-    roofPitch: 0,
-    waterfront: true,
-  }),
-  abenaki_birchbark_wigwam: Object.freeze({
-    id: 'abenaki_birchbark_wigwam',
-    label: 'Abenaki / Algonquian Birchbark Wigwam (Wetu)',
-    length: 6.8,
-    width: 6.4,
-    height: 3.6,
-    foundationDepth: 2.2,
-    materialKind: 17,
-    roofPitch: 1.8,
-    waterfront: false,
-    indigenous: true,
-  }),
-  algonquian_longhouse: Object.freeze({
-    id: 'algonquian_longhouse',
-    label: 'Algonquian / Wabanaki Arched Bark Longhouse',
-    length: 22.0,
-    width: 7.2,
-    height: 5.2,
-    foundationDepth: 2.6,
-    materialKind: 17,
-    roofPitch: 2.4,
-    waterfront: false,
-    indigenous: true,
-  }),
-  indigenous_palisade_ring: Object.freeze({
-    id: 'indigenous_palisade_ring',
-    label: 'Woodland Split-Log Palisade Stockade & Three Sisters Mound Plaza',
-    length: 28.0,
-    width: 26.0,
-    height: 4.4,
-    foundationDepth: 2.8,
-    materialKind: 10,
-    roofPitch: 0,
-    waterfront: false,
-    indigenous: true,
-  }),
-  taino_cacique_caney: Object.freeze({
-    id: 'taino_cacique_caney',
-    label: 'Taíno Cacique Royal Caney & Portico',
-    length: 16.5,
-    width: 11.2,
-    height: 6.4,
-    foundationDepth: 2.8,
-    materialKind: 15,
-    roofPitch: 3.6,
-    waterfront: false,
-    indigenous: true,
-  }),
-  taino_circular_bohio: Object.freeze({
-    id: 'taino_circular_bohio',
-    label: 'Taíno / Arawak Circular Conical Guano-Thatch Bohío',
-    length: 8.6,
-    width: 8.6,
-    height: 5.4,
-    foundationDepth: 2.4,
-    materialKind: 15,
-    roofPitch: 3.2,
-    waterfront: false,
-    indigenous: true,
-  }),
-  taino_batey_court: Object.freeze({
-    id: 'taino_batey_court',
-    label: 'Taíno Batey Ceremonial Ballcourt & Petroglyph Monoliths',
-    length: 24.0,
-    width: 15.0,
-    height: 2.2,
-    foundationDepth: 2.2,
-    materialKind: 16,
-    roofPitch: 0,
-    waterfront: false,
-    indigenous: true,
-  }),
-  kalinago_carbet_hall: Object.freeze({
-    id: 'kalinago_carbet_hall',
-    label: 'Kalinago (Island Carib) Elliptical Taboui / Carbet Assembly Hall',
-    length: 21.0,
-    width: 9.8,
-    height: 6.2,
-    foundationDepth: 2.6,
-    materialKind: 15,
-    roofPitch: 3.8,
-    waterfront: false,
-    indigenous: true,
-  }),
-  tupinamba_oca_longhouse: Object.freeze({
-    id: 'tupinamba_oca_longhouse',
-    label: 'Tupinambá / Lokono Monumental Arched Palm-Thatch Oca Longhouse',
-    length: 28.0,
-    width: 9.6,
-    height: 6.6,
-    foundationDepth: 2.8,
-    materialKind: 15,
-    roofPitch: 3.8,
-    waterfront: false,
-    indigenous: true,
-  }),
-  palafito_estuary_village: Object.freeze({
-    id: 'palafito_estuary_village',
-    label: 'Tierra Firme / Maracaibo Lagoon Stilt Palafito Cluster',
-    length: 18.0,
-    width: 14.0,
-    height: 5.4,
-    foundationDepth: 5.5,
-    materialKind: 15,
-    roofPitch: 2.8,
-    waterfront: true,
-    indigenous: true,
-  }),
-  maya_limestone_shrine_and_na: Object.freeze({
-    id: 'maya_limestone_shrine_and_na',
-    label: 'Postclassic Coastal Maya Limestone Shrine & Apsidal Thatched Nah',
-    length: 18.5,
-    width: 11.5,
-    height: 7.4,
-    foundationDepth: 3.2,
-    materialKind: 11,
-    roofPitch: 2.8,
-    waterfront: true,
-    indigenous: true,
-  }),
-  indigenous_canoe_landing: Object.freeze({
-    id: 'indigenous_canoe_landing',
-    label: 'Indigenous Canoe Beaching & Tidal Fish Weir',
-    length: 16.0,
-    width: 8.5,
-    height: 2.2,
-    foundationDepth: 3.2,
-    materialKind: 10,
-    roofPitch: 0,
-    waterfront: true,
-    indigenous: true,
-  }),
-  // English / North American Colonial Timber & Palisade Architecture (Jamestown 1607 James Fort, Plymouth, New England)
-  english_triangular_palisade_fort: Object.freeze({
-    id: 'english_triangular_palisade_fort',
-    label: 'James Fort Triangular Timber Palisade & Bulwarks',
-    length: 90,
-    width: 118,
-    height: 6.8,
-    foundationDepth: 3.2,
-    materialKind: 10,
-    roofPitch: 0,
-    waterfront: false,
-  }),
-  english_half_timber_hall: Object.freeze({
-    id: 'english_half_timber_hall',
-    label: 'English Half-Timbered Church & Storehouse',
-    length: 22,
-    width: 10.5,
-    height: 7.4,
-    foundationDepth: 3.2,
-    materialKind: 10,
-    roofPitch: 3.8,
-    waterfront: false,
-  }),
-  english_timber_cottage: Object.freeze({
-    id: 'english_timber_cottage',
-    label: 'English Clapboard & Wattle-and-Daub Steep-Gable Cottage',
-    length: 15.5,
-    width: 8.2,
-    height: 5.8,
-    foundationDepth: 2.8,
-    materialKind: 10,
-    roofPitch: 3.2,
-    waterfront: false,
-  }),
-});
-
-const OVER_WATER_PREFAB_IDS = new Set([
-  'timber_mole_pier',
-  'stone_quay_seawall',
-  'palafito_estuary_village',
-  'stone_arch_bridge',
-]);
-
-// What each prefab must stand on. Anything not named stands wholly on dry land.
-const PREFAB_SITE_NEEDS = Object.freeze({
-  // Works at the water's edge, with their feet in the shallows.
-  careening_shed: 'shore',
-  astillero_and_moored_hull: 'shore',
-  thatched_bohio_palafito: 'shore',
-  indigenous_canoe_landing: 'beach',
-  palafito_estuary_village: 'shore',
-  // Sea defences may overhang the water, but their middle and most of their floor are on land.
-  torreon_atalaya_farol: 'waterline',
-  timber_mole_pier: 'pier',
-  stone_arch_bridge: 'bridge',
-  stone_quay_seawall: 'quay',
-  // A ring walls round the settlement, so it is its wall line that needs the ground and the room.
-  english_triangular_palisade_fort: 'enclosure',
-  indigenous_palisade_ring: 'enclosure',
-});
-const FOOTPRINT_SAMPLES = Object.freeze([-1, -0.5, 0, 0.5, 1]);
 // Nothing grows on a way, and a tree stands a little off it.
 export const PLANT_STREET_GAP_M = 3;
-// Room for a street between neighbours.
-const BUILDING_STREET_GAP_M = 5;
-const PREFAB_DRY_GROUND_M = 0.6;
-const PREFAB_MOST_RISE_M = 11;
-const SHORE_WORKS_LOWEST_M = -0.7;
-const SHORE_WORKS_HIGHEST_M = 3.2;
-const PREFAB_SITE_STEP_M = 6;
-const PREFAB_SITE_REACH_M = 300;
-const PIER_ROOT_LOWEST_M = 0.1;
-const PIER_ROOT_HIGHEST_M = 4;
-const PIER_HEAD_HIGHEST_M = -1;
-const PIER_MOST_SLIDE_M = 240;
-const PIER_APART_M = 6;
-const FIELD_OF_FIRE_M = 130;
-
-export function syncPortInstancesToTerrain(portOrInstances, heights, region, { gradePads = false } = {}) {
-  const instances = Array.isArray(portOrInstances) ? portOrInstances : portOrInstances?.instances;
-  if (!Array.isArray(instances) || !heights || !region) return instances;
-  const n = region.size;
-  const span = region.span;
-  const step = span / Math.max(1, n - 1);
-
-  if (gradePads) {
-    // Grade continuous seawall landward aprons ([0..+18 m] inland >= 2.12 m so zero water lagoons get trapped behind quays)
-    // and dredge seaward berth faces ([-8..-0.6 m] in front <= -3.2 m so ships moor cleanly against the vertical ashlar wall).
-    const portObj = Array.isArray(portOrInstances) ? null : portOrInstances;
-    const berthGuards = [portObj?.dockBerth, portObj?.berth].filter((b) => b && Number.isFinite(b.x) && Number.isFinite(b.z));
-    for (const inst of instances) {
-      if (inst.prefabId !== 'stone_quay_seawall') continue;
-      const cosY = Math.cos(inst.yaw ?? 0);
-      const sinY = Math.sin(inst.yaw ?? 0);
-      const hw = (inst.width ?? 24) * 0.5;
-      const hl = (inst.length ?? 12) * 0.5;
-      const latPad = Math.max(5.0, step * 0.55);
-      const apronCore = Math.max(18.0, step * 1.02);
-      const apronEnd = apronCore + Math.max(10.0, step * 0.5);
-      const dredgeCore = Math.max(10.0, step * 1.05);
-      const dredgeEnd = dredgeCore + Math.max(4.0, step * 0.4);
-      const maxReach = Math.hypot(hw + latPad + 2.0, hl + Math.max(apronEnd, dredgeEnd) + 2.0);
-      const i0 = Math.max(0, Math.floor(((inst.x - maxReach - region.x) / span + 0.5) * (n - 1)));
-      const i1 = Math.min(n - 1, Math.ceil(((inst.x + maxReach - region.x) / span + 0.5) * (n - 1)));
-      const j0 = Math.max(0, Math.floor(((inst.z - maxReach - region.z) / span + 0.5) * (n - 1)));
-      const j1 = Math.min(n - 1, Math.ceil(((inst.z + maxReach - region.z) / span + 0.5) * (n - 1)));
-      for (let j = j0; j <= j1; j++) {
-        const wz = region.z + (j / (n - 1) - 0.5) * span;
-        for (let i = i0; i <= i1; i++) {
-          const wx = region.x + (i / (n - 1) - 0.5) * span;
-          const dx = wx - inst.x;
-          const dz = wz - inst.z;
-          const lxSigned = dx * cosY - dz * sinY;
-          const lzSigned = dx * sinY + dz * cosY;
-          const lxAbs = Math.abs(lxSigned);
-          if (lxAbs > hw + latPad) continue;
-          const sFromFace = lzSigned + hl; // 0 at seaward ashlar wall face, +inland behind wall, -seaward in front
-          const k = j * n + i;
-          const tx = Math.max(0, Math.min(1, 1 - Math.max(0, lxAbs - (hw + 0.5)) / Math.max(4.5, latPad - 0.5)));
-          const sx = tx * tx * (3 - 2 * tx);
-          const apronCoreEnd = 2 * hl + apronCore;
-          const apronFullEnd = 2 * hl + apronEnd;
-          if (sFromFace >= hl && sFromFace <= apronFullEnd) {
-            if (berthGuards.some((b) => Math.hypot(wx - b.x, wz - b.z) < 25) && heights[k] < -0.5) continue;
-            const tz = sFromFace <= apronCoreEnd ? 1.0 : Math.max(0, Math.min(1, 1 - (sFromFace - apronCoreEnd) / (apronFullEnd - apronCoreEnd)));
-            const wApron = sx * (tz * tz * (3 - 2 * tz));
-            const targetApron = 2.16;
-            if (heights[k] < targetApron) {
-              heights[k] = heights[k] * (1 - wApron) + targetApron * wApron;
-            }
-          } else if (sFromFace > -0.5 && sFromFace < hl) {
-            const rampT = (sFromFace + 0.5) / Math.max(1.0, hl + 0.5);
-            const targetCaisson = -1.8 + (2.16 - -1.8) * rampT;
-            heights[k] = heights[k] * (1 - sx) + targetCaisson * sx;
-          } else if (sFromFace >= -dredgeEnd && sFromFace <= -0.5) {
-            if (heights[k] > 1.25) continue;
-            const tz = sFromFace >= -dredgeCore ? 1.0 : Math.max(0, Math.min(1, 1 - (-dredgeCore - sFromFace) / (dredgeEnd - dredgeCore)));
-            const wDredge = sx * (tz * tz * (3 - 2 * tz));
-            const targetDepth = -3.65;
-            if (heights[k] > targetDepth) {
-              heights[k] = heights[k] * (1 - wDredge) + targetDepth * wDredge;
-            }
-          }
-        }
-      }
-    }
-
-    // A palisade fort keeps the level it was sited at. Its yard goes last, so its houses' pads cannot lift it.
-    const levelledLast = (inst) => inst.prefabId === 'english_triangular_palisade_fort';
-    for (const inst of [...instances.filter((i) => !levelledLast(i)), ...instances.filter(levelledLast)]) {
-      if (
-        OVER_WATER_PREFAB_IDS.has(inst.prefabId) ||
-        inst.prefabId === 'indigenous_canoe_landing' ||
-        inst.prefabId === 'astillero_and_moored_hull'
-      ) {
-        continue;
-      }
-      const cosY = Math.cos(inst.yaw ?? 0);
-      const sinY = Math.sin(inst.yaw ?? 0);
-      const hw = (inst.width ?? 10) * 0.5;
-      const hl = (inst.length ?? 12) * 0.5;
-      const sampleLocal = (lx, lz) =>
-        terrainSurfaceSample(
-          heights,
-          inst.x + lx * cosY + lz * sinY,
-          inst.z - lx * sinY + lz * cosY,
-          region
-        );
-      const centerGroundY = sampleLocal(0, 0);
-      const isFort =
-        inst.prefabId === 'torreon_atalaya_farol' ||
-        inst.prefabId === 'curtain_wall_and_gate' ||
-        inst.prefabId === 'english_triangular_palisade_fort';
-      // A pad is level.
-      const padY = levelledLast(inst)
-        ? inst.y ?? 2.8
-        : inst.indigenous && !isFort
-          ? Math.max(0.95, centerGroundY)
-          : isFort
-            ? Math.max(inst.y ?? 2.8, centerGroundY)
-            : Math.max(1.6, centerGroundY);
-      const targetH = Math.max(0.45, padY);
-
-      const coreX = hw + step * 1.05;
-      const coreZ = hl + step * 1.05;
-      const feather = Math.max(step * 1.15, 8.0);
-      const outerX = coreX + feather;
-      const outerZ = coreZ + feather;
-      const rad = Math.hypot(outerX, outerZ);
-      const i0 = Math.max(0, Math.floor(((inst.x - rad - region.x) / span + 0.5) * (n - 1)));
-      const i1 = Math.min(n - 1, Math.ceil(((inst.x + rad - region.x) / span + 0.5) * (n - 1)));
-      const j0 = Math.max(0, Math.floor(((inst.z - rad - region.z) / span + 0.5) * (n - 1)));
-      const j1 = Math.min(n - 1, Math.ceil(((inst.z + rad - region.z) / span + 0.5) * (n - 1)));
-      for (let j = j0; j <= j1; j++) {
-        const wz = region.z + (j / (n - 1) - 0.5) * span;
-        for (let i = i0; i <= i1; i++) {
-          const k = j * n + i;
-          if (heights[k] <= -0.35) continue;
-          const wx = region.x + (i / (n - 1) - 0.5) * span;
-          const dx = wx - inst.x;
-          const dz = wz - inst.z;
-          const lxSigned = dx * cosY - dz * sinY;
-          const lzSigned = dx * sinY + dz * cosY;
-          const lx = Math.abs(lxSigned);
-          const lz = Math.abs(lzSigned);
-          if (lx > outerX || lz > outerZ) continue;
-          const tx = Math.max(0, Math.min(1, 1 - Math.max(0, lx - coreX) / feather));
-          const tz = Math.max(0, Math.min(1, 1 - Math.max(0, lz - coreZ) / feather));
-          const sx = tx * tx * (3 - 2 * tx);
-          const sz = tz * tz * (3 - 2 * tz);
-          const wBlend = sx * sz;
-          heights[k] = heights[k] * (1 - wBlend) + targetH * wBlend;
-        }
-      }
-    }
-  }
-
-  for (let idx = 0; idx < instances.length; idx++) {
-    const inst = instances[idx];
-    inst.id ??= `${inst.prefabId}_${idx}`;
-    inst.depth ??= inst.length ?? 16;
-    inst._cosNegYaw = Math.cos(inst.yaw ?? 0);
-    inst._sinNegYaw = Math.sin(inst.yaw ?? 0);
-    inst._boundR = Math.hypot(inst.width ?? 10, inst.length ?? 12) * 0.5;
-    if (OVER_WATER_PREFAB_IDS.has(inst.prefabId)) {
-      inst.slopeX = 0;
-      inst.slopeZ = 0;
-      if (inst.prefabId === 'stone_quay_seawall') {
-        inst.y = inst.isQuayRibbon ? 0 : Math.min(0.45, inst.y ?? 0.40);
-      }
-      inst.baseY = inst.baseY ?? inst.y ?? 0;
-      continue;
-    }
-    const cosY = inst._cosNegYaw;
-    const sinY = inst._sinNegYaw;
-    const sampleLocal = (lx, lz) =>
-      terrainSurfaceSample(
-        heights,
-        inst.x + lx * cosY + lz * sinY,
-        inst.z - lx * sinY + lz * cosY,
-        region
-      );
-    const hCenter = sampleLocal(0, 0);
-    const isFort =
-      inst.prefabId === 'torreon_atalaya_farol' ||
-      inst.prefabId === 'curtain_wall_and_gate' ||
-      inst.prefabId === 'english_triangular_palisade_fort';
-    if (isFort || !inst.indigenous) {
-      inst.slopeX = 0;
-      inst.slopeZ = 0;
-      inst.y = isFort ? Math.max(inst.y ?? 3.2, hCenter) : Math.max(0.85, hCenter);
-    } else {
-      // Only a native building follows the lie of its ground, a canoe landing less steeply than a house.
-      const landing = inst.prefabId === 'indigenous_canoe_landing', steepest = landing ? 0.12 : 0.20;
-      const probeX = Math.max(1.5, (inst.width ?? 8) * 0.42);
-      const probeZ = Math.max(1.5, (inst.length ?? 8) * 0.42);
-      inst.slopeX = Math.max(-steepest, Math.min(steepest, (sampleLocal(probeX, 0) - sampleLocal(-probeX, 0)) / (2 * probeX)));
-      inst.slopeZ = Math.max(-steepest, Math.min(steepest, (sampleLocal(0, probeZ) - sampleLocal(0, -probeZ)) / (2 * probeZ)));
-      inst.y = Math.max(landing ? 0.28 : 0.38, hCenter);
-    }
-    inst.baseY = inst.y;
-  }
-  return instances;
-}
 
 function coastalInferBearingFromRings(lat, lon, rings) {
   if (!Array.isArray(rings) || rings.length === 0) return null;
@@ -3285,602 +2673,19 @@ export function synthesizeCoastalBeaches(
   };
 }
 
-export function extractOrthophotoBuildingFootprints(regionSpec, heights, satelliteData, shoreDist = null) {
-  if (!satelliteData) return null;
-  const region = resolveGlobalCoastalRegion(regionSpec);
-  if (region.hasColonialPort === false && !satelliteData.allowFootprints) return null;
-  const n = region.size;
-  const span = region.span;
-
-  if (Array.isArray(satelliteData.precomputedFootprints?.footprints) && satelliteData.precomputedFootprints.footprints.length >= 4) {
-    const pre = satelliteData.precomputedFootprints;
-    const clusterX = region.x + ((pre.clusterU ?? 0.5) - 0.5) * span;
-    const clusterZ = region.z + ((pre.clusterV ?? 0.5) - 0.5) * span;
-    const footprints = pre.footprints.map((fp) => {
-      const x = Number.isFinite(fp.u) ? region.x + (fp.u - 0.5) * span : fp.x;
-      const z = Number.isFinite(fp.v) ? region.z + (fp.v - 0.5) * span : fp.z;
-      const y = Math.max(1.8, terrainSample(heights, x, z, region));
-      const width = fp.width ?? 22;
-      const length = fp.length ?? 26;
-      return {
-        x,
-        z,
-        y,
-        yaw: fp.yaw ?? 0,
-        width,
-        length,
-        area: width * length,
-        inlandM: fp.inlandM ?? 64,
-        roofClass: fp.roofClass ?? 1,
-        fillRatio: fp.fillRatio ?? null,
-        holeRatio: fp.holeRatio ?? null,
-        prefabId: fp.prefabId || null,
-      };
-    });
-    return { clusterX, clusterZ, footprints };
-  }
-
-  if (!satelliteData.rgba || !satelliteData.size) return null;
-  if (!satelliteData.is1550Orthophoto && !satelliteData.allowFootprints) return null;
-  const distInfo = shoreDist ?? computeCoastalShoreDistances(heights, n, span, 0.25);
-  const { distWater } = distInfo;
-
-  const gSize = 384;
-  const cellStep = span / gSize;
-  // Multi-class 1550 roof & fortification mask:
-  // 1 = terracotta tile / dark wood shingle roof
-  // 2 = palm-thatch bohío / caney / palafito roof
-  // 3 = grey ashlar / coquina fortification, tower, or bridge
-  const mask = new Uint8Array(gSize * gSize);
-  for (let gz = 0; gz < gSize; gz++) {
-    const v = (gz + 0.5) / gSize;
-    const hj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
-    for (let gx = 0; gx < gSize; gx++) {
-      const u = (gx + 0.5) / gSize;
-      const hi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
-      const kH = hj * n + hi;
-      const h = heights[kH];
-      const inlandM = distWater[kH];
-      if (h < -0.6 || h > 68 || inlandM > 960) continue;
-      const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
-      if (!sat) continue;
-      // Class 1: 1550 AI orthophoto terracotta barrel-tile & weathered timber/shingle roof signature
-      const isTerracotta = sat.r > 92 && sat.r < 236 && sat.g < 164 && sat.r - sat.g >= 24 && sat.r - sat.b >= 42;
-      const isBrownShingle =
-        sat.r > 90 &&
-        sat.r < 200 &&
-        sat.r - sat.g >= 16 &&
-        sat.r - sat.b >= 30 &&
-        sat.luma < 122 &&
-        sat.g > sat.b + 8;
-      if (h >= 0.45 && inlandM >= 8 && (isTerracotta || isBrownShingle)) {
-        mask[gz * gSize + gx] = 1;
-        continue;
-      }
-      if (satelliteData.is1550Orthophoto) {
-        // Class 2: Warm tan / golden-ochre palm-thatch roofs (bohíos, caneyes & mangrove palafitos)
-        const isPalmThatch =
-          h >= -0.4 &&
-          h <= 26 &&
-          inlandM >= 2 &&
-          inlandM <= 360 &&
-          sat.r >= 118 &&
-          sat.r <= 196 &&
-          sat.g >= 96 &&
-          sat.g <= 168 &&
-          sat.b >= 58 &&
-          sat.b <= 128 &&
-          sat.r - sat.g >= 13 &&
-          sat.r - sat.g <= 30 &&
-          sat.g - sat.b >= 18 &&
-          sat.r - sat.b >= 36 &&
-          sat.luma >= 100 &&
-          sat.luma <= 164;
-        if (isPalmThatch) {
-          mask[gz * gSize + gx] = 2;
-          continue;
-        }
-        // Class 3: Grey-stone ashlar fortifications, watchtowers & cutwater bridges
-        const isGreyStone =
-          h >= -0.5 &&
-          h <= 42 &&
-          inlandM <= 160 &&
-          Math.abs(sat.r - sat.g) <= 11 &&
-          Math.abs(sat.g - sat.b) <= 13 &&
-          sat.r >= sat.b - 4 &&
-          sat.luma >= 116 &&
-          sat.luma <= 182;
-        if (isGreyStone) {
-          mask[gz * gSize + gx] = 3;
-        }
-      }
-    }
-  }
-
-  const visited = new Uint8Array(gSize * gSize);
-  const rawBlobs = [];
-  const q = new Int32Array(gSize * gSize);
-  for (let idx = 0; idx < gSize * gSize; idx++) {
-    const curClass = mask[idx];
-    if (!curClass || visited[idx]) continue;
-    let head = 0, tail = 0;
-    q[tail++] = idx;
-    visited[idx] = 1;
-    const pts = [];
-    let sumX = 0, sumZ = 0, sumH = 0, sumInland = 0;
-    while (head < tail) {
-      const cur = q[head++];
-      const gz = Math.floor(cur / gSize);
-      const gx = cur - gz * gSize;
-      const u = (gx + 0.5) / gSize;
-      const v = (gz + 0.5) / gSize;
-      const wx = region.x + (u - 0.5) * span;
-      const wz = region.z + (v - 0.5) * span;
-      const hi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
-      const hj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
-      const kH = hj * n + hi;
-      pts.push([wx, wz]);
-      sumX += wx;
-      sumZ += wz;
-      sumH += heights[kH];
-      sumInland += distWater[kH];
-      for (let dz = -1; dz <= 1; dz++) {
-        const nz = gz + dz;
-        if (nz < 0 || nz >= gSize) continue;
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dz === 0) continue;
-          const nx = gx + dx;
-          if (nx < 0 || nx >= gSize) continue;
-          const nIdx = nz * gSize + nx;
-          if (mask[nIdx] === curClass && !visited[nIdx]) {
-            visited[nIdx] = 1;
-            q[tail++] = nIdx;
-          }
-        }
-      }
-    }
-    const minPts = curClass === 1 ? 2 : 4;
-    const maxPts = curClass === 3 ? 1600 : 2400;
-    if (pts.length >= minPts && pts.length <= maxPts) {
-      const count = pts.length;
-      rawBlobs.push({
-        cx: sumX / count,
-        cz: sumZ / count,
-        meanH: sumH / count,
-        meanInland: sumInland / count,
-        count,
-        roofClass: curClass,
-        pts,
-      });
-    }
-  }
-
-  if (rawBlobs.length < 1) return null;
-
-  // Identify dominant 1550 colonial settlement cluster (weighted toward terracotta & thatch roof blobs)
-  let bestClusterScore = -Infinity;
-  let seedX = 0, seedZ = 0;
-  for (const b of rawBlobs) {
-    let localWeight = 0;
-    for (const other of rawBlobs) {
-      const d = Math.hypot(other.cx - b.cx, other.cz - b.cz);
-      const classW = other.roofClass === 1 ? 1.0 : other.roofClass === 2 ? 0.65 : 0.35;
-      if (d <= 650) localWeight += other.count * classW * (1 - d / 750);
-    }
-    const centerBias = -Math.hypot(b.cx - region.x, b.cz - region.z) * 0.015;
-    const score = localWeight + centerBias;
-    if (score > bestClusterScore) {
-      bestClusterScore = score;
-      seedX = b.cx;
-      seedZ = b.cz;
-    }
-  }
-
-  let wSum = 0, clusterX = 0, clusterZ = 0;
-  const clusterBlobs = [];
-  for (const b of rawBlobs) {
-    if (Math.hypot(b.cx - seedX, b.cz - seedZ) <= 920) {
-      clusterBlobs.push(b);
-      const cw = b.roofClass === 1 ? b.count : b.count * 0.5;
-      clusterX += b.cx * cw;
-      clusterZ += b.cz * cw;
-      wSum += cw;
-    }
-  }
-  if (wSum < 6) return null;
-  clusterX /= wSum;
-  clusterZ /= wSum;
-
-  // Minimum-Area Oriented Bounding Box (Rotating Calipers) + Interior Courtyard Vacancy (holeRatio)
-  const computeMinAreaOBB = (pts, mx, mz) => {
-    let bestArea = Infinity;
-    let bestX = mx, bestZ = mz, bestW = 24, bestL = 28, bestYaw = 0, bestAngle = 0;
-    for (let deg = -45; deg < 45; deg += 3) {
-      const a = deg * COASTAL_DEG_TO_RAD;
-      const ca = Math.cos(a), sa = Math.sin(a);
-      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
-      for (const [px, pz] of pts) {
-        const dx = px - mx, dz = pz - mz;
-        const u = dx * ca + dz * sa;
-        const v = -dx * sa + dz * ca;
-        if (u < u0) u0 = u;
-        if (u > u1) u1 = u;
-        if (v < v0) v0 = v;
-        if (v > v1) v1 = v;
-      }
-      const su = Math.max(cellStep * 0.9, u1 - u0 + cellStep * 0.75);
-      const sv = Math.max(cellStep * 0.9, v1 - v0 + cellStep * 0.75);
-      const area = su * sv;
-      if (area < bestArea) {
-        bestArea = area;
-        const cu = 0.5 * (u0 + u1);
-        const cv = 0.5 * (v0 + v1);
-        bestX = mx + cu * ca - cv * sa;
-        bestZ = mz + cu * sa + cv * ca;
-        if (su <= sv) {
-          bestW = su;
-          bestL = sv;
-          bestYaw = -a;
-          bestAngle = a;
-        } else {
-          bestW = sv;
-          bestL = su;
-          bestYaw = -(a + Math.PI * 0.5);
-          bestAngle = a + Math.PI * 0.5;
-        }
-      }
-    }
-    const ca = Math.cos(bestAngle), sa = Math.sin(bestAngle);
-    let coreCount = 0;
-    const coreW = bestW * 0.22;
-    const coreL = bestL * 0.22;
-    for (const [px, pz] of pts) {
-      const dx = px - bestX, dz = pz - bestZ;
-      const u = Math.abs(dx * ca + dz * sa);
-      const v = Math.abs(-dx * sa + dz * ca);
-      if (u <= coreW && v <= coreL) coreCount++;
-    }
-    const cellArea = cellStep * cellStep;
-    const fillRatio = Math.min(1, (pts.length * cellArea) / Math.max(cellArea, bestW * bestL));
-    const expectedCore = Math.max(1, (bestW * 0.44 * bestL * 0.44) / cellArea);
-    const holeRatio = Math.max(0, Math.min(1, 1 - coreCount / expectedCore));
-    return {
-      x: bestX,
-      z: bestZ,
-      width: bestW,
-      length: bestL,
-      yaw: bestYaw,
-      area: bestW * bestL,
-      fillRatio,
-      holeRatio,
-    };
-  };
-
-  const candidates = [];
-  for (const b of clusterBlobs) {
-    const obb = computeMinAreaOBB(b.pts, b.cx, b.cz);
-    const hGround = terrainSample(heights, obb.x, obb.z, region);
-    if (b.roofClass === 1 && hGround < 0.4) continue;
-    if (b.roofClass !== 1 && hGround < -1.2) continue;
-    candidates.push({
-      x: obb.x,
-      z: obb.z,
-      y: Math.max(0.5, hGround),
-      yaw: obb.yaw,
-      length: obb.length,
-      width: obb.width,
-      area: obb.area,
-      inlandM: b.meanInland,
-      roofClass: b.roofClass,
-      fillRatio: obb.fillRatio,
-      holeRatio: obb.holeRatio,
-    });
-  }
-
-  // Sort terracotta & landmark structures first, then by area
-  candidates.sort((a, b) => (a.roofClass === 1 ? 1 : 0) !== (b.roofClass === 1 ? 1 : 0)
-    ? (b.roofClass === 1 ? 1 : -1)
-    : b.area - a.area);
-  const footprints = [];
-  for (const c of candidates) {
-    if (footprints.length >= 32) break;
-    let overlaps = false;
-    for (const existing of footprints) {
-      const minSep = 0.42 * (Math.min(c.width, c.length) + Math.min(existing.width, existing.length));
-      if (Math.hypot(c.x - existing.x, c.z - existing.z) < Math.max(8, minSep)) {
-        overlaps = true;
-        break;
-      }
-    }
-    if (!overlaps) footprints.push(c);
-  }
-
-  return footprints.length >= 4 ? { clusterX, clusterZ, footprints } : null;
-}
-
-export function validateOrthophotoScale1550(regionSpec, satelliteData = null, precomputedFootprints = null) {
-  const region = resolveGlobalCoastalRegion(regionSpec);
-  const pre = precomputedFootprints || satelliteData?.precomputedFootprints || null;
-
-  if (Number.isFinite(pre?.span) && pre.span >= 1200 && pre.span <= 2600) {
-    return {
-      spanM: Math.round(pre.span),
-      metersPerPixel: Number((pre.span / 1024).toFixed(3)),
-      footprintScale: 1,
-    };
-  }
-
-  if (Array.isArray(pre?.footprints) && pre.footprints.length >= 3) {
-    const widths = pre.footprints
-      .map((fp) => Number(fp.width) || 20)
-      .sort((a, b) => a - b);
-    const allWidths = (widths.length >= 2 ? widths : pre.footprints.map((fp) => Number(fp.width) || 20)).sort(
-      (a, b) => a - b
-    );
-    const medW = allWidths[Math.floor(allWidths.length * 0.5)] || 20;
-    if (medW > 28) {
-      // Footprints were measured against an unvalidated wide map span; rescale to true ~20m single-building width
-      const footprintScale = 20.0 / medW;
-      const spanM = Math.round(Math.max(1350, Math.min(2300, region.span * footprintScale)));
-      return {
-        spanM,
-        metersPerPixel: Number((spanM / 1024).toFixed(3)),
-        footprintScale: spanM / region.span,
-      };
-    }
-    const spanM =
-      region.span > 2600
-        ? Math.round(Math.max(1350, Math.min(2300, 1024 * (medW / 13.0))))
-        : Math.round(region.span);
-    return {
-      spanM,
-      metersPerPixel: Number((spanM / 1024).toFixed(3)),
-      footprintScale: 1,
-    };
-  }
-
-  if (satelliteData?.rgba && satelliteData?.size && (satelliteData.is1550Orthophoto || satelliteData.allowFootprints)) {
-    const sz = satelliteData.size;
-    const rgba = satelliteData.rgba;
-    const gSize = 256;
-    const mask = new Uint8Array(gSize * gSize);
-    for (let gz = 0; gz < gSize; gz++) {
-      const sy = Math.min(sz - 1, Math.floor(((gz + 0.5) / gSize) * sz));
-      for (let gx = 0; gx < gSize; gx++) {
-        const sx = Math.min(sz - 1, Math.floor(((gx + 0.5) / gSize) * sz));
-        const k = (sy * sz + sx) * 4;
-        const r = rgba[k], g = rgba[k + 1], b = rgba[k + 2];
-        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-        const isRoof =
-          (r > 92 && r < 236 && g < 164 && r - g >= 24 && r - b >= 42) ||
-          (r > 90 && r < 200 && r - g >= 16 && r - b >= 30 && luma < 122 && g > b + 8);
-        if (isRoof) mask[gz * gSize + gx] = 1;
-      }
-    }
-    const visited = new Uint8Array(gSize * gSize);
-    const q = new Int32Array(gSize * gSize);
-    const pxScale = 1024 / gSize;
-    const bldgPxWidths = [];
-    for (let idx = 0; idx < gSize * gSize; idx++) {
-      if (!mask[idx] || visited[idx]) continue;
-      let head = 0, tail = 0;
-      q[tail++] = idx;
-      visited[idx] = 1;
-      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-      while (head < tail) {
-        const cur = q[head++];
-        const gz = Math.floor(cur / gSize);
-        const gx = cur - gz * gSize;
-        if (gx < minX) minX = gx;
-        if (gx > maxX) maxX = gx;
-        if (gz < minZ) minZ = gz;
-        if (gz > maxZ) maxZ = gz;
-        for (let dz = -1; dz <= 1; dz++) {
-          const nz = gz + dz;
-          if (nz < 0 || nz >= gSize) continue;
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dz === 0) continue;
-            const nx = gx + dx;
-            if (nx < 0 || nx >= gSize) continue;
-            const nIdx = nz * gSize + nx;
-            if (mask[nIdx] && !visited[nIdx]) {
-              visited[nIdx] = 1;
-              q[tail++] = nIdx;
-            }
-          }
-        }
-      }
-      if (tail >= 2 && tail <= 90) {
-        const wPx = (Math.min(maxX - minX + 1, maxZ - minZ + 1) + 0.5) * pxScale;
-        if (wPx >= 6 && wPx <= 28) bldgPxWidths.push(wPx);
-      }
-    }
-    bldgPxWidths.sort((a, b) => a - b);
-    const medBldgPx = bldgPxWidths.length >= 3 ? bldgPxWidths[Math.floor(bldgPxWidths.length * 0.5)] : 13.0;
-    const mpp = Math.max(1.32, Math.min(2.25, 20.0 / medBldgPx));
-    const spanM = Math.round(1024 * mpp);
-    return {
-      spanM,
-      metersPerPixel: Number(mpp.toFixed(3)),
-      footprintScale: spanM / region.span,
-    };
-  }
-
-  if (satelliteData?.is1550Orthophoto) {
-    const spanM = 1600;
-    return {
-      spanM,
-      metersPerPixel: Number((spanM / 1024).toFixed(3)),
-      footprintScale: spanM / region.span,
-    };
-  }
-
-  return {
-    spanM: region.span,
-    metersPerPixel: Number((region.span / 1024).toFixed(3)),
-    footprintScale: 1,
-  };
-}
-
-function extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints) {
-  const n = region.size;
-  const span = region.span;
-  const distInfo = computeCoastalShoreDistances(heights, n, span, 0.25);
-  const coreFloats = new Float32Array(n * n);
-  for (let k = 0; k < n * n; k++) {
-    coreFloats[k] = heights[k] > 0.25 && (distInfo.distWater[k] >= 17.5 || heights[k] > 8.0) ? 1.0 : -1.0;
-  }
-  const coreDist = computeCoastalShoreDistances(coreFloats, n, span, 0.0);
-  const isProtrusion = new Uint8Array(n * n);
-  for (let k = 0; k < n * n; k++) {
-    if (heights[k] > 0.20 && coreDist.distLand[k] > 20.5) isProtrusion[k] = 1;
-  }
-
-  const bldgs = orthoFootprints?.footprints || [];
-  const clusterX = orthoFootprints?.clusterX ?? region.x;
-  const clusterZ = orthoFootprints?.clusterZ ?? region.z;
-  const vis = new Uint8Array(n * n);
-  const rawPiers = [];
-  const step = span / (n - 1);
-  const searchR = Math.ceil(46 / step);
-
-  for (let idx = 0; idx < n * n; idx++) {
-    if (!isProtrusion[idx] || vis[idx]) continue;
-    const q = [idx];
-    vis[idx] = 1;
-    const cells = [];
-    let minD = Infinity;
-    let maxD = -Infinity;
-    let tipX = 0, tipZ = 0, baseX = 0, baseZ = 0, sumX = 0, sumZ = 0;
-    while (q.length) {
-      const c = q.pop();
-      const cj = Math.floor(c / n);
-      const ci = c - cj * n;
-      const wx = region.x + (ci / (n - 1) - 0.5) * span;
-      const wz = region.z + (cj / (n - 1) - 0.5) * span;
-      const d = coreDist.distLand[c];
-      cells.push([ci, cj]);
-      sumX += wx;
-      sumZ += wz;
-      if (d < minD) {
-        minD = d;
-        baseX = wx;
-        baseZ = wz;
-      }
-      if (d > maxD) {
-        maxD = d;
-        tipX = wx;
-        tipZ = wz;
-      }
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const ni = ci + dx, nj = cj + dz;
-          if (ni >= 0 && ni < n && nj >= 0 && nj < n) {
-            const nk = nj * n + ni;
-            if (isProtrusion[nk] && !vis[nk]) {
-              vis[nk] = 1;
-              q.push(nk);
-            }
-          }
-        }
-      }
-    }
-    const blobAreaM2 = cells.length * step * step;
-    if (cells.length < 2 || blobAreaM2 < 24 || blobAreaM2 > 6500) continue;
-
-    // Carve narrow AI boat/pier outlines in the harbor back into navigable water depth
-    for (const [ci, cj] of cells) {
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const ni = ci + dx, nj = cj + dz;
-          if (ni >= 0 && ni < n && nj >= 0 && nj < n) {
-            const nk = nj * n + ni;
-            if (coreDist.distLand[nk] > 18.0 && heights[nk] > -2.4) {
-              heights[nk] = -Math.min(10.5, 2.4 + 0.15 * Math.max(0, coreDist.distLand[nk] - 17.5));
-            }
-          }
-        }
-      }
-    }
-
-    const cx = sumX / cells.length;
-    const cz = sumZ / cells.length;
-    let minBldgDist = Math.hypot(cx - clusterX, cz - clusterZ);
-    for (const b of bldgs) {
-      const bd = Math.hypot(cx - b.x, cz - b.z);
-      if (bd < minBldgDist) minBldgDist = bd;
-    }
-
-    if (blobAreaM2 >= 65 && minBldgDist <= 310 && minD <= 42 + step) {
-      const bi = Math.round(((baseX - region.x) / span + 0.5) * (n - 1));
-      const bj = Math.round(((baseZ - region.z) / span + 0.5) * (n - 1));
-      const shoreMinD = Math.max(6.0, 15.5 - step * 0.85);
-      const shoreMaxD = 18.5 + step * 0.85;
-      let rootX = baseX, rootZ = baseZ, bestRDist = Infinity;
-      for (let dj = -searchR; dj <= searchR; dj++) {
-        const nj = bj + dj;
-        if (nj < 0 || nj >= n) continue;
-        for (let di = -searchR; di <= searchR; di++) {
-          const ni = bi + di;
-          if (ni < 0 || ni >= n) continue;
-          const nk = nj * n + ni;
-          if (coreDist.distLand[nk] >= shoreMinD && coreDist.distLand[nk] <= shoreMaxD && heights[nk] > 0.35) {
-            const wx = region.x + (ni / (n - 1) - 0.5) * span;
-            const wz = region.z + (nj / (n - 1) - 0.5) * span;
-            const dd = Math.hypot(wx - baseX, wz - baseZ);
-            if (dd < bestRDist) {
-              bestRDist = dd;
-              rootX = wx;
-              rootZ = wz;
-            }
-          }
-        }
-      }
-      const dx = tipX - rootX;
-      const dz = tipZ - rootZ;
-      const reach = Math.hypot(dx, dz);
-      if (reach >= 14 && bestRDist < 55) {
-        rawPiers.push({
-          cells: cells.length,
-          rootX,
-          rootZ,
-          tipX,
-          tipZ,
-          reach,
-          ux: dx / reach,
-          uz: dz / reach,
-        });
-      }
-    }
-  }
-
-  rawPiers.sort((a, b) => b.reach - a.reach);
-  const selected = [];
-  for (const p of rawPiers) {
-    if (selected.length >= 5) break;
-    const tooClose = selected.some(
-      (s) => Math.hypot(p.rootX - s.rootX, p.rootZ - s.rootZ) < 18 || Math.hypot(p.tipX - s.tipX, p.tipZ - s.tipZ) < 18
-    );
-    if (!tooClose) selected.push(p);
-  }
-  return selected;
-}
-
 // Where a ship lies to send her people ashore. A line reaches 36 m (MOORING_LINE_REACH_M in boarding-docking.js) to
 // whatever that file's findNearestPier will take one to, and createCoastalViews starts a 20 m caravel here, which
-// safeLandfallStart moves off, out of reach, if any of her swinging room is shoaler than 3.1 m. A pier slides along
-// its heading to find its shore and no coast is straight, so a berth measured off the shoreline can be neither. It is
-// found from the piers as they stand: the wanted place if she floats there with a line ashore, else the nearest water
-// by a pier where she does, and failing that the nearest that can be dredged for her. Mud is dredged; land never.
-const DOCK_BERTH_PIER = /jetty|pier|wharf|dock|quay|mole|slip/i;
+// safeLandfallStart moves off, out of reach, if any of her swinging room is shoaler than 3.1 m. No coast is straight,
+// so a berth measured off the shoreline can be neither. It is found from the moles of the waterfront as they stand
+// (`piers`: js/board-waterfront.js records): the wanted place if she floats there with a line ashore, else the nearest
+// water by a mole where she does, and failing that the nearest that can be dredged for her. Mud is dredged; land never.
 const DOCK_BERTH_SWING_M = 22;
 const DOCK_BERTH_WATER_M = 3.8;
 const DOCK_BERTH_DREDGED_M = 4.8;
 const DOCK_BERTH_NEAREST_M = 12;
 const DOCK_BERTH_FURTHEST_M = 30;
-export function settleDockBerth(heights, region, instances, wanted) {
-  const piers = instances.filter((inst) => DOCK_BERTH_PIER.test(inst.prefabId ?? ''));
-  if (!piers.length) return { x: wanted.x, z: wanted.z };
+export function settleDockBerth(heights, region, piers, wanted) {
+  if (!piers?.length) return { x: wanted.x, z: wanted.z };
   const n = region.size, span = region.span, cell = span / (n - 1), keep = span * 0.42;
   const lineTo = (x, z) => {
     let nearest = Infinity;
@@ -3962,86 +2767,22 @@ export function settleDockBerth(heights, region, instances, wanted) {
   return { x: inMud.x, z: inMud.z };
 }
 
-function buildPortRiverCorridor(region) {
-  const rivers = bakedBoardFor(region)?.board?.rivers ?? [];
-  const ox = region?.x ?? 0;
-  const oz = region?.z ?? 0;
-  const segments = [];
-  const reaches = [];
-  for (let ri = 0; ri < rivers.length; ri++) {
-    const pts = rivers[ri]?.points;
-    if (!pts || pts.length < 6) continue;
-    const isCanal = Boolean(rivers[ri]?.canal);
-    const reachSegs = [];
-    let arc = 0;
-    for (let k = 0; k + 5 < pts.length; k += 3) {
-      const ax = ox + pts[k], az = oz + pts[k + 1], hwA = widenBoardRiverHalfWidth(pts[k + 2] || 2.0, isCanal);
-      const bx = ox + pts[k + 3], bz = oz + pts[k + 4], hwB = widenBoardRiverHalfWidth(pts[k + 5] || 2.0, isCanal);
-      const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
-      if (len < 0.5) continue;
-      const tx = dx / len, tz = dz / len;
-      const seg = {
-        ax, az, bx, bz,
-        cx: (ax + bx) * 0.5, cz: (az + bz) * 0.5,
-        tx, tz, nx: -tz, nz: tx,
-        hw: (hwA + hwB) * 0.5,
-        len, arcStart: arc, reachIdx: ri,
-      };
-      arc += len;
-      segments.push(seg);
-      reachSegs.push(seg);
-    }
-    if (reachSegs.length) reaches.push({ reachIdx: ri, totalLen: arc, segs: reachSegs });
-  }
-  const segDistSq = (px, pz, s) => {
-    const dx = s.bx - s.ax, dz = s.bz - s.az, l2 = dx * dx + dz * dz;
-    const t = l2 > 1e-6 ? Math.max(0, Math.min(1, ((px - s.ax) * dx + (pz - s.az) * dz) / l2)) : 0;
-    return (px - (s.ax + dx * t)) ** 2 + (pz - (s.az + dz * t)) ** 2;
-  };
-  const pointHits = (px, pz, margin = 4.5) => {
-    for (let i = 0; i < segments.length; i++) {
-      const s = segments[i], r = s.hw + margin;
-      if (segDistSq(px, pz, s) <= r * r) return true;
-    }
-    return false;
-  };
-  const hits = (x, z, yaw = 0, width = 8, length = 8, margin = 4.5) => {
-    if (!segments.length) return false;
-    if (pointHits(x, z, margin)) return true;
-    const c = Math.cos(yaw), s = Math.sin(yaw), hw = width * 0.5, hl = length * 0.5;
-    for (const [lx, lz] of [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl], [0, -hl], [0, hl], [-hw, 0], [hw, 0]]) {
-      if (pointHits(x + lx * c + lz * s, z - lx * s + lz * c, margin)) return true;
-    }
-    return false;
-  };
-  return { segments, reaches, pointHits, hits };
-}
-
-export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null, coastIsReal = false } = {}) {
+// Where a port meets its water, read from its ground: the shore its town looks onto (`center`), the water a ship lies
+// off it (`berth`) and alongside it (`dockBerth`, settled on the waterfront's moles once its board has laid them:
+// dressProceduralCoastalPack), the harbour's geography, and the berth's dredged channel. It builds nothing: the town,
+// its works and its waterfront are its board's (js/old-world-board.js, js/board-waterfront.js).
+export function placeCoastalPort(regionSpec, heights, { coastIsReal = false } = {}) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const recordedPortId = region.colonyGrowth?.portId ?? region.id;
   const allowColonialPort = region.hasColonialPort !== false;
   const simYear = region.year ?? region.era ?? 1550;
   const nearOldWorldCity = oldWorldCityNear(region.latitude, region.longitude);
-  // A town on this ground is its board's (js/old-world.js): an Old World city, or a town Spain or Portugal planted
-  // (js/colonial-towns.js). The port lays its waterfront, never its town.
-  const heldBoardTown = allowColonialPort ? boardTownHeld(region) : null;
+  // A town on this ground is its board's (js/old-world.js): an Old World city, a town of the peoples of the Americas,
+  // or a town Spain or Portugal planted (js/colonial-towns.js).
+  const heldBoardTown = boardTownHeld(region);
   const oldWorldPop = nearOldWorldCity ? oldWorldPeople(nearOldWorldCity, simYear) : 0;
   const isDerivedMetropolePort = Boolean(allowColonialPort && (oldWorldPop >= 18000 || (region.colonyGrowth?.population ?? 0) >= 18000));
   const metropoleScale = isDerivedMetropolePort ? Math.min(1, Math.max(0.5, (oldWorldPop || region.colonyGrowth?.population || 30000) / 85000)) : 0;
-  const portRiverCorridor = buildPortRiverCorridor(region);
-  const orthoFootprints =
-    allowColonialPort && !isDerivedMetropolePort && !heldBoardTown
-      ? extractOrthophotoBuildingFootprints(region, heights, satelliteData, shoreDist)
-      : null;
-  const hasOrthoFootprints = Boolean(orthoFootprints?.footprints?.length >= 4);
-  const extractedHarborPiers =
-    allowColonialPort && !isDerivedMetropolePort && !heldBoardTown && (hasOrthoFootprints || satelliteData?.is1550Orthophoto)
-      ? extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints)
-      : [];
-  const clusterFrame = orthoFootprints
-    ? coastalFrame(region, orthoFootprints.clusterX, orthoFootprints.clusterZ)
-    : null;
   const scaleFactor = Math.min(1, region.span / 4096);
   // Ground whose only water is a river (js/river-water.js) is looked across at a river's width, not the sea's.
   let wetCells = 0;
@@ -4049,14 +2790,15 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const probeOffshoreM = wetCells < 0.06 * heights.length ? 24 : Math.max(24, 72 * scaleFactor);
   const probeInlandM = Math.max(18, 48 * scaleFactor);
 
-  // Scan a 2D coastal window (anchored to the 1550 orthophoto settlement cluster when present)
-  // to find where the shoreline (h ~ 0) meets navigable harbor water offshore and buildable land inland.
-  let bestShoreAlong = clusterFrame ? clusterFrame.along : 0;
+  // Scan the coast for where the shoreline (h ~ 0) meets navigable harbour water offshore and buildable land inland,
+  // nearest the town: the fort a town grew inside stands where the record says it stood; any other town on its board's
+  // site (js/old-world.js boardTownHeld). A port is on its town's shore, never across the water from it.
+  let bestShoreAlong = 0;
   let bestShoreInland = 0;
   let bestScore = -Infinity;
-  // A town that grew inside its fort stands where the record says the fort stood.
   const heldByRecord = coastIsReal ? fortRecordsFor(recordedPortId, 1800).forts.find((record) => record.encloses) : null;
-  const townHint = heldByRecord ? worldOfPosition(region, heldByRecord.lat, heldByRecord.lon) : null;
+  const townHint = heldByRecord ? worldOfPosition(region, heldByRecord.lat, heldByRecord.lon)
+    : heldBoardTown ? worldOfPosition(region, heldBoardTown.latitude, heldBoardTown.longitude) : null;
   const probePoint = (alongProbe, inland) => {
     const p = worldFromCoastalFrame(region, alongProbe, inland);
     const h = terrainSample(heights, p.x, p.z, region);
@@ -4077,9 +2819,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       inlandH >= 0.45 &&
       inlandH <= 38
     ) {
-      const clusterDistPenalty = clusterFrame
-        ? Math.hypot(alongProbe - clusterFrame.along, inland - clusterFrame.inland) * 0.018
-        : Math.abs(inland) * 0.001 + Math.abs(alongProbe) * 0.004;
+      const clusterDistPenalty = Math.abs(inland) * 0.001 + Math.abs(alongProbe) * 0.004;
       const hintPenalty = townHint ? Math.hypot(p.x - townHint.x, p.z - townHint.z) * 0.03 : 0;
       const score = -Math.abs(h - 0.5) * 4 + Math.min(12, -offshoreFarH) - clusterDistPenalty - hintPenalty;
       if (score > bestScore) {
@@ -4089,16 +2829,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       }
     }
   };
-  if (clusterFrame) {
-    const scanAlong = Math.round(560 * Math.max(0.45, scaleFactor));
-    const scanInland = Math.round(640 * Math.max(0.45, scaleFactor));
-    const scanStep = Math.max(8, Math.round(24 * Math.max(0.45, scaleFactor)));
-    for (let dAlong = -scanAlong; dAlong <= scanAlong; dAlong += scanStep) {
-      for (let dInland = -scanInland; dInland <= scanInland; dInland += scanStep) {
-        probePoint(clusterFrame.along + dAlong, clusterFrame.inland + dInland);
-      }
-    }
-  }
   if (townHint) {
     const hinted = coastalFrame(region, townHint.x, townHint.z);
     for (let dAlong = -900; dAlong <= 900; dAlong += 24) {
@@ -4110,7 +2840,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     for (let inland = -1200; inland <= 800; inland += 16) {
       probePoint(alongProbe * scaleFactor, inland * scaleFactor);
     }
-    if (bestScore > -Infinity && alongProbe === 0 && !clusterFrame) break;
+    if (bestScore > -Infinity && alongProbe === 0) break;
   }
   // If real-world DEM shoreline lies outside the default synthetic bay window, scan wider coastal frame
   if (bestScore === -Infinity) {
@@ -4126,8 +2856,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   if (bestScore === -Infinity) {
     const n = region.size;
     const span = region.span;
-    const targetX = orthoFootprints ? orthoFootprints.clusterX : region.x;
-    const targetZ = orthoFootprints ? orthoFootprints.clusterZ : region.z;
+    const targetX = townHint?.x ?? region.x;
+    const targetZ = townHint?.z ?? region.z;
     for (const requireBearingOrientation of [true, false]) {
       for (let j = 4; j < n - 4; j += 2) {
         const wz = region.z + (j / (n - 1) - 0.5) * span;
@@ -4171,12 +2901,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   if (coastIsReal) carveRecordedChannel(heights, region, fortRecordsFor(recordedPortId, 1800).channel);
   // The coast as it is, before the port's own works change it, for reading what the harbour needs.
   const pristineHeights = allowColonialPort ? new Float32Array(heights) : null;
-  // NMS-style Feature Stamp Terraforming: grade the harbor pier berth and level foundation pads
-  // so every port building sits flush on level ground and the pier reaches deep water.
+  // The harbour's berth dredged so that a ship reaches the town, and the bench a people's village stands on.
   const n = region.size;
   const span = region.span;
-  const plazaRadiusAlong = preserveRealCoast && !isDerivedMetropolePort ? 72 : isDerivedMetropolePort ? Math.round(115 + 53 * metropoleScale) : 105;
-  const plazaRadiusInland = preserveRealCoast && !isDerivedMetropolePort ? 105 : isDerivedMetropolePort ? Math.round(125 + 50 * metropoleScale) : 145;
   const berthHalfW = Math.max(18, (isDerivedMetropolePort ? 44 + 24 * metropoleScale : 36) * scaleFactor);
   const berthMaxOffshore = Math.max(80, (isDerivedMetropolePort ? 195 + 40 * metropoleScale : 190) * scaleFactor);
   const preIndigenousVillage = !allowColonialPort
@@ -4231,44 +2958,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   }
 
-  // Grade flat building pads directly under each top-down single-building footprint (never elevating water)
-  if (hasOrthoFootprints) {
-    const step = span / (n - 1);
-    const padMargin = Math.max(step * 1.5, 4.5);
-    for (const fp of orthoFootprints.footprints) {
-      const padY = Math.max(2.6, terrainSample(heights, fp.x, fp.z, region));
-      const cosY = Math.cos(fp.yaw);
-      const sinY = Math.sin(fp.yaw);
-      const hw = fp.width * 0.5;
-      const hl = fp.length * 0.5;
-      const rad = Math.hypot(hw + padMargin, hl + padMargin);
-      const i0 = Math.max(0, Math.floor(((fp.x - rad - region.x) / span + 0.5) * (n - 1)));
-      const i1 = Math.min(n - 1, Math.ceil(((fp.x + rad - region.x) / span + 0.5) * (n - 1)));
-      const j0 = Math.max(0, Math.floor(((fp.z - rad - region.z) / span + 0.5) * (n - 1)));
-      const j1 = Math.min(n - 1, Math.ceil(((fp.z + rad - region.z) / span + 0.5) * (n - 1)));
-      for (let j = j0; j <= j1; j++) {
-        const wz = region.z + (j / (n - 1) - 0.5) * span;
-        for (let i = i0; i <= i1; i++) {
-          const k = j * n + i;
-          if (heights[k] <= 0.15) continue;
-          const wx = region.x + (i / (n - 1) - 0.5) * span;
-          const dx = wx - fp.x;
-          const dz = wz - fp.z;
-          const lx = Math.abs(dx * cosY - dz * sinY);
-          const lz = Math.abs(dx * sinY + dz * cosY);
-          if (lx > hw + padMargin || lz > hl + padMargin) continue;
-          const wxBlend = Math.max(0, Math.min(1, 1 - (lx - hw) / padMargin));
-          const wzBlend = Math.max(0, Math.min(1, 1 - (lz - hl) / padMargin));
-          const wBlend = wxBlend * wzBlend * 0.90;
-          heights[k] = heights[k] * (1 - wBlend) + padY * wBlend;
-        }
-      }
-      fp.y = padY;
-    }
-  }
-
-  const bearingRad = (region.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
-  const instances = [];
   const shoreAnchor = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland);
   const harbour = allowColonialPort
     ? readHarbourGeography(pristineHeights, region, {
@@ -4278,1105 +2967,15 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         seawardHint: ((region.shoreBearing ?? 112) + 180) % 360,
       })
     : null;
-  const ENCLOSING_RING_PREFABS = new Set(['english_triangular_palisade_fort', 'indigenous_palisade_ring']);
-  const obbOverlapsExisting = (cx, cz, cyaw, cw, cl, prefabId) => {
-    if (ENCLOSING_RING_PREFABS.has(prefabId) || prefabId === 'timber_mole_pier') return false;
-    const cA = Math.cos(cyaw), sA = Math.sin(cyaw);
-    const hwA = cw * 0.5 + BUILDING_STREET_GAP_M * 0.5, hlA = cl * 0.5 + BUILDING_STREET_GAP_M * 0.5;
-    const cornersA = [
-      [cx - hwA * cA - hlA * sA, cz + hwA * sA - hlA * cA],
-      [cx + hwA * cA - hlA * sA, cz - hwA * sA - hlA * cA],
-      [cx + hwA * cA + hlA * sA, cz - hwA * sA + hlA * cA],
-      [cx - hwA * cA + hlA * sA, cz + hwA * sA + hlA * cA],
-    ];
-    for (const other of instances) {
-      if (ENCLOSING_RING_PREFABS.has(other.prefabId)) continue;
-      if (other.prefabId === 'timber_mole_pier' && prefabId === 'stone_quay_seawall') continue;
-      const cB = Math.cos(other.yaw), sB = Math.sin(other.yaw);
-      const hwB = other.width * 0.5 + BUILDING_STREET_GAP_M * 0.5, hlB = other.length * 0.5 + BUILDING_STREET_GAP_M * 0.5;
-      if (Math.hypot(cx - other.x, cz - other.z) > Math.hypot(hwA, hlA) + Math.hypot(hwB, hlB)) continue;
-      const cornersB = [
-        [other.x - hwB * cB - hlB * sB, other.z + hwB * sB - hlB * cB],
-        [other.x + hwB * cB - hlB * sB, other.z - hwB * sB - hlB * cB],
-        [other.x + hwB * cB + hlB * sB, other.z - hwB * sB + hlB * cB],
-        [other.x - hwB * cB + hlB * sB, other.z + hwB * sB + hlB * cB],
-      ];
-      const axes = [[cA, -sA], [sA, cA], [cB, -sB], [sB, cB]];
-      let separated = false;
-      for (const [ax, az] of axes) {
-        let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
-        for (const [x, z] of cornersA) { const p = x * ax + z * az; if (p < a0) a0 = p; if (p > a1) a1 = p; }
-        for (const [x, z] of cornersB) { const p = x * ax + z * az; if (p < b0) b0 = p; if (p > b1) b1 = p; }
-        if (Math.min(a1, b1) - Math.max(a0, b0) <= 0) {
-          separated = true;
-          break;
-        }
-      }
-      if (!separated) return true;
-    }
-    return false;
-  };
-  const obbsMeet = (x, z, yaw, width, length, other, gap = 0) => {
-    const corners = (cx, cz, a, w, l) => {
-      const c = Math.cos(a), s = Math.sin(a), hw = w * 0.5 + gap * 0.5, hl = l * 0.5 + gap * 0.5;
-      return [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl]].map(([lx, lz]) => [cx + lx * c + lz * s, cz - lx * s + lz * c]);
-    };
-    const a = corners(x, z, yaw, width, length), b = corners(other.x, other.z, other.yaw, other.width, other.length);
-    for (const shape of [a, b]) for (let i = 0; i < 4; i++) {
-      const [px, pz] = shape[i], [qx, qz] = shape[(i + 1) % 4], nx = pz - qz, nz = qx - px;
-      let aLow = Infinity, aHigh = -Infinity, bLow = Infinity, bHigh = -Infinity;
-      for (const [cx, cz] of a) { const d = cx * nx + cz * nz; if (d < aLow) aLow = d; if (d > aHigh) aHigh = d; }
-      for (const [cx, cz] of b) { const d = cx * nx + cz * nz; if (d < bLow) bLow = d; if (d > bHigh) bHigh = d; }
-      if (aLow >= bHigh || bLow >= aHigh) return false;
-    }
-    return true;
-  };
-  // Nobody builds in front of a fort's guns: the town keeps out of the ground between it and the water.
-  const inFieldOfFire = (x, z, yaw, width, length) => instances.some((fort) => {
-    if (!enclosurePlan(fort)?.gate) return false;
-    const field = FIELD_OF_FIRE_M * 0.5, reach = fort.length * 0.5 + field * 0.5;
-    return obbsMeet(x, z, yaw, width, length, { x: fort.x - Math.sin(fort.yaw) * reach, z: fort.z - Math.cos(fort.yaw) * reach, yaw: fort.yaw, width: hasFortTrace ? fort.width + 12 : fort.width * 0.8, length: field });
-  });
-  // The layout below is written against a straight shore, and real coasts curve. So each prefab says
-  // what it must stand on, and takes the nearest place that gives it that. One with no such place
-  // nearby is left out rather than built on the seabed.
-  const groundUnder = (x, z, yaw, width, length, a, b) => {
-    const lx = a * width * 0.5, lz = b * length * 0.5;
-    return terrainSurfaceSample(heights, x + lx * Math.cos(yaw) + lz * Math.sin(yaw), z - lx * Math.sin(yaw) + lz * Math.cos(yaw), region);
-  };
-  const footprintShare = (x, z, yaw, width, length, level) => {
-    let above = 0;
-    for (const a of FOOTPRINT_SAMPLES) for (const b of FOOTPRINT_SAMPLES) if (groundUnder(x, z, yaw, width, length, a, b) >= level) above++;
-    return above / (FOOTPRINT_SAMPLES.length * FOOTPRINT_SAMPLES.length);
-  };
-  const footprintRise = (x, z, yaw, width, length) => {
-    let low = Infinity, high = -Infinity;
-    for (const a of FOOTPRINT_SAMPLES) for (const b of FOOTPRINT_SAMPLES) {
-      const h = groundUnder(x, z, yaw, width, length, a, b);
-      if (h < low) low = h;
-      if (h > high) high = h;
-    }
-    return high - low;
-  };
-  const siteSuits = (need, x, z, yaw, width, length) => {
-    if (need !== 'bridge' && need !== 'pier' && need !== 'quay' && portRiverCorridor.hits(x, z, yaw, width, length, 4.5)) {
-      return false;
-    }
-    if (need === 'quay') {
-      const h = terrainSurfaceSample(heights, x, z, region);
-      return h >= SHORE_WORKS_LOWEST_M - 1 && h <= SHORE_WORKS_HIGHEST_M;
-    }
-    if (need === 'beach') {
-      const h = terrainSurfaceSample(heights, x, z, region);
-      return h >= 0.25 && h <= SHORE_WORKS_HIGHEST_M && footprintShare(x, z, yaw, width, length, -0.1) >= 0.8;
-    }
-    if (need === 'shore') {
-      const h = terrainSurfaceSample(heights, x, z, region);
-      return h >= SHORE_WORKS_LOWEST_M && h <= SHORE_WORKS_HIGHEST_M && footprintShare(x, z, yaw, width, length, SHORE_WORKS_LOWEST_M - 0.6) >= 0.75;
-    }
-    if (need === 'waterline') {
-      return terrainSurfaceSample(heights, x, z, region) >= PREFAB_DRY_GROUND_M && footprintShare(x, z, yaw, width, length, PREFAB_DRY_GROUND_M) >= 0.55;
-    }
-    return terrainSurfaceSample(heights, x, z, region) >= PREFAB_DRY_GROUND_M &&
-      footprintShare(x, z, yaw, width, length, PREFAB_DRY_GROUND_M) === 1 &&
-      footprintRise(x, z, yaw, width, length) <= PREFAB_MOST_RISE_M;
-  };
-  // A pier keeps its heading and slides along it until its root is on the shore and its head in water.
-  const pierSite = (wanted, yaw, width, length) => {
-    const axisX = Math.sin(yaw), axisZ = Math.cos(yaw), half = length * 0.5;
-    const endAt = (slide, end) => terrainSurfaceSample(heights, wanted.x + axisX * (slide + end * half), wanted.z + axisZ * (slide + end * half), region);
-    for (let distance = 0; distance <= PIER_MOST_SLIDE_M; distance += 3) {
-      for (const slide of distance ? [distance, -distance] : [0]) {
-        const a = endAt(slide, 1), b = endAt(slide, -1);
-        const root = Math.max(a, b), head = Math.min(a, b);
-        if (root >= PIER_ROOT_LOWEST_M && root <= PIER_ROOT_HIGHEST_M && head <= PIER_HEAD_HIGHEST_M) {
-          const x = wanted.x + axisX * slide, z = wanted.z + axisZ * slide;
-          const headEnd = a <= b ? 1 : -1;
-          const hx = x + axisX * headEnd * half, hz = z + axisZ * headEnd * half;
-          if (Math.abs(hx - region.x) > span * 0.422 || Math.abs(hz - region.z) > span * 0.422) continue;
-          // Two piers never share water: a ship could lie at neither.
-          if (footprintFitsEnclosures(instances, x, z, yaw, width, length) && !instances.some((other) => other.prefabId === 'timber_mole_pier' && obbsMeet(x, z, yaw, width, length, other, PIER_APART_M))) return { x, z };
-        }
-      }
-    }
-    return null;
-  };
-  // A bridge needs a bank at each end and water, or at least a low place, between them.
-  const bridgeSuits = (x, z, yaw, length) => {
-    const axisX = Math.sin(yaw) * length * 0.5, axisZ = Math.cos(yaw) * length * 0.5;
-    return terrainSurfaceSample(heights, x + axisX, z + axisZ, region) >= PREFAB_DRY_GROUND_M &&
-      terrainSurfaceSample(heights, x - axisX, z - axisZ, region) >= PREFAB_DRY_GROUND_M &&
-      terrainSurfaceSample(heights, x, z, region) <= 0.2;
-  };
-  const prefabSiteNeed = (prefabId) => PREFAB_SITE_NEEDS[prefabId] ?? 'land';
-  const enclosureSuits = (candidate) => {
-    if (portRiverCorridor.hits(candidate.x, candidate.z, candidate.yaw, candidate.width, candidate.length, 4.0)) return false;
-    let low = Infinity, high = -Infinity;
-    for (const { x, z } of enclosureGroundPoints(candidate)) {
-      const h = terrainSurfaceSample(heights, x, z, region);
-      if (h < low) low = h;
-      if (h > high) high = h;
-    }
-    return low >= PREFAB_DRY_GROUND_M && high - low <= PREFAB_MOST_RISE_M;
-  };
-  function findPrefabSite(prefabId, wanted, yaw, width, length, homeFort = null, overrides = null) {
-    const need = prefabSiteNeed(prefabId);
-    if (need === 'pier') return pierSite(wanted, yaw, width, length);
-    const asEnclosure = (x, z) => ({ prefabId, x, z, yaw, width, length, enclosureShape: overrides?.enclosureShape, gateSide: overrides?.gateSide });
-    const suits = need === 'bridge'
-      ? (x, z) => bridgeSuits(x, z, yaw, length)
-      : need === 'enclosure'
-        ? (x, z) => enclosureSuits(asEnclosure(x, z))
-        : (x, z) => siteSuits(need, x, z, yaw, width, length);
-    const open = need === 'enclosure'
-      ? (x, z) => enclosureSiteIsClear(asEnclosure(x, z), instances)
-      : (x, z) => (need === 'quay' || !obbOverlapsExisting(x, z, yaw, width, length, prefabId)) &&
-          footprintFitsEnclosures(instances, x, z, yaw, width, length, homeFort) && !inFieldOfFire(x, z, yaw, width, length);
-    if (suits(wanted.x, wanted.z) && open(wanted.x, wanted.z)) return { x: wanted.x, z: wanted.z };
-    // Rings out from the wanted spot, starting on the landward side so ties go inland.
-    const landward = (region.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
-    for (let radius = PREFAB_SITE_STEP_M; radius <= PREFAB_SITE_REACH_M; radius += PREFAB_SITE_STEP_M) {
-      const spots = Math.max(8, Math.round((2 * Math.PI * radius) / PREFAB_SITE_STEP_M));
-      for (let spot = 0; spot < spots; spot++) {
-        const turn = Math.ceil(spot / 2) * (spot % 2 ? 1 : -1) * ((2 * Math.PI) / spots);
-        const x = wanted.x + Math.sin(landward + turn) * radius;
-        const z = wanted.z - Math.cos(landward + turn) * radius;
-        if (suits(x, z) && open(x, z)) return { x, z };
-      }
-    }
-    return null;
-  }
-  const addPrefab = (prefabId, alongOffset, inlandOffset, yawOffsetDeg = 0, minElevation = null, overrides = null) => {
-    const cairnSpec = overrides?.cairnSpec ?? CAIRN_ARCHITECTURAL_TEMPLATES[prefabId] ?? null;
-    const prefab = PORT_PREFABS[prefabId] ?? cairnSpec;
-    const instLength = overrides?.length ?? prefab?.length ?? 24;
-    const instWidth = overrides?.width ?? prefab?.width ?? 18;
-    // A house inside a fort is set out in the fort's own frame, so its plan holds however the coast runs.
-    const homeFort = overrides?.homeFort ?? null;
-    const yaw = overrides?.yaw ?? (homeFort ? homeFort.yaw + overrides.fortSlot[2] : bearingRad + yawOffsetDeg * COASTAL_DEG_TO_RAD);
-    const wanted = overrides?.at ?? (homeFort
-      ? fortLocalToWorld(homeFort, overrides.fortSlot[0], overrides.fortSlot[1])
-      : worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset));
-    const isWaterfrontStructure = prefabId === 'stone_arch_bridge' || prefabId === 'timber_mole_pier' || prefabId === 'stone_quay_seawall';
-    const fixedPositionRequested = Boolean(overrides?.lockSite || overrides?.exactY !== undefined);
-    const collidesRiver = !isWaterfrontStructure && portRiverCorridor.hits(wanted.x, wanted.z, yaw, instWidth, instLength, 4.0);
-    const site = fixedPositionRequested && !collidesRiver
-      ? wanted
-      : findPrefabSite(prefabId, wanted, yaw, instWidth, instLength, homeFort, overrides);
-    if (!site) return null;
-    if (!isWaterfrontStructure && portRiverCorridor.hits(site.x, site.z, yaw, instWidth, instLength, 4.0)) return null;
-    const pos = site;
-    const groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
-    const y = overrides?.exactY !== undefined
-      ? (typeof overrides.exactY === 'boolean' ? (overrides.baseY ?? 0) : overrides.exactY)
-      : prefabId === 'stone_quay_seawall'
-        ? 0
-        : minElevation !== null
-          ? Math.max(minElevation, groundY)
-          : Math.max(1.2, groundY);
-    instances.push({
-      prefabId,
-      label: overrides?.label ?? prefab?.label ?? prefab?.name ?? prefabId,
-      x: pos.x,
-      y,
-      z: pos.z,
-      yaw,
-      length: instLength,
-      width: instWidth,
-      height: overrides?.height ?? prefab?.height ?? 12,
-      foundationDepth: overrides?.foundationDepth ?? prefab?.foundationDepth ?? 4.0,
-      materialKind: overrides?.materialKind ?? prefab?.materialKind ?? 11,
-      roofPitch: overrides?.roofPitch ?? prefab?.roofPitch ?? 2.8,
-      waterfront: overrides?.waterfront ?? prefab?.waterfront ?? false,
-      friendlyToPlayer: overrides?.friendlyToPlayer ?? false,
-      indigenous: overrides?.indigenous ?? Boolean(prefab?.indigenous),
-      cultureId: overrides?.cultureId ?? region.indigenousSettlement?.cultureId ?? null,
-      cairnSpec,
-      ...(overrides?.baseY !== undefined ? { baseY: overrides.baseY } : {}),
-      ...(overrides?.isQuayRibbon ? { isQuayRibbon: true } : {}),
-      // A pier or quay asked to carry guns, or a magazine, keeps the asking.
-      ...(overrides?.armed !== undefined ? { armed: Boolean(overrides.armed) } : {}),
-      ...(overrides?.hasMagazine !== undefined ? { hasMagazine: Boolean(overrides.hasMagazine) } : {}),
-      ...(overrides?.guards ? { guards: overrides.guards } : {}),
-      ...(overrides?.enclosureShape ? { enclosureShape: overrides.enclosureShape } : {}),
-      ...(overrides?.gateSide !== undefined ? { gateSide: overrides.gateSide } : {}),
-      ...(overrides?.bankYNeg !== undefined ? { bankYNeg: overrides.bankYNeg } : {}),
-      ...(overrides?.bankYPos !== undefined ? { bankYPos: overrides.bankYPos } : {}),
-    });
-    return instances[instances.length - 1];
-  };
+  const colonyGrowth = region.colonyGrowth ?? computeColonyGrowthProfile(region, simYear);
+  const indigenousSettlement = region.indigenousSettlement ?? computeIndigenousSettlementProfile(region, colonyGrowth.year);
 
-  // Trace the actual harbor shoreline contour (h ~ -0.6 m..-0.2 m, smoothed via 3-pass moving average)
-  // and emit contiguous, corner-to-corner joined `stone_quay_seawall` chords with seaward-facing vertical ashlar walls.
-  const placeContinuousQuayRibbon = (alongStart, alongEnd, label = PORT_PREFABS.stone_quay_seawall.label, quayDepth = 12) => {
-    const seaHintX = -Math.sin(bearingRad);
-    const seaHintZ = Math.cos(bearingRad);
-    const stepAlong = 6;
-    const rawSamples = [];
-    for (let along = alongStart; along <= alongEnd + 1e-3; along += stepAlong) {
-      let bestCross = null;
-      let prevP = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland - 38);
-      let prevH = terrainSample(heights, prevP.x, prevP.z, region);
-      for (let d = -36; d <= 38; d += 2) {
-        const curP = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + d);
-        const curH = terrainSample(heights, curP.x, curP.z, region);
-        if (prevH <= -0.35 && curH > -0.35) {
-          const frac = Math.max(0, Math.min(1, (-0.35 - prevH) / Math.max(1e-3, curH - prevH)));
-          bestCross = d - 2 + frac * 2;
-          break;
-        }
-        prevH = curH;
-      }
-      if (bestCross !== null) {
-        const pSea = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + bestCross - 18);
-        const pLand = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + bestCross + 18);
-        if (terrainSample(heights, pSea.x, pSea.z, region) > -0.4 || terrainSample(heights, pLand.x, pLand.z, region) < 0.25) {
-          bestCross = null;
-        }
-      }
-      rawSamples.push({ along, inland: bestCross });
-    }
-
-    // 3-pass moving average over valid contour inland offsets so chords bend smoothly with the bay/riverbank
-    let smoothedInland = rawSamples.map((s) => s.inland);
-    for (let pass = 0; pass < 3; pass++) {
-      const next = smoothedInland.slice();
-      for (let i = 0; i < smoothedInland.length; i++) {
-        if (smoothedInland[i] === null) continue;
-        let sum = smoothedInland[i] * 2;
-        let w = 2;
-        if (i > 0 && smoothedInland[i - 1] !== null) { sum += smoothedInland[i - 1]; w += 1; }
-        if (i + 1 < smoothedInland.length && smoothedInland[i + 1] !== null) { sum += smoothedInland[i + 1]; w += 1; }
-        next[i] = sum / w;
-      }
-      smoothedInland = next;
-    }
-
-    const runs = [];
-    let curRun = [];
-    for (let i = 0; i < rawSamples.length; i++) {
-      const d = smoothedInland[i];
-      if (d === null) {
-        if (curRun.length >= 3) runs.push(curRun);
-        curRun = [];
-        continue;
-      }
-      const wp = worldFromCoastalFrame(region, bestShoreAlong + rawSamples[i].along, bestShoreInland + d);
-      if (portRiverCorridor.pointHits(wp.x, wp.z, 9.5)) {
-        if (curRun.length >= 3) runs.push(curRun);
-        curRun = [];
-        continue;
-      }
-      curRun.push({ along: rawSamples[i].along, inland: d, x: wp.x, z: wp.z });
-    }
-    if (curRun.length >= 3) runs.push(curRun);
-
-    // Fallback to clean straight shoreline chord run if synthetic test heightfield had no -0.35m contour in window
-    if (!runs.length) {
-      const fallbackPts = [];
-      for (let along = alongStart; along <= alongEnd + 1e-3; along += 26) {
-        const wp = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland);
-        if (!portRiverCorridor.pointHits(wp.x, wp.z, 9.5)) {
-          fallbackPts.push({ along, inland: 0, x: wp.x, z: wp.z });
-        }
-      }
-      if (fallbackPts.length >= 2) runs.push(fallbackPts);
-    }
-
-    const emitted = [];
-    const hl = quayDepth * 0.5;
-    for (const run of runs) {
-      let arcLen = 0;
-      for (let i = 1; i < run.length; i++) arcLen += Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z);
-      if (arcLen < 14) continue;
-      const segCount = Math.max(1, Math.round(arcLen / 28));
-      const vertices = [run[0]];
-      for (let s = 1; s < segCount; s++) {
-        const targetDist = (arcLen * s) / segCount;
-        let acc = 0;
-        let picked = run[run.length - 1];
-        for (let i = 1; i < run.length; i++) {
-          const segD = Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z);
-          if (acc + segD >= targetDist) {
-            const t = segD > 1e-4 ? (targetDist - acc) / segD : 0;
-            picked = {
-              x: run[i - 1].x + (run[i].x - run[i - 1].x) * t,
-              z: run[i - 1].z + (run[i].z - run[i - 1].z) * t,
-            };
-            break;
-          }
-          acc += segD;
-        }
-        vertices.push(picked);
-      }
-      vertices.push(run[run.length - 1]);
-
-      for (let k = 0; k < vertices.length - 1; k++) {
-        let a = vertices[k];
-        let b = vertices[k + 1];
-        const rawDx = b.x - a.x;
-        const rawDz = b.z - a.z;
-        const chordLen = Math.hypot(rawDx, rawDz);
-        if (chordLen < 6) continue;
-        // Orient A -> B so -lz = (+uz, -ux) always faces seaward into harbor water and +lz = (-uz, +ux) faces inland
-        if (rawDz * seaHintX - rawDx * seaHintZ < 0) {
-          const tmp = a;
-          a = b;
-          b = tmp;
-        }
-        const ux = (b.x - a.x) / chordLen;
-        const uz = (b.z - a.z) / chordLen;
-        const yaw = Math.atan2(-uz, ux);
-        const sinY = Math.sin(yaw);
-        const cosY = Math.cos(yaw);
-        // Shift center inland by hl so the seaward face (lz = -hl) lies directly on chord AB (exact shared vertices!)
-        const cx = 0.5 * (a.x + b.x) + hl * sinY;
-        const cz = 0.5 * (a.z + b.z) + hl * cosY;
-        if (portRiverCorridor.hits(cx, cz, yaw, chordLen + 0.65, quayDepth, 4.5)) continue;
-        const seg = addPrefab('stone_quay_seawall', 0, 0, 0, null, {
-          at: { x: cx, z: cz },
-          yaw,
-          width: chordLen + 0.65,
-          length: quayDepth,
-          height: 2.15,
-          foundationDepth: 6.5,
-          exactY: 0,
-          baseY: 0,
-          lockSite: true,
-          isQuayRibbon: true,
-          label,
-        });
-        if (seg) emitted.push(seg);
-      }
-    }
-    return emitted;
-  };
-
-  // A fort that holds the settlement stands back from the water and looks at it. It is sited first of all.
-  const placeEnclosingFort = (label, recordOf) => {
-    const shape = recordOf?.encloses === 'triangle' || region.id === 'jamestown' ? 'triangle' : 'square';
-    const width = shape === 'triangle' ? PORT_PREFABS.english_triangular_palisade_fort.width : 96;
-    const length = shape === 'triangle' ? PORT_PREFABS.english_triangular_palisade_fort.length : 86;
-    const told = recordOf && coastIsReal ? worldOfPosition(region, recordOf.lat, recordOf.lon) : null;
-    const water = harbour?.townWater ?? harbour?.anchorage;
-    // Its river side lies along the shore, looking straight out at the water.
-    const lookFrom = (x, z) => {
-      const shore = harbour ? shoreNormal(harbour, x, z) : null;
-      if (shore) return shore;
-      const dx = (water?.x ?? x) - x, dz = (water?.z ?? z) - z, d = Math.hypot(dx, dz) || 1;
-      return { x: dx / d, z: dz / d };
-    };
-    let look = lookFrom(shoreAnchor.x, shoreAnchor.z);
-    // Where the record says, if that is by the water. The elevation data often has the shore further off than it was then.
-    const start = told && Math.max(Math.abs(told.x - region.x), Math.abs(told.z - region.z)) < region.span * 0.5 - 200 && Math.hypot(told.x - shoreAnchor.x, told.z - shoreAnchor.z) < 320
-      ? told
-      : { x: shoreAnchor.x - look.x * 62, z: shoreAnchor.z - look.z * 62 };
-    let yaw = Math.atan2(-look.x, -look.z);
-    const candidate = { prefabId: 'english_triangular_palisade_fort', width, length, enclosureShape: shape === 'square' ? 'square' : undefined };
-    const site = findPrefabSite('english_triangular_palisade_fort', start, yaw, width, length, null, candidate);
-    if (!site) return null;
-    look = lookFrom(site.x, site.z);
-    yaw = Math.atan2(-look.x, -look.z);
-    const stillFits = findPrefabSite('english_triangular_palisade_fort', site, yaw, width, length, null, candidate) ?? site;
-    // The gate is in the flank that looks towards dry ground and the rest of the town, unless the record says otherwise.
-    let gateSide;
-    if (shape === 'triangle' && recordOf?.gate === 'river') gateSide = 0;
-    else if (shape === 'triangle') {
-      const score = (side) => {
-        const plan = triangularFortPlan(width, length, side), g = plan.gate;
-        const c = Math.cos(yaw), s = Math.sin(yaw), wx = stillFits.x + (g.x + g.nx * 22) * c + (g.z + g.nz * 22) * s, wz = stillFits.z - (g.x + g.nx * 22) * s + (g.z + g.nz * 22) * c;
-        return (terrainSurfaceSample(heights, wx, wz, region) >= PREFAB_DRY_GROUND_M ? 1000 : 0) - Math.hypot(wx - shoreAnchor.x, wz - shoreAnchor.z);
-      };
-      gateSide = score(-1) >= score(1) ? -1 : 1;
-    }
-    return addPrefab('english_triangular_palisade_fort', 0, 0, 0, 2.8, {
-      at: stillFits, yaw, width, length, label: recordOf?.name ?? label, armed: true, hasMagazine: true,
-      ...(shape === 'square' ? { enclosureShape: 'square' } : { gateSide }),
-      guards: { role: recordOf?.role ?? 'waterfront', what: 'the anchorage off the town', source: recordOf && coastIsReal ? 'record' : recordOf ? 'role' : 'rule', name: recordOf?.name ?? label },
-    });
-  };
-
-  // 1. Timber mole piers & stone quays derived procedurally from bathymetry, river mouths & population (or orthophoto outlines)
-  if (isDerivedMetropolePort && allowColonialPort) {
-    // Score along-shore stations by deep offshore water clear of tributary mouths
-    const pierCandidates = [];
-    for (let alongProbe = -108; alongProbe <= 108; alongProbe += 18) {
-      const pShore = worldFromCoastalFrame(region, bestShoreAlong + alongProbe, bestShoreInland);
-      const pDeep = worldFromCoastalFrame(region, bestShoreAlong + alongProbe, bestShoreInland - 62);
-      const pTip = worldFromCoastalFrame(region, bestShoreAlong + alongProbe, bestShoreInland - 74);
-      const hShore = terrainSample(heights, pShore.x, pShore.z, region);
-      const hDeep = terrainSample(heights, pDeep.x, pDeep.z, region);
-      const hTip = terrainSample(heights, pTip.x, pTip.z, region);
-      if (hDeep > -2.2 || hTip > -3.0) continue;
-      if (portRiverCorridor.pointHits(pShore.x, pShore.z, 10) || portRiverCorridor.pointHits(pDeep.x, pDeep.z, 10)) continue;
-      let reachLen = 52;
-      for (let off = 36; off <= 74; off += 6) {
-        const probe = worldFromCoastalFrame(region, bestShoreAlong + alongProbe, bestShoreInland - off);
-        if (terrainSample(heights, probe.x, probe.z, region) <= -4.4) {
-          reachLen = Math.max(48, off + 8);
-          break;
-        }
-      }
-      const centerPref = -Math.abs(alongProbe) * 0.04;
-      const score = -hDeep - hTip * 0.6 - Math.max(0, Math.abs(hShore - 0.5)) * 0.8 + centerPref;
-      pierCandidates.push({ alongProbe, reachLen, score });
-    }
-    pierCandidates.sort((a, b) => b.score - a.score);
-    const chosenPiers = [];
-    for (const c of pierCandidates) {
-      if (chosenPiers.some((p) => Math.abs(p.alongProbe - c.alongProbe) < 48)) continue;
-      chosenPiers.push(c);
-      if (chosenPiers.length >= (metropoleScale >= 0.7 ? 2 : 1)) break;
-    }
-    if (!chosenPiers.length) chosenPiers.push({ alongProbe: 0, reachLen: 68, score: 0 });
-    const isLisbon = region.id === 'lisbon';
-    const mainPier = chosenPiers[0];
-    const mainInlandOffset = -(mainPier.reachLen * 0.42);
-    addPrefab('timber_mole_pier', mainPier.alongProbe, mainInlandOffset, 180, null, {
-      label: isLisbon ? 'Ponte da Casa da Índia (Main Royal Embarkation Pier)' : `${nearOldWorldCity?.name || region.name} Main Royal Embarkation Pier`,
-      length: mainPier.reachLen,
-      width: 8.4,
-      height: 1.75,
-      foundationDepth: 14.0,
-      exactY: 0.45,
-    });
-    const lHeadTip = worldFromCoastalFrame(region, bestShoreAlong + mainPier.alongProbe - 14, bestShoreInland - (mainPier.reachLen - 6));
-    if (isLisbon || terrainSample(heights, lHeadTip.x, lHeadTip.z, region) <= -1.6) {
-      addPrefab('timber_mole_pier', mainPier.alongProbe - 14, -(mainPier.reachLen - 3), 90, null, {
-        label: isLisbon ? 'Cais da Ribeira Crane Wharf & Fitting Mole' : 'Harbor Crane Wharf & Fitting Mole',
-        length: 36,
-        width: 8.0,
-        height: 1.75,
-        foundationDepth: 15.0,
-        exactY: 0.45,
-      });
-    }
-    if (chosenPiers[1] || isLisbon) {
-      const alt = chosenPiers[1] ?? { alongProbe: mainPier.alongProbe >= 0 ? mainPier.alongProbe - 56 : mainPier.alongProbe + 56, reachLen: 54 };
-      addPrefab('timber_mole_pier', alt.alongProbe, -(alt.reachLen * 0.36), 180, null, {
-        label: isLisbon ? 'Estaleiro da Ribeira das Naus Pier' : 'Shipyard Fitting-Out & Careening Pier',
-        length: Math.min(58, alt.reachLen),
-        width: 7.2,
-        height: 1.65,
-        foundationDepth: 13.5,
-        exactY: 0.40,
-      });
-    }
-  } else if (extractedHarborPiers.length > 0) {
-    const pierPrefab = PORT_PREFABS.timber_mole_pier;
-    const quayPrefab = PORT_PREFABS.stone_quay_seawall;
-    for (const hp of extractedHarborPiers) {
-      const pierYaw = Math.atan2(-hp.ux, -hp.uz);
-      const pierLen = Math.min(76, Math.max(24, hp.reach + 7));
-      const pierX = hp.rootX + hp.ux * (pierLen * 0.5 - 5.5);
-      const pierZ = hp.rootZ + hp.uz * (pierLen * 0.5 - 5.5);
-      const quayW = Math.min(38, Math.max(20, hp.reach * 0.55));
-      const quayX = hp.rootX - hp.ux * 5.5;
-      const quayZ = hp.rootZ - hp.uz * 5.5;
-      const rootGroundY = Math.max(1.2, Math.min(2.8, terrainSurfaceSample(heights, hp.rootX, hp.rootZ, region)));
-      instances.push({
-        prefabId: 'stone_quay_seawall',
-        label: quayPrefab.label,
-        x: quayX,
-        y: 0,
-        baseY: 0,
-        z: quayZ,
-        yaw: pierYaw,
-        length: 11,
-        width: quayW,
-        height: 2.15,
-        foundationDepth: 6.5,
-        materialKind: quayPrefab.materialKind,
-        roofPitch: 0,
-        waterfront: true,
-        isQuayRibbon: true,
-        fromOrthophotoFootprint: true,
-      });
-      instances.push({
-        prefabId: 'timber_mole_pier',
-        label: pierPrefab.label,
-        x: pierX,
-        y: rootGroundY - 0.15,
-        z: pierZ,
-        yaw: pierYaw,
-        length: pierLen,
-        width: pierPrefab.width,
-        height: 1.4,
-        foundationDepth: pierPrefab.foundationDepth,
-        materialKind: pierPrefab.materialKind,
-        roofPitch: 0,
-        waterfront: true,
-        fromOrthophotoFootprint: true,
-      });
-    }
-  } else if (allowColonialPort) {
-    for (const alongTry of [0, -18, 18, -36, 36, -54, 54]) {
-      if (addPrefab('timber_mole_pier', alongTry, -24, 0, 2.2)) break;
-    }
-  }
-
-  const colonyGrowth =
-    region.colonyGrowth ??
-    computeColonyGrowthProfile(region, region.year ?? region.era ?? 1550);
-
-  const inTimberManner = allowColonialPort && !hasOrthoFootprints && !isDerivedMetropolePort && (
-    region.id === 'jamestown' || region.id === 'plymouth-colony' || region.id === 'boston' || region.id === 'new-amsterdam' || region.id === 'quebec' ||
-    region.id === 'charleston' || region.id === 'philadelphia' ||
-    ((colonyGrowth.crown === 'england' || colonyGrowth.crown === 'netherlands' || colonyGrowth.crown === 'france') && Math.abs(region.latitude ?? 0) >= 31.5)
-  );
-
-  if (allowColonialPort && hasOrthoFootprints) {
-    const fps = orthoFootprints.footprints.slice();
-    const hasPreassigned = fps.some((f) => Boolean(f.prefabId));
-    let bastionIdx = 0;
-    let casaIdx = -1;
-    let chapelIdx = -1;
-
-    if (!hasPreassigned) {
-      let bestBastionScore = Infinity;
-      for (let i = 0; i < fps.length; i++) {
-        const s = fps[i].inlandM - fps[i].y * 1.5;
-        if (s < bestBastionScore) {
-          bestBastionScore = s;
-          bastionIdx = i;
-        }
-      }
-      const used = new Set([bastionIdx]);
-      for (let i = 0; i < fps.length; i++) {
-        if (used.has(i)) continue;
-        if (casaIdx === -1 || fps[i].area - fps[i].inlandM * 1.2 > fps[casaIdx].area - fps[casaIdx].inlandM * 1.2) {
-          casaIdx = i;
-        }
-      }
-      if (casaIdx >= 0) used.add(casaIdx);
-      for (let i = 0; i < fps.length; i++) {
-        if (used.has(i)) continue;
-        const aspect = fps[i].length / Math.max(1, fps[i].width);
-        const curScore = aspect * 65 + fps[i].area * 0.12;
-        const bestChapelScore =
-          chapelIdx === -1
-            ? -Infinity
-            : (fps[chapelIdx].length / Math.max(1, fps[chapelIdx].width)) * 65 + fps[chapelIdx].area * 0.12;
-        if (curScore > bestChapelScore) {
-          chapelIdx = i;
-        }
-      }
-    }
-
-    // 1 Footprint Rectangle = 1 Single 3D Building classified by footprint topology & material class
-    let warehouseAssigned = false;
-    let arsenalAssigned = false;
-    let lonjaAssigned = false;
-    let corralAssigned = false;
-    const maxOrthoBuildings =
-      colonyGrowth.stage === 'outpost'
-        ? Math.max(6, Math.min(10, fps.length))
-        : colonyGrowth.stage === 'settlement'
-          ? Math.max(10, Math.min(16, fps.length))
-          : 32;
-    for (let i = 0; i < fps.length && i < maxOrthoBuildings; i++) {
-      const fp = fps[i];
-      const aspect = fp.length / Math.max(1, fp.width);
-      const rClass = fp.roofClass ?? 1;
-      const holeR = fp.holeRatio ?? (fp.width >= 21 && aspect <= 1.55 ? 0.38 : 0.08);
-      const fillR = fp.fillRatio ?? 0.78;
-      // A footprint naming a prefab the ports have not is classified by its shape like any other.
-      let prefabId = PORT_PREFABS[fp.prefabId] ? fp.prefabId : null;
-
-      if (!prefabId || (fps.length > 4 && prefabId === 'colonial_town_block')) {
-        if (!fp.prefabId && i === bastionIdx) {
-          // The forts go where the harbour needs them, not on whichever roof reads like one.
-          prefabId = 'royal_warehouse';
-        } else if (!fp.prefabId && i === casaIdx) {
-          prefabId = 'casa_de_contratacion';
-        } else if (!fp.prefabId && i === chapelIdx) {
-          prefabId = 'mission_chapel';
-        } else if (rClass === 2) {
-          prefabId = 'thatched_bohio_palafito';
-        } else if (rClass === 3) {
-          if (fp.width <= 16.5 && fp.length <= 18.5) prefabId = 'torreon_atalaya_farol';
-          else if (aspect >= 2.2 && fp.y <= 3.0) prefabId = 'stone_arch_bridge';
-          else if (aspect >= 2.4) prefabId = 'curtain_wall_and_gate';
-          else prefabId = 'colonial_town_block';
-        } else if (!arsenalAssigned && fp.width >= 21 && fp.length >= 25 && holeR < 0.24 && fp.inlandM < 135) {
-          prefabId = 'royal_atarazanas_arsenal';
-          arsenalAssigned = true;
-        } else if (!lonjaAssigned && fp.width <= 16.5 && fp.length >= 19 && fp.inlandM < 98) {
-          prefabId = 'open_lonja_loggia';
-          lonjaAssigned = true;
-        } else if (!warehouseAssigned && fp.inlandM < 120 && aspect >= 1.55) {
-          prefabId = 'royal_warehouse';
-          warehouseAssigned = true;
-        } else if (!corralAssigned && fp.width >= 23 && holeR >= 0.48) {
-          prefabId = 'walled_mule_corral';
-          corralAssigned = true;
-        } else if (fp.width <= 13.2 || (aspect >= 1.78 && holeR < 0.22)) {
-          prefabId = 'single_nave_solar';
-        } else if (fp.width < 20.2 || (fillR < 0.72 && holeR < 0.42)) {
-          prefabId = 'l_wing_u_wing_solar';
-        } else {
-          prefabId = 'modular_patio_cloister';
-        }
-      }
-
-      const prefab = PORT_PREFABS[prefabId] || PORT_PREFABS.colonial_town_block;
-      const maxW = prefabId === 'mission_chapel' ? 28 : 38;
-      const maxL = prefabId === 'mission_chapel' ? 42 : 44;
-      const minW = prefabId === 'curtain_wall_and_gate' || prefabId === 'stone_arch_bridge' ? 6.0 : 7.5;
-      const scaleW = Math.min(maxW, Math.max(minW, fp.width));
-      const scaleL = Math.min(maxL, Math.max(10, fp.length));
-
-      // True 16th-century human & tree scale (7.6m–10.8m eave/parapet height vs 18m–24m mature tropical forest trees)
-      const heightVar = (i % 3) * 0.45;
-      const trueHeight =
-        prefabId === 'mission_chapel' || prefabId === 'torreon_atalaya_farol'
-          ? 10.2
-          : prefabId === 'casa_de_contratacion' || prefabId === 'royal_atarazanas_arsenal'
-            ? 9.4
-            : 7.8 + heightVar;
-      const truePitch =
-        prefabId === 'mission_chapel'
-          ? 3.2
-          : prefabId === 'thatched_bohio_palafito'
-            ? 3.0
-            : prefabId === 'casa_de_contratacion'
-              ? 2.8
-              : 2.4;
-
-      const groundY = terrainSurfaceSample(heights, fp.x, fp.z, region);
-      const y = Math.max(2.2, groundY);
-
-      instances.push({
-        prefabId,
-        label: prefab.label,
-        x: fp.x,
-        y,
-        z: fp.z,
-        yaw: fp.yaw,
-        length: scaleL,
-        width: scaleW,
-        height: trueHeight,
-        foundationDepth: Math.max(prefab.foundationDepth, 6.0),
-        materialKind: prefab.materialKind,
-        roofPitch: truePitch,
-        waterfront: prefab.waterfront,
-        fromOrthophotoFootprint: true,
-      });
-    }
-    // Declarative Cairn JSON landmarks for orthophoto colonial ports (placed clear of existing orthophoto footprints)
-    const findClearPortOffset = (baseAlong, baseInland, minClearDist = 34) => {
-      let along = baseAlong;
-      const inland = baseInland;
-      for (let step = 0; step < 8; step++) {
-        const candPos = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + inland);
-        const overlaps = instances.some((inst) => Math.hypot(inst.x - candPos.x, inst.z - candPos.z) < minClearDist);
-        if (!overlaps) return [along, inland];
-        along += baseAlong >= 0 ? 28 : -28;
-      }
-      return [along, inland];
-    };
-    const [catAlong, catInland] = findClearPortOffset(82, 108, 36);
-    addPrefab('catedral_basilica', catAlong, catInland, 0, 4.0, {
-      label: 'Catedral Basílica Metropolitana',
-    });
-    const [palAlong, palInland] = findClearPortOffset(-82, 64, 34);
-    addPrefab('palacio_del_gobernador', palAlong, palInland, 0, 3.5, {
-      label: 'Palacio de los Capitanes Generales (Governor Palace)',
-    });
-    // Progressive 17th-century expansion for orthophoto ports when year > 1560 (Antonelli & Buccaneer eras)
-    if (colonyGrowth.expansionTier >= 2) {
-      addPrefab('modular_patio_cloister', 68, 92, 0, 3.8, {
-        label: 'Barrio de los Mercaderes (17th-Century Expansion)',
-      });
-    }
-    if (colonyGrowth.expansionTier >= 3) {
-      addPrefab('royal_warehouse', 48, 128, 0, 4.2, {
-        label: 'Almacén Real de Flota',
-      });
-      addPrefab('acueducto_de_piedra', -68, 118, 12, 4.0, {
-        label: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
-      });
-    }
-  } else if (allowColonialPort && isDerivedMetropolePort) {
-    // Procedural metropole harbor derivation from terrain contour, bathymetry, slope, hill relief, river corridors, and population:
-    // (a) Continuous contour-following stone seawall ribbon along shoreline stretches free of river mouths
-    const isLisbon = region.id === 'lisbon';
-    placeContinuousQuayRibbon(-112, 88, isLisbon ? 'Cais da Ribeira & Terreiro do Paço Stone Seawall' : `${nearOldWorldCity?.name || region.name} Stone Quay Wall`, 12);
-
-    // (b) Find flattest river-clear waterfront bench for civic Terreiro plaza & royal customhouse / palace complex
-    let benchAlong = 10, benchInland = 40, bestBenchScore = -Infinity;
-    for (let a = -36; a <= 48; a += 14) {
-      for (let d = 28; d <= 52; d += 12) {
-        const bp = worldFromCoastalFrame(region, bestShoreAlong + a, bestShoreInland + d);
-        if (portRiverCorridor.pointHits(bp.x, bp.z, 18)) continue;
-        const bh = terrainSurfaceSample(heights, bp.x, bp.z, region);
-        if (bh < 1.6 || bh > 6.5) continue;
-        const rise = footprintRise(bp.x, bp.z, bearingRad, 32, 32);
-        const score = -rise * 3.5 - Math.abs(bh - 3.0) * 0.6 - Math.abs(a - 12) * 0.03;
-        if (score > bestBenchScore) {
-          bestBenchScore = score;
-          benchAlong = a;
-          benchInland = d;
-        }
-      }
-    }
-    const isIberianMetropole = colonyGrowth.crown === 'portugal' || colonyGrowth.crown === 'spain';
-    addPrefab('torreon_atalaya_farol', benchAlong + 28, Math.max(4, benchInland - 34), 0, 2.8, {
-      label: isLisbon ? 'Torreão do Paço da Ribeira' : isIberianMetropole ? 'Waterfront Royal Palace Turret' : 'Harbor Citadel Watchtower',
-      width: 18,
-      length: 22,
-      height: 20.5,
-      foundationDepth: 9.5,
-      cairnSpec: isIberianMetropole ? CAIRN_ARCHITECTURAL_TEMPLATES.paco_da_ribeira_torreao : undefined,
-    });
-    addPrefab('casa_de_contratacion', benchAlong, benchInland, 0, 3.0, {
-      label: isLisbon ? 'Paço da Ribeira & Casa da Índia' : isIberianMetropole ? 'Royal Customhouse & Chamber of Commerce' : 'Customhouse & Staple Hall',
-    });
-    addPrefab('open_lonja_loggia', benchAlong - 24, Math.max(22, benchInland - 12), 0, 2.8, {
-      label: 'Merchant Guild Arcaded Loggia',
-    });
-    addPrefab('modular_patio_cloister', benchAlong + 38, benchInland + 2, 0, 3.2, {
-      label: 'Waterfront Palace & Exchange Cloister',
-    });
-
-    // (c) Pick gentler foreshore flank without river mouth blocking for royal shipyards & slipways
-    const flankScore = (sign) => {
-      const fIn = worldFromCoastalFrame(region, bestShoreAlong + sign * 62, bestShoreInland + 32);
-      const fOut = worldFromCoastalFrame(region, bestShoreAlong + sign * 62, bestShoreInland - 14);
-      const hIn = terrainSample(heights, fIn.x, fIn.z, region);
-      const hOut = terrainSample(heights, fOut.x, fOut.z, region);
-      const riverPenalty = portRiverCorridor.pointHits(fIn.x, fIn.z, 18) ? 25 : 0;
-      const shelfScore = (hIn >= 1.2 && hIn <= 5.5 && hOut <= 0.4 && hOut >= -4.0) ? 10 - Math.abs(hIn - hOut - 3.2) : -10;
-      return shelfScore - riverPenalty;
-    };
-    const shipSide = flankScore(-1) >= flankScore(1) ? -1 : 1;
-    addPrefab('royal_atarazanas_arsenal', shipSide * 52, 48, 0, 2.9, {
-      label: isLisbon ? 'Ribeira das Naus Royal Naval Arsenal' : 'Tercenas & Naval Arsenal Halls',
-      width: 34,
-      length: 36,
-      height: 9.2,
-    });
-    addPrefab('royal_warehouse', shipSide * 92, 46, 0, 2.9, {
-      label: isLisbon ? 'Armazéns da Índia & Naval Storehouses' : 'Royal Naval & Spice Storehouses',
-      length: 34,
-      width: 15,
-    });
-    addPrefab('astillero_and_moored_hull', shipSide * 38, 15, 0, 1.5, {
-      label: 'Shipwright Launch Ways & Hull on Blocks',
-    });
-    addPrefab('astillero_and_moored_hull', shipSide * 58, 15, 0, 1.5, {
-      label: 'Caravel Fitting Slipway',
-    });
-    addPrefab('careening_shed', shipSide * 116, 20, shipSide * -6, 2.2, {
-      label: 'Pitch Works & Careening Shed',
-    });
-    if (oldWorldPop >= 50000) {
-      addPrefab('mosteiro_dos_jeronimos', shipSide * 124, 88, 0, 3.8, {
-        label: isLisbon ? 'Mosteiro dos Jerónimos (Belém)' : 'Great Estuary Cloister & Abbey',
-      });
-    }
-
-    // (d) Site the cathedral & upper town on prominent dry hillside shoulders clear of river beds
-    let hillAlong = 64, hillInland = 88, bestHillScore = -Infinity;
-    for (let a = -64; a <= 84; a += 18) {
-      for (let d = 72; d <= 122; d += 16) {
-        if (Math.abs(a - benchAlong) < 30 && d < benchInland + 32) continue;
-        const hp = worldFromCoastalFrame(region, bestShoreAlong + a, bestShoreInland + d);
-        if (portRiverCorridor.hits(hp.x, hp.z, bearingRad, 26, 36, 6.0)) continue;
-        const hh = terrainSurfaceSample(heights, hp.x, hp.z, region);
-        const rise = footprintRise(hp.x, hp.z, bearingRad, 24, 34);
-        if (hh < 3.6 || hh > 24 || rise > 4.2) continue;
-        const score = hh * 0.9 - rise * 2.5 + Math.abs(a) * 0.04;
-        if (score > bestHillScore) {
-          bestHillScore = score;
-          hillAlong = a;
-          hillInland = d;
-        }
-      }
-    }
-    addPrefab('mission_chapel', hillAlong, hillInland, 0, 4.2, {
-      label: isLisbon ? 'Sé Patriarcal de Lisboa' : isIberianMetropole && oldWorldPop >= 40000 ? 'Metropolitan Twin-Tower Cathedral' : 'Principal Harbor Church',
-      width: 24,
-      length: 34,
-      height: 19.0,
-      foundationDepth: 5.5,
-      cairnSpec: isIberianMetropole && oldWorldPop >= 40000 ? CAIRN_ARCHITECTURAL_TEMPLATES.se_patriarcal_de_lisboa : undefined,
-    });
-    addPrefab('acueducto_de_piedra', -shipSide * 48, 124, 8, 4.2, {
-      label: isLisbon ? 'Aqueduto Real (Royal Stone Aqueduct)' : 'Arched Royal Water Aqueduct',
-    });
-
-    // (e) Derive subdivided merchant solares & pack yards procedurally across river-clear upland lots (zero colonial_town_block)
-    const quarterDefs = [
-      { id: 'modular_patio_cloister', along: -18, inland: 84, yaw: 0, minY: 3.6, label: 'Upper Merchant Cloister Solar' },
-      { id: 'l_wing_u_wing_solar', along: 24, inland: 84, yaw: 0, minY: 3.6, label: 'Waterfront Guild Solar' },
-      { id: 'l_wing_u_wing_solar', along: -56, inland: 86, yaw: 90, minY: 3.5, label: 'Noble Courtyard Solar' },
-      { id: 'single_nave_solar', along: 88, inland: 56, yaw: 0, minY: 3.6, label: 'Hillside Merchant Terrace' },
-      { id: 'walled_mule_corral', along: -22, inland: 118, yaw: 0, minY: 4.0, label: 'Caravan & Pack-Train Courtyard' },
-    ];
-    if (metropoleScale >= 0.75) {
-      quarterDefs.push({ id: 'modular_patio_cloister', along: 64, inland: 116, yaw: 0, minY: 4.2, label: 'Upper Hillside Cloister' });
-    }
-    for (const qd of quarterDefs) {
-      addPrefab(qd.id, qd.along, qd.inland, qd.yaw, qd.minY, { label: qd.label });
-    }
-
-    // (f) Derive road-aligned or river-perpendicular stone bridges centered across navigable port river reaches
-    const bakedPortBoard = bakedBoardFor(region);
-    const boardCrossings = bakedPortBoard?.board
-      ? boardRoadCrossings(bakedPortBoard.board.roads, widenBoardRivers(bakedPortBoard.board.rivers), bakedPortBoard.board.places)
-      : [];
-    const bridgeCenters = [];
-    let bridgesBuilt = 0;
-    for (const q of boardCrossings) {
-      if (bridgesBuilt >= 2) break;
-      const cx = region.x + q.x, cz = region.z + q.z;
-      const distAnchor = Math.hypot(cx - shoreAnchor.x, cz - shoreAnchor.z);
-      if (distAnchor < 50 || distAnchor > 360) continue;
-      const cf = coastalFrame(region, cx, cz);
-      if (cf.inland - bestShoreInland < 18 || cf.inland - bestShoreInland > 220) continue;
-      if (bridgeCenters.some((b) => Math.hypot(b.x - cx, b.z - cz) < 36)) continue;
-      const spanLen = Math.max(24, Math.min(76, Math.round(q.span + 6)));
-      const hA = terrainSurfaceSample(heights, cx + q.ux * (spanLen * 0.45), cz + q.uz * (spanLen * 0.45), region);
-      const hB = terrainSurfaceSample(heights, cx - q.ux * (spanLen * 0.45), cz - q.uz * (spanLen * 0.45), region);
-      if (hA < PREFAB_DRY_GROUND_M || hB < PREFAB_DRY_GROUND_M) continue;
-      const bankH = Math.max(hA, hB);
-      const bankYPos = Math.max(1.2, terrainSurfaceSample(heights, cx + q.ux * (spanLen * 0.5 + 6.0), cz + q.uz * (spanLen * 0.5 + 6.0), region));
-      const bankYNeg = Math.max(1.2, terrainSurfaceSample(heights, cx - q.ux * (spanLen * 0.5 + 6.0), cz - q.uz * (spanLen * 0.5 + 6.0), region));
-      const exactY = Math.max(2.2, bankH - 0.15);
-      const bridgeHeight = Math.max(3.15, 3.65 - exactY + 0.85);
-      const placedBridge = addPrefab('stone_arch_bridge', 0, 0, 0, Math.max(2.2, bankH + 0.4), {
-        at: { x: cx, z: cz },
-        yaw: Math.atan2(q.ux, q.uz),
-        length: spanLen,
-        width: 9.6,
-        height: bridgeHeight,
-        exactY,
-        bankYNeg,
-        bankYPos,
-        label: `River Cutwater Bridge #${bridgesBuilt + 1}`,
-      });
-      if (placedBridge) {
-        bridgeCenters.push({ x: cx, z: cz });
-        bridgesBuilt++;
-      }
-    }
-    for (const reach of portRiverCorridor.reaches) {
-      if (bridgesBuilt >= 2) break;
-      let chosenSeg = null;
-      let bestCrossScore = -Infinity;
-      for (const seg of reach.segs) {
-        if (bridgeCenters.some((b) => Math.hypot(b.x - seg.cx, b.z - seg.cz) < 42)) continue;
-        const distAnchor = Math.hypot(seg.cx - shoreAnchor.x, seg.cz - shoreAnchor.z);
-        if (distAnchor < 56 || distAnchor > 340 || seg.hw < 1.8) continue;
-        const cf = coastalFrame(region, seg.cx, seg.cz);
-        if (cf.inland - bestShoreInland < 26 || cf.inland - bestShoreInland > 185) continue;
-        const spanHalf = Math.max(11, seg.hw + 7);
-        const hL = terrainSurfaceSample(heights, seg.cx + seg.nx * spanHalf, seg.cz + seg.nz * spanHalf, region);
-        const hR = terrainSurfaceSample(heights, seg.cx - seg.nx * spanHalf, seg.cz - seg.nz * spanHalf, region);
-        if (hL < PREFAB_DRY_GROUND_M || hR < PREFAB_DRY_GROUND_M) continue;
-        const score = 10 - Math.abs(hL - hR) * 1.4 - Math.abs((cf.inland - bestShoreInland) - 68) * 0.05;
-        if (score > bestCrossScore) {
-          bestCrossScore = score;
-          chosenSeg = seg;
-        }
-      }
-      if (chosenSeg) {
-        const spanLen = Math.max(24, Math.min(76, Math.round(chosenSeg.hw * 2 + 16)));
-        const bankH = Math.max(
-          terrainSurfaceSample(heights, chosenSeg.cx + chosenSeg.nx * (spanLen * 0.45), chosenSeg.cz + chosenSeg.nz * (spanLen * 0.45), region),
-          terrainSurfaceSample(heights, chosenSeg.cx - chosenSeg.nx * (spanLen * 0.45), chosenSeg.cz - chosenSeg.nz * (spanLen * 0.45), region),
-        );
-        const bankYPos = Math.max(1.2, terrainSurfaceSample(heights, chosenSeg.cx + chosenSeg.nx * (spanLen * 0.5 + 6.0), chosenSeg.cz + chosenSeg.nz * (spanLen * 0.5 + 6.0), region));
-        const bankYNeg = Math.max(1.2, terrainSurfaceSample(heights, chosenSeg.cx - chosenSeg.nx * (spanLen * 0.5 + 6.0), chosenSeg.cz - chosenSeg.nz * (spanLen * 0.5 + 6.0), region));
-        const exactY = Math.max(2.2, bankH - 0.15);
-        const bridgeHeight = Math.max(3.15, 3.65 - exactY + 0.85);
-        const placedBridge = addPrefab('stone_arch_bridge', 0, 0, 0, Math.max(2.2, bankH + 0.4), {
-          at: { x: chosenSeg.cx, z: chosenSeg.cz },
-          yaw: Math.atan2(chosenSeg.nx, chosenSeg.nz),
-          length: spanLen,
-          width: 9.6,
-          height: bridgeHeight,
-          exactY,
-          bankYNeg,
-          bankYPos,
-          label: `River Cutwater Bridge #${bridgesBuilt + 1}`,
-        });
-        if (placedBridge) {
-          bridgeCenters.push({ x: chosenSeg.cx, z: chosenSeg.cz });
-          bridgesBuilt++;
-        }
-      }
-    }
-  } else if (
-    inTimberManner
-  ) {
-    // The English, Dutch and French colonies' first works (Jamestown, Plymouth, Boston, New Amsterdam, Québec): the
-    // enclosing palisade fort and its first houses. Their towns, all founded after 1550, stand when their boards are
-    // founded for those years, as the planted towns of Spain and Portugal are (js/colonial-towns.js).
-    const isJamestown = region.id === 'jamestown';
-    const fortLabel = isJamestown
-      ? 'James Fort (1607 Triangular Timber Palisade & Bulwarks)'
-      : region.id === 'plymouth-colony'
-        ? 'Plymouth Fort & Timber Meetinghouse Mount (1621)'
-        : region.id === 'new-amsterdam'
-          ? 'Fort Amsterdam Timber & Earthwork Redoubt'
-          : region.id === 'quebec'
-            ? 'Habitation de Québec Timber Redoubt & Palisade'
-            : `${region.name} Timber Palisade Fort & Bulwarks`;
-    const hallLabel = isJamestown
-      ? '1608 Timber-Framed Church & Virginia Company Storehouse'
-      : 'Half-Timbered Meetinghouse & Company Magazine';
-
-    const grownToSecondPier = colonyGrowth.stage === 'fortified-port' || colonyGrowth.stage === 'citadel-metropolis' || colonyGrowth.expansionTier >= 3;
-    if (grownToSecondPier) {
-      const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
-      if (terrainSample(heights, secondPierTip.x, secondPierTip.z, region) <= -0.4) {
-        addPrefab('timber_mole_pier', 42, -22, 0, 2.2, {
-          label: isJamestown ? 'Tobacco Fleet Hogshead Wharf' : 'Merchant Brigantine Wharf',
-        });
-      }
-    }
-    const heldBy = fortRecordsFor(recordedPortId, colonyGrowth.year).forts.find((record) => record.encloses) ?? fortRecordsFor(recordedPortId, 1800).forts.find((record) => record.encloses) ?? null;
-    const fort = placeEnclosingFort(fortLabel, heldBy);
-    const fortPlan = fort ? enclosurePlan(fort) : null;
-    const inFort = (slot) => (fort ? { homeFort: fort, fortSlot: slot } : null);
-    addPrefab('english_half_timber_hall', 0, 44, 0, 2.8, {
-      label: hallLabel,
-      ...inFort(fortPlan?.hallSlot),
-    });
-    addPrefab('english_timber_cottage', -22, 32, 0, 2.7, {
-      label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ West Row' : 'Clapboard & Thatch Settler Cottage',
-      ...inFort(fortPlan?.cottageSlots[3]),
-    });
-    addPrefab('english_timber_cottage', 22, 32, 0, 2.7, {
-      label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ East Row' : 'Half-Timbered Planter’s House',
-      ...inFort(fortPlan?.cottageSlots[2]),
-    });
-    addPrefab('english_timber_cottage', -14, 62, 0, 2.9, {
-      label: isJamestown ? 'Governor’s Half-Timbered Tenement (Inside Fort)' : 'Company Guard & Quartermaster House',
-      ...inFort(fortPlan?.cottageSlots[0]),
-    });
-    addPrefab('english_timber_cottage', 14, 62, 0, 2.9, {
-      label: 'Artificers’ & Smiths’ Timber Forge Cottage (Inside Fort)',
-      ...inFort(fortPlan?.cottageSlots[1]),
-    });
-
-    const sampleShoreCross = (alongOff) => {
-      for (let d = -32; d <= 36; d += 4) {
-        const p = worldFromCoastalFrame(region, bestShoreAlong + alongOff, bestShoreInland + d);
-        if (terrainSample(heights, p.x, p.z, region) > 0.25) return d;
-      }
-      return 0;
-    };
-    addPrefab('careening_shed', -66, sampleShoreCross(-66) + 12, 10, 2.0, {
-      label: 'Shallop & Pinnace Careening Shed',
-    });
-    addPrefab('astillero_and_moored_hull', -42, sampleShoreCross(-42) + 8, 5, 1.8, {
-      label: 'River Shallop Slipway & Timber Stocks',
-    });
-    addPrefab('torreon_atalaya_farol', 70, sampleShoreCross(70) + 10, -10, 2.5, {
-      label: isJamestown ? 'Point Comfort / River Watch Beacon' : 'Harbor Look-Out Beacon Tower',
-      materialKind: 10,
-    });
-
-  } else if (allowColonialPort && heldBoardTown) {
-    // An Old World or planted town: its streets, houses, walls, churches and castle are its board's, founded by Castle
-    // and Commons' own generator on this ground (js/old-world-board.js), which builds round what stands here. The port
-    // lays only its waterfront: the quay along the shore, and the shipwrights' ways on the gentler flank.
-    const inPortugueseManner = colonyGrowth.crown === 'portugal';
-    if (colonyGrowth.stage !== 'outpost') {
-      placeContinuousQuayRibbon(-72, 84, inPortugueseManner ? `Cais da Ribeira de ${heldBoardTown.name}` : `Muelle de ${heldBoardTown.name}`, 12);
-    }
-    const flankScore = (sign) => {
-      const fIn = worldFromCoastalFrame(region, bestShoreAlong + sign * 62, bestShoreInland + 32);
-      const fOut = worldFromCoastalFrame(region, bestShoreAlong + sign * 62, bestShoreInland - 14);
-      const hIn = terrainSample(heights, fIn.x, fIn.z, region), hOut = terrainSample(heights, fOut.x, fOut.z, region);
-      const riverPenalty = portRiverCorridor.pointHits(fIn.x, fIn.z, 18) ? 25 : 0;
-      return ((hIn >= 1.2 && hIn <= 5.5 && hOut <= 0.4 && hOut >= -4.0) ? 10 - Math.abs(hIn - hOut - 3.2) : -10) - riverPenalty;
-    };
-    const shipSide = flankScore(-1) >= flankScore(1) ? -1 : 1;
-    addPrefab('astillero_and_moored_hull', shipSide * 48, 14, 0, 1.6, {
-      label: inPortugueseManner ? 'Estaleiro da Ribeira' : 'Astillero de la Ribera (Shipwright Ways)',
-    });
-    addPrefab('careening_shed', shipSide * 88, 18, shipSide * -6, 2.0, {
-      label: inPortugueseManner ? 'Telheiro de Querenar' : 'Carenero (Careening Shed)',
-    });
-  } else if (allowColonialPort) {
-    // A colonial port whose ground holds no town of a board in this year has none: its town stands when a board is
-    // founded for it (scripts/bake-board.mjs, js/colonial-towns.js).
-  } else {
-    // Uncolonized coast or Sovereign Indigenous Polity: check Native American settlement profile for this region & year.
-    // A town of the peoples of the Americas founded by Castle and Commons' model stands here as its board
-    // (js/native-towns.js, js/old-world.js): its houses are the board's, and none is placed here.
-    const indigenousSettlement =
-      region.indigenousSettlement ??
-      computeIndigenousSettlementProfile(region, colonyGrowth.year);
-    if (!boardTownHeld(region) && indigenousSettlement?.hasIndigenousSettlement && Array.isArray(indigenousSettlement.prefabMix)) {
-      // Organic coastal village layout slots: (alongOffset, inlandOffset, yawOffsetDeg, minElev)
-      // Slot 0 is the foreshore canoe beaching & tidal fish weir right at the water's edge;
-      // Slots 1..11 arrange the council house / longhouse / batey plaza, palisade stockades, and family wigwams/bohíos on the coastal terrace.
-      const villageSlots = [
-        [-14, 4, 0, 0.55],
-        [4, 34, 8, 0.75],
-        [-28, 28, -14, 0.75],
-        [32, 30, 16, 0.75],
-        [-6, 62, 0, 0.85],
-        [-48, 44, -22, 0.75],
-        [48, 48, 24, 0.75],
-        [-26, 56, 12, 0.80],
-        [26, 58, -12, 0.80],
-        [0, 82, 6, 0.85],
-        [-54, 72, -16, 0.85],
-        [54, 74, 16, 0.85],
-      ];
-      const count = Math.min(
-        villageSlots.length,
-        indigenousSettlement.targetStructureCount || 6,
-        indigenousSettlement.prefabMix.length
-      );
-      for (let s = 0; s < count; s++) {
-        const prefabId = indigenousSettlement.prefabMix[s];
-        const [alongOff, inlandOff, yawOff, minElev] = villageSlots[s];
-        // Palafito stilt villages sit right in the shallow estuary foreshore (inlandOffset ~ 6..18m)
-        const effInland = prefabId === 'palafito_estuary_village' ? Math.min(16, inlandOff * 0.42) : inlandOff;
-        const effMinElev = prefabId === 'palafito_estuary_village' ? 1.15 : minElev;
-        addPrefab(prefabId, alongOff, effInland, yawOff, effMinElev, {
-          indigenous: true,
-          friendlyToPlayer: true,
-          cultureId: indigenousSettlement.cultureId,
-        });
-      }
-      if (indigenousSettlement.isSovereignPolity) {
-        const sovPierTip = worldFromCoastalFrame(region, bestShoreAlong + 16, bestShoreInland - 30);
-        if (terrainSample(heights, sovPierTip.x, sovPierTip.z, region) <= -0.4) {
-          addPrefab('timber_mole_pier', 16, -22, 0, 2.0, {
-            label: `${indigenousSettlement.shortName || indigenousSettlement.cultureName} Sovereign Trade Wharf`,
-            indigenous: true,
-            friendlyToPlayer: true,
-            cultureId: indigenousSettlement.cultureId,
-          });
-        }
-      }
-    }
-  }
-
-  syncPortInstancesToTerrain(instances, heights, region, { gradePads: true });
-
-  const indigenousSettlement =
-    region.indigenousSettlement ??
-    computeIndigenousSettlementProfile(region, colonyGrowth.year);
-  const indigenousInstanceCount = instances.filter((i) => i.indigenous).length;
-  const colonialInstanceCount = instances.length - indigenousInstanceCount;
-
-  const center = orthoFootprints
-    ? { x: orthoFootprints.clusterX, z: orthoFootprints.clusterZ }
-    : worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland + 32);
+  const center = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland + 32);
   const berthPos = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland - 76);
   const berthDepth = -terrainSample(heights, berthPos.x, berthPos.z, region);
   const dockAlongOffset = isDerivedMetropolePort ? 22 : -6;
   const dockInlandOffset = isDerivedMetropolePort ? -84 : -62;
-  const dockPos = settleDockBerth(heights, region, instances, worldFromCoastalFrame(region, bestShoreAlong + dockAlongOffset, bestShoreInland + dockInlandOffset));
+  const dockPos = worldFromCoastalFrame(region, bestShoreAlong + dockAlongOffset, bestShoreInland + dockInlandOffset);
   const dockDepth = -terrainSample(heights, dockPos.x, dockPos.z, region);
   const dockHeading = (((region.shoreBearing ?? 112) - (isDerivedMetropolePort ? 100 : 108)) % 360 + 360) % 360;
 
@@ -5399,8 +2998,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     hasColonialPort: allowColonialPort,
     hasIndigenousSettlement: Boolean(indigenousSettlement?.hasIndigenousSettlement),
     indigenousSettlement,
-    colonialInstanceCount,
-    indigenousInstanceCount,
     era: region.era,
     year: colonyGrowth.year,
     stage: allowColonialPort
@@ -5424,10 +3021,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     shoreBearing: region.shoreBearing ?? 112,
     center: { x: center.x, z: center.z, shoreAlong: bestShoreAlong, shoreInland: bestShoreInland },
     clearRadius,
-    // How far from its centre a port reaches: a fort may stand well off, at the harbour's mouth.
-    reach: instances.reduce((most, inst) => Math.max(most, Math.hypot(inst.x - center.x, inst.z - center.z) + Math.hypot(inst.width, inst.length) * 0.5), 0),
+    // How far from its centre a port reaches: a fort may stand well off, at the harbour's mouth. Its board's works and
+    // waterfront set it once laid (dressProceduralCoastalPack).
+    reach: 0,
     harbour: harbour ? harbourSummary(harbour) : null,
-    hasOrthophotoFootprints: hasOrthoFootprints,
     berth: {
       x: berthPos.x,
       z: berthPos.z,
@@ -5440,9 +3037,11 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       heading: dockHeading,
       depth: Math.max(5.5, dockDepth),
     },
-    instances,
+    // The port's buildings a shot has struck (js/city-targets.js), which keep their damage and draw their pieces; and
+    // its waterfront, as its board laid it.
+    instances: [],
+    waterfront: [],
   };
-  buildPostSettlementPortFlatIndex(placedPort);
   return placedPort;
 }
 
@@ -5456,8 +3055,10 @@ function harbourSummary(harbour) {
   };
 }
 
+// The port's waterfront (js/board-waterfront.js records: quays, moles, slipways, sheds) as turned boxes, so that trees,
+// grass and a ship's hull keep off what its board built at the water. Its town keeps them off by its blocks.
 export function buildPostSettlementPortFlatIndex(portPlacement) {
-  const instances = portPlacement?.instances;
+  const instances = portPlacement?.waterfront;
   if (!Array.isArray(instances)) return null;
   const count = instances.length;
   // Flat post-settlement OBB buffer (stride 7: [x, z, cosNegYaw, sinNegYaw, halfW, halfL, boundR])
@@ -5503,7 +3104,7 @@ export function buildPostSettlementPortFlatIndex(portPlacement) {
 }
 
 export function portClearanceEnvelope(portPlacement, x, z, hullRadius = 0) {
-  const instances = portPlacement?.instances;
+  const instances = portPlacement?.waterfront;
   if (!instances) return true;
   if (portPlacement.center) {
     const cdx = x - portPlacement.center.x;
@@ -5544,80 +3145,20 @@ export function portClearanceEnvelope(portPlacement, x, z, hullRadius = 0) {
   return true;
 }
 
-let cachedLRMBuildingTemplates = null;
-let pendingLRMBuildingPromise = null;
-
-export function decode1550BuildingLRMBundle(buffer) {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  if (bytes.byteLength < 12) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (view.getUint32(0, false) !== 0x57573344) return null; // 'WW3D'
-  const manifestLen = view.getUint32(8, true);
-  if (bytes.byteLength < 12 + manifestLen) return null;
-  let manifest;
-  try {
-    manifest = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + manifestLen)));
-  } catch {
-    return null;
-  }
-  const payloadBase = bytes.byteOffset + 12 + manifestLen;
-  const templates = {};
-  for (const entry of manifest) {
-    const vFloats = new Float32Array(
-      bytes.buffer,
-      payloadBase + entry.vertexByteOffset,
-      entry.vertexCount * 8
-    );
-    const iShorts = new Uint16Array(
-      bytes.buffer,
-      payloadBase + entry.indexByteOffset,
-      entry.indexCount
-    );
-    templates[entry.id] = {
-      id: entry.id,
-      vertices: vFloats,
-      indices: iShorts,
-      vertexCount: entry.vertexCount,
-      indexCount: entry.indexCount,
-    };
-  }
-  return templates;
-}
-
-export async function load1550BuildingLRMTemplates(fetchImpl = typeof fetch === 'function' ? fetch : null) {
-  if (cachedLRMBuildingTemplates) return cachedLRMBuildingTemplates;
-  if (!fetchImpl) return null;
-  if (!pendingLRMBuildingPromise) {
-    pendingLRMBuildingPromise = fetchImpl('assets/ports/1550/buildings-1550-lrm.bin')
-      .then(async (res) => {
-        if (!res?.ok) return null;
-        const decoded = decode1550BuildingLRMBundle(await res.arrayBuffer());
-        if (decoded) cachedLRMBuildingTemplates = decoded;
-        return decoded;
-      })
-      .catch(() => null);
-  }
-  return pendingLRMBuildingPromise;
-}
-
 // A kind-14 opening asked for above this shade is a glazed window, and at or below it a dark portal. The terrain shader
 // draws the line at the same place (isGlazedWindow), so no face of an opening is ever shaded across it.
 const GLAZED_ABOVE_SHADE = 0.25;
-const DARK_PORTAL_SHADE = GLAZED_ABOVE_SHADE;
 
-export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cachedLRMBuildingTemplates) {
-  const hasPalms = palms instanceof Float32Array && palms.length >= 8;
-  if (!portPlacement?.instances?.length && !hasPalms) {
-    return {
-      vertices: new Float32Array(0),
-      indices: new Uint32Array(0),
-      groups: [],
-      partAssembly: null,
-      instanceCount: 0,
-      triangleCount: 0,
-      bounds: { min: [0, 0, 0], max: [0, 0, 0] },
-    };
-  }
+// One city type's building as its builder draws it (js/old-world-buildings.js compileCityBuildingType): at the origin,
+// unturned, its floor at 0, at the type's own size. `cairnSpec` is a Cairn type's JSON, drawn by emitCairnScene; else
+// `kind` names the builder below that draws it (a quay's bays, a mole's bents, a slipway, a careening shed, a customhouse,
+// an arsenal, a storehouse, an exchange) or the Cairn template it is (CAIRN_ARCHITECTURAL_TEMPLATES). The mesh it returns, with its part catalogue, is the type's physical truth: the continuum
+// is baked from it, and a struck building's pieces are cut from it (js/city-targets.js).
+export function buildCityTypeGeometry({ id = 0, kind = null, width, length, height, foundationDepth = 0, materialKind = 11, roofPitch = 0, cairnSpec = null }) {
+  const prefabId = kind ?? `city_type_${id}`;
+  const portPlacement = {
+    instances: [{ prefabId, id: prefabId, x: 0, y: 0, z: 0, yaw: 0, width, length, depth: length, height, foundationDepth, materialKind, roofPitch, cairnSpec, isQuayRibbon: kind === 'stone_quay_seawall' }],
+  };
   const verts = [];
   const indices = [];
   const groups = [];
@@ -5754,53 +3295,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     return idx;
   };
 
-  // Stamp a reconstructed 3D building mesh into world coordinates with zero per-vertex array allocations
-  const emitLRMMesh = (instX, instZ, tmpl, widthX, y0, y1, lengthZ, cosY, sinY, slopeX = 0, slopeZ = 0) =>
-    withPartGroup('lrm_superstructure', () => {
-      const baseVertex = verts.length / 8;
-      const spanY = Math.max(1.0, y1 - y0);
-      const invW = 1 / Math.max(1, widthX);
-      const invY = 1 / spanY;
-      const invL = 1 / Math.max(1, lengthZ);
-      const vArr = tmpl.vertices;
-      const vCount = tmpl.vertexCount;
-      for (let v = 0; v < vCount; v++) {
-        const off = v * 8;
-        const lx = vArr[off] * widthX;
-        const lz = vArr[off + 2] * lengthZ;
-        const py = y0 + vArr[off + 1] * spanY + lx * slopeX + lz * slopeZ;
-        const px = instX + lx * cosY + lz * sinY;
-        const pz = instZ - lx * sinY + lz * cosY;
-        const lnx = vArr[off + 3] * invW;
-        const lny = vArr[off + 4] * invY;
-        const lnz = vArr[off + 5] * invL;
-        let wx = lnx * cosY + lnz * sinY;
-        let wy = lny;
-        let wz = -lnx * sinY + lnz * cosY;
-        const nLen = Math.hypot(wx, wy, wz) || 1;
-        wx /= nLen; wy /= nLen; wz /= nLen;
-        const kind = encodeArchKind(vArr[off + 6]);
-        const kindOffset =
-          kind >= 9.5 && kind < 10.5 ? 0.095 :
-          kind >= 13.5 && kind < 14.5 ? 0.065 :
-          kind >= 12.5 && kind < 13.5 ? 0.048 :
-          kind >= 10.5 && kind < 11.5 ? 0.032 : 0;
-        const ox = px + wx * kindOffset;
-        const oy = py + wy * kindOffset;
-        const oz = pz + wz * kindOffset;
-        verts.push(ox, oy, oz, wx, wy, wz, kind, vArr[off + 7]);
-        if (ox < bounds.min[0]) bounds.min[0] = ox;
-        if (ox > bounds.max[0]) bounds.max[0] = ox;
-        if (oy < bounds.min[1]) bounds.min[1] = oy;
-        if (oy > bounds.max[1]) bounds.max[1] = oy;
-        if (oz < bounds.min[2]) bounds.min[2] = oz;
-        if (oz > bounds.max[2]) bounds.max[2] = oz;
-      }
-      const iArr = tmpl.indices;
-      for (let i = 0; i < iArr.length; i++) {
-        indices.push(baseVertex + iArr[i]);
-      }
-    });
 
   // `glazed` says which a kind-14 opening is, a window or a dark portal, for every face of whatever it is part of.
   // Left out, the face's own shade says. A box must say: it lights its faces differently, and one opening is one thing.
@@ -5908,31 +3402,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06), isGlazedWin);
     if (includeBottom) {
       pushQuad(p001, p101, p100, p000, kind, shade * 0.65, isGlazedWin);
-    }
-  };
-
-  const emitSlopedBoxZ = (toWorld, x0, x1, y0AtZ0, y1AtZ0, y0AtZ1, y1AtZ1, z0, z1, kind, shade = 0.88, includeBottom = false) => {
-    const p000 = toWorld(x0, y0AtZ0, z0);
-    const p100 = toWorld(x1, y0AtZ0, z0);
-    const p101 = toWorld(x1, y0AtZ1, z1);
-    const p001 = toWorld(x0, y0AtZ1, z1);
-    const p010 = toWorld(x0, y1AtZ0, z0);
-    const p110 = toWorld(x1, y1AtZ0, z0);
-    const p111 = toWorld(x1, y1AtZ1, z1);
-    const p011 = toWorld(x0, y1AtZ1, z1);
-    const spanX = Math.abs(x1 - x0);
-    const spanY = Math.max(Math.abs(y1AtZ0 - y0AtZ0), Math.abs(y1AtZ1 - y0AtZ1));
-    const spanZ = Math.abs(z1 - z0);
-    const nx = spanX >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanX / 1.75))) : 1;
-    const ny = spanY >= 1.8 ? Math.min(8, Math.max(2, Math.round(spanY / 1.45))) : 1;
-    const nz = spanZ >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanZ / 1.75))) : 1;
-    pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94, false);
-    pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade, false);
-    pushSubdividedQuad(p101, p001, p011, p111, nx, ny, kind, shade * 0.96, false);
-    pushSubdividedQuad(p001, p000, p010, p011, nz, ny, kind, shade * 0.88, false);
-    pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06), false);
-    if (includeBottom) {
-      pushQuad(p001, p101, p100, p000, kind, shade * 0.65, false);
     }
   };
 
@@ -6136,101 +3605,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     }
   };
 
-  // Emit an authentic 16th/17th-century Lathe-Turned Cast-Iron Fortress Cannon (24-pounder / Culverin)
-  // mounted on a stepped oak garrison carriage (Cureña de Plaza) with 4 cylindrical truck wheels,
-  // horizontal cylindrical trunnions, iron capsquare straps, cascabel button, reinforce rings,
-  // flared muzzle tulip swell, and recessed hollow bore.
-  const emitFortCannon = (toWorld, cx, yFloor, cz, dirX = 0, dirZ = -1, scale = 1.0) => {
-    const emit = () => {
-      const dLen = Math.hypot(dirX, dirZ) || 1;
-      const fx = dirX / dLen, fz = dirZ / dLen;
-      const rx = -fz, rz = fx;
-      const cToWorld = (lx, ly, lz) =>
-        toWorld(cx + (rx * lx + fx * lz) * scale, yFloor + ly * scale, cz + (rz * lx + fz * lz) * scale);
-
-      // 1. Stepped oak garrison carriage (Cureña de Plaza): twin stepped cheeks, transom bed, quoin wedge & axletrees
-      for (const side of [-1, 1]) {
-        const xIn = side * 0.20, xOut = side * 0.34;
-        const xMin = Math.min(xIn, xOut), xMax = Math.max(xIn, xOut);
-        // Lower cheek bed & trail step (kept behind lz <= +0.36 so carriage stands cleanly behind parapet wall)
-        emitBox(cToWorld, xMin, xMax, 0.16, 0.44, -0.74, 0.36, 10, 0.72, true);
-        // Middle carriage step
-        emitBox(cToWorld, xMin, xMax, 0.44, 0.60, -0.38, 0.35, 10, 0.75);
-        // Front trunnion cheek breast
-        emitBox(cToWorld, xMin, xMax, 0.60, 0.74, -0.06, 0.34, 10, 0.78);
-        // Dark cast-iron capsquare strap clamping the trunnion
-        emitBox(cToWorld, xMin - 0.01, xMax + 0.01, 0.72, 0.80, 0.02, 0.24, 18, 0.80, true);
-      }
-      // Carriage transom bed, elevating quoin wedge, and front/rear wooden axletree bolsters
-      emitBox(cToWorld, -0.20, 0.20, 0.22, 0.48, -0.56, 0.32, 10, 0.68, true);
-      emitBox(cToWorld, -0.44, 0.44, 0.12, 0.24, 0.10, 0.26, 10, 0.64, true);
-      emitBox(cToWorld, -0.44, 0.44, 0.10, 0.22, -0.60, -0.44, 10, 0.64, true);
-
-      // 2. Four cylindrical iron-shod truck wheels (8 facets each) on front & rear axles (flush at ly = 0)
-      for (const [az, rTruck] of [[0.18, 0.18], [-0.52, 0.155]]) {
-        for (const side of [-1, 1]) {
-          const wx0 = side * 0.34, wx1 = side * 0.47;
-          emitLatheTube(
-            cToWorld,
-            [wx0, rTruck, az],
-            [wx1, rTruck, az],
-            [[0, rTruck * scale, 0.92], [1, rTruck * scale, 0.92]],
-            8,
-            18,
-            0.76,
-            true,
-            0
-          );
-        }
-      }
-
-      // 3. Horizontal cylindrical cast-iron trunnions (muñones) resting across the carriage cheeks
-      emitLatheTube(
-        cToWorld,
-        [-0.40, 0.72, 0.13],
-        [0.40, 0.72, 0.13],
-        [[0, 0.072 * scale, 0.88], [1, 0.072 * scale, 0.88]],
-        8,
-        18,
-        0.80,
-        true,
-        0
-      );
-
-      // 4. 10-Faceted Multi-Station Lathe-Turned Cast-Iron Cannon Barrel projecting through the embrasure throat
-      const cannonProfile = [
-        [0.00, 0.055 * scale, 0.84], // Cascabel pommel button tip
-        [0.04, 0.115 * scale, 0.92], // Cascabel button equator
-        [0.08, 0.074 * scale, 0.78], // Cascabel neck fillet
-        [0.12, 0.260 * scale, 0.96], // Breech base ring (astragal)
-        [0.39, 0.240 * scale, 0.94], // First reinforce (heavy powder chamber)
-        [0.42, 0.258 * scale, 0.98], // Trunnion reinforce ring
-        [0.46, 0.218 * scale, 0.92], // Second reinforce start
-        [0.68, 0.192 * scale, 0.92], // Second reinforce to chase step
-        [0.88, 0.156 * scale, 0.90], // Chase taper neck
-        [0.91, 0.182 * scale, 0.96], // Muzzle astragal ring
-        [0.97, 0.220 * scale, 0.98], // Flared muzzle tulip swell
-        [1.00, 0.198 * scale, 0.94], // Muzzle face rim
-      ];
-      emitLatheTube(
-        cToWorld,
-        [0, 0.68, -0.80],
-        [0, 0.79, 1.92],
-        cannonProfile,
-        10,
-        18,
-        0.84,
-        true,
-        0.58
-      );
-    };
-    if (partGroupDepth === 0) {
-      withPartGroup('fort_cannon', emit);
-    } else {
-      emit();
-    }
-  };
-
   // Helper to emit a 3D radial stone voussoir arch & shadowed barrel vault along the Z axis (for X-facing facades)
   const emitStoneArchZ = (toWorld, xFace, depthSign, yFloor, ySpring, radius, zCenter, archSegs = 6, isGlazed = false) =>
     withPartGroup('stone_arch', () => {
@@ -6417,13 +3791,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   const rot90 = (toWorld) => (lx, ly, lz) => toWorld(lz, ly, -lx);
   const emitStoneArchX = (toWorld, zFace, depthSign, yFloor, ySpring, radius, xCenter, archSegs = 6, isGlazed = false) =>
     emitStoneArchZ(rot90(toWorld), -zFace, -depthSign, yFloor, ySpring, radius, xCenter, archSegs, isGlazed);
-  const emitBalustradeX = (toWorld, zWall, outSign, yFloor, x0, x1) =>
-    emitBalustradeZ(rot90(toWorld), -zWall, -outSign, yFloor, x0, x1);
-  const emitRoofX = (toWorld, x0, x1, yEave, yPeak, z0, z1, overhang = 0.65, hipRatio = 0.25, wallKind = 12, roofKind = 13) =>
-    emitRoof(rot90(toWorld), -z1, -z0, yEave, yPeak, x0, x1, overhang, hipRatio, wallKind, roofKind);
 
   // Horizontal Bay Iteration constants & helpers (never stretch features; repeat bays with constant cross-sections!)
-  const WING_DEPTH = 5.8; // Standard 1550 Spanish single-bay beam span (~20 pies castellanos)
   const ROOF_TAN = 0.42; // Constant 23° barrel-tile roof pitch slope
   const roofRise = (spanW, tanSlope = ROOF_TAN) => Math.max(1.15, (spanW * 0.5) * tanSlope);
   const snapBays = (span, nominalBay, minBays = 2) => Math.max(minBays, Math.round(span / nominalBay));
@@ -6493,9 +3862,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const inst = portPlacement.instances[instIdx];
     activeInstIndex = instIdx;
     activePrefabId = inst.prefabId ?? 'colonial_town_block';
-    activeInstTag = portPlacement.singleBuildingPrefab
-      ? activePrefabId
-      : (inst.id ?? `${activePrefabId}_${instIdx}`);
+    activeInstTag = activePrefabId;
     instPartCounters.clear();
     currentSectionKey = null;
     sectionStart = indices.length;
@@ -6510,19 +3877,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     activeInstYaw = inst.yaw ?? 0;
     const cosY = Math.cos(inst.yaw);
     const sinY = Math.sin(inst.yaw);
-    const isOverWater = OVER_WATER_PREFAB_IDS.has(inst.prefabId);
-    const allowEarthShear =
-      !isOverWater &&
-      (Boolean(inst.indigenous) ||
-        inst.prefabId === 'algonquian_longhouse' ||
-        inst.prefabId === 'indigenous_canoe_landing');
-    const slopeX = allowEarthShear ? (inst.slopeX ?? 0) : 0;
-    const slopeZ = allowEarthShear ? (inst.slopeZ ?? 0) : 0;
-    const toWorld = (lx, ly, lz) => [
-      inst.x + lx * cosY + lz * sinY,
-      ly + lx * slopeX + lz * slopeZ,
-      inst.z - lx * sinY + lz * cosY,
-    ];
+    // A type is built level, at the origin: it is stood on its ground when placed.
+    const toWorld = (lx, ly, lz) => [inst.x + lx * cosY + lz * sinY, ly, inst.z - lx * sinY + lz * cosY];
 
     const cairnSpec = inst.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[inst.prefabId] || null;
     if (cairnSpec) {
@@ -6537,32 +3893,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox,
         emitCylinder,
         emitLatheTube,
-        emitFortCannon,
         emitRoof,
         pushQuad,
         pushTri,
         withPartGroup,
       });
-      flushSection();
-      continue;
-    }
-
-    // Only use static LRM template mesh if the instance is at canonical unstretched prefab dimensions (never stretch footprints!)
-    const basePrefab = PORT_PREFABS[inst.prefabId];
-    const isUnstretchedCanonical =
-      !inst.fromOrthophotoFootprint &&
-      basePrefab &&
-      Math.abs(inst.width - basePrefab.width) < 0.6 &&
-      Math.abs(inst.length - basePrefab.length) < 0.6 &&
-      (inst.prefabId === 'mission_chapel' || inst.prefabId === 'casa_de_contratacion');
-    const lrmTmpl = isUnstretchedCanonical ? lrmTemplates?.[inst.prefabId] : null;
-    if (lrmTmpl) {
-      beginSection('foundation_plinth');
-      const yPlinth = yGround + 0.65;
-      emitBox(toWorld, -hw - 0.55, hw + 0.55, yBase, yPlinth, -hl - 0.55, hl + 0.55, 11, 0.82);
-      const peakExtra = inst.prefabId === 'mission_chapel' ? 9.2 : (inst.roofPitch ?? 2.6);
-      const yPeak = yTop + peakExtra;
-      emitLRMMesh(inst.x, inst.z, lrmTmpl, inst.width * 1.087, yPlinth - 0.18, yPeak, inst.length * 1.087, cosY, sinY, slopeX, slopeZ);
       flushSection();
       continue;
     }
@@ -6741,64 +4076,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBalustradeZ(toWorld, -hw, -1, yMid + 0.08, -hl + 0.8, hl - 0.8);
       emitBalustradeZ(toWorld, hw, 1, yMid + 0.08, -hl + 0.8, hl - 0.8);
       emitRoof(toWorld, -hw - 0.2, hw + 0.2, yTop, yTop + roofRise(Math.min(16, inst.width)), -hl - 0.2, hl + 0.2, 0.85, 0.22, 12);
-    } else if (inst.prefabId === 'mission_chapel') {
-      // 16th-century Spanish Colonial Iglesia, Stepped Espadaña Facade & 3-Stage Arched Campanario
-      // Nave width is locked to authentic single-nave span (<= 14m) while buttress & clerestory bays iterate along Z
-      const naveHW = Math.min(hw, 7.2);
-      const yPlinth = yGround + 0.78;
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -naveHW - 0.42, Math.max(naveHW + 0.42, naveHW + 2.8 + 0.28), yBase, yPlinth, -hl - 1.35, hl + 0.85, 11, 0.82);
-      beginSection('nave_walls');
-      emitBox(toWorld, -naveHW, naveHW, yPlinth, yTop, -hl, hl, 12, 0.91);
-      beginSection('apse_walls');
-      emitCylinder(toWorld, 0, hl + 0.4, yPlinth, yTop - 1.1, naveHW * 0.62, naveHW * 0.62, 8, 12, 0.89, true);
-      beginSection('apse_dome');
-      emitCylinder(toWorld, 0, hl + 0.4, yTop - 1.1, yTop + 0.9, naveHW * 0.66, 0.18, 8, 13, 0.93, true);
-      const nButtressBays = snapBays(inst.length - 2.4, 5.2, 4);
-      const buttressSpan = (inst.length - 2.4) / nButtressBays;
-      for (let b = 0; b <= nButtressBays; b++) {
-        const bz = -hl + 1.2 + b * buttressSpan;
-        beginSection('nave_buttresses');
-        emitBox(toWorld, -naveHW - 0.82, -naveHW, yPlinth, yTop - 0.4, bz - 0.45, bz + 0.45, 11, 0.84, false, 0.18);
-        emitBox(toWorld, naveHW, naveHW + 0.82, yPlinth, yTop - 0.4, bz - 0.45, bz + 0.45, 11, 0.84, false, 0.18);
-        if (b < nButtressBays) {
-          const wz = bz + buttressSpan * 0.5;
-          emitStoneArchZ(toWorld, -naveHW, -1, yPlinth + 2.6, yTop - 2.2, 0.62, wz, 5, true);
-          emitStoneArchZ(toWorld, naveHW, 1, yPlinth + 2.6, yTop - 2.2, 0.62, wz, 5, true);
-        }
-      }
-      // West facade Plateresque carved stone portal frame, arched doorway, flanking pilasters & rose choir window
-      beginSection('west_portal_and_rose_window');
-      emitBox(toWorld, -2.85, 2.85, yPlinth, yPlinth + 6.4, -hl - 0.48, -hl, 11, 0.88);
-      emitCylinder(toWorld, -2.35, -hl - 0.48, yPlinth, yPlinth + 5.8, 0.28, 0.24, 6, 11, 0.91, true);
-      emitCylinder(toWorld, 2.35, -hl - 0.48, yPlinth, yPlinth + 5.8, 0.28, 0.24, 6, 11, 0.91, true);
-      emitBox(toWorld, -3.1, 3.1, yPlinth + 5.8, yPlinth + 6.4, -hl - 0.65, -hl, 11, 0.92, true);
-      emitBox(toWorld, -1.45, 1.45, yPlinth, yPlinth + 4.8, -hl - 0.56, -hl + 0.1, 14, 0.20);
-      emitCylinder(toWorld, 0, -hl - 0.22, yPlinth + 7.2, yPlinth + 9.2, 1.15, 1.15, 8, 11, 0.88, true);
-      emitBox(toWorld, -0.82, 0.82, yPlinth + 7.45, yPlinth + 8.95, -hl - 0.36, -hl + 0.08, 14, 0.42);
-      const yPeak = yTop + roofRise(naveHW * 2, 0.48);
-      beginSection('espadana_gable_wall');
-      emitBox(toWorld, -naveHW * 0.72, naveHW * 0.72, yTop, yPeak - 0.6, -hl - 0.35, -hl + 0.35, 12, 0.92);
-      emitBox(toWorld, -naveHW * 0.38, naveHW * 0.38, yPeak - 0.6, yPeak + 1.2, -hl - 0.35, -hl + 0.35, 11, 0.90);
-      emitRoof(toWorld, -naveHW, naveHW, yTop, yPeak, -hl, hl, 0.78, 0.0, 12);
-      // 3-Stage Spanish Colonial Bell Tower (Campanario)
-      const tx0 = naveHW - 2.2, tx1 = naveHW + 2.8, tz0 = -hl - 1.3, tz1 = -hl + 3.7;
-      const tmx = (tx0 + tx1) * 0.5, tmz = (tz0 + tz1) * 0.5;
-      const yT1 = yTop + 2.8, yT2 = yT1 + 4.1, yT3 = yT2 + 3.4;
-      beginSection('campanario_tower_walls');
-      emitBox(toWorld, tx0, tx1, yPlinth, yT1, tz0, tz1, 12, 0.92);
-      emitBox(toWorld, tx0 - 0.28, tx1 + 0.28, yT1 - 0.34, yT1, tz0 - 0.28, tz1 + 0.28, 11, 0.90, true);
-      emitBox(toWorld, tx0 + 0.35, tx1 - 0.35, yT1, yT2, tz0 + 0.35, tz1 - 0.35, 12, 0.94);
-      emitStoneArchZ(toWorld, tx1 - 0.35, 1, yT1 + 0.45, yT2 - 1.35, 0.78, tmz, 5);
-      emitStoneArchZ(toWorld, tx0 + 0.35, -1, yT1 + 0.45, yT2 - 1.35, 0.78, tmz, 5);
-      beginSection('campanario_bell_chamber');
-      emitBox(toWorld, tmx - 0.72, tmx + 0.72, yT1 + 0.55, yT2 - 0.65, tz0 + 0.26, tz1 - 0.26, 14, 0.20);
-      emitCylinder(toWorld, tmx, tmz, yT1 + 1.45, yT1 + 2.45, 0.58, 0.24, 8, 10, 0.76, true);
-      emitBox(toWorld, tx0 + 0.12, tx1 - 0.12, yT2 - 0.32, yT2, tz0 + 0.12, tz1 - 0.12, 11, 0.91, true);
-      beginSection('campanario_cupola_spire');
-      emitCylinder(toWorld, tmx, tmz, yT2, yT3, 2.05, 0.22, 8, 13, 0.95, true);
-      emitBox(toWorld, tmx - 0.08, tmx + 0.08, yT3, yT3 + 1.35, tmz - 0.08, tmz + 0.08, 18, 0.78);
-      emitBox(toWorld, tmx - 0.48, tmx + 0.48, yT3 + 0.75, yT3 + 0.92, tmz - 0.08, tmz + 0.08, 18, 0.78);
     } else if (inst.prefabId === 'careening_shed') {
       // Open-sided timber boatyard pavilion on the beach (Atarazana / Carenero) iterating king-post roof trusses every 4.2m
       const yApron = yGround + 0.45;
@@ -6865,278 +4142,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.15, Math.min(1.18, baySpanZ * 0.32), pz, 6);
         }
       }
-    } else if (inst.prefabId === 'open_lonja_loggia') {
-      // Primitive #5: Lonja de Mercaderes / Feria Porticada (Open-Sided Stone-Arched Waterfront Market Pavilion)
-      const yPlinth = yGround + 0.85;
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.85, hw + 0.85, yBase, yPlinth - 0.22, -hl - 0.85, hl + 0.85, 11, 0.82);
-      emitBox(toWorld, -hw - 0.35, hw + 0.35, yPlinth - 0.22, yPlinth, -hl - 0.35, hl + 0.35, 16, 0.88, true);
-      // Entablature frieze & cornice beam supported on iterated Tuscan stone columns & radial arches around all 4 sides
-      const ySpring = yPlinth + (yTop - yPlinth) * 0.56;
-      beginSection('lonja_entablature_walls');
-      emitBox(toWorld, -hw, hw, ySpring + 1.15, yTop, -hl, hl, 11, 0.90, true);
-      // Shadowed interior vault core recessed slightly behind the perimeter colonnade
-      beginSection('interior_vault_core');
-      emitBox(toWorld, -hw + 1.4, hw - 1.4, yPlinth, ySpring + 1.15, -hl + 1.4, hl - 1.4, 12, 0.78);
-
-      const nBaysZ = snapBays(inst.length - 1.4, 4.0, 4);
-      const baySpanZ = (inst.length - 1.4) / nBaysZ;
-      const archRZ = Math.min(1.35, baySpanZ * 0.36);
-      for (let b = 0; b <= nBaysZ; b++) {
-        const cz = -hl + 0.7 + b * baySpanZ;
-        beginSection('arcade_columns');
-        emitCylinder(toWorld, -hw + 0.45, cz, yPlinth, ySpring + 1.15, 0.34, 0.30, 8, 11, 0.91, true);
-        emitCylinder(toWorld, hw - 0.45, cz, yPlinth, ySpring + 1.15, 0.34, 0.30, 8, 11, 0.91, true);
-        if (b < nBaysZ) {
-          const bz = cz + baySpanZ * 0.5;
-          emitStoneArchZ(toWorld, -hw, -1, yPlinth, ySpring, archRZ, bz, 6);
-          emitStoneArchZ(toWorld, hw, 1, yPlinth, ySpring, archRZ, bz, 6);
-        }
-      }
-      const nBaysX = snapBays(inst.width - 1.4, 4.0, 2);
-      const baySpanX = (inst.width - 1.4) / nBaysX;
-      const archRX = Math.min(1.35, baySpanX * 0.36);
-      for (let bxIdx = 0; bxIdx < nBaysX; bxIdx++) {
-        const bx = -hw + 0.7 + (bxIdx + 0.5) * baySpanX;
-        emitStoneArchX(toWorld, -hl, -1, yPlinth, ySpring, archRX, bx, 6);
-        emitStoneArchX(toWorld, hl, 1, yPlinth, ySpring, archRX, bx, 6);
-      }
-      emitRoof(toWorld, -hw, hw, yTop, yTop + roofRise(Math.min(14, inst.width)), -hl, hl, 0.85, 0.24, 11);
-    } else if (inst.prefabId === 'walled_mule_corral') {
-      // Primitive #6: Corral del Rey / Caballerizas Reales (Roofed Courtyard Stable & Pack-Train Compound)
-      const yPlinth = yGround + 0.58;
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.32, hw + 0.32, yBase, yPlinth - 0.15, -hl - 0.32, hl + 0.32, 11, 0.80);
-      // Cobbled courtyard yard floor (kind 16)
-      beginSection('courtyard_cobble_floor');
-      emitBox(toWorld, -hw, hw, yPlinth - 0.15, yPlinth, -hl, hl, 16, 0.84, true);
-      // Paired tiled stable & storehouse wings along +X and -X with roofed north/south cross-galleries
-      const stableD = Math.min(WING_DEPTH, inst.width * 0.32);
-      const gateD = Math.min(4.6, inst.width * 0.26);
-      const crossD = Math.min(4.2, inst.length * 0.24);
-      const sx0 = hw - stableD, sx1 = hw;
-      const gx0 = -hw, gx1 = -hw + gateD;
-      const yWingEave = yTop - 0.35;
-      beginSection('stable_wing_walls');
-      emitBox(toWorld, sx0, sx1, yPlinth, yTop, -hl, hl, 12, 0.88);
-      emitRoof(toWorld, sx0, sx1, yTop, yTop + roofRise(stableD), -hl, hl, 0.65, 0.20, 12);
-      beginSection('corral_perimeter_walls');
-      emitBox(toWorld, gx0, gx1, yPlinth, yWingEave, -hl, hl, 12, 0.86);
-      emitRoof(toWorld, gx0, gx1, yWingEave, yWingEave + roofRise(gateD), -hl, hl, 0.58, 0.20, 12);
-      emitBox(toWorld, gx1, sx0, yPlinth, yWingEave, -hl, -hl + crossD, 12, 0.85);
-      emitRoofX(toWorld, -hw, hw, yWingEave, yWingEave + roofRise(crossD), -hl, -hl + crossD, 0.58, 0.20, 12);
-      emitBox(toWorld, gx1, sx0, yPlinth, yWingEave, hl - crossD, hl, 12, 0.85);
-      emitRoofX(toWorld, -hw, hw, yWingEave, yWingEave + roofRise(crossD), hl - crossD, hl, 0.58, 0.20, 12);
-      // Iterated timber stable stalls & stone watering troughs facing the courtyard
-      const nStalls = snapBays(inst.length - 2.0, 3.8, 4);
-      const stallSpan = (inst.length - 2.0) / nStalls;
-      for (let s = 0; s < nStalls; s++) {
-        const sz = -hl + 1.0 + (s + 0.5) * stallSpan;
-        emitStoneArchZ(toWorld, sx0, -1, yPlinth, yPlinth + 2.0, Math.min(1.15, stallSpan * 0.34), sz, 5);
-        if (s % 2 === 0) {
-          beginSection('courtyard_watering_troughs');
-          emitBox(toWorld, sx0 - 2.2, sx0 - 0.8, yPlinth, yPlinth + 0.85, sz - 1.1, sz + 1.1, 11, 0.82);
-        }
-      }
-      // Arched stone carriage gateway cut cleanly through the -X street wing
-      beginSection('carriage_gatehouse');
-      emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.2, 1.35, 0, 6);
-      emitStoneArchZ(toWorld, gx1, 1, yPlinth, yPlinth + 2.2, 1.35, 0, 6);
-    } else if (inst.prefabId === 'torreon_atalaya_farol') {
-      // Primitive #8: Torre del Homenaje / Torreón Redondo (Torre del Oro) / Atalaya de Madera & Farol Beacon
-      const rBase = Math.min(hw, hl);
-      const yPlinth = yGround + 0.85;
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -rBase - 0.9, rBase + 0.9, yBase, yPlinth, -rBase - 0.9, rBase + 0.9, 11, 0.82, false, 0.65);
-      if (inst.materialKind === 10) {
-        // Open X-braced 4-post timber frontier Atalaya watchtower on sandy barrier spit (St. Augustine)
-        const postR = rBase * 0.62;
-        const yDeck = yTop;
-        beginSection('atalaya_timber_posts');
-        for (const sx of [-1, 1]) {
-          for (const sz of [-1, 1]) {
-            emitCylinder(toWorld, sx * postR, sz * postR, yPlinth, yDeck + 2.4, 0.32, 0.24, 6, 10, 0.74, true);
-          }
-        }
-        beginSection('atalaya_tier_decks');
-        for (let tier = 0; tier < 3; tier++) {
-          const ty = yPlinth + (tier + 1) * ((yDeck - yPlinth) / 3);
-          emitBox(toWorld, -postR - 0.2, postR + 0.2, ty - 0.22, ty, -postR - 0.2, postR + 0.2, 10, 0.78, true);
-        }
-        emitBalustradeZ(toWorld, -postR, -1, yDeck, -postR, postR);
-        emitBalustradeZ(toWorld, postR, 1, yDeck, -postR, postR);
-        emitRoof(toWorld, -postR - 0.3, postR + 0.3, yDeck + 2.4, yDeck + 4.8, -postR - 0.3, postR + 0.3, 0.65, 0.48, 10, 15);
-      } else {
-        // 12-sided polygonal/circular stone Torreón (Seville Torre del Oro / Veracruz & Havana headland lighthouse keep)
-        const yBody1 = yPlinth + (yTop - yPlinth) * 0.58;
-        const yBody2 = yTop;
-        const yLantern = yTop + 3.4;
-        beginSection('torreon_lower_drum_walls');
-        emitCylinder(toWorld, 0, 0, yPlinth, yBody1, rBase * 0.92, rBase * 0.84, 12, 11, 0.88, true);
-        emitCylinder(toWorld, 0, 0, yBody1 - 0.28, yBody1 + 0.18, rBase * 0.94, rBase * 0.94, 12, 11, 0.94, true);
-        beginSection('torreon_upper_drum_walls');
-        emitCylinder(toWorld, 0, 0, yBody1 + 0.18, yBody2, rBase * 0.82, rBase * 0.78, 12, 12, 0.91, true);
-        // Crenellated corbel ring around tower crown
-        beginSection('parapet_merlons');
-        emitCylinder(toWorld, 0, 0, yBody2 - 0.35, yBody2 + 0.65, rBase * 0.88, rBase * 0.90, 12, 11, 0.92, true);
-        for (let s = 0; s < 8; s++) {
-          const a = (s / 8) * Math.PI * 2;
-          const mx = Math.cos(a) * rBase * 0.78;
-          const mz = Math.sin(a) * rBase * 0.78;
-          emitBox(toWorld, mx - 0.55, mx + 0.55, yBody2 + 0.65, yBody2 + 1.35, mz - 0.55, mz + 0.55, 11, 0.90);
-        }
-        // Upper octagonal lantern turret + glazed dome + iron fire-basket Farol beacon
-        beginSection('lantern_farol_beacon');
-        emitCylinder(toWorld, 0, 0, yBody2 + 0.65, yLantern, rBase * 0.44, rBase * 0.42, 8, 11, 0.92, true);
-        beginSection('lantern_cupola_dome');
-        emitCylinder(toWorld, 0, 0, yLantern, yLantern + 1.85, rBase * 0.46, 0.16, 8, 13, 0.96, true);
-        emitCylinder(toWorld, 0, 0, yLantern + 1.85, yLantern + 2.85, 0.14, 0.48, 6, 18, 0.80, true);
-      }
-    } else if (inst.prefabId === 'curtain_wall_and_gate') {
-      // Primitive #9: Muralla Real / Muro de las Argollas y Puerta de la Ciudad (Bay-Iterated City Curtain Wall & Gatehouse)
-      const yWalk = yTop - 0.95;
-      const wallHW = Math.min(3.4, hw);
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -wallHW - 0.85, wallHW + 0.85, yBase, yGround + 0.65, -hl - 0.65, hl + 0.65, 11, 0.82, false, 0.55);
-      // Battered ashlar curtain wall body + rampart walk (adarve)
-      beginSection('curtain_wall');
-      emitBox(toWorld, -wallHW, wallHW, yGround + 0.65, yWalk, -hl, hl, 11, 0.87, false, 0.35);
-      beginSection('terreplein_adarve_walk');
-      emitBox(toWorld, -wallHW + 0.55, wallHW - 0.55, yWalk - 0.15, yWalk + 0.05, -hl, hl, 16, 0.82, true);
-
-      // Iterate 4.0m merlon-and-embrasure bays along the full curtain wall length + mooring rings
-      const nBays = snapBays(inst.length - 1.6, 4.0, 4);
-      const baySpan = (inst.length - 1.6) / nBays;
-      for (let b = 0; b <= nBays; b++) {
-        const bz = -hl + 0.8 + b * baySpan;
-        if (Math.abs(bz) > 3.6) {
-          beginSection('parapet_merlons');
-          emitBox(toWorld, -wallHW, -wallHW + 0.85, yWalk, yTop, bz - 1.15, bz + 1.15, 11, 0.91, false, 0.08);
-          emitBox(toWorld, wallHW - 0.85, wallHW, yWalk, yTop, bz - 1.15, bz + 1.15, 11, 0.89, false, 0.08);
-        }
-        if (b % 2 === 0) {
-          // Bronze/iron mooring ring bosses (Muro de las Argollas) on the outer scarp face
-          beginSection('mooring_rings');
-          emitCylinder(toWorld, -wallHW - 0.25, bz, yGround + 1.4, yGround + 1.95, 0.32, 0.32, 6, 18, 0.78, true);
-        }
-      }
-      // Central twin-turret arched city gatehouse (Puerta de la Mar / Puerta de Tierra)
-      const gHW = wallHW + 1.15;
-      const yGateTop = yTop + 2.8;
-      beginSection('city_gatehouse');
-      emitBox(toWorld, -gHW, gHW, yGround + 0.65, yGateTop, -3.8, 3.8, 11, 0.90);
-      emitBox(toWorld, -gHW - 0.25, gHW + 0.25, yGateTop - 0.32, yGateTop, -4.05, 4.05, 11, 0.94, true);
-      for (const mz of [-2.8, 0, 2.8]) {
-        emitBox(toWorld, -gHW, gHW, yGateTop, yGateTop + 0.85, mz - 0.85, mz + 0.85, 11, 0.92);
-      }
-      emitStoneArchZ(toWorld, -gHW, -1, yGround + 0.65, yGround + 3.2, 1.65, 0, 6);
-      emitStoneArchZ(toWorld, gHW, 1, yGround + 0.65, yGround + 3.2, 1.65, 0, 6);
-    } else if (inst.prefabId === 'stone_arch_bridge') {
-      // Primitive #10: Puente de Piedra con Tajamares (Bay-Iterated Multi-Arch Stone Bridge with Triangular Cutwater Piers)
-      const bridgeHW = Math.min(4.2, hw);
-      const yDeck = yTop - 0.85;
-      const nSpans = snapBays(inst.length - 2.4, 6.8, 3);
-      const spanLen = (inst.length - 2.4) / nSpans;
-      const archR = Math.min(2.35, spanLen * 0.36);
-      const ySpring = yDeck - archR - 0.55;
-
-      // Bridge roadway body, cobbled deck (kind 16), and cut-stone side parapets (kind 11)
-      beginSection('bridge_roadway_walls');
-      emitBox(toWorld, -bridgeHW, bridgeHW, ySpring, yDeck, -hl, hl, 11, 0.88);
-      beginSection('courtyard_bridge_deck_slab');
-      emitBox(toWorld, -bridgeHW + 0.55, bridgeHW - 0.55, yDeck, yDeck + 0.14, -hl, hl, 16, 0.84, true);
-      emitBox(toWorld, -bridgeHW - 0.18, bridgeHW + 0.18, yDeck - 0.24, yDeck, -hl - 0.2, hl + 0.2, 11, 0.93, true);
-      beginSection('parapet_walls');
-      emitBox(toWorld, -bridgeHW, -bridgeHW + 0.58, yDeck, yTop, -hl, hl, 11, 0.90);
-      emitBox(toWorld, bridgeHW - 0.58, bridgeHW, yDeck, yTop, -hl, hl, 11, 0.90);
-      const rampLen = 6.0;
-      const yEndNeg = (Number.isFinite(inst.bankYNeg) ? inst.bankYNeg : yGround) - 0.35;
-      const yEndPos = (Number.isFinite(inst.bankYPos) ? inst.bankYPos : yGround) - 0.35;
-      beginSection('bridge_approach_ramp');
-      emitSlopedBoxZ(toWorld, -bridgeHW, bridgeHW, yBase, yEndNeg, ySpring, yDeck, -hl - rampLen, -hl, 11, 0.87);
-      emitSlopedBoxZ(toWorld, -bridgeHW + 0.55, bridgeHW - 0.55, yEndNeg - 0.08, yEndNeg + 0.08, yDeck, yDeck + 0.14, -hl - rampLen, -hl, 16, 0.84, true);
-      emitSlopedBoxZ(toWorld, -bridgeHW, -bridgeHW + 0.58, yEndNeg, yEndNeg + 0.42, yDeck, yTop, -hl - rampLen, -hl, 11, 0.90);
-      emitSlopedBoxZ(toWorld, bridgeHW - 0.58, bridgeHW, yEndNeg, yEndNeg + 0.42, yDeck, yTop, -hl - rampLen, -hl, 11, 0.90);
-      emitSlopedBoxZ(toWorld, -bridgeHW, bridgeHW, ySpring, yDeck, yBase, yEndPos, hl, hl + rampLen, 11, 0.87);
-      emitSlopedBoxZ(toWorld, -bridgeHW + 0.55, bridgeHW - 0.55, yDeck, yDeck + 0.14, yEndPos - 0.08, yEndPos + 0.08, hl, hl + rampLen, 16, 0.84, true);
-      emitSlopedBoxZ(toWorld, -bridgeHW, -bridgeHW + 0.58, yDeck, yTop, yEndPos, yEndPos + 0.42, hl, hl + rampLen, 11, 0.90);
-      emitSlopedBoxZ(toWorld, bridgeHW - 0.58, bridgeHW, yDeck, yTop, yEndPos, yEndPos + 0.42, hl, hl + rampLen, 11, 0.90);
-
-      // Iterate deep seabed piers, triangular upstream/downstream cutwaters (tajamares), and radial voussoir arches
-      for (let s = 0; s <= nSpans; s++) {
-        const pz = -hl + 1.2 + s * spanLen;
-        beginSection('foundation_bridge_piers');
-        emitBox(toWorld, -bridgeHW - 0.35, bridgeHW + 0.35, yBase, ySpring + 0.2, pz - 0.95, pz + 0.95, 11, 0.83);
-        // Triangular cutwater beaks (tajamares) projecting from -bridgeHW and +bridgeHW
-        beginSection('foundation_cutwaters');
-        for (const sideX of [-1, 1]) {
-          const xFace = sideX * (bridgeHW + 0.35);
-          const xBeak = sideX * (bridgeHW + 1.85);
-          const b00 = toWorld(xFace, yBase, pz - 0.95);
-          const b10 = toWorld(xFace, yBase, pz + 0.95);
-          const bTip0 = toWorld(xBeak, yBase, pz);
-          const t00 = toWorld(xFace, ySpring + 0.35, pz - 0.95);
-          const t10 = toWorld(xFace, ySpring + 0.35, pz + 0.95);
-          const tTip0 = toWorld(xBeak, ySpring + 0.35, pz);
-          if (sideX < 0) {
-            pushQuad(b00, bTip0, tTip0, t00, 11, 0.86);
-            pushQuad(bTip0, b10, t10, tTip0, 11, 0.82);
-            pushTri(t00, tTip0, t10, 11, 0.92);
-          } else {
-            pushQuad(bTip0, b00, t00, tTip0, 11, 0.86);
-            pushQuad(b10, bTip0, tTip0, t10, 11, 0.82);
-            pushTri(t10, tTip0, t00, 11, 0.92);
-          }
-        }
-        if (s < nSpans) {
-          const az = pz + spanLen * 0.5;
-          emitStoneArchZ(toWorld, -bridgeHW, -1, yBase + 0.5, ySpring, archR, az, 6);
-          emitStoneArchZ(toWorld, bridgeHW, 1, yBase + 0.5, ySpring, archR, az, 6);
-        }
-      }
-    } else if (inst.prefabId === 'thatched_bohio_palafito') {
-      // Primitive #11: Bohío / Caney de Palma y Palafito de Manglar (Palm-Thatch House & Over-Water Stilt Hut)
-      const hutHW = Math.min(5.2, hw);
-      const isPalafito = inst.y <= 3.2 || inst.waterfront;
-      const yDeck = isPalafito ? yGround + 1.15 : yGround + 0.45;
-      const yEave = yTop;
-      const nPostsZ = snapBays(inst.length - 1.2, 3.0, 3);
-      const postSpanZ = (inst.length - 1.2) / nPostsZ;
-
-      if (isPalafito) {
-        // Raised timber stilt platform (palafito) + submerged mangrove pilings + seaward planked catwalk jetty
-        beginSection('interior_deck_slab');
-        emitBox(toWorld, -hutHW - 0.85, hutHW + 0.85, yDeck - 0.28, yDeck, -hl - 1.4, hl + 0.8, 10, 0.80, true);
-        emitBox(toWorld, -1.1, 1.1, yDeck - 0.25, yDeck, -hl - 4.8, -hl - 1.4, 10, 0.78, true);
-        beginSection('foundation_pilings');
-        for (let p = 0; p <= nPostsZ; p++) {
-          const pz = -hl + 0.6 + p * postSpanZ;
-          emitCylinder(toWorld, -hutHW - 0.45, pz, yBase, yDeck + 0.85, 0.22, 0.19, 6, 10, 0.68, true);
-          emitCylinder(toWorld, hutHW + 0.45, pz, yBase, yDeck + 0.85, 0.22, 0.19, 6, 10, 0.68, true);
-        }
-      } else {
-        beginSection('foundation_plinth');
-        emitBox(toWorld, -hutHW - 0.45, hutHW + 0.45, yBase, yDeck, -hl - 0.45, hl + 0.45, 16, 0.78);
-      }
-
-      // Wattle-and-daub (bahareque, kind 12) walls with iterated exterior mangrove timber posts (kind 10)
-      beginSection('bohio_bahareque_walls');
-      emitBox(toWorld, -hutHW, hutHW, yDeck, yEave, -hl, hl, 12, 0.86);
-      for (let p = 0; p <= nPostsZ; p++) {
-        const pz = -hl + 0.6 + p * postSpanZ;
-        beginSection('arcade_timber_columns');
-        emitCylinder(toWorld, -hutHW - 0.08, pz, yDeck, yEave, 0.20, 0.18, 6, 10, 0.74, true);
-        emitCylinder(toWorld, hutHW + 0.08, pz, yDeck, yEave, 0.20, 0.18, 6, 10, 0.74, true);
-        if (p < nPostsZ) {
-          beginSection('facade_window_openings');
-          const wz = pz + postSpanZ * 0.5;
-          emitBox(toWorld, -hutHW - 0.08, -hutHW + 0.12, yDeck + 0.65, yEave - 0.55, wz - 0.48, wz + 0.48, 14, 0.20);
-          emitBox(toWorld, hutHW - 0.12, hutHW + 0.08, yDeck + 0.65, yEave - 0.55, wz - 0.48, wz + 0.48, 14, 0.20);
-        }
-      }
-      // Steep 38° multi-tiered palm-thatch hipped roof (kind 15)
-      const yPeak = yEave + roofRise(hutHW * 2, 0.68);
-      emitRoof(toWorld, -hutHW, hutHW, yEave, yPeak, -hl, hl, 0.92, 0.32, 10, 15);
     } else if (inst.prefabId === 'astillero_and_moored_hull') {
       // Primitive #12: Astillero con Carabela en Grada / Barco de Puerto (Foreshore Slipway & Carvel-Planked 16th-Century Caravel/Nau on the Stocks)
       const hullHW = Math.min(3.5, hw * 0.76);
@@ -7268,6 +4273,43 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitCylinder(toWorld, -hw + 1.05, hl * 0.52, ySlip + 0.42, ySlip + 1.12, 0.62, 0.72, 10, 18, 0.66, true);
       emitBox(toWorld, hw - 1.55, hw - 0.45, ySlip, ySlip + 0.36, -hl * 0.42, hl * 0.32, 10, 0.74, true);
       emitBox(toWorld, hw - 1.45, hw - 0.55, ySlip + 0.38, ySlip + 0.72, -hl * 0.36, hl * 0.26, 10, 0.78, true);
+    } else if (inst.prefabId === 'open_lonja_loggia') {
+      // A merchants' exchange: an open stone arcade on Tuscan columns all round, under an entablature and a hipped roof.
+      const yPlinth = yGround + 0.85;
+      beginSection('foundation_plinth');
+      emitBox(toWorld, -hw - 0.85, hw + 0.85, yBase, yPlinth - 0.22, -hl - 0.85, hl + 0.85, 11, 0.82);
+      emitBox(toWorld, -hw - 0.35, hw + 0.35, yPlinth - 0.22, yPlinth, -hl - 0.35, hl + 0.35, 16, 0.88, true);
+      // Entablature frieze & cornice beam supported on iterated Tuscan stone columns & radial arches around all 4 sides
+      const ySpring = yPlinth + (yTop - yPlinth) * 0.56;
+      beginSection('lonja_entablature_walls');
+      emitBox(toWorld, -hw, hw, ySpring + 1.15, yTop, -hl, hl, 11, 0.90, true);
+      // Shadowed interior vault core recessed slightly behind the perimeter colonnade
+      beginSection('interior_vault_core');
+      emitBox(toWorld, -hw + 1.4, hw - 1.4, yPlinth, ySpring + 1.15, -hl + 1.4, hl - 1.4, 12, 0.78);
+
+      const nBaysZ = snapBays(inst.length - 1.4, 4.0, 4);
+      const baySpanZ = (inst.length - 1.4) / nBaysZ;
+      const archRZ = Math.min(1.35, baySpanZ * 0.36);
+      for (let b = 0; b <= nBaysZ; b++) {
+        const cz = -hl + 0.7 + b * baySpanZ;
+        beginSection('arcade_columns');
+        emitCylinder(toWorld, -hw + 0.45, cz, yPlinth, ySpring + 1.15, 0.34, 0.30, 8, 11, 0.91, true);
+        emitCylinder(toWorld, hw - 0.45, cz, yPlinth, ySpring + 1.15, 0.34, 0.30, 8, 11, 0.91, true);
+        if (b < nBaysZ) {
+          const bz = cz + baySpanZ * 0.5;
+          emitStoneArchZ(toWorld, -hw, -1, yPlinth, ySpring, archRZ, bz, 6);
+          emitStoneArchZ(toWorld, hw, 1, yPlinth, ySpring, archRZ, bz, 6);
+        }
+      }
+      const nBaysX = snapBays(inst.width - 1.4, 4.0, 2);
+      const baySpanX = (inst.width - 1.4) / nBaysX;
+      const archRX = Math.min(1.35, baySpanX * 0.36);
+      for (let bxIdx = 0; bxIdx < nBaysX; bxIdx++) {
+        const bx = -hw + 0.7 + (bxIdx + 0.5) * baySpanX;
+        emitStoneArchX(toWorld, -hl, -1, yPlinth, ySpring, archRX, bx, 6);
+        emitStoneArchX(toWorld, hl, 1, yPlinth, ySpring, archRX, bx, 6);
+      }
+      emitRoof(toWorld, -hw, hw, yTop, yTop + roofRise(Math.min(14, inst.width)), -hl, hl, 0.85, 0.24, 11);
     } else if (inst.prefabId === 'royal_warehouse') {
       // Royal Warehouse (Almacén Real): Bay-iterated buttressed masonry hall with radial stone voussoir cargo portals
       const yPlinth = yGround + 0.68;
@@ -7294,920 +4336,16 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         }
       }
       emitRoof(toWorld, -whHW, whHW, yTop, yTop + roofRise(whHW * 2), -hl, hl, 0.78, 0.15, 12);
-    } else if (inst.prefabId === 'abenaki_birchbark_wigwam') {
-      // Abenaki / Wabanaki & New England Algonquian Domed Birchbark Wigwam (Wetu):
-      // Bent-sapling frame sheathed in overlapping paper-birchbark sheets (kind 17) & rush mats (kind 15),
-      // external sapling hoop binders (kind 10), bark-hooded doorway, apex smoke hole, stone hearth & fish-smoking rack.
-      const rBase = Math.min(hw, hl) * 0.92;
-      const yPlinth = yGround + 0.04;
-      beginSection('foundation_plinth');
-      emitCylinder(toWorld, 0, 0, yGround - 1.2, yPlinth, rBase + 0.05, rBase, 10, 15, 0.78, true);
-      // 4-tier hemispherical/ellipsoidal birchbark dome (lower tier woven cattail/rush mat skirt kind 15, upper 3 tiers paper birchbark kind 17)
-      const domeH = Math.max(2.9, inst.height);
-      const tiers = [
-        [0.0, 0.32, 1.0, 0.92, 15, 0.86],
-        [0.32, 0.62, 0.92, 0.74, 17, 0.92],
-        [0.62, 0.86, 0.74, 0.44, 17, 0.95],
-        [0.86, 1.0, 0.44, 0.14, 17, 0.97],
-      ];
-      beginSection('wigwam_birchbark_dome');
-      for (const [t0, t1, s0, s1, mat, sh] of tiers) {
-        emitCylinder(
-          toWorld,
-          0,
-          0,
-          yPlinth + t0 * domeH,
-          yPlinth + t1 * domeH,
-          rBase * s0,
-          rBase * s1,
-          10,
-          mat,
-          sh,
-          t1 >= 0.99
-        );
-      }
-      // External bent-sapling hoop rings & vertical pole ribs (kind 10) holding the birchbark sheets against coastal gales
-      beginSection('wigwam_sapling_frame');
-      for (const [tRing, sRing] of [[0.32, 0.93], [0.62, 0.75], [0.85, 0.45]]) {
-        const ry = yPlinth + tRing * domeH;
-        emitCylinder(toWorld, 0, 0, ry - 0.06, ry + 0.06, rBase * sRing + 0.06, rBase * sRing + 0.06, 10, 10, 0.76, false);
-      }
-      // Apex smoke-hole collar (kind 14) & projecting smoke-flap poles (kind 10)
-      emitCylinder(toWorld, 0, 0, yPlinth + domeH - 0.08, yPlinth + domeH + 0.14, rBase * 0.18, rBase * 0.16, 8, 14, 0.20, true);
-      emitCylinder(toWorld, -0.22, -0.15, yPlinth + domeH - 0.4, yPlinth + domeH + 0.75, 0.05, 0.04, 5, 10, 0.78, true);
-      emitCylinder(toWorld, 0.22, 0.15, yPlinth + domeH - 0.4, yPlinth + domeH + 0.75, 0.05, 0.04, 5, 10, 0.78, true);
-      // Low arched bark-hooded entrance tunnel on -Z with deerskin door flap (kind 13/14)
-      beginSection('wigwam_doorway_hood');
-      emitBox(toWorld, -0.78, 0.78, yGround - 0.35, yPlinth + 1.55, -rBase - 0.55, -rBase + 0.25, 17, 0.90, true);
-      emitBox(toWorld, -0.56, 0.56, yPlinth, yPlinth + 1.38, -rBase - 0.58, -rBase - 0.35, 14, 0.20);
-      // Forecourt stone hearth ring (kind 11) + glowing ember bed (kind 13) + timber fish-smoking rack (kind 10)
-      beginSection('hearth_and_drying_rack');
-      const hz = -rBase - 1.65;
-      emitCylinder(toWorld, 1.35, hz, yGround - 0.35, yGround + 0.28, 0.68, 0.62, 8, 11, 0.82, true);
-      emitCylinder(toWorld, 1.35, hz, yGround + 0.28, yGround + 0.34, 0.44, 0.38, 8, 13, 0.92, true);
-      emitCylinder(toWorld, -1.55, hz - 0.4, yGround - 0.45, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
-      emitCylinder(toWorld, -1.55, hz + 0.8, yGround - 0.45, yGround + 1.75, 0.07, 0.06, 5, 10, 0.74, true);
-      emitBox(toWorld, -1.62, -1.48, yGround + 1.55, yGround + 1.68, hz - 0.55, hz + 0.95, 10, 0.80, true);
-    } else if (inst.prefabId === 'algonquian_longhouse') {
-      // Algonquian / Wabanaki / Powhatan / Haudenosaunee Barrel-Vaulted Bark Longhouse:
-      // Bowed sapling rib frame sheathed in overlapping birch/elm/cedar bark sheets (kind 17),
-      // dark cedar/elm horizontal bark trim bands & vertical lash-poles (kind 10), arched barrel roof with smoke holes, and hooded end portals.
-      const lhHW = Math.min(4.2, hw);
-      const yPlinth = yGround + 0.04;
-      const yEave = yPlinth + Math.max(2.4, inst.height * 0.54);
-      const vaultRise = Math.max(1.8, inst.height * 0.46);
-      beginSection('foundation_plinth');
-      // Shallow ground-hugging dark cedar sill (avoids deep exposed wedge on slopes)
-      emitBox(toWorld, -lhHW - 0.08, lhHW + 0.08, yGround - 0.28, yPlinth + 0.22, -hl - 0.08, hl + 0.08, 10, 0.72, false, 0.04);
-      beginSection('longhouse_bark_walls');
-      emitBox(toWorld, -lhHW, lhHW, yPlinth + 0.18, yEave, -hl, hl, 17, 0.88);
-      // Horizontal dark elm/cedar bark lashing bands along side walls to break up bark panels
-      for (const bandFrac of [0.38, 0.74, 0.96]) {
-        const by = yPlinth + (yEave - yPlinth) * bandFrac;
-        emitBox(toWorld, -lhHW - 0.05, lhHW + 0.05, by - 0.07, by + 0.07, -hl - 0.04, hl + 0.04, 10, 0.70, true);
-      }
-      // Barrel-vaulted bark roof built from 3 stacked arched tiers (kind 17)
-      beginSection('longhouse_barrel_vault_roof');
-      emitBox(toWorld, -lhHW * 0.92, lhHW * 0.92, yEave, yEave + vaultRise * 0.46, -hl - 0.15, hl + 0.15, 17, 0.91, true, lhHW * 0.14);
-      emitBox(toWorld, -lhHW * 0.76, lhHW * 0.76, yEave + vaultRise * 0.46, yEave + vaultRise * 0.82, -hl - 0.12, hl + 0.12, 17, 0.94, true, lhHW * 0.18);
-      emitBox(toWorld, -lhHW * 0.52, lhHW * 0.52, yEave + vaultRise * 0.82, yEave + vaultRise, -hl - 0.08, hl + 0.08, 17, 0.96, true, lhHW * 0.22);
-      // Iterated external vertical & arched sapling binder poles every 2.8m along Z + roof smoke holes
-      const nBays = snapBays(inst.length - 1.6, 2.8, 5);
-      const baySpan = (inst.length - 1.6) / nBays;
-      for (let b = 0; b <= nBays; b++) {
-        const bz = -hl + 0.8 + b * baySpan;
-        beginSection('longhouse_sapling_ribs');
-        emitCylinder(toWorld, -lhHW - 0.08, bz, yGround - 0.26, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
-        emitCylinder(toWorld, lhHW + 0.08, bz, yGround - 0.26, yEave + 0.2, 0.10, 0.08, 5, 10, 0.74, true);
-        emitBox(toWorld, -lhHW * 0.58, lhHW * 0.58, yEave + vaultRise - 0.05, yEave + vaultRise + 0.09, bz - 0.08, bz + 0.08, 10, 0.76, true);
-        if (b > 0 && b < nBays && b % 2 === 1) {
-          beginSection('roof_smoke_holes');
-          emitBox(toWorld, -0.55, 0.55, yEave + vaultRise - 0.04, yEave + vaultRise + 0.12, bz - 0.55, bz + 0.55, 14, DARK_PORTAL_SHADE, true);
-        }
-      }
-      // End doorway portals on -hl and +hl with projecting bark rain-hoods & red-ochre clan lintel (kind 13)
-      beginSection('longhouse_end_portals');
-      for (const sideZ of [-1, 1]) {
-        const zFace = sideZ * hl;
-        const zOut = sideZ * (hl + 0.65);
-        const zMin = Math.min(zFace, zOut), zMax = Math.max(zFace, zOut);
-        emitBox(toWorld, -1.05, 1.05, yPlinth + 1.85, yPlinth + 2.25, zMin, zMax, 13, 0.88, true);
-        emitBox(toWorld, -0.78, 0.78, yPlinth, yPlinth + 1.85, zFace - 0.18, zFace + 0.18, 14, DARK_PORTAL_SHADE);
-      }
-    } else if (inst.prefabId === 'indigenous_palisade_ring') {
-      // Woodland / Tupinambá Circular Split-Log Palisade Stockade, Council Firepit & Three Sisters Maize-Bean-Squash Mounds:
-      // Solid continuous split-log & woven-sapling stockade curtain wall connecting all perimeter posts (no floating grey floor wedge!).
-      const { radiusX: rRingX, radiusZ: rRingZ } = palisadeRingPlan(inst.width, inst.length);
-      const yPlinth = yGround + 0.03;
-      const emitStockadeChord = (x0, z0, x1, z1, y0, y1, halfThick, kind, shade) => {
-        const dx = x1 - x0;
-        const dz = z1 - z0;
-        const segLen = Math.hypot(dx, dz) || 1;
-        const nx = (-dz / segLen) * halfThick;
-        const nz = (dx / segLen) * halfThick;
-        const b0L = toWorld(x0 + nx, y0, z0 + nz);
-        const b0R = toWorld(x0 - nx, y0, z0 - nz);
-        const b1L = toWorld(x1 + nx, y0, z1 + nz);
-        const b1R = toWorld(x1 - nx, y0, z1 - nz);
-        const t0L = toWorld(x0 + nx, y1, z0 + nz);
-        const t0R = toWorld(x0 - nx, y1, z0 - nz);
-        const t1L = toWorld(x1 + nx, y1, z1 + nz);
-        const t1R = toWorld(x1 - nx, y1, z1 - nz);
-        pushQuad(b0L, b1L, t1L, t0L, kind, shade);
-        pushQuad(b1R, b0R, t0R, t1R, kind, shade * 0.95);
-        pushQuad(t0L, t1L, t1R, t0R, kind, shade * 1.04);
-      };
-      beginSection('plaza_earth_floor');
-      // Ground-flush central council hearth ring (replaces the deep grey stone cylinder that caused slope wedges)
-      emitCylinder(toWorld, 0, 0, yGround - 0.14, yPlinth + 0.04, 2.35, 2.20, 10, 10, 0.72, true);
-      // 28 pointed vertical log stockade posts connected by a continuous split-log stockade wall with a baffled entrance on -Z
-      beginSection('palisade_stockade_posts');
-      const nPosts = 28;
-      const postH = Math.max(3.6, inst.height);
-      for (let p = 0; p < nPosts; p++) {
-        const angle = (p / nPosts) * Math.PI * 2;
-        if (ringPostIsGate(angle)) continue;
-        const px = Math.cos(angle) * rRingX;
-        const pz = Math.sin(angle) * rRingZ;
-        const hVar = ((p * 7) % 5) * 0.14;
-        emitCylinder(toWorld, px, pz, yGround - 0.35, yPlinth + postH + hVar, 0.32, 0.15, 6, 10, 0.74 + (p % 3) * 0.04, true);
-        const nextAngle = (((p + 1) % nPosts) / nPosts) * Math.PI * 2;
-        if (!ringPostIsGate(nextAngle)) {
-          const nx = Math.cos(nextAngle) * rRingX;
-          const nz = Math.sin(nextAngle) * rRingZ;
-          // Continuous split-log & woven-sapling curtain wall between post p and post p+1
-          emitStockadeChord(px, pz, nx, nz, yGround - 0.28, yPlinth + postH - 0.28, 0.16, 10, 0.78);
-          // Upper and lower horizontal withe-lashed sapling binder rails
-          emitStockadeChord(px, pz, nx, nz, yPlinth + 1.05, yPlinth + 1.24, 0.22, 10, 0.68);
-          emitStockadeChord(px, pz, nx, nz, yPlinth + postH - 0.78, yPlinth + postH - 0.58, 0.22, 10, 0.68);
-        }
-      }
-      // Central stone council hearth (kind 11 + 13) & 4 split-log council benches (kind 10)
-      beginSection('council_firepit_and_benches');
-      emitCylinder(toWorld, 0, 0, yGround - 0.18, yPlinth + 0.42, 1.45, 1.32, 10, 11, 0.82, true);
-      emitCylinder(toWorld, 0, 0, yPlinth + 0.42, yPlinth + 0.52, 0.95, 0.78, 8, 13, 0.94, true);
-      emitBox(toWorld, -2.6, 2.6, yGround - 0.16, yPlinth + 0.52, -3.4, -2.75, 10, 0.78, true);
-      emitBox(toWorld, -2.6, 2.6, yGround - 0.16, yPlinth + 0.52, 2.75, 3.4, 10, 0.78, true);
-      emitBox(toWorld, -3.4, -2.75, yGround - 0.16, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
-      emitBox(toWorld, 2.75, 3.4, yGround - 0.16, yPlinth + 0.52, -2.2, 2.2, 10, 0.78, true);
-      // Three Sisters (maize, climbing beans, winter squash) hillock mounds inside the stockade lee
-      beginSection('three_sisters_crop_mounds');
-      for (const mx of [-rRingX * 0.48, rRingX * 0.48]) {
-        for (const mz of [-rRingZ * 0.36, 0, rRingZ * 0.36]) {
-          emitCylinder(toWorld, mx, mz, yGround - 0.18, yPlinth + 0.36, 0.95, 0.55, 6, 10, 0.72, true);
-          emitCylinder(toWorld, mx, mz, yPlinth + 0.30, yPlinth + 1.65, 0.32, 0.08, 5, 4, 0.84, true);
-        }
-      }
-    } else if (inst.prefabId === 'taino_cacique_caney') {
-      // Taíno Cacique Royal Caney: Rectangular/polygonal royal palm-thatch council & chief's residence
-      // facing the batey plaza with a carved hardwood front portico and high-pitched multi-tier guano thatch roof.
-      const cHW = Math.min(5.8, hw);
-      const yPlinth = yGround + 0.10;
-      const yEave = yPlinth + Math.max(2.8, inst.height * 0.48);
-      const yPeak = yEave + Math.max(3.2, inst.roofPitch || 3.6);
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -cHW - 0.25, cHW + 0.25, yGround - 1.4, yPlinth, -hl - 0.25, hl + 0.25, 10, 0.74, false, 0.20);
-      // Cane-and-post bahareque walls (kind 12) recessed behind the front portico (-hl + 2.6 .. hl)
-      beginSection('caney_cane_walls');
-      emitBox(toWorld, -cHW, cHW, yPlinth, yEave, -hl + 2.6, hl, 12, 0.88);
-      // Front ceremonial portico columns (kind 10) & shadowed doorway portal (kind 14)
-      beginSection('caney_portico_posts');
-      for (const px of [-cHW + 0.45, -cHW * 0.34, cHW * 0.34, cHW - 0.45]) {
-        emitCylinder(toWorld, px, -hl + 0.35, yGround - 0.8, yEave, 0.24, 0.21, 6, 10, 0.76, true);
-      }
-      emitBox(toWorld, -1.15, 1.15, yPlinth, yEave - 0.45, -hl + 2.45, -hl + 2.75, 14, DARK_PORTAL_SHADE);
-      // Multi-tiered royal palm-thatch hipped roof (kind 15) + carved ridge pole crest (kind 10)
-      beginSection('caney_palm_thatch_roof');
-      emitRoof(toWorld, -cHW - 0.35, cHW + 0.35, yEave, yPeak, -hl - 0.35, hl + 0.35, 0.95, 0.36, 10, 15);
-      emitBox(toWorld, -0.22, 0.22, yPeak - 0.15, yPeak + 0.42, -hl * 0.55, hl * 0.55, 10, 0.80, true);
-    } else if (inst.prefabId === 'taino_circular_bohio') {
-      // Taíno / Arawak / Kalinago Circular Conical Guano-Thatch Bohío:
-      // 10-sided circular cane wall with exterior hardwood posts + steep 3-tier conical palm-thatch roof & center pole finial.
-      const rBohio = Math.min(hw, hl) * 0.88;
-      const yPlinth = yGround + 0.05;
-      const yEave = yPlinth + Math.max(2.1, inst.height * 0.42);
-      const coneH = Math.max(3.0, inst.roofPitch || 3.2);
-      beginSection('foundation_plinth');
-      emitCylinder(toWorld, 0, 0, yGround - 1.2, yPlinth, rBohio + 0.06, rBohio, 10, 12, 0.78, true);
-      beginSection('bohio_circular_cane_wall');
-      emitCylinder(toWorld, 0, 0, yPlinth, yEave, rBohio, rBohio, 10, 12, 0.86, false);
-      // Exterior hardwood post ring (kind 10) & doorway opening on -Z (kind 14)
-      beginSection('bohio_perimeter_posts');
-      for (let p = 0; p < 10; p++) {
-        const a = (p / 10) * Math.PI * 2;
-        emitCylinder(toWorld, Math.cos(a) * (rBohio + 0.08), Math.sin(a) * (rBohio + 0.08), yGround - 0.6, yEave, 0.15, 0.13, 5, 10, 0.74, true);
-      }
-      emitBox(toWorld, -0.68, 0.68, yPlinth, yEave - 0.35, -rBohio - 0.12, -rBohio + 0.18, 14, DARK_PORTAL_SHADE);
-      // 3-tier overhanging conical palm-thatch roof (kind 15) + center pole finial (kind 10)
-      beginSection('bohio_conical_thatch_roof');
-      emitCylinder(toWorld, 0, 0, yEave - 0.25, yEave + coneH * 0.36, rBohio + 0.72, rBohio * 0.68, 10, 15, 0.88, false);
-      emitCylinder(toWorld, 0, 0, yEave + coneH * 0.34, yEave + coneH * 0.72, rBohio * 0.72, rBohio * 0.34, 10, 15, 0.92, false);
-      emitCylinder(toWorld, 0, 0, yEave + coneH * 0.70, yEave + coneH, rBohio * 0.38, 0.16, 10, 15, 0.96, true);
-      emitCylinder(toWorld, 0, 0, yEave + coneH - 0.2, yEave + coneH + 0.75, 0.14, 0.06, 6, 10, 0.80, true);
-    } else if (inst.prefabId === 'taino_batey_court') {
-      // Taíno Batey Ceremonial Ballcourt & Plaza:
-      // Sunken/graded earthen court (kind 16) lined with upright carved petroglyph stone monoliths (kind 11) & central zemi altar.
-      const yCourt = yGround + 0.05;
-      beginSection('batey_plaza_floor');
-      emitBox(toWorld, -hw, hw, yGround - 0.9, yCourt, -hl, hl, 16, 0.82, true, 0.12);
-      // Flanking rows of upright carved stone monoliths & river boulders along -hw and +hw
-      beginSection('batey_petroglyph_monoliths');
-      const nStones = snapBays(inst.length - 2.0, 2.8, 5);
-      const stoneSpan = (inst.length - 2.0) / nStones;
-      for (let s = 0; s <= nStones; s++) {
-        const sz = -hl + 1.0 + s * stoneSpan;
-        const hMod = 1.15 + ((s * 5) % 4) * 0.22;
-        emitBox(toWorld, -hw - 0.15, -hw + 0.42, yGround - 0.6, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
-        emitBox(toWorld, hw - 0.42, hw + 0.15, yGround - 0.6, yCourt + hMod, sz - 0.48, sz + 0.48, 11, 0.86, false, 0.08);
-      }
-      // Carved stone Zemi sanctuary plinth & cacique wooden duho ceremonial stool at the head of the court
-      beginSection('zemi_altar_and_duho');
-      emitCylinder(toWorld, 0, hl * 0.58, yGround - 0.4, yCourt + 0.65, 1.35, 1.18, 8, 11, 0.88, true);
-      emitCylinder(toWorld, 0, hl * 0.58, yCourt + 0.65, yCourt + 1.85, 0.48, 0.28, 6, 11, 0.94, true);
-      emitBox(toWorld, -0.85, 0.85, yGround - 0.25, yCourt + 0.48, -hl * 0.65 - 0.45, -hl * 0.65 + 0.45, 10, 0.78, true);
-    } else if (inst.prefabId === 'kalinago_carbet_hall') {
-      // Kalinago (Island Carib) Elliptical Taboui / Carbet Assembly Hall:
-      // Soaring palm-thatch communal warrior hall with low open eaves, hardwood post colonnade & boucan roasting rack.
-      const kHW = Math.min(5.2, hw);
-      const yPlinth = yGround + 0.05;
-      const yLowEave = yPlinth + 1.65;
-      const yPeak = yPlinth + Math.max(5.6, inst.height);
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -kHW - 0.08, kHW + 0.08, yGround - 1.4, yPlinth, -hl - 0.08, hl + 0.08, 10, 0.74, false, 0.08);
-      beginSection('carbet_timber_colonnade');
-      const nPosts = snapBays(inst.length - 2.0, 3.2, 4);
-      const pSpan = (inst.length - 2.0) / nPosts;
-      for (let p = 0; p <= nPosts; p++) {
-        const pz = -hl + 1.0 + p * pSpan;
-        emitCylinder(toWorld, -kHW + 0.45, pz, yGround - 0.7, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
-        emitCylinder(toWorld, kHW - 0.45, pz, yGround - 0.7, yLowEave + 0.6, 0.22, 0.19, 6, 10, 0.74, true);
-      }
-      // Low woven-reed windbreak skirt (kind 12) + sweeping two-stage steep palm-thatch roof (kind 15)
-      beginSection('carbet_thatch_hall_roof');
-      emitBox(toWorld, -kHW + 0.5, kHW - 0.5, yPlinth, yLowEave, -hl + 1.2, hl - 1.2, 12, 0.80);
-      emitRoof(toWorld, -kHW, kHW, yLowEave, yPeak, -hl, hl, 0.85, 0.35, 10, 15);
-      // Apsidal thatched ends on -hl and +hl
-      emitCylinder(toWorld, 0, -hl + 0.8, yLowEave, yPeak - 0.6, kHW * 0.92, 0.28, 8, 15, 0.90, true);
-      emitCylinder(toWorld, 0, hl - 0.8, yLowEave, yPeak - 0.6, kHW * 0.92, 0.28, 8, 15, 0.90, true);
-    } else if (inst.prefabId === 'tupinamba_oca_longhouse') {
-      // Tupinambá / Lokono Monumental Arched Palm-Thatch Oca Longhouse (28m x 9.6m):
-      // Continuous ground-to-ridge arched palm-thatch shell (kind 15) with 3 low side doorways & external sapling ribs.
-      const oHW = Math.min(5.0, hw);
-      const yPlinth = yGround + 0.05;
-      const ocaH = Math.max(5.8, inst.height);
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -oHW - 0.06, oHW + 0.06, yGround - 1.4, yPlinth, -hl - 0.06, hl + 0.06, 15, 0.78, false, 0.06);
-      beginSection('oca_arched_thatch_vault');
-      emitBox(toWorld, -oHW, oHW, yPlinth, yPlinth + ocaH * 0.38, -hl, hl, 15, 0.86, false, oHW * 0.08);
-      emitBox(toWorld, -oHW * 0.92, oHW * 0.92, yPlinth + ocaH * 0.38, yPlinth + ocaH * 0.72, -hl - 0.2, hl + 0.2, 15, 0.91, true, oHW * 0.18);
-      emitBox(toWorld, -oHW * 0.68, oHW * 0.68, yPlinth + ocaH * 0.72, yPlinth + ocaH, -hl - 0.15, hl + 0.15, 15, 0.95, true, oHW * 0.26);
-      // Ridge pole & 3 low arched side/end portals (kind 14)
-      beginSection('oca_ridge_and_portals');
-      emitBox(toWorld, -0.24, 0.24, yPlinth + ocaH - 0.1, yPlinth + ocaH + 0.28, -hl - 0.4, hl + 0.4, 10, 0.78, true);
-      for (const pz of [-hl * 0.55, 0, hl * 0.55]) {
-        emitBox(toWorld, -oHW - 0.08, oHW + 0.08, yPlinth, yPlinth + 1.65, pz - 0.72, pz + 0.72, 14, DARK_PORTAL_SHADE);
-      }
-    } else if (inst.prefabId === 'palafito_estuary_village') {
-      // Tierra Firme / Maracaibo / Warao Over-Water Lagoon Stilt Palafito Cluster:
-      // Twin elevated palm-thatch stilt dwellings connected by a timber catwalk over mangrove pilings + moored dugout piragua.
-      const yDeck = yGround + 1.35;
-      const hutW = Math.min(5.4, hw * 0.72);
-      const hutL = Math.min(7.2, hl * 0.42);
-      beginSection('palafito_stilt_pilings');
-      for (const sx of [-hutW * 0.8, 0, hutW * 0.8]) {
-        for (const sz of [-hl + 1.2, -hl * 0.35, 0, hl * 0.35, hl - 1.2]) {
-          emitCylinder(toWorld, sx, sz, yBase - 1.5, yDeck + 0.4, 0.20, 0.17, 6, 10, 0.68, true);
-        }
-      }
-      beginSection('palafito_platform_and_catwalk');
-      emitBox(toWorld, -hutW - 0.9, hutW + 0.9, yDeck - 0.26, yDeck, -hl, -hl + hutL * 2 + 0.8, 10, 0.80, true);
-      emitBox(toWorld, -hutW - 0.9, hutW + 0.9, yDeck - 0.26, yDeck, hl - hutL * 2 - 0.8, hl, 10, 0.80, true);
-      emitBox(toWorld, -1.25, 1.25, yDeck - 0.24, yDeck, -hl - 3.6, hl + 1.2, 10, 0.78, true);
-      // Twin palm-thatch huts on the stilt platforms
-      const yHutEave = yDeck + 2.45;
-      const yHutPeak = yHutEave + 2.35;
-      for (const zCenter of [-hl + hutL + 0.4, hl - hutL - 0.4]) {
-        beginSection('palafito_hut_walls_and_roof');
-        emitBox(toWorld, -hutW, hutW, yDeck, yHutEave, zCenter - hutL, zCenter + hutL, 12, 0.86);
-        emitBox(toWorld, -0.65, 0.65, yDeck, yHutEave - 0.45, zCenter - hutL - 0.08, zCenter + hutL + 0.08, 14, DARK_PORTAL_SHADE);
-        emitRoof(toWorld, -hutW, hutW, yHutEave, yHutPeak, zCenter - hutL, zCenter + hutL, 0.75, 0.28, 10, 15);
-      }
-    } else if (inst.prefabId === 'maya_limestone_shrine_and_na') {
-      // Postclassic Coastal Maya Stepped Whitewashed Limestone Shrine/Beacon Platform & Apsidal Thatched Nah
-      const pyrR = Math.min(hw * 0.78, 4.8);
-      const pyrZ = -hl * 0.36;
-      const yT1 = yGround + 1.45;
-      const yT2 = yT1 + 1.35;
-      const yT3 = yT2 + 1.25;
-      const ySanctTop = yT3 + 2.85;
-      beginSection('maya_stepped_pyramid_base');
-      emitBox(toWorld, -pyrR - 0.6, pyrR + 0.6, yBase, yT1, pyrZ - pyrR - 0.6, pyrZ + pyrR + 0.6, 11, 0.86, true, 0.35);
-      emitBox(toWorld, -pyrR * 0.78, pyrR * 0.78, yT1, yT2, pyrZ - pyrR * 0.78, pyrZ + pyrR * 0.78, 11, 0.90, true, 0.28);
-      emitBox(toWorld, -pyrR * 0.56, pyrR * 0.56, yT2, yT3, pyrZ - pyrR * 0.56, pyrZ + pyrR * 0.56, 12, 0.93, true, 0.20);
-      // Seaward stone balustrade stairway on -Z
-      beginSection('maya_shrine_stairway');
-      for (let st = 0; st < 6; st++) {
-        const sy0 = yGround + st * ((yT3 - yGround) / 6);
-        const sy1 = sy0 + (yT3 - yGround) / 6;
-        const sz0 = pyrZ - pyrR - 1.4 + st * 0.36;
-        emitBox(toWorld, -1.35, 1.35, sy0, sy1, sz0, pyrZ - pyrR * 0.4, 11, 0.88 + st * 0.01, true);
-      }
-      // Whitewashed flat-roofed masonry coastal shrine / navigation beacon temple at summit (Tulum / Cozumel style)
-      beginSection('maya_summit_sanctuary');
-      const sW = pyrR * 0.42;
-      emitBox(toWorld, -sW, sW, yT3, ySanctTop, pyrZ - sW * 0.85, pyrZ + sW * 0.85, 12, 0.95, true);
-      emitBox(toWorld, -sW - 0.18, sW + 0.18, ySanctTop - 0.38, ySanctTop + 0.12, pyrZ - sW, pyrZ + sW, 11, 0.92, true);
-      emitBox(toWorld, -0.68, 0.68, yT3, ySanctTop - 0.65, pyrZ - sW * 0.92, pyrZ - sW * 0.5, 14, DARK_PORTAL_SHADE);
-      // Apsidal palm-thatched Maya Nah house behind the shrine (+Z)
-      const naZ = hl * 0.44;
-      const naW = Math.min(3.8, hw * 0.68);
-      const naL = Math.min(3.6, hl * 0.36);
-      beginSection('maya_apsidal_thatched_nah');
-      emitBox(toWorld, -naW, naW, yGround - 0.6, yGround + 2.35, naZ - naL, naZ + naL, 12, 0.88);
-      emitRoof(toWorld, -naW, naW, yGround + 2.35, yGround + 4.95, naZ - naL, naZ + naL, 0.72, 0.28, 10, 15);
-    } else if (inst.prefabId === 'indigenous_canoe_landing') {
-      // Indigenous Canoe Beaching, Log Rollers, Upturned Birchbark / Dugout Canoes & Tidal Brushwood Fish Weir
-      const isBirchbark =
-        inst.cultureId === 'abenaki-algonquian' || inst.cultureId === 'mid-atlantic-algonquian';
-      const canoeKind = isBirchbark ? 17 : 10;
-      const yBeach = yGround + 0.06;
-      beginSection('canoe_landing_rollers');
-      for (let r = 0; r < 5; r++) {
-        const rz = -hl + 1.8 + r * 2.6;
-        emitCylinder(toWorld, -hw * 0.55, rz, yBeach - 0.14, yBeach + 0.14, 0.16, 0.16, 6, 10, 0.72, true);
-        emitCylinder(toWorld, hw * 0.55, rz, yBeach - 0.14, yBeach + 0.14, 0.16, 0.16, 6, 10, 0.72, true);
-      }
-      // 2 Beached 3D Canoes (Abenaki high-stem paper-birchbark canoes or Taíno/Kalinago carved mahogany cayucos/kanawas)
-      beginSection('beached_indigenous_canoes');
-      for (const [cx, cz, cLen, cBeam] of [[-hw * 0.42, -1.2, 6.2, 0.92], [hw * 0.42, 1.4, 6.8, 0.98]]) {
-        const cHL = cLen * 0.5;
-        const cHW = cBeam * 0.5;
-        // Hull midbody, tapered bow/stern, and upturned birchbark/dugout stems
-        emitBox(toWorld, cx - cHW, cx + cHW, yBeach + 0.12, yBeach + 0.64, cz - cHL * 0.65, cz + cHL * 0.65, canoeKind, 0.90, true);
-        emitBox(toWorld, cx - cHW * 0.62, cx + cHW * 0.62, yBeach + 0.18, yBeach + 0.86, cz - cHL, cz - cHL * 0.62, canoeKind, 0.93, true, cHW * 0.22);
-        emitBox(toWorld, cx - cHW * 0.62, cx + cHW * 0.62, yBeach + 0.18, yBeach + 0.86, cz + cHL * 0.62, cz + cHL, canoeKind, 0.93, true, cHW * 0.22);
-        // Dark spruce-root / pitched gunwale wales & cross thwarts
-        emitBox(toWorld, cx - cHW - 0.04, cx + cHW + 0.04, yBeach + 0.58, yBeach + 0.68, cz - cHL * 0.65, cz + cHL * 0.65, 10, 0.68, true);
-      }
-      // Seaward V-shaped tidal brushwood fish weir stakes & net rack (-hl .. -hl - 3.5)
-      beginSection('tidal_fish_weir_and_rack');
-      for (let s = 0; s < 9; s++) {
-        const u = (s / 8) * 2 - 1;
-        const wx = u * hw * 0.85;
-        const wz = -hl - 0.5 - (1 - Math.abs(u)) * 2.8;
-        emitCylinder(toWorld, wx, wz, yBase, yBeach + 1.35, 0.09, 0.07, 5, 10, 0.70, true);
-      }
-      emitBox(toWorld, -hw * 0.7, hw * 0.7, yBeach + 1.05, yBeach + 1.20, hl - 2.2, hl - 1.9, 10, 0.78, true);
-      emitCylinder(toWorld, -hw * 0.65, hl - 2.05, yBase, yBeach + 1.35, 0.10, 0.08, 5, 10, 0.74, true);
-      emitCylinder(toWorld, hw * 0.65, hl - 2.05, yBase, yBeach + 1.35, 0.10, 0.08, 5, 10, 0.74, true);
-    } else if (inst.prefabId === 'english_triangular_palisade_fort') {
-      // 1607 James Fort Enclosing Triangular Timber Palisade & Bulwarks:
-      // Large triangular split-oak stockade perimeter enclosing the core colonial settlement buildings,
-      // with 3 circular corner bulwark bastions, continuous solid timber curtain walls + closely spaced pointed palisade logs,
-      // interior raised timber firing banquettes & walers, 4 mounted demi-culverin cannon barrels, riverward gatehouse,
-      // and gate-flank guardhouse / magazine.
-      const yPlinth = yGround + 0.16;
-      const yWallTop = yPlinth + Math.max(4.4, inst.height * 0.68);
-      const yBulwarkDeck = yWallTop - 1.05;
-      // 3 triangular apex coordinates: SW river bulwark (-hw*0.86, -hl*0.72), SE river bulwark (+hw*0.86, -hl*0.72), N landward bulwark (0, +hl*0.86)
-      const fortPlan = enclosurePlan(inst);
-      const rBulwark = fortPlan.bastionRadius;
-      const emitAngledWall = (x0, z0, x1, z1, y0, y1, halfThick, kind, shade) => {
-        const dx = x1 - x0;
-        const dz = z1 - z0;
-        const segLen = Math.hypot(dx, dz) || 1;
-        const nx = (-dz / segLen) * halfThick;
-        const nz = (dx / segLen) * halfThick;
-        const b0L = toWorld(x0 + nx, y0, z0 + nz);
-        const b0R = toWorld(x0 - nx, y0, z0 - nz);
-        const b1L = toWorld(x1 + nx, y0, z1 + nz);
-        const b1R = toWorld(x1 - nx, y0, z1 - nz);
-        const t0L = toWorld(x0 + nx, y1, z0 + nz);
-        const t0R = toWorld(x0 - nx, y1, z0 - nz);
-        const t1L = toWorld(x1 + nx, y1, z1 + nz);
-        const t1R = toWorld(x1 - nx, y1, z1 - nz);
-        pushQuad(b0L, b1L, t1L, t0L, kind, shade);
-        pushQuad(b1R, b0R, t0R, t1R, kind, shade * 0.95);
-        pushQuad(t0L, t1L, t1R, t0R, kind, shade * 1.04);
-        pushQuad(b0R, b0L, t0L, t0R, kind, shade * 0.92);
-        pushQuad(b1L, b1R, t1R, t1L, kind, shade * 0.92);
-      };
-
-      beginSection('fort_earthwork_plinth');
-      // Perimeter earthen embankment berm along the 3 curtains (leaves the central parade/village ground open)
-      for (const [[x0, z0], [x1, z1]] of fortPlan.curtains) emitAngledWall(x0, z0, x1, z1, yGround - 0.45, yPlinth, 1.35, 10, 0.72);
-
-      // 3 Circular Corner Bulwark Bastions (earthen drum + timber revetment + solid log parapet + gun deck)
-      beginSection('corner_bulwark_bastions');
-      for (const [bastion, [bx, bz]] of fortPlan.bastions.entries()) {
-        emitCylinder(toWorld, bx, bz, yGround - 1.2, yBulwarkDeck, rBulwark + 0.35, rBulwark + 0.15, 12, 16, 0.78, true);
-        emitCylinder(toWorld, bx, bz, yBulwarkDeck - 0.25, yBulwarkDeck + 0.08, rBulwark + 0.12, rBulwark + 0.12, 12, 10, 0.82, true);
-        const nLogs = 24;
-        for (let p = 0; p < nLogs; p++) {
-          const a = (p / nLogs) * Math.PI * 2;
-          const aNext = (((p + 1) % nLogs) / nLogs) * Math.PI * 2;
-          const lx = bx + Math.cos(a) * rBulwark;
-          const lz = bz + Math.sin(a) * rBulwark;
-          const nx = bx + Math.cos(aNext) * rBulwark;
-          const nz = bz + Math.sin(aNext) * rBulwark;
-          const isEmbrasure = bastionBayIsEmbrasure(fortPlan, bastion, p, nLogs);
-          // Continuous lower breastwork wall around the bulwark drum (lowered at embrasure sills so barrels clear cleanly)
-          emitAngledWall(lx, lz, nx, nz, yBulwarkDeck, yBulwarkDeck + (isEmbrasure ? 0.52 : 0.72), 0.18, 10, 0.76);
-          // Leave cannon embrasure openings on every 6th bay, except where a curtain joins
-          if (isEmbrasure) continue;
-          emitAngledWall(lx, lz, nx, nz, yBulwarkDeck + 0.70, yWallTop + 0.28, 0.16, 10, 0.78);
-          emitCylinder(toWorld, lx, lz, yGround - 0.8, yWallTop + 0.45 + (p % 3) * 0.14, 0.28, 0.14, 6, 10, 0.72 + (p % 2) * 0.05, true);
-        }
-      }
-
-      // 3 Triangular Palisade Curtain Walls (Riverward curtain bSW->bSE with central gate; West curtain bSW->bN; East curtain bSE->bN)
-      beginSection('triangular_palisade_curtains');
-      const emitPalisadeLine = (x0, z0, x1, z1, leaveCenterGate) => {
-        const dx = x1 - x0;
-        const dz = z1 - z0;
-        const dist = Math.hypot(dx, dz) || 1;
-        // Solid continuous split-oak stockade curtain wall, interior horizontal waler beams, and raised firing banquette step
-        const emitCurtainSpan = (u0, u1) => {
-          const sx0 = x0 + dx * u0, sz0 = z0 + dz * u0;
-          const sx1 = x0 + dx * u1, sz1 = z0 + dz * u1;
-          // Continuous solid split-oak curtain wall connecting the posts and bulwarks
-          emitAngledWall(sx0, sz0, sx1, sz1, yGround - 0.38, yWallTop - 0.16, 0.24, 10, 0.77);
-          // Upper and lower horizontal oak waler binder beams
-          emitAngledWall(sx0, sz0, sx1, sz1, yPlinth + 1.35, yPlinth + 1.58, 0.31, 10, 0.68);
-          emitAngledWall(sx0, sz0, sx1, sz1, yWallTop - 0.82, yWallTop - 0.58, 0.31, 10, 0.68);
-          // Interior raised timber firing banquette along the inside of the curtain wall
-          const inX = (0 - (sx0 + sx1) * 0.5);
-          const inZ = (0 - (sz0 + sz1) * 0.5);
-          let perpX = -dz / dist, perpZ = dx / dist;
-          if (perpX * inX + perpZ * inZ < 0) {
-            perpX = -perpX;
-            perpZ = -perpZ;
-          }
-          const bx0 = sx0 + perpX * 0.72, bz0 = sz0 + perpZ * 0.72;
-          const bx1 = sx1 + perpX * 0.72, bz1 = sz1 + perpZ * 0.72;
-          emitAngledWall(bx0, bz0, bx1, bz1, yGround - 0.25, yPlinth + 1.05, 0.52, 10, 0.74);
-        };
-        const gateHalfU = Math.min(0.08, fortPlan.gateHalfWidth / dist);
-        // A flank's gate stands at the middle of the line between the bulwarks, as a river curtain's does.
-        if (leaveCenterGate) {
-          emitCurtainSpan(0, 0.5 - gateHalfU);
-          emitCurtainSpan(0.5 + gateHalfU, 1);
-        } else {
-          emitCurtainSpan(0, 1);
-        }
-        // Closely spaced pointed vertical palisade logs along the curtain, from the edge of one bulwark to the next
-        const steps = Math.max(12, Math.round(dist / 0.64));
-        for (let s = 0; s <= steps; s++) {
-          const u = s / steps;
-          if (leaveCenterGate && Math.abs(u - 0.5) < gateHalfU) continue;
-          const px = x0 + dx * u;
-          const pz = z0 + dz * u;
-          const hJit = ((s * 5) % 4) * 0.12;
-          emitCylinder(toWorld, px, pz, yGround - 0.65, yWallTop + 0.18 + hJit, 0.26, 0.13, 6, 10, 0.73 + (s % 3) * 0.04, true);
-        }
-      };
-      fortPlan.curtains.forEach(([[ax, az], [bx, bz]], index) => emitPalisadeLine(ax, az, bx, bz, index === fortPlan.gateCurtain));
-
-      // Timber Gatehouse & Watch-Bell Frame over the gate, built square to its curtain
-      beginSection('river_gatehouse_and_watchtower');
-      const gateFrame = (lx, ly, lz) => toWorld(fortPlan.gate.x + fortPlan.gate.ux * lx - fortPlan.gate.nx * lz, ly, fortPlan.gate.z + fortPlan.gate.uz * lx - fortPlan.gate.nz * lz);
-      emitBox(gateFrame, -2.4, 2.4, yPlinth, yWallTop + 1.8, -1.2, 1.2, 10, 0.78, true);
-      emitBox(gateFrame, -1.25, 1.25, yPlinth, yWallTop - 0.9, -1.3, 1.3, 14, DARK_PORTAL_SHADE);
-      emitRoof(gateFrame, -2.7, 2.7, yWallTop + 1.8, yWallTop + 3.4, -1.5, 1.5, 0.45, 0.35, 10, 10);
-
-      // Mounted Demi-Culverin / Saker Ordnance Guns on Timber Carriages, sitting flush on the raised bulwark timber decks
-      for (const gun of fortPlan.guns) emitFortCannon(toWorld, gun.x, yBulwarkDeck + 0.08, gun.z, gun.nx, gun.nz, 0.94);
-
-      // Gate-Flank Mud-and-Stud Guardhouse / Corps de Garde & Powder Magazine just inside the river gatehouse
-      beginSection('interior_guardhouse_and_magazine');
-      const ghX = fortPlan.guardhouse.x;
-      const ghZ = fortPlan.guardhouse.z;
-      const ghW = fortPlan.guardhouse.halfWidth;
-      const ghL = fortPlan.guardhouse.halfLength;
-      const yGhEave = yPlinth + 2.75;
-      const yGhPeak = yGhEave + 2.25;
-      emitBox(toWorld, ghX - ghW, ghX + ghW, yPlinth, yGhEave, ghZ - ghL, ghZ + ghL, 12, 0.86, true);
-      for (const sx of [ghX - ghW - 0.06, ghX, ghX + ghW + 0.06]) {
-        emitBox(toWorld, sx - 0.14, sx + 0.14, yPlinth, yGhEave, ghZ - ghL - 0.04, ghZ + ghL + 0.04, 10, 0.70, true);
-      }
-      emitRoof(toWorld, ghX - ghW - 0.25, ghX + ghW + 0.25, yGhEave, yGhPeak, ghZ - ghL - 0.05, ghZ + ghL + 0.05, 0.55, 0.32, 10, 10);
-    } else if (inst.prefabId === 'english_half_timber_hall') {
-      // 17th-Century English Half-Timbered Church & Company Storehouse (Jamestown 1608/1617 Church & Magazine, Plymouth Meetinghouse):
-      // Fieldstone & Tudor brick plinth, buff wattle-and-daub infill walls with dark-oak box framing & Jacobean diagonal braces,
-      // projecting timber entry porch, massive end brick chimney stack, leaded casement windows, and steep 52° thatch/shingle gable roof.
-      const hHW = Math.min(5.4, hw);
-      const yPlinth = yGround + 0.52;
-      const yEave = yPlinth + Math.max(3.6, inst.height * 0.52);
-      const yPeak = yEave + Math.max(3.4, inst.roofPitch || 3.8);
-
-      beginSection('brick_and_cobble_plinth');
-      emitBox(toWorld, -hHW - 0.28, hHW + 0.28, yGround - 2.2, yPlinth, -hl - 0.28, hl + 0.28, 13, 0.82, false, 0.25);
-
-      beginSection('wattle_and_daub_infill_walls');
-      emitBox(toWorld, -hHW, hHW, yPlinth, yEave, -hl, hl, 12, 0.88);
-
-      // Exposed Dark-Oak Half-Timber Framing (vertical posts, horizontal wall-plates & mid-rails, windows)
-      beginSection('exposed_oak_timber_framing');
-      const nBays = snapBays(inst.length - 1.2, 3.2, 5);
-      const baySpan = (inst.length - 1.2) / nBays;
-      // Horizontal sill beam, mid-girt rail, and eave wall-plate along both long walls
-      for (const [y0, y1] of [
-        [yPlinth, yPlinth + 0.24],
-        [yPlinth + (yEave - yPlinth) * 0.48, yPlinth + (yEave - yPlinth) * 0.48 + 0.22],
-        [yEave - 0.26, yEave],
-      ]) {
-        emitBox(toWorld, -hHW - 0.09, hHW + 0.09, y0, y1, -hl - 0.09, hl + 0.09, 10, 0.68, true);
-      }
-      for (let b = 0; b <= nBays; b++) {
-        const bz = -hl + 0.6 + b * baySpan;
-        emitBox(toWorld, -hHW - 0.10, -hHW + 0.14, yPlinth, yEave, bz - 0.14, bz + 0.14, 10, 0.66, true);
-        emitBox(toWorld, hHW - 0.14, hHW + 0.10, yPlinth, yEave, bz - 0.14, bz + 0.14, 10, 0.66, true);
-        if (b < nBays) {
-          const cz = bz + baySpan * 0.5;
-          // Shuttered casement windows in each bay
-          emitBox(toWorld, -hHW - 0.08, hHW + 0.08, yPlinth + 1.15, yEave - 0.65, cz - 0.46, cz + 0.46, 14, 0.42);
-          emitBox(toWorld, -hHW - 0.12, hHW + 0.12, yPlinth + 1.05, yPlinth + 1.18, cz - 0.56, cz + 0.56, 10, 0.72, true);
-        }
-      }
-      // Gable-end oak king-post & collar-beam timber framing
-      for (const gz of [-hl - 0.08, hl + 0.08]) {
-        emitBox(toWorld, -0.16, 0.16, yPlinth, yPeak - 0.2, gz - 0.08, gz + 0.08, 10, 0.66, true);
-        emitBox(toWorld, -hHW * 0.55, -hHW * 0.55 + 0.22, yPlinth, yEave + (yPeak - yEave) * 0.45, gz - 0.08, gz + 0.08, 10, 0.66, true);
-        emitBox(toWorld, hHW * 0.55 - 0.22, hHW * 0.55, yPlinth, yEave + (yPeak - yEave) * 0.45, gz - 0.08, gz + 0.08, 10, 0.66, true);
-      }
-
-      // Projecting Timber Entry Porch / Belfry Vestibule on -Z gable front & Tudor Brick Chimney Stack on +Z gable
-      beginSection('porch_and_tudor_brick_chimney');
-      emitBox(toWorld, -1.65, 1.65, yGround - 1.2, yEave - 0.4, -hl - 2.1, -hl, 12, 0.86, true);
-      emitBox(toWorld, -1.72, 1.72, yPlinth, yEave - 0.4, -hl - 2.16, -hl - 1.92, 10, 0.68, true);
-      emitBox(toWorld, -0.85, 0.85, yPlinth, yPlinth + 2.15, -hl - 2.22, -hl - 1.85, 14, 0.20);
-      emitRoof(toWorld, -1.85, 1.85, yEave - 0.4, yEave + 1.35, -hl - 2.25, -hl + 0.1, 0.35, 0, 12, 10);
-      // Stepped Virginia red-brick chimney stack at +hl
-      emitBox(toWorld, -1.35, 1.35, yGround - 1.4, yEave + 0.6, hl - 0.2, hl + 1.35, 13, 0.86, true, 0.18);
-      emitBox(toWorld, -0.95, 0.95, yEave + 0.6, yPeak + 1.45, hl + 0.05, hl + 1.15, 13, 0.90, true);
-      emitCylinder(toWorld, -0.42, hl + 0.6, yPeak + 1.45, yPeak + 2.25, 0.28, 0.24, 6, 13, 0.94, true);
-      emitCylinder(toWorld, 0.42, hl + 0.6, yPeak + 1.45, yPeak + 2.25, 0.28, 0.24, 6, 13, 0.94, true);
-
-      // Steep 52° Reed-Thatch / Riven-Oak Shingle Gable Roof (kind 10) with gable end walls (kind 12)
-      beginSection('steep_english_gable_roof');
-      emitRoof(toWorld, -hHW, hHW, yEave, yPeak, -hl, hl, 0.68, 0, 12, 10);
-      emitBox(toWorld, -0.20, 0.20, yPeak - 0.12, yPeak + 0.26, -hl - 0.55, hl + 0.55, 10, 0.74, true);
-    } else if (inst.prefabId === 'english_timber_cottage') {
-      // 17th-Century English Colonial Clapboard & Wattle-and-Daub Steep-Gable Cottage (Jamestown Mud-and-Stud / Plymouth House):
-      // Fieldstone sill, riven oak weatherboard / wattle-and-daub lower story, jettied timber-framed gable,
-      // end cobble-and-brick chimney stack, shuttered casements, and steep thatch/wood-shingle gable roof.
-      const cHW = Math.min(4.3, hw);
-      const yPlinth = yGround + 0.42;
-      const yEave = yPlinth + Math.max(2.85, inst.height * 0.50);
-      const yPeak = yEave + Math.max(2.85, inst.roofPitch || 3.2);
-
-      beginSection('fieldstone_sill_plinth');
-      emitBox(toWorld, -cHW - 0.22, cHW + 0.22, yGround - 2.0, yPlinth, -hl - 0.22, hl + 0.22, 11, 0.80, false, 0.22);
-
-      beginSection('cottage_wattle_and_clapboard_walls');
-      emitBox(toWorld, -cHW, cHW, yPlinth, yEave, -hl, hl, 12, 0.86);
-
-      beginSection('cottage_oak_posts_and_openings');
-      emitBox(toWorld, -cHW - 0.14, cHW + 0.14, yEave - 0.24, yEave + 0.06, -hl - 0.24, hl + 0.24, 10, 0.68, true);
-      const nBays = snapBays(inst.length - 1.0, 3.0, 3);
-      const baySpan = (inst.length - 1.0) / nBays;
-      for (let b = 0; b <= nBays; b++) {
-        const bz = -hl + 0.5 + b * baySpan;
-        emitBox(toWorld, -cHW - 0.08, -cHW + 0.12, yPlinth, yEave, bz - 0.12, bz + 0.12, 10, 0.66, true);
-        emitBox(toWorld, cHW - 0.12, cHW + 0.08, yPlinth, yEave, bz - 0.12, bz + 0.12, 10, 0.66, true);
-        if (b < nBays) {
-          const cz = bz + baySpan * 0.5;
-          if (b === 1) {
-            // Plank batten doorway with timber hood on -X side
-            emitBox(toWorld, -cHW - 0.08, -cHW + 0.14, yPlinth, yPlinth + 2.05, cz - 0.62, cz + 0.62, 14, 0.20);
-            emitBox(toWorld, -cHW - 0.48, -cHW + 0.05, yPlinth + 2.02, yPlinth + 2.24, cz - 0.82, cz + 0.82, 10, 0.72, true);
-            emitBox(toWorld, cHW - 0.12, cHW + 0.08, yPlinth + 0.95, yEave - 0.55, cz - 0.42, cz + 0.42, 14, 0.42);
-          } else {
-            emitBox(toWorld, -cHW - 0.08, cHW + 0.08, yPlinth + 0.95, yEave - 0.55, cz - 0.42, cz + 0.42, 14, 0.42);
-            emitBox(toWorld, -cHW - 0.12, cHW + 0.12, yPlinth + 0.86, yPlinth + 0.98, cz - 0.50, cz + 0.50, 10, 0.72, true);
-          }
-        }
-      }
-
-      // End Cobble-and-Brick Hearth Chimney on +hl gable
-      beginSection('cottage_hearth_chimney');
-      emitBox(toWorld, -1.15, 1.15, yGround - 1.4, yEave + 0.35, hl - 0.15, hl + 1.15, 11, 0.82, true, 0.18);
-      emitBox(toWorld, -0.78, 0.78, yEave + 0.35, yPeak + 1.15, hl + 0.05, hl + 0.95, 13, 0.88, true);
-
-      // Steep Reed-Thatch / Riven-Clapboard Gable Roof (kind 10) with gable end walls (kind 12)
-      beginSection('cottage_steep_thatch_roof');
-      emitRoof(toWorld, -cHW, cHW, yEave, yPeak, -hl, hl, 0.58, 0, 12, 10);
-      emitBox(toWorld, -0.18, 0.18, yPeak - 0.10, yPeak + 0.22, -hl - 0.45, hl + 0.45, 10, 0.74, true);
     } else {
-      // Bay-Iterated Spanish Colonial Residential & Civic Blocks:
-      // Dispatches cleanly between:
-      //  - Primitive #1 (`single_nave_solar` or narrow footprint `width <= 13.2m`): Solid single-ridge hall (no crushed courtyard slit!)
-      //  - Primitive #2 (`l_wing_u_wing_solar` or medium footprint `13.2m < width < 20.5m`): Constant 5.8m-deep L/U wings + walled corral
-      //  - Primitive #3 (`modular_patio_cloister` or wide `colonial_town_block` `width >= 20.5m`): 4 constant 5.8m-deep wings + arcaded courtyard
-      const yPlinth = yGround + 0.68;
-      const yMid = yPlinth + (yTop - yPlinth) * 0.50;
-      beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.32, hw + 0.32, yBase, yPlinth, -hl - 0.32, hl + 0.32, 11, 0.80);
-
-      const isSingleNave =
-        inst.prefabId === 'single_nave_solar' ||
-        (inst.prefabId !== 'modular_patio_cloister' && inst.prefabId !== 'l_wing_u_wing_solar' && inst.width <= 13.2);
-      const isCloister =
-        inst.prefabId === 'modular_patio_cloister' ||
-        (inst.prefabId === 'colonial_town_block' && inst.width >= 20.5 && inst.length >= 21.5);
-
-      if (isSingleNave) {
-        // Primitive #1: Casa de Una Nave / Barracón (Single-Span Rectangular Hall with Iterated 3.8m Facade Bays)
-        const spanW = Math.min(12.8, inst.width);
-        const sHW = spanW * 0.5;
-        beginSection('single_nave_walls');
-        emitBox(toWorld, -sHW, sHW, yPlinth, yTop, -hl, hl, 12, 0.90);
-        emitBox(toWorld, -sHW - 0.15, sHW + 0.15, yMid - 0.18, yMid + 0.10, -hl - 0.15, hl + 0.15, 11, 0.86, true);
-        emitCornerQuoins(toWorld, -sHW, sHW, yPlinth, yTop, -hl, hl, 5);
-
-        const nBaysZ = snapBays(inst.length - 1.2, 3.8, 3);
-        const baySpanZ = (inst.length - 1.2) / nBaysZ;
-        const doorBay = Math.floor(nBaysZ * 0.5);
-        for (let b = 0; b < nBaysZ; b++) {
-          const bz = -hl + 0.6 + (b + 0.5) * baySpanZ;
-          if (b === doorBay) {
-            emitStoneArchZ(toWorld, -sHW, -1, yPlinth, yPlinth + 2.05, Math.min(1.08, baySpanZ * 0.32), bz, 5);
-            emitFacadeBayZ(toWorld, -sHW, -1, yPlinth, yMid, yTop, bz, true, false);
-          } else {
-            emitFacadeBayZ(toWorld, -sHW, -1, yPlinth, yMid, yTop, bz, true, true);
-          }
-          emitFacadeBayZ(toWorld, sHW, 1, yPlinth, yMid, yTop, bz, true, true);
-        }
-        const nBaysX = snapBays(spanW - 1.0, 3.6, 2);
-        const baySpanX = (spanW - 1.0) / nBaysX;
-        for (let bxIdx = 0; bxIdx < nBaysX; bxIdx++) {
-          const bx = -sHW + 0.5 + (bxIdx + 0.5) * baySpanX;
-          emitFacadeBayX(toWorld, -hl, -1, yPlinth, yMid, yTop, bx, true);
-          emitFacadeBayX(toWorld, hl, 1, yPlinth, yMid, yTop, bx, true);
-        }
-        emitBalustradeZ(toWorld, -sHW, -1, yMid + 0.08, -hl + 0.9, hl - 0.9);
-        emitRoof(toWorld, -sHW, sHW, yTop, yTop + roofRise(spanW), -hl, hl, 0.68, 0.22, 12);
-      } else if (isCloister) {
-        // Primitive #3: Casa de Patio / Convento Claustral (4 Constant-Depth 5.8m Wings + Iterated Arcaded Courtyard)
-        const wingD = Math.min(WING_DEPTH, Math.max(4.6, Math.min(inst.width, inst.length) * 0.28));
-        const wingPeak = yTop + roofRise(wingD);
-        const ix0 = -hw + wingD, ix1 = hw - wingD;
-        const iz0 = -hl + wingD, iz1 = hl - wingD;
-
-        // Cobbled central courtyard floor (kind 16) + octagonal stone patio fountain (Fuente de Patio)
-        beginSection('courtyard_floor_and_fountain');
-        emitBox(toWorld, ix0 + 0.04, ix1 - 0.04, yPlinth - 0.12, yPlinth + 0.04, iz0 + 0.04, iz1 - 0.04, 16, 0.84, true);
-        emitCylinder(toWorld, 0, 0, yPlinth + 0.04, yPlinth + 0.88, 1.45, 1.55, 8, 11, 0.88, true);
-        emitCylinder(toWorld, 0, 0, yPlinth + 0.88, yPlinth + 2.35, 0.34, 0.24, 8, 11, 0.92, true);
-
-        // 4 Perimeter Wings with constant wingD thickness and constant-angle roofs
-        beginSection('cloister_west_wing_walls');
-        emitBox(toWorld, -hw, ix0, yPlinth, yTop, -hl, hl, 12, 0.90);
-        beginSection('cloister_east_wing_walls');
-        emitBox(toWorld, ix1, hw, yPlinth, yTop, -hl, hl, 12, 0.89);
-        beginSection('cloister_north_wing_walls');
-        emitBox(toWorld, ix0, ix1, yPlinth, yTop, -hl, iz0, 12, 0.88);
-        beginSection('cloister_south_wing_walls');
-        emitBox(toWorld, ix0, ix1, yPlinth, yTop, iz1, hl, 12, 0.88);
-        emitCornerQuoins(toWorld, -hw, hw, yPlinth, yTop, -hl, hl, 5);
-
-        emitRoof(toWorld, -hw, ix0, yTop, wingPeak, -hl, hl, 0.62, 0.20, 12);
-        emitRoof(toWorld, ix1, hw, yTop, wingPeak, -hl, hl, 0.62, 0.20, 12);
-        emitRoofX(toWorld, -hw, hw, yTop, wingPeak, -hl, iz0, 0.62, 0.20, 12);
-        emitRoofX(toWorld, -hw, hw, yTop, wingPeak, iz1, hl, 0.62, 0.20, 12);
-
-        // Corner Mirador Watch-Turret (Torre Mirador) rising 2.6m above the southwest corner
-        const yMirador = yTop + 2.6;
-        beginSection('mirador_watch_turret');
-        emitBox(toWorld, -hw, ix0, yTop, yMirador, -hl, iz0, 12, 0.92);
-        emitStoneArchZ(toWorld, -hw, -1, yTop + 0.3, yMirador - 0.9, 0.65, (-hl + iz0) * 0.5, 5);
-        emitRoof(toWorld, -hw, ix0, yMirador, yMirador + roofRise(wingD, 0.48), -hl, iz0, 0.58, 0.45, 12);
-
-        // Iterate 3.6m semicircular stone arches around all 4 interior courtyard walls (ground & upper cloister galleries)
-        const patioL = Math.max(4.0, iz1 - iz0);
-        const patioW = Math.max(4.0, ix1 - ix0);
-        const nPatioZ = snapBays(patioL, 3.6, 2);
-        const pSpanZ = patioL / nPatioZ;
-        const pArchRZ = Math.min(1.12, pSpanZ * 0.34);
-        for (let b = 0; b < nPatioZ; b++) {
-          const pz = iz0 + (b + 0.5) * pSpanZ;
-          emitStoneArchZ(toWorld, ix0, 1, yPlinth, yPlinth + 1.95, pArchRZ, pz, 5);
-          emitStoneArchZ(toWorld, ix1, -1, yPlinth, yPlinth + 1.95, pArchRZ, pz, 5);
-          emitStoneArchZ(toWorld, ix0, 1, yMid, yMid + 1.65, pArchRZ * 0.88, pz, 5);
-          emitStoneArchZ(toWorld, ix1, -1, yMid, yMid + 1.65, pArchRZ * 0.88, pz, 5);
-        }
-        const nPatioX = snapBays(patioW, 3.6, 2);
-        const pSpanX = patioW / nPatioX;
-        const pArchRX = Math.min(1.12, pSpanX * 0.34);
-        for (let b = 0; b < nPatioX; b++) {
-          const px = ix0 + (b + 0.5) * pSpanX;
-          emitStoneArchX(toWorld, iz0, 1, yPlinth, yPlinth + 1.95, pArchRX, px, 5);
-          emitStoneArchX(toWorld, iz1, -1, yPlinth, yPlinth + 1.95, pArchRX, px, 5);
-        }
-
-        // Iterate 3.8m exterior street facade bays along Z and X
-        const nExtZ = snapBays(inst.length - 1.4, 3.8, 4);
-        const extSpanZ = (inst.length - 1.4) / nExtZ;
-        const midBayZ = Math.floor(nExtZ * 0.5);
-        for (let b = 0; b < nExtZ; b++) {
-          const bz = -hl + 0.7 + (b + 0.5) * extSpanZ;
-          const isDoorBay = b === midBayZ;
-          if (isDoorBay) {
-            emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.15, 1.18, bz, 6);
-            emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.15, 1.18, bz, 6);
-          }
-          emitFacadeBayZ(toWorld, -hw, -1, yPlinth, yMid, yTop, bz, true, !isDoorBay);
-          emitFacadeBayZ(toWorld, hw, 1, yPlinth, yMid, yTop, bz, true, !isDoorBay);
-        }
-        const nExtX = snapBays(inst.width - 1.4, 3.8, 3);
-        const extSpanX = (inst.width - 1.4) / nExtX;
-        for (let b = 0; b < nExtX; b++) {
-          const bx = -hw + 0.7 + (b + 0.5) * extSpanX;
-          emitFacadeBayX(toWorld, -hl, -1, yPlinth, yMid, yTop, bx, true);
-          emitFacadeBayX(toWorld, hl, 1, yPlinth, yMid, yTop, bx, true);
-        }
-        emitBalustradeZ(toWorld, -hw, -1, yMid + 0.08, -hl + 1.0, hl - 1.0);
-        emitBalustradeZ(toWorld, hw, 1, yMid + 0.08, -hl + 1.0, hl - 1.0);
-      } else {
-        // Primitive #2: Casa Solariega en L / U con Corral (Constant 5.8m-Deep L-Wing or U-Wing + Walled Corner Patio)
-        const wingD = Math.min(WING_DEPTH, Math.max(4.8, inst.width * 0.36));
-        const mainPeak = yTop + 0.85 + roofRise(wingD);
-        const crossEave = yTop - 0.25;
-        const crossPeak = crossEave + roofRise(wingD);
-        const ix0 = -hw + wingD;
-        const iz0 = -hl + wingD;
-        const iz1 = hl - wingD;
-        const eastD = Math.min(4.2, Math.max(3.2, (hw - ix0) * 0.38));
-
-        // Cobbled side patio floor (kind 16) + stone wellhead (brocal de pozo)
-        beginSection('courtyard_floor_and_wellhead');
-        emitBox(toWorld, ix0 + 0.04, hw - eastD + 0.04, yPlinth - 0.12, yPlinth + 0.04, iz0 + 0.04, iz1 - 0.04, 16, 0.83, true);
-        emitCylinder(toWorld, (ix0 + hw - eastD) * 0.5, (iz0 + iz1) * 0.5, yPlinth + 0.04, yPlinth + 1.05, 0.88, 0.92, 8, 11, 0.86, true);
-
-        // Main street wing [-hw, ix0] running full length [-hl, hl]
-        beginSection('main_street_wing_walls');
-        emitBox(toWorld, -hw, ix0, yPlinth, yTop + 0.85, -hl, hl, 12, 0.90);
-        emitCornerQuoins(toWorld, -hw, ix0, yPlinth, yTop + 0.85, -hl, hl, 5);
-        emitRoof(toWorld, -hw, ix0, yTop + 0.85, mainPeak, -hl, hl, 0.65, 0.22, 12);
-
-        // North cross-wing [ix0 - 0.6, hw] × [-hl, iz0]
-        beginSection('north_cross_wing_walls');
-        emitBox(toWorld, ix0 - 0.6, hw, yPlinth, crossEave, -hl, iz0, 12, 0.87);
-        emitRoofX(toWorld, ix0 - 0.6, hw, crossEave, crossPeak, -hl, iz0, 0.60, 0.22, 12);
-
-        // South cross-wing [ix0 - 0.6, hw] × [iz1, hl] completing the U-plan
-        beginSection('south_cross_wing_walls');
-        emitBox(toWorld, ix0 - 0.6, hw, yPlinth, crossEave, iz1, hl, 12, 0.87);
-        emitRoofX(toWorld, ix0 - 0.6, hw, crossEave, crossPeak, iz1, hl, 0.60, 0.22, 12);
-
-        // Roofed east carriage gallery & zaguán portal closing the courtyard
-        beginSection('east_courtyard_wall');
-        emitBox(toWorld, hw - eastD, hw, yPlinth, crossEave - 0.45, iz0, iz1, 12, 0.86);
-        emitRoof(toWorld, hw - eastD, hw, crossEave - 0.45, crossEave - 0.45 + roofRise(eastD), iz0 - 0.4, iz1 + 0.4, 0.55, 0.18, 12);
-        emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.0, 1.08, (iz0 + iz1) * 0.5, 5);
-
-        // Iterate 3.8m street facade bays on -hw and interior patio colonnade arches on ix0
-        const nBaysZ = snapBays(inst.length - 1.2, 3.8, 3);
-        const baySpanZ = (inst.length - 1.2) / nBaysZ;
-        const midBay = Math.floor(nBaysZ * 0.5);
-        for (let b = 0; b < nBaysZ; b++) {
-          const bz = -hl + 0.6 + (b + 0.5) * baySpanZ;
-          const isDoorBay = b === midBay;
-          if (isDoorBay) {
-            emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.15, 1.12, bz, 5);
-          }
-          emitFacadeBayZ(toWorld, -hw, -1, yPlinth, yMid, yTop + 0.85, bz, true, !isDoorBay);
-          if (bz > iz0 + 0.8 && bz < iz1 - 0.8) {
-            emitStoneArchZ(toWorld, ix0, 1, yPlinth, yPlinth + 1.95, Math.min(1.08, baySpanZ * 0.32), bz, 5);
-          }
-        }
-        emitBalustradeZ(toWorld, -hw, -1, yMid + 0.08, -hl + 0.9, hl - 0.9);
-      }
+      throw Error(`No builder draws ${inst.prefabId}`);
     }
     flushSection();
   }
 
-  // Foreshore palms are drawn by the forest, which seeds real palms at these places. Shot still strikes them here.
-  if (palms instanceof Float32Array && palms.length >= 8) portPlacement.palms = palms;
-
   const outVertices = new Float32Array(verts);
   const outIndices = new Uint32Array(indices);
-  const instCount = portPlacement?.instances?.length ?? 0;
-  const partAssembly = instCount
-    ? createPartAssemblyCatalog({
-        domain: 'building',
-        modelId: portPlacement.regionId ?? 'port',
-        vertices: outVertices,
-        vertexStride: 8,
-        indices: outIndices,
-        groups,
-      })
-    : null;
-
-  return {
-    vertices: outVertices,
-    indices: outIndices,
-    groups,
-    partAssembly,
-    instanceCount: instCount,
-    triangleCount: indices.length / 3,
-    bounds,
-  };
-}
-
-const BUILDING_PARTS_CACHE = new Map();
-
-export function getBuildingParts(prefabId, options = {}) {
-  let prefab = PORT_PREFABS[prefabId];
-  const cairnTmpl = options?.cairnSpec || CAIRN_ARCHITECTURAL_TEMPLATES[prefabId] || null;
-  if (!prefab && cairnTmpl) {
-    prefab = {
-      id: prefabId,
-      label: cairnTmpl.name || prefabId,
-      length: cairnTmpl.length ?? 34,
-      width: cairnTmpl.width ?? 22,
-      height: cairnTmpl.height ?? 18,
-      foundationDepth: cairnTmpl.foundationDepth ?? 3.5,
-      materialKind: cairnTmpl.materialKind ?? 11,
-      roofPitch: cairnTmpl.roofPitch ?? 3.5,
-      waterfront: cairnTmpl.waterfront ?? false,
-      cairnSpec: cairnTmpl,
-    };
-  }
-  if (!prefab) {
-    throw new Error(`Unknown port building prefab: ${prefabId}`);
-  }
-  const hasCustomOptions =
-    options &&
-    (options.length !== undefined ||
-      options.width !== undefined ||
-      options.height !== undefined ||
-      options.foundationDepth !== undefined ||
-      options.materialKind !== undefined ||
-      options.roofPitch !== undefined ||
-      options.cairnSpec !== undefined);
-  if (!hasCustomOptions && BUILDING_PARTS_CACHE.has(prefab.id)) {
-    return BUILDING_PARTS_CACHE.get(prefab.id);
-  }
-  const inst = {
-    id: prefab.id,
-    prefabId: prefab.id,
-    label: prefab.label,
-    x: 0,
-    y: 0,
-    z: 0,
-    yaw: 0,
-    length: options.length ?? prefab.length,
-    width: options.width ?? prefab.width,
-    height: options.height ?? prefab.height,
-    foundationDepth: options.foundationDepth ?? prefab.foundationDepth,
-    materialKind: options.materialKind ?? prefab.materialKind,
-    roofPitch: options.roofPitch ?? prefab.roofPitch,
-    waterfront: options.waterfront ?? prefab.waterfront,
-    cairnSpec: options.cairnSpec ?? prefab.cairnSpec ?? null,
-    fromOrthophotoFootprint: true,
-  };
-  const geo = buildPortPrefabGeometry(
-    {
-      regionId: prefab.id,
-      singleBuildingPrefab: true,
-      instances: [inst],
-    },
-    null,
-    null
-  );
-  const adapter = Object.freeze({
-    id: prefab.id,
-    prefabId: prefab.id,
-    label: prefab.label,
-    domain: 'building',
-    dimensions: Object.freeze({
-      length: inst.length,
-      width: inst.width,
-      height: inst.height,
-      foundationDepth: inst.foundationDepth,
-      roofPitch: inst.roofPitch,
-    }),
-    materialKind: inst.materialKind,
-    waterfront: inst.waterfront,
-    bounds: geo.bounds,
-    vertexStride: 8,
-    vertexCount: geo.vertices.length / 8,
-    triangleCount: geo.triangleCount,
-    vertices: geo.vertices,
-    indices: geo.indices,
-    groups: geo.groups,
-    partAssembly: geo.partAssembly,
-    subAssemblies: BUILDING_SUB_ASSEMBLIES,
-    cutawayModes: PART_CUTAWAY_MODES,
-    createAssemblyState: (stateOpts = {}) => createPartAssemblyState(geo.partAssembly, stateOpts),
-    locatePartAtLocalPoint: (localPoint, locateOpts = {}) =>
-      locatePartAtLocalPoint(geo.partAssembly, localPoint, locateOpts),
-  });
-  if (!hasCustomOptions) {
-    BUILDING_PARTS_CACHE.set(prefab.id, adapter);
-  }
-  return adapter;
+  const partAssembly = createPartAssemblyCatalog({ domain: 'building', modelId: prefabId, vertices: outVertices, vertexStride: 8, indices: outIndices, groups });
+  return { vertices: outVertices, indices: outIndices, groups, partAssembly, instanceCount: 1, triangleCount: indices.length / 3, bounds };
 }
 
 export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, portPlacement = null, satelliteData = null) {
@@ -8239,7 +4377,6 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
         const distPort = Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z);
         const clearEnvelope = !portClearanceEnvelope(portPlacement, x, z, is1550Ortho ? 8 : 10);
         const clearCircle =
-          !portPlacement.hasOrthophotoFootprints &&
           !portPlacement.hasIndigenousSettlement &&
           distPort < portPlacement.clearRadius * 0.68;
         if (clearEnvelope || clearCircle) {
@@ -8616,10 +4753,9 @@ export function seedCoastalVegetation(
     if (vegWaterAt?.(px, pz)) return false;
     if (!portPlacement) return true;
     const distPort = Math.hypot(px - portPlacement.center.x, pz - portPlacement.center.z);
-    const hullMargin = portPlacement.hasOrthophotoFootprints ? 6 : 10;
+    const hullMargin = 10;
     if (
-      (!portPlacement.hasOrthophotoFootprints &&
-        !portPlacement.hasIndigenousSettlement &&
+      (!portPlacement.hasIndigenousSettlement &&
         distPort < portPlacement.clearRadius * 0.68) ||
       !portClearanceEnvelope(portPlacement, px, pz, hullMargin) ||
       streetEdgeAt(portPlacement.streets, px, pz) < PLANT_STREET_GAP_M ||
@@ -9715,7 +5851,6 @@ function finalizeProceduralCoastalPack(
     connectedEdges: pack.connectedEdges || null,
     taperOuterBorders: Boolean(pack.taperOuterBorders),
   });
-  const preShoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const port = pack.skipPortPlacement
     ? {
         regionId: region.id,
@@ -9726,14 +5861,13 @@ function finalizeProceduralCoastalPack(
         clearRadius: 0,
         instances: [],
       }
-    : placeCoastalPort(region, heights, { preserveRealCoast, satelliteData, shoreDist: preShoreDist, coastIsReal: pack.coastIsReal ?? /terrarium/.test(elevationSource) });
+    : placeCoastalPort(region, heights, { coastIsReal: pack.coastIsReal ?? /terrarium/.test(elevationSource) });
   if (!pack.skipPortPlacement) {
     smoothCoastlineAndForeshoreBeaches(heights, region, {
       preservePortCore: port,
       connectedEdges: pack.connectedEdges || null,
       taperOuterBorders: Boolean(pack.taperOuterBorders),
     });
-    syncPortInstancesToTerrain(port, heights, region, { gradePads: !port?.hasOrthoFootprints });
   }
   const climateProfile = pack.climateProfile ?? estimateLocalClimateProfile(region.latitude, region.longitude, region);
   // The ground and its port alone, for a caller that is about to carve another land out of this one
@@ -9747,16 +5881,8 @@ function finalizeProceduralCoastalPack(
 
 function dressProceduralCoastalPack(pack, heights, port, elevationSource, satelliteData, climateProfile) {
   const { region } = pack;
-  if (!pack.skipPortPlacement) {
-    // A board's town's roads are its board's alone.
-    const suppressSyntheticCountryRoads = Boolean(boardTownHeld(region));
-    port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region), {
-      suppressSyntheticCountryRoads,
-    });
-    port.props = layPortProps(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
-  }
-  // An Old World city round the port: its plan is laid here, its streets paved with the port's
-  // own, and its blocks handed to the renderer to draw as instances.
+  // The country round the port, its board's (js/old-world.js): its town, its works and its waterfront are laid first,
+  // and the port's dock, ways and props are read from them.
   const surveyHeights = pack.skipPortPlacement ? null : new Float32Array(heights);
   const country = pack.skipPortPlacement ? null : oldWorldCountry(region, heights, port);
   if (port) port._resolvedCountry = country;
@@ -9775,6 +5901,15 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   if (country?.watch) port.watch = country.watch;
   // The forts, batteries and watchtowers of its board, as built: their guns and posts are manned from its watch.
   port.works = country?.works ?? [];
+  if (!pack.skipPortPlacement) {
+    settlePortOnWaterfront(port, heights, region, country?.waterfront ?? []);
+    // A board's town's roads are its board's alone.
+    const suppressSyntheticCountryRoads = Boolean(boardTownHeld(region));
+    port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region), {
+      suppressSyntheticCountryRoads,
+    });
+    port.props = layPortProps(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
+  }
   if (cityPlan?.paving?.length) port.streets = paveCityStreets(port.streets, cityPlan.paving);
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {
@@ -9785,29 +5920,7 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   const biome = synthesizeCoastalBiome(region, heights, beaches, port, satelliteData);
   const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome, satelliteData, shoreDist);
   const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port, 5, shoreDist);
-  const waterCheck = !pack.skipPortPlacement && country ? createInlandWaterSampler(country, { margin: 4.5 }) : null;
-  if (waterCheck && Array.isArray(port?.instances) && port.instances.length) {
-    const WATER_EXEMPT_PREFABS = new Set(['stone_arch_bridge']);
-    const hitsWaterFootprint = (inst) => {
-      if (!inst || WATER_EXEMPT_PREFABS.has(inst.prefabId)) return false;
-      if (inst.prefabId === 'timber_mole_pier' || inst.prefabId === 'stone_quay_seawall') {
-        return Boolean(waterCheck(inst.x, inst.z));
-      }
-      if (waterCheck(inst.x, inst.z)) return true;
-      const c = Math.cos(inst.yaw ?? 0), s = Math.sin(inst.yaw ?? 0);
-      const hw = (inst.width ?? 10) * 0.5, hl = (inst.length ?? 10) * 0.5;
-      for (const [lx, lz] of [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl]]) {
-        if (waterCheck(inst.x + lx * c + lz * s, inst.z - lx * s + lz * c)) return true;
-      }
-      return false;
-    };
-    const before = port.instances.length;
-    port.instances = port.instances.filter((inst) => !hitsWaterFootprint(inst));
-    if (port.instances.length !== before) {
-      port.instanceCount = port.instances.length;
-    }
-  }
-  const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
+  if (port && !pack.skipPortPlacement && vegetation.palms?.length >= 8) port.palms = vegetation.palms;
   const views = pack.skipPortPlacement ? null : createCoastalViews(region, heights, port);
 
   Object.assign(pack, {
@@ -9816,7 +5929,6 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
     mesh,
     beaches,
     port,
-    portGeometry,
     city: cityPlan ? { blocks: cityPlan.blocks, count: cityPlan.count, typed: cityPlan.typed, typedTypes: cityPlan.typedTypes, typedCount: cityPlan.typedCount, typedBlocks: cityPlan.typedBlocks, typedAttached: cityPlan.typedAttached ?? null, stats: cityPlan.stats } : null,
     // Where Castle and Commons' model founded this coast: what the GPU stamps onto the ground's colours.
     board: country?.board ?? null,
@@ -9831,10 +5943,24 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
     climateProfile,
     groundOnly: null,
   });
-  if (!pack.skipPortPlacement && region.span >= 4096) {
-    planUngrownFrontierParcels(pack, heights);
-  }
   return pack;
+}
+
+// The port's waterfront as its board laid it (js/board-waterfront.js): the seat's moles take her alongside, a line's
+// reach from the nearest of them (settleDockBerth, which dredges mud and never land), and the port reaches as far as
+// its works and its waterfront do.
+export function settlePortOnWaterfront(port, heights, region, waterfront) {
+  port.waterfront = waterfront;
+  const seat = waterfront.filter((w) => w.seat !== false);
+  const moles = seat.filter((w) => w.kind === 'pier');
+  const dock = settleDockBerth(heights, region, moles.length ? moles : seat.filter((w) => w.kind === 'quay'), port.dockBerth);
+  port.dockBerth = { ...port.dockBerth, x: dock.x, z: dock.z, depth: Math.max(5.5, -terrainSample(heights, dock.x, dock.z, region)) };
+  const c = port.center;
+  let reach = 0;
+  for (const w of seat) reach = Math.max(reach, Math.hypot(w.x - c.x, w.z - c.z) + Math.hypot(w.width, w.length) * 0.5);
+  for (const work of port.works ?? []) reach = Math.max(reach, Math.hypot(work.x - c.x, work.z - c.z) + Math.hypot(work.w ?? 0, work.d ?? 0) * 0.5);
+  port.reach = reach;
+  return port;
 }
 
 // A pack left as ground and port only is dressed here: its city laid, its ground painted and planted.
@@ -10280,7 +6406,6 @@ export async function upgradeProceduralPackWithRealDEM(
   if (cols < 1 || cols > 6 || rows < 1 || rows > 6) return ensureFallback(pack);
 
   try {
-    const lrmPromise = !fetchTile ? load1550BuildingLRMTemplates() : Promise.resolve(null);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const w = cols * 256;
@@ -10337,7 +6462,6 @@ export async function upgradeProceduralPackWithRealDEM(
 
     // Single uniform tile grid across the entire territory (no inner 2x2 Z14 square composite seam)
     const nearZoom = zoom + 1;
-    const nearDemPromises = [];
     const regionalDemPromise =
       !isNeighborSection && !pack.regionalDem
         ? fetchRegionalCoastalDemEnvelope(region, {
@@ -10348,23 +6472,14 @@ export async function upgradeProceduralPackWithRealDEM(
           }).catch(() => null)
         : Promise.resolve(pack.regionalDem ?? null);
 
-    const [loaded, satLoaded, nearDemLoaded, regionalDemLoaded] = await Promise.all([
+    const [loaded, satLoaded, regionalDemLoaded] = await Promise.all([
       Promise.all(tilePromises),
       satPromises.length ? Promise.all(satPromises) : Promise.resolve([]),
-      nearDemPromises.length ? Promise.all(nearDemPromises) : Promise.resolve([]),
       regionalDemPromise,
     ]);
     clearTimeout(timer);
-    await lrmPromise;
 
     const pixels = rasterizeTileGrid(loaded, tx0, ty0, w, h);
-    let nearPixels = null;
-    const nearW = 512, nearH = 512;
-    if (nearDemLoaded.length === 4 && nearDemLoaded.every(Boolean)) {
-      nearPixels = rasterizeTileGrid(nearDemLoaded, ntx0, nty0, nearW, nearH);
-    } else {
-      for (const item of nearDemLoaded) item?.bmp?.close?.();
-    }
 
     const decodeGridPx = (buf, gw, gh, px, py) => {
       const ix = Math.max(0, Math.min(gw - 1, px));
@@ -10384,18 +6499,7 @@ export async function upgradeProceduralPackWithRealDEM(
       const h01 = decodeGridPx(buf, gw, gh, x0, y0 + 1), h11 = decodeGridPx(buf, gw, gh, x0 + 1, y0 + 1);
       return (h00 * (1 - ax) + h10 * ax) * (1 - ay) + (h01 * (1 - ax) + h11 * ax) * ay;
     };
-    const sampleTerrarium = (lat, lon) => {
-      const baseH = sampleTerrariumGrid(pixels, w, h, tx0, ty0, numTiles, lat, lon);
-      if (!nearPixels) return baseH;
-      const fx = ((lon + 180) / 360) * nearNumTiles - ntx0;
-      const r = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
-      const fy = ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * nearNumTiles - nty0;
-      if (fx <= 0.05 || fx >= 1.95 || fy <= 0.05 || fy >= 1.95) return baseH;
-      const nearHVal = sampleTerrariumGrid(nearPixels, nearW, nearH, ntx0, nty0, nearNumTiles, lat, lon);
-      const edge = Math.min(fx, 2 - fx, fy, 2 - fy);
-      const blend = coastalSmoothstep(0.05, 0.25, edge);
-      return baseH * (1 - blend) + nearHVal * blend;
-    };
+    const sampleTerrarium = (lat, lon) => sampleTerrariumGrid(pixels, w, h, tx0, ty0, numTiles, lat, lon);
 
     const rawDem = new Float32Array(n * n);
     let landCount = 0;
@@ -10622,7 +6726,7 @@ export async function upgradeProceduralPackWithRealDEM(
     finalizeProceduralCoastalPack(
       pack,
       heights,
-      `aws-terrarium-srtm-z${nearPixels ? nearZoom : zoom}`,
+      `aws-terrarium-srtm-z${zoom}`,
       satelliteData,
       true,
       groundOnly
@@ -10634,9 +6738,9 @@ export async function upgradeProceduralPackWithRealDEM(
       provider: 'aws-terrarium-srtm-etopo1',
       zoom,
       nearshoreZoom: nearZoom,
-      effectiveZoom: nearPixels ? nearZoom : zoom,
+      effectiveZoom: zoom,
       satelliteOverlay: Boolean(satelliteData),
-      tiles: loaded.length + (nearPixels ? nearDemLoaded.length : 0),
+      tiles: loaded.length,
     };
     pack.imagerySource = satelliteData
       ? {
@@ -10676,39 +6780,9 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
   const baseRegion = resolveGlobalCoastalRegion(basePack.region);
   const satSource = options.orthophoto1550 || basePack.satelliteData || null;
   const hasDedicated1550Ortho = Boolean(options.orthophoto1550);
-  const rawPrecomputedFootprints =
-    baseRegion.hasColonialPort === false
-      ? null
-      : options.precomputedFootprints || satSource?.precomputedFootprints || null;
-
-  // Validate physical ground scale (metersPerPixel & spanM) of the AI 1550 orthophoto / footprints
-  const scaleInfo =
-    hasDedicated1550Ortho || rawPrecomputedFootprints
-      ? validateOrthophotoScale1550(
-          baseRegion,
-          satSource ? { ...satSource, is1550Orthophoto: hasDedicated1550Ortho } : null,
-          rawPrecomputedFootprints
-        )
-      : { spanM: baseRegion.span, metersPerPixel: Number((baseRegion.span / 1024).toFixed(3)), footprintScale: 1 };
-
-  const region =
-    scaleInfo.spanM !== baseRegion.span
-      ? resolveGlobalCoastalRegion({ ...baseRegion, span: scaleInfo.spanM })
-      : baseRegion;
-  const precomputedFootprints =
-    rawPrecomputedFootprints && Math.abs(scaleInfo.footprintScale - 1) > 1e-3
-      ? {
-          ...rawPrecomputedFootprints,
-          span: region.span,
-          metersPerPixel: scaleInfo.metersPerPixel,
-          footprints: rawPrecomputedFootprints.footprints.map((fp) => ({
-            ...fp,
-            width: Number((fp.width * scaleInfo.footprintScale).toFixed(1)),
-            length: Number((fp.length * scaleInfo.footprintScale).toFixed(1)),
-            inlandM: Number(((fp.inlandM ?? 64) * scaleInfo.footprintScale).toFixed(1)),
-          })),
-        }
-      : rawPrecomputedFootprints;
+  // A town is its board's (js/old-world.js): the orthophoto only colours the ground, at the region's own span.
+  const region = baseRegion;
+  const metersPerPixel = Number((region.span / 1024).toFixed(3));
 
   const n = region.size;
   const span = region.span;
@@ -10854,11 +6928,7 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
     }
   }
   // Step 3: Build 100% De-Urbanized 1550 Orthophoto Imagery Seed
-  let sat1550 = satSource
-    ? { ...satSource, is1550Orthophoto: hasDedicated1550Ortho, precomputedFootprints }
-    : precomputedFootprints
-      ? { is1550Orthophoto: true, precomputedFootprints }
-      : null;
+  let sat1550 = satSource ? { ...satSource, is1550Orthophoto: hasDedicated1550Ortho } : null;
   if (satSource && !hasDedicated1550Ortho) {
     const shoreDist1550 = cachedShoreDist1550 || computeCoastalShoreDistances(heights1550, n, span, 0.25);
     const prov1550 = resolveGeographicCoastalProvince(region);
@@ -10921,7 +6991,6 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
       size: sz,
       lowLuma: satSource.lowLuma,
       lowSize: satSource.lowSize,
-      precomputedFootprints,
     };
   }
 
@@ -10951,7 +7020,7 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
     name: cellInfo.name,
     coordLabel: cellInfo.coordLabel,
     span: region.span,
-    metersPerPixel: scaleInfo.metersPerPixel,
+    metersPerPixel,
     year: region.year ?? 1550,
     eraId: region.eraId ?? 'conquistador-1550',
     settlementKind: region.settlementKind,
@@ -11042,21 +7111,10 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
       }
     }
   }
-  const precomputedFootprints =
-    Array.isArray(meta.footprints) && meta.footprints.length >= 4
-      ? {
-          clusterU: meta.clusterU,
-          clusterV: meta.clusterV,
-          span: meta.span,
-          metersPerPixel: meta.metersPerPixel,
-          footprints: meta.footprints,
-        }
-      : null;
   const built = build1550HistoricalTerritoryPack(basePack, {
     orthophoto1550,
     discoveredAt: meta.discoveredAt,
     precomputedHeights1550: heights1550,
-    precomputedFootprints,
   });
   built.territory1550 = {
     ...built.territory1550,
@@ -11068,7 +7126,6 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
     settlementKind: built.region.settlementKind,
     hasColonialPort: Boolean(built.region.hasColonialPort),
     colonyStage: built.region.colonyGrowth?.stage || (built.region.hasColonialPort ? 'settlement' : 'wilderness'),
-    footprints: precomputedFootprints?.footprints || built.territory1550.footprints,
   };
   return built;
 }
@@ -11097,7 +7154,6 @@ export async function runLandfallDiscoveryPipeline(basePack, {
     }
   };
   const cellInfo = canonicalCoastalCellId(basePack.region);
-  const lrmPromise = load1550BuildingLRMTemplates(fetchImpl);
   const regionalDemPromise =
     !basePack.regionalDem && fetchImpl && typeof createImageBitmap === 'function'
       ? fetchRegionalCoastalDemEnvelope(basePack.region, { ringCount: 2, zoom: 10, timeoutMs: 9000 }).catch(() => null)
@@ -11129,7 +7185,6 @@ export async function runLandfallDiscoveryPipeline(basePack, {
       }
     } catch { /* fallback to localStorage when offline */ }
   }
-  await lrmPromise;
 
   if (!remoteAvailable && !forceFirstExplorer && typeof localStorage !== 'undefined') {
     try {
@@ -12320,523 +8375,7 @@ export function buildMockCoastalSection(
     biome,
     albedo,
     vegetation,
-    portGeometry: null,
   };
-}
-
-function createEmptyCitySlice() {
-  return {
-    blocks: new Float32Array(0),
-    typed: new Float32Array(0),
-    typedTypes: new Uint32Array(0),
-    typedBlocks: new Uint32Array(0),
-    typedAttached: new Uint8Array(0),
-  };
-}
-
-function parcelHash(a, b) {
-  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x7f4a7c15, 0xc2b2ae35);
-  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
-  h ^= h >>> 12;
-  h = Math.imul(h, 0x297a2d39);
-  h ^= h >>> 15;
-  return (h >>> 0) / 4294967296;
-}
-
-export function rebuildPackFrontierCity(pack) {
-  if (!pack) return null;
-  const base = pack._baseCity ?? {
-    blocks: new Float32Array(0),
-    count: 0,
-    typed: new Float32Array(0),
-    typedTypes: new Uint32Array(0),
-    typedCount: 0,
-    typedBlocks: new Uint32Array(0),
-    typedAttached: new Uint8Array(0),
-    stats: {},
-  };
-  const slices = [];
-  for (const parcel of pack.frontierParcels ?? []) {
-    const slice = parcel.state === 'mocked' ? parcel.mockCity : parcel.grownCity;
-    if (slice && (slice.blocks?.length || slice.typedTypes?.length)) slices.push(slice);
-  }
-  let totalBlocksFloats = base.blocks?.length ?? 0;
-  let totalTypedCount = base.typedCount ?? 0;
-  for (const s of slices) {
-    totalBlocksFloats += s.blocks.length;
-    totalTypedCount += s.typedTypes.length;
-  }
-  const blocks = new Float32Array(totalBlocksFloats);
-  const typed = new Float32Array(totalTypedCount * CITY_TYPED_FLOATS);
-  const typedTypes = new Uint32Array(totalTypedCount);
-  const typedBlocks = new Uint32Array(totalTypedCount * 2);
-  const typedAttached = new Uint8Array(totalTypedCount);
-
-  if (base.blocks?.length) blocks.set(base.blocks, 0);
-  if (base.typed?.length) typed.set(base.typed, 0);
-  if (base.typedTypes?.length) typedTypes.set(base.typedTypes, 0);
-  if (base.typedBlocks?.length) typedBlocks.set(base.typedBlocks, 0);
-  if (base.typedAttached?.length) typedAttached.set(base.typedAttached, 0);
-
-  let bFloatOff = base.blocks?.length ?? 0;
-  let tIdxOff = base.typedCount ?? 0;
-  for (const s of slices) {
-    const blockIdxOff = bFloatOff / CITY_BLOCK_FLOATS;
-    if (s.blocks.length) blocks.set(s.blocks, bFloatOff);
-    if (s.typed.length) typed.set(s.typed, tIdxOff * CITY_TYPED_FLOATS);
-    if (s.typedTypes.length) typedTypes.set(s.typedTypes, tIdxOff);
-    for (let k = 0; k < s.typedTypes.length; k++) {
-      typedBlocks[(tIdxOff + k) * 2] = blockIdxOff + s.typedBlocks[k * 2];
-      typedBlocks[(tIdxOff + k) * 2 + 1] = s.typedBlocks[k * 2 + 1];
-    }
-    bFloatOff += s.blocks.length;
-    tIdxOff += s.typedTypes.length;
-  }
-  pack.city = {
-    blocks,
-    count: blocks.length / CITY_BLOCK_FLOATS,
-    typed,
-    typedTypes,
-    typedCount: typedTypes.length,
-    typedBlocks,
-    typedAttached,
-    stats: base.stats ?? {},
-  };
-
-  const baseHerds = pack._baseHerds ?? new Float32Array(0);
-  let herdFloatsLen = baseHerds.length;
-  for (const p of pack.frontierParcels ?? []) {
-    if (p.state === 'grown' && p.grownHerds?.length) herdFloatsLen += p.grownHerds.length;
-  }
-  if (herdFloatsLen > 0) {
-    const mergedHerds = new Float32Array(herdFloatsLen);
-    if (baseHerds.length) mergedHerds.set(baseHerds, 0);
-    let hOff = baseHerds.length;
-    for (const p of pack.frontierParcels ?? []) {
-      if (p.state === 'grown' && p.grownHerds?.length) {
-        mergedHerds.set(p.grownHerds, hOff);
-        hOff += p.grownHerds.length;
-      }
-    }
-    pack.herds = mergedHerds;
-  } else {
-    pack.herds = null;
-  }
-  return pack.city;
-}
-
-// Emit a contiguous closed polygonal farmyard / crofthold perimeter enclosure whose sides meet corner-to-corner around
-// (cx, cz), leaving a single clean ~4.5 m entrance gateway facing baseYaw. Each side is laid by the masons' `fence`
-// (js/old-world-city.js cityMasonry): whole panels or courses of their own size, never stretched to the chord.
-function emitContiguousParcelEnclosure({
-  cx,
-  cz,
-  rx,
-  rz,
-  sides = 8,
-  baseYaw = 0,
-  gateWidth = 4.5,
-  wobble = 0,
-  stoneOnly = false,
-  heightAt,
-  waterSampler,
-  fence,
-  rr,
-}) {
-  const verts = [];
-  for (let k = 0; k < sides; k++) {
-    const ang = baseYaw + ((k + 0.5) / sides) * Math.PI * 2;
-    const sAng = Math.sin(ang);
-    const cAng = Math.cos(ang);
-    const radJitter = wobble > 0 ? 1 + (rr() - 0.5) * wobble : 1;
-    let chosen = null;
-    for (const scale of [1.0, 0.86, 0.72, 0.58]) {
-      const vx = cx + sAng * rx * radJitter * scale;
-      const vz = cz + cAng * rz * radJitter * scale;
-      const vh = heightAt(vx, vz);
-      if (vh >= 1.2 && vh <= 175 && !waterSampler?.(vx, vz)) {
-        chosen = { x: vx, z: vz };
-        break;
-      }
-    }
-    if (!chosen) return 0;
-    verts.push(chosen);
-  }
-
-  let emittedBays = 0;
-  const clear = (x, z) => heightAt(x, z) >= 1.1 && !waterSampler?.(x, z);
-  const emitChordSpan = (ax, az, bx, bz, stone, tone) => {
-    if (Math.hypot(bx - ax, bz - az) < 1.2) return;
-    emittedBays += fence(ax, az, bx, bz, stone, { tone, clear });
-  };
-
-  for (let k = 0; k < sides; k++) {
-    const a = verts[k];
-    const b = verts[(k + 1) % sides];
-    const dx = b.x - a.x;
-    const dz = b.z - a.z;
-    const edgeLen = Math.hypot(dx, dz);
-    if (edgeLen < 1.4) continue;
-    const isGateSide = k === sides - 1;
-    const tone = 0.42 + (k % 3) * 0.08;
-    if (isGateSide) {
-      if (edgeLen > gateWidth + 1.8) {
-        const leaf = (edgeLen - gateWidth) * 0.5;
-        const ux = dx / edgeLen;
-        const uz = dz / edgeLen;
-        emitChordSpan(a.x, a.z, a.x + ux * leaf, a.z + uz * leaf, true, tone);
-        emitChordSpan(b.x - ux * leaf, b.z - uz * leaf, b.x, b.z, true, tone);
-      }
-    } else {
-      emitChordSpan(a.x, a.z, b.x, b.z, stoneOnly || k === 0 || k === sides - 2, tone);
-    }
-  }
-  return emittedBays;
-}
-
-function buildMockParcelCity(parcel, heights, region, waterSampler) {
-  const blocks = [];
-  const typed = [];
-  const typedTypes = [];
-  const typedBlocks = [];
-  let sCount = 0;
-  const rr = () => parcelHash(parcel.ix * 73856093 ^ parcel.iz * 19349663, ++sCount);
-  const heightAt = (x, z) => terrainSurfaceSample(heights, x, z, region);
-  const { pushBlock, pushTyped, fence } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates: [], keep: () => {}, rr });
-  const pushSlight = (type, x, z, yaw, tone = 0.5) => pushTyped(type, x, heightAt(x, z), z, yaw, tone, 0);
-  const half = parcel.span * 0.42;
-  const spots = [];
-  for (let a = 0; a < 16 && spots.length < 4; a++) {
-    const sx = parcel.cx + (rr() * 2 - 1) * half;
-    const sz = parcel.cz + (rr() * 2 - 1) * half;
-    const h = heightAt(sx, sz);
-    if (h < 1.6 || h > 160 || waterSampler?.(sx, sz)) continue;
-    const slope = Math.max(Math.abs(heightAt(sx + 5, sz) - h), Math.abs(heightAt(sx, sz + 5) - h)) / 5;
-    if (slope > 0.35) continue;
-    if (spots.some((q) => Math.hypot(q.x - sx, q.z - sz) < 64)) continue;
-    spots.push({ x: sx, z: sz, yaw: rr() * Math.PI * 2 });
-  }
-  for (let i = 0; i < spots.length; i++) {
-    const sp = spots[i];
-    if (i === 0) {
-      if (parcel.dryShare >= 0.45) {
-        const T = CITY_BUILDING_TYPES[CITY_TYPE.SHED];
-        const f = footprint(sp.x, sp.z, T.width, T.length, sp.yaw);
-        const Far = footprint(sp.x, sp.z, f.d, f.w, sp.yaw + Math.PI / 2);
-        const floor = pushBlock(Far, T.height, 0.95, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.5);
-        pushTyped(CITY_TYPE.SHED, sp.x, floor, sp.z, sp.yaw, 0.5, 1);
-      }
-      const enclosed = emitContiguousParcelEnclosure({
-        cx: sp.x,
-        cz: sp.z,
-        rx: 11.2,
-        rz: 10.2,
-        sides: 6,
-        baseYaw: sp.yaw,
-        gateWidth: 4.5,
-        wobble: 0.06,
-        stoneOnly: true,
-        heightAt,
-        waterSampler,
-        fence,
-        rr,
-      });
-      if (!enclosed) pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw);
-    } else {
-      pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw);
-    }
-  }
-  return {
-    blocks: new Float32Array(blocks),
-    typed: new Float32Array(typed),
-    typedTypes: new Uint32Array(typedTypes),
-    typedBlocks: new Uint32Array(typedBlocks),
-  };
-}
-
-export function planUngrownFrontierParcels(pack, heights, { playerPos = null } = {}) {
-  if (!pack?.region || !heights) return [];
-  const region = pack.region;
-  const gridN = 8;
-  const parcelSpan = region.span / gridN;
-  const minX = region.x - region.span * 0.5;
-  const minZ = region.z - region.span * 0.5;
-  const baseCity = pack._baseCity ?? (pack.city ? {
-    blocks: new Float32Array(pack.city.blocks ?? 0),
-    count: pack.city.count ?? 0,
-    typed: new Float32Array(pack.city.typed ?? 0),
-    typedTypes: new Uint32Array(pack.city.typedTypes ?? 0),
-    typedCount: pack.city.typedCount ?? 0,
-    typedBlocks: new Uint32Array(pack.city.typedBlocks ?? 0),
-    typedAttached: new Uint8Array(pack.city.typedAttached ?? 0),
-    stats: pack.city.stats ?? {},
-  } : { ...createEmptyCitySlice(), count: 0, typedCount: 0, stats: {} });
-  pack._baseCity = baseCity;
-  if (pack._baseHerds === undefined) pack._baseHerds = new Float32Array(pack.herds ?? 0);
-
-  const counts = new Int32Array(gridN * gridN);
-  const bump = (x, z) => {
-    const ix = Math.floor((x - minX) / parcelSpan);
-    const iz = Math.floor((z - minZ) / parcelSpan);
-    if (ix >= 0 && ix < gridN && iz >= 0 && iz < gridN) counts[iz * gridN + ix]++;
-  };
-  for (const inst of pack.port?.instances ?? []) bump(inst.x, inst.z);
-  for (let i = 0; i < baseCity.typedCount; i++) {
-    bump(baseCity.typed[i * CITY_TYPED_FLOATS], baseCity.typed[i * CITY_TYPED_FLOATS + 2]);
-  }
-  for (const pl of pack.port?.country?.places ?? []) {
-    if (Number.isFinite(pl?.x) && Number.isFinite(pl?.z)) bump(region.x + pl.x, region.z + pl.z);
-  }
-
-  const waterSampler = createInlandWaterSampler(pack.port?.country ?? null, { margin: 6 });
-  const portCx = pack.port?.center?.x ?? region.x;
-  const portCz = pack.port?.center?.z ?? region.z;
-  const parcels = [];
-
-  for (let iz = 0; iz < gridN; iz++) {
-    for (let ix = 0; ix < gridN; ix++) {
-      const cx = minX + (ix + 0.5) * parcelSpan;
-      const cz = minZ + (iz + 0.5) * parcelSpan;
-      let dryHits = 0;
-      for (let sy = -2; sy <= 2; sy++) {
-        for (let sx = -2; sx <= 2; sx++) {
-          const tx = cx + sx * parcelSpan * 0.16;
-          const tz = cz + sy * parcelSpan * 0.16;
-          if (terrainSurfaceSample(heights, tx, tz, region) > 1.2 && !waterSampler?.(tx, tz)) dryHits++;
-        }
-      }
-      const dryShare = dryHits / 25;
-      const nearPort = Math.hypot(cx - portCx, cz - portCz) < 750;
-      const hasPlayer = Boolean(playerPos && Math.abs(playerPos.x - cx) <= parcelSpan * 0.5 && Math.abs(playerPos.z - cz) <= parcelSpan * 0.5);
-      const occupied = counts[iz * gridN + ix] > 0;
-      const isMock = !occupied && !nearPort && !hasPlayer && dryShare >= 0.22;
-      const parcel = {
-        id: `parcel_${ix}_${iz}`,
-        ix,
-        iz,
-        cx,
-        cz,
-        span: parcelSpan,
-        dryShare,
-        state: isMock ? 'mocked' : 'grown',
-        generationCount: 0,
-        mockCity: null,
-        grownCity: null,
-        grownHerds: null,
-        grownPaving: null,
-      };
-      if (isMock) parcel.mockCity = buildMockParcelCity(parcel, heights, region, waterSampler);
-      parcels.push(parcel);
-    }
-  }
-  pack.frontierParcels = parcels;
-  rebuildPackFrontierCity(pack);
-  return parcels;
-}
-
-export function growFrontierParcel(pack, parcel, heights) {
-  if (!pack || !parcel || parcel.state !== 'mocked') return false;
-  parcel.state = 'generating';
-  const region = pack.region;
-  const hGrid = heights ?? pack.heights;
-  const heightAt = (x, z) => terrainSurfaceSample(hGrid, x, z, region);
-  const waterSampler = createInlandWaterSampler(pack.port?.country ?? null, { margin: 6 });
-
-  const blocks = [];
-  const typed = [];
-  const typedTypes = [];
-  const typedBlocks = [];
-  let sCount = 17;
-  const rr = () => parcelHash((parcel.ix + 11) * 83492791 ^ (parcel.iz + 23) * 297121507, ++sCount);
-  const { pushBlock, pushTyped, fence } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates: [], keep: () => {}, rr });
-
-  // Locate flattest dry open pasture cluster hub & optional ridge crest for windmill
-  const bGrid = pack.biome instanceof Uint8Array ? pack.biome : null;
-  const bMask = bGrid ? Math.round(Math.sqrt(bGrid.length)) : 0;
-  const sampleBiomeAt = (x, z) => {
-    if (!bGrid || bMask <= 0) return 0;
-    const i = Math.floor(((x - (region.x - region.span * 0.5)) / region.span) * bMask);
-    const j = Math.floor(((z - (region.z - region.span * 0.5)) / region.span) * bMask);
-    return i >= 0 && j >= 0 && i < bMask && j < bMask ? bGrid[j * bMask + i] : 0;
-  };
-  const parcelAt = pack.port?.country?.parcelAt ?? null;
-  let hubX = parcel.cx, hubZ = parcel.cz, bestHubScore = -Infinity;
-  let crestX = parcel.cx, crestZ = parcel.cz, crestH = -Infinity;
-  const half = parcel.span * 0.36;
-  for (let gy = -4; gy <= 4; gy++) {
-    for (let gx = -4; gx <= 4; gx++) {
-      const tx = parcel.cx + (gx / 4) * half;
-      const tz = parcel.cz + (gy / 4) * half;
-      const h = heightAt(tx, tz);
-      if (h < 1.5 || h > 165 || waterSampler?.(tx, tz)) continue;
-      const slope = Math.max(Math.abs(heightAt(tx + 8, tz) - h), Math.abs(heightAt(tx, tz + 8) - h)) / 8;
-      const woodPen = (sampleBiomeAt(tx, tz) >= 42 ? 12 : 0) + (parcelAt?.(tx, tz)?.use?.wooded ? 10 : 0);
-      if (slope < 0.28) {
-        const sc = 8 - slope * 16 - woodPen - Math.hypot(tx - parcel.cx, tz - parcel.cz) * 0.008;
-        if (sc > bestHubScore) { bestHubScore = sc; hubX = tx; hubZ = tz; }
-      }
-      if (slope < 0.32 && sampleBiomeAt(tx, tz) < 60 && h > crestH) { crestH = h; crestX = tx; crestZ = tz; }
-    }
-  }
-  if (bGrid && bMask > 0) {
-    const stepM = region.span / bMask;
-    const x0 = region.x - region.span * 0.5;
-    const z0 = region.z - region.span * 0.5;
-    const clearPasture = (cx, cz, radius) => {
-      const i0 = Math.max(0, Math.floor((cx - radius - x0) / stepM));
-      const i1 = Math.min(bMask - 1, Math.ceil((cx + radius - x0) / stepM));
-      const j0 = Math.max(0, Math.floor((cz - radius - z0) / stepM));
-      const j1 = Math.min(bMask - 1, Math.ceil((cz + radius - z0) / stepM));
-      for (let j = j0; j <= j1; j++) {
-        const dz = z0 + (j + 0.5) * stepM - cz;
-        for (let i = i0; i <= i1; i++) {
-          const dx = x0 + (i + 0.5) * stepM - cx;
-          if (dx * dx + dz * dz <= radius * radius) {
-            const idx = j * bMask + i;
-            bGrid[idx] = Math.max(18, Math.min(bGrid[idx], 24));
-          }
-        }
-      }
-    };
-    clearPasture(hubX, hubZ, 92);
-    if (crestH > 18 && Math.hypot(crestX - hubX, crestZ - hubZ) > 28) clearPasture(crestX, crestZ, 36);
-  }
-
-  const placedLots = [];
-  const portCx = pack.port?.center?.x ?? region.x;
-  const portCz = pack.port?.center?.z ?? region.z;
-  const baseYaw = Math.atan2(portCx - hubX, portCz - hubZ);
-  const isTropicalHinterland = Math.abs(region.latitude ?? 0) < 31.5 || region.climate === 'tropical' || region.climate === 'subtropical';
-  const isAmericasColonial = !pack.port?.country && ((region.longitude ?? 0) < -30 || isTropicalHinterland);
-  const buildingPlan = isTropicalHinterland
-    ? [
-        // Colonial tropical *estancia / ingenio*: limewashed *Casa de Hacienda*, cane-press *trapiche* & boiling house, cacao/maize *troje*
-        [CITY_TYPE.STONE_HALL, 0, 0, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 2.5, true],
-        [CITY_TYPE.WINEPRESS, 22, -10, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 2.7, true],
-        [CITY_TYPE.BARN, -20, 8, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 2.9, true],
-        [CITY_TYPE.GRANARY, 16, 18, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, 10, 2.3, false],
-        [CITY_TYPE.COURT, -16, -22, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 2.4, true],
-        [CITY_TYPE.SHED, 28, 6, CITY_ROOF.HIP + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 1.35, true],
-      ]
-    : isAmericasColonial
-      ? [
-          // Temperate colonial Tidewater / northern farmstead: timber planter hall, clapboard barn, granary & sheds
-          [CITY_TYPE.HALL, 0, 0, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 3.2, true],
-          [CITY_TYPE.BARN, 22, -10, CITY_ROOF.GABLE + CITY_TYPED_ROOF, 10, 3.1, true],
-          [cityHouseType(1, false, 0.25), -20, 8, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 3.0, true],
-          [CITY_TYPE.GRANARY, 16, 18, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, 10, 2.3, false],
-          [cityHouseType(1, true, 0.45), -16, -22, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 3.0, true],
-          [CITY_TYPE.SHED, 28, 6, CITY_ROOF.GABLE + CITY_TYPED_ROOF, 10, 1.15, true],
-        ]
-      : [
-          [CITY_TYPE.THATCH_LONGHOUSE, 0, 0, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.3, true],
-          [CITY_TYPE.BARN, 22, -10, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.STUCCO, 3.1, true],
-          [CITY_TYPE.THATCH_HOUSE, -20, 8, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.6, true],
-          [CITY_TYPE.GRANARY, 16, 18, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, 10, 2.3, false],
-          [CITY_TYPE.THATCH_HOUSE, -16, -22, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.6, true],
-          [CITY_TYPE.SHED, 28, 6, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.95, true],
-        ];
-  const wantBuildings = 3 + Math.min(3, Math.floor(parcel.dryShare * 4));
-  for (let bi = 0; bi < wantBuildings; bi++) {
-    const [type, ox, oz, roofKind, wallKind, rise, ridgeAlong] = buildingPlan[bi];
-    const T = CITY_BUILDING_TYPES[type];
-    const yaw = baseYaw + (rr() - 0.5) * 0.55;
-    const x = hubX + ox + (rr() - 0.5) * 6;
-    const z = hubZ + oz + (rr() - 0.5) * 6;
-    const h = heightAt(x, z);
-    if (h < 1.3 || h > 180 || waterSampler?.(x, z)) continue;
-    if (placedLots.some((q) => Math.hypot(q.x - x, q.z - z) < 14)) continue;
-    const f = footprint(x, z, T.width, T.length, yaw);
-    const Far = ridgeAlong ? footprint(x, z, f.d, f.w, yaw + Math.PI / 2) : f;
-    const tone = isTropicalHinterland ? 0.62 + rr() * 0.30 : 0.35 + rr() * 0.35;
-    const floor = pushBlock(Far, T.height, rise, roofKind, wallKind, tone);
-    pushTyped(type, x, floor, z, yaw, tone, 1);
-    placedLots.push({ x, z });
-  }
-  if (isTropicalHinterland) {
-    // Peripheral indigenous *conuco* clearing with palm-thatch *bohío / oca* huts outside the estancia corral
-    const conucoAng = baseYaw + Math.PI * 0.72 + (rr() - 0.5) * 0.4;
-    const conucoDist = 56 + rr() * 14;
-    const cx = hubX + Math.sin(conucoAng) * conucoDist;
-    const cz = hubZ + Math.cos(conucoAng) * conucoDist;
-    for (let k = 0; k < 2; k++) {
-      const bx = cx + (k === 0 ? 0 : 12 * (rr() - 0.3));
-      const bz = cz + (k === 0 ? 0 : 12 * (rr() - 0.3));
-      const bh = heightAt(bx, bz);
-      if (bh < 1.4 || bh > 165 || waterSampler?.(bx, bz)) continue;
-      const bType = k === 0 ? CITY_TYPE.COT : CITY_TYPE.SHED;
-      const T = CITY_BUILDING_TYPES[bType];
-      const byaw = baseYaw + rr() * Math.PI;
-      const f = footprint(bx, bz, T.width, T.length, byaw);
-      const floor = pushBlock(f, T.height, 1.55, CITY_ROOF.HIP + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.48);
-      pushTyped(bType, bx, floor, bz, byaw, 0.48, 1);
-    }
-  } else if (!isAmericasColonial && crestH > 18 && Math.hypot(crestX - hubX, crestZ - hubZ) > 28 && !waterSampler?.(crestX, crestZ)) {
-    const T = CITY_BUILDING_TYPES[CITY_TYPE.WINDMILL];
-    const f = footprint(crestX, crestZ, T.width, T.length, baseYaw);
-    const floor = pushBlock(f, T.height, 1.8, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 0.25);
-    pushTyped(CITY_TYPE.WINDMILL, crestX, floor, crestZ, baseYaw, 0.25, 1);
-  }
-  emitContiguousParcelEnclosure({
-    cx: hubX,
-    cz: hubZ,
-    rx: 36.5,
-    rz: 32.5,
-    sides: 8,
-    baseYaw,
-    gateWidth: 4.5,
-    wobble: 0.1,
-    stoneOnly: isTropicalHinterland,
-    heightAt,
-    waterSampler,
-    fence,
-    rr,
-  });
-
-  const herdFloats = [];
-  for (let fl = 0; fl < 2; fl++) {
-    const fx = hubX + (fl === 0 ? 48 : -44);
-    const fz = hubZ + (fl === 0 ? 32 : -36);
-    if (heightAt(fx, fz) < 1.2 || waterSampler?.(fx, fz)) continue;
-    const count = fl === 0 ? 6 : 4;
-    // Tropical/colonial *estancias* graze Criollo cattle (1) & horses/mules (3); Old World crofts graze sheep (0) & cattle (1).
-    const species = (isTropicalHinterland || isAmericasColonial) ? (fl === 0 ? 1 : 3) : (fl === 0 ? 0 : 1);
-    for (let m = 0; m < count; m++) {
-      const a = (m / count) * Math.PI * 2 + rr();
-      const d = 3 + rr() * 9;
-      const ax = fx + Math.cos(a) * d, az = fz + Math.sin(a) * d;
-      if (heightAt(ax, az) < 1.1 || waterSampler?.(ax, az)) continue;
-      herdFloats.push(ax, az, 5.5, rr() * Math.PI * 2, rr(), 0.9 + rr() * 0.2, species, baseYaw);
-    }
-  }
-
-  const toPortL = Math.max(1, Math.hypot(portCx - hubX, portCz - hubZ));
-  const dirX = (portCx - hubX) / toPortL, dirZ = (portCz - hubZ) / toPortL;
-  const edgeD = Math.min(parcel.span * 0.45, Math.max(85, toPortL * 0.45));
-  parcel.grownPaving = {
-    points: [
-      [hubX, hubZ, 4.4, 0.45],
-      [hubX + dirX * (edgeD * 0.5), hubZ + dirZ * (edgeD * 0.5), 4.0, 0.38],
-      [hubX + dirX * edgeD, hubZ + dirZ * edgeD, 3.6, 0.32],
-    ],
-  };
-  parcel.grownCity = {
-    blocks: new Float32Array(blocks),
-    typed: new Float32Array(typed),
-    typedTypes: new Uint32Array(typedTypes),
-    typedBlocks: new Uint32Array(typedBlocks),
-  };
-  parcel.grownHerds = herdFloats.length ? new Float32Array(herdFloats) : null;
-  parcel.mockCity = null;
-  parcel.state = 'grown';
-  parcel.generationCount = (parcel.generationCount || 0) + 1;
-
-  rebuildPackFrontierCity(pack);
-  if (pack.port?.streets && parcel.grownPaving) {
-    const paved = paveCityStreets(pack.port.streets, [parcel.grownPaving]);
-    if (paved) pack.port.streets = paved;
-  }
-  return true;
 }
 
 export async function generateCoastalNeighborSection(
@@ -13018,7 +8557,8 @@ export async function generateCoastalNeighborSection(
   const vegetation = skipStaticPalms
     ? { trees: new Float32Array(0), palms: new Float32Array(0), treeCount: 0, palmCount: 0 }
     : seedCoastalVegetation(sectionRegion, stitched, biome, beaches, port, 5, shoreDist);
-  const portGeometry = skipStaticPalms ? null : buildPortPrefabGeometry(port, vegetation.palms);
+  // Foreshore palms are drawn by the forest, which seeds real palms at these places; shot strikes them here.
+  if (!skipStaticPalms && vegetation.palms?.length >= 8) port.palms = vegetation.palms;
 
   return Object.assign(sectionPack, {
     connectedEdges,
@@ -13028,7 +8568,6 @@ export async function generateCoastalNeighborSection(
     biome,
     albedo,
     vegetation,
-    portGeometry,
   });
 }
 

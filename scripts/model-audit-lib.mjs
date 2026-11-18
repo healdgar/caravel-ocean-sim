@@ -397,10 +397,19 @@ export function auditShipCollision(ship, sweepShipSegment, createVesselDamageSta
   };
 }
 
-// Fires the fan at one building, through the game's own sweep, in the states a real port holds it in.
-export function auditBuildingCollision(prefabId, lib, fan = {}) {
-  const { getBuildingParts, createPortFractures, prepareBuildingFracture, buildingFractureStateOf, classifyBuildingMaterial, createBuildingDamageState, sweepBuildingSegment } = lib;
-  const parts = getBuildingParts(prefabId), dims = parts.dimensions, ox = 40, oz = -30, ground = 2;
+// A city type's building as its builder drew it (js/coastal-world.js buildCityTypeGeometry): the mesh, with its part
+// catalogue, that the continuum is baked from and a struck building is cut from. Kept, since a port uses a type often.
+const cityTypeSources = new Map();
+export function cityTypeSource(type, lib) {
+  if (!cityTypeSources.has(type)) cityTypeSources.set(type, lib.compileCityBuildingType(type, lib.buildCityTypeGeometry).source);
+  return cityTypeSources.get(type);
+}
+
+// Fires the fan at one city type's building, through the game's own sweep, in the states a real port holds it in.
+export function auditBuildingCollision(type, lib, fan = {}) {
+  const { CITY_BUILDING_TYPES, cityFamilyOf, cityTypeTarget, createPortFractures, prepareBuildingFracture, buildingFractureStateOf, classifyBuildingMaterial, createBuildingDamageState, sweepBuildingSegment } = lib;
+  const spec = CITY_BUILDING_TYPES[type], { prefabId } = cityTypeTarget(type);
+  const parts = cityTypeSource(type, lib), dims = { width: spec.width, length: spec.length, height: spec.height }, ox = 40, oz = -30, ground = 2;
   const scene = (yaw) => {
     const cos = Math.cos(yaw), sin = Math.sin(yaw), vertices = new Float32Array(parts.vertices), count = vertices.length / 8, positions = new Float64Array(count * 3);
     for (let v = 0; v < count; v++) {
@@ -450,27 +459,43 @@ export function auditBuildingCollision(prefabId, lib, fan = {}) {
   const half = (reach) => Math.max(-reach.min[0], reach.max[0], -reach.min[2], reach.max[2]);
   const meshHalf = Math.max(square.index.max[0] - ox, ox - square.index.min[0], square.index.max[2] - oz, oz - square.index.min[2]);
   return {
-    id: prefabId, triangles: turned.index.triangles, nominal: [dims.width, dims.height, dims.length].map((v) => round(v, 1)).join('×'),
+    id: cityFamilyOf(type).key, triangles: turned.index.triangles, nominal: [dims.width, dims.height, dims.length].map((v) => round(v, 1)).join('×'),
     drawnTopM: round(square.index.max[1] - ground, 1), meshHalfM: round(meshHalf, 1), reachSquareM: round(half(piecesSquare.reach), 1), reachTurnedM: round(half(piecesTurned.reach), 1),
     mesh, piecesSquare: piecesSquare.row, piecesTurned: piecesTurned.row,
   };
 }
 
 // Every port and year: are its buildings known to the shot by their meshes, and is each mesh really that building?
+// Every building of its board's town is a city type (js/city-targets.js stands a struck one from its type's mesh).
 export function auditPortMeshes(pack, lib) {
-  const { createPortFractures, buildingReach, traceShotAtBuilding } = lib, port = pack.port, geometry = pack.portGeometry;
-  const instances = port?.instances ?? [];
-  createPortFractures({ device: null, port, geometry, portIndices: null, groundAt: () => 0 });
+  const { CITY_BUILDING_TYPES, cityTypeTarget } = lib, city = pack.city, count = city?.typedCount ?? 0;
   let noted = 0, misplaced = 0;
-  for (const inst of instances) {
-    const reach = buildingReach(inst);
-    if (!reach) continue;
+  const targets = new Set();
+  for (let i = 0; i < count; i++) {
+    const type = city.typedTypes[i], spec = CITY_BUILDING_TYPES[type], source = cityTypeSource(type, lib);
+    targets.add(cityTypeTarget(type).prefabId);
+    if (!source?.indices?.length) continue;
     noted++;
     // Its mesh, seen from its own frame, must surround its own origin or come within its footprint.
-    const away = Math.max(reach.min[0], -reach.max[0], reach.min[2], -reach.max[2]);
-    if (away > Math.max(inst.width ?? 10, inst.length ?? 10)) misplaced++;
+    const away = Math.max(source.min[0], -source.max[0], source.min[2], -source.max[2]);
+    if (away > Math.max(spec.width ?? 10, spec.length ?? 10)) misplaced++;
   }
-  return { instances: instances.length, noted, misplaced, prefabs: [...new Set(instances.map((i) => i.prefabId))] };
+  return { instances: count, noted, misplaced, prefabs: [...targets] };
+}
+
+// The port's waterfront as drawn (js/board-waterfront.js records, each its city type's mesh where it stands), for
+// what is said to stand on it.
+export function waterfrontMesh(pack, lib) {
+  const vertices = [], indices = [];
+  for (const record of pack.port?.waterfront ?? []) {
+    const source = cityTypeSource(record.type, lib), cos = Math.cos(record.yaw), sin = Math.sin(record.yaw), base = vertices.length / 3;
+    for (let v = 0; v < source.vertices.length; v += 8) {
+      const lx = source.vertices[v], ly = source.vertices[v + 1], lz = source.vertices[v + 2];
+      vertices.push(record.x + lx * cos + lz * sin, record.y + ly, record.z - lx * sin + lz * cos);
+    }
+    for (const i of source.indices) indices.push(base + i);
+  }
+  return { positions: Float64Array.from(vertices), indices: Uint32Array.from(indices) };
 }
 
 // --- Trees and palms --------------------------------------------------------------------------------------------
@@ -1015,9 +1040,7 @@ export function auditCrewRoutes(ship, lib, { seconds = 60, dt = 0.1 } = {}) {
 export function auditPortProps(pack, lib, propModels) {
   const { terrainSurfaceSample, PROP_MODELS, layPortProps } = lib, port = pack.port, region = pack.region;
   const groundAt = (x, z) => terrainSurfaceSample(pack.heights, x, z, region);
-  const geometry = pack.portGeometry, stride = 8, count = geometry.vertices.length / stride, positions = new Float64Array(count * 3);
-  for (let v = 0; v < count; v++) for (let c = 0; c < 3; c++) positions[v * 3 + c] = geometry.vertices[v * stride + c];
-  const index = createMeshIndex(positions, geometry.indices);
+  const { positions, indices } = waterfrontMesh(pack, lib), index = createMeshIndex(positions, indices);
   const props = port.props ?? layPortProps(port, groundAt);
   const row = { id: region.id, cleats: 0, cleatOff: 0, cleatWorst: 0, cleatNoMesh: 0, jetties: 0, jettyRootHigh: 0, jettyHeadDry: 0, jettyFarDeep: 0, jettyRootBuriedM: 0, jettyDetails: [] };
   for (const prop of props) {

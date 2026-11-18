@@ -23,7 +23,7 @@ import { packCityContinuumPieces } from './city-continuum.js';
 import { CONTINUUM_BROKEN, CONTINUUM_KIND, assembleContinuumAtlas, continuumAtlasTypes, continuumFinestClusters, continuumRoom } from './continuum-format.js';
 import { createContinuumScene, uploadContinuumAtlas } from './continuum-scene.js';
 import { CONTINUUM_GROUNDED } from './continuum-ground.js';
-import { bakeFracturePieces } from './prefab-continuum.js';
+import { bakeFracturePieces } from './continuum-bake-client.js';
 
 export const BUILDING_SHARD_KINDS = Object.freeze({ block: 1, whole: 2, cell: 3, gun: 4 });
 const STRIDE = 8;
@@ -1430,7 +1430,7 @@ export function replayBuildingFracture(fracture, damage, log, now = 0) {
 // The struck buildings of a port in the one continuum (AGENTS.md rule 3). Each building's pieces are a type of an
 // atlas of their own: the very triangles the shot, the footing and the fall read (rule 1), in a frame stood at the
 // building's root, every piece a part. Its finest clusters are packed the moment it is cut, and its coarser levels are
-// baked in the page's worker (js/prefab-continuum.js bakeFracturePieces) and take their place when they land. It is
+// baked in the page's worker (js/continuum-bake-client.js bakeFracturePieces) and take their place when they land. It is
 // then a broken instance of the one cut (js/continuum-scene.js), of the SHARDED kind (js/wgsl/continuum-kinds.js): each
 // cluster rides its piece's flight from the instance's block of shard records, which are written only when a piece
 // moves, and wears its piece's scorch from the block's wear, written only when it changes. `continuum()` gives the

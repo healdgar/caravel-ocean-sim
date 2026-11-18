@@ -15,7 +15,7 @@ const flag = (name) => process.argv.includes('--' + name);
 const option = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
 
 export async function loadAuditModules() {
-  const names = ['forest-trunks', 'gunnery-control', 'building-fracture', 'coastal-world', 'ship-fracture', 'hull', 'gunnery-models', 'crew', 'crew-pose', 'crew-physics', 'crew-work', 'crew-navigation', 'ship-models', 'models/victory', 'terrain-model', 'port-props', 'gltf'];
+  const names = ['forest-trunks', 'gunnery-control', 'building-fracture', 'coastal-world', 'ship-fracture', 'hull', 'gunnery-models', 'crew', 'crew-pose', 'crew-physics', 'crew-work', 'crew-navigation', 'ship-models', 'models/victory', 'terrain-model', 'port-props', 'gltf', 'old-world-buildings'];
   return Object.assign({}, ...(await Promise.all(names.map((n) => import(new URL(`../js/${n}.js`, import.meta.url).href)))));
 }
 // As js/crew.js chooses them: Indigenous people are built on the classic bodies.
@@ -177,7 +177,7 @@ export function renderTables(results) {
   out.push('\n### 1d. Balls against port buildings\n');
   out.push('*Mesh* is an intact building, turned 40°. *Square* and *turned* are the same building once cut into pieces, at 0° and 40°. Each cell is agree / air / through / early, as lines.\n');
   const cell = (b) => `${b.agree} / ${b.air} / ${b.through + b.late} / ${b.early}`;
-  out.push(table(['Prefab', 'nominal w×h×l', 'drawn top m', 'mesh half m', 'reach square m', 'reach turned m', 'mesh', 'pieces square', 'pieces turned', 'max air m'], results.buildings.map((b) => [b.id, b.nominal, b.drawnTopM, b.meshHalfM, b.reachSquareM, b.reachTurnedM, cell(b.mesh), cell(b.piecesSquare), cell(b.piecesTurned), A.round(b.piecesTurned.maxAir, 1)])));
+  out.push(table(['City type', 'nominal w×h×l', 'drawn top m', 'mesh half m', 'reach square m', 'reach turned m', 'mesh', 'pieces square', 'pieces turned', 'max air m'], results.buildings.map((b) => [b.id, b.nominal, b.drawnTopM, b.meshHalfM, b.reachSquareM, b.reachTurnedM, cell(b.mesh), cell(b.piecesSquare), cell(b.piecesTurned), A.round(b.piecesTurned.maxAir, 1)])));
   out.push('\n### 2a. Masts\n');
   out.push(table(['Ship', 'mast', 'table z', 'mesh z', 'off', 'deck y', 'foot y', 'top y', 'top break', 'full break', 'break above deck', 'rig top', 'rail', 'struck from', 'struck to', 'dead band'], ships.flatMap((r) => (r.masts.rows.length ? r.masts.rows : [{}]).map((q) => [r.id, q.mast, q.tableZ, q.meshZ, q.offZ, q.deck, q.foot, q.top, q.topBreak, q.fullBreak, q.fullBreakAboveDeck, r.masts.rigTopMeshM, r.masts.railAmidshipsM, r.masts.mastStruckFromM, r.masts.mastStruckToM, r.masts.mastDeadBandM]))));
   out.push('\n### 2b. Guns\n');
@@ -216,7 +216,7 @@ export async function runAudit({ fast = false, live = null, log = () => {} } = {
     ships.push(A.auditShip(ship, lib, { fan: fast ? A.FAST_FAN : A.FULL_FAN, crewMeshes, everyNth: fast ? 6 : 2, routeSeconds: fast ? 30 : 90, pose }));
   }
   log('buildings');
-  const buildings = Object.keys(lib.PORT_PREFABS).map((id) => A.auditBuildingCollision(id, lib, fast ? FAST_BUILDING_FAN : {}));
+  const buildings = lib.CITY_FAMILIES.map((family) => A.auditBuildingCollision(family.canonical, lib, fast ? FAST_BUILDING_FAN : {}));
   log('trees');
   const trees = auditForestTrees(lib, fast ? { bearings: 6, columns: 16, rows: 24 } : {});
   log('ports');

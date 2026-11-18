@@ -22,9 +22,8 @@ import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
 import { BOULDER_CONTINUUM_ASSETS } from './js/boulder-continuum.js';
 import { SHIP_CONTINUUM_ASSETS } from './js/ship-continuum.js';
 import { ANIMAL_CONTINUUM_ASSETS } from './js/animal-continuum.js';
-import { PREFAB_CONTINUUM_ASSETS } from './js/prefab-continuum.js';
+import { CONTINUUM_BAKE_ASSETS } from './js/continuum-bake-client.js';
 import { BAKED_BOARDS, BAKED_WORLDS } from './js/board-model.js';
-import { PREFAB_CONTINUUM_PORT_BODIES } from './js/prefab-continuum-ports.js';
 import { bundleContinuumBakeWorker } from './scripts/continuum-bake-worker-bundle.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -70,7 +69,7 @@ order.splice(order.indexOf('js/wgsl/part-assembly.js')+1,0,'js/wgsl/ship-fractur
 order.splice(order.indexOf('js/boat.js'),0,'js/ship-part-taxonomy.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/part-assembly.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/ship-fracture.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/building-fracture.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/continuum-bake-client.js','js/building-fracture.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/land-craters.js');
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-craters.js');
 wgslModules.push('js/wgsl/land-craters.js');
@@ -90,7 +89,7 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/animal-continuum.js','js/
 wgslModules.push('js/wgsl/skinned-pose.js');
 // A port's country as Castle and Commons' model founded it: what is asked of the model, how it stands here, and the GPU's stamp of it.
 // The herds go first: board-folk.js reads herds.js's STREET_MOUNT_FLAG as it loads.
-order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/old-world-board.js','js/native-towns.js','js/colonial-towns.js','js/old-world.js');
+order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/board-waterfront.js','js/place-landmarks.js','js/old-world-board.js','js/native-towns.js','js/colonial-towns.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
@@ -102,7 +101,7 @@ order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js');
 // The fleet's own ships in the same continuum (js/vessel-continuum.js), drawn by main.js.
 order.splice(order.indexOf('js/main.js'),0,'js/vessel-continuum.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
-order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/wgsl/boulder-continuum.js','js/continuum-scene.js','js/city-continuum-draw.js','js/prefab-continuum-ports.js','js/prefab-continuum.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/wgsl/boulder-continuum.js','js/continuum-scene.js','js/city-continuum-draw.js');
 // The land's continuum: its programs ahead of the land shader its drawing is appended to, its bake and cut ahead of the land.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
 wgslModules.push('js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
@@ -155,8 +154,6 @@ const runtimeAssetTypes = new Map([
   ['assets/world/saba/manifest.json','application/json'],
   ['assets/world/land.json','application/json'],
   ['assets/world/hyg-stars.bin','application/octet-stream'],
-  ['assets/ports/1550/buildings-1550-lrm.bin','application/octet-stream'],
-  ['assets/ports/1550/buildings-1550-photo-atlas.jpg','image/jpeg'],
   ['assets/ports/1550/land-materials-pbr.png','image/png'],
   ['assets/neural-pbr/neural-pbr-latents.bin.gz','application/octet-stream'],
   ['assets/neural-pbr/neural-light-weights.bin','application/octet-stream'],
@@ -199,17 +196,12 @@ for(const file of Object.values(BOULDER_CONTINUUM_ASSETS))runtimeAssetTypes.set(
 // The animal continuum's atlas (scripts/prepare-animal-continuum.mjs), kept in git: every animal is drawn from nothing else.
 for(const file of Object.values(ANIMAL_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The one simplifier (js/continuum-bake.js) bundled for the page's bake workers (js/continuum-bake-worker.js), written
-// only when it changes: its digest is the bake's version, under which every body is shipped and kept. Then the bodies
-// baked for the historical ports (scripts/prepare-prefab-continuum.mjs), baked by that same version.
+// only when it changes.
 {
-  const bakeWorker=PREFAB_CONTINUUM_ASSETS['bake-worker.js'],out=path.join(root,bakeWorker);
+  const bakeWorker=CONTINUUM_BAKE_ASSETS['bake-worker.js'],out=path.join(root,bakeWorker);
   const {text}=await bundleContinuumBakeWorker(root);
   if(!fs.existsSync(out)||!text.equals(fs.readFileSync(out))){fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,text);}
   runtimeAssetTypes.set(bakeWorker,'text/javascript');
-  const bodies=[PREFAB_CONTINUUM_ASSETS['manifest.json'],...Object.values(PREFAB_CONTINUUM_PORT_BODIES)];
-  const missing=bodies.filter(file=>!fs.existsSync(path.join(root,file)));
-  if(missing.length||bodies.length<2)throw Error(`The prefab continuum is not baked (${missing.join(', ')||'no ports'}): run node scripts/prepare-prefab-continuum.mjs`);
-  for(const file of bodies)runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 }
 // The people continuum's bodies (scripts/prepare-crew-continuum.mjs). Their streams are not committed, and people are
 // drawn through nothing else: a checkout without every one of them does not build.
@@ -238,8 +230,6 @@ for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBT
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))externalDownloadGeometry.add(file);
 // So do the founded worlds of the Old World cities.
 for(const file of Object.values(BAKED_WORLDS))externalDownloadGeometry.add(file);
-// So do the prefab bodies baked for the historical ports.
-for(const file of Object.values(PREFAB_CONTINUUM_PORT_BODIES))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){
   if(!runtimeAssetBytes.has(file))runtimeAssetBytes.set(file,fs.readFileSync(path.join(root,file)));
   const bytes=runtimeAssetBytes.get(file);

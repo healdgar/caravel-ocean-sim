@@ -1,11 +1,10 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // The one continuum's simplifier (AGENTS.md rule 3): one rigid body's bake, the same code offline and in game. The
-// offline bakes (scripts/prepare-city-continuum.mjs for the city's types, scripts/prepare-prefab-continuum.mjs for
-// the coasts' prefabs, scripts/prepare-prop-continuum.mjs, scripts/prepare-animal-continuum.mjs,
-// scripts/prepare-meadow-grass.mjs, and scripts/prepare-ship-continuum.mjs, whose far bodies are voxel pieces below)
-// import it under Node; the page's bake worker (js/continuum-bake-worker.js, bundled by
-// build.mjs into assets/continuum/bake-worker.js) runs it in the browser for whatever the offline bakes did not
-// cover. It is no part of the page's own bundle.
+// offline bakes (scripts/prepare-city-continuum.mjs for the city's types, scripts/prepare-prop-continuum.mjs,
+// scripts/prepare-animal-continuum.mjs, scripts/prepare-meadow-grass.mjs, and scripts/prepare-ship-continuum.mjs,
+// whose far bodies are voxel pieces below) import it under Node; the page's bake worker (js/continuum-bake-worker.js, bundled by
+// build.mjs into assets/continuum/bake-worker.js) runs it in the browser for a struck building's pieces, which no
+// offline bake can know. It is no part of the page's own bundle.
 //   clusters   a cluster hierarchy the GPU cuts by projected error. Every part of the body's assembly is clustered
 //              apart, its boundary a seam both sides coarsen alike, so no simplified triangle spans two parts and a
 //              shot part's own triangles are always its own.

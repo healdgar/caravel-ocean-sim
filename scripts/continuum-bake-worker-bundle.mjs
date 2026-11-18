@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // The page's continuum bake worker (js/continuum-bake-worker.js and the one simplifier it runs, js/continuum-bake.js)
-// bundled into one classic worker script, as build.mjs writes it to assets/continuum/bake-worker.js. Its digest is the
-// bake's version: scripts/prepare-prefab-continuum.mjs ships bodies under it and the page keeps bodies under it.
+// bundled into one classic worker script, as build.mjs writes it to assets/continuum/bake-worker.js; build.mjs writes it
+// again only when its digest changes.
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import path from 'node:path';

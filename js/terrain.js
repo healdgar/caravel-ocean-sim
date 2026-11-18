@@ -24,9 +24,8 @@ import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_TYPED_FLOATS,CITY_TYPES_WATERSIDE,compileCityBuildingType} from './old-world-buildings.js';
 import {cityContinuumMaterial} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,createCityContinuum} from './city-continuum-draw.js';
-import {requestContinuumPrograms,requestContinuumView,requestContinuumCapture,uploadContinuumAtlas} from './continuum-scene.js';
+import {requestContinuumPrograms,requestContinuumView,requestContinuumCapture} from './continuum-scene.js';
 import {createCityTargets} from './city-targets.js';
-import {isPrefabContinuumInstance,prefabContinuumAtlas,prefabContinuumPlan,resolvePrefabContinuum} from './prefab-continuum.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize,landCraterMark} from './land-craters.js';
 import {createLandBanks} from './land-banks.js';
 import {bakeLandContinuumPiece,landContinuumSeams,requestLandContinuumPipelines,createLandContinuum} from './land-continuum.js';
@@ -39,8 +38,9 @@ import {createBoulderContinuum,requestBoulderContinuumAtlas} from './boulder-con
 import {BOULDER_CONTINUUM_MATERIAL_SPEC} from './wgsl/boulder-continuum.js';
 
 import {
-  buildPortPrefabGeometry,
+  buildCityTypeGeometry,
   portClearanceEnvelope,
+  settlePortOnWaterfront,
   PLANT_STREET_GAP_M,
   runLandfallDiscoveryPipeline,
   completeProceduralCoastalPack,
@@ -50,9 +50,6 @@ import {
   stitchCoastalSectionBorders,
   restitchCoastalSection,
   buildMockCoastalSection,
-  planUngrownFrontierParcels,
-  growFrontierParcel,
-  rebuildPackFrontierCity,
   generateCoastalNeighborSection,
   smoothCoastlineAndForeshoreBeaches,
   synthesizeCoastalBeaches,
@@ -260,7 +257,7 @@ export function retargetForestPackToProcedural(
     const span = region.span ?? 8192;
     const areaScale = span < 4096 ? Math.max(0.45, Math.min(1, Math.pow(span / 4096, 1.15))) : 1;
     const effectiveSecMaxRoots = Math.max(64, Math.round(secMaxRoots * areaScale));
-    const cacheKey = `${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${effectiveSecMaxRoots}:${span}:${heightFingerprint(secPack.heights)}:${secPack.port?.instances?.length ?? 0}:${secPack.city?.count ?? 0}`;
+    const cacheKey = `${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${effectiveSecMaxRoots}:${span}:${heightFingerprint(secPack.heights)}:${secPack.port?.waterfront?.length ?? 0}:${secPack.city?.count ?? 0}`;
     const cachedPlanted = cachedFor(secPack._cachedForestPlanted, cacheKey);
     if (cachedPlanted) return cachedPlanted.roots;
 
@@ -403,11 +400,10 @@ export function retargetForestPackToProcedural(
       // No forest giants and no nurse rings among a farmer's trees.
       if (tended && (tended.none || isVeteran || isSatellite)) return -1;
 
-      if (port && (port.clearRadius > 0 || port.instances?.length > 0)) {
-        const envPad = port.hasOrthophotoFootprints ? 8 : port.hasIndigenousSettlement ? 8.5 : 10;
+      if (port && (port.clearRadius > 0 || port.waterfront?.length > 0)) {
+        const envPad = port.hasIndigenousSettlement ? 8.5 : 10;
         const clearEnv = !portClearanceEnvelope(port, x, z, envPad);
         const clearRad =
-          !port.hasOrthophotoFootprints &&
           !port.hasIndigenousSettlement &&
           port.clearRadius > 0 &&
           Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38;
@@ -827,10 +823,10 @@ export function retargetForestPackToProcedural(
       if (x <= x0 + borderMargin || x >= x0 + span - borderMargin || z <= z0 + borderMargin || z >= z0 + span - borderMargin) return;
       // A grove is wild wood: none stands on a farmer's ground, in a town or by a road.
       if (country && country.treesAt(x, z) !== null) return;
-      if (port && (port.clearRadius > 0 || port.instances?.length > 0)) {
-        const envPad = port.hasOrthophotoFootprints ? 8 : port.hasIndigenousSettlement ? 8.5 : 10;
+      if (port && (port.clearRadius > 0 || port.waterfront?.length > 0)) {
+        const envPad = port.hasIndigenousSettlement ? 8.5 : 10;
         if (!portClearanceEnvelope(port, x, z, envPad)) return;
-        if (!port.hasOrthophotoFootprints && !port.hasIndigenousSettlement && port.clearRadius > 0 && Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38) return;
+        if (!port.hasIndigenousSettlement && port.clearRadius > 0 && Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38) return;
         if (streetEdgeAt(port.streets, x, z) < PLANT_STREET_GAP_M) return;
       }
       if (waterAt?.(x, z) || cityBlocked?.(x, z)) return;
@@ -872,10 +868,10 @@ export function retargetForestPackToProcedural(
   const baseCityBlocked = buildCityBlockTester(proceduralPack.city ?? basePort?._resolvedCountry?.plan, 2.6);
   const isBaseClearForTree = (px, pz) => {
     if (baseWaterAt?.(px, pz) || baseCityBlocked?.(px, pz)) return false;
-    if (basePort && (basePort.clearRadius > 0 || basePort.instances?.length > 0)) {
-      const envPad = basePort.hasOrthophotoFootprints ? 8 : basePort.hasIndigenousSettlement ? 8.5 : 10;
+    if (basePort && (basePort.clearRadius > 0 || basePort.waterfront?.length > 0)) {
+      const envPad = basePort.hasIndigenousSettlement ? 8.5 : 10;
       if (!portClearanceEnvelope(basePort, px, pz, envPad)) return false;
-      if (!basePort.hasOrthophotoFootprints && !basePort.hasIndigenousSettlement && basePort.clearRadius > 0 &&
+      if (!basePort.hasIndigenousSettlement && basePort.clearRadius > 0 &&
           Math.hypot(px - basePort.center.x, pz - basePort.center.z) < basePort.clearRadius * 0.38) return false;
       if (streetEdgeAt(basePort.streets, px, pz) < PLANT_STREET_GAP_M) return false;
     }
@@ -1242,8 +1238,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
     if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;
   };
-  // A port's prefabs are drawn through the one continuum alone (js/prefab-continuum.js); its assembly
-  // (portGeometry) is the physical truth that shot, flooding and fracture work on, and nothing draws it.
   // Buildings under fire draw from their own buffers, made when each is first hit.
   // A port set up for a side game is no part of the career: its damage is neither restored from the store nor kept in it.
   // A city's buildings are drawn through the one continuum (js/city-continuum-draw.js), and are no buildings of the
@@ -1251,10 +1245,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // drawn by the port's fractures, and the continuum leaves it out.
   // Each type is built when shot first comes near one of its buildings, and kept.
   const cityCatalogue=[];
-  const cityTypeCatalogue=(id)=>cityCatalogue[id]??=compileCityBuildingType(id,buildPortPrefabGeometry);
+  const cityTypeCatalogue=(id)=>cityCatalogue[id]??=compileCityBuildingType(id,buildCityTypeGeometry);
   const cityTargetsFor=(city,port)=>city?.typedCount&&city.typedBlocks&&port&&search.get('cityTargets')!=='0'?createCityTargets({city,types:cityTypeCatalogue,port,onStruck:index=>cityBuildingHit(index)}):null;
   let activeCity=proceduralPack?.city??null,cityTargets=cityTargetsFor(activeCity,proceduralPack?.port);
-  let cityContinuum=null,cityAim=null,prefabs=null;
+  let cityContinuum=null,cityAim=null;
   // Buildings in pieces, and buildings shot has struck (cut finer from the first hit until the town stands them again).
   const cityStruckIndices=new Set(),cityHitIndices=new Set();
   const syncCollapsedBridges=(index,city,struck)=>{
@@ -1294,51 +1288,28 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     cityContinuum?.hide(index,1+(city.typedAttached?.[index]??0),false);
   };
   // When the port's fractures are let go (another port stands in, or the coast is loaded again), the city stands whole.
-  const cityStandsWhole=()=>{for(const index of new Set([...cityStruckIndices,...cityHitIndices]))cityBuildingRebuilt({city:{index}});};
-  // A prefab struck is cut finer from its first hit; in pieces, its continuum leaves it out; stood again, it is drawn
-  // whole as before. Kept by instance, so that a continuum that lands later marks them too (prefabMarks).
-  const prefabFelled=new Set(),prefabHit=new Set();
-  const prefabAt=instance=>prefabs?.plan.index.get(instance);
-  const prefabMarks=()=>{
-    for(const instance of prefabFelled){const at=prefabAt(instance);if(at!==undefined)prefabs.hide(at,1,true);}
-    for(const instance of prefabHit){const at=prefabAt(instance);if(at!==undefined)prefabs.strike(at,1,true);}
-  };
-  const portBuildingHit=instance=>{
-    if(instance.city){cityBuildingHit(instance.city.index);return;}
-    if(!isPrefabContinuumInstance(instance))return;
-    prefabHit.add(instance);
-    const at=prefabAt(instance);if(at!==undefined)prefabs.strike(at,1,true);
-  };
-  const portBuildingStruck=instance=>{
-    if(instance.city){cityBuildingStruck(instance);return;}
-    if(!isPrefabContinuumInstance(instance))return;
-    prefabFelled.add(instance);
-    const at=prefabAt(instance);if(at!==undefined)prefabs.hide(at,1,true);
-  };
-  const portBuildingRebuilt=instance=>{
-    if(instance.city){cityBuildingRebuilt(instance);return;}
-    prefabFelled.delete(instance);prefabHit.delete(instance);
-    const at=prefabAt(instance);if(at!==undefined){prefabs.hide(at,1,false);prefabs.strike(at,1,false);}
-  };
+  // Every building of a port is a city's (js/city-targets.js), drawn by the city's continuum: struck, it is cut finer
+  // from its first hit; in pieces, the continuum leaves it out; stood again, it is drawn whole as before.
+  const portBuildingHit=instance=>{if(instance.city)cityBuildingHit(instance.city.index);};
+  const portBuildingStruck=instance=>{if(instance.city)cityBuildingStruck(instance);};
+  const portBuildingRebuilt=instance=>{if(instance.city)cityBuildingRebuilt(instance);};
   // The cut's programs and the city's view, once made: a building shot down stands as its pieces through them.
   let fracturePrograms=null,fractureView=null;
   const fractureContinuum=()=>fracturePrograms&&fractureView?{programs:fracturePrograms,view:fractureView,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples}:null;
-  const portFracturesFor=(geometry,port,targets=null)=>{
-    const own=Boolean(port?.instances?.length&&geometry?.partAssembly);
-    if(!port||(!own&&!targets))return null;
+  const portFracturesFor=(port,targets=null)=>{
+    if(!port||!targets)return null;
     const damageStore=port.transient?null:portDamage;
     // A save names the city's struck buildings; they are stood first, so that their records find them.
     if(targets&&damageStore)targets.revive(damageStore.recorded(port));
     damageStore?.restore(port);
-    return createPortFractures({device,port,geometry:own?geometry:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,continuum:fractureContinuum,grounded:fractureGrounded,
+    return createPortFractures({device,port,geometry:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,continuum:fractureContinuum,grounded:fractureGrounded,
       onStruck:portBuildingHit,onFractured:portBuildingStruck,onRebuilt:portBuildingRebuilt});
   };
-  let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,cityTargets);
+  let portFractures=portFracturesFor(proceduralPack?.port,cityTargets);
   let transientBoulderPort=null;
   const ensureBoulderFracturePort=()=>{
     const targetPort=proceduralPack?(proceduralPack.port??=(transientBoulderPort={regionId:activeRegion.id??'coast',name:activeRegion.name??'Coast',instances:[],transient:true})):(transientBoulderPort??={regionId:activeRegion.id??'saba',name:activeRegion.name??'Saba',instances:[],transient:true});
-    const geometry=proceduralPack?.portGeometry?.partAssembly?proceduralPack.portGeometry:null;
-    portFractures??=createPortFractures({device,port:targetPort,geometry,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,continuum:fractureContinuum,grounded:fractureGrounded,
+    portFractures??=createPortFractures({device,port:targetPort,geometry:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,continuum:fractureContinuum,grounded:fractureGrounded,
       onStruck:portBuildingHit,onFractured:portBuildingStruck,onRebuilt:portBuildingRebuilt});
     return targetPort;
   };
@@ -1529,38 +1500,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     for(const index of cityHitIndices)cityContinuum.strike(index,1+(city.typedAttached?.[index]??0),true);
     cityContinuum.setAim(cityAim);
   };
-  // A coast's prefabs on the one continuum, cut and drawn by the city's programs from an atlas of their own
-  // (js/prefab-continuum.js). Every body a port needs lands (shipped for the historical ports, kept by this browser,
-  // or baked now in workers, nearest first) before any of it is drawn, and a port lands once.
-  let prefabsMade=0,prefabsPort=null,prefabsLanding=Promise.resolve();
-  const prefabLandings=new WeakMap();
-  const landPrefabs=port=>{
-    if(!port?.instances?.length)return Promise.resolve(null);
-    if(!prefabLandings.has(port))prefabLandings.set(port,(async()=>{
-      const plan=await prefabContinuumPlan(port,{near:lastCamera});
-      if(!plan.instances.length)return null;
-      const [words,programs]=await Promise.all([resolvePrefabContinuum(plan,{portId:port.regionId??activeRegion.id}),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format})]);
-      return {plan,atlas:prefabContinuumAtlas(words),programs};
-    })().catch(error=>{prefabLandings.delete(port);throw error;}));
-    return prefabLandings.get(port);
-  };
-  const setPrefabBuildings=port=>prefabsLanding=(async()=>{
-    const made=++prefabsMade;
-    const old=prefabs;prefabs=null;if(old)retireGPU(()=>old.destroy());
-    if(port!==prefabsPort){prefabFelled.clear();prefabHit.clear();prefabsPort=port;}
-    const landing=await landPrefabs(port);
-    if(!landing||made!==prefabsMade||terrainDisposed)return;
-    const atlas=uploadContinuumAtlas(device,landing.atlas,'prefab');
-    const grounded=landing.plan.instances.map(instance=>standsOnGround(instance.x,instance.y??0,instance.z));
-    const continuum=createCityContinuum({device,atlas,programs:landing.programs,view:cityView,typed:landing.plan.typed,types:landing.plan.types,grounded,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'prefabs'});
-    const release=continuum.destroy;
-    prefabs=Object.assign(continuum,{plan:landing.plan,destroy(){release();atlas.destroy();}});
-    prefabs.setWorldOffset(worldOffset.x,worldOffset.z);prefabs.setAim(cityAim);
-    prefabMarks();
-  })();
-  const prefabsFailed=error=>console.error('prefab continuum',error);
-  // The coast is not presented until its city and its prefabs have landed.
-  await Promise.all([setCityBuildings(proceduralPack),setPrefabBuildings(proceduralPack?.port)]);
+  // The coast is not presented until its city has landed.
+  await setCityBuildings(proceduralPack);
   clouds=await cloudsResolvedPromise;waterOptics=await waterOpticsResolvedPromise;
   // Every tree of a coast is a root of its forest pack, drawn through the one continuum; a coast without a pack
   // has no trees, never a stand-in.
@@ -1798,8 +1739,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   function buildSectionGPURecord(secPack){
     const sReg=secPack.region;
     const sMesh=secPack.mesh;
-    // A section's port is laid out with no prefabs (js/coastal-world.js): only boulders join it, when struck.
-    if(secPack.port?.instances?.some(isPrefabContinuumInstance))throw Error(`Coastal section (${secPack.secX},${secPack.secZ}) has prefabs, which only a coast's own port draws through the continuum`);
     const sUniform=buffer(new Float32Array([sReg.x,sReg.z,sReg.span,0]),GPUBufferUsage.UNIFORM,`coastal section (${secPack.secX},${secPack.secZ}) domain`);
     const sAlbedoMips=1+Math.log2(sReg.albedoSize);
     const sAlbedo=device.createTexture({
@@ -1845,7 +1784,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       vegetation:secPack.vegetation,
       // Kept for what its points say of the ground (sand); the section's land draws through the continuum.
       meshVertsCpu:sMesh.vertices,
-      portFractures:portFracturesFor(secPack.portGeometry,secPack.port),
+      portFractures:null,
       uniform:sUniform,
       albedo:sAlbedo,
       biomeTexture:sBiome,
@@ -1864,7 +1803,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   function getActivePorts(){
     if(portsDirty||!cachedPorts){
       cachedPorts=proceduralPack?.port?[proceduralPack.port]:[];
-      for(const sec of loadedSections.values())if(sec.port?.instances?.length)cachedPorts.push(sec.port);
+      for(const sec of loadedSections.values())if(sec.port?.waterfront?.length||sec.port?.works?.length)cachedPorts.push(sec.port);
       portsDirty=false;
     }
     return cachedPorts;
@@ -1925,37 +1864,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     meadowGrass?.rebind(nearResources);
     tradeVessels?.rebind(nearResources);
     if(oldTownField)retireGPU(()=>{oldTownField.texture?.destroy?.();oldTownField.window?.destroy?.();});
-  }
-
-  function refreshFrontierParcelGPU(){
-    if(terrainDisposed||!proceduralPack)return;
-    if(proceduralPack.port?.streets)rebindNearTownField(proceduralPack.port.streets);
-    // Those shot down stay down.
-    setCityBuildings(proceduralPack).catch(error=>console.warn('city continuum',error));
-    activeCity=proceduralPack.city??null;
-    cityTargets=cityTargetsFor(activeCity,proceduralPack.port);
-    if(!savedPortOverride&&!portFractures){
-      portFractures=portFracturesFor(proceduralPack.portGeometry,proceduralPack.port,cityTargets);
-      portFractures?.restoreNow().catch(()=>{});
-    }
-    herds?.setHerds?.(proceduralPack.herds??null);
-    if(biome&&biomeTexture){
-      if(proceduralPack.biome&&proceduralPack.biome!==biome&&proceduralPack.biome.byteLength===biome.byteLength){
-        biome.set(proceduralPack.biome);
-      }
-      device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
-      rebuildNeighborTreeInstances();
-    }
-    meadowGrass?.sync?.({
-      region:activeRegion,
-      heights,
-      biome,
-      beaches:proceduralPack.beaches??null,
-      port:(savedPortOverride?null:proceduralPack.port)??null,
-      city:proceduralPack.city??null,
-      board:proceduralPack.board??null,
-      inlandWater:proceduralPack.inlandWater??null,
-    });
   }
 
   function ensureMockSection(secX,secZ,{rebuildTrees=true}={}){
@@ -2114,8 +2022,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         bordersModified=true;
         proceduralPack._cachedForestPlanted=null;
         device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
-        mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,savedPortOverride?null:proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
-        landCentre((savedPortOverride?.port??proceduralPack.port)?.riverCut);
+        mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
+        landCentre(proceduralPack.port?.riverCut);
         craters?.invalidate(activeRegion);
       }
     }
@@ -2154,18 +2062,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(terrainDisposed||!proceduralPack||!Number.isFinite(lx)||!Number.isFinite(lz)){
       return {parcelsGrown:0,sectionsQueued:0,mocksSeeded:0};
     }
-    let parcelsGrown=0;
-    const parcels=proceduralPack.frontierParcels;
-    if(Array.isArray(parcels)){
-      proceduralPack.biome=biome;
-      for(const parcel of parcels){
-        if(parcel.state!=='mocked')continue;
-        if(Math.abs(lx-parcel.cx)<=parcel.span*0.5&&Math.abs(lz-parcel.cz)<=parcel.span*0.5){
-          if(growFrontierParcel(proceduralPack,parcel,heights))parcelsGrown++;
-        }
-      }
-      if(parcelsGrown)refreshFrontierParcelGPU();
-    }
+    // A town grows by its board's own life (js/board-life.js), laid again as it grows: nothing else grows one.
+    const parcelsGrown=0;
 
     const span=activeRegion.span;
     const halfSpan=span*0.5;
@@ -2242,7 +2140,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     biome:new Uint8Array(biome),
     albedo:proceduralPack.albedo?new Uint8Array(proceduralPack.albedo):null,
     mesh:proceduralPack.mesh,
-    portGeometry:proceduralPack.portGeometry,
     vegetation:proceduralPack.vegetation,
     beaches:proceduralPack.beaches,
     views:proceduralPack.views,
@@ -2267,11 +2164,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
     }
     if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
-    // With a custom port standing in, the new coast's own port waits behind it: setCustomPort(null) brings it out.
-    // Either way the port keeps the geometry it is drawn from, so a later swap never restores another coast's.
-    const heldPort=savedPortOverride,portOwner=heldPort??proceduralPack;
-    if(upgradedPack.port)portOwner.port=upgradedPack.port;
-    portOwner.portGeometry=upgradedPack.portGeometry??null;
+    if(upgradedPack.port)proceduralPack.port=upgradedPack.port;
     if(upgradedPack.beaches)proceduralPack.beaches=upgradedPack.beaches;
     if(upgradedPack.vegetation){
       proceduralPack.vegetation=upgradedPack.vegetation;
@@ -2296,17 +2189,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     mesh=upgradedPack.mesh;
     // A coast laid out wider or narrower puts every piece of land on another grid.
     if(landGrid.g!==activeRegion.span/1024){landGrid=landGridFor();landContinuum?.regrid(landGrid);for(const key of landSpecs.keys())landDirty.add(key);}
-    landCentre(portOwner.port?.riverCut);
-    // The buildings moved, so their ways did too.
-    if(!upgradedPack.frontierParcels?.length){
-      planUngrownFrontierParcels(upgradedPack,heights,{playerPos:boat?{x:boat.x,z:boat.z}:null});
-    }
+    landCentre(proceduralPack.port?.riverCut);
     rebindNearTownField(upgradedPack.port?.streets);
     inlandWaterSampler=createInlandWaterSampler(upgradedPack.port?.country??null);
     inlandWater?.setGeometry(upgradedPack.inlandWater??null);
     herds?.setBridges?.(upgradedPack.port?.country?.bridges??null);
     herds?.setHerds(upgradedPack.herds??null);
-    meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portOwner.port??null,city:upgradedPack.city??proceduralPack.city??null,board:upgradedPack.board??proceduralPack.board??null,inlandWater:upgradedPack.inlandWater??proceduralPack.inlandWater??null});
+    meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:upgradedPack.city??proceduralPack.city??null,board:upgradedPack.board??proceduralPack.board??null,inlandWater:upgradedPack.inlandWater??proceduralPack.inlandWater??null});
     if(upgradedPack.port?.country?.board){
       tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
     }
@@ -2314,21 +2203,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(upgradedPack.board)proceduralPack.board=upgradedPack.board;
     proceduralPack.inlandWater=upgradedPack.inlandWater??null;
     proceduralPack.herds=upgradedPack.herds??null;
-    proceduralPack.frontierParcels=upgradedPack.frontierParcels??null;
     proceduralPack.city=upgradedPack.city??proceduralPack.city??null;
-    proceduralPack._baseCity=upgradedPack._baseCity??proceduralPack._baseCity??null;
-    proceduralPack._baseHerds=upgradedPack._baseHerds??proceduralPack._baseHerds??null;
     // The city is laid out again on the new ground, whole; what was shot down is put back from the record.
-    if(!heldPort)portDamage?.capture(proceduralPack?.port);
+    portDamage?.capture(proceduralPack?.port);
     cityStruckIndices.clear();cityHitIndices.clear();
     setCityBuildings(upgradedPack).catch(error=>console.warn('city continuum',error));
     activeCity=upgradedPack.city??null;cityTargets=cityTargetsFor(activeCity,upgradedPack.port);
-    if(!heldPort){
-      portFractures?.destroy();
-      setPrefabBuildings(upgradedPack.port).catch(prefabsFailed);
-      portFractures=portFracturesFor(upgradedPack.portGeometry,upgradedPack.port,cityTargets);
-      portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
-    }
+    portFractures?.destroy();
+    portFractures=portFracturesFor(upgradedPack.port,cityTargets);
+    portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
 
     groundPatches=createGroundCoverPatches(activeRegion,baseGroundSample,null);
     groundStats.patches=groundPatches.length;
@@ -2351,38 +2234,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return true;
   }
 
-  // Stands a custom port (a side game's) in place of this coast's own, or with no arguments brings the coast's own
-  // back. False when there is no procedural coast to stand it on, or nothing to bring back.
-  let savedPortOverride=null;
-  function setCustomPort(customPort=null,customPortGeometry=null){
-    if(terrainDisposed||!proceduralPack)return false;
-    const standIn=Boolean(customPort&&customPortGeometry);
-    if(!standIn&&!savedPortOverride)return false;
-    portsDirty=true;
-    if(standIn){
-      if(!savedPortOverride){
-        // The coast's own port leaves the scene with its damage on record, as any port going out of sight does.
-        portDamage?.capture(proceduralPack.port);
-        savedPortOverride={port:proceduralPack.port,portGeometry:proceduralPack.portGeometry};
-      }
-      proceduralPack.port=customPort;
-      proceduralPack.portGeometry=customPortGeometry;
-    }else{
-      proceduralPack.port=savedPortOverride.port;
-      proceduralPack.portGeometry=savedPortOverride.portGeometry;
-      savedPortOverride=null;
-      portDamage?.capture(proceduralPack.port);
-    }
-    const nextGeo=proceduralPack.portGeometry;
-    const nextPort=proceduralPack.port;
-    // The same stone raised again stands whole: its continuum is made again from the bodies it landed with.
-    portFractures?.destroy();cityStandsWhole();prefabsPort=null;
-    setPrefabBuildings(nextPort).catch(prefabsFailed);
-    portFractures=portFracturesFor(nextGeo,nextPort,standIn?null:cityTargets);
-    // Its own port comes back as it was left: what was shot down is down, on the new buffers.
-    if(!standIn)portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
-    return true;
-  }
 
   const discoveryListeners=new Set();
   const discovery={
@@ -2557,7 +2408,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     groundStats,forestStats,
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
-    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['prefabs',prefabs],['land',landContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
+    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['land',landContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null},
     // The land's cut, read back: for tests. Per piece, the view's and the captures' lists of patches.
     readLandCut:()=>landContinuum?.readCut()??null,
@@ -2619,30 +2470,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           elevationSource:rec.elevationSource??null,
         };
       };
-      const summarizeParcel=p=>({
-        id:p.id,
-        ix:p.ix,
-        iz:p.iz,
-        cx:p.cx+worldOffset.x,
-        cz:p.cz+worldOffset.z,
-        localCx:p.cx,
-        localCz:p.cz,
-        span:p.span,
-        dryShare:p.dryShare,
-        state:p.state,
-        generationCount:p.generationCount,
-      });
       return {
         get sections(){
           return Array.from(loadedSections.values(),rec=>summarizeSection(rec));
-        },
-        get parcels(){
-          return (proceduralPack?.frontierParcels??[]).map(summarizeParcel);
-        },
-        parcelAt(x,z){
-          const lx=x-worldOffset.x,lz=z-worldOffset.z;
-          const hit=(proceduralPack?.frontierParcels??[]).find(p=>Math.abs(lx-p.cx)<=p.span*0.5&&Math.abs(lz-p.cz)<=p.span*0.5);
-          return hit?summarizeParcel(hit):null;
         },
         sectionAt(x,z){
           const lx=x-worldOffset.x,lz=z-worldOffset.z;
@@ -2678,22 +2508,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
               grownSections++;
             }
           }
-          const parcels=proceduralPack?.frontierParcels??[];
-          let mockedParcels=0,generatingParcels=0,grownParcels=0;
-          for(const p of parcels){
-            if(p.state==='mocked')mockedParcels++;
-            else if(p.state==='generating')generatingParcels++;
-            else grownParcels++;
-          }
           return {
             mockedSections,
             generatingSections,
             grownSections,
             totalLoadedSections:loadedSections.size,
-            mockedParcels,
-            generatingParcels,
-            grownParcels,
-            totalParcels:parcels.length,
             lastPlayerEntry:Number.isFinite(lastStreamCheckCam.x)?{x:lastStreamCheckCam.x,z:lastStreamCheckCam.z}:null,
           };
         },
@@ -2703,8 +2522,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get baseRegion(){return activeRegion;},
     get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
     get ports(){return getActivePorts();},
-    // What a shot meets among the city's buildings, for js/gunnery-control.js. Not while another port stands in.
-    sweepCity(from,to,radius,options,sweepBuilding){return cityTargets&&!savedPortOverride?cityTargets.sweep(from,to,radius,options,sweepBuilding):null;},
+    // What a shot meets among the city's buildings, for js/gunnery-control.js.
+    sweepCity(from,to,radius,options,sweepBuilding){return cityTargets?cityTargets.sweep(from,to,radius,options,sweepBuilding):null;},
     get cityTargets(){return cityTargets;},
     // A struck building of the port in view stands whole again at once (js/castle-duel.js rematch).
     rebuildPortBuilding(instance){portFractures?.rebuild(instance);},
@@ -2715,7 +2534,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     setStreetMounts(mountSeeds,routes){return herds?.setStreetMounts?.(mountSeeds,routes);},
     async refreshBoardFabric(nextBoardJson){
       if(terrainDisposed||!proceduralPack||!nextBoardJson)return false;
-      const portObj=savedPortOverride?.port??proceduralPack.port;
+      const portObj=proceduralPack.port;
       const country=refreshOldWorldBoardCountry(nextBoardJson,activeRegion,heights,portObj,proceduralPack.surveyHeights??heights);
       if(!country)return false;
       device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
@@ -2730,6 +2549,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         };
         portObj.riverCut=country.riverCut??null;
         if(country.watch)portObj.watch=country.watch;
+        // Its works and its waterfront as the board stands them now; the dock is read from its moles again.
+        portObj.works=country.works??[];
+        settlePortOnWaterfront(portObj,heights,activeRegion,country.waterfront??[]);
         if(country.plan?.paving?.length){
           portObj.streets=paveCityStreets(portObj.streets,country.plan.paving);
           rebindNearTownField(portObj.streets);
@@ -2747,14 +2569,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }:null;
       proceduralPack.board=country.board??null;
       proceduralPack.inlandWater=country.inlandWater??null;
-      proceduralPack._baseCity=nextBaseCity;
-      proceduralPack._baseHerds=country.herds?new Float32Array(country.herds):new Float32Array(0);
-      if(proceduralPack.frontierParcels?.length){
-        rebuildPackFrontierCity(proceduralPack);
-      }else{
-        proceduralPack.city=nextBaseCity;
-        proceduralPack.herds=country.herds??null;
-      }
+      proceduralPack.city=nextBaseCity;
+      proceduralPack.herds=country.herds??null;
       // The board cut its rivers into the lattice again and meshed their banks anew: the land is baked from both.
       landCentre(portObj?.riverCut);
       craters?.invalidate(activeRegion);
@@ -2776,10 +2592,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       cityStruckIndices.clear();cityHitIndices.clear();
       setCityBuildings(proceduralPack).catch(error=>console.warn('city continuum',error));
       activeCity=proceduralPack.city??null;cityTargets=cityTargetsFor(activeCity,portObj);
-      if(!savedPortOverride){
-        portFractures?.destroy();
-        portFractures=portFracturesFor(proceduralPack.portGeometry,portObj,cityTargets);
-      }
+      portFractures?.destroy();
+      portFractures=portFracturesFor(portObj,cityTargets);
       meadowGrass?.sync?.({
         region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portObj??null,
         city:proceduralPack.city??null,board:proceduralPack.board??null,inlandWater:proceduralPack.inlandWater??null,
@@ -2886,16 +2700,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     setSharedCrew(crewAssets){tradeVessels?.setSharedCrew?.(crewAssets);},
     // Where the player's guns would fall now ({x,y,z,radius} in the scene's frame, or null): the city's buildings
     // there are cut finer. Four floats a frame at most, written only when they change.
-    setGunneryAim(fall){cityAim=fall??null;cityContinuum?.setAim(cityAim);prefabs?.setAim(cityAim);},
-    // Once every body of the port standing now has landed and it is drawn (js/prefab-continuum.js).
-    prefabsLanded(){return prefabsLanding;},
-    get prefabContinuum(){return prefabs;},
+    setGunneryAim(fall){cityAim=fall??null;cityContinuum?.setAim(cityAim);},
     get tradeVessels(){return tradeVessels;},
     setWorldOffset(dx=0,dz=0){
       const nx=Number.isFinite(dx)?dx:0,nz=Number.isFinite(dz)?dz:0;
       if(Math.abs(nx-worldOffset.x)<0.05&&Math.abs(nz-worldOffset.z)<0.05)return;
       worldOffset.x=nx;worldOffset.z=nz;
-      cityContinuum?.setWorldOffset(nx,nz);prefabs?.setWorldOffset(nx,nz);forest?.setWorldOffset(nx,nz);
+      cityContinuum?.setWorldOffset(nx,nz);forest?.setWorldOffset(nx,nz);
       boulderContinuum?.setWorldOffset(nx,nz);meadowGrass?.setWorldOffset(nx,nz);
       landContinuum?.setWorldOffset(nx,nz);
       writeNearDomainUniform();
@@ -2915,7 +2726,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       (marineLife?.state??marineLife)?.shift?.(-dx,-dz);
       (dolphins?.state??dolphins)?.shift?.(-dx,-dz);
       worldOffset.x=0;worldOffset.z=0;
-      cityContinuum?.setWorldOffset(0,0);prefabs?.setWorldOffset(0,0);forest?.setWorldOffset(0,0);
+      cityContinuum?.setWorldOffset(0,0);forest?.setWorldOffset(0,0);
       boulderContinuum?.setWorldOffset(0,0);meadowGrass?.setWorldOffset(0,0);
       landContinuum?.setWorldOffset(0,0);
       writeNearDomainUniform();
@@ -2940,7 +2751,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       biomeTexture?.destroy?.();
       boulderContinuum?.destroy();
       cityContinuumMade++;cityContinuum?.destroy();cityContinuum=null;
-      prefabsMade++;prefabs?.destroy();prefabs=null;
       inlandWater?.destroy?.();
       herds?.destroy?.();
       meadowGrass?.destroy?.();
@@ -2999,7 +2809,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const slope=Math.hypot(heightSample(lx+2,lz)-heightSample(lx-2,lz),heightSample(lx,lz+2)-heightSample(lx,lz-2))/4;
       return Math.max(surveyed,(1-step(.12,.3,green))*(1-step(1.5,3.5,heightSample(lx,lz)))*(1-step(.12,.3,slope)));
     },
-    discovery,applyUpgradedPack,setCustomPort,
+    discovery,applyUpgradedPack,
     safeStart(view,boat){return safeLandfallStart(heights,view,boat,this.region,this.height);},
     constrain(boat,x,z,extraOptions=null){return constrainIslandMotion(heights,boat,x,z,this.height,this.region,{ports:this.ports,beaches:proceduralPack?.beaches??null,onGrounding:this.onGrounding,...(extraOptions||{})});},
     waveShelter(x,z,swellDirRad=0){
@@ -3029,9 +2839,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         sec.portFractures.setWorldOffset(worldOffset.x,worldOffset.z);sec.portFractures.encode(pass);
       }
       boulderContinuum?.encode(pass);
-      // The city's and the prefabs' cuts read the scene's one pixel error themselves (js/continuum-scene.js).
+      // The city's cut reads the scene's one pixel error itself (js/continuum-scene.js).
       cityContinuum?.encode(pass);
-      prefabs?.encode(pass);
       forest?.encode(pass);
       herds?.encode(pass);
       meadowGrass?.encode(pass);
@@ -3050,10 +2859,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(!lastCamera)updateTrees(camera,viewProjection);
       // The land, every piece, its pits in it: one pipeline, indirect draws the cut wrote.
       landContinuum?.draw(pass,landClouds);
-      // Every building and prefab is cut on the GPU: one pipeline, four indirect draws each. Those shot down (houses,
-      // prefabs and cleaved boulders alike) are drawn by the same pipeline as their pieces, each riding its flight.
+      // Every building is cut on the GPU: one pipeline, four indirect draws each. Those shot down (buildings and
+      // cleaved boulders alike) are drawn by the same pipeline as their pieces, each riding its flight.
       cityContinuum?.draw(pass,cityGroup,cityClouds);
-      prefabs?.draw(pass,cityGroup,cityClouds);
       if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,4800))portFractures.draw(pass,cityGroup,cityClouds);
       for(const sec of loadedSections.values()){
         if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,3400))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
@@ -3077,7 +2885,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const sec of loadedSections.values()){
         if(sec.portFractures&&isSectionVisible(sec.region,camera,null,650))sec.portFractures.drawShadow(pass);
       }
-      cityContinuum?.drawShadow(pass);prefabs?.drawShadow(pass);
+      cityContinuum?.drawShadow(pass);
       if(boulderContinuum&&isSectionVisible(activeRegion,camera,null,750))boulderContinuum.drawShadow(pass);
       forest?.drawShadow?.(pass);
       herds?.drawShadow?.(pass);

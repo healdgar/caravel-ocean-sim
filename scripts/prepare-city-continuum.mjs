@@ -5,8 +5,8 @@
 // Each type, every size of every family (js/old-world-buildings.js: a house of so many bays, a wall of so many, a
 // bridge of so many bents or of such an arch), comes from its builder (compileCityBuildingType), as drawn: every
 // triangle with its kind and its part, and is baked by the one simplifier (js/continuum-bake.js: clusters by part, a
-// closed far body collapsed a half-edge at a time, a splat), the same code the page's bake worker runs for the coasts'
-// prefabs. The types are baked side by side, a worker thread to a core; each type's bake is its own and the same on any.
+// closed far body collapsed a half-edge at a time, a splat), the same code the page's bake worker runs. The types are
+// baked side by side, a worker thread to a core; each type's bake is its own and the same on any.
 // One atlas of the one format (js/continuum-format.js) holds them all, in the catalogue's order, gzipped beside a
 // manifest with its receipt and each type's source digest. Both are kept.
 import { createHash } from 'node:crypto';
@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker, isMainThread, parentPort } from 'node:worker_threads';
 import zlib from 'node:zlib';
-import { buildPortPrefabGeometry } from '../js/coastal-world.js';
+import { buildCityTypeGeometry } from '../js/coastal-world.js';
 import { CITY_BUILDING_TYPES, CITY_TYPE_SLIGHT_FROM, compileCityBuildingType } from '../js/old-world-buildings.js';
 import { CONTINUUM_HEADER, CONTINUUM_ATLAS_VERSION, assembleContinuumAtlas, continuumSourceBytes } from '../js/continuum-format.js';
 import {
@@ -34,7 +34,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 // ------------------------------------------------------------------------------------------------ one type
 // Type `id` built, baked and packed, with what its manifest entry and its line tell of it.
 async function bakeType(id) {
-  const t0 = Date.now(), type = compileCityBuildingType(id, buildPortPrefabGeometry);
+  const t0 = Date.now(), type = compileCityBuildingType(id, buildCityTypeGeometry);
   // The one simplifier (js/continuum-bake.js), as the page's bake worker runs it.
   const body = await bakeContinuumBody(type), { clusters, far } = body;
   const { words, low, span, centre, radius } = packCityContinuumBody({ triangles: type.triangles, slight: id >= CITY_TYPE_SLIGHT_FROM }, body);
