@@ -81,9 +81,10 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/ground-detail.js');
 wgslModules.push('js/wgsl/ground-detail.js');
 // The Old World: building types ahead of the land shader, which reads their constants, then the town plan and its country.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/native-works.js','js/old-world-works.js','js/old-world-buildings.js');
-// The one cut (its pose kinds, then its select, lists and pipeline family, js/wgsl/continuum-cut.js), then the city
-// continuum: its bodies' packing, then its material, which reads the buildings' own constants.
-order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/continuum-kinds.js','js/wgsl/ship-kinds.js','js/wgsl/continuum-cut.js','js/city-continuum.js','js/wgsl/city-continuum.js');
+// The one cut (its pose kinds, the ships' and the wind's among them, then its select, lists and pipeline family,
+// js/wgsl/continuum-cut.js), then the city continuum: its bodies' packing, then its material, which reads the
+// buildings' own constants.
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/continuum-kinds.js','js/wgsl/ship-kinds.js','js/wgsl/continuum-wind.js','js/wgsl/continuum-cut.js','js/city-continuum.js','js/wgsl/city-continuum.js');
 // The animal continuum: its atlas format, then how a family's pass writes its joints (the SKINNED kind's pose data),
 // which the herds' and the sea's shaders are built on.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/animal-continuum.js','js/wgsl/skinned-pose.js');

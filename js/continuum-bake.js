@@ -668,17 +668,32 @@ function weldDrawn(type) {
 }
 
 // ------------------------------------------------------------------------------------------------ clusters
-// `groupError`, if given, measures a group's error in place of the builder (a skinned body's, in every pose its rig
-// takes: (children, simplified, error) => metres).
-async function bakeClusters(w, { groupError = null } = {}) {
+// `uv`: the attributes the simplifier keeps beside the normals, two a welded vertex (its kinds unless given). `leaves`:
+// a body's leaf cards ({ pos, nrm, uv, vpl, mask, error, part }; third_party/threejs-nanites/dag/leaves.ts), clustered
+// beside it, each coarser level fewer cards grown to cover what the finer did. Their vertices follow the welded ones:
+// `leafVertices` holds them (position, normal, uv, and the card vertex each was made from), welded vertex
+// count + i being leaf vertex i, so a packer reads them past the welded mesh's own. `groupError`, if given, measures a
+// group's error in place of the builder (a skinned body's, in every pose its rig takes: (children, simplified, error)
+// => metres).
+async function bakeClusters(w, { uv = w.kind, leaves = null, groupError = null } = {}) {
   const dag = await buildDag({
-    id: 0, bark: { pos: w.position, nrm: w.normal, uv: w.kind, idx: w.index },
-    leaves: { pos: new Float32Array(0), nrm: new Float32Array(0), uv: new Float32Array(0), vpl: 8 }, barkParts: w.part,
+    id: 0, bark: { pos: w.position, nrm: w.normal, uv, idx: w.index },
+    leaves: leaves ? { pos: leaves.pos, nrm: leaves.nrm, uv: leaves.uv, vpl: leaves.vpl } : { pos: new Float32Array(0), nrm: new Float32Array(0), uv: new Float32Array(0), vpl: 8 },
+    ...(leaves ? { leafErr: leaves.error, leafMask: leaves.mask ?? undefined } : {}), barkParts: w.part,
     ...(groupError ? { barkGroupError: groupError } : {}),
   });
   const count = dag.meta.length / 4, records = [];
   for (let c = 0; c < count; c++) {
     const r = dag.rec.subarray(c * 16, c * 16 + 16), first = dag.meta[c * 4], parent = dag.groups[c * 2 + 1];
+    // A leaf cluster's parent is a group of the leaf hierarchy's own, the bark's groups know nothing of it.
+    if (dag.meta[c * 4 + 3] === 1) {
+      const root = r[13] >= 1e29;
+      records.push({
+        cluster: c, lod: Array.from(r.subarray(0, 4)), parentLod: Array.from(r.subarray(root ? 0 : 4, root ? 4 : 8)), cull: Array.from(r.subarray(8, 12)),
+        error: r[12], parentError: root ? Infinity : r[13], first, triangles: dag.meta[c * 4 + 1], level: dag.meta[c * 4 + 2], part: leaves.part ?? 0,
+      });
+      continue;
+    }
     records.push({
       cluster: c, lod: Array.from(r.subarray(0, 4)), parentLod: Array.from(r.subarray(parent >= 0 ? 4 : 0, parent >= 0 ? 8 : 4)), cull: Array.from(r.subarray(8, 12)),
       error: r[12], parentError: parent >= 0 ? r[13] : Infinity, first, triangles: dag.meta[c * 4 + 1], level: dag.meta[c * 4 + 2], part: w.part[dag.idx[first]],
@@ -686,18 +701,33 @@ async function bakeClusters(w, { groupError = null } = {}) {
   }
   // Coarsest parent first: what a building can draw at its nearest point is then a prefix.
   records.sort((p, q) => q.parentError - p.parentError || q.error - p.error || p.cluster - q.cluster);
-  const local = new Int32Array(w.count).fill(-1), order = [], indices = [];
+  // A leaf vertex is one of the packed DAG's past its bark; those alike in every way are one.
+  const leafAt = new Map(), leafPosition = [], leafNormal = [], leafUV = [], leafSource = [];
+  const vertexOf = (v) => {
+    if (v < dag.barkVertices) return v;
+    const source = dag.leafSource[v - dag.barkVertices], key = `${Array.from(dag.vtx.subarray(v * 8, v * 8 + 8)).join(',')}|${source}`;
+    let at = leafAt.get(key);
+    if (at === undefined) {
+      at = w.count + leafSource.length;
+      leafAt.set(key, at);
+      const x = dag.vtx.subarray(v * 8, v * 8 + 8);
+      leafPosition.push(x[0], x[1], x[2]); leafNormal.push(x[4], x[5], x[6]); leafUV.push(x[3], x[7]); leafSource.push(source);
+    }
+    return at;
+  };
+  const local = new Map(), order = [], indices = [];
   for (const record of records) {
     const at = record.first;
     record.first = indices.length;
     for (let i = 0; i < record.triangles * 3; i++) {
-      const v = dag.idx[at + i];
-      if (local[v] < 0) { local[v] = order.length; order.push(v); }
-      indices.push(local[v]);
+      const v = vertexOf(dag.idx[at + i]);
+      if (!local.has(v)) { local.set(v, order.length); order.push(v); }
+      indices.push(local.get(v));
     }
   }
   const finest = records.filter((r) => r.level === 0).reduce((n, r) => n + r.triangles, 0);
-  return { records, order, indices, count, levels: dag.stats.barkLevels, roots: dag.stats.barkRoots, finestTriangles: finest, rootError: Math.max(...records.map((r) => r.error)) };
+  const leafVertices = { position: Float32Array.from(leafPosition), normal: Float32Array.from(leafNormal), uv: Float32Array.from(leafUV), source: Uint32Array.from(leafSource) };
+  return { records, order, indices, count, levels: dag.stats.barkLevels + dag.stats.leafLevels, roots: dag.stats.barkRoots + dag.stats.leafRoots, finestTriangles: finest, rootError: Math.max(...records.map((r) => r.error)), leafVertices, stats: dag.stats };
 }
 
 // ------------------------------------------------------------------------------------------------ the wrap
@@ -1011,11 +1041,16 @@ export async function bakeContinuumBody(body) {
   await MeshoptSimplifier.ready;
   const welded = body.welded ?? weldDrawn(body), clusters = await bakeClusters(welded, { groupError: body.groupError?.(welded) ?? null });
   const far = body.far ? bakeFar(body.far, weldDrawn(body.far)) : bakeFar(body, welded);
+  continuumFarFirst(clusters, far);
+  return { welded, clusters, far };
+}
+// The step from which a far body takes over from its clusters: the first no heavier than their roots.
+export function continuumFarFirst(clusters, far) {
   const rootTriangles = clusters.records.reduce((n, record) => n + (record.parentError === Infinity ? record.triangles : 0), 0);
   far.farFirst = 0;
   while (far.farFirst < far.chain.steps.length && far.steps[far.farFirst * CONTINUUM_STEP_WORDS] > rootTriangles) far.farFirst++;
   Object.assign(far.stats, { rootTriangles, farFirst: far.farFirst, farFirstTriangles: far.steps[far.farFirst * CONTINUUM_STEP_WORDS], handoffError: +new Float32Array(far.steps.buffer)[far.farFirst * CONTINUUM_STEP_WORDS + 1].toFixed(4) });
-  return { welded, clusters, far };
+  return far.farFirst;
 }
 
 // A struck building's pieces (js/building-fracture.js), each piece a part: welded and clustered like any body, never

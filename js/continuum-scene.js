@@ -172,8 +172,10 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       setFloat(aimAt, on ? fall.x : 0); setFloat(aimAt + 1, on ? fall.y : 0); setFloat(aimAt + 2, on ? fall.z : 0); setFloat(aimAt + 3, on ? fall.radius : 0);
     },
     // In the frame's compute pass, before any pass draws: the lists emptied, then every instance cut at the scene's
-    // one pixel error (js/continuum-core.js), which only a governor moves.
-    encode(pass) {
+    // one pixel error (js/continuum-core.js), which only a governor moves. `indirect` ({ buffer, offset }): a family's
+    // own pass listed its records this frame, and wrote the cut's workgroups there (CONTINUUM_ROW a row, every record
+    // of the last row past its own marked GONE); its count is then the scene's capacity.
+    encode(pass, indirect = null) {
       if (destroyed) return;
       setFloat(4, continuumPixelError());
       if (viewChanged) { device.queue.writeBuffer(viewBuffer, 0, viewWords); viewChanged = false; }
@@ -182,7 +184,8 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       pass.dispatchWorkgroups(1);
       if (!count) return;
       pass.setPipeline(P.select);
-      pass.dispatchWorkgroups(Math.min(count, CONTINUUM_ROW), Math.ceil(count / CONTINUUM_ROW));
+      if (indirect) pass.dispatchWorkgroupsIndirect(indirect.buffer, indirect.offset ?? 0);
+      else pass.dispatchWorkgroups(Math.min(count, CONTINUUM_ROW), Math.ceil(count / CONTINUUM_ROW));
     },
     // The view's four lists, one pipeline. `sceneGroup` and `second` are the material's groups 0 and 1.
     draw(pass, sceneGroup, second) {

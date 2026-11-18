@@ -405,7 +405,8 @@ fn continuumSplatCorner(record:ContinuumRecord,eye:vec3f,vertex:u32,thinned:f32)
 }
 // The samples of this pixel each draw takes (continuumSamples, the shared core's split): the far side the handoff's
 // share and the clusters the rest; of the far side's, the splat its own share and the far body the rest. Every sample
-// is drawn by exactly one of the three. coverage: the draw, handoff | splat << 8, the instance, samples.
+// is drawn by exactly one of the three. coverage: the draw, handoff | splat << 8, the record's seed (js/continuum-format.js:
+// it splits the samples, so an instance a family's own pass lists anew each frame keeps its pattern), samples.
 fn continuumMask(coverage:vec4u,pixel:vec2f,salt:u32)->u32 {
   let samples=clamp(coverage.w,1u,8u);
   let all=(1u<<samples)-1u;
@@ -452,6 +453,9 @@ fn continuumEye()->vec3f { return F.camPos.xyz-continuumShift(); }
 //   capture   whether it is drawn under water too (its prelude then must leave group 3 free).
 //   mask      whether it brings <name>Mask(v:ContinuumVarying, front:bool)->u32, the samples of a fragment it keeps
 //             (what shot and tearing have taken away is none), ANDed into the handoff's: no discard, rule 2.
+//   coverage  whether its surface cuts (a leaf card's alpha): it then also writes <name>Coverage(v:ContinuumVarying,
+//             front:bool)->u32, the samples of the pixel its surface covers, and the view keeps only those (rule 2: a
+//             cut by the sample mask, never discard).
 function continuumVaryingWGSL(material) {
   const fields = material.varyings.map(([name, type, flat], i) => `  @location(${3 + i})${flat ? ' @interpolate(flat)' : ''} ${name}:${type},`).join('\n');
   return /* wgsl */`
@@ -459,7 +463,7 @@ struct ContinuumVarying {
   @builtin(position) position:vec4f,
   @location(0) world:vec3f,
   @location(1) normal:vec3f,
-  @location(2) @interpolate(flat) coverage:vec4u,   // x the entry (1 clusters, 2 far body, 3 splat), y handoff | splat << 8, z the instance, w samples
+  @location(2) @interpolate(flat) coverage:vec4u,   // x the entry (1 clusters, 2 far body, 3 splat), y handoff | splat << 8, z the record's seed, w samples
 ${fields}
 };
 struct ContinuumCoverage { @location(0) colour:vec4f, @builtin(sample_mask) mask:u32 };
@@ -488,7 +492,7 @@ fn continuumVertex(vertex:u32,listed:ContinuumEntry,coarse:bool)->ContinuumVaryi
   out.world=s.world+vec3f(touched);
   out.normal=s.normal;
   out.position=continuumClip(out.world);
-  out.coverage=vec4u(what,state.x&65535u,instance,continuumView.counts.y);
+  out.coverage=vec4u(what,state.x&65535u,record.tag.z,continuumView.counts.y);
   ${material.name}Varying(s,&out);
   return out;
 }
@@ -532,7 +536,7 @@ export function continuumModuleWGSL({ pass, material = null, capture = null }) {
 @fragment fn continuumFS(v:ContinuumVarying,@builtin(front_facing) front:bool)->ContinuumCoverage {
   var out:ContinuumCoverage;
   out.colour=${material.name}Shade(v,front);
-  out.mask=continuumMask(v.coverage,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''};
+  out.mask=continuumMask(v.coverage,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''}${material.coverage ? `&${material.name}Coverage(v,front)` : ''};
   return out;
 }
 `;

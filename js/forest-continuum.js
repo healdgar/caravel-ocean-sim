@@ -1,0 +1,105 @@
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// A forest pack's trees in the one continuum (AGENTS.md rule 3). Each prototype of a pack (js/forest-scenery.js), its
+// wood and its leaf cards, is baked by scripts/prepare-forest-continuum.mjs with the one simplifier
+// (js/continuum-bake.js): its wood into a cluster hierarchy cut by projected error, its leaves beside it, each coarser
+// level fewer cards grown to cover what the finer did, the whole tree wrapped in one closed far body (its crown and
+// trunk) that collapses a half-edge at a time to a few triangles, and one splat. All of it is one atlas of the one
+// format (js/continuum-format.js), drawn through the WIND pose kind (js/wgsl/continuum-wind.js) by the forest's
+// material (js/wgsl/forest-continuum.js). This is what a tree puts in the atlas:
+//   a vertex   high: its layer (the prototype's own; FOREST_CONTINUUM_UNTEXTURED if colour alone) | leaf << 4 | exposure << 5 (8 bits); word: its colour
+//              (each channel's square root, 8 bits) | the light its own canopy lets through << 24 (8 bits); the UV
+//              stream its texture coordinates over its type's range; the wind stream its sway weight and phase.
+//   a far triangle  leaf | material << 1 | exposure << 5 (6 bits) | canopy light << 11 (6 bits) | colour << 17
+//              (5 bits a channel, square roots), of the surface nearest it.
+//   a type's material block  its texture coordinates' range, its sway at full weight, its splat's look (a far word),
+//              and its first layer among the pack's materials.
+import {
+  CONTINUUM_ATLAS_VERSION, CONTINUUM_HEADER_WORDS, CONTINUUM_NEVER, CONTINUUM_TYPE, continuumFloatWord, packContinuumBody, packContinuumUV, loadContinuumAtlas,
+} from './continuum-format.js';
+import { packContinuumWind } from './wgsl/continuum-wind.js';
+
+export const FOREST_CONTINUUM_FORMAT = 'waterworld.forest-continuum';
+export const FOREST_CONTINUUM_VERSION = CONTINUUM_ATLAS_VERSION;
+// A type's material block (js/continuum-format.js CONTINUUM_TYPE.material).
+export const FOREST_CONTINUUM_MATERIAL = Object.freeze({
+  uvLow: CONTINUUM_TYPE.material, uvScale: CONTINUUM_TYPE.material + 2, sway: CONTINUUM_TYPE.material + 4, splat: CONTINUUM_TYPE.material + 5, firstLayer: CONTINUUM_TYPE.material + 6,
+});
+// A body's kind floats (js/continuum-bake.js): [FOREST_CONTINUUM_BARK or _LEAF, the source vertex].
+export const FOREST_CONTINUUM_BARK = 0, FOREST_CONTINUUM_LEAF = 1;
+
+// The baked atlas of each pack, and its manifest. Spelled out: the build publishes only the asset paths it finds quoted.
+export const FOREST_CONTINUUM_ASSETS = Object.freeze({
+  'manifest.json': 'assets/forest-scenery/saba/continuum/manifest.json',
+  'atlas.bin.gz': 'assets/forest-scenery/saba/continuum/atlas.bin.gz',
+});
+export const SUBTROPICAL_FOREST_CONTINUUM_ASSETS = Object.freeze({
+  'manifest.json': 'assets/forest-scenery/subtropical/continuum/manifest.json',
+  'atlas.bin.gz': 'assets/forest-scenery/subtropical/continuum/atlas.bin.gz',
+});
+export const PORTUGAL_FOREST_CONTINUUM_ASSETS = Object.freeze({
+  'manifest.json': 'assets/forest-scenery/portugal/continuum/manifest.json',
+  'atlas.bin.gz': 'assets/forest-scenery/portugal/continuum/atlas.bin.gz',
+});
+
+// A surface's layer among its prototype's materials, or FOREST_CONTINUUM_UNTEXTURED for one the pack colours alone (its
+// source layer -1): its vertex colour is then its albedo.
+export const FOREST_CONTINUUM_UNTEXTURED = 15;
+function forestContinuumLayer(material) {
+  if (material < 0) return FOREST_CONTINUUM_UNTEXTURED;
+  if (!(material < FOREST_CONTINUUM_UNTEXTURED)) throw Error(`A forest surface has a layer out of range: ${material}`);
+  return material;
+}
+const forestUnit = (v, bits) => Math.max(0, Math.min((1 << bits) - 1, Math.round(Math.max(0, Math.min(1, v)) * ((1 << bits) - 1))));
+// What one source vertex of a pack gives a tree's surface: its layer, whether it is a leaf, its colour, its exposure
+// (how open it stands to the sky) and the light its own canopy lets through.
+export function forestContinuumVertex({ material, leaf, colour, exposure, canopy }) {
+  const layer = forestContinuumLayer(material), root = colour.map((c) => Math.sqrt(Math.max(0, c)));
+  return {
+    high: (layer | (leaf ? 16 : 0) | (forestUnit(exposure, 8) << 5)) >>> 0,
+    word: (forestUnit(root[0], 8) | (forestUnit(root[1], 8) << 8) | (forestUnit(root[2], 8) << 16) | (forestUnit(canopy, 8) << 24)) >>> 0,
+  };
+}
+export function forestContinuumFarWord({ material, leaf, colour, exposure, canopy }) {
+  const root = colour.map((c) => Math.sqrt(Math.max(0, c)));
+  return ((leaf ? 1 : 0) | (forestContinuumLayer(material) << 1) | (forestUnit(exposure, 6) << 5) | (forestUnit(canopy, 6) << 11)
+    | (forestUnit(root[0], 5) << 17) | (forestUnit(root[1], 5) << 22) | (forestUnit(root[2], 5) << 27)) >>> 0;
+}
+// How a tree is packed (js/continuum-format.js packContinuumBody). `surface(v)` gives a packed vertex's source
+// attributes (forestContinuumVertex's), `uv(v)` its texture coordinates and `wind(v)` its [weight, phase]; `farSurface(t)`
+// a far triangle's; `look` the splat's (a far word's attributes); `uvRange` [low u, low v, span u, span v]; `sway` the
+// metres its tips move at full gust strength; `firstLayer` its first among the pack's materials.
+export function packForestContinuumBody({ triangles, surface, uv, wind, farSurface, look, uvRange, sway, firstLayer }, baked) {
+  const [lowU, lowV, spanU, spanV] = uvRange;
+  return packContinuumBody({
+    triangles,
+    material: [continuumFloatWord(lowU), continuumFloatWord(lowV), continuumFloatWord(spanU), continuumFloatWord(spanV), continuumFloatWord(sway), forestContinuumFarWord(look), firstLayer >>> 0],
+    vertex: (v) => forestContinuumVertex(surface(v)),
+    farWord: (t) => forestContinuumFarWord(farSurface(t)),
+    streams: {
+      uv: (v) => { const [u, w] = uv(v); return [packContinuumUV([Math.max(0, Math.min(1, (u - lowU) / spanU)), Math.max(0, Math.min(1, (w - lowV) / spanV))])]; },
+      wind: (v) => { const [weight, phase] = wind(v); return [packContinuumWind(weight, phase)]; },
+    },
+  }, baked);
+}
+
+export function validateForestContinuumManifest(manifest) {
+  if (manifest?.format !== FOREST_CONTINUUM_FORMAT || manifest.version !== FOREST_CONTINUUM_VERSION) throw Error('Invalid forest continuum manifest: rebake it');
+  const { types, atlas } = manifest;
+  if (!Array.isArray(types) || !types.length) throw Error('The forest continuum holds no types');
+  types.forEach((type, id) => {
+    if (type.id !== id || !/^[0-9a-f]{64}$/.test(type.fingerprint ?? '')) throw Error(`Forest continuum type ${id} is malformed`);
+    if (!(type.clusters?.count > 0) || !(type.chain?.baseTriangles >= 4) || !(type.chain.steps >= 1 && type.chain.steps < CONTINUUM_NEVER)) throw Error(`Forest continuum type ${id} is incomplete`);
+  });
+  if (!(atlas?.words > CONTINUUM_HEADER_WORDS) || atlas.bytes !== atlas.words * 4 || !/^[0-9a-f]{64}$/.test(atlas.sha256 ?? '') || !atlas.gzip?.file) throw Error('The forest continuum atlas is malformed');
+  return manifest;
+}
+// A pack's atlas, fetched, unpacked and checked. Resolves to { manifest, words }.
+export function loadForestContinuum({ assets, fetchAsset = fetch }) {
+  return loadContinuumAtlas({ assets, validate: validateForestContinuumManifest, label: 'forest', fetchAsset });
+}
+// The atlas of the pack a manifest describes, and its prototypes' fingerprint: a pack's continuum is its own.
+export function forestContinuumAssetsFor(manifest) {
+  const species = new Set(manifest.prototypes.map((p) => p.species));
+  if (species.has('royal_palm') || species.has('ceiba') || species.has('mangrove')) return SUBTROPICAL_FOREST_CONTINUUM_ASSETS;
+  return manifest.prototypes.some((p) => Boolean(p.cohort)) ? PORTUGAL_FOREST_CONTINUUM_ASSETS : FOREST_CONTINUUM_ASSETS;
+}
