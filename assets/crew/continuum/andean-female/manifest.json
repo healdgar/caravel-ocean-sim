@@ -12,14 +12,14 @@
   "triangles": 1910098
  },
  "atlas": {
-  "words": 18944999,
+  "words": 18944310,
   "headerWords": 32,
-  "bytes": 75779996,
-  "sha256": "c42ce49a7ee81f7f2267d69084b2e437bf40d71305f38d57d72b37a1b38b1b15",
+  "bytes": 75777240,
+  "sha256": "00c7e97016759e631c43019e0012db707ccfe52eb0978f35059201297aed907a",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 34686051,
-   "sha256": "20b718161d8d969a1ff967a3389dc8c7726f0116615f7180c4a45e052c62c89f"
+   "bytes": 34553290,
+   "sha256": "615ac3c9e1a1951dd77ede9567f5e50652793034307db9663edfecd35435682e"
   }
  },
  "pieces": [
@@ -681,11 +681,11 @@
   ]
  },
  "clusters": {
-  "count": 31404,
-  "levels": 14,
-  "roots": 28,
+  "count": 30407,
+  "levels": 10,
+  "roots": 234,
   "finestTriangles": 1910098,
-  "rootError": 0.5766,
+  "rootError": 1.0668,
   "pieceCopies": 10314
  },
  "chain": {
@@ -703,18 +703,18 @@
   "outward": 0.0882,
   "inward": 0.0874,
   "simplifyError": 0.0105,
-  "steps": 1269,
+  "steps": 1268,
   "coreTriangles": 6,
   "depth": 9,
   "errorRange": [
    0.0882,
-   1.204
+   1.0966
   ],
   "inflateMax": 0.1759,
-  "rootTriangles": 1280,
-  "farFirst": 634,
-  "farFirstTriangles": 1280,
-  "handoffError": 0.1477,
+  "rootTriangles": 23652,
+  "farFirst": 0,
+  "farFirstTriangles": 2548,
+  "handoffError": 0.0882,
   "farSourceTriangles": 50000,
   "farSourceError": 0.145,
   "posedDelta": 0.0564
@@ -875,12 +875,12 @@
  "poses": 27,
  "files": {
   "atlas.bin": {
-   "bytes": 75779996,
-   "sha256": "c42ce49a7ee81f7f2267d69084b2e437bf40d71305f38d57d72b37a1b38b1b15",
+   "bytes": 75777240,
+   "sha256": "00c7e97016759e631c43019e0012db707ccfe52eb0978f35059201297aed907a",
    "gzip": {
     "file": "atlas.bin.gz",
-    "bytes": 34686051,
-    "sha256": "20b718161d8d969a1ff967a3389dc8c7726f0116615f7180c4a45e052c62c89f"
+    "bytes": 34553290,
+    "sha256": "615ac3c9e1a1951dd77ede9567f5e50652793034307db9663edfecd35435682e"
    }
   },
   "albedo.bc7.bin": {
@@ -902,5 +902,5 @@
    }
   }
  },
- "bakeSeconds": 52.4
+ "bakeSeconds": 47.5
 }

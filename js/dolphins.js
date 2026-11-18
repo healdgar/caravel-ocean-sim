@@ -29,7 +29,7 @@ export async function createDolphins({device,frameUBO,transView,skyView,sampler,
     shader(seaSource(DOLPHIN_RENDER,surfaceWaves),'dolphin water'),
     shader(seaSource(seaStandWGSL(false),surfaceWaves),'dolphin stand').then(code=>device.createComputePipelineAsync({label:'dolphin stand',layout:'auto',compute:{module:code,entryPoint:'seaStandCS'}})),
   ]);
-  const animals=createAnimalScene({device,atlas,programs,view,count:DOLPHIN_LIMIT,types:[ANIMAL_TYPE.dolphin],frame:frameUBO,shadowUniform:shadows.uniform,samples,label:'dolphins'});
+  const animals=createAnimalScene({device,atlas,programs,view,count:DOLPHIN_LIMIT,types:[ANIMAL_TYPE.dolphin],frame:frameUBO,shadowUniform:shadows.uniform,samples,label:'dolphins',profile:'animals'});
   const entries=list=>list.map(([binding,resource])=>({binding,resource}));
   const main=entries([[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envView],[5,{buffer:sunVis}]]);
   const bodyGroup=device.createBindGroup({layout:view.pipeline.getBindGroupLayout(0),entries:main}),lighting=shadows.bind(view.pipeline);

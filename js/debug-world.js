@@ -251,7 +251,7 @@ function normalizePercent(raw, fallback = 100) {
   if (raw == null) return fallback;
   let v = raw;
   if (typeof raw === 'object') {
-    v = raw.percent ?? raw.pct ?? raw.scale ?? raw.ratio ?? raw.value ?? raw.current ?? fallback;
+    v = raw.grantedScale ?? raw.percent ?? raw.pct ?? raw.scale ?? raw.ratio ?? raw.value ?? raw.current ?? fallback;
   }
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return fallback;

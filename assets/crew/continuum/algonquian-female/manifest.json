@@ -12,14 +12,14 @@
   "triangles": 1935592
  },
  "atlas": {
-  "words": 19225136,
+  "words": 19223503,
   "headerWords": 32,
-  "bytes": 76900544,
-  "sha256": "cfea1685616c7bc44ab6d018f571fe1de5d3763fe8fb86ddf10816cdb0fcfd7c",
+  "bytes": 76894012,
+  "sha256": "1fada1c4d950db09cbd4a634e65175cfdc8d6d3bfff681c72aaff729e0c444e7",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 35308615,
-   "sha256": "57bdade9a1ccd50032694a5dd2eefe46a54a647b67ce78df361da3d57cbbc46b"
+   "bytes": 35232412,
+   "sha256": "da7c8f4a9782c4f8dfbdbf30138e0e6ba043d4b2ea1964dbded74c322100ef10"
   }
  },
  "pieces": [
@@ -681,11 +681,11 @@
   ]
  },
  "clusters": {
-  "count": 31774,
-  "levels": 13,
-  "roots": 31,
+  "count": 30831,
+  "levels": 11,
+  "roots": 240,
   "finestTriangles": 1935592,
-  "rootError": 0.3599,
+  "rootError": 0.6841,
   "pieceCopies": 9969
  },
  "chain": {
@@ -704,17 +704,17 @@
   "inward": 0.1448,
   "simplifyError": 0.0105,
   "steps": 1070,
-  "coreTriangles": 6,
-  "depth": 8,
+  "coreTriangles": 4,
+  "depth": 9,
   "errorRange": [
    0.1448,
-   0.9488
+   1.1322
   ],
   "inflateMax": 0.1759,
-  "rootTriangles": 1740,
-  "farFirst": 205,
-  "farFirstTriangles": 1740,
-  "handoffError": 0.1758,
+  "rootTriangles": 23614,
+  "farFirst": 0,
+  "farFirstTriangles": 2150,
+  "handoffError": 0.1448,
   "farSourceTriangles": 50000,
   "farSourceError": 0.071,
   "posedDelta": 0.0527
@@ -875,12 +875,12 @@
  "poses": 27,
  "files": {
   "atlas.bin": {
-   "bytes": 76900544,
-   "sha256": "cfea1685616c7bc44ab6d018f571fe1de5d3763fe8fb86ddf10816cdb0fcfd7c",
+   "bytes": 76894012,
+   "sha256": "1fada1c4d950db09cbd4a634e65175cfdc8d6d3bfff681c72aaff729e0c444e7",
    "gzip": {
     "file": "atlas.bin.gz",
-    "bytes": 35308615,
-    "sha256": "57bdade9a1ccd50032694a5dd2eefe46a54a647b67ce78df361da3d57cbbc46b"
+    "bytes": 35232412,
+    "sha256": "da7c8f4a9782c4f8dfbdbf30138e0e6ba043d4b2ea1964dbded74c322100ef10"
    }
   },
   "albedo.bc7.bin": {
@@ -902,5 +902,5 @@
    }
   }
  },
- "bakeSeconds": 50.4
+ "bakeSeconds": 45.5
 }

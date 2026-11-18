@@ -18,4 +18,13 @@ test('GPU timing excludes stale disabled queries, accepts quantized zero, and re
   assert.equal(result.windowMs,10);assert.equal(result.passes.Bloom,0);
   assert.equal(result.passes['Waves + effects'],0);
   assert.equal(decodeGPUTimestamps(new BigUint64Array([2n,1n]),['Frame'],[1]),null);
+  const elided=decodeGPUTimestamps(
+    new BigUint64Array([0n,0n,0n,500_000_000n,100_000_000n,112_000_000n]),
+    ['Continuum scenery','Cut: props','Scene'],
+    [1,1,1]
+  );
+  assert.equal(elided.windowMs,12);
+  assert.equal(elided.passes['Continuum scenery'],0);
+  assert.equal(elided.passes['Cut: props'],0);
+  assert.equal(elided.passes.Scene,12);
 });

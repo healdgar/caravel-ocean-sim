@@ -69,7 +69,8 @@ import { createWorldDebugUI } from './debug-world.js';
 import { deepSeaColour } from './sea-colour.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
 import { createAdaptiveResolution, createAdaptivePolygons, POLYGON_COMFORT } from './resolution.js';
-import { setContinuumPixelError, aimContinuumPixelError, stepContinuumPixelError } from './continuum-core.js';
+import { continuumPixelError, setContinuumPixelError, aimContinuumPixelError, stepContinuumPixelError } from './continuum-core.js';
+import { continuumProfilesSnapshot, setContinuumProfile, resetContinuumProfiles } from './continuum-profiles.js';
 import { createContinuumCensus } from './continuum-census.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower, commandFriendlyFleet, stepVesselCombatAI } from './follower.js';
@@ -1113,9 +1114,20 @@ async function main() {
   performancePanel.innerHTML='<div class="panel-header"><strong id="performance-title">Performance</strong></div><div class="panel-body"></div>';
   const profileDetails=document.createElement('details');profileDetails.id='gpu-profile';profileDetails.open=true;
   const profileToggle=document.createElement('summary');profileToggle.textContent='GPU pass timing';
+  const deepTraceRow=document.createElement('label');deepTraceRow.style.cssText='display:flex;align-items:center;gap:6px;padding:4px 8px;font:11px/1.3 system-ui,sans-serif;cursor:pointer;';
+  const deepTraceCheck=document.createElement('input');deepTraceCheck.type='checkbox';deepTraceCheck.id='gpu-deep-trace';deepTraceCheck.checked=profiler.deepTrace;
+  deepTraceCheck.addEventListener('change',()=>{profiler.setDeepTrace(deepTraceCheck.checked);profilePanel.textContent=profiler.text();});
+  const deepTraceText=document.createElement('span');deepTraceText.textContent='Deep per-family compute & shadow trace';
+  deepTraceRow.append(deepTraceCheck,deepTraceText);
   const profilePanel=document.createElement('pre');profilePanel.id='gpu-profile-details';
-  profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,profilePanel);
+  profilePanel.textContent=profiler.text();profileDetails.append(profileToggle,deepTraceRow,profilePanel);
   const performanceSummary=document.createElement('pre');performanceSummary.id='performance-summary';performanceSummary.textContent=profileSummary;
+  let stageMeasureRequested=false,stageMeasuring=false,stageMeasurePendingResolve=null,lastTerrainCamera=null,lastHulls=[];
+  const stageMeasureButton=document.createElement('button');stageMeasureButton.type='button';stageMeasureButton.id='stage-measure-btn';stageMeasureButton.textContent='Measure GPU stage breakdown';stageMeasureButton.disabled=!hasTS;
+  const stageMeasureResult=document.createElement('pre');stageMeasureResult.id='stage-measurement';stageMeasureResult.setAttribute('role','status');
+  stageMeasureResult.style.cssText='margin:4px 0 8px;font:10.5px/1.45 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;';
+  stageMeasureResult.textContent=hasTS?'Drains GPU between stages to measure true isolated pass costs.':'Isolated stage timing needs browser GPU timestamp support.';
+  stageMeasureButton.addEventListener('click',()=>{stageMeasureRequested=true;delete stageMeasureResult.dataset.measurement;stageMeasureButton.disabled=true;stageMeasureResult.textContent='Measuring isolated GPU stages…';});
   const bloomMeasureButton=document.createElement('button');bloomMeasureButton.type='button';bloomMeasureButton.textContent='Measure bloom alone';bloomMeasureButton.disabled=!hasTS;
   const bloomMeasureResult=document.createElement('p');bloomMeasureResult.id='bloom-measurement';bloomMeasureResult.setAttribute('role','status');
   bloomMeasureResult.textContent=hasTS?'Pauses briefly to exclude earlier GPU waits.':'Separate bloom timing needs browser GPU timestamp support.';
@@ -1124,7 +1136,7 @@ async function main() {
   const neuralMeasureResult=document.createElement('p');neuralMeasureResult.id='neural-measurement';neuralMeasureResult.setAttribute('role','status');
   neuralMeasureResult.textContent=hasTS?'Measures isolated 1/4-res neural light compute.':'Separate neural timing needs browser GPU timestamp support.';
   neuralMeasureButton.addEventListener('click',()=>{neuralMeasureRequested=true;delete neuralMeasureResult.dataset.measurement;neuralMeasureButton.disabled=true;neuralMeasureResult.textContent='Measuring neural pass alone…';});
-  performancePanel.querySelector('.panel-body').append(performanceSummary,bloomMeasureButton,bloomMeasureResult,neuralMeasureButton,neuralMeasureResult,profileDetails);document.body.append(performancePanel);
+  performancePanel.querySelector('.panel-body').append(performanceSummary,stageMeasureButton,stageMeasureResult,bloomMeasureButton,bloomMeasureResult,neuralMeasureButton,neuralMeasureResult,profileDetails);document.body.append(performancePanel);
   const bloomProfileWrites=(_,name)=>profiler.writes(name);
   function encodeBloom(encoder,timestamps,mediumBand=bloomCameraMediumBand){
     for(let i=0;i<bloomPasses.length;i++){
@@ -4120,7 +4132,7 @@ async function main() {
   }
   polygonInput.value=polygons.mode;polygonInput.disabled=fixedPolygons;
   const polygonStatus=document.createElement('p');polygonStatus.id='polygon-status';
-  const updatePolygonStatus=()=>{polygonStatus.textContent=`${polygons.mode==='fixed'?'fixed by URL':Math.round(polygons.scale*100)+'% budget'} · ${polygons.pixelError.toFixed(1)} px LOD threshold${polygons.mode==='auto'?' · target '+polygons.targetFPS+' FPS':''}`;};
+  const updatePolygonStatus=()=>{polygonStatus.textContent=`${polygons.mode==='fixed'?'fixed by URL':Math.round(polygons.grantedScale*100)+'% budget (time '+Math.round(polygons.scale*100)+'% · tris '+Math.round(polygons.budgetScale*100)+'%)'} · aim ${polygons.pixelError.toFixed(1)} px (live ${continuumPixelError().toFixed(1)} px)${polygons.mode==='auto'?' · target '+polygons.targetFPS+' FPS':''}`;};
   polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);aimContinuumPixelError(polygons.pixelError);updatePolygonStatus();});
   polygonLabel.append(polygonInput);
   seaBody.append(polygonLabel,polygonStatus);
@@ -5228,9 +5240,140 @@ async function main() {
     hasLivePortContact,hailNearbyShip,get intelLedger(){return sessionIntelLedger;},
     reply:q=>mateReply(q,mateKnows()),
   };
+  const fmtTris=n=>n>=1e5?(n/1e6).toFixed(2)+'M':n>=1e3?Math.round(n/1e3)+'k':String(n|0);
+  async function measureStageBreakdown(){
+    stageMeasuring=true;stageMeasureRequested=false;
+    const out={width:W,height:H,pixelError:continuumPixelError(),stages:{}};
+    try{
+      if(!hasTS)throw new Error('GPU timestamps are unavailable on this browser');
+      const camSnap=lastTerrainCamera??{x:cam.x,y:cam.y,z:cam.z,screenHeight:H,tanHalfFovY:Math.tan(cam.fovY*0.5),forward:[0,0,-1],playerX:cam.x,playerZ:cam.z,onFoot:ashore.on,hulls:[]};
+      const hullsSnap=lastHulls;
+      const runIsolated=async(label,passCount,encodeFn)=>{
+        const res=await measureIsolatedGPUStage({device,encode:encodeFn,passCount,width:W,height:H,repetitions:2,sampleCount:3});
+        out.stages[label]=+res.milliseconds.toFixed(3);
+      };
+      // 1. Continuum compute cuts
+      await runIsolated('Continuum compute',1,(encoder,ts)=>{
+        const p=encoder.beginComputePass({timestampWrites:ts(0)});
+        terrain?.encode(p,false,frameF,null);
+        townsfolk?.encode(p,gameDateMs());
+        props?.encode(p,0,simTime);
+        p.end();
+      });
+      // 2. Land shadows (solid + cloth + pack)
+      if(terrain&&landShadows.data[19]){
+        const clothFn=terrain.clothShadow();
+        const shadowPasses=clothFn?3:1;
+        await runIsolated('Land shadows',shadowPasses,(encoder,ts)=>{
+          let idx=0;
+          const stageProf={writes:()=>idx<shadowPasses?ts(idx++):undefined};
+          landShadows.encode(encoder,stageProf,p=>{
+            terrain.drawShadow(p,camSnap,frameF);props?.drawShadow?.(p);townsfolk?.drawShadow?.(p);
+            fortSoldiers?.drawShadow?.(p);mateSoldiers?.drawShadow?.(p);dolphins.drawShadow(p);marineLife.drawShadow(p);
+          },clothFn);
+        });
+      }
+      // Helper to run an isolated MSAA Scene render pass with custom draw body
+      const runSceneSubpass=async(label,drawBody)=>{
+        await runIsolated(label,1,(encoder,ts)=>{
+          mainPass.colorAttachments[0].resolveTarget=hdrView;
+          mainPass.colorAttachments[0].storeOp='discard';
+          mainPass.depthStencilAttachment.depthStoreOp='discard';
+          mainPass.timestampWrites=ts(0);
+          const rp=encoder.beginRenderPass(mainPass);
+          drawBody(rp);
+          rp.end();
+          mainPass.timestampWrites=undefined;
+        });
+      };
+      const drawOceanAndSky=rp=>{
+        if(nodeCount){
+          rp.setVertexBuffer(0,instBuf);rp.setIndexBuffer(idxBuf,'uint16');
+          const ocean=terrain?coastalOcean:openOcean;
+          if(OCEAN_DEPTH){
+            rp.setPipeline(ocean.depthPipe);rp.setBindGroup(0,ocean.depthGroups[wakeIndex()]);
+            if(coastalDepthGroup){rp.setBindGroup(1,opticsEmptyGroup);rp.setBindGroup(2,coastalDepthGroup);}
+            rp.drawIndexed(GRID*GRID*6,nodeCount);
+          }
+          rp.setPipeline(ocean.pipe);rp.setBindGroup(0,ocean.groups[foamCur][wakeIndex()]);
+          rp.setBindGroup(1,ocean.shadows);rp.setBindGroup(2,coastalGroup??opticsEmptyGroup);
+          rp.setBindGroup(3,ocean.optics??=oceanOpticsGroup(ocean));
+          rp.drawIndexed(GRID*GRID*6,nodeCount);
+        }
+        terrain?.drawWater?.(rp,camSnap,frameF);
+        rp.setPipeline(skyPipe);rp.setBindGroup(0,bgSky);clouds.drawSky(rp);rp.draw(3);
+      };
+      await runSceneSubpass('Scene (all MSAA)',rp=>{
+        for(const v of hullsSnap)v.continuum.draw(rp,pipeline=>vesselOwnGroups(v,pipeline));
+        for(const v of hullsSnap)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
+        fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);townsfolk?.draw(rp);props?.draw(rp);
+        terrain?.draw(rp,camSnap,frameF);
+        drawOceanAndSky(rp);
+        dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);weatherRenderer.draw(rp);
+      });
+      await runSceneSubpass('Scene: Ships',rp=>{
+        for(const v of hullsSnap)v.continuum.draw(rp,pipeline=>vesselOwnGroups(v,pipeline));
+      });
+      await runSceneSubpass('Scene: People+Props',rp=>{
+        for(const v of hullsSnap)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
+        fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);townsfolk?.draw(rp);props?.draw(rp);
+      });
+      if(terrain){
+        await runSceneSubpass('Scene: Land',rp=>terrain.drawFamily(rp,'land',camSnap,frameF));
+        await runSceneSubpass('Scene: City',rp=>terrain.drawFamily(rp,'city',camSnap,frameF));
+        await runSceneSubpass('Scene: Meadow',rp=>terrain.drawFamily(rp,'meadow',camSnap,frameF));
+        await runSceneSubpass('Scene: Forest',rp=>terrain.drawFamily(rp,'forest',camSnap,frameF));
+        await runSceneSubpass('Scene: Herds+Rocks+Trade',rp=>terrain.drawFamily(rp,'other',camSnap,frameF));
+      }
+      await runSceneSubpass('Scene: Ocean+Sky',drawOceanAndSky);
+      const lines=[`Isolated GPU stages (${W}×${H}, ${out.pixelError.toFixed(1)} px):`];
+      for(const [k,ms] of Object.entries(out.stages))lines.push(`  ${k.padEnd(25)} ${ms.toFixed(2)} ms`);
+      stageMeasureResult.textContent=lines.join('\n');
+      stageMeasureResult.dataset.measurement=JSON.stringify(out);
+      stageMeasurePendingResolve?.resolve(out);
+    }catch(error){
+      stageMeasureResult.textContent='Stage breakdown unavailable: '+(error.message||error);
+      stageMeasurePendingResolve?.reject(error);
+    }finally{
+      stageMeasurePendingResolve=null;stageMeasuring=false;stageMeasureButton.disabled=!hasTS;
+      last=performance.now();fpsN=0;fpsT=0;resolution.reset();polygons.reset();requestAnimationFrame(frame);
+    }
+  }
+  window.oceanDiagnostics={
+    snapshot(){
+      return {
+        width:W,height:H,dpr:window.devicePixelRatio||1,frame:frameIndex,
+        cpuFrameWorkMs:frameWorkMs,cpuStages:frameStages.snapshot(),
+        resolution:{mode:resolution.mode,scale:resolution.scale,fps:resolution.fps,trying:resolution.trying},
+        polygons:{mode:polygons.mode,scale:polygons.scale,budgetScale:polygons.budgetScale,grantedScale:polygons.grantedScale,aimPixelError:polygons.pixelError,livePixelError:continuumPixelError(),fps:polygons.fps,trying:polygons.trying},
+        ocean:{nodes:nodeCount,grid:GRID,depthPrepass:OCEAN_DEPTH,surfaceTris:nodeCount*GRID*GRID*2,submittedTris:nodeCount*GRID*GRID*2*(OCEAN_DEPTH?2:1)},
+        profiles:continuumProfilesSnapshot(),
+        census:continuumCensus?.latest??null,
+        gpuProfiler:profiler.snapshot(),
+      };
+    },
+    profiles:{
+      get:()=>continuumProfilesSnapshot(),
+      set:(family,patch)=>setContinuumProfile(family,patch),
+      reset:(family=null)=>resetContinuumProfiles(family),
+    },
+    setProfilerOpen(open=true,deep=false){
+      profiler.setDeepTrace(Boolean(deep));deepTraceCheck.checked=profiler.deepTrace;
+      setPerformanceOpen(Boolean(open));
+      return profiler.snapshot();
+    },
+    measureStageBreakdown(){
+      if(!hasTS)return Promise.reject(new Error('timestamp-query unsupported'));
+      return new Promise((resolve,reject)=>{
+        stageMeasurePendingResolve={resolve,reject};
+        stageMeasureRequested=true;
+      });
+    },
+  };
   function frame(now) {
     if (gpuDeviceLost) return;
     if (shooting) return;  // paused while a screenshot is read back
+    if(stageMeasureRequested&&bloomFrameReady&&!stageMeasuring){measureStageBreakdown();return;}
     if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
     if(neuralMeasureRequested&&bloomFrameReady){measureNeuralAlone();return;}
     const cpuFrameStart=performance.now();frameStages.begin();
@@ -5242,12 +5385,14 @@ async function main() {
     // left set by a section that failed, would switch them off. They judge the cadence delivered, the same whether
     // or not the performance panel is open to time the GPU.
     const sectionsStreamed=terrain?.streamedSectionCount??0;
-    if(sectionsStreamed!==governedSections){governedSections=sectionsStreamed;resolution.reset();polygons.reset();}
+    const sectionJustLanded=sectionsStreamed!==governedSections;
+    if(sectionJustLanded)governedSections=sectionsStreamed;
     // A polygon budget down to half is hard to see, so it goes along with sharpness. Further cuts
     // wait until the image is at half size, and come back before any sharpness does.
-    const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
-    if(resChanged)polygons.reset();
-    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))aimContinuumPixelError(polygons.pixelError);
+    const governorActive=!document.hidden&&!sectionJustLanded;
+    const resChanged = resolution.sample(elapsed,governorActive,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
+    if(resChanged&&resolution.trying)polygons.reset();
+    if(polygons.sample(elapsed,governorActive,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))aimContinuumPixelError(polygons.pixelError);
     // Each new count of the scene's submitted triangles holds it to the one budget through the same scalar, judged
     // at the error the count was taken at; the scalar glides to wherever the governors aim it.
     const census=continuumCensus?.latest;
@@ -5261,7 +5406,25 @@ async function main() {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (profiler.detailed ? `  |  GPU window ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nPolygons: ${polygons.mode} · ${Math.round(polygons.scale*100)}% · ${polygons.pixelError.toFixed(1)} px${continuumCensus?.latest?`\nTriangles: ${(continuumCensus.latest.total/1e6).toFixed(2)}M of ${(continuumCensus.latest.budget/1e6).toFixed(1)}M · `+Object.entries(continuumCensus.latest.families).filter(([,n])=>n>0).map(([name,n])=>`${name} ${n>=1e5?(n/1e6).toFixed(2)+'M':Math.round(n/1e3)+'k'}`).join(' · '):''}\nMain thread: ${frameStages.text()}\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
+      const oceanSceneTris=nodeCount*GRID*GRID*2*(OCEAN_DEPTH?2:1);
+      const cen=continuumCensus?.latest;
+      const cenLines=cen?(()=>{
+        const bd=cen.breakdown??{};
+        const rows=Object.entries(cen.families).filter(([k,n])=>n>0||(bd[k]?.submitted>0)||(bd[k]?.shadowSubmitted>0))
+          .sort((a,b)=>(bd[b[0]]?.submitted??b[1])-(bd[a[0]]?.submitted??a[1]))
+          .map(([name,dem])=>{
+            const b=bd[name];
+            if(!b)return `${name} ${fmtTris(dem)}`;
+            const sh=b.shadowSubmitted>0?` sh:${fmtTris(b.shadowSubmitted)}`:'';
+            const cl=b.clamped?.length?` [CLAMP:${b.clamped.join(',')}]`:'';
+            return `${name} ${fmtTris(dem)}/${fmtTris(b.submitted)}${sh}${cl}`;
+          });
+        return `\nTriangles (demand): ${(cen.total/1e6).toFixed(2)}M of ${(cen.budget/1e6).toFixed(1)}M`
+          +`\nGPU tris: scene ${((cen.submittedTotal+oceanSceneTris)/1e6).toFixed(2)}M (cont ${(cen.submittedTotal/1e6).toFixed(2)}M + sea ${(oceanSceneTris/1e6).toFixed(2)}M) · shdw ${(cen.shadowTotal/1e6).toFixed(2)}M`
+          +(cen.clampedFamilies?.length?`\nList clamp: ${cen.clampedFamilies.join(' · ')}`:'')
+          +(rows.length?`\nBy family (dem/sub): `+rows.join(' · '):'');
+      })():'';
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nPolygons: ${polygons.mode} · ${Math.round(polygons.grantedScale*100)}% (time ${Math.round(polygons.scale*100)}% · tris ${Math.round(polygons.budgetScale*100)}%) · aim ${polygons.pixelError.toFixed(1)} px · live ${continuumPixelError().toFixed(1)} px${cenLines}\nMain thread: ${frameStages.text()}\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
       if(!performancePanel.hidden){performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();}
       updateResolutionStatus();
       updatePolygonStatus();
@@ -5573,9 +5736,24 @@ async function main() {
       skySun = frameF[33]; skyHaze = frameF[72]; skyHeight = frameF[73];
     }
     clouds.encode(cp);
-    terrain?.encode(cp,skyChanged,frameF);
-    // The townsfolk after the land, whose cut writes the ground they are drawn walking on (js/continuum-ground.js).
-    townsfolk?.encode(cp,gameDateMs());
+    const splitComputePass=profiler.detailed?name=>{
+      const writes=profiler.writes(name);
+      if(!writes)return null;
+      cp.end();
+      cp=enc.beginComputePass({timestampWrites:writes});
+      return cp;
+    }:null;
+    if(terrain){
+      splitComputePass?.('Continuum land');
+      cp=terrain.encode(cp,skyChanged,frameF,splitComputePass)??cp;
+    }
+    if(!profiler.deepTrace)splitComputePass?.('Continuum people + props');
+    if(townsfolk?.people){
+      if(profiler.deepTrace)splitComputePass?.('Cut: people');
+      // The townsfolk after the land, whose cut writes the ground they are drawn walking on (js/continuum-ground.js).
+      townsfolk.encode(cp,gameDateMs());
+    }
+    if(profiler.deepTrace)splitComputePass?.('Cut: props');
     // The props after the land too: what of them stands on the ground stands on the ground it draws.
     props?.encode(cp,simF[53],simTime);
     cp.setPipeline(sunVisPipe);
@@ -5636,6 +5814,7 @@ async function main() {
     props?.drawSubmerged(underwater);
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
     if(cam.y<waterH+Math.min(HB,1.5)){
+      aboveWaterPass.timestampWrites=profiler.writes('Above-water capture');
       const aboveWater=enc.beginRenderPass(aboveWaterPass);
       terrain?.drawSubmerged(aboveWater,true);
       for(const v of vessels){
@@ -5663,6 +5842,7 @@ async function main() {
     }
     const rp = enc.beginRenderPass(mainPass);
     const hulls=!drawProw?[]:vessels.filter(v=>v.boat.showProw&&!(v.bakedWreck&&v.entirelySubmerged));
+    lastTerrainCamera=terrainCamera;lastHulls=hulls;
     // Whole hulls through their cuts: clusters, far body and splat, each keeping its own samples of a pixel.
     for(const v of hulls)v.continuum.draw(rp,pipeline=>vesselOwnGroups(v,pipeline));
     for(const v of hulls)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
@@ -5771,12 +5951,15 @@ async function main() {
     const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
     if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
     if(continuumCensus?.idle){
-      // People are one family across every company, the garrison, the mate, the town and the decks of passing vessels.
-      const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
+      // People and their strand hair across every company, the garrison, the mate, the town and the decks of passing vessels.
+      const allPeopleDraws=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
+      const people=allPeopleDraws.filter(d=>!d.hair);
+      const hair=allPeopleDraws.filter(d=>d.hair);
       // The sea's animals beside the land's (the herds, among terrain's sources).
       const sea=[{name:'dolphins',draws:dolphins.continuumDraws()},{name:'marine life',draws:marineLife.continuumDraws()}].filter(s=>s.draws.length);
       const ships=hulls.flatMap(v=>v.continuum.continuumDraws());
-      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...props.continuumSources(),...(people.length?[{name:'people',draws:people}]:[]),...(ships.length?[{name:'ships',draws:ships}]:[]),...sea]);
+      const oceanSubmittedTris=nodeCount*GRID*GRID*2*(OCEAN_DEPTH?2:1);
+      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...props.continuumSources(),...(people.length?[{name:'people',draws:people}]:[]),...(hair.length?[{name:'hair',draws:hair}]:[]),...(ships.length?[{name:'ships',draws:ships}]:[]),...sea],{oceanSubmittedTris,oceanSurfaceTris:nodeCount*GRID*GRID*2,oceanNodes:nodeCount});
     }
     const doTs=profiler.resolve(enc);
     let readBuf = null;

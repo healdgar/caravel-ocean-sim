@@ -113,5 +113,5 @@ export const BOULDER_CONTINUUM_MATERIAL_SPEC = Object.freeze({
   name: 'boulderContinuum', prelude: boulderContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['stone', 'vec3f', true], ['lit', 'vec2f']],
   wgsl: () => BOULDER_CONTINUUM_MATERIAL_WGSL, salt: 5,
-  cullMode: 'back', air: true, capture: false,
+  cullMode: 'back', air: true, capture: false, visibility: true,
 });

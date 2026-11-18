@@ -164,7 +164,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   const bodyLoad = { fetchAsset };
   const [{ walk: walkPipeline, reset: resetPipeline, pose: posePipeline }, continuum, colonial] = await Promise.all([
     requestTownsfolkPipelines({ device, shader }),
-    requestCrewContinuumPipelines({ device, shader, format, samples }),
+    requestCrewContinuumPipelines({ device, shader, format, samples, fetchAsset }),
     loadCrewContinuumBodies(device, townsfolkBodiesFor(), bodyLoad),
   ]);
   // Ashore the frame people are drawn in is the world's own.

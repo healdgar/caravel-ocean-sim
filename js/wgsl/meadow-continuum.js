@@ -375,10 +375,13 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
   let centre = vec3f(low.x + side * 0.5, (bottom + top) * 0.5, low.y + side * 0.5);
   // The sward stands on the ground the land draws (js/continuum-ground.js), off the true ground by up to its bound.
   let size = length(vec3f(side * 0.5 + ${MEADOW_OVERHANG.toFixed(1)}, (top - bottom) * 0.5, side * 0.5 + ${MEADOW_OVERHANG.toFixed(1)}));
-  let reach = size + continuumGroundBound(cfg.scene.x, meadowFocal(), length(centre + meadowShift() - F.camPos.xyz) + size);
-  let seen = !meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach);
-  if (!seen && !meadowInLight(centre, reach)) { return; }
-  let band = u32(clamp(floor(log2(max(length(centre + meadowShift() - F.camPos.xyz), 8.0) / 8.0) * 3.0), 0.0, f32(MEADOW_BANDS - 1u)));
+  let dist = length(centre + meadowShift() - F.camPos.xyz);
+  let nearDist = max(dist - size, 0.0);
+  let reach = size + continuumGroundBound(cfg.scene.x, meadowFocal(), dist + size);
+  let seen = (cfg.scene.z <= 0.0 || nearDist < cfg.scene.z) && !meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach);
+  let lit = (cfg.scene.w <= 0.0 || nearDist <= cfg.scene.w) && meadowInLight(centre, reach);
+  if (!seen && !lit) { return; }
+  let band = u32(clamp(floor(log2(max(dist, 8.0) / 8.0) * 3.0), 0.0, f32(MEADOW_BANDS - 1u)));
   let most = bitcast<u32>(data.w);
   var bits = array<vec2u, 5>(${MEADOW_GRAIN_BITS.map(([at, n]) => `vec2u(${at}u, ${(1 << n) - 1}u)`).join(', ')});
   for (var g = 0u; g < MEADOW_GRAINS; g++) { atomicAdd(&meadowBlockWork[MEADOW_COUNTS + band * MEADOW_GRAINS + g], (most >> bits[g].x) & bits[g].y); }

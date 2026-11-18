@@ -890,7 +890,7 @@ export async function createLivestockHerds({
     clockU[0] = count;
     const cfg = mkBuf('livestock config', clock, B.UNIFORM);
     // Every beast's record and joints, which the step writes and the one cut reads.
-    const animals = createAnimalScene({ device, atlas, programs: pipelines.programs, view: pipelines.view, count, types: herdTypes, frame: frameUBO, shadowUniform: landShadowUniform, samples, label: 'livestock' });
+    const animals = createAnimalScene({ device, atlas, programs: pipelines.programs, view: pipelines.view, count, types: herdTypes, frame: frameUBO, shadowUniform: landShadowUniform, samples, label: 'livestock', profile: 'animals' });
     animals.setCount(count);
 
     const stepGroup = device.createBindGroup({

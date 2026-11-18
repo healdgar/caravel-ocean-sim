@@ -1,18 +1,34 @@
 // Timestamp queries are optional, and on Apple GPUs they stall the frame they sample. They run
 // only while the performance panel is open and add compute pass boundaries there.
 export const GPU_PASS_NAMES = [
-  'Waves + effects', 'Sky + clouds', 'Reflections', 'Solid shadows', 'Canvas shadows', 'Companion Solid shadows', 'Companion Canvas shadows',
+  'Waves + effects', 'Sky + clouds',
+  'Continuum land', 'Continuum scenery',
+  'Cut: boulders', 'Cut: city', 'Cut: forest', 'Cut: herds', 'Cut: meadow', 'Cut: trade vessels',
+  'Continuum people + props', 'Cut: people', 'Cut: props',
+  'Reflections',
+  'Solid shadows', 'Canvas shadows', 'Companion Solid shadows', 'Companion Canvas shadows',
   ...Array.from({length:8},(_,i)=>['escort-'+(i+1)+' Solid shadows','escort-'+(i+1)+' Canvas shadows']).flat(),
-  'Land shadows', 'Submerged geometry', 'Water reflection filter', 'Scene', 'Cannon smoke', 'Underwater medium', 'Neural light pass',
+  'Land shadows', 'Land canvas shadows', 'Land canvas shadow pack',
+  'Submerged geometry', 'Above-water capture', 'Water reflection filter',
+  'Scene', 'Cannon smoke', 'Underwater medium', 'Neural light pass',
   ...Array.from({length:8},(_,i)=>`Bloom down ${i}`),
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',
 ];
 
 export const PRIMARY_GPU_PASS_NAMES = Object.freeze([
   'Waves + effects',
+  'Sky + clouds',
+  'Continuum land',
+  'Continuum scenery',
+  'Continuum people + props',
+  'Reflections',
   'Solid shadows',
+  'Canvas shadows',
   'Land shadows',
+  'Land canvas shadows',
   'Submerged geometry',
+  'Above-water capture',
+  'Water reflection filter',
   'Scene',
   'Cannon smoke',
   'Underwater medium',
@@ -20,6 +36,11 @@ export const PRIMARY_GPU_PASS_NAMES = Object.freeze([
   'Bloom down 0',
   'Bloom up 1',
   'Composite',
+]);
+const CONTINUUM_COMPUTE_PASSES = Object.freeze([
+  'Continuum land', 'Continuum scenery',
+  'Cut: boulders', 'Cut: city', 'Cut: forest', 'Cut: herds', 'Cut: meadow', 'Cut: trade vessels',
+  'Continuum people + props', 'Cut: people', 'Cut: props',
 ]);
 const PRIMARY_GPU_PASSES = new Set(PRIMARY_GPU_PASS_NAMES);
 const GPU_PASS_ALIASES = Object.freeze({
@@ -30,16 +51,20 @@ const GPU_PASS_ALIASES = Object.freeze({
   'Bloom last': 'Bloom up 1',
 });
 
+const CONTINUUM_COMPUTE_SET = new Set(CONTINUUM_COMPUTE_PASSES);
+
 // Passes may begin before the first encoded compute pass starts. Preserve the
 // endpoint interval separately; only min(start)..max(end) encloses all samples.
 export function decodeGPUTimestamps(values,names,used) {
-  let first=null,last=null,bloomFirst=null,bloomLast=null;
+  let first=null,last=null,bloomFirst=null,bloomLast=null,contFirst=null,contLast=null;
   const passes={};
   for(let i=0;i<names.length;i++){
     const name=names[i];passes[name]=0;
     if(!used[i])continue; // Unwritten slots may contain a previous frame's data.
     const start=values[i*2],end=values[i*2+1];
     if(end<start)return null;
+    // Dawn/Metal elides a compute pass that encoded zero dispatches, leaving start=0 (with end=0 or end>0).
+    if(start===0n)continue;
     passes[name]=Number(end-start)/1e6;
     if(first===null||start<first)first=start;
     if(last===null||end>last)last=end;
@@ -47,9 +72,14 @@ export function decodeGPUTimestamps(values,names,used) {
       if(bloomFirst===null||start<bloomFirst)bloomFirst=start;
       if(bloomLast===null||end>bloomLast)bloomLast=end;
     }
+    if(CONTINUUM_COMPUTE_SET.has(name)){
+      if(contFirst===null||start<contFirst)contFirst=start;
+      if(contLast===null||end>contLast)contLast=end;
+    }
   }
   if(first===null)return null;
   passes.Bloom=bloomFirst===null?0:Number(bloomLast-bloomFirst)/1e6;
+  if(contFirst!==null)passes['Continuum window']=Number(contLast-contFirst)/1e6;
   return {windowMs:Number(last-first)/1e6,passes};
 }
 
@@ -157,7 +187,10 @@ export function createGPUProfiler(device, requested=false, options=null) {
       const lines=[`GPU sampled window  ${totalMs.toFixed(2)} ms`, 'Smoothed pass spans (overlap; not additive):'];
       for(const name of GPU_PASS_NAMES.filter(n=>!n.startsWith('Bloom '))){
         if(!deepTrace&&!PRIMARY_GPU_PASSES.has(name)&&!(name in latest&&latest[name]>0))continue;
-        if((name.startsWith('escort-')||name.startsWith('Companion '))&&!(name in latest&&latest[name]>0))continue;
+        if((name.startsWith('escort-')||name.startsWith('Companion ')||name.startsWith('Cut: '))&&!(name in latest&&latest[name]>0)&&!(smoothed[name]>0.004))continue;
+        if(name==='Reflections'&&smoothed['Continuum window']>0){
+          lines.push(`Continuum window        ${smoothed['Continuum window'].toFixed(2)} ms`);
+        }
         if(name==='Composite'){
           lines.push(`Bloom window (waits)    ${(smoothed.Bloom||0).toFixed(2)} ms`);
         }

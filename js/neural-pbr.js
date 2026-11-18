@@ -70,7 +70,7 @@ export function createNeuralPbrBank(device, {
   strength = 1.0,
   normalScale = 1.45,
   glossScale = 1.25,
-  maxDistanceM = 185.0,
+  maxDistanceM = 36.0,
   autoLoad = true,
   rawLatentBytes = null,
 } = {}) {

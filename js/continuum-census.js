@@ -13,6 +13,7 @@
 // fixed-size entries hide degenerate triangles (the one cut, js/wgsl/continuum-cut.js) counts its real triangles as it
 // lists them and offers those words, stride 1. Every family is counted from its draws: nothing is sized on the CPU.
 import { CONTINUUM_TRIANGLE_BUDGET, continuumPixelError } from './continuum-core.js';
+import { CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES } from './continuum-format.js';
 
 const CONTINUUM_CENSUS_WGSL = /* wgsl */`
 struct CensusRegion { first: u32, records: u32, stride: u32, family: u32 }
@@ -34,11 +35,12 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
   const STORAGE = GPUBufferUsage.STORAGE, COPY_DST = GPUBufferUsage.COPY_DST, COPY_SRC = GPUBufferUsage.COPY_SRC;
   const names = [];
   const totals = device.createBuffer({ label: 'continuum census totals', size: maxFamilies * 4, usage: STORAGE | COPY_SRC | COPY_DST });
-  const staging = device.createBuffer({ label: 'continuum census read', size: maxFamilies * 4, usage: GPUBufferUsage.MAP_READ | COPY_DST });
+  let stagingWordsCap = Math.max(maxFamilies, 256);
+  let staging = device.createBuffer({ label: 'continuum census read', size: stagingWordsCap * 4, usage: GPUBufferUsage.MAP_READ | COPY_DST });
   const pipeline = device.createComputePipeline({ label: 'continuum census', layout: 'auto', compute: { module: device.createShaderModule({ label: 'continuum census', code: CONTINUUM_CENSUS_WGSL }), entryPoint: 'main' } });
   let gather = null, regionBuffer = null, group = null, shape = '', regionCount = 0;
-  let copies = [];
-  let reading = false, copiedThisFrame = false, latest = null, copiedPixels = 0;
+  let copies = [], sceneCopies = [], sceneWordsTotal = 0;
+  let reading = false, copiedThisFrame = false, latest = null, copiedPixels = 0, copiedScenes = [], copiedWords = maxFamilies, copiedAux = null;
 
   const familyOf = (name) => {
     let at = names.indexOf(name);
@@ -49,7 +51,9 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
   function layout(sources) {
     const regions = [];
     copies = [];
-    let words = 0;
+    sceneCopies = [];
+    const seenScene = new Set();
+    let words = 0, sceneWords = 0;
     for (const { name, draws } of sources) {
       const family = familyOf(name);
       for (const d of draws || []) {
@@ -58,8 +62,18 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
         regions.push(words, d.records, stride, family);
         copies.push({ buffer: d.buffer, offset: d.offset | 0, at: words * 4, bytes: d.records * stride * 4 });
         words += d.records * stride;
+        const cs = d.continuumScene;
+        if (cs?.buffer && cs.words >= 24 && !seenScene.has(cs.buffer)) {
+          seenScene.add(cs.buffer);
+          sceneCopies.push({
+            family, name, buffer: cs.buffer, words: cs.words | 0, wordOffset: sceneWords,
+            capacity: cs.capacity | 0, lists: cs.lists ?? [], label: cs.label ?? name, people: d.people ?? 0,
+          });
+          sceneWords += cs.words | 0;
+        }
       }
     }
+    sceneWordsTotal = sceneWords;
     const key = copies.map((c) => `${c.at}:${c.bytes}`).join(',') + '|' + regions.join(',');
     regionCount = regions.length / 4;
     if (key === shape && gather) return;
@@ -76,11 +90,11 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
     get budget() { return CONTINUUM_TRIANGLE_BUDGET; },
     // No read is in flight: a count encoded now is read back.
     get idle() { return !reading; },
-    // The last count read: { families: { name: triangles }, total, budget, pixels }, or null before the first arrives;
-    // `pixels` is the scene's pixel error the count was taken at.
+    // The last count read: { families: { name: triangles }, total, submittedTotal, shadowTotal, breakdown, budget, pixels },
+    // or null before the first arrives; `pixels` is the scene's pixel error the count was taken at.
     get latest() { return latest; },
     // After the frame's selections: copy each family's records and sum them. sources: [{ name, draws }].
-    encode(encoder, sources) {
+    encode(encoder, sources, aux = null) {
       copiedThisFrame = false;
       layout(sources);
       encoder.clearBuffer(totals);
@@ -90,20 +104,83 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
         pass.setPipeline(pipeline); pass.setBindGroup(0, group); pass.dispatchWorkgroups(Math.ceil(regionCount / 64));
         pass.end();
       }
-      if (!reading) { encoder.copyBufferToBuffer(totals, 0, staging, 0, maxFamilies * 4); copiedThisFrame = true; copiedPixels = continuumPixelError(); }
+      if (!reading) {
+        const neededWords = maxFamilies + sceneWordsTotal;
+        if (neededWords > stagingWordsCap) {
+          staging.destroy();
+          stagingWordsCap = Math.max(neededWords * 2, 256);
+          staging = device.createBuffer({ label: 'continuum census read', size: stagingWordsCap * 4, usage: GPUBufferUsage.MAP_READ | COPY_DST });
+        }
+        encoder.copyBufferToBuffer(totals, 0, staging, 0, maxFamilies * 4);
+        for (const sc of sceneCopies) {
+          encoder.copyBufferToBuffer(sc.buffer, 0, staging, (maxFamilies + sc.wordOffset) * 4, sc.words * 4);
+        }
+        copiedScenes = sceneCopies.slice();
+        copiedWords = neededWords;
+        copiedAux = aux ? { ...aux } : null;
+        copiedThisFrame = true;
+        copiedPixels = continuumPixelError();
+      }
     },
     // After the frame is submitted: start reading this frame's count if it was copied out.
     afterSubmit() {
       if (!copiedThisFrame || reading) return;
       reading = true; copiedThisFrame = false;
-      const pixels = copiedPixels;
-      staging.mapAsync(GPUMapMode.READ).then(() => {
-        const counts = new Uint32Array(staging.getMappedRange().slice(0));
+      const pixels = copiedPixels, scenesSnap = copiedScenes, wordsCount = copiedWords, auxSnap = copiedAux;
+      staging.mapAsync(GPUMapMode.READ, 0, wordsCount * 4).then(() => {
+        const words = new Uint32Array(staging.getMappedRange(0, wordsCount * 4).slice(0));
         staging.unmap();
-        const families = {};
+        const families = {}, breakdown = {};
         let total = 0;
-        names.forEach((name, i) => { families[name] = counts[i]; total += counts[i]; });
-        latest = { families, total, budget: CONTINUUM_TRIANGLE_BUDGET, pixels };
+        names.forEach((name, i) => {
+          const demanded = words[i];
+          families[name] = demanded;
+          total += demanded;
+          breakdown[name] = {
+            demanded,
+            submitted: demanded,
+            shadowSubmitted: 0,
+            liveInstances: 0,
+            capacity: 0,
+            scenes: 0,
+            entries: [0, 0, 0, 0, 0, 0],
+            room: [0, 0, 0, 0, 0, 0],
+            maxFill: 0,
+            clamped: [],
+          };
+        });
+        const hasScene = new Set(scenesSnap.map((s) => s.name));
+        for (const name of hasScene) if (breakdown[name]) breakdown[name].submitted = 0;
+        for (const sc of scenesSnap) {
+          const b = breakdown[sc.name];
+          if (!b) continue;
+          const base = maxFamilies + sc.wordOffset;
+          b.scenes++;
+          b.capacity += sc.capacity;
+          if (sc.words > 28) b.liveInstances += words[base + 28];
+          for (let list = 0; list < CONTINUUM_LISTS.length; list++) {
+            const count = words[base + list * 4 + 1] ?? 0;
+            const room = sc.lists?.[list]?.[1] ?? 0;
+            const tris = count * CONTINUUM_ENTRY_TRIANGLES[list];
+            b.entries[list] += count;
+            b.room[list] += room;
+            if (list < 4) b.submitted += tris;
+            else b.shadowSubmitted += tris;
+            if (room > 0) {
+              const fill = count / room;
+              if (fill > b.maxFill) b.maxFill = fill;
+              if (count >= room && !b.clamped.includes(CONTINUUM_LISTS[list])) b.clamped.push(CONTINUUM_LISTS[list]);
+            }
+          }
+        }
+        let submittedTotal = 0, shadowTotal = 0;
+        const clampedFamilies = [];
+        for (const [name, b] of Object.entries(breakdown)) {
+          submittedTotal += b.submitted;
+          shadowTotal += b.shadowSubmitted;
+          if (b.clamped.length) clampedFamilies.push(`${name}(${b.clamped.join(',')})`);
+        }
+        latest = { families, total, submittedTotal, shadowTotal, clampedFamilies, breakdown, aux: auxSnap, budget: CONTINUUM_TRIANGLE_BUDGET, pixels };
       }).catch(() => {}).finally(() => { reading = false; });
     },
     destroy() { gather?.destroy(); regionBuffer?.destroy(); totals.destroy(); staging.destroy(); },

@@ -41,7 +41,7 @@ export async function createMarineLife({device,frameUBO,transView,skyView,sample
     requestContinuumCapture(waterOptics,MARINE_CONTINUUM_MATERIAL_SPEC),
     shader(seaSource(seaStandWGSL(true),surfaceWaves),'marine stand').then(code=>device.createComputePipelineAsync({label:'marine stand',layout:'auto',compute:{module:code,entryPoint:'seaStandCS'}})),
   ]);
-  const animals=createAnimalScene({device,atlas,programs,view,count:MARINE_ANIMAL_LIMIT,types:[ANIMAL_TYPE.shark,ANIMAL_TYPE.whale],frame:frameUBO,shadowUniform:shadows.uniform,samples,label:'marine animals'});
+  const animals=createAnimalScene({device,atlas,programs,view,count:MARINE_ANIMAL_LIMIT,types:[ANIMAL_TYPE.shark,ANIMAL_TYPE.whale],frame:frameUBO,shadowUniform:shadows.uniform,samples,label:'marine animals',profile:'animals'});
   const bones=buffer('whale joint poses',whaleRig.update(0,0),B.STORAGE);
   const placeWords=new Uint32Array(MARINE_ANIMAL_LIMIT*SEA_PLACE_VEC4S*4),places=new Float32Array(placeWords.buffer),placed=buffer('marine animal places',places,B.STORAGE);
   const effectValues=new Float32Array(MARINE_EFFECT_LIMIT*12);

@@ -105,6 +105,7 @@ def main():
     parser.add_argument('out', type=Path)
     parser.add_argument('--size', type=int, default=4096)
     parser.add_argument('--sample', type=int, default=2048)
+    parser.add_argument('--sample-only', action='store_true')
     args = parser.parse_args()
     if args.size & (args.size - 1) or args.sample & (args.sample - 1) or args.sample > args.size:
         raise SystemExit('Sizes must be powers of two, the sample no larger than the texture')
@@ -123,6 +124,11 @@ def main():
     while chain[-1].shape[0] > 1:
         chain.append(box_down(chain[-1]))
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.sample_only:
+        for image in chain:
+            if image.shape[0] == args.sample:
+                np.round(np.clip(srgb_from_linear(image), 0, 1) * 255).astype(np.uint8).tofile(args.out / 'sample.rgb')
+        return
     levels = []
     bc7, astc = bytearray(), bytearray()
     with tempfile.TemporaryDirectory() as folder, concurrent.futures.ProcessPoolExecutor() as pool:

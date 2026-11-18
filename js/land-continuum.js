@@ -19,6 +19,7 @@ import {
 } from './wgsl/land-continuum.js';
 import { continuumGroundField, continuumGroundForget, CONTINUUM_GROUND_TEXELS, CONTINUUM_GROUND_CUTS, CONTINUUM_GROUND_LEVELS } from './continuum-ground.js';
 import { continuumPixelError } from './continuum-core.js';
+import { continuumProfile } from './continuum-profiles.js';
 
 // How much a parent's error stands above its children's, so that a parent and its child are never both drawn.
 const LAND_CONTINUUM_RISE = 1.01;
@@ -396,7 +397,7 @@ export function requestLandContinuumPipelines({ device, shader }) {
  * js/continuum-scene.js, with landContinuumMaterial from js/wgsl/land-continuum.js), `frame` the scene's frame uniform,
  * `grid` the grid every piece is placed on: {x0, z0, g}.
  */
-export function createLandContinuum({ device, pipelines: P, view: viewPipeline, capture = null, frame, grid, shared = [] }) {
+export function createLandContinuum({ device, pipelines: P, view: viewPipeline, capture = null, frame, grid, shared = [], profile = null }) {
   const B = GPUBufferUsage;
   const { indices, firsts } = landContinuumIndices();
   const indexBuffer = device.createBuffer({ label: 'land continuum patches', size: Math.ceil(indices.byteLength / 4) * 4, usage: B.INDEX | B.COPY_DST });
@@ -506,8 +507,8 @@ export function createLandContinuum({ device, pipelines: P, view: viewPipeline, 
     // cut, then the drawn ground's field emptied and written from what each cut kept.
     encode(pass) {
       if (destroyed) return;
-      // The scene's one pixel error, which every family's cut reads (js/continuum-core.js); the captures' is coarser.
-      const pixels = continuumPixelError();
+      // The scene's one pixel error, scaled by the land's symmetric profile when present; the captures' is coarser.
+      const pixels = continuumPixelError() * continuumProfile(profile).errorScale;
       setView(0, pixels); setView(1, pixels * LAND_CONTINUUM_CAPTURE_COARSENING);
       if (viewChanged) { device.queue.writeBuffer(viewBuffer, 0, viewFloats); viewChanged = false; }
       pass.setPipeline(P.reset); pass.setBindGroup(0, resetGroup);

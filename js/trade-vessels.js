@@ -5430,7 +5430,7 @@ export async function createTradeVessels({
   const bufferOf = (curResources, binding) => curResources.find(([b]) => b === binding)?.[1]?.buffer ?? null;
   const makeScene = (curResources) => createContinuumScene({
     device, atlas, programs, capacity: MAX_TRADE_VESSELS, room, view, poses,
-    frame: bufferOf(curResources, 0), shadowUniform: bufferOf(curResources, 19), samples, label: 'trade vessel',
+    frame: bufferOf(curResources, 0), shadowUniform: bufferOf(curResources, 19), samples, label: 'trade vessel', profile: 'tradeVessels',
   });
   let scene = makeScene(resources);
   let sceneFrame = bufferOf(resources, 0), sceneShadow = bufferOf(resources, 19);

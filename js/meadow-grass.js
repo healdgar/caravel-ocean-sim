@@ -10,6 +10,7 @@
 // the land's own crater field and the frame's ballistic wakes.
 import { requestOnce } from './gpu-program-cache.js';
 import { continuumPixelError } from './continuum-core.js';
+import { continuumProfile } from './continuum-profiles.js';
 import { CONTINUUM_HEADER, CONTINUUM_TYPE_WORDS, continuumRoom } from './continuum-format.js';
 import { CONTINUUM_ROW } from './wgsl/continuum-cut.js';
 import { createContinuumScene, requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, continuumAtlasPages } from './continuum-scene.js';
@@ -697,7 +698,7 @@ export async function createMeadowGrass({
   const most = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / (MEADOW_CONTINUUM_POSE * 16));
   const perType = Math.floor(Math.min(wanted, most) / atlas.types.length);
   const { capacity, room } = continuumRoom(atlas.types, atlas.types.map(() => perType));
-  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: 'meadow', written: true });
+  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: 'meadow', written: true, profile: 'meadow' });
   scene.setCount(capacity);
   scene.setWorldOffset(worldOffset?.x ?? 0, worldOffset?.z ?? 0);
   const stood = mkBuf('meadow stood', MEADOW_CONTINUUM_STOOD_BYTES, B.STORAGE | B.INDIRECT);
@@ -988,8 +989,10 @@ export async function createMeadowGrass({
     encode(pass) {
       active = !destroyed && coverTexels > 0 && standGroups !== null;
       if (!active) return;
-      const pixels = continuumPixelError();
-      if (cfgF[16] !== Math.fround(pixels)) { cfgF[16] = pixels; cfgDirty = true; }
+      const pixels = continuumPixelError(), mp = continuumProfile('meadow');
+      if (cfgF[16] !== Math.fround(pixels) || cfgF[18] !== Math.fround(mp.maxDistance) || cfgF[19] !== Math.fround(mp.shadowMaxDistance)) {
+        cfgF[16] = pixels; cfgF[18] = mp.maxDistance; cfgF[19] = mp.shadowMaxDistance; cfgDirty = true;
+      }
       if (cfgDirty) { device.queue.writeBuffer(cfgBuf, 0, cfgData); cfgDirty = false; }
       const P = stand.pipelines;
       pass.setPipeline(P.reset);

@@ -86,8 +86,8 @@ fn vesselContinuumFarShade(v:ContinuumVarying,front:bool)->vec4f {
 // keeps her samples by her mask as her view does (js/wgsl/continuum-cut.js), so her holes read from below as above.
 fn vesselContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let near=vesselShade(vesselContinuumBoat(v),front);
-  let far=vesselContinuumFarShade(v,front);
-  return select(far,near,v.coverage.x==CONTINUUM_CLUSTER_ENTRY);
+  if(v.coverage.x==CONTINUUM_CLUSTER_ENTRY){return near;}
+  return vesselContinuumFarShade(v,front);
 }
 // The samples a holed vessel's clusters keep: none where shot has holed her timber, parted her rope or torn her canvas.
 fn vesselContinuumMask(v:ContinuumVarying,front:bool)->u32 {
@@ -130,7 +130,7 @@ const vesselContinuumMaterial = (capture) => Object.freeze({
   wgsl: VESSEL_CONTINUUM_WGSL,
   salt: 7,
   // Sails, planking and her lines are open shells, lit from whichever side is seen.
-  cullMode: 'none', air: true, capture: true, mask: true, shadow: capture ? null : VESSEL_CONTINUUM_SHADOW,
+  cullMode: 'none', air: true, capture: true, mask: true, visibility: !capture, shadow: capture ? null : VESSEL_CONTINUUM_SHADOW,
 });
 // Her material in the scene, and as the water captures it (its medium water, js/wgsl/caravel.js).
 export const VESSEL_CONTINUUM_MATERIAL = vesselContinuumMaterial(false);
@@ -171,7 +171,7 @@ export function createVesselContinuum({ device, programs, body, asset, pose, fra
   const { room } = continuumRoom(types, [1]);
   const scene = createContinuumScene({
     device, atlas: body, programs: programs.programs, capacity: 1, room, view: programs.view, poses: pose.buffer,
-    frame, shadowUniform: shadows.uniform, samples, label,
+    frame, shadowUniform: shadows.uniform, samples, label, profile: 'ships',
   });
   // Her RIDER header (js/wgsl/ship-kinds.js): her posed vertices from vec4f 0, two a vertex; her lines after them; and
   // design units to her type's metres, as her hull program scales her (js/wgsl/caravel.js rigVertex), over her record's scale.
@@ -211,6 +211,11 @@ export function createVesselContinuum({ device, programs, body, asset, pose, fra
     // her own resources and lighting, groups 0 and 1.
     draw(pass, groups) {
       if (!shown) return;
+      if (!this.damaged && programs.view.equalPipeline) {
+        const [own, lighting] = groups(programs.view.equalPipeline);
+        scene.drawEqual(pass, own, lighting);
+        return;
+      }
       const [own, lighting] = groups(programs.view.pipeline);
       scene.draw(pass, own, lighting);
     },

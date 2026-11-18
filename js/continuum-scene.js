@@ -7,7 +7,8 @@
 // by the same select and cast by the same shadow program (or its material's part of it); each family's material has
 // its view (and, if it is seen under water, its capture) composed by the one composer.
 import { requestOnce } from './gpu-program-cache.js';
-import { continuumPixelError } from './continuum-core.js';
+import { continuumPixelError, packContinuumProfile } from './continuum-core.js';
+import { continuumProfile } from './continuum-profiles.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, writeContinuumRecord, continuumAtlasTypes } from './continuum-format.js';
 import {
@@ -26,7 +27,7 @@ export function continuumAtlasPaging(device, pages = 1) {
   if (!(pages >= 1 && pages <= CONTINUUM_ATLAS_PAGES)) throw Error(`A continuum atlas is bound in 1 to ${CONTINUUM_ATLAS_PAGES} pages, not ${pages}`);
   let made = continuumPagings.get(device);
   if (!made) {
-    const bytes = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize);
+    const bytes = Math.min(device.limits?.maxStorageBufferBindingSize ?? 2 ** 31, device.limits?.maxBufferSize ?? 2 ** 31);
     const shift = Math.min(31, Math.floor(Math.log2(bytes / 4)));
     made = Array.from({ length: CONTINUUM_ATLAS_PAGES }, (_, p) => Object.freeze({ pages: p + 1, shift, pageWords: 2 ** shift }));
     continuumPagings.set(device, made);
@@ -81,25 +82,55 @@ export async function requestContinuumPrograms({ device, shader, shadowFormat, p
   });
 }
 
-// A material's view: { pipeline, material, shadows, paging }, one a device, material, target format, sample count and
-// atlas paging (`pages`, as requestContinuumPrograms has it). A material with a shadow of its own (its `shadow`) has its
-// parts' programs in `shadows` ('whole', or 'solid' and 'canvas'), cast into maps of `shadowFormat`.
+// In-pass TBDR visibility prepass (AGENTS.md rule 2): lays exact per-sample depth with @builtin(sample_mask) and
+// writeMask: 0 so the main material shader can run at depthCompare: 'equal' with zero sample_mask and full hardware HSR.
+function requestContinuumVisibility({ device, shader, format, samples, cullMode, paging }) {
+  return requestOnce(device, `continuum visibility ${format} ${samples} ${cullMode}${paging.pages > 1 ? ` ${paging.pages} pages` : ''}`, async () => {
+    const module = await shader(continuumModuleWGSL({ pass: 'visibility', paging }), 'continuum visibility');
+    const pipeline = await device.createRenderPipelineAsync({
+      label: 'continuum visibility', layout: 'auto',
+      vertex: { module, entryPoint: 'continuumVisibilityVS', buffers: CONTINUUM_ENTRY_LAYOUT },
+      fragment: { module, entryPoint: 'continuumVisibilityFS', targets: [{ format, writeMask: 0 }] },
+      primitive: { topology: 'triangle-list', cullMode },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+      multisample: { count: samples },
+    });
+    return { pipeline };
+  });
+}
+
+// A material's view: { pipeline, equalPipeline, visibility, material, shadows, paging }, one a device, material, target
+// format, sample count and atlas paging (`pages`, as requestContinuumPrograms has it). A material with a shadow of its
+// own (its `shadow`) has its parts' programs in `shadows` ('whole', or 'solid' and 'canvas'), cast into maps of
+// `shadowFormat`. When `material.visibility` is true, `visibility` lays per-sample depth first so shading runs at
+// `depthCompare: 'equal'` without `@builtin(sample_mask)`.
 export async function requestContinuumView({ device, shader, material, format, samples, shadowFormat = 'depth32float', pages = 1 }) {
   const paging = continuumAtlasPaging(device, await pages);
   return requestOnce(device, `continuum view ${material.name} ${format} ${samples}${paging.pages > 1 ? ` ${paging.pages} pages` : ''}`, async () => {
     const parts = !material.shadow ? [] : material.shadow.canvas ? ['solid', 'canvas'] : ['whole'];
-    const [module, ...cast] = await Promise.all([
+    const useVisibility = Boolean(material.visibility && !material.heightfield);
+    const pureEqual = useVisibility && !material.mask && !material.coverage;
+    const [module, visibility, ...cast] = await Promise.all([
       shader(continuumModuleWGSL({ pass: 'view', material, paging }), `${material.name} view`),
+      useVisibility ? requestContinuumVisibility({ device, shader, format, samples, cullMode: material.cullMode, paging }) : Promise.resolve(null),
       ...parts.map((part) => requestContinuumShadow({ device, shader, material, part, shadowFormat, paging })),
     ]);
-    const pipeline = await device.createRenderPipelineAsync({
+    const makePipe = (equal) => device.createRenderPipelineAsync({
       label: `${material.name} view`, layout: 'auto',
       vertex: { module, entryPoint: 'continuumVS', buffers: material.entryLayout ?? CONTINUUM_ENTRY_LAYOUT },
-      fragment: { module, entryPoint: 'continuumFS', targets: [{ format }] },
+      fragment: { module, entryPoint: equal ? 'continuumEqualFS' : 'continuumFS', targets: [{ format }] },
       primitive: { topology: 'triangle-list', cullMode: material.cullMode },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: samples },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: !equal, depthCompare: equal ? 'equal' : 'greater' },
+      multisample: { count: samples },
     });
-    return { pipeline, material, paging, shadows: Object.fromEntries(parts.map((part, i) => [part, cast[i]])) };
+    const [pipeline, equalPipeline] = await Promise.all([
+      makePipe(pureEqual),
+      useVisibility && !pureEqual ? makePipe(true) : Promise.resolve(null),
+    ]);
+    return {
+      pipeline, equalPipeline: equalPipeline ?? (pureEqual ? pipeline : null), visibility, pureEqual,
+      material, paging, shadows: Object.fromEntries(parts.map((part, i) => [part, cast[i]])),
+    };
   });
 }
 
@@ -177,12 +208,12 @@ export function continuumListLayout(capacity, room, mostBytes = Infinity) {
 // uniforms. Every family's instances are the same record: `words` and `floats` hold them on the CPU, `place` writes
 // one, `send` uploads a range. A scene `written` on the GPU (a family's own pass stands its records each frame,
 // encode's `indirect`) keeps none on the CPU.
-export function createContinuumScene({ device, atlas, programs: P, capacity, room, view = null, poses = null, poseRoom = 1, frame, shadowUniform, samples = 4, label, written = false }) {
+export function createContinuumScene({ device, atlas, programs: P, capacity, room, view = null, poses = null, poseRoom = 1, frame, shadowUniform, samples = 4, label, written = false, profile = null }) {
   const B = GPUBufferUsage, W = CONTINUUM_RECORD_WORDS, packed = CONTINUUM_RECORD.packed;
   const { paging } = P;
   if (!atlas?.pages?.length) throw Error(`The ${label} scene's atlas is not uploaded (uploadContinuumAtlas)`);
   if (atlas.pages.length !== paging.pages || (view && view.paging !== paging)) throw Error(`The ${label} scene's atlas takes ${atlas.pages.length} pages; its programs bind ${paging.pages}${view ? ` and its view ${view.paging.pages}` : ''} (request them with its pages)`);
-  const { lists, entries } = continuumListLayout(capacity, room, Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize));
+  const { lists, entries } = continuumListLayout(capacity, room, Math.min(device.limits?.maxStorageBufferBindingSize ?? Infinity, device.limits?.maxBufferSize ?? Infinity));
   const words = new Uint32Array((written ? 1 : Math.max(1, capacity)) * W), floats = new Float32Array(words.buffer);
   const onCPU = () => { if (written) throw Error(`The ${label} scene's records are written on the GPU`); };
   const records = device.createBuffer({ label: `${label} continuum records`, size: Math.max(1, capacity) * W * 4, usage: B.STORAGE | B.COPY_DST | B.COPY_SRC });
@@ -193,12 +224,20 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
   // The select's workgroups for what a family's own pass stood, made from its count on the GPU.
   const batches = written ? device.createBuffer({ label: `${label} continuum batches`, size: 16, usage: B.STORAGE | B.INDIRECT }) : null;
   const viewWords = new Uint32Array(CONTINUUM_VIEW_BYTES / 4), viewFloats = new Float32Array(viewWords.buffer);
-  viewWords.set([0, samples, 1, 0], 0);
+  viewWords.set([0, samples, 1, (view?.material?.salt ?? 0) >>> 0], 0);
   lists.forEach(([at, n], i) => viewWords.set([at, n, 0, 0], 8 + i * 4));
   const aimAt = 8 + CONTINUUM_LISTS.length * 4;
+  const curveAt = aimAt + 4;
+  const profileScratch = new Float32Array(8);
+  let profileSpec = profile;
   let viewChanged = true;
   const setWord = (at, value) => { if (viewWords[at] !== value) { viewWords[at] = value; viewChanged = true; } };
   const setFloat = (at, value) => { if (viewFloats[at] !== Math.fround(value)) { viewFloats[at] = value; viewChanged = true; } };
+  const syncProfile = () => {
+    packContinuumProfile(continuumProfile(profileSpec), profileScratch, 0);
+    for (let k = 0; k < 8; k++) setFloat(curveAt + k, profileScratch[k]);
+  };
+  syncProfile();
 
   const group = (layout, resources) => device.createBindGroup({ layout, entries: resources.map(([binding, buffer]) => ({ binding, resource: { buffer } })) });
   // The scene's data, as every program binds it from its first binding, the further pages from `pagesAt`.
@@ -218,6 +257,10 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     return batching.get(stood);
   };
   const drawn = view ? dataGroupFor(view.pipeline, view.material) : null;
+  const equalDrawn = view?.equalPipeline && view.equalPipeline !== view.pipeline ? dataGroupFor(view.equalPipeline, view.material) : drawn;
+  const visibilityGroups = view?.visibility
+    ? { frame: group(view.visibility.pipeline.getBindGroupLayout(0), [[0, frame]]), data: group(view.visibility.pipeline.getBindGroupLayout(1), dataAt(0)) }
+    : null;
   // Each shadow program's groups: the frame's two uniforms, the data, and its material's own (`own`, from its family).
   const shadowGroups = new Map();
   const shadowGroupsFor = (program, own) => {
@@ -274,6 +317,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       const on = fall && fall.radius > 0;
       setFloat(aimAt, on ? fall.x : 0); setFloat(aimAt + 1, on ? fall.y : 0); setFloat(aimAt + 2, on ? fall.z : 0); setFloat(aimAt + 3, on ? fall.radius : 0);
     },
+    setProfile(next) { profileSpec = next; syncProfile(); },
     // In the frame's compute pass, before any pass draws: the lists emptied, then every instance cut at the scene's
     // one pixel error (js/continuum-core.js), which only a governor moves, CONTINUUM_BATCH instances a workgroup.
     // `indirect` ({ buffer }): a written scene's family stood its records this frame in its own pass and counted them
@@ -281,6 +325,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     encode(pass, indirect = null) {
       if (destroyed) return;
       setFloat(4, continuumPixelError());
+      syncProfile();
       if (viewChanged) { device.queue.writeBuffer(viewBuffer, 0, viewWords); viewChanged = false; }
       pass.setBindGroup(0, cut);
       pass.setPipeline(P.reset);
@@ -300,9 +345,24 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       pass.setPipeline(P.select);
       pass.dispatchWorkgroups(Math.min(groups, CONTINUUM_ROW), Math.ceil(groups / CONTINUUM_ROW));
     },
-    // The view's four lists, one pipeline. `sceneGroup` and `second` are the material's groups 0 and 1.
+    drawVisibility(pass) {
+      if (destroyed || !count || !visibilityGroups) return;
+      pass.setPipeline(view.visibility.pipeline);
+      pass.setBindGroup(0, visibilityGroups.frame); pass.setBindGroup(1, visibilityGroups.data);
+      for (let index = 0; index < CONTINUUM_VIEW_LISTS; index++) drawList(pass, index);
+    },
+    drawEqual(pass, sceneGroup, second) {
+      if (destroyed || !count || !equalDrawn || !view?.equalPipeline) return;
+      if (visibilityGroups) scene.drawVisibility(pass);
+      pass.setPipeline(view.equalPipeline);
+      pass.setBindGroup(0, sceneGroup); pass.setBindGroup(1, second); pass.setBindGroup(view.material.data.group, equalDrawn);
+      for (let index = 0; index < CONTINUUM_VIEW_LISTS; index++) drawList(pass, index);
+    },
+    // The view's four lists, one pipeline (with in-pass visibility first when the material is pure visibility-equal).
+    // `sceneGroup` and `second` are the material's groups 0 and 1.
     draw(pass, sceneGroup, second) {
       if (destroyed || !count || !drawn) return;
+      if (view.pureEqual && visibilityGroups) scene.drawVisibility(pass);
       pass.setPipeline(view.pipeline);
       pass.setBindGroup(0, sceneGroup); pass.setBindGroup(1, second); pass.setBindGroup(view.material.data.group, drawn);
       for (let index = 0; index < CONTINUUM_VIEW_LISTS; index++) drawList(pass, index);
@@ -328,8 +388,13 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       for (let index = CONTINUUM_VIEW_LISTS; index < CONTINUUM_LISTS.length; index++) drawList(pass, index);
     },
     dataGroup: dataGroupFor,
-    // For the continuum census (js/continuum-census.js): the real triangles the scene's error asked of the view.
-    continuumDraws() { return !destroyed && count ? [{ buffer: draws, offset: CONTINUUM_DRAW_WORDS * 4, records: CONTINUUM_VIEW_LISTS, stride: 1 }] : []; },
+    // For the continuum census (js/continuum-census.js): the real triangles the scene's error asked of the view,
+    // alongside the draw/list buffer so diagnostics can also read submitted hardware triangles, shadow cuts, and list fill.
+    continuumDraws() {
+      return !destroyed && count
+        ? [{ buffer: draws, offset: CONTINUUM_DRAW_WORDS * 4, records: CONTINUUM_VIEW_LISTS, stride: 1, continuumScene: { buffer: draws, words: CONTINUUM_DRAWS_BYTES / 4, capacity, lists, label } }]
+        : [];
+    },
     destroy() { destroyed = true; for (const resource of [records, ownPoses, list, draws, viewBuffer, batches]) resource?.destroy(); },
   };
   return scene;

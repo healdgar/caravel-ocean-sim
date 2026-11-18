@@ -94,6 +94,6 @@ export function cityContinuumMaterial(landSource) {
     varyings: [['kind', 'vec2f'], ['leafUV', 'vec2f'], ['splatKinds', 'vec4f', true], ['splat', 'vec2f']],
     wgsl: () => CITY_CONTINUUM_MATERIAL_WGSL, salt: 1,
     // Every type, its far body and its splat are wound outward, so the far faces are left out.
-    cullMode: 'back', air: false, capture: false,
+    cullMode: 'back', air: false, capture: false, visibility: true,
   });
 }

@@ -152,6 +152,7 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
   return {
     get mode() { return mode; },
     get scale() { return scale; },
+    get grantedScale() { return granted(); },
     get fps() { return fps; },
     get trying() { return probe.trying; },
     get budgetScale() { return budgetScale; },

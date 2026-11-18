@@ -76,6 +76,51 @@ export function stepContinuumPixelError(seconds) {
   return continuumScenePixelError;
 }
 
+// One symmetric parameter schema for any scene's Continuum cut: every field has a neutral identity default so an
+// unprofiled scene behaves identically to the raw core constants, while profiled scenes supply data through the same
+// uniform layout (curve: vec4f, limits: vec4f) without branching or per-family selection code.
+export const CONTINUUM_DEFAULT_PROFILE = Object.freeze({
+  errorScale: 1,
+  taperMetres: 0,
+  taperPower: 1,
+  splatScale: 1,
+  minPixels: CONTINUUM_MIN_PIXELS,
+  maxDistance: 0,
+  shadowMinError: 0,
+  shadowMaxDistance: 0,
+});
+
+export function normalizeContinuumProfile(spec = null) {
+  const s = spec && typeof spec === 'object' ? spec : CONTINUUM_DEFAULT_PROFILE;
+  const pos = (v, d) => (Number.isFinite(v) && v > 0 ? v : d);
+  const nonNeg = (v, d) => (Number.isFinite(v) && v >= 0 ? v : d);
+  return Object.freeze({
+    errorScale: pos(s.errorScale, CONTINUUM_DEFAULT_PROFILE.errorScale),
+    taperMetres: nonNeg(s.taperMetres, CONTINUUM_DEFAULT_PROFILE.taperMetres),
+    taperPower: pos(s.taperPower, CONTINUUM_DEFAULT_PROFILE.taperPower),
+    splatScale: pos(s.splatScale, CONTINUUM_DEFAULT_PROFILE.splatScale),
+    minPixels: pos(s.minPixels, CONTINUUM_DEFAULT_PROFILE.minPixels),
+    maxDistance: nonNeg(s.maxDistance, CONTINUUM_DEFAULT_PROFILE.maxDistance),
+    shadowMinError: nonNeg(s.shadowMinError, CONTINUUM_DEFAULT_PROFILE.shadowMinError),
+    shadowMaxDistance: nonNeg(s.shadowMaxDistance, CONTINUUM_DEFAULT_PROFILE.shadowMaxDistance),
+  });
+}
+
+// Packs a normalized profile into 8 floats: curve (errorScale, invTaperMetres, splatScale, taperPower) and
+// limits (minPixels, maxDistance, shadowMinError, shadowMaxDistance).
+export function packContinuumProfile(spec = null, out = new Float32Array(8), offset = 0) {
+  const p = normalizeContinuumProfile(spec);
+  out[offset] = p.errorScale;
+  out[offset + 1] = p.taperMetres > 0 ? 1 / p.taperMetres : 0;
+  out[offset + 2] = p.splatScale;
+  out[offset + 3] = p.taperPower;
+  out[offset + 4] = p.minPixels;
+  out[offset + 5] = p.maxDistance;
+  out[offset + 6] = p.shadowMinError;
+  out[offset + 7] = p.shadowMaxDistance;
+  return out;
+}
+
 // The same core for the GPU. A shader takes it once, at the top of its source; it defines only `continuum*` names.
 export const CONTINUUM_CORE_WGSL = /* wgsl */`
 const CONTINUUM_SPLAT_PIXELS: f32 = ${CONTINUUM_SPLAT_PIXELS.toFixed(4)};
@@ -136,6 +181,39 @@ fn continuumThin(pixels: f32, seed: u32) -> f32 {
   let keep = pixels / CONTINUUM_MIN_PIXELS;
   if (pixels < least || f32(continuumHash(seed) & 65535u) / 65535.0 > keep * keep) { return 0.0; }
   return CONTINUUM_MIN_PIXELS / max(pixels, least);
+}
+// Symmetric profile evaluation on the GPU: curve = (errorScale, invTaperMetres, splatScale, taperPower),
+// limits = (minPixels, maxDistance, shadowMinError, shadowMaxDistance). Reduces identically to the base core at
+// CONTINUUM_DEFAULT_PROFILE while allowing rich near-field detail and rapid, pop-free distance taper per scene.
+fn continuumProfilePixels(pixels: f32, important: bool, distance: f32, curve: vec4f) -> f32 {
+  let base = continuumImportance(pixels, important) * max(curve.x, 0.05);
+  let taperRate = max(curve.y, 0.0) * select(1.0, CONTINUUM_IMPORTANT, important);
+  let u = max(distance, 0.0) * taperRate;
+  let power = max(curve.w, 1.0);
+  return base * (1.0 + select(u, pow(max(u, 1e-6), power), u > 0.0 && abs(power - 1.0) > 1e-3));
+}
+fn continuumProfileSplatShare(pixels: f32, error: f32, curve: vec4f) -> f32 {
+  let scale = max(curve.z, 0.25);
+  return 1.0 - smoothstep(CONTINUUM_SPLAT_PIXELS * scale, CONTINUUM_SPLAT_BAND_PIXELS * scale, pixels * CONTINUUM_BASE_PIXEL_ERROR / max(error, 1e-3));
+}
+fn continuumProfileThin(pixels: f32, distance: f32, limits: vec4f, seed: u32) -> f32 {
+  let maxDist = limits.y;
+  if (maxDist > 0.0 && distance >= maxDist) { return 0.0; }
+  let minPx = max(limits.x, 0.1);
+  var scale = 1.0;
+  var keepProb = 1.0;
+  if (pixels < minPx) {
+    let least = 0.16 * minPx;
+    if (pixels < least) { return 0.0; }
+    let keep = pixels / minPx;
+    keepProb = keep * keep;
+    scale = minPx / max(pixels, least);
+  }
+  if (maxDist > 0.0 && distance > maxDist * 0.80) {
+    keepProb *= 1.0 - smoothstep(maxDist * 0.80, maxDist, distance);
+  }
+  if (keepProb < 1.0 && f32(continuumHash(seed) & 65535u) / 65535.0 > keepProb) { return 0.0; }
+  return scale;
 }
 // The cluster cut's own test: a cluster is drawn where its projected error is within 'allowed' pixels and its
 // parent's is not, so exactly one level of every part of the hierarchy is drawn. Errors are in metres at the

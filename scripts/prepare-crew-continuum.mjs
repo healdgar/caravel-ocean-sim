@@ -203,10 +203,11 @@ const jointPoint = (palette, j, x, y, z, out) => {
 // to 255.
 function packSkin(joints, weights) {
   const list = [0, 1, 2, 3].map((k) => [joints[k], weights[k]]).filter(([, w]) => w > 1e-6).sort((a, b) => b[1] - a[1]), sum = list.reduce((s, [, w]) => s + w, 0) || 1;
-  const q = list.map(([, w]) => Math.round((w / sum) * 255));
-  q[0] += 255 - q.reduce((s, x) => s + x, 0);
+  const pairs = list.map(([j, w]) => [j, Math.round((w / sum) * 255)]);
+  if (pairs.length) pairs[0][1] += 255 - pairs.reduce((s, [, q]) => s + q, 0);
+  pairs.sort((a, b) => b[1] - a[1]);
   let J = 0, W = 0;
-  list.forEach(([j], k) => { J |= j << (k * 8); W |= q[k] << (k * 8); });
+  pairs.forEach(([j, q], k) => { J |= j << (k * 8); W |= q << (k * 8); });
   return [J >>> 0, W >>> 0];
 }
 
@@ -271,11 +272,19 @@ function coverageMask(fit, size) {
   }
   return mask;
 }
-function bakeTexture(fit, work) {
+function bakeTexture(fit, work, reuseDir = null) {
+  let prev = null;
+  if (reuseDir && fs.existsSync(path.join(reuseDir, 'manifest.json')) && fs.existsSync(path.join(reuseDir, 'albedo.bc7.bin.gz')) && fs.existsSync(path.join(reuseDir, 'albedo.astc.bin.gz'))) {
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(reuseDir, 'manifest.json'), 'utf8'));
+      if (m?.source?.sha256 === fit.sha256 && m?.texture?.width === TEXTURE_SIZE && m?.files?.['albedo.bc7.bin'] && m?.files?.['albedo.astc.bin']) prev = m;
+    } catch { /* rebake full texture */ }
+  }
   const image = path.join(work, fit.mime === 'image/png' ? 'albedo.png' : 'albedo.jpg'), mask = path.join(work, 'mask.u8');
   fs.writeFileSync(image, fit.picture);
   fs.writeFileSync(mask, coverageMask(fit, TEXTURE_SIZE));
-  execFileSync('python3', [fileURLToPath(new URL('./crew-continuum-texture.py', import.meta.url)), image, mask, work, `--size=${TEXTURE_SIZE}`, `--sample=${SAMPLE_SIZE}`], { stdio: ['ignore', 'inherit', 'inherit'] });
+  const pyArgs = [fileURLToPath(new URL('./crew-continuum-texture.py', import.meta.url)), image, mask, work, `--size=${TEXTURE_SIZE}`, `--sample=${SAMPLE_SIZE}`, ...(prev ? ['--sample-only'] : [])];
+  execFileSync('python3', pyArgs, { stdio: ['ignore', 'inherit', 'inherit'] });
   const sample = fs.readFileSync(path.join(work, 'sample.rgb')), toLinear = Float32Array.from({ length: 256 }, (_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
   // Bilinear, in linear light, wrapping as the GPU's sampler does.
   const at = (u, v, out) => {
@@ -287,7 +296,8 @@ function bakeTexture(fit, work) {
     }
     return out;
   };
-  return { levels: JSON.parse(fs.readFileSync(path.join(work, 'levels.json'), 'utf8')), bc7: fs.readFileSync(path.join(work, 'albedo.bc7.bin')), astc: fs.readFileSync(path.join(work, 'albedo.astc.bin')), at };
+  if (prev) return { levels: prev.texture, bc7: null, astc: null, reusedFiles: prev.files, at };
+  return { levels: JSON.parse(fs.readFileSync(path.join(work, 'levels.json'), 'utf8')), bc7: fs.readFileSync(path.join(work, 'albedo.bc7.bin')), astc: fs.readFileSync(path.join(work, 'albedo.astc.bin')), reusedFiles: null, at };
 }
 // Each triangle's colour and area, and each region's median colour (area-weighted, a channel at a time).
 function surfaceColours(fit, texture) {
@@ -534,9 +544,10 @@ async function bake(entry) {
   const fitCount = fit.position.length / 3;
   console.log(`${entry.id}: ${fitCount} vertices, ${fit.index.length / 3} triangles`);
   try {
+    const dir = path.join(OUT, entry.id);
     const palettes = samplePoses(fit.animator), body = splitPieces(fit), posed = palettes.map((palette) => posedPositions(palette, body));
     lap(`${palettes.length} poses`);
-    const texture = bakeTexture(fit, work), surface = surfaceColours(fit, texture);
+    const texture = bakeTexture(fit, work, dir), surface = surfaceColours(fit, texture);
     lap('albedo');
     const weldedFit = weld(fit), far = farSource(fit, weldedFit, surface);
     lap('far source');
@@ -662,12 +673,11 @@ async function bake(entry) {
     const standIn = writeBody(fit, weldedFit, surface, texture), drift = contactDrift(fit, standIn.bytes);
     lap('body.glb');
 
-    const dir = path.join(OUT, entry.id);
     fs.mkdirSync(dir, { recursive: true });
     const files = {
       'atlas.bin': receipt(asBytes(atlas), dir, 'atlas.bin'),
-      'albedo.bc7.bin': receipt(texture.bc7, dir, 'albedo.bc7.bin'),
-      'albedo.astc.bin': receipt(texture.astc, dir, 'albedo.astc.bin'),
+      'albedo.bc7.bin': texture.reusedFiles ? texture.reusedFiles['albedo.bc7.bin'] : receipt(texture.bc7, dir, 'albedo.bc7.bin'),
+      'albedo.astc.bin': texture.reusedFiles ? texture.reusedFiles['albedo.astc.bin'] : receipt(texture.astc, dir, 'albedo.astc.bin'),
     };
     fs.writeFileSync(path.join(dir, 'body.glb'), standIn.bytes);
     // The streams of the format before this one, which nothing reads now.

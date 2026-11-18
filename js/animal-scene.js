@@ -22,7 +22,7 @@ export function requestAnimalContinuumAtlas(device) {
 // A scene of the one cut for `count` animals, each of any of `types`: its lists have the room the heaviest of them
 // would take were all of that type; its joints lie in a pose buffer of its own, which its family's pass writes
 // (ANIMAL_POSE_VEC4S an instance).
-export function createAnimalScene({ device, atlas, programs, view, count, types, frame, shadowUniform, samples, label }) {
+export function createAnimalScene({ device, atlas, programs, view, count, types, frame, shadowUniform, samples, label, profile = null }) {
   const room = types.map((t) => continuumRoom(atlas.types, atlas.types.map((_, u) => (u === t ? count : 0))).room).reduce((a, b) => a.map((n, i) => Math.max(n, b[i])));
-  return createContinuumScene({ device, atlas, programs, capacity: count, room, view, poseRoom: count * ANIMAL_POSE_VEC4S, frame, shadowUniform, samples, label });
+  return createContinuumScene({ device, atlas, programs, capacity: count, room, view, poseRoom: count * ANIMAL_POSE_VEC4S, frame, shadowUniform, samples, label, profile });
 }

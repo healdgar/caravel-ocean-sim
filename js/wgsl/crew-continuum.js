@@ -4,7 +4,7 @@
 // water are the one continuum's (js/wgsl/continuum-cut.js). This supplies three things only: the pass that poses people
 // placed on the GPU into the crew's joints and actors, the stand that turns those joints and actors into each person's
 // record and pose data, and the crew's material.
-import { FRAME_WGSL } from './common.js';
+import { ENV_MIPS, FRAME_WGSL } from './common.js';
 import { CREW_JOINT_BLEND_WGSL, crewRenderWGSL } from './crew.js';
 import { CONTINUUM_RECORD_WGSL } from './continuum-cut.js';
 import { SKINNED_POSE_WGSL, skinnedPoseVec4s } from './skinned-pose.js';
@@ -209,20 +209,53 @@ function crewContinuumMaterialWGSL() {
   return /* wgsl */`
 // What this person wears where the body is of a region. Skin, hair and paint are worn as the picture has them; cloth
 // takes the person's own shirt and trousers, at the shade the picture holds against that region's median, so folds
-// and stitching survive any colour. Where cloth is the colour of this body's skin (a label strayed onto a neck or a
-// wrist) it is worn as skin. w: how much of it is skin.
-fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor)->vec4f {
-  let median=crewWear[min(region,4u)];
-  if(region==0u||region>=3u||median.w<0.5){return vec4f(picture,select(0.0,1.0,region==3u));}
-  let worn=select(actor.trousers.rgb,actor.shirt.rgb,region==1u);
-  // Bounded, so a stain or a pale fleck in dark cloth stays a fleck and does not blaze in a pale shirt.
-  let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
-  let dyed=worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2);
+// and stitching survive any colour. Where cloth is the colour of this body's skin on a neck or wrist border, it is
+// worn as skin; where white blouse texels bled onto the anatomical neck cylinder, they wear the body's skin.
+fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f)->vec4f {
+  let female=actor.skin.w>0.5&&actor.skin.w<1.5;
   let skin=crewWear[3u];
-  let bright=max(dot(picture,vec3f(0.3333)),1e-3);let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
-  let away=length(picture/bright-skin.xyz/skinBright)+abs(log2(bright/skinBright))*0.15;
-  let cloth=select(1.0,smoothstep(0.1,0.28,away),skin.w>0.5);
-  return vec4f(mix(picture,dyed,cloth),1.0-cloth);
+  let bright=max(dot(picture,vec3f(0.3333)),1e-3);
+  let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
+
+  // Smooth anatomical throat/neck mask (prevents stray shirt tags or white UV collar bleed on neck without hard steps).
+  let neckLineY=select(1.465,1.375,female);
+  let neckRad=length(vec2f(bodyPos.x*1.05,bodyPos.z+select(0.005,0.022,female)));
+  let neckSkinMask=select(0.0,
+    smoothstep(neckLineY-0.018,neckLineY+0.018,bodyPos.y)*(1.0-smoothstep(neckLineY+0.125,neckLineY+0.150,bodyPos.y))*(1.0-smoothstep(0.062,0.080,neckRad)),
+    skin.w>0.5);
+
+  // Smooth torso cloth override where fit-crew-body.py mislabeled dark shirt folds as region 4 (hair), 0 (paint), or 3 (skin).
+  let strayHairOnShirt=(region==4u||region==0u)&&bodyPos.y>0.86&&bodyPos.y<1.495&&abs(bodyPos.x)<0.44;
+  let strayHairOnTrousers=(region==4u||region==0u)&&bodyPos.y>=0.24&&bodyPos.y<=0.86;
+  let torsoSkinOnShirt=region==3u&&bodyPos.y>0.94&&bodyPos.y<select(1.40,1.335,female)&&abs(bodyPos.x)<0.26&&!( !female&&bodyPos.z>0.06&&abs(bodyPos.x)<0.055&&bodyPos.y>1.26 );
+  var effRegion=region;
+  if(strayHairOnShirt||torsoSkinOnShirt){effRegion=1u;}
+  else if(strayHairOnTrousers){effRegion=2u;}
+
+  let median=crewWear[min(effRegion,4u)];
+  var baseOut=vec4f(picture,select(0.0,1.0,effRegion==3u));
+  if(effRegion==1u||effRegion==2u){
+    if(median.w>=0.5){
+      let worn=select(actor.trousers.rgb,actor.shirt.rgb,effRegion==1u);
+      let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
+      let dyed=worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2);
+      // Skin-border rescue applies ONLY at the 9.5cm collar opening around the neck and past the elbow/wrist (>0.44m) — never across shoulders!
+      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.030&&neckRad<0.095)||abs(bodyPos.x)>0.44),effRegion==1u);
+      if(!atBorder||skin.w<=0.5){
+        baseOut=vec4f(dyed,0.0);
+      }else{
+        let away=length(picture/bright-skin.xyz/skinBright)+abs(log2(bright/skinBright))*0.15;
+        let cloth=smoothstep(0.035,0.095,away);
+        baseOut=vec4f(mix(picture,dyed,cloth),1.0-cloth);
+      }
+    }
+  }
+  if(neckSkinMask>0.001&&effRegion==1u){
+    let neckShade=clamp(bright/max(dot(median.xyz,vec3f(0.3333)),1e-3),0.68,1.08);
+    let cleanNeck=skin.xyz*(0.76*mix(1.0,neckShade,0.25));
+    baseOut=vec4f(mix(baseOut.rgb,cleanNeck,neckSkinMask),mix(baseOut.w,1.0,neckSkinMask));
+  }
+  return baseOut;
 }
 // A word's colour: three bytes, each the square root of its linear channel.
 fn crewContinuumWordColour(word:u32)->vec3f { let c=vec3f(f32(word&255u),f32((word>>8u)&255u),f32((word>>16u)&255u))/255.0;return c*c; }
@@ -246,14 +279,14 @@ fn crewContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
     for(var r=0u;r<5u;r++){
       let share=crewWear[5u+r];
       if(share.w<=0.0){continue;}
-      let worn=crewContinuumWorn(r,share.xyz,actor);
+      let worn=crewContinuumWorn(r,share.xyz,actor,vec3f(0.0,1.0,0.0));
       colour+=worn.rgb*share.w;skin+=worn.w*share.w;
     }
     tone=vec4f(colour,skin);region=0u;
   }else{
     rest=continuumPointAt(s.model,s.vertex).position;
     if(s.what==CONTINUUM_CLUSTER_ENTRY){(*v).uv=continuumUV(s.vertex);}
-    else{tone=crewContinuumWorn(region,tone.rgb,actor);}
+    else{tone=crewContinuumWorn(region,tone.rgb,actor,rest);}
   }
   (*v).tone=tone;
   (*v).bodyPos=rest+vec3f(crewContinuumTouch());
@@ -269,7 +302,7 @@ fn crewContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   // Read in uniform control flow; worn only by the full body.
   let picture=textureSample(crewAlbedo,crewAlbedoSampler,v.uv).rgb;
   var surface=v.tone;
-  if(v.look.x==CONTINUUM_CLUSTER_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actors[v.look.z]);}
+  if(v.look.x==CONTINUUM_CLUSTER_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actors[v.look.z],v.bodyPos);}
   var c:CrewVertex;
   c.position=v.position;c.world=v.world;c.normal=v.normal;c.color=surface.rgb;c.wet=v.wet;c.skin=clamp(surface.w,0.0,1.0);
   c.bodyPos=v.bodyPos;c.damage=v.hurt.xyz;c.paint=v.look.w;c.actor=v.look.z;
@@ -288,5 +321,238 @@ export const CREW_CONTINUUM_MATERIAL = Object.freeze({
   varyings: Object.freeze([['uv', 'vec2f'], ['tone', 'vec4f'], ['bodyPos', 'vec3f'], ['wet', 'vec2f'], ['look', 'vec4u', true], ['hurt', 'vec4f', true]].map(Object.freeze)),
   wgsl: crewContinuumMaterialWGSL, salt: 17,
   // Sleeves, collars and hems are open shells, lit from whichever side is seen.
+  cullMode: 'none', air: true, capture: true,
+});
+
+// --------------------------------------------------------------------------------------------- strand hair & beards
+// Pairs each stood person with up to two records in the hair continuum (2 * person = scalp groom 0..8, 2 * person + 1 =
+// facial groom 9..11), sharing the person's posed joint palette in skinnedPoses and writing walking/stride sway into
+// skinnedPoses[at].zw so CONTINUUM_KIND.SKINNED bends free strand tips with both wind and movement.
+export function crewContinuumHairStandWGSL() {
+  const N = CREW_JOINT_COUNT;
+  return CONTINUUM_RECORD_WGSL + /* wgsl */`
+struct CrewStandActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
+struct CrewHairInfo { scalpShift:vec4f, beardShift:vec4f, counts:vec4u };
+@group(0) @binding(0) var<storage,read> crewStandRecords:array<ContinuumRecord>;
+@group(0) @binding(1) var<storage,read_write> skinnedPoses:array<vec4f>;
+@group(0) @binding(2) var<storage,read> crewStandActors:array<CrewStandActor>;
+@group(0) @binding(3) var<uniform> crewHairInfo:CrewHairInfo;
+@group(0) @binding(4) var<storage,read_write> hairRecords:array<ContinuumRecord>;
+
+fn crewHairHash(v:u32)->u32 {
+  var h=v*0x9e3779b1u+0x85ebca6bu;
+  h=(h^(h>>15u))*0x2c1b3c6du;
+  return h^(h>>13u);
+}
+
+@compute @workgroup_size(64) fn crewContinuumHairStand(@builtin(global_invocation_id) gid:vec3u){
+  let person=gid.x;
+  let cap=crewHairInfo.counts.x;
+  if(person>=cap){return;}
+  let rec=crewStandRecords[person];
+  let at=rec.tag.y;
+  let headSph=skinnedPoses[at+1u+${N}u*3u+9u];
+  let personGone=(rec.tag.x&CONTINUUM_GONE)!=0u||headSph.w<0.0;
+  let baseFlags=rec.tag.x&(~65535u)&(~CONTINUUM_GONE);
+  if(personGone){
+    let dead=ContinuumRecord(rec.place,rec.turn,vec4u(baseFlags|CONTINUUM_GONE,at,rec.tag.z*2u,0u),vec4u(rec.spare.x,0u,0u,0u));
+    hairRecords[person*2u]=dead;
+    hairRecords[person*2u+1u]=dead;
+    return;
+  }
+
+  let slot=min(rec.spare.x,arrayLength(&crewStandActors)-1u);
+  let actor=crewStandActors[slot];
+  let identity=rec.tag.z;
+  let h=crewHairHash(identity*131u+slot*17u+1u);
+
+  // Instantaneous gait sway from posed left/right foot separation + head forward trailing drag.
+  let m0=skinnedPoses[at+1u+9u*3u];
+  let m1=skinnedPoses[at+1u+9u*3u+1u];
+  let m2=skinnedPoses[at+1u+9u*3u+2u];
+  let footL=vec2f(skinnedPoses[at+1u+83u*3u].w,skinnedPoses[at+1u+83u*3u+2u].w);
+  let footR=vec2f(skinnedPoses[at+1u+91u*3u].w,skinnedPoses[at+1u+91u*3u+2u].w);
+  let stride=footL-footR;
+  let gait=clamp(length(stride)-0.22,0.0,0.65);
+  let fwdXZ=vec2f(m0.z,m2.z);
+  skinnedPoses[at]=vec4f(skinnedPoses[at].xy,clamp(-fwdXZ*gait*0.048+stride*0.022,vec2f(-0.042),vec2f(0.042)));
+
+  let female=crewHairInfo.scalpShift.w>0.5||(actor.skin.w>0.5&&actor.skin.w<1.5);
+  let indigenous=actor.face.w>1.5;
+  let hasComp=actor.face.w<0.0;
+  let compMask=select(0u,u32((-actor.face.w)*0.5),hasComp);
+  let hairCode=compMask&7u;
+  let beardCode=(compMask>>6u)&3u;
+
+  var scalpType=0u;
+  var scalpGone=false;
+  if(indigenous){
+    if(female){scalpType=select(8u,7u,(h&7u)==0u);}
+    else{scalpType=select(3u,0u,(h&7u)==0u);}
+  }else if(female){
+    if(hairCode==4u){scalpType=6u;}
+    else if(hairCode==5u){scalpType=7u;}
+    else if(hairCode==3u){scalpType=8u;}
+    else if(hairCode==1u||hairCode==2u){scalpType=5u;}
+    else{scalpType=5u+(h&3u);}
+  }else{
+    if(hairCode==1u){scalpType=0u;}
+    else if(hairCode==2u||hairCode==4u||hairCode==5u){scalpType=1u;}
+    else if(hairCode==3u){scalpType=2u;}
+    else{
+      // Note: reconcileColonialGroomAndComp zeroes hairCode when hat!=0 (though hats are not drawn on continuum bodies),
+      // so roll full period hair for most hairCode==0 men, leaving ~12% tonsure fringe and ~6% shaved dome.
+      let roll=h&31u;
+      if(roll==0u){scalpGone=true;}
+      else if(roll<=3u){scalpType=4u;}
+      else if(roll<=13u){scalpType=0u;}
+      else if(roll<=23u){scalpType=1u;}
+      else{scalpType=2u;}
+    }
+  }
+
+  var beardType=9u;
+  var beardGone=true;
+  if(!female&&!indigenous){
+    if(beardCode==1u){beardType=9u;beardGone=false;}
+    else if(beardCode==2u){beardType=10u;beardGone=false;}
+    else if(beardCode==3u){beardType=11u;beardGone=false;}
+    else{
+      let bRoll=(h>>4u)&7u;
+      if(bRoll==2u||bRoll==3u){beardType=9u;beardGone=false;}
+      else if(bRoll==4u||bRoll==5u){beardType=10u;beardGone=false;}
+      else if(bRoll>=6u){beardType=11u;beardGone=false;}
+    }
+  }
+
+  let scale=rec.place.w;
+  let ds=crewHairInfo.scalpShift.xyz;
+  let db=crewHairInfo.beardShift.xyz;
+  let scalpDelta=vec3f(dot(m0.xyz,ds),dot(m1.xyz,ds),dot(m2.xyz,ds))*scale;
+  let beardDelta=vec3f(dot(m0.xyz,db),dot(m1.xyz,db),dot(m2.xyz,db))*scale;
+  let reachWord=bitcast<u32>(0.10f);
+
+  let sFlags=select(baseFlags|scalpType,baseFlags|CONTINUUM_GONE,scalpGone);
+  let bFlags=select(baseFlags|beardType,baseFlags|CONTINUUM_GONE,beardGone);
+  hairRecords[person*2u]=ContinuumRecord(vec4f(rec.place.xyz+scalpDelta,scale),rec.turn,vec4u(sFlags,at,identity*2u,reachWord),vec4u(slot,scalpType,0u,0u));
+  hairRecords[person*2u+1u]=ContinuumRecord(vec4f(rec.place.xyz+beardDelta,scale),rec.turn,vec4u(bFlags,at,identity*2u+1u,reachWord),vec4u(slot,beardType,0u,0u));
+}
+`;
+}
+
+function hairContinuumMaterialWGSL() {
+  return /* wgsl */`
+fn hairContinuumDecodeOct(u:f32,v:f32)->vec3f {
+  let fx=u*2.0-1.0;let fy=v*2.0-1.0;
+  var n=vec3f(fx,fy,1.0-abs(fx)-abs(fy));
+  let t=max(-n.z,0.0);
+  n.x+=select(t,-t,n.x>=0.0);
+  n.y+=select(t,-t,n.y>=0.0);
+  return normalize(n);
+}
+fn hairContinuumTouch()->f32 {
+  if(continuumView.counts.y!=0xffffffffu){return 0.0;}
+  return textureSampleLevel(transLUT,sampC,vec2f(0.0),0.0).x+textureSampleLevel(skyLUT,sampC,vec2f(0.0),0.0).x+textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),0.0).x
+    +textureSampleLevel(captainTex,captainSampler,vec2f(0.0),0.0).x+sunVis[0]+joints[0][0].x+hull.origin.x+moisture[0].x+actors[0].hair.x;
+}
+fn hairContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
+  let slot=s.record.spare.x;
+  let actor=actors[slot];
+  let baseHair=max(actor.hair.rgb,vec3f(0.010,0.008,0.007));
+  let data=continuumKindData(s.record);
+  let count=u32(continuumPoses[data].x);
+  var tLocal=vec3f(0.0,-1.0,0.0);
+  var along=0.5;
+  var crossV=0.0;
+  var lockTone=0.5;
+  var seedPhase=0.5;
+  if(s.what!=CONTINUUM_SPLAT_ENTRY){
+    let tu=f32(s.word&255u)/255.0;
+    let tv=f32((s.word>>8u)&255u)/255.0;
+    tLocal=hairContinuumDecodeOct(tu,tv);
+    lockTone=f32((s.word>>16u)&255u)/255.0;
+    seedPhase=f32((s.word>>24u)&255u)/255.0;
+    if(s.what==CONTINUUM_CLUSTER_ENTRY){
+      let hv=continuumPointAt(s.model,s.vertex).high;
+      along=f32(hv&255u)/255.0;
+      crossV=f32((hv>>8u)&255u)/255.0*2.0-1.0;
+    }
+  }
+  var tWorld=tLocal;
+  if(count>9u){
+    let mHead=continuumSkinnedJoint(data,count,9u);
+    let tr=vec4f(tLocal,0.0)*mHead;
+    if(length(tr)>1e-4){tWorld=normalize(tr);}
+  }
+  (*v).fiberT=tWorld+vec3f(hairContinuumTouch());
+  (*v).strand=vec4f(along,crossV,lockTone,seedPhase);
+  (*v).tone=baseHair;
+  let mBase=crewMoistureBase(actor.hair.w);
+  (*v).wet=moisture[mBase+3u];
+}
+fn hairContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
+  var n=normalize(select(-v.normal,v.normal,front));
+  var T=v.fiberT;
+  let tl=length(T);
+  T=select(vec3f(0.0,-1.0,0.0),T/max(tl,1e-4),tl>1e-4);
+  let along=clamp(v.strand.x,0.0,1.0);
+  let crossV=clamp(v.strand.y,-1.0,1.0);
+  let lockTone=v.strand.z;
+  let seedPhase=v.strand.w;
+
+  // Fine individual hair-fiber micro-ridges across each lock ribbon so close-ups read as multi-hair bundles.
+  let B=normalize(cross(n,T)+vec3f(1e-5,0.0,0.0));
+  let micro=sin(crossV*21.99+seedPhase*6.2831853);
+  let micro2=sin(crossV*47.12-seedPhase*12.566);
+  n=normalize(n+B*(crossV*0.32+micro*0.18+micro2*0.08));
+
+  // Root-to-tip melanin variation, follicle root AO, and sun-kissed tip warmth.
+  let rootAO=mix(0.42,1.0,smoothstep(0.0,0.26,along));
+  let lockVar=mix(0.70,1.32,lockTone)*(0.90+0.10*micro+0.05*micro2);
+  let tipWarm=mix(vec3f(1.0),vec3f(1.16,1.08,0.94),along*along*0.45);
+  let wet=clamp(v.wet,vec2f(0.0),vec2f(1.0));
+  let albedo=clamp(v.tone*lockVar*tipWarm*mix(1.0,0.62,wet.x),vec3f(0.005),vec3f(0.92));
+
+  let sun=F.sunDir.xyz;
+  let shadowSample=vesselShadow(v.world,n);
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
+  let sky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
+  let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-0.65,n.z)),${ENV_MIPS - 1}.0).rgb;
+  let ambient=vesselAmbient(n,sky,sea)*rootAO;
+  let view=normalize(F.camPos.xyz-v.world);
+  let H=normalize(sun+view);
+
+  // Marschner / Kajiya-Kay dual-lobe anisotropic hair fiber highlights:
+  //   R-lobe: cuticular surface glint shifted slightly toward root
+  //   TRT-lobe: internal pigment-tinted sheen shifted toward tip
+  let T1=normalize(T-n*0.09);
+  let T2=normalize(T+n*0.15);
+  let sinTH1=sqrt(max(0.0,1.0-clamp(dot(T1,H),-1.0,1.0)*clamp(dot(T1,H),-1.0,1.0)));
+  let sinTH2=sqrt(max(0.0,1.0-clamp(dot(T2,H),-1.0,1.0)*clamp(dot(T2,H),-1.0,1.0)));
+  let atten=smoothstep(-0.25,0.45,dot(n,sun))*rootAO;
+  let specR=pow(sinTH1,mix(76.0,140.0,wet.y))*mix(0.042,0.085,wet.y)*atten;
+  let tintTRT=pow(max(albedo,vec3f(0.012)),vec3f(0.68))*1.85;
+  let specTRT=pow(sinTH2,26.0)*0.095*atten*(1.0-wet.x*0.35)*tintTRT;
+
+  // Soft wrapped fiber diffuse + backlit forward scatter through thin wisps & strand tips.
+  let wrapDiff=max(0.0,(dot(n,sun)+0.32)/1.32)/3.14159265*rootAO;
+  let backScatter=pow(clamp(dot(-sun,view),0.0,1.0),4.0)*(0.18+0.42*along)*atten*albedo*1.4;
+  let skyGlint=textureSampleLevel(envCube,sampC,reflect(-view,n),4.5).rgb*0.028*rootAO;
+  let rough=mix(0.68,0.40,wet.y);
+  let f0=vec3f(0.04);
+  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))
+    +lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)
+    +albedo*(direct*wrapDiff+ambient)+direct*(vec3f(specR)+specTRT+backScatter)+skyGlint*F.windP[1].w;
+  return vec4f(continuumAir(col,v.world),1.0);
+}
+`;
+}
+
+export const HAIR_CONTINUUM_MATERIAL = Object.freeze({
+  name: 'hairContinuum',
+  prelude: () => crewRenderWGSL(),
+  core: false, data: Object.freeze({ group: 2, binding: 0 }),
+  varyings: Object.freeze([['fiberT', 'vec3f'], ['strand', 'vec4f'], ['tone', 'vec3f'], ['wet', 'vec2f']].map(Object.freeze)),
+  wgsl: hairContinuumMaterialWGSL, salt: 19,
   cullMode: 'none', air: true, capture: true,
 });

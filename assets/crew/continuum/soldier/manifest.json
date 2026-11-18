@@ -12,14 +12,14 @@
   "triangles": 1931936
  },
  "atlas": {
-  "words": 19132130,
+  "words": 19126295,
   "headerWords": 32,
-  "bytes": 76528520,
-  "sha256": "2c734eded6affad1d21c0782f09df0bc92a56f4a1d85863a019cc26e72f60588",
+  "bytes": 76505180,
+  "sha256": "10f90cbdd6ffac1de8da3a4f4ed2df038c601a70e81fb3fcae428117033c1d87",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 35431077,
-   "sha256": "c3744b67cb3c489a05a45c84a85c7eca94b041d4f5a34142552be6e54d253402"
+   "bytes": 35340685,
+   "sha256": "7b5dfdf9c4409897cd45c299072aeb1f2d1ddfa4ef8e746849158544b43d588d"
   }
  },
  "pieces": [
@@ -681,11 +681,11 @@
   ]
  },
  "clusters": {
-  "count": 31627,
-  "levels": 13,
-  "roots": 28,
+  "count": 30673,
+  "levels": 12,
+  "roots": 232,
   "finestTriangles": 1931936,
-  "rootError": 0.4602,
+  "rootError": 0.7629,
   "pieceCopies": 10034
  },
  "chain": {
@@ -708,13 +708,13 @@
   "depth": 8,
   "errorRange": [
    0.1096,
-   0.8184
+   0.8437
   ],
   "inflateMax": 0.1799,
-  "rootTriangles": 1190,
-  "farFirst": 685,
-  "farFirstTriangles": 1190,
-  "handoffError": 0.1638,
+  "rootTriangles": 23026,
+  "farFirst": 0,
+  "farFirstTriangles": 2560,
+  "handoffError": 0.1096,
   "farSourceTriangles": 50000,
   "farSourceError": 0.0497,
   "posedDelta": 0.0863
@@ -875,12 +875,12 @@
  "poses": 27,
  "files": {
   "atlas.bin": {
-   "bytes": 76528520,
-   "sha256": "2c734eded6affad1d21c0782f09df0bc92a56f4a1d85863a019cc26e72f60588",
+   "bytes": 76505180,
+   "sha256": "10f90cbdd6ffac1de8da3a4f4ed2df038c601a70e81fb3fcae428117033c1d87",
    "gzip": {
     "file": "atlas.bin.gz",
-    "bytes": 35431077,
-    "sha256": "c3744b67cb3c489a05a45c84a85c7eca94b041d4f5a34142552be6e54d253402"
+    "bytes": 35340685,
+    "sha256": "7b5dfdf9c4409897cd45c299072aeb1f2d1ddfa4ef8e746849158544b43d588d"
    }
   },
   "albedo.bc7.bin": {
@@ -902,5 +902,5 @@
    }
   }
  },
- "bakeSeconds": 51.8
+ "bakeSeconds": 47.1
 }

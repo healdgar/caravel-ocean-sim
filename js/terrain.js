@@ -1503,7 +1503,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(!city?.typedCount)return;
     const [atlas,programs]=await Promise.all([requestCityContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format})]);
     if(made!==cityContinuumMade||terrainDisposed)return;
-    cityContinuum=createCityContinuum({device,atlas,programs,view:cityView,typed:city.typed,types:city.typedTypes,grounded:cityGrounded(city),frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'city'});
+    cityContinuum=createCityContinuum({device,atlas,programs,view:cityView,typed:city.typed,types:city.typedTypes,grounded:cityGrounded(city),frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'city',profile:'city'});
     cityContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
     for(const index of cityStruckIndices)cityContinuum.hide(index,1+(city.typedAttached?.[index]??0),true);
     for(const index of cityHitIndices)cityContinuum.strike(index,1+(city.typedAttached?.[index]??0),true);
@@ -2391,7 +2391,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   meadowGrass?.bindCraters?.(craters);
   // The land's cut and draw, its pits read from the crater tiles in the same draw.
   const landShared=()=>[...craters.resources(),...landBanks.resources()];
-  landContinuum=createLandContinuum({device,pipelines:await requestLandContinuumPipelines({device,shader}),view:landPipe,capture:submerged??null,frame:frameUBO,grid:landGrid,shared:landShared()});
+  landContinuum=createLandContinuum({device,pipelines:await requestLandContinuumPipelines({device,shader}),view:landPipe,capture:submerged??null,frame:frameUBO,grid:landGrid,shared:landShared(),profile:'land'});
   landClouds=clouds.bindVolume(landPipe);
   landContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
   craters.onReallocate(()=>landContinuum?.setShared(landShared()));
@@ -2417,7 +2417,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     groundStats,forestStats,
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
-    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['land',landContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
+    continuumSources(){
+      const pieceDraws=[...(portFractures?.continuumDraws?.()??[])];
+      for(const sec of loadedSections.values())if(sec.portFractures)pieceDraws.push(...(sec.portFractures.continuumDraws?.()??[]));
+      return [
+        ['forest',forest?.continuumDraws?.()],
+        ['boulders',boulderContinuum?.continuumDraws?.()],
+        ['meadow',meadowGrass?.continuumDraws?.()],
+        ['herds',herds?.continuumDraws?.()],
+        ['trade vessels',tradeVessels?.continuumDraws?.()],
+        ['city',cityContinuum?.continuumDraws?.()],
+        ['city pieces',pieceDraws],
+        ['land',landContinuum?.continuumDraws?.()],
+      ].filter(([,draws])=>draws?.length).map(([name,draws])=>({name,draws}));
+    },
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null},
     // The land's cut, read back: for tests. Per piece, the view's and the captures' lists of patches.
     readLandCut:()=>landContinuum?.readCut()??null,
@@ -2851,25 +2864,48 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const surfDamp=bed>-4.2?Math.max(0.18,1-Math.max(0,Math.min(1,(bed+4.2)/4.1))*0.82):1;
       return Math.max(0.22,transmit*surfDamp*0.78+0.22);
     },
-    encode(pass,changed=false,frame=null){
-      if(frame)coastalField.encode(pass,frame);
+    encode(pass,changed=false,frame=null,splitPass=null){
+      let p=pass;
+      const split=name=>{if(!splitPass)return;const next=splitPass(name);if(next)p=next;};
+      if(frame)coastalField.encode(p,frame);
       // The land first: its cut writes the ground it draws (js/continuum-ground.js), which everything after stands on.
-      landFlush();landContinuum?.encode(pass);
+      landFlush();landContinuum?.encode(p);
       // Every building shot down, cut as its pieces at the scene's one pixel error.
-      portFractures?.setWorldOffset(worldOffset.x,worldOffset.z);portFractures?.encode(pass);
-      for(const sec of loadedSections.values()){
-        if(!sec.portFractures)continue;
-        sec.portFractures.setWorldOffset(worldOffset.x,worldOffset.z);sec.portFractures.encode(pass);
+      let hasPieces=Boolean(portFractures?.continuumDraws?.()?.length);
+      if(!hasPieces)for(const sec of loadedSections.values())if(sec.portFractures?.continuumDraws?.()?.length){hasPieces=true;break;}
+      split('Continuum scenery');
+      if(hasPieces){
+        portFractures?.setWorldOffset(worldOffset.x,worldOffset.z);portFractures?.encode(p);
+        for(const sec of loadedSections.values()){
+          if(!sec.portFractures)continue;
+          sec.portFractures.setWorldOffset(worldOffset.x,worldOffset.z);sec.portFractures.encode(p);
+        }
       }
-      boulderContinuum?.encode(pass);
+      if(boulderContinuum){split('Cut: boulders');boulderContinuum.encode(p);}
       // The city's cut reads the scene's one pixel error itself (js/continuum-scene.js).
-      cityContinuum?.encode(pass);
-      forest?.encode(pass);
-      herds?.encode(pass);
-      meadowGrass?.encode(pass);
-      tradeVessels?.encode?.(pass);
-      if((tick++%8)!==0&&!changed)return;
-      pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
+      if(cityContinuum){split('Cut: city');cityContinuum.encode(p);}
+      if(forest){split('Cut: forest');forest.encode(p);}
+      if(herds){split('Cut: herds');herds.encode(p);}
+      if(meadowGrass){split('Cut: meadow');meadowGrass.encode(p);}
+      if(tradeVessels?.encode){split('Cut: trade vessels');tradeVessels.encode(p);}
+      if((tick++%8)===0||changed){
+        p.setPipeline(lightPipe);p.setBindGroup(0,lightGroup);p.setBindGroup(1,cloudLight);p.dispatchWorkgroups(8,8);
+      }
+      return p;
+    },
+    drawFamily(pass,which,camera={x:0,y:6,z:0},viewProjection=null){
+      if(which==='land')landContinuum?.draw(pass,landClouds);
+      else if(which==='city'){
+        cityContinuum?.draw(pass,cityGroup,cityClouds);
+        if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,4800))portFractures.draw(pass,cityGroup,cityClouds);
+        for(const sec of loadedSections.values())if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,3400))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
+      }else if(which==='meadow')meadowGrass?.draw(pass);
+      else if(which==='forest')forest?.draw(pass);
+      else if(which==='other'){
+        if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,4800))boulderContinuum.draw(pass);
+        if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
+        if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
+      }
     },
     drawSubmerged(pass,above=false){
       if(!submerged)return;
@@ -2880,22 +2916,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
       if(!lastCamera)updateTrees(camera,viewProjection);
-      // The land, every piece, its pits in it: one pipeline, indirect draws the cut wrote.
-      landContinuum?.draw(pass,landClouds);
-      // Every building is cut on the GPU: one pipeline, four indirect draws each. Those shot down (buildings and
-      // cleaved boulders alike) are drawn by the same pipeline as their pieces, each riding its flight.
+      // Major opaque occluders (city buildings, fractured masonry, boulders) draw first so hardware HSR skips hidden
+      // terrain behind them, followed by the land heightfield, herds, vessels, trees and grass.
       cityContinuum?.draw(pass,cityGroup,cityClouds);
       if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,4800))portFractures.draw(pass,cityGroup,cityClouds);
       for(const sec of loadedSections.values()){
         if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,3400))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
       }
       if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,4800))boulderContinuum.draw(pass);
+      landContinuum?.draw(pass,landClouds);
       if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
-      // Every patch of grass, cut on the GPU through the one continuum (js/meadow-grass.js).
-      meadowGrass?.draw(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
       // Every tree, its leaves cut by the sample mask: one pipeline, four indirect draws (js/forest-scenery.js).
       forest?.draw(pass);
+      // Every patch of grass, cut on the GPU through the one continuum (js/meadow-grass.js).
+      meadowGrass?.draw(pass);
     },
     drawWater(pass,camera={x:0,y:6,z:0},viewProjection=null){
       if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200)){

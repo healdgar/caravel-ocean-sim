@@ -628,7 +628,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       if(scene?.capacity===capacity){standGroup=standBindGroup();windGroup=windBindGroup();return;}
       if(scene)retire([scene]);
       const {room}=continuumRoom(atlas.types,new Array(atlas.types.length).fill(capacity));
-      scene=createContinuumScene({device,atlas,programs,capacity,room,view,poseRoom:skeletonRoom+capacity*CONTINUUM_WIND_POSE,frame:frameUBO,shadowUniform,samples,label:'forest',written:true});
+      scene=createContinuumScene({device,atlas,programs,capacity,room,view,poseRoom:skeletonRoom+capacity*CONTINUUM_WIND_POSE,frame:frameUBO,shadowUniform,samples,label:'forest',written:true,profile:'forest'});
       scene.setCount(capacity);scene.setWorldOffset(shiftX,shiftZ);
       standGroup=standBindGroup();windGroup=windBindGroup();standChanged=true;
     };

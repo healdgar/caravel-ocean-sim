@@ -130,6 +130,7 @@ defineContinuumKind(CONTINUUM_KIND.SKINNED, {
   name: 'Skinned',
   wgsl: () => {
     const skin = CONTINUUM_STREAMS.find((s) => s.name === 'skin');
+    const wind = CONTINUUM_STREAMS.find((s) => s.name === 'wind');
     return /* wgsl */`
 // Joint j's matrix, its three rows as the columns of a mat3x4f, so that vec4f(p, 1) * m is the posed point.
 fn continuumSkinnedJoint(data:u32,count:u32,j:u32)->mat3x4f {
@@ -153,6 +154,36 @@ fn continuumSkinnedPose(record:ContinuumRecord,data:u32,part:u32,vertex:u32,p:Co
   out.position=vec4f(p.position,1.0)*m;
   out.normal=normalize(vec4f(p.normal,0.0)*m);
   out.hidden=continuumPoses[data+1u+count*3u+min((joints>>(8u*lead))&255u,count-1u)].w<0.0;
+  let windWord=continuumStreamWord(${CONTINUUM_HEADER.wind}u,${wind.bit}u,${wind.words}u,vertex,0u);
+  if(!out.hidden&&windWord!=0u){
+    let flex=f32(windWord&65535u)/65535.0;
+    if(flex>0.0){
+      let phase=f32(windWord>>16u)/65535.0*6.2831853+f32(record.tag.z&1023u)*0.173;
+      let wLen=length(F.windP[0].xy);
+      let wDir=select(vec2f(0.8,0.6),F.windP[0].xy/max(wLen,1e-4),wLen>1e-4);
+      let speed=clamp(F.windP[0].z,0.0,22.0);
+      let t=F.camPos.w;
+      let gust=0.68+0.32*sin(dot(record.place.xz,wDir)*0.16-t*(1.5+speed*0.20)+phase);
+      let push=min(0.055,(0.005+speed*0.0034)*gust);
+      let flutter=vec3f(
+        sin(t*(4.1+speed*0.40)+phase*3.1)*0.0042,
+        cos(t*(3.4+speed*0.32)+phase*2.3)*(0.0022+push*0.14),
+        cos(t*(3.8+speed*0.38)+phase*2.7)*0.0042
+      );
+      let motion=continuumPoses[data].zw;
+      var delta=(vec3f(wDir.x*push+motion.x,flutter.y-push*0.18,wDir.y*push+motion.y)+vec3f(flutter.x,0.0,flutter.z))*flex;
+      // Deflect inward motion tangentially around the posed head core so wind blows hair around the face, never into it.
+      let headSph=continuumPoses[data+1u+count*3u+min(9u,count-1u)];
+      if(headSph.w>0.0){
+        let rel=out.position+delta-headSph.xyz;
+        let rl=length(rel);
+        let guard=0.092;
+        if(rl<guard&&rl>1e-4){delta+=(guard-rl)*(rel/rl);}
+      }
+      out.position+=delta;
+      out.normal=normalize(out.normal+vec3f(delta.x,delta.y*0.4,delta.z)*2.2);
+    }
+  }
   return out;
 }
 // A part's sphere rides its joint, as far as the joint's matrix stretches it, grown by the pose slack; the whole is the

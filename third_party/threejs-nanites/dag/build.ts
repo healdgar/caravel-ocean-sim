@@ -100,6 +100,18 @@ interface BarkHooks {
   groupError?: (children: Uint32Array, simplified: Uint32Array, error: number) => number;
 }
 
+function groupClusters(clusters: Cluster[], remap: Uint32Array, parts: ArrayLike<number> | undefined): Cluster[][] {
+  if (!parts) return groupByAdjacency(clusters, remap);
+  const byPart = new Map<number, Cluster[]>();
+  for (const c of clusters) {
+    const part = parts[c.idx[0]];
+    let list = byPart.get(part);
+    if (!list) byPart.set(part, (list = []));
+    list.push(c);
+  }
+  return [...byPart.keys()].sort((a, b) => a - b).flatMap((part) => groupByAdjacency(byPart.get(part)!, remap));
+}
+
 function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out: Cluster[], [ns, us] = [1, 1], errMode: 'sum' | 'max' = 'max', hooks: BarkHooks = {}): number {
   const weights = BARK_WEIGHTS.map((w, i) => w * (i < 3 ? ns : us));
   const nv = pos.length / 3;
@@ -112,7 +124,7 @@ function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out:
   const shared = new Uint8Array(nv);
   while (current.length > 1 && level < 32) {
     level++;
-    const groups = groupByAdjacency(current, remap);
+    const groups = groupClusters(current, remap, hooks.parts);
     owner.fill(-1);
     shared.fill(0);
     groups.forEach((g, gi) => {

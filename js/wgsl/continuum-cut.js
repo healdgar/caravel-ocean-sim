@@ -42,7 +42,7 @@ export const CONTINUUM_ENTRY_VERTICES = Object.freeze(CONTINUUM_ENTRY_TRIANGLES.
 export const CONTINUUM_DRAW_WORDS = CONTINUUM_LISTS.length * 4;
 export const CONTINUUM_LIVE_WORD = CONTINUUM_DRAW_WORDS + CONTINUUM_VIEW_LISTS;
 export const CONTINUUM_DRAWS_BYTES = (CONTINUUM_LIVE_WORD + 1) * 4;
-export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 16;
+export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 48;
 // The select's workgroups each cut this many instances, and are laid in rows of CONTINUUM_ROW.
 export const CONTINUUM_BATCH = 8;
 export const CONTINUUM_ROW = 8192;
@@ -104,10 +104,12 @@ ${reads}
 // loads: the kinds read constants that load later.
 const continuumCommonWGSL = (paging) => CONTINUUM_RECORD_WGSL + continuumWordWGSL(paging) + /* wgsl */`
 struct ContinuumView {
-  counts:vec4u,             // instances, samples a pixel, 1 when shadows are cast, unused
+  counts:vec4u,             // instances, samples a pixel, 1 when shadows are cast, material salt
   scene:vec4f,              // the scene's pixel error, the world's offset x and z, unused
   lists:array<vec4u,${CONTINUUM_LISTS.length}>,     // each list's first entry and room
   aim:vec4f,                // where the player's guns would fall, in the scene's frame, and how far about it (0: none)
+  curve:vec4f,              // symmetric family profile: errorScale, invTaperMetres, splatScale, 0
+  limits:vec4f,             // symmetric family profile: minPixels, maxDistance, shadowMinError, shadowMaxDistance
 };
 struct ContinuumPoint { position:vec3f, normal:vec3f, high:u32, word:u32 };
 // A point as its kind poses it, in its type's own metres; wear (0 to ${CONTINUUM_SURFACE_RANGE}) how worn it is.
@@ -419,77 +421,85 @@ fn continuumTry(slot:u32,i:u32)->u32 {
         let reach=bound.w*scale+bitcast<f32>(record.tag.w);
         let relative=world+continuumShift()-F.camPos.xyz;
         let away=max(length(relative),1e-3);
+        let nearDist=max(away-reach,0.0);
+        let maxDist=continuumView.limits.y;
         let focal=continuumFocal();
         // One important, struck, broken, wounded, or within the fall of the player's guns is cut finer, and yields to
         // the budget more slowly (rule 3, item 5); one exact, at its finest.
         let aim=continuumView.aim;
         let aimed=aim.w>0.0&&length(relative+F.camPos.xyz-aim.xyz)<=reach+aim.w;
-        let pixels=select(continuumImportance(continuumView.scene.x,aimed||continuumFlagged(record,${important >>> 0}u)),0.0,continuumFlagged(record,CONTINUUM_EXACT));
-        let steps=continuumType(model,${CONTINUUM_TYPE.stepCount}u);
-        // The far body is drawn from the first step no heavier than the clusters' coarsest cut; finer is theirs.
-        let farFirst=continuumType(model,${CONTINUUM_TYPE.farFirst}u);
-        let farError=bitcast<f32>(continuumStepWord(model,farFirst,1u));
-        continuumStepsAt=continuumType(model,${CONTINUUM_TYPE.steps}u);
-        let first=continuumType(model,${CONTINUUM_TYPE.clusterFirst}u);
-        let clusterCount=continuumType(model,${CONTINUUM_TYPE.clusterCount}u);
-        // Its detail layer: its leading clusters, cast and seen under water with its coarse cut, whole or not.
-        let detail=min(continuumType(model,${CONTINUUM_TYPE.flags}u)>>${CONTINUUM_TYPE_DETAIL_SHIFT}u,clusterCount);
-        tries.z=first;tries.w=detail;
-        cut=vec4f(focal,pixels,scale,0.0);
-        // Its shadow, cut coarse enough for the shadow map, is cast whether it is seen or not: one drawn alone casts
-        // its clusters; one drawn whole its clusters where the map can hold finer than its far body, its far body
-        // where it cannot, and both across the band between, each keeping its share of the map's texels.
-        if(continuumView.counts.z!=0u){
-          let light=SH.lightView*vec4f(world-SH.origin.xyz,1.0);
-          let r=reach*vec3f(length(vec3f(SH.lightView[0].x,SH.lightView[1].x,SH.lightView[2].x)),length(vec3f(SH.lightView[0].y,SH.lightView[1].y,SH.lightView[2].y)),length(vec3f(SH.lightView[0].z,SH.lightView[1].z,SH.lightView[2].z)));
-          if(abs(light.x)<1.0+r.x&&abs(light.y)<1.0+r.y&&light.z> -r.z&&light.z<1.0+r.z){
-            let allowed=max(CONTINUUM_SHADOW_TEXELS*SH.texel.x,pixels*away/focal)/scale;
-            if(!alone){shadowShare=u32(round(continuumHandoff(allowed,farError)*255.0));}
-            if(shadowShare>0u){
-              for(var j=0u;j<CONTINUUM_LEVELS;j++){
-                let s=max(farFirst,u32(continuumMorphStep(steps,allowed*continuumLevel(j)).x));
-                let chunks=continuumChunks(model,s);let at=continuumReserve(4u,chunks);
-                if(at!=CONTINUUM_FULL){shadowStep=s;far.z=at;far.w=chunks;break;}
-              }
-            }
-            cut.w=allowed;
-            tries.y=select(detail,continuumPrefix(first,clusterCount,allowed),shadowShare<255u);
-          }
-        }
-        // Afloat, the earth's curve does not bend it: the sea's own surface is drawn flat about the eye.
-        let sea=continuumFlagged(record,CONTINUUM_SEA);
-        if(!continuumOutside(select(earthCurve(relative,F.camPos.y),relative,sea),reach)){
-          // One drawn whole hands over from its clusters to its far body where the far body's error at its first step
-          // is all the scene allows, over a band of distance; then to its splat. A far body the lists cannot hold is
-          // drawn at the finest coarser step they can.
-          if(!alone){
-            let start=farError*scale*focal/pixels;
-            share=u32(round(continuumHandoff(away,start)*255.0));
-            let stretch=continuumStretch(record);
-            let span=2.0*max(continuumTypeF(model,${CONTINUUM_TYPE.splatRx}u)*0.5*(stretch.x+stretch.z),continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*stretch.y)*record.place.w*focal/away;
-            splatShare=u32(round(continuumSplatShare(span,pixels)*255.0));
-            if(share>0u){
-              splatScale=continuumThin(span,record.tag.z*0x9e3779b9u+0x85ebca6bu);
-              if(splatShare>0u&&splatScale>0.0){
-                atomicAdd(&continuumCounted[3],1u);
-                let at=continuumReserve(3u,1u);
-                if(at!=CONTINUUM_FULL){continuumLists[at]=vec2u(instance,CONTINUUM_SPLAT_ENTRY<<28u);}
-              }
-              if(splatShare<255u){
+        let isImportant=aimed||continuumFlagged(record,${important >>> 0}u);
+        if(maxDist<=0.0||nearDist<maxDist||isImportant){
+          let pixels=select(continuumProfilePixels(continuumView.scene.x,isImportant,away,continuumView.curve),0.0,continuumFlagged(record,CONTINUUM_EXACT));
+          let steps=continuumType(model,${CONTINUUM_TYPE.stepCount}u);
+          // The far body is drawn from the first step no heavier than the clusters' coarsest cut; finer is theirs.
+          let farFirst=continuumType(model,${CONTINUUM_TYPE.farFirst}u);
+          let farError=bitcast<f32>(continuumStepWord(model,farFirst,1u));
+          continuumStepsAt=continuumType(model,${CONTINUUM_TYPE.steps}u);
+          let first=continuumType(model,${CONTINUUM_TYPE.clusterFirst}u);
+          let clusterCount=continuumType(model,${CONTINUUM_TYPE.clusterCount}u);
+          // Its detail layer: its leading clusters, cast and seen under water with its coarse cut, whole or not.
+          let detail=min(continuumType(model,${CONTINUUM_TYPE.flags}u)>>${CONTINUUM_TYPE_DETAIL_SHIFT}u,clusterCount);
+          tries.z=first;tries.w=detail;
+          cut=vec4f(focal,pixels,scale,0.0);
+          // Its shadow, cut coarse enough for the shadow map (and bounded by the family profile's shadow floor/range),
+          // is cast whether it is seen or not.
+          let shadowMaxDist=continuumView.limits.w;
+          if(continuumView.counts.z!=0u&&(shadowMaxDist<=0.0||nearDist<=shadowMaxDist||isImportant)){
+            let light=SH.lightView*vec4f(world-SH.origin.xyz,1.0);
+            let r=reach*vec3f(length(vec3f(SH.lightView[0].x,SH.lightView[1].x,SH.lightView[2].x)),length(vec3f(SH.lightView[0].y,SH.lightView[1].y,SH.lightView[2].y)),length(vec3f(SH.lightView[0].z,SH.lightView[1].z,SH.lightView[2].z)));
+            if(abs(light.x)<=1.0+r.x&&abs(light.y)<=1.0+r.y&&light.z>= -r.z&&light.z<=1.0+r.z){
+              let shadowFloor=select(continuumView.limits.z,0.0,continuumFlagged(record,CONTINUUM_EXACT));
+              let allowed=max(max(CONTINUUM_SHADOW_TEXELS*SH.texel.x,shadowFloor),pixels*away/focal)/scale;
+              if(!alone){shadowShare=u32(round(continuumHandoff(allowed,farError)*255.0));}
+              if(shadowShare>0u){
                 for(var j=0u;j<CONTINUUM_LEVELS;j++){
-                  let chosen=continuumMorphStep(steps,pixels*continuumLevel(j)*away/(focal*scale));
-                  var s=u32(chosen.x);var m=chosen.y;
-                  if(s<farFirst){s=farFirst;m=0.0;}
-                  if(j==0u){atomicAdd(&continuumCounted[2],continuumStepWord(model,s,0u));}
-                  let chunks=continuumChunks(model,s);let at=continuumReserve(2u,chunks);
-                  if(at!=CONTINUUM_FULL){step=s;morph=m;far.x=at;far.y=chunks;break;}
+                  let s=max(farFirst,u32(continuumMorphStep(steps,allowed*continuumLevel(j)).x));
+                  let chunks=continuumChunks(model,s);let at=continuumReserve(4u,chunks);
+                  if(at!=CONTINUUM_FULL){shadowStep=s;far.z=at;far.w=chunks;break;}
+                }
+              }
+              cut.w=allowed;
+              tries.y=select(detail,continuumPrefix(first,clusterCount,allowed),shadowShare<255u);
+            }
+          }
+          // Afloat, the earth's curve does not bend it: the sea's own surface is drawn flat about the eye.
+          let sea=continuumFlagged(record,CONTINUUM_SEA);
+          if(!continuumOutside(select(earthCurve(relative,F.camPos.y),relative,sea),reach)){
+            // Smooth outer-range hash dissolve when maxDistance > 0 (never a hard pop).
+            let seed=record.tag.z*0x9e3779b9u+0x85ebca6bu;
+            let rangeKept=isImportant||maxDist<=0.0||away<=maxDist*0.80||continuumProfileThin(999.0,away,continuumView.limits,seed)>0.0;
+            if(!rangeKept){
+              share=255u;splatShare=255u;splatScale=0.0;
+            }else if(!alone){
+              let start=farError*scale*focal/max(pixels,1e-4);
+              share=u32(round(continuumHandoff(away,start)*255.0));
+              let stretch=continuumStretch(record);
+              let span=2.0*max(continuumTypeF(model,${CONTINUUM_TYPE.splatRx}u)*0.5*(stretch.x+stretch.z),continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*stretch.y)*record.place.w*focal/away;
+              splatShare=u32(round(continuumProfileSplatShare(span,pixels,continuumView.curve)*255.0));
+              if(share>0u){
+                splatScale=continuumProfileThin(span,select(away,0.0,isImportant),continuumView.limits,seed);
+                if(splatShare>0u&&splatScale>0.0){
+                  atomicAdd(&continuumCounted[3],1u);
+                  let at=continuumReserve(3u,1u);
+                  if(at!=CONTINUUM_FULL){continuumLists[at]=vec2u(instance,CONTINUUM_SPLAT_ENTRY<<28u);}
+                }
+                if(splatShare<255u){
+                  for(var j=0u;j<CONTINUUM_LEVELS;j++){
+                    let chosen=continuumMorphStep(steps,pixels*continuumLevel(j)*away/(focal*scale));
+                    var s=u32(chosen.x);var m=chosen.y;
+                    if(s<farFirst){s=farFirst;m=0.0;}
+                    if(j==0u){atomicAdd(&continuumCounted[2],continuumStepWord(model,s,0u));}
+                    let chunks=continuumChunks(model,s);let at=continuumReserve(2u,chunks);
+                    if(at!=CONTINUUM_FULL){step=s;morph=m;far.x=at;far.y=chunks;break;}
+                  }
                 }
               }
             }
-          }
-          // The clusters that can be drawn at its nearest point (the eye's own nearest, when it stands inside).
-          if(share<255u){
-            tries.x=continuumPrefix(first,clusterCount,pixels*max(away-reach,CONTINUUM_NEAREST)/(focal*scale));
+            // The clusters that can be drawn at its nearest point (the eye's own nearest, when it stands inside).
+            if(share<255u){
+              tries.x=continuumPrefix(first,clusterCount,pixels*max(away-reach,CONTINUUM_NEAREST)/(focal*scale));
+            }
           }
         }
       }
@@ -726,7 +736,7 @@ const continuumVaryingFields = (varyings, from) => varyings.map(([name, type, fl
 function continuumVaryingWGSL(material) {
   return /* wgsl */`
 struct ContinuumVarying {
-  @builtin(position) position:vec4f,
+  @invariant @builtin(position) position:vec4f,
   @location(0) world:vec3f,
   @location(1) normal:vec3f,
   @location(2) @interpolate(flat) coverage:vec4u,   // x the entry (1 clusters, 2 far body, 3 splat), y handoff | splat << 8, z the record's seed, w samples
@@ -811,11 +821,46 @@ struct ContinuumShadowCloth { @location(0) colour:vec4f, @builtin(sample_mask) m
 `;
 }
 
+const continuumVisibilityWGSL = () => /* wgsl */`
+@group(0) @binding(0) var<uniform> F:Frame;
+struct ContinuumVisibilityVarying {
+  @invariant @builtin(position) position:vec4f,
+  @location(0) @interpolate(flat) coverage:vec4u,
+};
+@vertex fn continuumVisibilityVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVisibilityVarying {
+  let touched=continuumBindings();
+  let instance=listed.entry.x;let what=listed.entry.y>>28u;let item=listed.entry.y&0x0fffffffu;
+  var out:ContinuumVisibilityVarying;
+  if(what==0u){out.position=CONTINUUM_HIDDEN;return out;}
+  let state=continuumState(instance);
+  let lift=continuumLift(state,false);
+  let record=continuumRecords[instance];
+  var s:ContinuumSurface;
+  s.instance=instance;s.what=what;s.model=continuumTypeOf(record);s.record=record;s.vertex=CONTINUUM_NO_VERTEX;
+  var pull=0.0;
+  if(what==CONTINUUM_SPLAT_ENTRY){
+    let splat=continuumSplatCorner(record,continuumEye(),vertex,unpack2x16float(state.w).x);
+    s.local=splat.local;s.world=splat.world+lift;s.normal=splat.toward;s.corner=splat.corner;pull=splat.pull;
+  }else if(!continuumSurfaceOf(&s,record,what,item,vertex,state.y&65535u,bitcast<f32>(state.z),lift)){out.position=CONTINUUM_HIDDEN;return out;}
+  out.position=continuumClipPulled(s.world+vec3f(touched),pull);
+  out.coverage=vec4u(what,state.x&65535u,record.tag.z,continuumView.counts.y);
+  return out;
+}
+@fragment fn continuumVisibilityFS(v:ContinuumVisibilityVarying)->@builtin(sample_mask) u32 {
+  return continuumMask(v.coverage,v.position.xy,continuumView.counts.w);
+}
+`;
+
 // Every program of the one family, composed: the select ('select'), the shadow map's ('shadow': the kernel's, or a
-// material's `part` of it), and a material's view ('view') or under-water capture ('capture', with `capture` the
-// water's own tail: js/water-optics.js captureTail), for an atlas bound in `paging`'s pages.
+// material's `part` of it), the visibility prepass ('visibility'), and a material's view ('view') or under-water
+// capture ('capture', with `capture` the water's own tail: js/water-optics.js captureTail), for an atlas bound in
+// `paging`'s pages.
 export function continuumModuleWGSL({ pass, material = null, capture = null, paging = CONTINUUM_SINGLE_PAGE, part = 'whole' }) {
   if (pass === 'select') return continuumSelectWGSL(paging);
+  if (pass === 'visibility') {
+    return FRAME_WGSL + CONTINUUM_CORE_WGSL + continuumDataWGSL(1, 0, 'read', paging) + continuumCommonWGSL(paging) + continuumKindsWGSL() + continuumTouchWGSL(paging)
+      + CONTINUUM_SPLAT + CONTINUUM_SURFACE + continuumVisibilityWGSL();
+  }
   if (pass === 'shadow') {
     if (material && !material.shadow) throw Error(`The ${material.name} material casts as the kernel does: draw its shadow with the kernel's program`);
     return FRAME_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + continuumDataWGSL(1, 0, 'read', paging) + continuumCommonWGSL(paging) + continuumKindsWGSL() + continuumTouchWGSL(paging)
@@ -848,6 +893,9 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
   out.colour=${material.name}Shade(v,front);
   out.mask=${mask};
   return out;
+}
+@fragment fn continuumEqualFS(v:ContinuumVarying,@builtin(front_facing) front:bool)->@location(0) vec4f {
+  return ${material.name}Shade(v,front);
 }
 `;
   }

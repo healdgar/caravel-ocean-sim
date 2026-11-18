@@ -21,11 +21,11 @@ export function requestCityContinuumAtlas(device, fetchAsset = fetch) {
 // type), written once. `atlas` is the city's (requestCityContinuumAtlas); `view` the city material's view
 // (js/continuum-scene.js); `grounded` whether each building stands on the land (CONTINUUM_GROUNDED: it is stood on the
 // ground the land draws), or none.
-export function createCityContinuum({ device, atlas, programs, view = null, typed, types, grounded = null, frame, shadowUniform, samples = 4, label = 'city' }) {
+export function createCityContinuum({ device, atlas, programs, view = null, typed, types, grounded = null, frame, shadowUniform, samples = 4, label = 'city', profile = null }) {
   const count = types.length, counts = new Array(atlas.types.length).fill(0);
   for (let i = 0; i < count; i++) counts[types[i]]++;
   const { room } = continuumRoom(atlas.types, counts);
-  const scene = createContinuumScene({ device, atlas, programs, capacity: count, room, view, frame, shadowUniform, samples, label });
+  const scene = createContinuumScene({ device, atlas, programs, capacity: count, room, view, frame, shadowUniform, samples, label, profile });
   for (let i = 0; i < count; i++) {
     const at = i * CITY_TYPED_FLOATS;
     scene.place(i, { position: [typed[at], typed[at + 1], typed[at + 2]], yaw: typed[at + 3], type: types[i], flags: grounded?.[i] ? CONTINUUM_GROUNDED : 0, identity: typed[at + 4] });

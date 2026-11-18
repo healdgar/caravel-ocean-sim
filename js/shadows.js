@@ -265,6 +265,7 @@ export function createLandShadows(device, resolution = LAND_SHADOW_RESOLUTION) {
     const cloth = encoder.beginRenderPass(clothDesc);
     drawCloth?.(cloth);
     cloth.end();
+    packDesc.timestampWrites = profiler?.writes('Land canvas shadow pack');
     const work = encoder.beginComputePass(packDesc);
     work.setPipeline(pack); work.setBindGroup(0, packGroup);
     work.dispatchWorkgroups(Math.ceil(clothResolution / 8), Math.ceil(clothResolution / 8));

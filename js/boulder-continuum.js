@@ -1231,7 +1231,7 @@ export function createBoulderContinuum({ device, atlas, programs, view, frame, s
   // Room for every rock to be of the heaviest archetype.
   const heaviest = { clusters: Math.max(...atlas.types.map((type) => type.clusters)), farChunks: Math.max(...atlas.types.map((type) => type.farChunks)) };
   const { room } = continuumRoom([heaviest], [capacity]);
-  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity, frame, shadowUniform, samples, label: 'boulders' });
+  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity, frame, shadowUniform, samples, label: 'boulders', profile: 'boulders' });
   const W = CONTINUUM_RECORD_WORDS, R = CONTINUUM_RECORD;
   const slotRecord = new Int32Array(capacity).fill(-1), recordSlot = new Int32Array(capacity).fill(-1);
   const stretches = new Float32Array(Math.max(1, capacity) * 4);

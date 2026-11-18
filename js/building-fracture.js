@@ -1442,7 +1442,7 @@ function createFracturedContinuum({ device, continuum, grounded = null }) {
     const { room } = continuumRoom(continuumAtlasTypes(words), list.map(() => 1));
     scene = createContinuumScene({
       device, atlas, programs: ready.programs, capacity: list.length, room, view: ready.view, poses: shards,
-      frame: ready.frame, shadowUniform: ready.shadowUniform, samples: ready.samples, label: 'struck buildings',
+      frame: ready.frame, shadowUniform: ready.shadowUniform, samples: ready.samples, label: 'struck buildings', profile: 'city',
     });
     list.forEach((entry, i) => {
       copyRecords(entry, 0, entry.shardCount);
@@ -1523,6 +1523,7 @@ function createFracturedContinuum({ device, continuum, grounded = null }) {
     encode(pass) { scene?.encode(pass); },
     draw(pass, group, clouds) { scene?.draw(pass, group, clouds); },
     drawShadow(pass) { scene?.drawShadow(pass); },
+    continuumDraws() { return scene?.continuumDraws() ?? []; },
     setWorldOffset(x, z) { offsetX = x; offsetZ = z; scene?.setWorldOffset(x, z); },
     destroy() { destroyed = true; release(); entries.clear(); },
   };
@@ -1624,6 +1625,7 @@ export function createPortFractures({ device, port, groundAt, waterAt = null, da
     encode(pass) { drawn.encode(pass); },
     draw(pass, group, clouds) { drawn.draw(pass, group, clouds); },
     drawShadow(pass) { drawn.drawShadow(pass); },
+    continuumDraws() { return drawn.continuumDraws(); },
     setWorldOffset(x, z) { drawn.setWorldOffset(x, z); },
     destroy() { drawn.destroy(); live.clear(); building.clear(); },
   };

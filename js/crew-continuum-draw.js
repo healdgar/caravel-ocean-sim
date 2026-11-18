@@ -18,7 +18,11 @@ import {
   CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, crewContinuumMissingMessage, crewContinuumRig, crewContinuumWear,
   validateCrewContinuumManifest,
 } from './crew-continuum.js';
-import { CREW_CONTINUUM_MATERIAL, CREW_CONTINUUM_POSE_VEC4S, crewContinuumPoseWGSL, crewContinuumStandWGSL } from './wgsl/crew-continuum.js';
+import { hairContinuumShiftsFor, loadHairContinuum } from './hair-continuum.js';
+import {
+  CREW_CONTINUUM_MATERIAL, CREW_CONTINUUM_POSE_VEC4S, HAIR_CONTINUUM_MATERIAL,
+  crewContinuumHairStandWGSL, crewContinuumPoseWGSL, crewContinuumStandWGSL,
+} from './wgsl/crew-continuum.js';
 import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 
 // What the GPU is told of a person, beside their joints and actor record (the batch's orders).
@@ -139,17 +143,28 @@ export async function loadCrewContinuumBodies(device, ids, options) {
 
 // Every program people are stood, cut and drawn with, once a device and target: the one cut's programs, the crew's
 // view of them, the stand afloat and ashore, and (by whoever has the water's optics) the capture under water.
-export function requestCrewContinuumPipelines({ device, shader, format = 'rgba16float', samples = 4, waterOptics = null }) {
+export function requestCrewContinuumPipelines({ device, shader, format = 'rgba16float', samples = 4, waterOptics = null, fetchAsset = typeof fetch === 'function' ? fetch : null }) {
   const stand = (ground) => requestOnce(device, `crew continuum stand${ground ? ' ashore' : ''}`, async () => device.createComputePipelineAsync({
     label: `crew continuum stand${ground ? ' ashore' : ''}`, layout: 'auto',
     compute: { module: await shader(crewContinuumStandWGSL(ground), `crew continuum stand${ground ? ' ashore' : ''}`), entryPoint: 'crewContinuumStand' },
+  }));
+  const hairStand = requestOnce(device, 'crew continuum hair stand', async () => device.createComputePipelineAsync({
+    label: 'crew continuum hair stand', layout: 'auto',
+    compute: { module: await shader(crewContinuumHairStandWGSL(), 'crew continuum hair stand'), entryPoint: 'crewContinuumHairStand' },
   }));
   return Promise.all([
     requestContinuumPrograms({ device, shader, shadowFormat: LAND_SHADOW_FORMAT }),
     requestContinuumView({ device, shader, material: CREW_CONTINUUM_MATERIAL, format, samples }),
     waterOptics ? requestOnce(device, `crew continuum capture ${format} ${samples}`, () => requestContinuumCapture(waterOptics, CREW_CONTINUUM_MATERIAL)) : null,
     stand(false), stand(true),
-  ]).then(([programs, view, capture, afloat, ashore]) => ({ programs, view, capture, stand: { afloat, ashore } }));
+    requestContinuumView({ device, shader, material: HAIR_CONTINUUM_MATERIAL, format, samples }),
+    waterOptics ? requestOnce(device, `hair continuum capture ${format} ${samples}`, () => requestContinuumCapture(waterOptics, HAIR_CONTINUUM_MATERIAL)) : null,
+    hairStand,
+    fetchAsset ? loadHairContinuum(device, { fetchAsset }).catch(() => null) : null,
+  ]).then(([programs, view, capture, afloat, ashore, hairView, hairCapture, hairStandPipe, hair]) => ({
+    programs, view, capture, stand: { afloat, ashore },
+    hair, hairView, hairCapture, hairStand: hairStandPipe,
+  }));
 }
 
 // The pass that poses people placed on the GPU (crewContinuumPoseWGSL), once a device.
@@ -216,7 +231,7 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
   const room = continuumRoom(body.types, [capacity]).room;
   const scene = createContinuumScene({
     device, atlas: body.atlas, programs: P.programs, capacity, room, view: P.view, poseRoom: capacity * CREW_CONTINUUM_POSE_VEC4S,
-    frame, shadowUniform: shadows.uniform, samples, label: `crew ${body.id}`,
+    frame, shadowUniform: shadows.uniform, samples, label: `crew ${body.id}`, profile: 'people',
   });
   const orders = device.createBuffer({ label: `crew continuum ${body.id} orders`, size: Math.max(16, capacity * 4), usage: B.STORAGE | B.COPY_DST });
   device.queue.writeBuffer(orders, 0, new Uint32Array(Math.max(4, capacity)));
@@ -235,12 +250,40 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
   // The material's group 0: the crew's own, then the body's picture, its sampler and its wear. Bound when first drawn.
   const entries = [...main, { binding: 15, resource: body.albedo }, { binding: 16, resource: body.sampler }, { binding: 17, resource: { buffer: body.wear } }]
     .map((resource, binding) => (resource?.resource !== undefined && resource?.binding !== undefined ? resource : { binding, resource }));
+  const hairEntries = main.map((resource, binding) => (resource?.resource !== undefined && resource?.binding !== undefined ? resource : { binding, resource }));
   let view = null, under;
   const viewGroups = () => (view ??= [device.createBindGroup({ label: `crew continuum ${body.id}`, layout: P.view.pipeline.getBindGroupLayout(0), entries }), shadows.bind(P.view.pipeline)]);
   const capture = () => (under === undefined ? (under = continuumCaptureDraw(P.capture, entries, shadows)) : under);
+
+  // Paired algorithmic strand hair & beard scene sharing `scene.poses`.
+  let hairScene = null, hairInfo = null, hairStandGroup = null, hairView = null, hairUnder;
+  const hairInfoWords = new Uint32Array(12), hairInfoFloats = new Float32Array(hairInfoWords.buffer);
+  if (P.hair && P.hairView && P.hairStand) {
+    const hairCapacity = Math.max(2, capacity * 2);
+    const perType = Math.max(1, Math.ceil(capacity * 0.35));
+    const hairRoom = continuumRoom(P.hair.types, Array(P.hair.types.length).fill(perType)).room;
+    hairScene = createContinuumScene({
+      device, atlas: P.hair.atlas, programs: P.programs, capacity: hairCapacity, room: hairRoom, view: P.hairView,
+      poses: scene.poses, frame, shadowUniform: shadows.uniform, samples, label: `hair ${body.id}`, profile: 'hair',
+    });
+    hairInfoFloats.set(hairContinuumShiftsFor(body.id, body.manifest?.sex === 'female'), 0);
+    hairInfo = device.createBuffer({ label: `hair continuum ${body.id} info`, size: 48, usage: B.UNIFORM | B.COPY_DST });
+    device.queue.writeBuffer(hairInfo, 0, hairInfoWords);
+    hairStandGroup = device.createBindGroup({
+      label: `hair continuum ${body.id} stand`,
+      layout: P.hairStand.getBindGroupLayout(0),
+      entries: [scene.records, scene.poses, actor, hairInfo, hairScene.records].map((buffer, binding) => ({ binding, resource: { buffer } })),
+    });
+  }
+  const hairViewGroups = () => (hairView ??= [
+    device.createBindGroup({ label: `hair continuum ${body.id}`, layout: P.hairView.pipeline.getBindGroupLayout(0), entries: hairEntries }),
+    shadows.bind(P.hairView.pipeline),
+  ]);
+  const hairCapture = () => (hairUnder === undefined ? (hairUnder = continuumCaptureDraw(P.hairCapture, hairEntries, shadows)) : hairUnder);
+
   let count = 0, armed = false;
   return {
-    body, scene, orders,
+    body, scene, hairScene, orders,
     get count() { return count; },
     // Before the frame's passes: who is drawn, with what orders. `at` moves the batch's first slot, where a garrison's
     // captains follow however many soldiers a port has. A counted batch is given how many it may hold (a number), and
@@ -253,6 +296,12 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
       device.queue.writeBuffer(run, 0, runWords);
       scene.setCount(count);
       scene.setShadows(castShadows);
+      if (hairScene) {
+        hairInfoWords[8] = count >>> 0;
+        device.queue.writeBuffer(hairInfo, 32, hairInfoWords, 8, 4);
+        hairScene.setCount(count * 2);
+        hairScene.setShadows(castShadows);
+      }
       armed = true;
     },
     // In a compute pass, after every joint of the batch is final for the frame: each person stood, then the one cut.
@@ -263,16 +312,43 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
         pass.setPipeline(stand);
         pass.setBindGroup(0, standGroup);
         pass.dispatchWorkgroups(count);
+        if (hairScene) {
+          pass.setPipeline(P.hairStand);
+          pass.setBindGroup(0, hairStandGroup);
+          pass.dispatchWorkgroups(Math.ceil(count / 64));
+        }
       }
       scene.encode(pass);
+      if (hairScene) hairScene.encode(pass);
     },
-    drawOpaque(pass) { if (count) scene.draw(pass, ...viewGroups()); },
-    drawShadow(pass) { if (count) scene.drawShadow(pass); },
+    drawOpaque(pass) {
+      if (!count) return;
+      scene.draw(pass, ...viewGroups());
+      if (hairScene) hairScene.draw(pass, ...hairViewGroups());
+    },
+    drawShadow(pass) {
+      if (!count) return;
+      scene.drawShadow(pass);
+      if (hairScene) hairScene.drawShadow(pass);
+    },
     // Under water, single-sampled, through the water's own capture: the coarse cut the shadow's lists hold.
-    drawSubmerged(pass, above = false) { if (count) capture()?.draw(pass, [scene], above); },
+    drawSubmerged(pass, above = false) {
+      if (!count) return;
+      capture()?.draw(pass, [scene], above);
+      if (hairScene) hairCapture()?.draw(pass, [hairScene], above);
+    },
     // For the continuum census: the one cut's triangle counts, with how many people the batch stands (for a counted
     // batch, how many it may hold).
-    continuumDraws() { return count ? scene.continuumDraws().map((draw) => ({ ...draw, people: count })) : []; },
-    destroy() { for (const resource of [orders, run]) resource.destroy(); scene.destroy(); },
+    continuumDraws() {
+      if (!count) return [];
+      const bodyDraws = scene.continuumDraws().map((draw) => ({ ...draw, people: count }));
+      const strandDraws = hairScene ? hairScene.continuumDraws().map((draw) => ({ ...draw, hair: true, people: count })) : [];
+      return [...bodyDraws, ...strandDraws];
+    },
+    destroy() {
+      for (const resource of [orders, run, hairInfo]) resource?.destroy();
+      scene.destroy();
+      hairScene?.destroy();
+    },
   };
 }

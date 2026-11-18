@@ -17,6 +17,7 @@ import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from '.
 import { PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS } from './js/meadow-continuum.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 import { CREW_CONTINUUM_ASSETS, crewContinuumMissingMessage } from './js/crew-continuum.js';
+import { HAIR_CONTINUUM_ASSETS } from './js/hair-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
 import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
 import { BOULDER_CONTINUUM_ASSETS } from './js/boulder-continuum.js';
@@ -38,8 +39,8 @@ order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew
 order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-clip-pose.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-solve.js');
-// People through the one continuum: the baked format, its GPU cut and draws, and the batches crew.js keeps.
-order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/wgsl/crew-continuum.js','js/bc7-transcode.js','js/crew-continuum-draw.js');
+// People through the one continuum: the baked format, strand hair, its GPU cut and draws, and the batches crew.js keeps.
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/hair-continuum.js','js/wgsl/crew-continuum.js','js/bc7-transcode.js','js/crew-continuum-draw.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-groves.js');
@@ -107,7 +108,7 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-banks.js','js/w
 wgslModules.push('js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/land-continuum.js','js/land-banks.js');
 // The ground the land draws, which every family standing on it reads: beside the shared core, ahead of them all.
-order.splice(order.indexOf('js/continuum-core.js')+1,0,'js/continuum-ground.js');
+order.splice(order.indexOf('js/continuum-core.js')+1,0,'js/continuum-profiles.js','js/continuum-ground.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js','js/debug-world.js');
 order.splice(order.indexOf('js/main.js'),0,'js/webgpu-adapter.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
@@ -203,12 +204,13 @@ for(const file of Object.values(ANIMAL_CONTINUUM_ASSETS))runtimeAssetTypes.set(f
   if(!fs.existsSync(out)||!text.equals(fs.readFileSync(out))){fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,text);}
   runtimeAssetTypes.set(bakeWorker,'text/javascript');
 }
-// The people continuum's bodies (scripts/prepare-crew-continuum.mjs). Their streams are not committed, and people are
-// drawn through nothing else: a checkout without every one of them does not build.
+// The people continuum's bodies (scripts/prepare-crew-continuum.mjs) and their strand hair & beards (scripts/prepare-hair-continuum.mjs).
 const missingCrewContinuum=Object.values(CREW_CONTINUUM_ASSETS).flatMap(files=>Object.values(files)).filter(file=>!fs.existsSync(path.join(root,file)));
 if(missingCrewContinuum.length)throw Error(crewContinuumMissingMessage(missingCrewContinuum));
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))
   runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.glb')?'model/gltf-binary':'application/octet-stream');
+for(const file of Object.values(HAIR_CONTINUUM_ASSETS))
+  runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The ships' continuum bodies (scripts/prepare-ship-continuum.mjs), committed and embedded: no ship is drawn without them.
 for(const files of Object.values(SHIP_CONTINUUM_ASSETS))for(const file of Object.values(files)){
   runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');

@@ -136,11 +136,23 @@ for (const { id } of CREW_CONTINUUM_BODIES) {
       assert.ok(step(s).inflate >= 0 && Number.isFinite(step(s).inflate), `${id} step ${s} inflation`);
     }
     for (const s of [0, 1, S >> 2, S >> 1, S - 8, S - 1, S].filter((x) => x >= 0 && x <= S)) {
-      const alive = step(s).alive;
+      const alive = step(s).alive, deadFaces = new Map();
+      for (let t = alive; t < triangles; t++) {
+        const corners = [0, 1, 2].map((k) => ancestor(words[trianglesAt + t * CONTINUUM_TRIANGLE_WORDS + k], s));
+        if (corners[0] !== corners[1] && corners[1] !== corners[2] && corners[0] !== corners[2]) {
+          const key = corners.slice().sort((a, b) => a - b).join(',');
+          deadFaces.set(key, (deadFaces.get(key) ?? 0) + 1);
+        }
+      }
       for (let t = 0; t < triangles; t++) {
         const corners = [0, 1, 2].map((k) => ancestor(words[trianglesAt + t * CONTINUUM_TRIANGLE_WORDS + k], s));
         const whole = corners[0] !== corners[1] && corners[1] !== corners[2] && corners[0] !== corners[2];
-        assert.equal(whole, t < alive, `${id} step ${s}: triangle ${t} ${t < alive ? 'is gone inside' : 'survives past'} the prefix`);
+        if (t < alive) {
+          assert.equal(whole, true, `${id} step ${s}: triangle ${t} is gone inside the prefix`);
+        } else if (whole) {
+          const key = corners.slice().sort((a, b) => a - b).join(',');
+          assert.equal((deadFaces.get(key) ?? 0) % 2, 0, `${id} step ${s}: triangle ${t} survives past the prefix without a cancelling twin`);
+        }
       }
     }
   });

@@ -168,7 +168,7 @@ export async function createGunneryTools({ device, frameUBO, hullUBO, transView,
   // Room for every record to be any piece.
   const counts = PROP_CONTINUUM_TYPES.map((_, t) => (t >= PROP_CONTINUUM_TOOL_FIRST ? GUNNERY_TOOL_RECORDS : 0));
   const { capacity, room } = continuumRoom(atlas.types, counts);
-  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: GUNNERY_TOOL_RECORDS, frame: frameUBO, shadowUniform: shadows.uniform, samples, label: 'gun tools' });
+  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: GUNNERY_TOOL_RECORDS, frame: frameUBO, shadowUniform: shadows.uniform, samples, label: 'gun tools', profile: 'props' });
   const placeGroup = device.createBindGroup({ label: 'gun tools placed', layout: place.getBindGroupLayout(0), entries: [tubes, poseBuffer, scene.records, scene.poses].map((buffer, binding) => ({ binding, resource: { buffer } })) });
   // The props' view, lit by this vessel. Every piece is plain: the pigments are one texel no piece reads.
   const pigment = device.createTexture({ label: 'gun tool pigments (none)', size: [1, 1, 1], format: 'rgba8unorm-srgb', usage: globalThis.GPUTextureUsage?.TEXTURE_BINDING ?? 4 });

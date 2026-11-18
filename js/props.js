@@ -70,9 +70,9 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
   requestContinuumCapture(waterOptics, PROP_CONTINUUM_MATERIAL_SPEC).then((capture) => { if (destroyed || !capture) return; submerged = capture; makeSceneGroup(); }, (error) => console.warn('props under water', error));
 
   // One scene of the one cut, of `counts` instances of each type at most.
-  const propScene = (counts, label, poses = null) => {
+  const propScene = (counts, label, poses = null, profile = 'props') => {
     const { capacity, room } = continuumRoom(ready.atlas.types, counts);
-    return createContinuumScene({ device, atlas: ready.atlas, programs: ready.programs, capacity, room, view: ready.view, poses, frame: frameUBO, shadowUniform: shadows.uniform, samples, label });
+    return createContinuumScene({ device, atlas: ready.atlas, programs: ready.programs, capacity, room, view: ready.view, poses, frame: frameUBO, shadowUniform: shadows.uniform, samples, label, profile });
   };
   // The atlas and the programs are wanted from the start: a ball may be fired anywhere.
   Promise.all([
@@ -83,7 +83,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     if (destroyed) return;
     ready = { atlas, programs, view, lighting: shadows.bind(view.pipeline) };
     makeSceneGroup();
-    shot = propScene(PROP_CONTINUUM_TYPES.map((_, t) => (t === PROP_CONTINUUM_SHOT ? GUNNERY_FX_LIMITS.projectiles : 0)), 'shot');
+    shot = propScene(PROP_CONTINUUM_TYPES.map((_, t) => (t === PROP_CONTINUUM_SHOT ? GUNNERY_FX_LIMITS.projectiles : 0)), 'shot', null, null);
     if (shotPlaced) placeShot(...shotPlaced);
   }).catch((error) => { unavailable = true; console.warn(error.message); });
 
