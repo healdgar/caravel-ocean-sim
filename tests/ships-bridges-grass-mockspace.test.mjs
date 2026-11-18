@@ -229,11 +229,13 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp appr
 test('meadow grass is one continuum atlas cut on the GPU: clusters, a 4..6 triangle core, ballistic wakes and terrain bindings', () => {
   const manifest = validateMeadowGrass(JSON.parse(fs.readFileSync('assets/ground-cover/portugal/meadows-gpu/manifest.json', 'utf8')));
   assert.equal(manifest.patchMetres, 4);
-  assert.equal(manifest.levels, 5);
+  assert.equal(manifest.levels, 8);
   assert.equal(manifest.variants.length, 12);
   for (const variant of manifest.variants) {
     assert.ok(variant.chain.coreTriangles >= 4 && variant.chain.coreTriangles <= 6, `variant ${variant.id} must end in a 4..6 triangle core, got ${variant.chain.coreTriangles}`);
     assert.ok(variant.clusters > 0 && variant.chain.baseTriangles > variant.chain.coreTriangles);
+    // Each variant's share of the ground its sward hides, which the error counts when it is lost.
+    assert.ok(variant.coverage > 0 && variant.coverage <= 1);
   }
   // The cut reads the scene's pixel error and the continuum's core; it never clips at a fixed range.
   assert.equal(MEADOW_CUT_WGSL.includes('280.0'), false, 'the meadow cut must not keep a hard 280 m clip');

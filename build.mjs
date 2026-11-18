@@ -16,7 +16,7 @@ import { FOREST_CLUSTER_ASSETS, SUBTROPICAL_FOREST_CLUSTER_ASSETS, PORTUGAL_FORE
 import { FOREST_WIND_ASSETS, SUBTROPICAL_FOREST_WIND_ASSETS, PORTUGAL_FOREST_WIND_ASSETS } from './js/forest-wind.js';
 import { FOREST_CROWN_ASSETS, SUBTROPICAL_FOREST_CROWN_ASSETS, PORTUGAL_FOREST_CROWN_ASSETS } from './js/forest-crowns.js';
 import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
-import { PORTUGAL_MEADOW_GRASS_ASSETS } from './js/meadow-continuum.js';
+import { PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS } from './js/meadow-continuum.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 import { CREW_CONTINUUM_ASSETS, crewContinuumMissingMessage } from './js/crew-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
@@ -176,8 +176,9 @@ if(fs.existsSync(path.join(root,'assets/forest-scenery/portugal/manifest.json'))
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
-if(fs.existsSync(path.join(root,'assets/ground-cover/portugal/meadows-gpu/manifest.json'))){
-  for(const file of Object.values(PORTUGAL_MEADOW_GRASS_ASSETS)){
+// The meadow continuum's packs (scripts/prepare-meadow-grass.mjs): every coast's sward.
+for(const assets of [PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS]){
+  for(const file of Object.values(assets)){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
   }
 }
@@ -218,7 +219,7 @@ const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 // Keep core sailing and the forest maps embedded in downloads. The forest's cluster
 // and wind streams alone exceed 100 MB after base64 encoding; downloads load those
 // from the same versioned public asset instead.
-const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/boards/partner-ports-1550.json','assets/board/game.js','assets/board/runtime.js','assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/portugal/clusters/vertices.bin.gz','assets/forest-scenery/portugal/clusters/indices.bin.gz','assets/forest-scenery/saba/wind/weights.bin.gz','assets/forest-scenery/portugal/wind/weights.bin.gz','assets/forest-scenery/subtropical/wind/weights.bin.gz', ...Object.values(PORTUGAL_MEADOW_GRASS_ASSETS).filter(f=>f.endsWith('.gz'))]);
+const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/boards/partner-ports-1550.json','assets/board/game.js','assets/board/runtime.js','assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/portugal/clusters/vertices.bin.gz','assets/forest-scenery/portugal/clusters/indices.bin.gz','assets/forest-scenery/saba/wind/weights.bin.gz','assets/forest-scenery/portugal/wind/weights.bin.gz','assets/forest-scenery/subtropical/wind/weights.bin.gz', ...[PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS].flatMap(assets=>Object.values(assets)).filter(f=>f.endsWith('.gz'))]);
 // Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 // The people continuum's bodies (hundreds of MB) stay out of the downloads, which fetch the published copies.

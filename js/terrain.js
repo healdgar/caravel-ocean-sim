@@ -20,7 +20,7 @@ import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
 import {bridgeDeckYAt,createLivestockHerds} from './herds.js';
 import {createMeadowGrass} from './meadow-grass.js';
-import {PORTUGAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
+import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
@@ -1126,7 +1126,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
   const grovePromise=canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
   let meadowFailure=null;
-  const meadowPromise=!useProcedural||!usePortugalForest?Promise.resolve(null):loadMeadowGrass({assets:PORTUGAL_MEADOW_GRASS_ASSETS}).catch(error=>{meadowFailure=error.message;return null;});
+  // Every coast grows grass: the tropical sward where the forest is subtropical and on Saba, the Portuguese elsewhere.
+  const meadowPromise=loadMeadowGrass({assets:useSubtropicalForest||!useProcedural?TROPICAL_MEADOW_GRASS_ASSETS:PORTUGAL_MEADOW_GRASS_ASSETS}).catch(error=>{meadowFailure=error.message;return null;});
   const autoCurated1550=isKnownSpanishMain&&search.get('discover')!=='1'&&search.get('era')!=='2026'&&search.get('realDEM')!=='off';
   const useRealDEM=useProcedural&&search.get('realDEM')!=='off'&&!autoCurated1550;
   const proceduralGridOpts=isMobile
@@ -1686,8 +1687,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
   const meadowPack=await meadowPromise;
   let meadowGrass=null;
-  if(proceduralPack&&meadowPack)try{
-    meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:proceduralPack.city??null,board:proceduralPack.board??null,inlandWater:proceduralPack.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,isMobile});
+  if(meadowPack)try{
+    meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile});
   }catch(error){meadowFailure=error.message;}
   const meadowGrassStats=meadowGrass?.stats??{loaded:false,error:meadowFailure};
   let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):null;
@@ -3016,6 +3017,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(!submerged)return;
       // Above and below the water alike, the land's coarser cut of the same patches.
       submerged.bind(pass,above);landContinuum?.drawCapture(pass,submergedClouds);
+      meadowGrass?.drawSubmerged(pass,above);
       tradeVessels?.drawSubmerged?.(pass,above);
     },
     draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
@@ -3074,6 +3076,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(boulderContinuum&&isSectionVisible(activeRegion,camera,null,750))boulderContinuum.drawShadow(pass);
       forest?.drawShadow?.(pass);
       herds?.drawShadow?.(pass);
+      meadowGrass?.drawShadow(pass);
       tradeVessels?.drawShadow?.(pass);
     },
   };

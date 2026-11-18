@@ -19,7 +19,7 @@ import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
 import { terrainSurfaceSample } from '../js/terrain-model.js';
 import { GROUND_DETAIL_RENDER } from '../js/wgsl/ground-detail.js';
 import { MEADOW_CUT_WGSL, MEADOW_RENDER_WGSL, buildMeadowCoverMap } from '../js/meadow-grass.js';
-import { MEADOW_CONTINUUM_HEADER, PORTUGAL_MEADOW_GRASS_ASSETS, loadMeadowGrass, validateMeadowGrass } from '../js/meadow-continuum.js';
+import { MEADOW_CONTINUUM_HEADER, PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS, loadMeadowGrass, validateMeadowGrass } from '../js/meadow-continuum.js';
 import {
   TRADE_VESSELS_WGSL,
   inspectTradeVesselArchetypes,
@@ -178,7 +178,12 @@ test('meadow continuum atlas integrity, cover masking, and GPU-only zero-discard
   assert.match(mask, /let splat = handoff & continuumSamples\(/);
   assert.match(mask, /return all & ~handoff;/);
   assert.match(mask, /return handoff & ~splat;/);
-  assert.match(MEADOW_RENDER_WGSL, /o\.mask = meadowMask\(in\.coverage, in\.pos\.xy\);/);
+  assert.match(MEADOW_RENDER_WGSL, /o\.mask = meadowMask\(in\.coverage, in\.pos\.xy, in\.world\);/);
+  // One start for every patch, each pixel shared by its own distance, with one pattern for every patch.
+  assert.match(mask, /continuumHandoff\(away, meadowStart\(focal\)\)/);
+  assert.doesNotMatch(mask, /in\.coverage\.y/);
+  // The tropical sward is baked through the same bake into the same atlas.
+  validateMeadowGrass(JSON.parse(fs.readFileSync(TROPICAL_MEADOW_GRASS_ASSETS['manifest.json'], 'utf8')));
 
   // Build cover map on Lisbon and confirm zero grass in rivers/streets and real grass on hillsides
   const baked = JSON.parse(fs.readFileSync(BAKED_BOARDS['lisbon:1550'], 'utf8'));
