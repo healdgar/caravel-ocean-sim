@@ -71,6 +71,8 @@ function hash32Forest(value) {
 }
 
 const FORESHORE_PALMS_MAX = 520;
+// Roots in each array a section is planted into: 12 MB of records.
+const FOREST_ROOT_CHUNK = 262144;
 const GROUND_COVER_STREET_GAP_M = 0.4;
 const SPECIES_SHADE_TOLERANCE = Object.freeze({
   ceiba: 0.25,
@@ -105,7 +107,7 @@ export function retargetForestPackToProcedural(
   forestPack,
   proceduralPack,
   groundSample = (x, z) => terrainSurfaceSample(proceduralPack.heights, x, z, proceduralPack.region),
-  { isMobile = false, extraSections = [], maxRootCapacity = null, climateProfile = null, stand = null, rootCapacity = Infinity } = {}
+  { isMobile = false, extraSections = [], maxRootCapacity = null, climateProfile = null, stand = null, rootCapacity = Infinity, near = null, owner = null } = {}
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
   const hasCohorts = forestPack.manifest.prototypes.some((p) => Boolean(p.cohort));
@@ -113,7 +115,6 @@ export function retargetForestPackToProcedural(
   // (scripts/bake-forest-mature-pack.py), and they are drawn at about that size and spaced by the crowns
   // they have. Any other pack holds young trees, enlarged below to stand for a wood's.
   const fullGrown = forestPack.manifest.stature === 'full-grown';
-  const buckets = Array.from({ length: protoCount }, () => []);
   const activeClimate =
     climateProfile ??
     proceduralPack.climateProfile ??
@@ -181,9 +182,37 @@ export function retargetForestPackToProcedural(
     return protoCount - 1;
   };
 
-  const appendFloats = (dst, src) => {
-    for (let k = 0; k < src.length; k++) dst.push(src[k]);
+  // A section's roots are written straight into arrays of records a fixed number of roots long, each filled before
+  // the next is made, and the last cut to what it holds. They are never joined: the forest holds each where it lies
+  // (js/forest-scenery.js), so a section's planting takes no more than its roots and one array besides.
+  const rootChunks = (chunkRoots = FOREST_ROOT_CHUNK) => {
+    const chunks = [];
+    let data = null, length = 0, count = 0;
+    return {
+      push(x, y, z, scale, yaw, r, g, b, kind, sink, identityZ, struck) {
+        if (!data || length === data.length) {
+          data = new Float32Array(chunkRoots * 12);
+          chunks.push(data);
+          length = 0;
+        }
+        data[length] = x; data[length + 1] = y; data[length + 2] = z; data[length + 3] = scale;
+        data[length + 4] = yaw; data[length + 5] = r; data[length + 6] = g; data[length + 7] = b;
+        data[length + 8] = kind; data[length + 9] = sink; data[length + 10] = identityZ; data[length + 11] = struck;
+        length += 12;
+        count++;
+      },
+      get count() { return count; },
+      finish() {
+        if (data && length < data.length) chunks[chunks.length - 1] = data.slice(0, length);
+        data = null;
+        return chunks;
+      },
+    };
   };
+  const rootsIn = (parts) => (parts ?? []).reduce((sum, part) => sum + part.length / 12, 0);
+  // A section's cached trees are this terrain's own: its forest strikes them where they lie, so another terrain
+  // given the same section plants its own.
+  const cachedFor = (cached, key) => (cached?.key === key && cached.owner === owner ? cached : null);
 
   const buildCityBlockTester = (cityObj, pad = 2.6) => {
     const bl = cityObj?.blocks;
@@ -223,7 +252,7 @@ export function retargetForestPackToProcedural(
     return idxs.map((idx) => Math.round((hArr[Math.min(len - 1, idx)] || 0) * 100)).join(',');
   };
 
-  // The trees a section plants one by one, as one list of records for each of the pack's trees: the town's
+  // The trees a section plants one by one, as one array of records in the order they were planted: the town's
   // and the farmer's, then the wood's giants and the canopy round them, as many as the budget allows.
   const plantSection = (secPack, secMaxRoots) => {
     const region = secPack.region;
@@ -231,7 +260,8 @@ export function retargetForestPackToProcedural(
     const areaScale = span < 4096 ? Math.max(0.45, Math.min(1, Math.pow(span / 4096, 1.15))) : 1;
     const effectiveSecMaxRoots = Math.max(64, Math.round(secMaxRoots * areaScale));
     const cacheKey = `${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${effectiveSecMaxRoots}:${span}:${heightFingerprint(secPack.heights)}:${secPack.port?.instances?.length ?? 0}:${secPack.city?.count ?? 0}`;
-    if (secPack._cachedForestBuckets?.key === cacheKey) return secPack._cachedForestBuckets.buckets;
+    const cachedPlanted = cachedFor(secPack._cachedForestPlanted, cacheKey);
+    if (cachedPlanted) return cachedPlanted.roots;
 
     const x0 = region.x - span * 0.5;
     const z0 = region.z - span * 0.5;
@@ -240,7 +270,7 @@ export function retargetForestPackToProcedural(
     const beaches = secPack.beaches;
     const port = secPack.port;
     const seed = (region.vegetationSeed ?? 47231) >>> 0;
-    if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return null;
+    if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return new Float32Array(0);
 
     const portCx = port ? port.center.x : proceduralPack.region.x;
     const portCz = port ? port.center.z : proceduralPack.region.z;
@@ -304,7 +334,7 @@ export function retargetForestPackToProcedural(
       if (bVal >= 135) targetPool.push(idx);
     }
 
-    const secBuckets = Array.from({ length: protoCount }, () => []);
+    const secRoots = new Float32Array(effectiveSecMaxRoots * 12);
     // Two trees stand no nearer than this share of the sum of their crown radii. Full-grown crowns are
     // twenty to thirty metres across, so their trunks stand six to ten metres apart and the crowns lock.
     const veteranSpacingFactor = fullGrown ? (isMobile ? 0.50 : 0.44) : hasCohorts ? (isMobile ? 0.52 : 0.42) : (isMobile ? 0.56 : 0.46);
@@ -604,7 +634,7 @@ export function retargetForestPackToProcedural(
       const rTint = tint * climateTint[0] * (tended ? tended.tint[0] : 1);
       const gTint = tint * climateTint[1] * (tended ? tended.tint[1] : 1);
       const bTint = tint * climateTint[2] * (tended ? tended.tint[2] : 1);
-      secBuckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, rootIdentityZ, 0);
+      secRoots.set([x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, rootIdentityZ, 0], placedIdx * 12);
       return placedIdx;
     };
 
@@ -753,8 +783,9 @@ export function retargetForestPackToProcedural(
         tryPlaceTree(nx, nz, cKey, true, false, c < 5);
       }
     }
-    secPack._cachedForestBuckets = { key: cacheKey, buckets: secBuckets };
-    return secBuckets;
+    const planted = secRoots.slice(0, totalPlaced * 12);
+    secPack._cachedForestPlanted = { key: cacheKey, owner, roots: planted };
+    return planted;
   };
 
   // A planted tree keeps the ground under its crown; a grove's trees stand everywhere else that is wood.
@@ -764,14 +795,16 @@ export function retargetForestPackToProcedural(
   };
   // The trees of the pack's grove that stand on a section (js/forest-groves.js), as records in the order they
   // were planted: on every square of its wood that no planted tree has, by the same rules a planted tree keeps.
-  // Planted again only when the section's ground, marking, town or planted trees change.
+  // Planted again only when the section's ground, marking, town or planted trees change. A section let go keeps
+  // only how many its grove holds (groveCount), and is planted again when it comes back. A grove is a list of arrays
+  // (rootChunks).
+  const groveKey = (secPack, planted) => `${forestGroveStamp(secPack, planted)}:${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${isMobile ? 1 : 0}`;
+  const groveCount = (secPack, planted) => cachedFor(secPack._cachedForestGrove, groveKey(secPack, planted))?.count ?? null;
   const groveSection = (secPack, planted) => {
-    const region = secPack.region, heights = secPack.heights, port = secPack.port;
-    const plantedFlat = new Float32Array(planted.reduce((sum, b) => sum + b.length, 0));
-    let at = 0;
-    for (const b of planted) { plantedFlat.set(b, at); at += b.length; }
-    const key = `${forestGroveStamp(secPack, plantedFlat)}:${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${isMobile ? 1 : 0}`;
-    if (secPack._cachedForestGrove?.key === key) return secPack._cachedForestGrove.roots;
+    const region = secPack.region, heights = secPack.heights, port = secPack.port, plantedFlat = planted;
+    const key = groveKey(secPack, planted);
+    const cachedGrove = cachedFor(secPack._cachedForestGrove, key);
+    if (cachedGrove?.roots) return cachedGrove.roots;
     const span = region.span ?? 8192, x0 = region.x - span * 0.5, z0 = region.z - span * 0.5, borderMargin = 0.05;
     const size = secPack === proceduralPack ? (isMobile ? 512 : 1024) : (isMobile ? 256 : 512);
     const cover = forestGroveCover({ region: { ...region, span }, heights, biome: secPack.biome, beaches: secPack.beaches, port, mangrove: hasMangrove, size });
@@ -786,7 +819,7 @@ export function retargetForestPackToProcedural(
     const isTrop = ['tropical', 'subtropical'].includes(activeClimate.climate) || ['tropical', 'subtropical'].includes(region.climate);
     const climateTint = activeClimate.foliageTint ?? (isTrop ? [0.78, 1.12, 0.68] : [1.0, 1.0, 1.0]);
     const harbour = port?.center ?? proceduralPack.port?.center ?? proceduralPack.region;
-    const out = [];
+    const out = rootChunks();
     forestGroveTrees({ stand, cover, size, region: { ...region, span }, harbour, visit(x, z, kind, scale, yaw, seed) {
       const proto = forestPack.manifest.prototypes[kind];
       if (!proto) return;
@@ -810,42 +843,27 @@ export function retargetForestPackToProcedural(
       const tint = 0.92 + ((seed >>> 8) & 0xffff) / 65536 * 0.16;
       out.push(x, gy - sink, z, scale, yaw, tint * climateTint[0], tint * climateTint[1], tint * climateTint[2], kind, sink, rootIdentityZ, 0);
     } });
-    const roots = new Float32Array(out);
-    secPack._cachedForestGrove = { key, roots };
+    const roots = out.finish();
+    secPack._cachedForestGrove = { key, owner, roots, count: out.count };
     return roots;
   };
 
-  // Planted trees first, every section's, within their budget; then each section's grove. The roots are as
-  // many as the device can hold (rootCapacity, js/forest-scenery.js forestRootCapacity), less the planted
-  // budget and the foreshore's palms; a grove that would pass that is planted only so far, and the trees
-  // refused are counted.
-  let plantedTotal = 0, groveTotal = 0, rootsRefused = 0;
-  const groveCapacity = Math.max(0, rootCapacity - effectiveMaxCapacity - FORESHORE_PALMS_MAX - 1);
-  const seedSectionCanopy = (secPack, secMaxRoots, plant = true) => {
-    const planted = plant ? plantSection(secPack, secMaxRoots) : Array.from({ length: protoCount }, () => []);
-    if (!planted) return;
-    for (let i = 0; i < protoCount; i++) {
-      if (planted[i].length) { appendFloats(buckets[i], planted[i]); plantedTotal += planted[i].length / 12; }
-    }
-    if (!stand) return;
-    const grove = groveSection(secPack, planted);
-    for (let k = 0; k < grove.length; k += 12) {
-      if (groveTotal >= groveCapacity) { rootsRefused += (grove.length - k) / 12; break; }
-      const bucket = buckets[grove[k + 8]];
-      for (let f = 0; f < 12; f++) bucket.push(grove[k + f]);
-      groveTotal++;
-    }
-  };
-
-  seedSectionCanopy(proceduralPack, baseMaxRoots);
-  if (Array.isArray(extraSections) && extraSections.length > 0) {
-    const perSecBudget = isMobile ? 2600 : 15000;
-    for (const sec of extraSections) {
-      const remaining = effectiveMaxCapacity - plantedTotal;
-      // Once the planted budget is spent a section plants none of its own, but its wood is still a grove.
-      if (remaining < 64) { if (!stand) break; seedSectionCanopy(sec, 0, false); continue; }
-      seedSectionCanopy(sec, Math.min(perSecBudget, remaining));
-    }
+  // Every section plants its own trees first, within the planted budget, in the order the sections came; that
+  // budget is small. Then the sections are held nearest the player first (`near`, or the coast's centre), each with
+  // its grove, as many as the device's roots hold (rootCapacity, js/forest-scenery.js forestRootCapacity): the first
+  // that does not fit is let go with every one beyond it, whole, and planted again when it is nearer.
+  const sectionPacks = [proceduralPack, ...(Array.isArray(extraSections) ? extraSections : [])];
+  const plantedOf = new Map();
+  let plantedTotal = 0;
+  plantedOf.set(proceduralPack, plantSection(proceduralPack, baseMaxRoots));
+  plantedTotal += plantedOf.get(proceduralPack).length / 12;
+  const perSecBudget = isMobile ? 2600 : 15000;
+  for (const sec of sectionPacks.slice(1)) {
+    const remaining = effectiveMaxCapacity - plantedTotal;
+    // Once the planted budget is spent a section plants none of its own, but its wood is still a grove.
+    const planted = remaining < 64 ? new Float32Array(0) : plantSection(sec, Math.min(perSecBudget, remaining));
+    plantedOf.set(sec, planted);
+    plantedTotal += planted.length / 12;
   }
 
   const basePort = proceduralPack.port ?? null;
@@ -863,8 +881,11 @@ export function retargetForestPackToProcedural(
     return true;
   };
 
-  // Fallback to explicit scrub/upland arrays if biome grid did not place roots
-  if (buckets.every((b) => b.length === 0)) {
+  // The coast's own section also holds its foreshore palms and, where nothing else would stand, the scrub its land
+  // cover names.
+  const coastTrees = rootChunks();
+  const mainGrove = stand ? groveSection(proceduralPack, plantedOf.get(proceduralPack)) : null;
+  if (plantedTotal === 0 && !(rootsIn(mainGrove) > 0)) {
     const sources = [
       ...(proceduralPack.vegetation?.scrub || []),
       ...(proceduralPack.vegetation?.upland || []),
@@ -885,7 +906,7 @@ export function retargetForestPackToProcedural(
       const tint = 0.92 + ((hash * 7.3) % 0.16);
       const basal = forestPack.manifest.prototypes[protoId].basalRadius ?? 1.2;
       const sink = Math.min(1.6, 0.22 + 0.68 * basal * scale * slope);
-      buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -2, 0);
+      coastTrees.push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -2, 0);
     }
   }
   // The foreshore fringe, leaning out over the sea as coconuts do.
@@ -905,37 +926,75 @@ export function retargetForestPackToProcedural(
       const { scale, sink: baseSink, yaw } = foreshorePalmPlacement(shape, seaX, seaZ, basal);
       const sink = Math.max(baseSink, 0.22 + 0.68 * basal * scale * fSlope);
       const tint = 0.94 + shape * 0.12;
-      buckets[coconutId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, coconutId, sink, -2, 0);
+      coastTrees.push(x, gy - sink, z, scale, yaw, tint, tint, tint, coconutId, sink, -2, 0);
     }
   }
-  // Ensure at least one subterranean sentinel root if a small coral cay has 0 upland trees
-  if (buckets.every(b => b.length === 0)) {
-    buckets[0].push(proceduralPack.region.x, -500, proceduralPack.region.z, 0, 0, 1, 1, 1, 0, 0, -2, 0);
+  const coastExtras = coastTrees.finish();
+
+  const centre = near && Number.isFinite(near.x) && Number.isFinite(near.z) ? near : proceduralPack.region;
+  const distanceTo = (secPack) => {
+    const r = secPack.region, half = (r.span ?? 8192) * 0.5;
+    return Math.hypot(Math.max(0, Math.abs(centre.x - r.x) - half), Math.max(0, Math.abs(centre.z - r.z) - half));
+  };
+  const ordered = sectionPacks.map((secPack, index) => ({ secPack, index, distance: distanceTo(secPack) }))
+    .sort((a, b) => a.distance - b.distance || a.index - b.index);
+  const sections = [];
+  let total = 0, groveTotal = 0, residentPlanted = 0, sectionsReleased = 0, letGo = false;
+  const release = (secPack) => {
+    sectionsReleased++;
+    const cached = secPack._cachedForestGrove;
+    if (cached?.roots) secPack._cachedForestGrove = { ...cached, roots: null };
+  };
+  for (const { secPack, index } of ordered) {
+    if (letGo) { release(secPack); continue; }
+    const planted = plantedOf.get(secPack);
+    const own = index === 0 ? coastExtras : [];
+    let count = planted.length / 12 + rootsIn(own);
+    let grove = null;
+    if (stand) {
+      // A section let go before says how large its grove is without being planted again.
+      const known = index === 0 ? null : groveCount(secPack, planted);
+      if (known !== null && total + count + known > rootCapacity) { letGo = true; release(secPack); continue; }
+      grove = index === 0 ? mainGrove : groveSection(secPack, planted);
+      count += rootsIn(grove);
+    }
+    if (total + count > rootCapacity) { letGo = true; release(secPack); continue; }
+    total += count;
+    residentPlanted += planted.length / 12;
+    groveTotal += rootsIn(grove);
+    const r = secPack.region;
+    sections.push({ key: index === 0 ? 'coast' : `${r.x},${r.z}`, parts: [planted, ...(grove ?? []), ...own].filter((part) => part.length > 0) });
+  }
+  // A coast with no tree at all keeps one root out of sight below the land.
+  if (total === 0) {
+    sections.push({ key: 'sentinel', parts: [new Float32Array([proceduralPack.region.x, -500, proceduralPack.region.z, 0, 0, 1, 1, 1, 0, 0, -2, 0])] });
+    total = 1;
+  }
+  const kinds = new Uint32Array(protoCount);
+  for (const section of sections) for (const part of section.parts) for (let k = 8; k < part.length; k += 12) {
+    const kind = part[k] | 0;
+    if (kind >= 0 && kind < protoCount) kinds[kind]++;
   }
   let firstRoot = 0;
   const prototypes = forestPack.manifest.prototypes.map((p, id) => {
-    const rootCount = buckets[id].length / 12;
-    const next = { ...p, firstRoot, rootCount };
-    firstRoot += rootCount;
+    const next = { ...p, firstRoot, rootCount: kinds[id] };
+    firstRoot += kinds[id];
     return next;
   });
-  const roots = new Float32Array(firstRoot * 12);
-  let offset = 0;
-  for (let id = 0; id < protoCount; id++) {
-    roots.set(buckets[id], offset);
-    offset += buckets[id].length;
-  }
   return {
     ...forestPack,
-    roots,
+    roots: null,
+    sections,
     maxRootCapacity: effectiveMaxCapacity,
     rootCapacity,
+    plantedRoots: residentPlanted,
     groveRoots: groveTotal,
-    rootsRefused,
+    sectionsResident: sections.length,
+    sectionsReleased,
     climateProfile: activeClimate,
     manifest: {
       ...forestPack.manifest,
-      rootCount: firstRoot,
+      rootCount: total,
       prototypes,
     },
   };
@@ -1399,6 +1458,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   let currentPixelError=TREE_PIXEL_ERROR;
   let lastCamera=null,lastView=null;
+  // Where the player stood when the forest's sections were last held, and how many were let go for want of room
+  // (retargetForestPackToProcedural): those are taken back as the player nears them.
+  const forestOwner={};
+  let forestNear=null,forestHeldAt=null,forestSectionsReleased=0;
   let checkPlayerFrontierEntry=null;
   const retireGPU=(fn)=>{if(typeof device.queue?.onSubmittedWorkDone==='function')device.queue.onSubmittedWorkDone().then(fn).catch(()=>{});else fn();};
   function updateTrees(camera,viewProjection,allowStream=false){
@@ -1410,6 +1473,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(allowStream)checkPlayerFrontierEntry?.(camera);
     updateGroundResidency(camera);
     const localCam = {x:camera.x-worldOffset.x,z:camera.z-worldOffset.z};
+    if(Number.isFinite(localCam.x)&&Number.isFinite(localCam.z)){
+      forestNear=localCam;
+      if(forestSectionsReleased>0&&forestHeldAt&&Math.hypot(localCam.x-forestHeldAt.x,localCam.z-forestHeldAt.z)>(activeRegion.span??8192)*0.25)rebuildNeighborTreeInstances();
+    }
     craters?.follow(localCam);
     activeTownField?.follow?.(localCam);
     if(forest?.wind?.enabled){
@@ -1481,12 +1548,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const streamMaxRoots=isMobile?22000:112000;
   // Planted trees keep their budget; a grove's are as many as the device can hold (forestRootCapacity).
   const grovePack=forestPack&&proceduralPack?await grovePromise:null,rootCapacity=forestRootCapacity(device);
-  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity}):forestPack;
+  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}):forestPack;
   // What has been shot down on this coast comes back with it, and is kept with the port damage.
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
   const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}).catch(error=>{forestFailure=error.message;return null;}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
-  forestStats.groves=grovePack?{loaded:true,roots:activeForestPack?.groveRoots??0,refused:activeForestPack?.rootsRefused??0,rootCapacity}:{loaded:false,error:groveFailure};
+  const forestHeld=pack=>({roots:pack?.manifest?.rootCount??0,groveRoots:pack?.groveRoots??0,sections:pack?.sectionsResident??0,released:pack?.sectionsReleased??0});
+  forestStats.groves=grovePack?{loaded:true,...forestHeld(activeForestPack),rootCapacity}:{loaded:false,error:groveFailure};
+  if(forest){forestSectionsReleased=activeForestPack?.sectionsReleased??0;forestHeldAt=forestNear??activeRegion;}
   forestStats.coverage=forestPack?.manifest.coverage??null;
   // The town's ways as a distance field. A coast without a town binds an empty one.
   const townField=streets=>{
@@ -1729,7 +1798,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       (sx,sz,inc)=>(sx===adjRec.secX&&sz===adjRec.secZ)?null:getSectionAt(sx,sz,inc),
       {taperUnconnectedOuter:true,refreshTextures:false}
     );
-    adjRec._cachedForestBuckets=null;
+    adjRec._cachedForestPlanted=null;
     const rebuiltMesh=adjRec.mesh;
     const oldVerts=adjRec.vertices;
     const oldIdx=adjRec.indices;
@@ -1759,15 +1828,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       proceduralPack.region=activeRegion;
       proceduralPack.heights=heights;
       proceduralPack.biome=biome;
-      proceduralPack._cachedForestBuckets=null;
+      proceduralPack._cachedForestPlanted=null;
       const nextForestPack=retargetForestPackToProcedural(
         forestPack,
         proceduralPack,
         baseGroundSample,
-        {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity}
+        {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}
       );
       forest.updatePack(nextForestPack,regionalElevationData??heights,getRegionalOcclusionRegion());
-      if(grovePack)Object.assign(forestStats.groves,{roots:nextForestPack.groveRoots,refused:nextForestPack.rootsRefused});
+      if(grovePack)Object.assign(forestStats.groves,forestHeld(nextForestPack));
+      forestSectionsReleased=nextForestPack.sectionsReleased??0;forestHeldAt=forestNear??activeRegion;
       lastCamera=null;
     }
   }
@@ -1975,7 +2045,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
       if(modified){
         bordersModified=true;
-        proceduralPack._cachedForestBuckets=null;
+        proceduralPack._cachedForestPlanted=null;
         device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
         const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null;
         mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,savedPortOverride?null:proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
@@ -2119,8 +2189,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
     if(terrainDisposed||!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
-    proceduralPack._cachedForestBuckets=null;
-    upgradedPack._cachedForestBuckets=null;
+    proceduralPack._cachedForestPlanted=null;
+    upgradedPack._cachedForestPlanted=null;
     if(upgradedPack.regionalDem)proceduralPack.regionalDem=upgradedPack.regionalDem;
     portsDirty=true;
     if(upgradedPack.region){
@@ -2304,8 +2374,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       activeClimate=liveClimate;
       discovery.climate=liveClimate;
       if(liveClimate.source==='nasa-power-climatology'||liveClimate.koppenCode!==prevKoppen){
-        proceduralPack._cachedForestBuckets=null;
-        for(const sec of loadedSections.values())sec._cachedForestBuckets=null;
+        proceduralPack._cachedForestPlanted=null;
+        for(const sec of loadedSections.values())sec._cachedForestPlanted=null;
         rebuildNeighborTreeInstances();
         notifyDiscovery();
       }

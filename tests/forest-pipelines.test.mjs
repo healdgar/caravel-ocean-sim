@@ -17,7 +17,7 @@ test('every compute pipeline the forest renderer creates is dispatched',()=>{
   }
   assert.equal(elements.length,names.length,'one pipeline to a name');
   const compute=names.filter((name,i)=>elements[i].includes('createComputePipelineAsync'));
-  assert.deepEqual(compute,['reset','cull']);
+  assert.deepEqual(compute,['reset','cull','listSpecies']);
   for(const name of compute)assert.ok(source.includes(`pass.setPipeline(${name})`),`${name} is compiled and never dispatched`);
 });
 

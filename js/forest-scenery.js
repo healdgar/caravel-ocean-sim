@@ -9,7 +9,8 @@ import {createTaskYieldBudget} from './task-yield.js';
 import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,PORTUGAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,FOREST_CLUSTER_SHADOW_WGSL} from './forest-clusters.js';
 import {loadForestCrowns,FOREST_CROWN_ASSETS,SUBTROPICAL_FOREST_CROWN_ASSETS,PORTUGAL_FOREST_CROWN_ASSETS,FOREST_CROWN_SPLAT_PIXELS,FOREST_CROWN_MIN_PIXELS} from './forest-crowns.js';
 import {loadForestWind,createForestWind,FOREST_WIND_ASSETS,SUBTROPICAL_FOREST_WIND_ASSETS,PORTUGAL_FOREST_WIND_ASSETS,FOREST_WIND_BASIS_RADIAL,FOREST_WIND_EVENT_FRIEDLANDER,FOREST_WIND_EVENT_PULSE} from './forest-wind.js';
-import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,reapplyForestStrikes,strikeForestRoot,strikeForestTree} from './forest-trunks.js';
+import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,TREE_STRIKE_REACH_M,blastForestRoot,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,nearestForestRoot,reapplyForestStrikes,strikeForestTree} from './forest-trunks.js';
+import {forestDispatch} from './forest-dispatch.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 
 // What the game fetches of a pack: its manifest, its roots, and the maps a device without block compression
@@ -762,21 +763,29 @@ export const FOREST_SHADOW_WGSL=FOREST_CLUSTER_SHADOW_WGSL;
 // One pass over the roots a frame: every tree in view goes on its species' one visible list, however far
 // off; no tree is ever handed to another surface. Nothing here sorts trees by distance; what each listed tree draws, from its finest leaves
 // to a single splat, is its own continuum's choice (forestClusterSelect, js/forest-clusters.js).
+// The roots lie section by section in the one buffer, with gaps where sections were let go; a gap is zeroed, and a
+// root of no size is passed over. forestSpeciesRoots lists every root of each species, for the shadow's cut, whenever
+// the sections change. The passes over roots spread their workgroups over y past 65,535 of them (js/forest-dispatch.js).
 export const FOREST_CULL_WGSL=FRAME_WGSL+ROOT_WGSL+/* wgsl */`
 struct ForestPrototype {bound:vec4f,roots:vec4u};
+// The roots in use as a float, the species, the scene's pixel error, and the roots in use exactly: past 2^24 a float
+// would round them.
+struct ForestCullParameters {roots:f32,species:f32,pixelError:f32,rootCount:u32};
 @group(0)@binding(0)var<uniform>F:Frame;
 @group(0)@binding(1)var<storage,read>roots:array<ForestRoot>;
 @group(0)@binding(2)var<storage,read>prototypes:array<ForestPrototype>;
 @group(0)@binding(3)var<storage,read_write>visible:array<u32>;
 @group(0)@binding(4)var<storage,read_write>visibleCounts:array<atomic<u32>>;
-// Roots in use, species, the scene's pixel error, unused.
-@group(0)@binding(5)var<uniform>parameters:vec4f;
+@group(0)@binding(5)var<uniform>parameters:ForestCullParameters;
+@group(0)@binding(6)var<storage,read_write>speciesRoots:array<u32>;
+@group(0)@binding(7)var<storage,read_write>speciesCounts:array<atomic<u32>>;
 @compute @workgroup_size(64)fn forestReset(@builtin(global_invocation_id)id:vec3u){
- if(id.x>=u32(parameters.y)){return;}atomicStore(&visibleCounts[id.x],0u);
+ if(id.x>=u32(parameters.species)){return;}atomicStore(&visibleCounts[id.x],0u);
 }
-@compute @workgroup_size(64)fn forestCull(@builtin(global_invocation_id)id:vec3u){
- if(id.x>=u32(parameters.x)){return;}
- let r=roots[id.x];if(r.rootScale.w<=0.0){return;}let pi=u32(r.identity.x);let p=prototypes[pi];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
+@compute @workgroup_size(64)fn forestCull(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
+ let i=id.x+id.y*groups.x*64u;
+ if(i>=parameters.rootCount){return;}
+ let r=roots[i];if(r.rootScale.w<=0.0){return;}let pi=u32(r.identity.x);let p=prototypes[pi];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let b=p.bound.xyz*r.rootScale.w;
  // A felled tree lies as far as its own height from where it stood.
  let world=r.rootScale.xyz+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);let relative=world-F.camPos.xyz;let radius=p.bound.w*r.rootScale.w*select(1.,2.,r.identity.w<0.);
@@ -788,27 +797,51 @@ struct ForestPrototype {bound:vec4f,roots:vec4u};
  }
  if(clip.w<-radius*length(rowW)){return;}
  let slot=atomicAdd(&visibleCounts[pi],1u);
- if(slot<p.roots.y){visible[p.roots.x+slot]=id.x;}
+ if(slot<p.roots.y){visible[p.roots.x+slot]=i;}
+}
+// Every root of a species in its stretch, one plus its index, in no order: the stretches are the visible lists'.
+@compute @workgroup_size(64)fn forestSpeciesRoots(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
+ let i=id.x+id.y*groups.x*64u;
+ if(i>=parameters.rootCount){return;}
+ let r=roots[i];if(r.rootScale.w<=0.0){return;}
+ let pi=u32(r.identity.x);if(pi>=u32(parameters.species)){return;}
+ let p=prototypes[pi];let n=atomicAdd(&speciesCounts[pi],1u);
+ if(n<p.roots.y){speciesRoots[p.roots.x+n]=i+1u;}
 }
 `;
 
-// As many roots as the device lets one buffer hold, one storage binding see and one dispatch reach. The roots are
-// the largest of the buffers sized by them, at 48 bytes a root; the visible list, the clusters' list and the wind's
-// slots take less. The cull, the wind and each species' cut run one root to a thread in workgroups of 64 along x.
+// As many roots as the device lets one buffer hold and one storage binding see, at 48 bytes a root: the roots are
+// the largest of the buffers sized by them; the visible list, the clusters' list, the species' roots and the wind's
+// slots take less. The passes over them spread past one dispatch row (js/forest-dispatch.js), so that bounds nothing.
 export function forestRootCapacity(device){
   const limits=device?.limits??{};
   const bytes=Math.min(limits.maxStorageBufferBindingSize??134217728,limits.maxBufferSize??268435456);
-  return Math.max(1,Math.min(Math.floor(bytes/48),(limits.maxComputeWorkgroupsPerDimension??65535)*64));
+  return Math.max(1,Math.floor(bytes/48));
+}
+
+// A pack's roots, section by section, nearest the player first, each section as the arrays it was planted in
+// (retargetForestPackToProcedural, js/terrain.js). A pack read whole from disk is one section of one array.
+export function forestPackSections(pack){
+  if(Array.isArray(pack?.sections))return pack.sections;
+  return pack?.roots?.length?[{key:'pack',parts:[pack.roots]}]:[];
+}
+
+// Every root of a pack in one array, section after section: for tools and tests. The game never joins them.
+export function forestPackRoots(pack){
+  const parts=forestPackSections(pack).flatMap(section=>section.parts??[]);
+  const out=new Float32Array(parts.reduce((sum,part)=>sum+part.length,0));
+  let at=0;for(const part of parts){out.set(part,at);at+=part.length;}
+  return out;
 }
 
 export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,pixelError=3,
   terrainOcclusion=null,savedStrikes=null,strikeOrigin={x:0,z:0},onStrikesChanged=null}){
   if(!(pixelError>0))throw Error('Invalid forest pixel error');
   if(samples<2)throw Error('Forest leaf coverage requires MSAA');
-  const m=pack.manifest,allocated=[],B=GPUBufferUsage;
+  const m=pack.manifest,allocated=[],B=GPUBufferUsage,P=m.prototypes.length;
   const make=(data,usage,label)=>{if(data.byteLength>device.limits.maxBufferSize)throw Error(label+' exceeds GPU maxBufferSize');const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST,label});allocated.push(b);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
   const abort=new AbortController();
-  let destroyed=false,terrainVisibility=null,surfaces=null,clusters=null,wind=null,fallCapsuleCursor=4,roots=null,visible=null;
+  let destroyed=false,terrainVisibility=null,surfaces=null,clusters=null,wind=null,fallCapsuleCursor=4,roots=null,visible=null,speciesRoots=null;
   // Far crowns (js/forest-crowns.js). forestCrowns=0 draws every tree's leaves as far as they go; the
   // others move the change for inspection: the nearest it may fall, in metres, the pixel share, and how
   // broad a tree may stand on screen as a crown, in leaf errors. forestWind=0 leaves the trees to the
@@ -822,9 +855,12 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
-    const rooted=pack.roots.slice();let excludedRoots=0;
-    let liveRoots=rooted;const strikes=forestStrikesFromSave(savedStrikes,strikeOrigin),falling=[];
-    if(groundSample)for(let i=0;i<rooted.length;i+=12){
+    // A pack planted for a coast (js/terrain.js) is the coast's own, and its arrays are struck where they lie. A pack
+    // read whole from disk may be shared, so it is copied first.
+    const initialSections=Array.isArray(pack.sections)?pack.sections:forestPackSections({roots:pack.roots?.slice()});
+    let excludedRoots=0;
+    const strikes=forestStrikesFromSave(savedStrikes,strikeOrigin),falling=[];
+    if(groundSample)for(const section of initialSections)for(const rooted of section.parts)for(let i=0;i+12<=rooted.length;i+=12){
       const x=rooted[i],z=rooted[i+2],y=groundSample(x,z);
       if(!Number.isFinite(y))throw Error('Non-finite forest ground sampler');
       const sx=(groundSample(x+1,z)-groundSample(x-1,z))*.5,sz=(groundSample(x,z+1)-groundSample(x,z-1))*.5,slope=Math.hypot(sx,sz);
@@ -836,14 +872,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       const maxSink=rooted[i+10]<0?0.65:Infinity;
       rooted[i+9]=Math.min(maxSink,Math.max(rooted[i+9],basal*rooted[i+3]*slope+.08));rooted[i+1]=y-rooted[i+9];
     }
-    // The roots and the list of those in view are as large as the coast's trees, and grow with them (grow, below).
-    // Only the device's limits bound them (forestRootCapacity).
+    // Only the device's limits bound the roots (forestRootCapacity); the buffers grow with the sections they hold.
     const deviceCapacity=forestRootCapacity(device);
-    let rootCapacity=Math.min(deviceCapacity,Math.max(m.rootCount,pack.maxRootCapacity||m.rootCount));
-    let activeRootCount=Math.min(rootCapacity,m.rootCount);
-    // Trees shot down in an earlier sitting are down before the coast is first seen.
-    reapplyForestStrikes(rooted,activeRootCount,strikes);
-    const stats={loaded:true,backend:'continuum',roots:activeRootCount-excludedRoots,excludedRoots,rootCapacity,deviceRootCapacity:deviceCapacity,prototypes:m.prototypes.length,gpuCulling:true,terrainOcclusion:false,pixelError,
+    let rootCapacity=0,activeRootCount=0;
+    const stats={loaded:true,backend:'continuum',roots:0,excludedRoots,rootCapacity,deviceRootCapacity:deviceCapacity,sections:{resident:0,released:0,arrays:0},prototypes:P,gpuCulling:true,terrainOcclusion:false,pixelError,
       materialContract:m.materialContract,materialLayers:0,textureFamilies:[],coverageFiltering:'Stable independent leaf footprint sample masks',
       species:[...new Set(m.prototypes.map(p=>p.species))],sourceClaim:m.sourceClaim};
     // Clusters are each tree near and middling, crowns beyond (js/forest-clusters.js, js/forest-crowns.js): fetched
@@ -856,30 +888,126 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const windPromise=windWanted?loadForestWind({assets:isSubtropicalPack?SUBTROPICAL_FOREST_WIND_ASSETS:isCohortPack?PORTUGAL_FOREST_WIND_ASSETS:FOREST_WIND_ASSETS,signal:abort.signal})
       .catch(error=>{if(abort.signal.aborted)throw error;stats.wind={enabled:false,error:error.message};return null;}):Promise.resolve(null);
     for(const promise of [clusterPromise,crownPromise,windPromise])promise.catch(()=>{});
-    const rootBuffers=capacity=>{
-      roots=device.createBuffer({size:Math.max(48,capacity*48),usage:B.STORAGE|B.COPY_DST,label:'forest immutable root transforms'});
-      visible=device.createBuffer({size:Math.max(4,capacity*4),usage:B.STORAGE|B.COPY_DST,label:'forest GPU visible root IDs'});
-    };
-    rootBuffers(rootCapacity);
-    if(activeRootCount)device.queue.writeBuffer(roots,0,rooted.subarray(0,activeRootCount*12));
-    // Each species' bound and the stretch of the roots it holds, which its visible list shares.
-    const meta=new ArrayBuffer(m.prototypes.length*32),floats=new Float32Array(meta),words=new Uint32Array(meta);
-    for(const p of m.prototypes){floats.set([...p.centre,p.radius],p.id*8);words.set([p.firstRoot,p.rootCount,0,0],p.id*8+4);}
+    // Each species' bound and the stretch of the visible list and of the species' roots it holds.
+    const meta=new ArrayBuffer(P*32),floats=new Float32Array(meta),words=new Uint32Array(meta);
+    for(const p of m.prototypes){floats.set([...p.centre,p.radius],p.id*8);words.set([0,0,0,0],p.id*8+4);}
     const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest species bounds and root ranges');
-    const visibleCounts=make(new Uint32Array(m.prototypes.length),B.STORAGE,'forest GPU visible root counts');
+    const visibleCounts=make(new Uint32Array(P),B.STORAGE,'forest GPU visible root counts');
+    const speciesCounts=make(new Uint32Array(P),B.STORAGE,'forest species root counts');
     let currentPixelError=pixelError;
-    const parameters=make(new Float32Array([activeRootCount,m.prototypes.length,pixelError,0]),B.UNIFORM,'forest roots and pixel error');
-    const writeParameters=()=>device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentPixelError,0]));
+    const parameterWords=new ArrayBuffer(16),parameterFloats=new Float32Array(parameterWords),parameterCount=new Uint32Array(parameterWords);
+    const fillParameters=()=>{parameterFloats.set([activeRootCount,P,currentPixelError]);parameterCount[3]=activeRootCount;return parameterWords;};
+    const parameters=make(new Uint8Array(fillParameters()),B.UNIFORM,'forest roots and pixel error');
+    const writeParameters=()=>device.queue.writeBuffer(parameters,0,fillParameters());
     let cullSource=FOREST_CULL_WGSL;
     if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);stats.terrainOcclusion=true;}
     const cullModule=await shader(cullSource,'forest GPU cull');
-    const [reset,cull]=await Promise.all([
+    const [reset,cull,listSpecies]=await Promise.all([
       device.createComputePipelineAsync({label:'forest reset visible counts',layout:'auto',compute:{module:cullModule,entryPoint:'forestReset'}}),
       device.createComputePipelineAsync({label:'forest cull',layout:'auto',compute:{module:cullModule,entryPoint:'forestCull'}}),
+      device.createComputePipelineAsync({label:'forest species roots',layout:'auto',compute:{module:cullModule,entryPoint:'forestSpeciesRoots'}}),
     ]);
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:visibleCounts}},{binding:5,resource:{buffer:parameters}}]});
     const groupCull=()=>device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...[frameUBO,roots,prototypes,visible,visibleCounts,parameters].map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
-    let cullGroup=groupCull();
+    const groupSpecies=()=>device.createBindGroup({layout:listSpecies.getBindGroupLayout(0),entries:[[1,roots],[2,prototypes],[5,parameters],[6,speciesRoots],[7,speciesCounts]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+    let cullGroup=null,speciesGroup=null;
+    // The GPU lets a buffer go once the work already given it is done.
+    const retire=buffers=>{const drop=()=>{for(const b of buffers)b?.destroy();};if(typeof device.queue?.onSubmittedWorkDone==='function')device.queue.onSubmittedWorkDone().then(drop,drop);else drop();};
+    const trunkShapes=m.prototypes.map(p=>forestTrunkShape(p.species,m.stature==='full-grown'?{height:p.high[1],trunkRadius:p.dbhCentimetres/200}:null));
+    // Every array of roots held, by the array: where it lies in the roots, how many it holds, how many of each species
+    // stand in it, and the ground it covers. An array once given its strikes is never given them again: it keeps them
+    // while it is let go and comes back with them.
+    const slabs=new Map(),charred=new WeakSet(),grids=new Map();
+    let order=[];
+    const slabOf=(part,count,start)=>{
+      const kinds=new Uint32Array(P);let standing=0,minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+      for(let i=0,at=0;i<count;i++,at+=12){
+        if(!(part[at+3]>0))continue;
+        const kind=part[at+8]|0,x=part[at],z=part[at+2];
+        if(kind>=0&&kind<P){kinds[kind]++;standing++;}
+        if(x<minX)minX=x;if(x>maxX)maxX=x;if(z<minZ)minZ=z;if(z>maxZ)maxZ=z;
+      }
+      return {part,count,start,kinds,standing,minX,maxX,minZ,maxZ};
+    };
+    const rootsBuffer=capacity=>device.createBuffer({size:Math.max(48,capacity*48),usage:B.STORAGE|B.COPY_DST|B.COPY_SRC,label:'forest root transforms'});
+    const listBuffer=(capacity,label)=>device.createBuffer({size:Math.max(4,capacity*4),usage:B.STORAGE|B.COPY_DST,label});
+    // The sections the pack holds, nearest the player first, each whole or not at all: those that fit the device's
+    // roots in that order are held, and the first that does not is let go with every one beyond it. An array held
+    // before keeps its place in the roots; one let go is zeroed; one new takes the first gap that holds it. When none
+    // does, the roots are packed anew on the GPU into a buffer as large as they need, and all bound to the old is bound
+    // anew. Then each species' stretches are laid out and its roots listed, on the GPU.
+    const applySections=sections=>{
+      const wanted=[];let total=0,resident=0,released=0;
+      for(let k=0;k<sections.length;k++){
+        const parts=(sections[k].parts??[]).filter(part=>part?.length>=12);
+        const count=parts.reduce((sum,part)=>sum+Math.floor(part.length/12),0);
+        if(total+count>deviceCapacity){released=sections.length-k;break;}
+        total+=count;resident++;
+        for(const part of parts)if(!wanted.includes(part))wanted.push(part);
+      }
+      const keep=new Set(wanted),encoder=device.createCommandEncoder({label:'forest sections'});
+      for(const [part,slab] of slabs)if(!keep.has(part)){
+        encoder.clearBuffer(roots,slab.start*48,slab.count*48);
+        slabs.delete(part);grids.delete(part);
+      }
+      const fresh=wanted.filter(part=>!slabs.has(part)),occupied=[...slabs.values()].sort((a,b)=>a.start-b.start),placed=[];
+      const gapFor=count=>{
+        for(let k=0,at=0;k<=occupied.length;k++){
+          const end=k<occupied.length?occupied[k].start:rootCapacity;
+          if(end-at>=count)return {at,k};
+          if(k<occupied.length)at=occupied[k].start+occupied[k].count;
+        }
+        return null;
+      };
+      let fits=Boolean(roots);
+      for(const part of fresh){
+        if(!fits)break;
+        const count=Math.floor(part.length/12),gap=gapFor(count);
+        if(!gap){fits=false;break;}
+        const slab=slabOf(part,count,gap.at);occupied.splice(gap.k,0,slab);placed.push(slab);
+      }
+      const previous=[];
+      if(!fits){
+        // A quarter again what the sections need, so the next to come seldom asks for more.
+        const capacity=Math.max(1,rootCapacity,Math.min(deviceCapacity,Math.max(total,pack.maxRootCapacity||0,Math.ceil(total*1.25))));
+        const next=rootsBuffer(capacity);let at=0;
+        for(const slab of [...slabs.values()].sort((a,b)=>a.start-b.start)){encoder.copyBufferToBuffer(roots,slab.start*48,next,at*48,slab.count*48);slab.start=at;at+=slab.count;}
+        previous.push(roots);roots=next;
+        if(capacity!==rootCapacity){previous.push(visible,speciesRoots);visible=listBuffer(capacity,'forest GPU visible root IDs');speciesRoots=listBuffer(capacity,'forest species roots');}
+        rootCapacity=capacity;placed.length=0;
+        for(const part of fresh){const count=Math.floor(part.length/12);placed.push(slabOf(part,count,at));at+=count;}
+      }
+      device.queue.submit([encoder.finish()]);
+      retire(previous);
+      for(const slab of placed){
+        // Trees shot down in an earlier sitting are down before the section is seen.
+        if(!charred.has(slab.part)){reapplyForestStrikes(slab.part,slab.count,strikes);charred.add(slab.part);}
+        slabs.set(slab.part,slab);
+        device.queue.writeBuffer(roots,slab.start*48,slab.part,0,slab.count*12);
+      }
+      order=wanted;
+      // Each species' stretch is as long as its trees standing in every section held.
+      const totals=new Uint32Array(P);let standing=0;activeRootCount=0;
+      for(const slab of slabs.values()){for(let p=0;p<P;p++)totals[p]+=slab.kinds[p];standing+=slab.standing;activeRootCount=Math.max(activeRootCount,slab.start+slab.count);}
+      let first=0;
+      for(const p of m.prototypes){p.firstRoot=first;p.rootCount=totals[p.id];words[p.id*8+4]=first;words[p.id*8+5]=totals[p.id];first+=totals[p.id];}
+      device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
+      writeParameters();
+      if(previous.length){
+        cullGroup=groupCull();speciesGroup=groupSpecies();
+        wind?.reroot(roots,rootCapacity);
+        clusters?.reroot(roots,visible,wind,speciesRoots);
+      }
+      wind?.updateRoots(activeRootCount);
+      clusters?.placeTrees();
+      const list=device.createCommandEncoder({label:'forest species roots'});
+      list.clearBuffer(speciesRoots);
+      list.clearBuffer(speciesCounts);
+      if(activeRootCount){const pass=list.beginComputePass({label:'forest species roots'});pass.setPipeline(listSpecies);pass.setBindGroup(0,speciesGroup);forestDispatch(pass,activeRootCount);pass.end();}
+      device.queue.submit([list.finish()]);
+      Object.assign(stats,{roots:standing,rootCapacity,sections:{resident,released,arrays:slabs.size}});
+    };
+    applySections(initialSections);
     async function loadCompressedSurfaces(){
       const materials=m.prototypes.flatMap(p=>p.nativeMaterials);
       const codec=chooseForestSurfaceCodec(device,query.get('forestSurfaces')||'auto');
@@ -914,7 +1042,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const sceneIds=[0,1,2,3,4,5,6,19,20,21];
     const bind=(p,ids=sceneIds)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.filter(([i])=>ids.includes(i)).map(([binding,resource])=>({binding,resource}))});
     bind.frameUBO=frameUBO;
-    clusters=await createForestClusters({device,shader,module,frame:FRAME_WGSL,source:clusterSource,crowns:crownSource,crownChange,wind,prototypes:m.prototypes,roots,visible,visibleCounts,parameters,format,samples,bind,
+    clusters=await createForestClusters({device,shader,module,frame:FRAME_WGSL,source:clusterSource,crowns:crownSource,crownChange,wind,prototypes:m.prototypes,roots,visible,speciesRoots,visibleCounts,parameters,format,samples,bind,
       hasLandShadow:resources.some(([id])=>id===19),shadowUniform:resources.find(([id])=>id===19)?.[1].buffer??null,
       cloudEntries:p=>clouds.bindVolume(p),
       surfaceEntries:(pipeline,id,offset,normals)=>{
@@ -928,23 +1056,36 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     if(crownSource)stats.crowns={loaded:true,mode:'progressive-continuum',steps:crownSource.manifest.prototypes.reduce((sum,q)=>sum+q.stepCount,0),splatPixels:FOREST_CROWN_SPLAT_PIXELS,minPixels:FOREST_CROWN_MIN_PIXELS,triangles:crownSource.manifest.indexCount/3,bytes:crownSource.vertices.byteLength+crownSource.indices.byteLength+crownSource.morph.byteLength,error:null};
     // The GPU holds the surfaces now; the pack lets go of its maps.
     pack.releaseSurfaces?.();
-    // A ball finds its trees through this. A new one builds off the frame; the old one serves until it is ready.
+    // A ball finds its trees through these: one grid an array, built off the frame one after another, nearest
+    // first, each serving as soon as it is ready; an array let go takes its grid with it.
     // A pack's trees are struck as the wood measured for their species (js/forest-trunk-shapes.js). Full-grown trees are
     // not the size of the trees measured, so for them that wood is made as tall as each kind of tree and as stout in the trunk.
-    const trunkShapes=m.prototypes.map(p=>forestTrunkShape(p.species,m.stature==='full-grown'?{height:p.high[1],trunkRadius:p.dbhCentimetres/200}:null));
     let trunkGrid=null,trunkBuild=0;
-    const rebuildTrunks=()=>{
-      const build=++trunkBuild,forRoots=liveRoots,forCount=activeRootCount;
-      return buildForestTrunkGridAsync(forRoots,forCount,trunkShapes,{isCancelled:()=>destroyed||build!==trunkBuild}).then(grid=>{if(grid&&build===trunkBuild)trunkGrid=grid;}).catch(error=>{console.error('Forest trunk grid failed',error);});
+    const publishTrunks=()=>{
+      const list=order.map(part=>grids.get(part)).filter(Boolean);
+      trunkGrid=list.length?{grids:list,trees:list.reduce((sum,grid)=>sum+grid.trees,0)}:null;
+    };
+    const rebuildTrunks=async()=>{
+      const build=++trunkBuild;publishTrunks();
+      try{
+        for(const part of order){
+          const slab=slabs.get(part);
+          if(!slab||grids.has(part))continue;
+          const grid=await buildForestTrunkGridAsync(part,slab.count,trunkShapes,{isCancelled:()=>destroyed||build!==trunkBuild||!slabs.has(part)});
+          if(destroyed||build!==trunkBuild)return;
+          if(grid&&slabs.has(part)){grids.set(part,grid);publishTrunks();}
+        }
+      }catch(error){console.error('Forest trunk grid failed',error);}
     };
     const trunksReady=rebuildTrunks();
-    const writeRoot=index=>device.queue.writeBuffer(roots,index*48,liveRoots.subarray(index*12,index*12+12));
-    const noteFall=(index,now)=>{
-      const fx=liveRoots[index*12],fy=liveRoots[index*12+1],fz=liveRoots[index*12+2],fScale=Math.max(0.5,liveRoots[index*12+3]);
-      falling.push({x:fx,z:fz,now});
+    const writeRoot=(slab,index)=>{if(slabs.get(slab.part)===slab)device.queue.writeBuffer(roots,(slab.start+index)*48,slab.part,index*12,12);};
+    const noteFall=(slab,index,now)=>{
+      const live=slab.part,at=index*12;
+      const fx=live[at],fy=live[at+1],fz=live[at+2],fScale=Math.max(0.5,live[at+3]);
+      falling.push({x:fx,z:fz,now,part:live,index});
       if(wind?.enabled){
-        const proto=m.prototypes[liveRoots[index*12+8]|0]??m.prototypes[0];
-        const code=(liveRoots[index*12+9]|0)>>>0;
+        const proto=m.prototypes[live[at+8]|0]??m.prototypes[0];
+        const code=(live[at+9]|0)>>>0;
         const fallAng=(((code>>>11)&(FOREST_FALL_BEARINGS-1))/FOREST_FALL_BEARINGS)*Math.PI*2;
         const reach=Math.max(4,(proto?.high?.[1]??16)*fScale*0.88);
         const crownR=Math.max(2.5,Math.min(10,(proto?.radius??12)*fScale*0.32));
@@ -953,47 +1094,22 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         wind.emitForce({x:fx+Math.cos(fallAng)*reach*0.55,y:fy+3.5,z:fz+Math.sin(fallAng)*reach*0.55,radius:reach*1.15,strengthPa:340,dx:Math.cos(fallAng),dy:-0.15,dz:Math.sin(fallAng),basis:FOREST_WIND_BASIS_RADIAL,eventType:FOREST_WIND_EVENT_PULSE,now,waveSpeed:FOREST_FALL_SECONDS+0.8,lobe:0.45});
       }
     };
-    const liveIndex=(hit)=>{
-      if(hit.roots===liveRoots)return hit.rootIndex;
-      for(let i=0;i<activeRootCount;i++)if(liveRoots[i*12]===hit.x&&liveRoots[i*12+2]===hit.z)return i;
-      return -1;
+    // The arrays whose ground reaches within this of a point.
+    const slabsNear=(x,z,reach)=>[...slabs.values()].filter(s=>x>=s.minX-reach&&x<=s.maxX+reach&&z>=s.minZ-reach&&z<=s.maxZ+reach);
+    // The root a ball's grid named: in the array it named while that is held, or the root standing where it stood.
+    const liveRoot=hit=>{
+      const slab=slabs.get(hit.roots);
+      if(slab&&hit.rootIndex<slab.count)return {slab,index:hit.rootIndex};
+      for(const near of slabsNear(hit.x,hit.z,0))for(let i=0;i<near.count;i++)if(near.part[i*12]===hit.x&&near.part[i*12+2]===hit.z)return {slab:near,index:i};
+      return null;
     };
     const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes,strikeOrigin));};
-    // A coast with more trees than the roots hold takes larger buffers, half again what it needs so the next
-    // coast seldom asks again, and never more than the device allows. Everything bound to the old ones is
-    // bound anew; the old are let go once the GPU has done with them.
-    const grow=need=>{
-      const previous=[roots,visible];
-      rootCapacity=Math.min(deviceCapacity,Math.ceil(need*1.5));
-      rootBuffers(rootCapacity);
-      cullGroup=groupCull();
-      wind.reroot(roots,rootCapacity);
-      clusters.reroot(roots,visible,wind);
-      stats.rootCapacity=rootCapacity;
-      const drop=()=>{for(const b of previous)b.destroy();};
-      if(typeof device.queue?.onSubmittedWorkDone==='function')device.queue.onSubmittedWorkDone().then(drop,drop);else drop();
-    };
     return {stats,trunksReady,
       get wind(){return wind;},
       get trunks(){return trunkGrid;},
       updatePack(nextPack,nextHeights=null,nextRegion=null){
-        if(destroyed||!nextPack?.roots||!nextPack?.manifest)return;
-        const nextCount=Math.min(deviceCapacity,nextPack.manifest.rootCount);
-        if(nextCount>rootCapacity)grow(nextCount);
-        activeRootCount=nextCount;
-        stats.roots=nextCount;
-        if(nextPack.roots.byteLength){
-          liveRoots=nextPack.roots;reapplyForestStrikes(liveRoots,nextCount,strikes);
-          device.queue.writeBuffer(roots,0,nextPack.roots.subarray(0,nextCount*12));
-        }
-        for(const p of nextPack.manifest.prototypes){
-          if(m.prototypes[p.id]){m.prototypes[p.id].firstRoot=p.firstRoot;m.prototypes[p.id].rootCount=p.rootCount;}
-          words[p.id*8+4]=p.firstRoot;words[p.id*8+5]=p.rootCount;
-        }
-        clusters.placeTrees();
-        wind.updateRoots(nextCount);
-        device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-        writeParameters();
+        if(destroyed||!nextPack?.manifest)return;
+        applySections(forestPackSections(nextPack));
         if(nextHeights)terrainVisibility?.update?.(nextHeights,nextRegion);
         rebuildTrunks();
       },
@@ -1004,10 +1120,15 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           const gy=groundAt?groundAt(x,z):0;
           wind.emitForce({x,y:(Number.isFinite(gy)?gy:0)+2.4,z,radius:34,strengthPa:920,basis:FOREST_WIND_BASIS_RADIAL,eventType:FOREST_WIND_EVENT_FRIEDLANDER,now,waveSpeed:280});
         }
-        const index=strikeForestRoot(liveRoots,activeRootCount,x,z,strikes,{now,groundAt,shapeOf:id=>trunkShapes[id]});
-        if(index<0)return;
-        writeRoot(index);saveStrikes();
-        if(liveRoots[index*12+11]<0)noteFall(index,now);
+        let slab=null,index=-1,distance=Infinity;
+        for(const near of slabsNear(x,z,TREE_STRIKE_REACH_M)){
+          const found=nearestForestRoot(near.part,near.count,x,z);
+          if(found.index>=0&&found.distance<distance){slab=near;index=found.index;distance=found.distance;}
+        }
+        if(!slab)return;
+        blastForestRoot(slab.part,index,x,z,strikes,{now,groundAt,shapeOf:id=>trunkShapes[id]});
+        writeRoot(slab,index);saveStrikes();
+        if(slab.part[index*12+11]<0)noteFall(slab,index,now);
       },
       // A ball in this tree. Only this root's 48 bytes go to the GPU, and only now.
       strikeTree(hit,impact,now=0,groundAt=null){
@@ -1016,32 +1137,38 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           const hx=hit.x??0,hz=hit.z??0,hy=(groundAt?groundAt(hx,hz):0)+(hit.height??3);
           wind.emitForce({x:hx,y:Number.isFinite(hy)?hy:3,z:hz,radius:26,strengthPa:720,dx:impact?.vx??1,dy:impact?.vy??0,dz:impact?.vz??0,basis:FOREST_WIND_BASIS_RADIAL,eventType:FOREST_WIND_EVENT_FRIEDLANDER,now,waveSpeed:290,lobe:0.35});
         }
-        const index=liveIndex(hit);if(index<0)return null;
-        const result=strikeForestTree(liveRoots,index,trunkShapes[liveRoots[index*12+8]|0],{...impact,height:hit.height,onTrunk:hit.onTrunk,now,groundAt},strikes);
+        const found=liveRoot(hit);if(!found)return null;
+        const {slab,index}=found;
+        const result=strikeForestTree(slab.part,index,trunkShapes[slab.part[index*12+8]|0],{...impact,height:hit.height,onTrunk:hit.onTrunk,now,groundAt},strikes);
         if(!result)return null;
-        writeRoot(index);saveStrikes();
-        if(result.felled)noteFall(index,now);
+        writeRoot(slab,index);saveStrikes();
+        if(result.felled)noteFall(slab,index,now);
         return result;
       },
-      // Once a tree is down it stays down, whatever the clock does: it wraps every ten minutes.
+      // Once a tree is down it stays down, whatever the clock does: it wraps every ten minutes. A tree whose section
+      // was let go meanwhile lies down in its array, and comes back so.
       settleFalls(now){
         for(let f=falling.length-1;f>=0;f--){
           const fall=falling[f],age=now-fall.now;
           if(age>=0&&age<FOREST_FALL_SECONDS+.1)continue;
           falling.splice(f,1);
-          for(let i=0;i<activeRootCount;i++)if(liveRoots[i*12]===fall.x&&liveRoots[i*12+2]===fall.z){liveRoots[i*12+11]=FOREST_LONG_FALLEN;writeRoot(i);break;}
+          const at=fall.index*12;
+          if(fall.part[at]!==fall.x||fall.part[at+2]!==fall.z)continue;
+          fall.part[at+11]=FOREST_LONG_FALLEN;
+          const slab=slabs.get(fall.part);if(slab)writeRoot(slab,fall.index);
         }
       },
       // The scene's one pixel error, which every tree's cut and crown read.
       setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentPixelError)>1e-4){currentPixelError=next;stats.pixelError=next;writeParameters();}},
-      encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));wind.encode(pass);clusters.encode(pass);},
+      // With no roots held the clusters still clear what they drew last.
+      encode(pass){if(!activeRootCount){clusters.encode(pass);return;}pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(P/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);forestDispatch(pass,activeRootCount);wind.encode(pass);clusters.encode(pass);},
       drawOpaque(pass){clusters.drawOpaque(pass);},
       // The indirect draws drawOpaque and drawCutout submit, for the continuum census (js/continuum-census.js).
       // Records lie five words apart, whichever draw call reads them; leaves drawn for depth and again to shade
       // are listed twice, because they are submitted twice.
       continuumDraws(){
         if(destroyed)return [];
-        const out=[],P=m.prototypes.length,record=(buffer,at,records=1)=>{if(records>0)out.push({buffer,offset:at*20,records,stride:5});};
+        const out=[],record=(buffer,at,records=1)=>{if(records>0)out.push({buffer,offset:at*20,records,stride:5});};
         // Per species: camera wood and leaves, then the shadow map's two, then the crowns' lists (js/forest-clusters.js).
         record(clusters.draws,0,P*2);
         for(const p of m.prototypes)record(clusters.draws,p.id*2+1);
@@ -1050,6 +1177,6 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       },
       drawCutout(pass){clusters.drawLeafDepth(pass);clusters.drawLeaves(pass);},
       drawShadow(pass){clusters.drawShadow(pass);},
-      destroy(){destroyed=true;abort.abort();for(const b of allocated)b.destroy();roots?.destroy();visible?.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();}};
-  }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();roots?.destroy();visible?.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();throw error;}
+      destroy(){destroyed=true;abort.abort();for(const b of allocated)b.destroy();roots?.destroy();visible?.destroy();speciesRoots?.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();}};
+  }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();roots?.destroy();visible?.destroy();speciesRoots?.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();throw error;}
 }

@@ -252,9 +252,23 @@ test('6. requestWebGPUAdapter rejects under-limit (< 8 storage buffers) adapters
   assert.deepEqual(seenDescriptors[0].requiredLimits, {
     maxStorageBuffersPerShaderStage: 8,
     maxStorageBuffersInVertexStage: 8,
-    maxBufferSize: 512 * 1024 * 1024,
-    maxStorageBufferBindingSize: 256 * 1024 * 1024,
+    maxBufferSize: 1024 * 1024 * 1024,
+    maxStorageBufferBindingSize: 512 * 1024 * 1024,
   });
+
+  // A device that refuses the adapter's own sizes is asked again at the former caps, then at its defaults.
+  const cappedCalls = [];
+  const cappingAdapter = {
+    features: new Set(),
+    limits: { maxStorageBuffersPerShaderStage: 8, maxBufferSize: 4 * 1024 * 1024 * 1024, maxStorageBufferBindingSize: 4 * 1024 * 1024 * 1024 },
+    async requestDevice(desc) {
+      cappedCalls.push(desc);
+      if (desc?.requiredLimits?.maxBufferSize > 512 * 1024 * 1024) throw new TypeError('Limit rejected by driver');
+      return { capped: desc?.requiredLimits };
+    },
+  };
+  const dev3 = await requestWebGPUDevice(cappingAdapter);
+  assert.deepEqual(dev3.capped, { maxStorageBuffersPerShaderStage: 8, maxBufferSize: 512 * 1024 * 1024, maxStorageBufferBindingSize: 256 * 1024 * 1024 });
 
   // Verify fallback retry without requiredLimits when requestDevice rejects limits
   const retryCalls = [];

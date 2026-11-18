@@ -172,7 +172,8 @@ test('WebGPU bone spring-damper simulation responds quadratically to wind speed,
     const windManifest = JSON.parse(fs.readFileSync(PORTUGAL_FOREST_WIND_ASSETS['manifest.json'], 'utf8'));
     const bonesBytes = Array.from(zlib.gunzipSync(fs.readFileSync(PORTUGAL_FOREST_WIND_ASSETS['bones.bin.gz'])));
     // Only header + small slice of weights needed for compute pose verification.
-    const simSource = fs.readFileSync('js/forest-wind.js', 'utf8');
+    // The wind module and the dispatch helper it imports, read as one script.
+    const simSource = fs.readFileSync('js/forest-dispatch.js', 'utf8') + '\n' + fs.readFileSync('js/forest-wind.js', 'utf8').replace(/^import .*$/gm, '');
     const commonSource = fs.readFileSync('js/wgsl/common.js', 'utf8');
 
     const result = await page.evaluate(async ({ simSource, commonSource, protos, windManifest, bonesBytes }) => {

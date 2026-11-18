@@ -11,7 +11,7 @@ import {generateProceduralCoastalPack,portClearanceEnvelope,PLANT_STREET_GAP_M,t
 import {CITY_BLOCK_FLOATS} from '../js/old-world-city.js';
 import {streetEdgeAt} from '../js/town-streets.js';
 import {retargetForestPackToProcedural} from '../js/terrain.js';
-import {forestRootCapacity} from '../js/forest-scenery.js';
+import {forestRootCapacity,forestPackRoots} from '../js/forest-scenery.js';
 import {forestTrunkShape,buildForestTrunkGrid,sweepForestTrunks,strikeForestRoot,forestStrikesToSave,forestStrikesFromSave,reapplyForestStrikes,FOREST_LONG_FALLEN} from '../js/forest-trunks.js';
 
 const PACKS={portugal:PORTUGAL_FOREST_GROVE_ASSETS,subtropical:SUBTROPICAL_FOREST_GROVE_ASSETS};
@@ -136,19 +136,21 @@ test('a grove\'s trees are roots of the forest, clear of town, ways and water, p
   const withGrove=retargetForestPackToProcedural(forest,pack,undefined,{stand});
   assert.equal(planted.groveRoots??0,0);
   assert.ok(withGrove.groveRoots>1000,`${withGrove.groveRoots} grove roots`);
-  assert.equal(withGrove.rootsRefused,0);
-  assert.equal(withGrove.manifest.rootCount,withGrove.roots.length/12);
+  assert.equal(withGrove.sectionsReleased,0);
+  assert.equal(withGrove.roots,null,'a planted pack is held section by section, never joined');
+  const plantedRoots=forestPackRoots(planted),groveRoots=forestPackRoots(withGrove);
+  assert.equal(withGrove.manifest.rootCount,groveRoots.length/12);
   assert.equal(withGrove.manifest.rootCount-planted.manifest.rootCount,withGrove.groveRoots);
   // Every planted tree is still planted, and the grove adds only its own.
-  const plantedKeys=new Set();for(let k=0;k<planted.roots.length;k+=12)plantedKeys.add(rootKey(planted.roots,k));
+  const plantedKeys=new Set();for(let k=0;k<plantedRoots.length;k+=12)plantedKeys.add(rootKey(plantedRoots,k));
   const grove=[];
-  for(let k=0;k<withGrove.roots.length;k+=12){const key=rootKey(withGrove.roots,k);if(!plantedKeys.delete(key))grove.push(k);}
+  for(let k=0;k<groveRoots.length;k+=12){const key=rootKey(groveRoots,k);if(!plantedKeys.delete(key))grove.push(k);}
   assert.equal(plantedKeys.size,0);
   assert.equal(grove.length,withGrove.groveRoots);
   // Each grove root is a planted tree's record: a kind of the pack, a scale, its ground, and a root's identity.
   const blocks=pack.city?.blocks??new Float32Array(0);
   const inBlock=(x,z)=>{for(let b=0;b<blocks.length;b+=CITY_BLOCK_FLOATS){const dx=x-blocks[b],dz=z-blocks[b+2],c=Math.cos(blocks[b+3]),s=Math.sin(blocks[b+3]);if(Math.abs(dx*c-dz*s)<=blocks[b+4]*.5&&Math.abs(dx*s+dz*c)<=blocks[b+5]*.5)return true;}return false;};
-  const roots=withGrove.roots;
+  const roots=groveRoots;
   for(const k of grove){
     const x=roots[k],y=roots[k+1],z=roots[k+2],scale=roots[k+3],kind=roots[k+8],sink=roots[k+9];
     assert.ok(Number.isInteger(kind)&&kind<forest.manifest.prototypes.length&&scale>0);
@@ -162,29 +164,55 @@ test('a grove\'s trees are roots of the forest, clear of town, ways and water, p
   // Planted again only when the section changes: the same section gives back the same roots, and a section
   // whose ground is different is stamped differently.
   const cached=pack._cachedForestGrove;
-  assert.ok(cached?.roots instanceof Float32Array);
+  assert.ok(Array.isArray(cached?.roots)&&cached.roots.length>0&&cached.roots.every(part=>part instanceof Float32Array),'a grove is held as arrays of records');
   const again=retargetForestPackToProcedural(forest,pack,undefined,{stand});
   assert.equal(pack._cachedForestGrove,cached);
-  assert.deepEqual(again.roots,withGrove.roots);
+  assert.ok(cached.roots.every(part=>again.sections[0].parts.includes(part)),'the same arrays, not copies');
+  assert.deepEqual(forestPackRoots(again),groveRoots);
   const raised=Float32Array.from(pack.heights,h=>h+1);
   assert.notEqual(forestGroveStamp({...pack,heights:raised},new Float32Array(0)),forestGroveStamp(pack,new Float32Array(0)));
   // A fresh coast plants the same grove: what is saved by place finds its tree again.
   const fresh=retargetForestPackToProcedural(forest,cartagena(),undefined,{stand});
-  assert.deepEqual(fresh.roots,withGrove.roots);
-  // A device that holds fewer roots plants the grove only so far, past the planted trees' budget and the
-  // foreshore's palms, and says how many it refused.
-  const small=retargetForestPackToProcedural(forest,pack,undefined,{stand,rootCapacity:64000+520+1+600});
-  assert.equal(small.groveRoots,600);
-  assert.equal(small.rootsRefused,withGrove.groveRoots-600);
-  assert.equal(small.manifest.rootCount,planted.manifest.rootCount+600);
+  assert.deepEqual(forestPackRoots(fresh),groveRoots);
+  // Another terrain given the same section plants its own: its forest strikes what it holds where it lies.
+  const other=retargetForestPackToProcedural(forest,pack,undefined,{stand,owner:{}});
+  assert.notEqual(pack._cachedForestGrove,cached);
+  assert.deepEqual(forestPackRoots(other),groveRoots);
+});
+
+test('a device holds the sections nearest the player, each whole, and lets the farthest go',async()=>{
+  const stand=await loadForestGroves({assets:SUBTROPICAL_FOREST_GROVE_ASSETS,fetchAsset:serve()});
+  const pack=cartagena(),forest=subtropical(),square=coast();
+  const far={...square,region:{...square.region,x:pack.region.x+30000,z:pack.region.z}};
+  const sizes=held=>Object.fromEntries(held.sections.map(section=>[section.key,section.parts.reduce((sum,part)=>sum+part.length/12,0)]));
+  const all=retargetForestPackToProcedural(forest,pack,undefined,{stand,extraSections:[far]});
+  const farKey=`${far.region.x},${far.region.z}`,whole=sizes(all);
+  assert.deepEqual(Object.keys(whole),['coast',farKey]);
+  assert.equal(all.sectionsReleased,0);
+  assert.ok(whole.coast>1000&&whole[farKey]>100,`${whole.coast} and ${whole[farKey]} roots`);
+  // One root short of both: the section nearer the player is held whole, and the other let go whole.
+  const tight=whole.coast+whole[farKey]-1;
+  const byFar=retargetForestPackToProcedural(forest,pack,undefined,{stand,extraSections:[far],rootCapacity:tight,near:far.region});
+  assert.deepEqual(sizes(byFar),{[farKey]:whole[farKey]});
+  assert.equal(byFar.sectionsReleased,1);
+  assert.equal(byFar.manifest.rootCount,whole[farKey]);
+  const byCoast=retargetForestPackToProcedural(forest,pack,undefined,{stand,extraSections:[far],rootCapacity:tight,near:pack.region});
+  assert.deepEqual(sizes(byCoast),{coast:whole.coast});
+  assert.equal(byCoast.sectionsReleased,1);
+  // A section let go keeps only the size of its grove; it is planted again when it is held again.
+  assert.equal(far._cachedForestGrove.roots,null);
+  assert.equal(far._cachedForestGrove.count,whole[farKey]-(far._cachedForestPlanted?.roots.length??0)/12);
+  const back=retargetForestPackToProcedural(forest,pack,undefined,{stand,extraSections:[far]});
+  assert.deepEqual(sizes(back),whole);
+  assert.deepEqual(forestPackRoots(back),forestPackRoots(all));
 });
 
 test('a grove\'s tree is struck, felled and remembered as any tree',async()=>{
   const stand=await loadForestGroves({assets:SUBTROPICAL_FOREST_GROVE_ASSETS,fetchAsset:serve()});
   const forest=subtropical(),pack=retargetForestPackToProcedural(forest,cartagena(),undefined,{stand});
   const planted=new Set(),bare=retargetForestPackToProcedural(forest,cartagena());
-  for(let k=0;k<bare.roots.length;k+=12)planted.add(rootKey(bare.roots,k));
-  const roots=pack.roots.slice(),count=roots.length/12;
+  const plantedRoots=forestPackRoots(bare);for(let k=0;k<plantedRoots.length;k+=12)planted.add(rootKey(plantedRoots,k));
+  const roots=forestPackRoots(pack),count=roots.length/12;
   let index=-1;for(let i=0;i<count;i++)if(!planted.has(rootKey(roots,i*12))&&roots[i*12+3]>.8){index=i;break;}
   assert.ok(index>=0,'a grove tree to shoot at');
   const shapes=forest.manifest.prototypes.map(p=>forestTrunkShape(p.species));
@@ -198,7 +226,7 @@ test('a grove\'s tree is struck, felled and remembered as any tree',async()=>{
   for(let k=0;k<3;k++)assert.equal(strikeForestRoot(roots,count,x,z,strikes,{shapeOf:id=>shapes[id]}),index);
   assert.ok(roots[index*12+11]<0,'felled');
   const saved=forestStrikesToSave(strikes,{x:0,z:0});
-  const again=retargetForestPackToProcedural(forest,cartagena(),undefined,{stand}).roots;
+  const again=forestPackRoots(retargetForestPackToProcedural(forest,cartagena(),undefined,{stand}));
   reapplyForestStrikes(again,count,forestStrikesFromSave(saved,{x:0,z:0}));
   assert.equal(again[index*12+11],FOREST_LONG_FALLEN,'the coast comes back with the grove tree down');
 });
@@ -206,12 +234,12 @@ test('a grove\'s tree is struck, felled and remembered as any tree',async()=>{
 test('the roots are as many as the device holds, and only its limits bound them',()=>{
   assert.equal(forestRootCapacity({limits:{maxStorageBufferBindingSize:256*1024*1024,maxBufferSize:512*1024*1024,maxComputeWorkgroupsPerDimension:1<<20}}),Math.floor(256*1024*1024/48));
   assert.equal(forestRootCapacity({limits:{maxStorageBufferBindingSize:1<<30,maxBufferSize:128*1024*1024,maxComputeWorkgroupsPerDimension:1<<20}}),Math.floor(128*1024*1024/48));
-  // One root to a thread, 64 to a workgroup along x: a dispatch reaches no further than the device lets it.
-  assert.equal(forestRootCapacity({limits:{maxStorageBufferBindingSize:256*1024*1024,maxBufferSize:512*1024*1024,maxComputeWorkgroupsPerDimension:65535}}),65535*64);
+  // The passes over the roots spread their workgroups over a second dimension, so a dispatch bounds nothing.
+  assert.equal(forestRootCapacity({limits:{maxStorageBufferBindingSize:256*1024*1024,maxBufferSize:512*1024*1024,maxComputeWorkgroupsPerDimension:65535}}),Math.floor(256*1024*1024/48));
   const scenery=fs.readFileSync('js/forest-scenery.js','utf8'),terrain=fs.readFileSync('js/terrain.js','utf8');
-  // A coast with more trees takes larger buffers, and the wind and the clusters are bound to them.
-  assert.match(scenery,/if\(nextCount>rootCapacity\)grow\(nextCount\);/);
-  assert.match(scenery,/wind\.reroot\(roots,rootCapacity\);\s*clusters\.reroot\(roots,visible,wind\);/);
+  // A coast with more trees takes larger buffers, packed anew on the GPU, and the wind and the clusters are bound to them.
+  assert.match(scenery,/encoder\.copyBufferToBuffer\(roots,slab\.start\*48,next,at\*48,slab\.count\*48\)/);
+  assert.match(scenery,/wind\?\.reroot\(roots,rootCapacity\);\s*clusters\?\.reroot\(roots,visible,wind,speciesRoots\);/);
   // The grove is planted on every section of the stream, and nothing draws it but the forest.
   assert.ok(!/FOREST_GROVE_WGSL|createForestGroves|groves\?\.encode|groves\?\.draw/.test(terrain));
   assert.match(terrain,/stand:grovePack,rootCapacity/);

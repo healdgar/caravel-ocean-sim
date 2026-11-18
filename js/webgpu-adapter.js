@@ -23,7 +23,12 @@ function adapterMeetsStorageLimits(adapter, option) {
   return true;
 }
 
-function buildRequiredLimits(adapterLimits, requestedLimits = {}) {
+// The largest buffer and storage binding are asked for as large as the adapter allows: the forest's roots and the
+// lists sized by them grow to whatever the coast holds (js/forest-scenery.js forestRootCapacity). A device that
+// refuses those is asked again at the sizes it was once given (cap), then at its defaults.
+const CAPPED_BUFFER_BYTES = 512 * 1024 * 1024;
+const CAPPED_STORAGE_BINDING_BYTES = 256 * 1024 * 1024;
+function buildRequiredLimits(adapterLimits, requestedLimits = {}, { cap = false } = {}) {
   if (!adapterLimits || typeof adapterLimits !== 'object') return null;
   const requiredLimits = {};
   const stageMax = adapterLimits.maxStorageBuffersPerShaderStage;
@@ -44,11 +49,11 @@ function buildRequiredLimits(adapterLimits, requestedLimits = {}) {
   }
   const bufMax = adapterLimits.maxBufferSize;
   if (Number.isFinite(bufMax) && bufMax > 256 * 1024 * 1024) {
-    requiredLimits.maxBufferSize = Math.min(bufMax, 512 * 1024 * 1024);
+    requiredLimits.maxBufferSize = cap ? Math.min(bufMax, CAPPED_BUFFER_BYTES) : bufMax;
   }
   const storageBindMax = adapterLimits.maxStorageBufferBindingSize;
   if (Number.isFinite(storageBindMax) && storageBindMax > 128 * 1024 * 1024) {
-    requiredLimits.maxStorageBufferBindingSize = Math.min(storageBindMax, 256 * 1024 * 1024);
+    requiredLimits.maxStorageBufferBindingSize = cap ? Math.min(storageBindMax, CAPPED_STORAGE_BINDING_BYTES) : storageBindMax;
   }
   return Object.keys(requiredLimits).length > 0 ? requiredLimits : null;
 }
@@ -98,6 +103,7 @@ export async function requestWebGPUDevice(adapter, optionalFeatures = [], reques
     }
   }
   const requiredLimits = buildRequiredLimits(adapter?.limits, requestedLimits);
+  const cappedLimits = buildRequiredLimits(adapter?.limits, requestedLimits, { cap: true });
   const makeDescriptor = (features, limits) => {
     if (!features.length && !limits) return undefined;
     const desc = {};
@@ -112,6 +118,13 @@ export async function requestWebGPUDevice(adapter, optionalFeatures = [], reques
     if (withoutTimestamp.length < supported.length) {
       try {
         return await adapter.requestDevice(makeDescriptor(withoutTimestamp, requiredLimits));
+      } catch {
+        // Fall through to retry without requiredLimits below.
+      }
+    }
+    if (cappedLimits && JSON.stringify(cappedLimits) !== JSON.stringify(requiredLimits)) {
+      try {
+        return await adapter.requestDevice(makeDescriptor(withoutTimestamp, cappedLimits));
       } catch {
         // Fall through to retry without requiredLimits below.
       }

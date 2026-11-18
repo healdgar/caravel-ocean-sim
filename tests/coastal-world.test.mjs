@@ -67,6 +67,7 @@ import {
   SUBTROPICAL_FOREST_ASSETS,
   PORTUGAL_FOREST_ASSETS,
   loadForestScenery,
+  forestPackRoots,
 } from '../js/forest-scenery.js';
 import {
   terrainSample,
@@ -486,7 +487,7 @@ test('architectural port materials, foreshore palm places, beach sand vertex wei
     { isMobile: true }
   );
   assert.equal(retargeted.maxRootCapacity, 16000);
-  assert.ok(retargeted.roots.length >= 12);
+  assert.ok(forestPackRoots(retargeted).length >= 12);
 });
 
 test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle and stamps into port geometry', () => {
@@ -769,10 +770,11 @@ test('coastline smoothing removes beach potholes, aligns regional swells, and st
   let centerTrees = 0;
   let neighborTrees = 0;
   const halfSpan = basePack.region.span * 0.5;
-  const totalRoots = multiForest.roots.length / 12;
+  const multiRoots = forestPackRoots(multiForest);
+  const totalRoots = multiRoots.length / 12;
   for (let i = 0; i < totalRoots; i++) {
-    const x = multiForest.roots[i * 12 + 0];
-    const z = multiForest.roots[i * 12 + 2];
+    const x = multiRoots[i * 12 + 0];
+    const z = multiRoots[i * 12 + 2];
     if (Math.abs(x - basePack.region.x) <= halfSpan && Math.abs(z - basePack.region.z) <= halfSpan) {
       centerTrees++;
     } else {
@@ -2030,8 +2032,9 @@ test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototype
   const country = oldWorldCountry(lisbonPack.region, lisbonPack.heights, lisbonPack.port);
   assert.ok(country?.town, 'Lisboa is an Old World city');
   let inTown = 0, misplaced = 0, inWood = 0, tended = 0, forbidden = 0;
+  const lisbonRoots = forestPackRoots(retargeted);
   for (let i = 0; i < retargeted.manifest.rootCount; i++) {
-    const x = retargeted.roots[i * 12], z = retargeted.roots[i * 12 + 2];
+    const x = lisbonRoots[i * 12], z = lisbonRoots[i * 12 + 2];
     if (country.beyondTown(x, z) <= 0) {
       inTown++;
       const ground = country.plan.groundAt(x, z);

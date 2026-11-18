@@ -44,7 +44,7 @@ order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/wgsl/crew-
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-clusters.js');
-order.splice(order.indexOf('js/forest-clusters.js'),0,'js/forest-wind.js','js/forest-crowns.js');
+order.splice(order.indexOf('js/forest-clusters.js'),0,'js/forest-dispatch.js','js/forest-wind.js','js/forest-crowns.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-groves.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-surfaces.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');

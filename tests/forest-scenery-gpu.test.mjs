@@ -24,7 +24,8 @@ test('forest compute lists every tree in view once, however far, and resets its 
       const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([[0,0,-20],[0,0,-30000],[0,0,20],[1000,0,-20]].flatMap(p=>[...p,1,0,1,1,1,0,0,0,0])),B.STORAGE);
       const meta=new ArrayBuffer(32),f=new Float32Array(meta),u=new Uint32Array(meta);f.set([0,1,0,2]);u.set([0,4,0,0],4);
       const prototypes=make(new Uint8Array(meta),B.STORAGE),visible=make(new Uint32Array(4),B.STORAGE|B.COPY_SRC),visibleCounts=make(new Uint32Array([999]),B.STORAGE|B.COPY_SRC);
-      const parameterData=new Float32Array([4,1,3,0]),parameters=make(parameterData,B.UNIFORM);
+      // The roots in use as a float and, in the last word, exactly.
+      const parameterData=new Float32Array([4,1,3,0]);new Uint32Array(parameterData.buffer)[3]=4;const parameters=make(parameterData,B.UNIFORM);
       const module=device.createShaderModule({code:FOREST_CULL_WGSL});errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
       const pipeline=entryPoint=>device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint}});
       const reset=await pipeline('forestReset'),cull=await pipeline('forestCull');

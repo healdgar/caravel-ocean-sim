@@ -16,7 +16,7 @@ import { streetEdgeAt } from '../js/town-streets.js';
 import { createCityTargets } from '../js/city-targets.js';
 import { refreshOldWorldBoardCountry } from '../js/old-world.js';
 import { retargetForestPackToProcedural } from '../js/terrain.js';
-import { FOREST_VERTEX_WGSL } from '../js/forest-scenery.js';
+import { FOREST_VERTEX_WGSL, forestPackRoots } from '../js/forest-scenery.js';
 import { FOREST_CLUSTER_VERTEX_WGSL } from '../js/forest-clusters.js';
 import { FOREST_WIND_SKIN_WGSL } from '../js/forest-wind.js';
 import { loadForestCrowns, PORTUGAL_FOREST_CROWN_ASSETS } from '../js/forest-crowns.js';
@@ -187,7 +187,7 @@ test('Deliverable 2: WGSL root grounding plunges horizontal root webs smoothly d
   });
   const subManifest = JSON.parse(fs.readFileSync('assets/forest-scenery/subtropical/manifest.json', 'utf8'));
   const retargeted = retargetForestPackToProcedural({ manifest: subManifest }, pack);
-  const roots = retargeted.roots;
+  const roots = forestPackRoots(retargeted);
   assert.ok(roots.length >= 12 * 20, 'Retargeted subtropical forest places trees around Cartagena');
 
   const blocks = pack.city?.blocks ?? new Float32Array(0);

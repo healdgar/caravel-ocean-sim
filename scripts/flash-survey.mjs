@@ -20,11 +20,12 @@ export const SUNS = Object.freeze([
 
 // Where a camera stands to look at a stand of trees, from a little way off and over clear ground.
 export const forestCamera = (range) => {
-  const t = oceanFleet.terrain, grid = t.forestTrunks, roots = grid.roots;
+  // The forest's trees lie in one grid a section's array of roots.
+  const t = oceanFleet.terrain;
   const cx = t.port?.center?.x ?? t.region?.x ?? 0, cz = t.port?.center?.z ?? t.region?.z ?? 0;
   const cells = new Map();
-  for (let i = 0; i < grid.trees; i++) {
-    const r = grid.rootOf[i] * 12, key = `${Math.round(roots[r] / 60)},${Math.round(roots[r + 2] / 60)}`;
+  for (const grid of t.forestTrunks.grids) for (let i = 0; i < grid.trees; i++) {
+    const roots = grid.roots, r = grid.rootOf[i] * 12, key = `${Math.round(roots[r] / 60)},${Math.round(roots[r + 2] / 60)}`;
     cells.set(key, (cells.get(key) ?? 0) + 1);
   }
   const dense = [...cells.entries()].map(([key, n]) => { const [u, v] = key.split(',').map(Number); return { x: u * 60, z: v * 60, n, far: Math.hypot(u * 60 - cx, v * 60 - cz) }; }).filter((c) => c.far < 2500).sort((a, b) => b.n - a.n).slice(0, 24);
@@ -42,8 +43,8 @@ export const forestCamera = (range) => {
       }
       if (!clear) continue;
       let near = 0;
-      for (let i = 0; i < grid.trees && near < 3; i++) {
-        const r = grid.rootOf[i] * 12;
+      for (const grid of t.forestTrunks.grids) for (let i = 0; i < grid.trees && near < 3; i++) {
+        const roots = grid.roots, r = grid.rootOf[i] * 12;
         if (Math.hypot(roots[r] - ex, roots[r + 2] - ez) < range * 0.25) near++;
       }
       if (near >= 3) continue;
@@ -89,10 +90,10 @@ export const shipCamera = () => {
 
 // The stand of trees nearest in view from the ship, and the look that holds them in frame as she sways.
 export const forestFromShip = () => {
-  const t = oceanFleet.terrain, grid = t.forestTrunks, roots = grid.roots, boat = oceanFleet.vessels[0].boat;
+  const t = oceanFleet.terrain, boat = oceanFleet.vessels[0].boat;
   const cells = new Map();
-  for (let i = 0; i < grid.trees; i++) {
-    const r = grid.rootOf[i] * 12, key = `${Math.round(roots[r] / 50)},${Math.round(roots[r + 2] / 50)}`;
+  for (const grid of t.forestTrunks.grids) for (let i = 0; i < grid.trees; i++) {
+    const roots = grid.roots, r = grid.rootOf[i] * 12, key = `${Math.round(roots[r] / 50)},${Math.round(roots[r + 2] / 50)}`;
     cells.set(key, (cells.get(key) ?? 0) + 1);
   }
   let best = null;

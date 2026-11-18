@@ -3,6 +3,7 @@
 // mesh-derived cumulative mass & aerodynamic drag load, vortex-shedding petiole flutter,
 // shared directional wind lanes + promoted individual close/force-touched instances,
 // propagating Friedlander blast waves, and contact push capsules.
+import { forestDispatch } from './forest-dispatch.js';
 
 export const FOREST_WIND_BONES = 32;
 export const FOREST_WIND_BONE_FLOATS = 16;
@@ -409,16 +410,19 @@ fn evalCapsulePushAtWorld(cap:ForestWindCapsule,worldPos:vec3f,now:f32)->vec3f{
  }
 }
 
-@compute @workgroup_size(64)fn forestWindClearRootSlots(@builtin(global_invocation_id)id:vec3u){
+// The three passes over roots spread their workgroups over y past 65,535 of them (js/forest-dispatch.js).
+@compute @workgroup_size(64)fn forestWindClearRootSlots(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
  let vecCount=(cfg.counts.x+3u)>>2u;
- if(id.x>=vecCount){return;}
- poses[1u+id.x]=vec4f(0.);
+ let v=id.x+id.y*groups.x*64u;
+ if(v>=vecCount){return;}
+ poses[1u+v]=vec4f(0.);
 }
 
-@compute @workgroup_size(64)fn forestWindPromoteRoots(@builtin(global_invocation_id)id:vec3u){
+@compute @workgroup_size(64)fn forestWindPromoteRoots(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
  let rootCount=cfg.counts.x;let protoCount=cfg.counts.y;
- if(id.x>=rootCount||protoCount==0u){return;}
- let r=roots[id.x];
+ let rootIdx=id.x+id.y*groups.x*64u;
+ if(rootIdx>=rootCount||protoCount==0u){return;}
+ let r=roots[rootIdx];
  if(r.rootScale.w<=0.||r.identity.w<0.){return;}
  let now=simState[0].x;
  let worldPos=r.rootScale.xyz;
@@ -437,7 +441,6 @@ fn evalCapsulePushAtWorld(cap:ForestWindCapsule,worldPos:vec3f,now:f32)->vec3f{
   }
  }
  // Check if this tree already owns one of its 12 deterministic hash-probed slots.
- let rootIdx=id.x;
  let probeStart=(rootIdx*2654435761u)&255u;
  let probeStep=(((rootIdx>>8u)*2u+1u)&255u);
  var mySlot=0xffffffffu;
@@ -459,14 +462,14 @@ fn evalCapsulePushAtWorld(cap:ForestWindCapsule,worldPos:vec3f,now:f32)->vec3f{
     let wp=vec2f(c*smoothDir.x+s*smoothDir.y,-s*smoothDir.x+c*smoothDir.y);
     let ang=fract(atan2(wp.y,wp.x)*0.15915494+1.0625);
     let bearing=min(u32(floor(ang*f32(SHARED_BEARINGS))),SHARED_BEARINGS-1u);
-    let phase=(windHash(id.x^0x6c8e9cf5u)&1u);
+    let phase=(windHash(rootIdx^0x6c8e9cf5u)&1u);
     let sharedSkel=pi*SHARED_LANES+(bearing*SHARED_PHASES+phase);
     let promoSkel=protoCount*SHARED_LANES+cand;
     for(var b=0u;b<WIND_BONES;b++){
      simState[BONE_STATE_BASE+(promoSkel*WIND_BONES+b)*2u]=simState[BONE_STATE_BASE+(sharedSkel*WIND_BONES+b)*2u];
      simState[BONE_STATE_BASE+(promoSkel*WIND_BONES+b)*2u+1u]=simState[BONE_STATE_BASE+(sharedSkel*WIND_BONES+b)*2u+1u];
     }
-    simState[PROMO_META_BASE+cand]=vec4f(f32(id.x),now,1.0,f32(pi));
+    simState[PROMO_META_BASE+cand]=vec4f(f32(rootIdx),now,1.0,f32(pi));
     break;
    }
   }
@@ -481,22 +484,23 @@ fn evalCapsulePushAtWorld(cap:ForestWindCapsule,worldPos:vec3f,now:f32)->vec3f{
  if(mySlot!=0xffffffffu){
   let blendQ=u32(clamp(simState[PROMO_META_BASE+mySlot].z,0.,1.)*65535.);
   let packed=(mySlot+1u)|(blendQ<<16u);
-  atomicStore(&promoTable[1u+MAX_PROMOTED+id.x],packed);
+  atomicStore(&promoTable[1u+MAX_PROMOTED+rootIdx],packed);
  }else{
-  atomicStore(&promoTable[1u+MAX_PROMOTED+id.x],0u);
+  atomicStore(&promoTable[1u+MAX_PROMOTED+rootIdx],0u);
  }
 }
 
-@compute @workgroup_size(64)fn forestWindPackRootSlots(@builtin(global_invocation_id)id:vec3u){
+@compute @workgroup_size(64)fn forestWindPackRootSlots(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
  let rootCount=cfg.counts.x;
  let vecCount=(rootCount+3u)>>2u;
- if(id.x>=vecCount){return;}
- let base=id.x*4u;
+ let v=id.x+id.y*groups.x*64u;
+ if(v>=vecCount){return;}
+ let base=v*4u;
  let w0=select(0u,atomicLoad(&promoTable[1u+MAX_PROMOTED+base]),base<rootCount);
  let w1=select(0u,atomicLoad(&promoTable[1u+MAX_PROMOTED+base+1u]),base+1u<rootCount);
  let w2=select(0u,atomicLoad(&promoTable[1u+MAX_PROMOTED+base+2u]),base+2u<rootCount);
  let w3=select(0u,atomicLoad(&promoTable[1u+MAX_PROMOTED+base+3u]),base+3u<rootCount);
- poses[1u+id.x]=bitcast<vec4f>(vec4u(w0,w1,w2,w3));
+ poses[1u+v]=bitcast<vec4f>(vec4u(w0,w1,w2,w3));
 }
 
 fn stepSkeletonBones(skelIdx:u32,protoId:u32,windProtoDir:vec3f,windSpeed:f32,gustFactor:f32,phaseSeed:f32,isPromoted:bool,treeRoot:ForestRoot){
@@ -828,13 +832,13 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
       pass.dispatchWorkgroups(1);
 
       pass.setPipeline(clearSlotsPipe);
-      pass.dispatchWorkgroups(Math.ceil(Math.ceil(activeRootCount / 4) / 64));
+      forestDispatch(pass, Math.ceil(activeRootCount / 4));
 
       pass.setPipeline(promotePipe);
-      pass.dispatchWorkgroups(Math.ceil(activeRootCount / 64));
+      forestDispatch(pass, activeRootCount);
 
       pass.setPipeline(packSlotsPipe);
-      pass.dispatchWorkgroups(Math.ceil(Math.ceil(activeRootCount / 4) / 64));
+      forestDispatch(pass, Math.ceil(activeRootCount / 4));
 
       pass.setPipeline(sharedPipe);
       pass.dispatchWorkgroups(Math.ceil((protoCount * FOREST_WIND_SHARED_LANES) / 64));

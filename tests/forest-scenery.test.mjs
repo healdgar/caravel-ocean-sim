@@ -157,7 +157,10 @@ test('forest rendering cannot fall back to the legacy generic mask or threshold 
 });
 test('the cull puts each tree in view once on its species\' one list, and sorts nothing by distance',()=>{
   assert.equal(FOREST_CULL_WGSL.split('atomicAdd(&visibleCounts[pi],1u)').length-1,1);
-  assert.match(FOREST_CULL_WGSL,/if\(slot<p\.roots\.y\)\{visible\[p\.roots\.x\+slot\]=id\.x;\}/);
+  assert.match(FOREST_CULL_WGSL,/if\(slot<p\.roots\.y\)\{visible\[p\.roots\.x\+slot\]=i;\}/);
+  // Past 65,535 workgroups the roots spread over a second dimension, and their count is read exactly, not as a float.
+  assert.equal(FOREST_CULL_WGSL.split('let i=id.x+id.y*groups.x*64u;').length-1,2);
+  assert.equal(FOREST_CULL_WGSL.split('if(i>=parameters.rootCount){return;}').length-1,2);
   assert.doesNotMatch(FOREST_CULL_WGSL,/nearLod|midLod|farLod|previousLod|commands|atlasThreshold/);
 });
 test('a procedural landfall skips the pack\'s roots, and a device with prebuilt surfaces its maps',async()=>{

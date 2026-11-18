@@ -38,27 +38,28 @@ async function open(region, params = {}, state = null) {
   return { page, errors };
 }
 
-// A tree of this species out in the open, away from any building, with a clear line to stand on.
+// A tree of this species out in the open, away from any building, with a clear line to stand on. The forest's trees
+// lie in one grid a section's array of roots (forestTrunks.grids).
 const pickTree = (page, species, range) => page.evaluate(({ species, range }) => {
-  const t = oceanFleet.terrain, grid = t.forestTrunks, roots = grid.roots, names = grid.shapes.map((s) => s?.species);
+  const t = oceanFleet.terrain, grids = t.forestTrunks.grids, names = grids[0].shapes.map((s) => s?.species);
   const buildings = (t.ports ?? []).flatMap((q) => q.instances ?? []);
   const cx = t.port?.center?.x ?? 0, cz = t.port?.center?.z ?? 0, list = [];
-  for (let i = 0; i < grid.trees; i++) if (names[roots[grid.rootOf[i] * 12 + 8] | 0] === species) list.push(grid.rootOf[i]);
-  list.sort((a, b) => Math.hypot(roots[a * 12] - cx, roots[a * 12 + 2] - cz) - Math.hypot(roots[b * 12] - cx, roots[b * 12 + 2] - cz));
-  for (const index of list.slice(0, 1600)) {
-    const x = roots[index * 12], y = roots[index * 12 + 1], z = roots[index * 12 + 2];
+  for (const grid of grids) for (let i = 0; i < grid.trees; i++) if (names[grid.roots[grid.rootOf[i] * 12 + 8] | 0] === species) list.push(grid.roots.subarray(grid.rootOf[i] * 12, grid.rootOf[i] * 12 + 12));
+  list.sort((a, b) => Math.hypot(a[0] - cx, a[2] - cz) - Math.hypot(b[0] - cx, b[2] - cz));
+  for (const root of list.slice(0, 1600)) {
+    const x = root[0], y = root[1], z = root[2];
     if (t.groundSample(x, z) < 1.5 || buildings.some((b) => Math.hypot(b.x - x, b.z - z) < 70 + Math.max(b.width ?? 10, b.length ?? 10))) continue;
     for (let a = 0; a < 16; a++) {
       const angle = (a / 16) * Math.PI * 2, ex = x + Math.cos(angle) * range, ez = z + Math.sin(angle) * range, eyeY = Math.max(t.groundSample(ex, ez) + 2.2, y + 2.4);
       let clear = true;
       for (let s = 0.08; s <= 0.92 && clear; s += 0.04) clear = t.groundSample(x + (ex - x) * s, z + (ez - z) * s) <= y + 1.6 + (eyeY - y - 1.6) * s - 0.3;
-      for (let k = 0; k < grid.trees && clear; k++) {
-        const q = grid.rootOf[k] * 12;
-        if (q === index * 12) continue;
+      for (const grid of grids) for (let k = 0; k < grid.trees && clear; k++) {
+        const q = grid.rootOf[k] * 12, roots = grid.roots;
+        if (roots[q] === x && roots[q + 2] === z) continue;
         const along = ((roots[q] - ex) * (x - ex) + (roots[q + 2] - ez) * (z - ez)) / (range * range);
         if (along >= -0.05 && along <= 1 && Math.hypot(roots[q] - (ex + (x - ex) * along), roots[q + 2] - (ez + (z - ez) * along)) < 9) clear = false;
       }
-      if (clear) return { x, y, z, ex, eyeY, ez, scale: roots[index * 12 + 3] };
+      if (clear) return { x, y, z, ex, eyeY, ez, scale: root[3] };
     }
   }
   return null;
@@ -69,11 +70,14 @@ const cameraAt = ({ x, y, z, ex, eyeY, ez, scale }) => {
   return [ex, eyeY, ez, yaw, pitch].join(',');
 };
 const readTree = (page, tree) => page.evaluate(({ x, z }) => {
-  const t = oceanFleet.terrain, roots = t.forestTrunks.roots;
-  let at = -1;
-  for (let i = 0; i < t.forestTrunks.count; i++) if (roots[i * 12] === x && roots[i * 12 + 2] === z) { at = i * 12; break; }
+  const t = oceanFleet.terrain;
+  let roots = null, at = -1;
+  for (const grid of t.forestTrunks.grids) {
+    for (let i = 0; i < grid.count; i++) if (grid.roots[i * 12] === x && grid.roots[i * 12 + 2] === z) { roots = grid.roots; at = i * 12; break; }
+    if (roots) break;
+  }
   oceanFleet.portDamage.snapshot(t.ports);
-  return { found: at >= 0, struck: roots[at + 11], scale: roots[at + 3], impacts: t.sceneryImpacts?.length ?? 0, last: t.sceneryImpacts?.at(-1) ?? null, saved: oceanFleet.portDamage.forestStrikes(t.forestStrikeKey), buildings: (t.port?.instances ?? []).filter((b) => b.damageState?.hits).length };
+  return { found: at >= 0, struck: roots?.[at + 11], scale: roots?.[at + 3], impacts: t.sceneryImpacts?.length ?? 0, last: t.sceneryImpacts?.at(-1) ?? null, saved: oceanFleet.portDamage.forestStrikes(t.forestStrikeKey), buildings: (t.port?.instances ?? []).filter((b) => b.damageState?.hits).length };
 }, tree);
 async function fire(page, shot) {
   await page.keyboard.down('f');

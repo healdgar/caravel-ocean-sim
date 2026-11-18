@@ -4,6 +4,7 @@
 import { FOREST_CROWN_LIMIT, FOREST_CROWN_NEAREST, forestCrownLook, forestCrownSplatLook } from './forest-crowns.js';
 import { CONTINUUM_CORE_WGSL, continuumClusterPrefixWGSL, continuumMorphStepWGSL } from './continuum-core.js';
 import { FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES, FOREST_WIND_SKIN_WGSL } from './forest-wind.js';
+import { forestDispatch } from './forest-dispatch.js';
 
 export const FOREST_CLUSTER_VERTEX_WORDS = 5;
 export const FOREST_CLUSTER_WORDS = 16;
@@ -115,6 +116,10 @@ struct ForestClusterBucket {
 struct ForestClusterShadowBox {lightView:mat4x4f,origin:vec4f,sun:vec4f,texel:vec4f};
 @group(0)@binding(9)var<uniform>shadowBox:ForestClusterShadowBox;
 @group(0)@binding(10)var<storage,read>crownMorph:array<u32>;
+// Every root of each species, wherever its section lies in the roots, one plus its index (0 is no root): built on
+// the GPU whenever the sections change (forestSpeciesRoots, js/forest-scenery.js), in the same stretches as the
+// visible lists. The shadow cut reads it; the camera's cut reads the visible lists.
+@group(0)@binding(11)var<storage,read>speciesRoots:array<u32>;
 // Shares of the forest's pixel error each kind may use. A leaf's error is its size, which stays
 // visible as a card, so leaves need the tighter limit. Wood is thin and hides among them.
 // Each halving of the leaf share draws four times the cards. At .2 the cards stayed about two pixels
@@ -137,8 +142,9 @@ fn forestClusterTree(index:u32)->u32{
  if(index>=min(visibleCounts[bucket.visible.y],bucket.capacity.z)){return 0xffffffffu;}
  return visible[bucket.visible.x+index];
 }
-@compute @workgroup_size(64)fn forestClusterSelect(@builtin(global_invocation_id)id:vec3u){
- let tree=forestClusterTree(id.x);if(tree==0xffffffffu){return;}
+// Both cuts spread their workgroups over y past 65,535 of them (js/forest-dispatch.js).
+@compute @workgroup_size(64)fn forestClusterSelect(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
+ let tree=forestClusterTree(id.x+id.y*groups.x*64u);if(tree==0xffffffffu){return;}
  let r=roots[tree];let scale=r.rootScale.w;let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let origin=r.rootScale.xyz-F.camPos.xyz;
  let focal=F.screen.y/max(2.0*length(F.camUp.xyz),.0001);
@@ -221,9 +227,11 @@ fn forestClusterTree(index:u32)->u32{
 // texels, nor finer than a few pixels where the camera sees it fall, so the cut is that coarse.
 const FOREST_CLUSTER_SHADOW_TEXELS=vec2f(1.5,2.5);
 const FOREST_CLUSTER_SHADOW_PIXELS=1.5;
-@compute @workgroup_size(64)fn forestClusterShadowSelect(@builtin(global_invocation_id)id:vec3u){
- if(shadowBox.origin.w<.5||id.x>=bucket.capacity.z){return;}
- let tree=bucket.capacity.y+id.x;
+@compute @workgroup_size(64)fn forestClusterShadowSelect(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
+ let index=id.x+id.y*groups.x*64u;
+ if(shadowBox.origin.w<.5||index>=bucket.capacity.z){return;}
+ let entry=speciesRoots[bucket.capacity.y+index];if(entry==0u){return;}
+ let tree=entry-1u;
  let r=roots[tree];let scale=r.rootScale.w;if(scale<=0.){return;}
  let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let rowX=vec3f(shadowBox.lightView[0].x,shadowBox.lightView[1].x,shadowBox.lightView[2].x);
@@ -379,7 +387,7 @@ const LEAF_PATTERN = [0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5];
 // one 1-triangle horizon splat list, and one crossfade list for trees still changing over.
 const ROOT_BYTES = 48;
 
-export async function createForestClusters({ device, shader, module, frame, source, crowns = null, crownChange = {}, wind = null, prototypes, roots, visible, visibleCounts, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false, shadowUniform = null, shadowFormat = 'depth32float' }) {
+export async function createForestClusters({ device, shader, module, frame, source, crowns = null, crownChange = {}, wind = null, prototypes, roots, visible, speciesRoots, visibleCounts, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false, shadowUniform = null, shadowFormat = 'depth32float' }) {
   const B = GPUBufferUsage, owned = [], count = prototypes.length;
   // A leaf cluster's place in the list shares a word with its tree's crown share (forestClusterSelect).
   if (source.manifest.clusterCount >= 1 << 24) throw Error('Forest clusters outnumber the bits that name them');
@@ -483,7 +491,7 @@ export async function createForestClusters({ device, shader, module, frame, sour
   });
   // Every bind group that names the roots, the visible lists, the list here or the wind's poses, made again
   // whenever reroot is given larger ones.
-  function bindSpecies(roots, visible) {
+  function bindSpecies(roots, visible, speciesRoots) {
     for (const s of species) {
       const { p, bucket, bounds, crown, uniforms: { wood, leaf, woodShadow, leafShadow } } = s;
       const clusterGroup = (pipeline, hasIndices, from = list) => device.createBindGroup({
@@ -505,24 +513,24 @@ export async function createForestClusters({ device, shader, module, frame, sour
       s.wood = { surface: surfaceEntries(woodPipeline, p.id, wood, true), cluster: clusterGroup(woodPipeline, true) };
       s.leafDepth = { surface: surfaceEntries(leafDepthPipeline, p.id, leaf, false), cluster: clusterGroup(leafDepthPipeline, false) };
       s.leaf = { surface: surfaceEntries(leafPipeline, p.id, leaf, true), cluster: clusterGroup(leafPipeline, false) };
-      s.shadowSelect = shadowSelect ? device.createBindGroup({ layout: shadowSelect.getBindGroupLayout(0), entries: [frameEntry(0), ...[[1, roots], [4, clusters], [5, shadowList], [6, draws], [7, parameters], [8, bucket], [9, shadowUniform]].map(([binding, buffer]) => ({ binding, resource: { buffer } }))] }) : null;
+      s.shadowSelect = shadowSelect ? device.createBindGroup({ layout: shadowSelect.getBindGroupLayout(0), entries: [frameEntry(0), ...[[1, roots], [4, clusters], [5, shadowList], [6, draws], [7, parameters], [8, bucket], [9, shadowUniform], [11, speciesRoots]].map(([binding, buffer]) => ({ binding, resource: { buffer } }))] }) : null;
       s.woodShadow = woodShadowPipeline ? { surface: shadowSurface(woodShadowPipeline, woodShadow), cluster: clusterGroup(woodShadowPipeline, true, shadowList) } : null;
       s.leafShadow = leafShadowPipeline ? { surface: surfaceEntries(leafShadowPipeline, p.id, leafShadow, false), cluster: clusterGroup(leafShadowPipeline, false, shadowList) } : null;
     }
   }
-  // The roots and visible lists of a forest that holds more trees than before, and the wind that sways them.
-  // The surfaces' bind groups (surfaceEntries) read the caller's roots, which it has swapped before this.
-  function rebind(nextRoots, nextVisible, nextWind) {
+  // The roots, visible lists and species' roots of a forest that holds more trees than before, and the wind that
+  // sways them. The surfaces' bind groups (surfaceEntries) read the caller's roots, which it has swapped before this.
+  function rebind(nextRoots, nextVisible, nextWind, nextSpeciesRoots) {
     const nextMax = Math.floor(nextRoots.size / ROOT_BYTES);
     const crownTotalSlots = crownInfo ? count * CROWN_CONT_TRIS_PER_SPECIES + 2 * nextMax : 0;
     const nextList = device.createBuffer({ label: 'forest clusters to draw', size: (crownListBase + crownTotalSlots) * 8, usage: B.STORAGE });
     const previous = list;
     maxRoots = nextMax; list = nextList;
     windPoses = nextWind?.posesBuffer ?? fallbackPoses; windWeights = nextWind?.weightsBuffer ?? fallbackWeights;
-    bindSpecies(nextRoots, nextVisible);
+    bindSpecies(nextRoots, nextVisible, nextSpeciesRoots);
     return previous;
   }
-  rebind(roots, visible, wind);
+  rebind(roots, visible, wind, speciesRoots);
   const activeSpecies = [];
   let hadActiveSpecies = false;
   function frameEntry(binding) { return { binding, resource: { buffer: bind.frameUBO } }; }
@@ -597,8 +605,8 @@ export async function createForestClusters({ device, shader, module, frame, sour
     placeTrees,
     updatePack: placeTrees,
     // Larger roots and visible lists, and their wind: the old list is let go once the GPU is done with it.
-    reroot(nextRoots, nextVisible, nextWind) {
-      const previous = rebind(nextRoots, nextVisible, nextWind);
+    reroot(nextRoots, nextVisible, nextWind, nextSpeciesRoots) {
+      const previous = rebind(nextRoots, nextVisible, nextWind, nextSpeciesRoots);
       placeTrees();
       const drop = () => previous?.destroy();
       if (typeof device.queue?.onSubmittedWorkDone === 'function') device.queue.onSubmittedWorkDone().then(drop, drop); else drop();
@@ -624,14 +632,14 @@ export async function createForestClusters({ device, shader, module, frame, sour
       for (let i = 0; i < n; i++) {
         const { s } = activeSpecies[i];
         pass.setBindGroup(0, s.select);
-        pass.dispatchWorkgroups(Math.ceil(s.rootCount / 64));
+        forestDispatch(pass, s.rootCount);
       }
       if (!shadowSelect) return;
       pass.setPipeline(shadowSelect);
       for (let i = 0; i < n; i++) {
         const { s } = activeSpecies[i];
         pass.setBindGroup(0, s.shadowSelect);
-        pass.dispatchWorkgroups(Math.ceil(s.rootCount / 64));
+        forestDispatch(pass, s.rootCount);
       }
     },
     drawOpaque(pass) {

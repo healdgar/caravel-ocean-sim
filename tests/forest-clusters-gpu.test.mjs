@@ -43,7 +43,10 @@ async function open(query,region='lisbon'){
   const url=region==='saba'?landfallStageURL(base,'coast','clear'):coastalRegionStageURL(base,region,'dock','clear',1650);
   for(const [k,v] of Object.entries({w:960,h:540,polygons:'fixed',...query}))url.searchParams.set(k,String(v));
   const page=await browser.newPage({viewport:{width:960,height:540}}),errors=[];
-  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
+  // Any error fails, and so does any GPU validation the browser reports only as a warning (a dispatch or binding
+  // past the device's limits, an invalid command buffer), so a coast that outgrows the device cannot pass unseen.
+  page.on('pageerror',e=>errors.push(e.message));
+  page.on('console',m=>{const text=m.text();if((m.type()==='error'&&!/404|favicon/.test(text))||(m.type()==='warning'&&/\[Invalid |validation|exceeds|GPU error|While (calling|validating|encoding)/.test(text)))errors.push(text);});
   const requested=[];page.on('request',r=>requested.push(new URL(r.url()).pathname));
   await page.addInitScript(instrument);
   await page.goto(url.toString());

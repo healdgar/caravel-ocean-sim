@@ -240,9 +240,18 @@ function trunkSphereEntry(ox, oy, oz, dx, dy, dz, dd, rr) {
 
 /**
  * The first wood on this line, of the trees that still stand. `from` and `to` are world points, the ball's own radius
- * counts, and nothing is allocated unless something is struck.
+ * counts, and nothing is allocated unless something is struck. `grid` is one grid, or a forest's set of them, one a
+ * section ({ grids, trees }): the nearest wood of any.
  */
 export function sweepForestTrunks(grid, from, to, radius = 0.08) {
+  if (grid?.grids) {
+    let best = null;
+    for (const one of grid.grids) {
+      const hit = sweepForestTrunks(one, from, to, radius);
+      if (hit && (!best || hit.fraction < best.fraction)) best = hit;
+    }
+    return best;
+  }
   if (!grid?.trees) return null;
   const ax = from[0], ay = from[1], az = from[2], bx = to[0], by = to[1], bz = to[2];
   const lowY = (ay < by ? ay : by) - radius, highY = (ay > by ? ay : by) + radius;
@@ -323,7 +332,7 @@ function describeTrunkHit(grid, i, section, fraction, from, lineX, lineY, lineZ)
 // half that at long range: one snaps a palm or a slender tree, and it takes two or more to bring down a hardwood.
 const TRUNK_BREAK_JOULES_PER_M2 = 8000000;
 const STRIKE_LIMB_SHARE = 0.25;
-const TREE_STRIKE_REACH_M = 6;
+export const TREE_STRIKE_REACH_M = 6;
 const STRIKE_BLAST_DAMAGE = 1 / 3;
 const STRIKE_CHAR = 0.6;
 export const FOREST_FALL_SECONDS = 3.6;
@@ -394,16 +403,28 @@ export function strikeForestTree(roots, index, shape, { energy, bearing, height,
   return { record, felled };
 }
 
-// A blast near a tree, not a ball in it: it chars the nearest, and the third fells it. Returns its index, or -1.
-export function strikeForestRoot(roots, count, x, z, strikes, { now = 0, shapeOf = () => null, groundAt = null } = {}) {
-  let best = -1, bestDistance = TREE_STRIKE_REACH_M;
+// The standing tree nearest this point, within reach of a blast: its index and how far, or index -1.
+export function nearestForestRoot(roots, count, x, z, reach = TREE_STRIKE_REACH_M) {
+  let best = -1, bestDistance = reach;
   for (let i = 0; i < count; i++) {
     const at = i * TRUNK_ROOT_FLOATS;
     if (!treeStands(roots, at)) continue;
     const distance = Math.hypot(roots[at] - x, roots[at + 2] - z);
     if (distance < bestDistance) { best = i; bestDistance = distance; }
   }
-  if (best < 0) return -1;
+  return { index: best, distance: bestDistance };
+}
+
+// A blast near a tree, not a ball in it: it chars the nearest, and the third fells it. Returns its index, or -1.
+export function strikeForestRoot(roots, count, x, z, strikes, options = {}) {
+  const { index } = nearestForestRoot(roots, count, x, z);
+  if (index < 0) return -1;
+  blastForestRoot(roots, index, x, z, strikes, options);
+  return index;
+}
+
+// The blast at x, z on this tree, which stands within reach of it (nearestForestRoot).
+export function blastForestRoot(roots, best, x, z, strikes, { now = 0, shapeOf = () => null, groundAt = null } = {}) {
   const at = best * TRUNK_ROOT_FLOATS, record = ensureStrikeRecord(strikes, roots[at], roots[at + 2]);
   record.hits++;
   record.chars++;
@@ -414,7 +435,6 @@ export function strikeForestRoot(roots, count, x, z, strikes, { now = 0, shapeOf
     record.rest = treeRestingDegrees(roots, at, record, shapeOf(roots[at + TRUNK_ROOT_PROTOTYPE] | 0), groundAt);
     writeStruckRoot(roots, at, record, { falling: true, now });
   }
-  return best;
 }
 
 // Puts what is remembered back on a freshly streamed set of roots. A tree that fell before stays down. Saved positions can
