@@ -24,7 +24,7 @@ export const OLD_WORLD_LAND = Object.freeze({ CITY: 0, GARDEN: 1, OLIVES: 2, VIN
 // People by year, read from period counts and later estimates, to the nearest few thousand; where
 // the record is thin the figure is a judgement. A city's ground follows from its people. `port` is the
 // coast (js/coastal-world.js) whose ground holds the city and under whose name its board is baked. `culture`
-// is the tongue its board's people speak and name their places in (scripts/board-tuning.mjs adds the
+// is the tongue its board's people speak and name their places in (scripts/board-upstream.mjs adds the
 // Portuguese and Dutch tongues to the eight of Castle and Commons). Seville and Porto stand on tidal rivers
 // whose water the survey reads above the datum; their ground reads it at its own level (js/river-water.js).
 export const OLD_WORLD_CITIES = Object.freeze([

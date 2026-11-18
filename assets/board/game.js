@@ -1,6 +1,6 @@
 // Castle and Commons: the game program, from d37a7cdc5079f4991014469203a2c12fce778d11.
 // Copyright (c) 2026 healdgar. MIT License; see assets/board/LICENSE. Its Math functions are fdlibm as ported in V8.
-// Taken by scripts/vendor-castle-and-commons.mjs and tuned by scripts/board-tuning.mjs. Do not edit: change the table and take it again.
+// Taken by scripts/vendor-castle-and-commons.mjs; tuned by scripts/board-tuning.mjs, then scripts/board-upstream.mjs. Do not edit: change the tables and take it again.
 
 /* =========================================================================
    ANNALS — a living kingdom in a single file
@@ -696,7 +696,8 @@ const CULT={
     church:(S,p,cath)=>cath?(S.length%2?'Catedral de Santa María':`Catedral de San ${S}`):`Iglesia de San ${S}`,
     inns:['Mesón del Toro','Posada del Sol','Venta de la Luna','Mesón de la Cruz','Posada del León','Venta del Gallo','Mesón de los Arrieros','Posada de la Estrella'],
     trade:{shop:['Tienda de {N}','La Balanza de Oro'],bakery:['Horno de {N}','El Pan de Oro'],smithy:['Herrería de {N}','El Yunque'],tannery:['Tenería de {N}'],warehouse:['Almacén {N} e Hijos','La Alhóndiga']}},
-  portuguese:{name:'Portuguese',adj:'Portuguese',
+  // drawn:false: spoken where a real map's region speaks it, never drawn by lot for a made-up realm (CULT_DRAWN), so a seed makes the realm it made before
+  portuguese:{name:'Portuguese',adj:'Portuguese',drawn:false,
     m:['Afonso','Sancho','Dinis','Pedro','Fernão','João','Duarte','Henrique','Nuno','Gonçalo','Egas','Vasco','Álvaro','Martim','Lourenço','Rodrigo','Estêvão','Soeiro'],
     f:['Urraca','Mafalda','Teresa','Beatriz','Isabel','Leonor','Constança','Inês','Filipa','Brites','Guiomar','Branca','Sancha','Violante','Mécia'],
     roots:['Rosa','Alva','Branca','Ouro','Sol','Lua','Real','Touro','Águia','Lobo','Azinha','Olmo','Penha','Ruiva','Verde','Cruz','Moura','Ferro','Pinho','Sobro'],
@@ -710,7 +711,7 @@ const CULT={
     church:(S,p,cath)=>{const T=(/^[AEIOUÁÉÍÓÚ]/.test(S)?'Santo ':'São ')+S;return cath?(S.length%2?'Sé de Santa Maria':'Sé de '+T):'Igreja de '+T;},
     inns:['Estalagem do Galo','Taberna do Sol','Venda da Lua','Estalagem da Cruz','Albergaria do Leão','Venda do Touro','Taberna dos Almocreves','Estalagem da Estrela'],
     trade:{shop:['Loja de {N}','A Balança de Ouro'],bakery:['Forno de {N}','O Pão de Ouro'],smithy:['Ferraria de {N}','A Bigorna'],tannery:['Pelames de {N}'],warehouse:['Armazém de {N} e Filhos','O Celeiro']}},
-  dutch:{name:'Dutch',adj:'Netherlandish',
+  dutch:{name:'Dutch',adj:'Netherlandish',drawn:false,
     m:['Willem','Floris','Dirk','Jan','Pieter','Gerrit','Arnoud','Hendrik','Jacob','Claes','Adriaen','Cornelis','Gijsbrecht','Reinoud','Wouter','Frans','Joost','Lodewijk'],
     f:['Aleid','Ada','Machteld','Geertruid','Margriet','Beatrijs','Katharina','Jacoba','Maria','Aleydis','Hadewych','Neeltje','Grietje','Agniet','Sophia'],
     roots:['Eik','Linde','Wilg','Berk','Els','Hazel','Ram','Haas','Vos','Zand','Riet','Mol','Ooster','Wester','Noord','Zuid','Lange','Hoog','Diep','Swart'],
@@ -725,9 +726,10 @@ const CULT={
     inns:['Het Wapen van Holland','De Gouden Leeuw','Het Witte Paard','De Drie Haringen','Het Hert','De Zwaan','De Roskam','Het Schip'],
     trade:{shop:['Winkel van {N}','De Gulden Schaal'],bakery:['Bakkerij van {N}','De Gouden Krakeling'],smithy:['Smidse van {N}','Het Aambeeld'],tannery:['Looierij van {N}'],warehouse:['Pakhuis {N} en Zonen','De Waag']}}
 };
-const CULT_NEAR={anglo:['anglo','celtic','norse','french'],german:['german','slavic','french','norse','italian','dutch'],french:['french','italian','iberian','german','celtic','dutch'],
-  italian:['italian','french','german','iberian'],norse:['norse','german','anglo','slavic'],slavic:['slavic','german','norse'],celtic:['celtic','anglo','norse','french'],iberian:['iberian','portuguese','french','italian'],
+const CULT_NEAR={anglo:['anglo','celtic','norse','french'],german:['german','slavic','french','norse','italian'],french:['french','italian','iberian','german','celtic'],
+  italian:['italian','french','german','iberian'],norse:['norse','german','anglo','slavic'],slavic:['slavic','german','norse'],celtic:['celtic','anglo','norse','french'],iberian:['iberian','french','italian'],
   portuguese:['portuguese','iberian','french','italian'],dutch:['dutch','german','french','anglo','norse']};
+const CULT_DRAWN=Object.keys(CULT).filter(k=>CULT[k].drawn!==false); // the tongues a made-up realm, and the sell-swords it hires, are drawn from
 /* more names for every tongue: given names, place roots, and the stuff of surnames (trade, dwelling, looks, father, home town) */
 const NAMEX={
 anglo:{
@@ -835,7 +837,7 @@ for(const c in NAMEX)if(CULT[c])CULT[c].roots=[...new Set([...CULT[c].roots,...N
 function r1(r,a){return a[Math.floor(r()*a.length)%a.length];}
 function nameRng(k){let a=(SEED^0x4E414D45^Math.imul(k|0,0x9E3779B1))>>>0,b=(a*31+0x51A7)>>>0,c=0x243F6A88^(k*7),d=(SEED+k*13)>>>0;const f=sfc32(a,b,c,d);for(let i=0;i<12;i++)f();return f;}
 function cultOf(x){return CULT[(x&&x.cult)||(W&&W.crownCult)||'anglo'];}
-const houseKey=n=>n.replace(/^House /,'').replace(/^(de |von |di |da |della |del )/,'').replace(/ (the Younger|of the March|Minor|the Cadet)$/,'').toLowerCase();
+const houseKey=n=>n.replace(/^House /,'').replace(/^(de |von |van der |van den |van |di |da |della |del )/,'').replace(/ (the Younger|of the March|Minor|the Cadet)$/,'').toLowerCase();
 function uniqueHouseName(C,seatName,r,skip){ // no two houses of the realm, living or ended, go by the same name
   const taken=new Set(W.houses.filter(o=>o!==skip&&o.name).map(o=>houseKey(o.name)));
   for(let t=0;t<10;t++){const n=C.house(t<4?seatName:fillName(r1(r,C.site.castle||C.site.farm),r1(r,C.roots)),r,C,r1(r,C.roots));if(!taken.has(houseKey(n)))return n;}
@@ -932,7 +934,7 @@ function siteFeatures(x,z){ // the ground about a place, as the founders saw it
   return {riv,sea,forest,rock,marsh,prom:W.h[cIdx(cx,cz)]-ring/8};
 }
 function assignCultures(){ // the crown's tongue, and each great house's: most share it, the marches may not
-  const r=nameRng(1),ids=Object.keys(CULT);
+  const r=nameRng(1),ids=CULT_DRAWN;
   W.crownCult=ids[Math.floor(r()*ids.length)];
   W.houseCult=[W.crownCult];for(let hi=1;hi<=5;hi++)W.houseCult.push(r()<0.45?W.crownCult:r1(r,CULT_NEAR[W.crownCult].slice(1)));
   W.usedNames=new Set();
@@ -5808,7 +5810,7 @@ function levyMen(a,s,si,k){
   const pool=s.folk.filter(p=>p.sx==='m'&&!p.dead&&ageYrs(p)>=16&&ageYrs(p)<45);
   for(const p of pickK(pool,Math.min(k,pool.length),p=>(p.sp?0.6:1.4)*Math.exp(0.6*p.sk[KA]))){const i=s.folk.indexOf(p);if(i>=0)removeAt(s,i);p.home=si;a.men.push(p);life(p,`Called to arms with ${a.name}`);}} // the unwed and the practised are the first called
 function hireMen(a,k){ // sell-swords: their own tongue, their own names
-  if(!a.men)a.men=[];const cs=Object.keys(CULT);
+  if(!a.men)a.men=[];const cs=CULT_DRAWN;
   for(let i=0;i<k;i++){const c=cs[Math.floor(frand()*cs.length)],X=NX(c),G=genome();
     const p={id:PID++,sx:'m',b:day()-(20+frand()*18)*360,si:-1,home:-1,fam:-1,sk:new Float32Array(9),sp:null,tr:'soldier',fed:0,lb:-9999,merc:c,g:G.g,e:G.e,hair:hairDraw(c)};
     p.gn=givenPick(c,'m',null);p.sur=X?(frand()<0.5?X.patr(givenPick(c,'m',null)):X.nick[['tall','strong','bold','dark','red','young','quick','stout'][Math.floor(frand()*8)]]):'';
@@ -16780,8 +16782,8 @@ function lordAt(hi){const h=W.houses[hi],a=h?.at,j=h?.journey;if(j?.abroad)retur
    the strip, or the lord's own demesne worked by hired hands. Each household keeps a purse: its share of the harvest, its
    craft or its wages, less its keep and its rent. Indebted households sell their strips and stay on them as sharecroppers;
    the well-off buy, and let what they cannot work; after the great plague the lords sell and lease their demesnes. A
-   holding passes to the eldest son, or is shared among the sons where the custom is partible (Welsh, German, Slav, Norse). */
-const PARTIBLE=new Set(['celtic','german','slavic','norse']);
+   holding passes to the eldest son, or is shared among the sons where the custom is partible (Welsh, German, Slav, Norse, Dutch). */
+const PARTIBLE=new Set(['celtic','german','slavic','norse','dutch']);
 const TEN_NAME={villein:'in villeinage, owing labour on the lord\'s land',free:'freehold, for a small quit-rent',lease:'on lease, for a money rent',crop:'as a sharecropper, for half the crop',demesne:'the lord\'s demesne, worked by hired hands'};
 const TEN_SHARE={villein:0.62,free:0.85,lease:0.7,crop:0.5}; // the worker's share of his strip's crop by tenure: custom of the manor, which the lord's dues move (#23)
 function tenureNew(){const ad=AD(),r=frand();return ad<1150?(r<0.75?'villein':'free'):ad<1349?(r<0.6?'villein':'free'):(r<0.45?'lease':r<0.8?'free':'villein');}

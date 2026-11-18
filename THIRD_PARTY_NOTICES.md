@@ -233,8 +233,10 @@ repository), copyright (c) 2026 healdgar, under the MIT licence reproduced in
 program as it stood there are recorded in `assets/board/SOURCE.json`.
 
 The program is **modified** only by the passages listed in
-`scripts/board-tuning.mjs`, applied by `scripts/vendor-castle-and-commons.mjs`;
-`tests/board-model.test.mjs` undoes that table and checks the result against
-the recorded hash. Its mathematical functions are fdlibm as ported in V8, which
+`scripts/board-tuning.mjs` (fitting it to this game) and
+`scripts/board-upstream.mjs` (changes to its simulation, written to be copied
+back into Castle and Commons), applied in that order by
+`scripts/vendor-castle-and-commons.mjs`; `tests/board-model.test.mjs` undoes
+those tables and checks the result against the recorded hash. Its mathematical functions are fdlibm as ported in V8, which
 the program carries itself. `assets/board/runtime.js`, which drives the program
 for this game, is original project code under the project MIT licence.

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BOARD_TUNING, tuneBoardSource } from '../scripts/board-tuning.mjs';
+import { BOARD_TABLES, tuneBoardSource } from '../scripts/board-tuning.mjs';
 import { BOARD_RIVERS, boardKey, boardPrefix, boardRequest, boardSeat } from '../js/board-model.js';
 import { openBoard } from '../scripts/board-host.mjs';
 
@@ -26,14 +26,14 @@ function bay() {
 const SITE = { name: 'Porto Novo', culture: 'iberian', x: 150, z: 380 };
 const ask = (more = {}) => boardRequest({ heights: bay(), span: SPAN, site: SITE, seed: 1550, era: 1550, seat: 0.5, ...more });
 
-test('the model here is Castle and Commons\' program as recorded, changed by the tuning table and nothing else', () => {
+test('the model here is Castle and Commons\' program as recorded, changed by the tuning tables and nothing else', () => {
   const source = JSON.parse(asset('SOURCE.json')), game = asset('game.js');
   const body = game.replace(/^(\/\/.*\n)+/, '');
   assert.match(game, new RegExp(`^// Castle and Commons: the game program, from ${source.commit}\\.`));
-  assert.equal(source.tuned, BOARD_TUNING.length);
+  for (const { name, table } of BOARD_TABLES) assert.equal(source[name], table.length, `${name} passages recorded`);
   // Every passage stands as tuned, once, and the source's own words for it are gone.
   let restored = body;
-  for (const { find, replace, count = 1 } of BOARD_TUNING) {
+  for (const { find, replace, count = 1 } of BOARD_TABLES.flatMap(({ table }) => table)) {
     assert.equal(restored.split(replace).length - 1, count, `tuned passage present: ${find.slice(0, 60)}`);
     restored = restored.split(replace).join(find);
   }
@@ -41,7 +41,7 @@ test('the model here is Castle and Commons\' program as recorded, changed by the
   assert.equal(createHash('sha256').update(restored).digest('hex'), source.sha256);
   assert.equal(tuneBoardSource(restored), body);
   // A passage the source no longer has stops the vendoring instead of passing silently.
-  assert.throws(() => tuneBoardSource(restored.replace(BOARD_TUNING[0].find, '')), /Castle and Commons has changed/);
+  for (const { table } of BOARD_TABLES) assert.throws(() => tuneBoardSource(restored.replace(table[0].find, '')), /Castle and Commons has changed/);
   assert.match(asset('LICENSE'), /MIT License/);
 });
 

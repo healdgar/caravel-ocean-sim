@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // The board: a coast's towns, roads, fields and people, as Castle and Commons' own generator founds them on this
-// game's ground. The generator is that game's whole program (assets/board/game.js), tuned by scripts/board-tuning.mjs and
-// driven by assets/board/runtime.js; it takes a minute or more to found a country, so it never runs on the page's own thread.
+// game's ground. The generator is that game's whole program (assets/board/game.js), fitted by scripts/board-tuning.mjs,
+// extended by scripts/board-upstream.mjs and driven by assets/board/runtime.js; it takes a minute or more to found a country, so it never runs on the page's own thread.
 // This module is what both sides share: what to ask of the model, and the words that set it up before it runs.
 
 export const BOARD_VERSION = 3;
