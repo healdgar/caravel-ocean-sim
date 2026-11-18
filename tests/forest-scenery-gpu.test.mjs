@@ -5,48 +5,31 @@ import {test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 
-// The cull lists each tree in view once on its species' one list; what a listed tree draws is its own continuum's
-// choice (forestClusterSelect), so neither the rendered resolution nor the scene's pixel error moves a tree off the
-// list, and no tree, however far, is handed to another surface.
-test('forest compute lists every tree in view once, however far, and resets its counts',{timeout:120000},async()=>{
+// The stand (js/wgsl/forest-continuum.js) lists each tree in view or in the light box for the one cut, which chooses
+// what a listed tree draws; so neither the rendered resolution nor the scene's pixel error moves a tree off the list,
+// and no tree, however far, is handed to another surface. Its three passes build on the layout the renderer gives them.
+test('the forest stand compiles as the game prepares it, and its passes build on their own layout',{timeout:120000},async()=>{
   const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
   try{
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
       ?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
     const page=await browser.newPage();await page.route('**/__forest-gpu',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://127.0.0.1:'+server.address().port+'/__forest-gpu');
     const result=await page.evaluate(async()=>{
-      const {FOREST_CULL_WGSL}=await import('/js/forest-scenery.js');
+      const {withCelestialFrame}=await import('/js/wgsl/celestial.js');
+      const {pruneWGSLFunctions}=await import('/js/wgsl-prune.js');
+      const {withSceneShadowCount}=await import('/js/wgsl/shadows.js');
+      const {forestContinuumStandWGSL}=await import('/js/wgsl/forest-continuum.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
-      const B=GPUBufferUsage,make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
-      const frameData=new Float32Array(96);frameData[0]=1/.6;frameData[5]=1/.45;frameData[11]=-1;frameData[14]=.1;
-      frameData.set([.6,0,0],20);frameData.set([0,.45,0],24);frameData.set([0,0,-1],28);frameData.set([1920,1080,1/1920,1/1080],36);
-      // In front near, in front 30 km off, behind, and off to the side.
-      const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([[0,0,-20],[0,0,-30000],[0,0,20],[1000,0,-20]].flatMap(p=>[...p,1,0,1,1,1,0,0,0,0])),B.STORAGE);
-      const meta=new ArrayBuffer(32),f=new Float32Array(meta),u=new Uint32Array(meta);f.set([0,1,0,2]);u.set([0,4,0,0],4);
-      const prototypes=make(new Uint8Array(meta),B.STORAGE),visible=make(new Uint32Array(4),B.STORAGE|B.COPY_SRC),visibleCounts=make(new Uint32Array([999]),B.STORAGE|B.COPY_SRC);
-      // The roots in use as a float and, in the last word, exactly.
-      const parameterData=new Float32Array([4,1,3,0]);new Uint32Array(parameterData.buffer)[3]=4;const parameters=make(parameterData,B.UNIFORM);
-      const module=device.createShaderModule({code:FOREST_CULL_WGSL});errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
-      const pipeline=entryPoint=>device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint}});
-      const reset=await pipeline('forestReset'),cull=await pipeline('forestCull');
-      const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:visibleCounts}},{binding:5,resource:{buffer:parameters}}]});
-      const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...[frame,roots,prototypes,visible,visibleCounts,parameters].map((buffer,binding)=>({binding,resource:{buffer}}))]});
-      const read=device.createBuffer({size:20,usage:B.COPY_DST|B.MAP_READ});
-      async function run(height,pixelError=3,capacity=4){
-        frameData[37]=height;parameterData[2]=pixelError;u[5]=capacity;
-        device.queue.writeBuffer(frame,0,frameData);device.queue.writeBuffer(parameters,0,parameterData);device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-        const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(1);pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(1);pass.end();
-        enc.copyBufferToBuffer(visibleCounts,0,read,0,4);enc.copyBufferToBuffer(visible,0,read,4,16);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
-        const data=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();
-        return {count:data[0],listed:data.slice(1,1+Math.min(data[0],capacity)).sort()};
-      }
-      const normal=await run(1080),repeat=await run(1080),high=await run(2160),coarse=await run(1080,12);
-      const full=await run(1080,3,1);
-      await device.queue.onSubmittedWorkDone();device.destroy();return {errors,normal,repeat,high,coarse,full};
+      const module=device.createShaderModule({code:pruneWGSLFunctions(withCelestialFrame(withSceneShadowCount(forestContinuumStandWGSL(),1)))});
+      errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
+      const C=GPUShaderStage.COMPUTE,entry=(binding,type)=>({binding,visibility:C,buffer:{type}});
+      const layout=device.createBindGroupLayout({entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),{binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}}]});
+      device.pushErrorScope('validation');
+      await Promise.all(['forestStandReset','forestStandRoots','forestStandFinish'].map(entryPoint=>device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[layout]}),compute:{module,entryPoint}}).catch(e=>errors.push(String(e.message??e)))));
+      const scope=await device.popErrorScope();if(scope)errors.push(scope.message);
+      await device.queue.onSubmittedWorkDone();device.destroy();return {errors};
     });
     assert.deepEqual(result.errors,[]);
-    for(const name of ['normal','repeat','high','coarse'])assert.deepEqual(result[name],{count:2,listed:[0,1]},name+': both trees in view, once each, whatever the resolution or pixel error');
-    assert.equal(result.full.count,2);assert.equal(result.full.listed.length,1,'a list never writes past its species\' stretch of the roots');
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });
 

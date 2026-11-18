@@ -5,7 +5,7 @@
 // with a flat spreading crown; and a red mangrove, a low dome on arching prop roots.
 //   python3 scripts/paint-tropical-leaves.py assets/forest-scenery/subtropical
 //   node scripts/grow-tropical-trees.mjs
-//   node scripts/prepare-forest-clusters.mjs subtropical
+//   node scripts/prepare-forest-continuum.mjs subtropical
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import zlib from 'node:zlib';

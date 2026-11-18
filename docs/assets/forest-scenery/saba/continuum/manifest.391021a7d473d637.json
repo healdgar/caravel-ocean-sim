@@ -1,0 +1,446 @@
+{
+ "format": "waterworld.forest-continuum",
+ "version": 2,
+ "generator": "scripts/prepare-forest-continuum.mjs",
+ "pack": "saba",
+ "layout": {
+  "atlasVersion": 2,
+  "header": {
+   "magic": 0,
+   "version": 1,
+   "typeCount": 2,
+   "typesAt": 3,
+   "clustersAt": 4,
+   "clusterCount": 5,
+   "verticesAt": 6,
+   "vertexCount": 7,
+   "indicesAt": 8,
+   "indexCount": 9,
+   "chainsAt": 10,
+   "words": 11,
+   "hops": 12,
+   "chunkTriangles": 13,
+   "clusterTriangles": 14,
+   "streams": 15,
+   "skin": 16,
+   "uv": 17,
+   "rider": 18,
+   "wind": 19,
+   "surface": 20
+  },
+  "material": {
+   "uvLow": 24,
+   "uvScale": 26,
+   "sway": 28,
+   "splat": 29,
+   "firstLayer": 30
+  },
+  "streams": 10
+ },
+ "totals": {
+  "types": 5,
+  "clusters": 45543,
+  "vertices": 7702146,
+  "indices": 17256096,
+  "sourceTriangles": 2898670,
+  "farTriangles": 14178
+ },
+ "types": [
+  {
+   "id": 0,
+   "name": "oak",
+   "fingerprint": "6ded6306e8470d95adb623206ef8dd6a78a7f32a986486e85f9f8eaf235a166a",
+   "sourceTriangles": 576223,
+   "sway": 0.7311,
+   "quantization": {
+    "low": [
+     -9.35841,
+     -2.76038,
+     -10.67647
+    ],
+    "span": 22.58179
+   },
+   "sphere": [
+    0.1163,
+    7.7083,
+    0.6144,
+    30.947
+   ],
+   "clusters": {
+    "count": 9043,
+    "levels": 23,
+    "roots": 2,
+    "finestTriangles": 576223,
+    "rootError": 2.1056,
+    "leafClusters": 4751,
+    "leafLevels": 12
+   },
+   "chain": {
+    "cell": 0.5604,
+    "cells": [
+     35,
+     47,
+     42
+    ],
+    "wellComposedCells": 37,
+    "wrapTriangles": 6848,
+    "baseTriangles": 4012,
+    "baseVertices": 2008,
+    "baseError": 2.792,
+    "outward": 1.2341,
+    "inward": 2.792,
+    "simplifyError": 0.1836,
+    "steps": 2003,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     2.792,
+     10.8185
+    ],
+    "inflateMax": 2.0724,
+    "rootTriangles": 188,
+    "farFirst": 1912,
+    "farFirstTriangles": 188,
+    "handoffError": 4.8534
+   },
+   "splat": {
+    "centre": [
+     0.7478,
+     8.9868,
+     2.5511
+    ],
+    "ry": 8.9868,
+    "rx": 5.0441,
+    "roofShare": 0,
+    "wallKind": [
+     1,
+     495168
+    ],
+    "roofKind": [
+     1,
+     495168
+    ]
+   },
+   "bakeMs": 37115
+  },
+  {
+   "id": 1,
+   "name": "maple",
+   "fingerprint": "2ca9e1946b0f31d9ebaad9a1a612b71cfea468ea318daaacfcbf2f3b82fcf5ef",
+   "sourceTriangles": 664478,
+   "sway": 0.7543,
+   "quantization": {
+    "low": [
+     -8.23346,
+     -2.2,
+     -7.82887
+    ],
+    "span": 18.53585
+   },
+   "sphere": [
+    -0.8457,
+    7.0679,
+    0.2249,
+    32.8833
+   ],
+   "clusters": {
+    "count": 10486,
+    "levels": 24,
+    "roots": 2,
+    "finestTriangles": 664478,
+    "rootError": 3.8145,
+    "leafClusters": 5981,
+    "leafLevels": 12
+   },
+   "chain": {
+    "cell": 0.7723,
+    "cells": [
+     27,
+     35,
+     28
+    ],
+    "wellComposedCells": 10,
+    "wrapTriangles": 3184,
+    "baseTriangles": 1816,
+    "baseVertices": 910,
+    "baseError": 2.6204,
+    "outward": 1.6917,
+    "inward": 2.6204,
+    "simplifyError": 0.2531,
+    "steps": 905,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     2.6204,
+     8.1361
+    ],
+    "inflateMax": 1.8527,
+    "rootTriangles": 154,
+    "farFirst": 831,
+    "farFirstTriangles": 154,
+    "handoffError": 4.6429
+   },
+   "splat": {
+    "centre": [
+     -0.2242,
+     8.1679,
+     0.3187
+    ],
+    "ry": 8.1679,
+    "rx": 5.6329,
+    "roofShare": 0,
+    "wallKind": [
+     1,
+     1085090
+    ],
+    "roofKind": [
+     1,
+     1085090
+    ]
+   },
+   "bakeMs": 38819
+  },
+  {
+   "id": 2,
+   "name": "birch",
+   "fingerprint": "b05d009e71f3e499afd3b9301cb16ffffc24358fc7b070cff06609da32443df3",
+   "sourceTriangles": 92476,
+   "sway": 0.3077,
+   "quantization": {
+    "low": [
+     -3.02696,
+     -2.46283,
+     -2.94018
+    ],
+    "span": 9.72479
+   },
+   "sphere": [
+    -0.4592,
+    2.3996,
+    1.1337,
+    12.6452
+   ],
+   "clusters": {
+    "count": 1458,
+    "levels": 17,
+    "roots": 2,
+    "finestTriangles": 92476,
+    "rootError": 0.4456,
+    "leafClusters": 1197,
+    "leafLevels": 10
+   },
+   "chain": {
+    "cell": 0.2628,
+    "cells": [
+     27,
+     47,
+     41
+    ],
+    "wellComposedCells": 35,
+    "wrapTriangles": 4396,
+    "baseTriangles": 2738,
+    "baseVertices": 1361,
+    "baseError": 0.558,
+    "outward": 0.558,
+    "inward": 0.5263,
+    "simplifyError": 0.0689,
+    "steps": 1355,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.558,
+     3.3845
+    ],
+    "inflateMax": 0.972,
+    "rootTriangles": 189,
+    "farFirst": 1275,
+    "farFirstTriangles": 188,
+    "handoffError": 1.3665
+   },
+   "splat": {
+    "centre": [
+     -0.2677,
+     3.631,
+     1.1337
+    ],
+    "ry": 3.631,
+    "rx": 1.5675,
+    "roofShare": 0,
+    "wallKind": [
+     1,
+     1478586
+    ],
+    "roofKind": [
+     1,
+     1478586
+    ]
+   },
+   "bakeMs": 9712
+  },
+  {
+   "id": 3,
+   "name": "elm",
+   "fingerprint": "b83837c7466a82d4ca8e70591d958d96df74f8eecf2e50abf1a3a9d1f9ba3e0e",
+   "sourceTriangles": 895546,
+   "sway": 0.9624,
+   "quantization": {
+    "low": [
+     -8.35695,
+     -2.2,
+     -11.80779
+    ],
+    "span": 20.64688
+   },
+   "sphere": [
+    0.8111,
+    7.4914,
+    -1.4843,
+    32.1692
+   ],
+   "clusters": {
+    "count": 14041,
+    "levels": 25,
+    "roots": 3,
+    "finestTriangles": 895546,
+    "rootError": 2.9832,
+    "leafClusters": 9690,
+    "leafLevels": 13
+   },
+   "chain": {
+    "cell": 0.7939,
+    "cells": [
+     33,
+     35,
+     35
+    ],
+    "wellComposedCells": 12,
+    "wrapTriangles": 3540,
+    "baseTriangles": 2092,
+    "baseVertices": 1048,
+    "baseError": 2.4767,
+    "outward": 1.5721,
+    "inward": 2.4767,
+    "simplifyError": 0.2081,
+    "steps": 1043,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     2.4767,
+     13.3401
+    ],
+    "inflateMax": 1.9045,
+    "rootTriangles": 188,
+    "farFirst": 952,
+    "farFirstTriangles": 188,
+    "handoffError": 4.403
+   },
+   "splat": {
+    "centre": [
+     1.1155,
+     8.4272,
+     -1.8233
+    ],
+    "ry": 8.4272,
+    "rx": 5.5543,
+    "roofShare": 0,
+    "wallKind": [
+     1,
+     2293195
+    ],
+    "roofKind": [
+     1,
+     2293195
+    ]
+   },
+   "bakeMs": 63132
+  },
+  {
+   "id": 4,
+   "name": "chestnut",
+   "fingerprint": "839671ca22cf4fcb2a9bb235a6d0f87b2ffa314ea21e22a2ed481ec392741b50",
+   "sourceTriangles": 669947,
+   "sway": 1.0292,
+   "quantization": {
+    "low": [
+     -6.84844,
+     -2.2,
+     -9.13191
+    ],
+    "span": 23.85093
+   },
+   "sphere": [
+    2.0497,
+    9.7255,
+    1.008,
+    37.8901
+   ],
+   "clusters": {
+    "count": 10515,
+    "levels": 24,
+    "roots": 3,
+    "finestTriangles": 669947,
+    "rootError": 3.3856,
+    "leafClusters": 5410,
+    "leafLevels": 12
+   },
+   "chain": {
+    "cell": 0.6578,
+    "cells": [
+     35,
+     47,
+     39
+    ],
+    "wellComposedCells": 44,
+    "wrapTriangles": 6024,
+    "baseTriangles": 3520,
+    "baseVertices": 1760,
+    "baseError": 2.0704,
+    "outward": 1.3678,
+    "inward": 2.0704,
+    "simplifyError": 0.2155,
+    "steps": 1755,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     2.0704,
+     10.881
+    ],
+    "inflateMax": 2.3669,
+    "rootTriangles": 234,
+    "farFirst": 1643,
+    "farFirstTriangles": 234,
+    "handoffError": 4.4272
+   },
+   "splat": {
+    "centre": [
+     2.1491,
+     10.7405,
+     1.4246
+    ],
+    "ry": 10.7405,
+    "rx": 4.9912,
+    "roofShare": 0,
+    "wallKind": [
+     1,
+     2858615
+    ],
+    "roofKind": [
+     1,
+     2858615
+    ]
+   },
+   "bakeMs": 47824
+  }
+ ],
+ "atlas": {
+  "words": 64289915,
+  "bytes": 257159660,
+  "sha256": "273848c1af5949d87df010248cbd46b2a4df11540d64930541c2c22b17cebcc0",
+  "gzip": {
+   "file": "atlas.bin.gz",
+   "bytes": 111466427,
+   "sha256": "e4503aff8b13dd51fccb864375b965d37088da9fab4ba0bf7e05471c3202f3a8"
+  }
+ },
+ "bakeSeconds": 225.2
+}

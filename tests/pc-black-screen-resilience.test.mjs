@@ -293,7 +293,7 @@ test('6. requestWebGPUAdapter rejects under-limit (< 8 storage buffers) adapters
   assert.equal('requiredLimits' in retryCalls[retryCalls.length - 1], false);
 });
 
-test('7. #err HUD banner, post-startup device.lost recovery, swapchain/init-flag ordering, boulder async pipelines, and forest-wind TDR/NaN guards', () => {
+test('7. #err HUD banner, post-startup device.lost recovery, swapchain/init-flag ordering, boulder async pipelines, and a forest wind with no state to run away', () => {
   const html = readRepoFile('index.html');
   const errLine = html.split('\n').find((line) => /#err\s*\{/.test(line));
   assert.ok(errLine, '#err style rule must exist in index.html');
@@ -328,13 +328,13 @@ test('7. #err HUD banner, post-startup device.lost recovery, swapchain/init-flag
   assert.match(boulderSrc, /device\.createComputePipelineAsync\s*\(/);
   assert.match(boulderSrc, /device\.createRenderPipelineAsync\s*\(/);
 
-  // Verify forest-wind uses 12-slot odd-stride hash probing and guards simState/theta/omegaVel
-  const forestWindSrc = readRepoFile('js/forest-wind.js');
-  assert.match(forestWindSrc, /2654435761u/);
-  assert.match(forestWindSrc, /\b[sp]<12u/);
-  assert.equal(/s<256u/.test(forestWindSrc.slice(forestWindSrc.indexOf('fn forestWindPromoteRoots'))), false);
-  assert.match(forestWindSrc, /dot\(theta,theta\)<1e4/);
-  assert.match(forestWindSrc, /dot\(omegaVel,omegaVel\)<1e6/);
+  // The forest's wind keeps no simulated state that could run away: each tree's gust is closed-form and bounded, and
+  // a blast's wave whips a tree for a few seconds and is gone (js/wgsl/forest-continuum.js forestStandRoots).
+  const forestStandSrc = readRepoFile('js/wgsl/forest-continuum.js');
+  assert.match(forestStandSrc, /clamp\(speed\/14\.0,0\.0,1\.6\)/);
+  assert.match(forestStandSrc, /if\(age<0\.0\|\|age>4\.0\)\{continue;\}/);
+  assert.match(forestStandSrc, /min\(forestStand\.counts\.w,\$\{FOREST_CONTINUUM_BLASTS\}u\)/);
+  assert.equal(/theta|omegaVel|simState/.test(forestStandSrc), false, 'no bone state to guard');
 });
 
 test('8. Build & GPU contract: zero aliased ES imports in js/*.js and P2 D3D12 fast-math guards present', () => {

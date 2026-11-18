@@ -31,12 +31,12 @@ test('packaged island reaches a real rendered frame without per-batch timer stal
     const result=await page.evaluate(()=>({state:oceanStartup.state,error:document.querySelector('#err').textContent,ready:performance.getEntriesByName('ocean-startup-ready')[0]?.startTime,...forestStartupAudit}));
     t.diagnostic(JSON.stringify(result));
     assert.equal(result.state,'ready',result.error);assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);assert.ok(result.frames>0);assert.ok(result.tasks>0);assert.ok(result.timers<100,'validation must not sleep after every small batch');
-    // Every tree is its clusters near and its crown far: the pack's own vertex and index streams never reach the GPU.
+    // Every tree is one type of the one continuum: the pack's own vertex and index streams never reach the GPU.
     for(const label of ['forest immutable prototype vertices','forest immutable prototype indices'])assert.equal(result.buffers[label],undefined,label);
-    assert.equal(result.pipelines.some(label=>label?.startsWith('instanced forest')),false,'no native forest pipelines');
-    for(const label of ['forest cluster vertices','forest cluster indices']){assert.ok(result.buffers[label]>10000000,label);assert.equal(result.uploads[label],result.buffers[label],label+' uploads every byte exactly once');}
-    // The far canopy is the continuum's crowns.
-    for(const label of ['forest crown vertices','forest crown morph'])assert.equal(result.uploads[label],result.buffers[label],label+' uploads every byte exactly once');
-    assert.ok(result.pipelines.includes('forest crowns forestCrownFS'),'continuum crowns render the far canopy');
+    assert.equal(result.pipelines.some(label=>label?.startsWith('instanced forest')||label?.startsWith('forest clusters')||label?.startsWith('forest crowns')),false,'no forest pipelines of its own');
+    // Its atlas uploads every byte exactly once, and its view is the one cut's.
+    const atlas=Object.keys(result.buffers).find(label=>/^forest .*continuum atlas$/.test(label));
+    assert.ok(result.buffers[atlas]>10000000,'the forest atlas');assert.equal(result.uploads[atlas],result.buffers[atlas],'the forest atlas uploads every byte exactly once');
+    assert.ok(result.pipelines.includes('forestContinuum view'),'the forest draws through the one continuum\'s view');
   }finally{await browser?.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
 });

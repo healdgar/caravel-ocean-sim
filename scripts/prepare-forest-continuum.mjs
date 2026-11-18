@@ -32,8 +32,11 @@ const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'ut
 // A pack's source vertex: position, normal, a spare float, its exposure, its UV, its colour and its layer.
 const SOURCE_STRIDE = 14;
 const MASK_SIZE = 64;
-// A coarser leaf level's error as a share of its size (third_party/threejs-nanites/dag/leaves.ts): the cluster bake's.
-const LEAF_ERROR_SHARE = 0.35;
+// A coarser leaf level's error as a share of its size (third_party/threejs-nanites/dag/leaves.ts). The forest's own
+// cut baked 0.35 and drew leaves at 0.4 of the scene's pixel error, so its cards stayed under ~3.4 px; the one cut
+// draws every family at the scene's error, so the share is baked at 0.35 / 0.4 to keep them so. At 0.35 a crown's
+// coarser cards grew to several times that, and its root cluster's few dozen read as single giant leaves.
+const LEAF_ERROR_SHARE = 0.875;
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const asBytes = (typed) => Buffer.from(typed.buffer, typed.byteOffset, typed.byteLength);
 
@@ -170,7 +173,7 @@ function main(source, indices, canopy) {
       look, uvRange: [uvLow[0], uvLow[1], Math.max(uvHigh[0] - uvLow[0], 1e-3), Math.max(uvHigh[1] - uvLow[1], 1e-3)], sway, firstLayer,
     }, { welded: { position, normal }, clusters, far });
     const ms = Date.now() - t0;
-    console.log(`${String(p.id).padStart(2)} ${name.padEnd(20)} wood ${woodTriangles} · leaves ${leafTriangles} tris · ${clusters.count} clusters, ${clusters.levels} levels, root ${clusters.rootError.toFixed(3)} m · wrap ${far.stats.cell} m, ${far.stats.baseTriangles} → ${far.stats.coreTriangles} in ${far.stats.steps} steps (depth ${far.stats.depth}), ${far.stats.errorRange.join('–')} m, handoff at step ${far.farFirst} (${far.stats.farFirstTriangles} ≤ ${far.stats.rootTriangles}, ${far.stats.handoffError} m) · sway ${sway.toFixed(3)} m · ${(ms / 1000).toFixed(1)} s`);
+    console.log(`${String(p.id).padStart(2)} ${name.padEnd(20)} wood ${woodTriangles} · leaves ${leafTriangles} tris · ${clusters.count} clusters, ${clusters.levels} levels, root ${clusters.rootError.toFixed(3)} m · wrap ${far.stats.cell} m, ${far.stats.baseTriangles} → ${far.stats.coreTriangles} in ${far.stats.steps} steps (depth ${far.stats.depth}), ${far.stats.errorRange.join('–')} m, handoff at step ${far.farFirst} (${far.stats.farFirstTriangles} ≤ ${far.stats.rootTriangles}, ${far.stats.handoffError} m) · bound ${packed.radius.toFixed(2)} m · sway ${sway.toFixed(3)} m · ${(ms / 1000).toFixed(1)} s`);
     const fingerprint = sha256(Buffer.concat([asBytes(corners), Buffer.from(JSON.stringify([p.nativeMaterials, firstLayer]))]));
     return { p, name, clusters, far, packed, ms, fingerprint, sourceTriangles: woodTriangles + leafTriangles, sway };
   };

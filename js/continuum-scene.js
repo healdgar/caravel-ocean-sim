@@ -107,12 +107,14 @@ export function continuumListLayout(capacity, room) {
 // its material's view (requestContinuumView), or none for a scene only cast into the shadow map; `poses` the buffer its
 // records' pose data lie in (a family's shard flights, joint palettes), or else `poseRoom` vec4f of its own, which
 // `writePoses` fills; `frame` and `shadowUniform` the frame's and the land shadow's uniforms. Every family's instances
-// are the same record: `words` and `floats` hold them on the CPU, `place` writes one, `send` uploads a range.
-export function createContinuumScene({ device, atlas, programs: P, capacity, room, view = null, poses = null, poseRoom = 1, frame, shadowUniform, samples = 4, label }) {
+// are the same record: `words` and `floats` hold them on the CPU, `place` writes one, `send` uploads a range. A scene
+// `written` on the GPU (a family's own pass stands its records each frame, encode's `indirect`) keeps none on the CPU.
+export function createContinuumScene({ device, atlas, programs: P, capacity, room, view = null, poses = null, poseRoom = 1, frame, shadowUniform, samples = 4, label, written = false }) {
   const B = GPUBufferUsage, W = CONTINUUM_RECORD_WORDS, packed = CONTINUUM_RECORD.packed;
   const { lists, entries } = continuumListLayout(capacity, room);
-  const words = new Uint32Array(Math.max(1, capacity) * W), floats = new Float32Array(words.buffer);
-  const records = device.createBuffer({ label: `${label} continuum records`, size: words.byteLength, usage: B.STORAGE | B.COPY_DST | B.COPY_SRC });
+  const words = new Uint32Array((written ? 1 : Math.max(1, capacity)) * W), floats = new Float32Array(words.buffer);
+  const onCPU = () => { if (written) throw Error(`The ${label} scene's records are written on the GPU`); };
+  const records = device.createBuffer({ label: `${label} continuum records`, size: Math.max(1, capacity) * W * 4, usage: B.STORAGE | B.COPY_DST | B.COPY_SRC });
   const ownPoses = poses ? null : device.createBuffer({ label: `${label} continuum poses`, size: Math.max(1, poseRoom) * 16, usage: B.STORAGE | B.COPY_DST });
   const list = device.createBuffer({ label: `${label} continuum lists`, size: entries * 8, usage: B.STORAGE | B.VERTEX | B.COPY_SRC });
   const draws = device.createBuffer({ label: `${label} continuum draws`, size: CONTINUUM_DRAWS_BYTES, usage: B.STORAGE | B.INDIRECT | B.COPY_SRC });
@@ -142,10 +144,11 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     capacity, lists, list, draws, records, words, floats, poses: poses ?? ownPoses,
     get count() { return count; },
     // Instance `index`'s record (js/continuum-format.js writeContinuumRecord), on the CPU until sent.
-    place(index, record) { writeContinuumRecord(words, floats, index, record); },
+    place(index, record) { onCPU(); writeContinuumRecord(words, floats, index, record); },
     // Instances `first`..`first + n` sent as they now stand.
     send(first = 0, n = count) {
       if (destroyed || n <= 0) return;
+      onCPU();
       device.queue.writeBuffer(records, first * W * 4, words, first * W, n * W);
     },
     // Its own pose buffer's vec4f from `at`, written.
@@ -153,6 +156,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     // Flag `bit` of instances `index`..`index + n` set or cleared, sent only where it changed.
     flag(index, n, bit, on) {
       if (!(index >= 0) || index >= capacity) return;
+      onCPU();
       const end = Math.min(capacity, index + n);
       let first = -1, last = -1;
       for (let i = index; i < end; i++) {

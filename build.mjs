@@ -12,9 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { FOREST_ASSETS, SUBTROPICAL_FOREST_ASSETS, PORTUGAL_FOREST_ASSETS } from './js/forest-scenery.js';
-import { FOREST_CLUSTER_ASSETS, SUBTROPICAL_FOREST_CLUSTER_ASSETS, PORTUGAL_FOREST_CLUSTER_ASSETS } from './js/forest-clusters.js';
-import { FOREST_WIND_ASSETS, SUBTROPICAL_FOREST_WIND_ASSETS, PORTUGAL_FOREST_WIND_ASSETS } from './js/forest-wind.js';
-import { FOREST_CROWN_ASSETS, SUBTROPICAL_FOREST_CROWN_ASSETS, PORTUGAL_FOREST_CROWN_ASSETS } from './js/forest-crowns.js';
+import { FOREST_CONTINUUM_ASSETS, SUBTROPICAL_FOREST_CONTINUUM_ASSETS, PORTUGAL_FOREST_CONTINUUM_ASSETS } from './js/forest-continuum.js';
 import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
 import { PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS } from './js/meadow-continuum.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
@@ -44,12 +42,12 @@ order.splice(order.indexOf('js/crew.js'),0,'js/crew-solve.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/wgsl/crew-continuum.js','js/crew-continuum-draw.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
-order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-clusters.js');
-order.splice(order.indexOf('js/forest-clusters.js'),0,'js/forest-dispatch.js','js/forest-wind.js','js/forest-crowns.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-groves.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-surfaces.js');
-order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-trunk-shapes.js','js/forest-trunks.js');
+// The forest on the one continuum: its atlas's packing, then its material and stand pass, which read the trunks' codes.
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-continuum.js','js/wgsl/forest-continuum.js');
 order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js','js/models/neural-light-weights.js','js/neural-post.js');
 order.splice(order.indexOf('js/main.js'),0,'js/career-save.js','js/career-ui.js','js/career-era.js','js/career-trade.js','js/career-port.js');
@@ -169,17 +167,17 @@ if(fs.existsSync(path.join(root,'assets/world/saba/wells-bay/manifest.json'))){
     runtimeAssetTypes.set('assets/world/saba/wells-bay/'+name,mime);
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/manifest.json'))){
-  for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(FOREST_CLUSTER_ASSETS),...Object.values(FOREST_WIND_ASSETS),...Object.values(FOREST_CROWN_ASSETS),...Object.values(FOREST_ASSETS)]){
+  for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(FOREST_CONTINUUM_ASSETS),...Object.values(FOREST_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/subtropical/manifest.json'))){
-  for(const file of [...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_CLUSTER_ASSETS),...Object.values(SUBTROPICAL_FOREST_WIND_ASSETS),...Object.values(SUBTROPICAL_FOREST_CROWN_ASSETS),...Object.values(SUBTROPICAL_FOREST_GROVE_ASSETS),...Object.values(SUBTROPICAL_FOREST_ASSETS)]){
+  for(const file of [...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_CONTINUUM_ASSETS),...Object.values(SUBTROPICAL_FOREST_GROVE_ASSETS),...Object.values(SUBTROPICAL_FOREST_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/portugal/manifest.json'))){
-  for(const file of [...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_CLUSTER_ASSETS),...Object.values(PORTUGAL_FOREST_WIND_ASSETS),...Object.values(PORTUGAL_FOREST_CROWN_ASSETS),...Object.values(PORTUGAL_FOREST_GROVE_ASSETS),...Object.values(PORTUGAL_FOREST_ASSETS)]){
+  for(const file of [...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_CONTINUUM_ASSETS),...Object.values(PORTUGAL_FOREST_GROVE_ASSETS),...Object.values(PORTUGAL_FOREST_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
@@ -226,10 +224,10 @@ if(fs.existsSync(path.join(root,'assets/boards/partner-ports-1550.json'))){
   runtimeAssetTypes.set('assets/boards/partner-ports-1550.json','application/json');
 }
 const runtimeAssetBytes = new Map(), pagesAssets = new Map();
-// Keep core sailing and the forest maps embedded in downloads. The forest's cluster
-// and wind streams alone exceed 100 MB after base64 encoding; downloads load those
-// from the same versioned public asset instead.
-const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/boards/partner-ports-1550.json','assets/board/game.js','assets/board/runtime.js','assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/portugal/clusters/vertices.bin.gz','assets/forest-scenery/portugal/clusters/indices.bin.gz','assets/forest-scenery/saba/wind/weights.bin.gz','assets/forest-scenery/portugal/wind/weights.bin.gz','assets/forest-scenery/subtropical/wind/weights.bin.gz', ...[PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS].flatMap(assets=>Object.values(assets)).filter(f=>f.endsWith('.gz'))]);
+// Keep core sailing and the forest maps embedded in downloads. The forest's continuum
+// atlases alone exceed 100 MB after base64 encoding; downloads load those from the
+// same versioned public asset instead.
+const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/boards/partner-ports-1550.json','assets/board/game.js','assets/board/runtime.js', ...[FOREST_CONTINUUM_ASSETS,SUBTROPICAL_FOREST_CONTINUUM_ASSETS,PORTUGAL_FOREST_CONTINUUM_ASSETS].flatMap(assets=>Object.values(assets)).filter(f=>f.endsWith('.gz')), ...[PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS].flatMap(assets=>Object.values(assets)).filter(f=>f.endsWith('.gz'))]);
 // Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 // The people continuum's bodies (hundreds of MB) stay out of the downloads, which fetch the published copies.
@@ -296,9 +294,7 @@ const TIGHT_WGSL_RELS = new Set([
   'js/wgsl/surface-coupling.js', 'js/wgsl/underwater.js', 'js/wgsl/gunnery-probe.js',
   'js/wgsl/hull-contact.js', 'js/wgsl/rig-surfaces.js', 'js/wgsl/vessel-pose.js',
   'js/wgsl/vessel-recoil.js', 'js/wgsl/deck.js', 'js/wgsl/wetness.js',
-  'js/forest-clusters.js', 'js/forest-crowns.js',
-  'js/forest-surfaces.js',
-  'js/forest-wind.js', 'js/forest-trunks.js',
+  'js/forest-surfaces.js', 'js/forest-trunks.js',
   'js/building-fracture.js', 'js/ship-fracture.js',
   'js/wgsl/terrain.js', 'js/wgsl/caravel.js', 'js/wgsl/prop-continuum.js',
   'js/wgsl/vessel.js', 'js/wgsl/neural-post.js', 'js/wgsl/ground-detail.js', 'js/wgsl/lateen.js',

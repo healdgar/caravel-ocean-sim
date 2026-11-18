@@ -1077,7 +1077,7 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
 
 test('scenery pass: beach wet sand, stratified stone, baked distant canopy domes, and multi-tier tree LOD shaders', async () => {
   const { TERRAIN } = await import('../js/wgsl/terrain.js');
-  const { FOREST_VERTEX_WGSL } = await import('../js/forest-scenery.js');
+  const { forestContinuumMaterial } = await import('../js/wgsl/forest-continuum.js');
 
   // Verify WGSL terrain shader includes wet-film Fresnel reflection, active wave-swash film, capillary damp sand,
   // dual-scale wave/wind beach ripples, stepped cliff strata, and derivative-filtered baked canopy crown domes
@@ -1091,8 +1091,8 @@ test('scenery pass: beach wet sand, stratified stone, baked distant canopy domes
   assert.match(TERRAIN, /crownGap/);
   assert.match(TERRAIN, /skyRefl/);
 
-  // A leaf's cut surface curves as a frond does; far crowns are the continuum's own (js/forest-crowns.js).
-  assert.match(FOREST_VERTEX_WGSL, /frondCurve/);
+  // Trees near and far are the one continuum's (js/wgsl/forest-continuum.js): each leaf cut by its own sample mask.
+  assert.match(forestContinuumMaterial('').wgsl(), /forestLeafSampleMask/);
 });
 
 test('colony growth year-by-year and era-by-era (1550–1689): founding dates, stage progression, fortifications, chart knowledge, and 17th-century encounters', async () => {

@@ -191,6 +191,9 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
   const centre = low.map((v, k) => (v + high[k]) / 2);
   let radius = 0;
   for (const P of [welded.position, far.position]) for (let v = 0; v < P.length / 3; v++) radius = Math.max(radius, Math.hypot(P[v * 3] - centre[0], P[v * 3 + 1] - centre[1], P[v * 3 + 2] - centre[2]));
+  // And every sphere its clusters are cut by: the cut tries a prefix of them bounded by this one (continuumPrefix,
+  // js/wgsl/continuum-cut.js), and would miss a cluster whose group's sphere pokes out of it.
+  for (const r of clusters.records) for (const s of [r.lod, r.parentLod, r.cull]) radius = Math.max(radius, Math.hypot(s[0] - centre[0], s[1] - centre[1], s[2] - centre[2]) + s[3]);
   radius += far.stats.inflateMax + 0.01;
   const ownVertices = clusters.order.length, V = far.position.length / 3, T = far.index.length / 3, S = far.chain.steps.length, vertices = ownVertices + V;
   if (V > 65535) throw Error(`A far body of ${V} vertices: its collapse records hold 16-bit targets`);

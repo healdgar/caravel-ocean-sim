@@ -7,8 +7,7 @@ import { createCoastalField } from './coastal-field.js';
 import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
 import {loadTerrainNear,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
-import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_VERTEX_WGSL,FOREST_SHADOW_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
-import {FOREST_CROWN_WGSL} from './forest-crowns.js';
+import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
 import {loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {createPortFractures} from './building-fracture.js';
@@ -1068,7 +1067,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
   const neuralPbr=sharedNeuralPbrBank(device);
   const terrainSource=withNeuralPbrTerrain(TERRAIN);
-  const modulePromise=shader(terrainSource+continuumGroundWGSL(2,CONTINUUM_GROUND_LAND_BINDING)+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+LAND_CONTINUUM_RENDER,'island terrain');
+  const modulePromise=shader(terrainSource+continuumGroundWGSL(2,CONTINUUM_GROUND_LAND_BINDING)+LAND_CONTINUUM_RENDER,'island terrain');
   // A city's buildings, through the one continuum: the city's material, shaded by the land's own surfaces, in a view
   // of its own (js/wgsl/city-continuum.js).
   const cityViewPromise=requestContinuumView({device,shader,material:cityContinuumMaterial(terrainSource),format,samples});
@@ -1330,7 +1329,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   };
   const regionalElevationSize=!nearTile&&proceduralPack?257:0;
   const regionalElevationData=regionalElevationSize?new Float32Array(regionalElevationSize*regionalElevationSize):null;
-  const getRegionalOcclusionRegion=()=>regionalElevationSize?{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span*5,size:regionalElevationSize}:activeRegion;
   const worldOffset={x:0,z:0};
   const nearDomainValues=()=>nearTile
     ?[nearTile.manifest.domain.x,nearTile.manifest.domain.z,nearTile.manifest.domain.span,1,nearTile.manifest.domain.size,worldOffset.x,worldOffset.z,0]
@@ -1468,14 +1466,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     craters?.follow(localCam);
     activeTownField?.follow?.(localCam);
-    if(forest?.wind?.enabled){
-      if(camera?.onFoot&&Number.isFinite(camera.x)&&Number.isFinite(camera.z)){
-        const gy=groundSample(localCam.x,localCam.z);
-        if(Number.isFinite(gy)&&camera.y-gy<3.6){
-          forest.wind.setPushCapsule(0,{ax:camera.x,ay:gy+0.25,az:camera.z,bx:camera.x,by:gy+1.85,bz:camera.z,radius:1.45,strength:1150,falloff:1.2});
-        }else forest.wind.clearPushCapsule(0);
-      }else forest.wind.clearPushCapsule(0);
-    }
     lastCamera=camera;lastView=viewProjection;
 
   }
@@ -1539,7 +1529,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}):forestPack;
   // What has been shot down on this coast comes back with it, and is kept with the port damage.
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
-  const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}).catch(error=>{forestFailure=error.message;return null;}):null;
+  const forest=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees)}).catch(error=>{forestFailure=error.message;return null;}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   const forestHeld=pack=>({roots:pack?.manifest?.rootCount??0,groveRoots:pack?.groveRoots??0,sections:pack?.sectionsResident??0,released:pack?.sectionsReleased??0});
   forestStats.groves=grovePack?{loaded:true,...forestHeld(activeForestPack),rootCapacity}:{loaded:false,error:groveFailure};
@@ -1879,7 +1869,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         baseGroundSample,
         {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}
       );
-      forest.updatePack(nextForestPack,regionalElevationData??heights,getRegionalOcclusionRegion());
+      forest.updatePack(nextForestPack);
       if(grovePack)Object.assign(forestStats.groves,forestHeld(nextForestPack));
       forestSectionsReleased=nextForestPack.sectionsReleased??0;forestHeldAt=forestNear??activeRegion;
       lastCamera=null;
@@ -2854,7 +2844,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const nx=Number.isFinite(dx)?dx:0,nz=Number.isFinite(dz)?dz:0;
       if(Math.abs(nx-worldOffset.x)<0.05&&Math.abs(nz-worldOffset.z)<0.05)return;
       worldOffset.x=nx;worldOffset.z=nz;
-      cityContinuum?.setWorldOffset(nx,nz);prefabs?.setWorldOffset(nx,nz);
+      cityContinuum?.setWorldOffset(nx,nz);prefabs?.setWorldOffset(nx,nz);forest?.setWorldOffset(nx,nz);
       boulderContinuum?.setWorldOffset(nx,nz);
       landContinuum?.setWorldOffset(nx,nz);
       writeNearDomainUniform();
@@ -2874,7 +2864,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       (marineLife?.state??marineLife)?.shift?.(-dx,-dz);
       (dolphins?.state??dolphins)?.shift?.(-dx,-dz);
       worldOffset.x=0;worldOffset.z=0;
-      cityContinuum?.setWorldOffset(0,0);prefabs?.setWorldOffset(0,0);
+      cityContinuum?.setWorldOffset(0,0);prefabs?.setWorldOffset(0,0);forest?.setWorldOffset(0,0);
       boulderContinuum?.setWorldOffset(0,0);
       landContinuum?.setWorldOffset(0,0);
       writeNearDomainUniform();
@@ -2942,7 +2932,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get streamedSectionCount(){return loadedSections.size;},
     get streamBusy(){return sectionStreamBusy;},
     get craters(){return craters;},
-    get forestWind(){return forest?.wind??null;},
     get forestStats(){return forest?.stats??null;},
     // How much of the ground at a point is loose sand, from none to all: what the beach survey says, or the low,
     // gentle strand with no green in this coast's imagery, which the land shader leaves bare (landGroundCover).
@@ -3023,9 +3012,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       // Every patch of grass, cut on the GPU through the one continuum (js/meadow-grass.js).
       meadowGrass?.draw(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
-      // Solid wood and crowns before cutout leaves, for Apple's hidden-surface removal.
-      forest?.drawOpaque(pass);
-      forest?.drawCutout(pass);
+      // Every tree, its leaves cut by the sample mask: one pipeline, four indirect draws (js/forest-scenery.js).
+      forest?.draw(pass);
     },
     drawWater(pass,camera={x:0,y:6,z:0},viewProjection=null){
       if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200)){

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { fitLandShadow, landShadowRadiusStep, landShadowRelief, LAND_SHADOW_RADII, LAND_SHADOW_RESOLUTION } from '../js/shadows.js';
 import { SHADOW_SAMPLE } from '../js/wgsl/shadows.js';
 import { TERRAIN } from '../js/wgsl/terrain.js';
-import { FOREST_CLUSTER_SELECT, FOREST_CLUSTER_SHADOW_WGSL } from '../js/forest-clusters.js';
+import { forestContinuumStandWGSL } from '../js/wgsl/forest-continuum.js';
 
 const RESOLUTION = LAND_SHADOW_RESOLUTION;
 const sunAt = (elevation, azimuth = 0.7) => {
@@ -103,15 +103,17 @@ test('land is shaded by whichever light the map was drawn from', () => {
   assert.match(canopy, /beyondShadowMap>0\.0\)\{[^}]*vegetationMask/, 'and its texture is read only there');
 });
 
-test('forest shadow casters are chosen from every tree against the light box, not from the camera\'s lists', () => {
-  const select = FOREST_CLUSTER_SELECT('');
-  const body = select.slice(select.indexOf('fn forestClusterShadowSelect('), select.indexOf('fn forestClusterReset('));
-  assert.ok(body.length > 200);
-  assert.ok(!/\bvisible\[|\bcommands\[|F\.viewProj/.test(body), 'the shadow cut must not depend on what the camera can see');
-  assert.match(body, /shadowBox\.lightView/);
-  assert.match(body, /bucket\.capacity\.y\+id\.x/, 'it walks every root of the species');
-  assert.ok(!/dCam|24025/.test(FOREST_CLUSTER_SHADOW_WGSL), 'no caster is rejected one vertex at a time');
-  assert.match(FOREST_CLUSTER_SHADOW_WGSL, /@fragment fn forestClusterLeafShadowFS[^}]*discard/, 'leaves cast through their outlines');
+test('forest shadow casters are stood from every tree against the light box, not only from the camera\'s view', () => {
+  // The forest's stand (js/wgsl/forest-continuum.js) lists each tree for the one cut, which casts every record in the
+  // light box whether it is seen or not (js/wgsl/continuum-cut.js continuumSelect).
+  const stand = forestContinuumStandWGSL();
+  const roots = stand.slice(stand.indexOf('fn forestStandRoots('), stand.indexOf('let slot=atomicAdd(&forestStood[3],1u);'));
+  assert.ok(roots.length > 200);
+  assert.match(roots, /if\(i>=forestStand\.counts\.x\)\{return;\}/, 'it walks every root');
+  assert.match(roots, /forestStandOutside\([^;]*\)&&!\(forestStand\.counts\.z!=0u&&forestStandShadowed\(/, 'a tree out of the camera\'s view still stands while it lies in the light box');
+  const light = stand.slice(stand.indexOf('fn forestStandShadowed('), stand.indexOf('@compute', stand.indexOf('fn forestStandShadowed(')));
+  assert.match(light, /SH\.lightView/);
+  assert.ok(!/F\.viewProj/.test(light), 'the light box test must not depend on what the camera can see');
 });
 
 test('the land shadow map is 2048 square on every device: 16 MiB, not 64', () => {

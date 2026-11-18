@@ -1,15 +1,14 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // A pack's leaves as a field: every leaf card as points, the points as leaf area in a grid, and the
-// surface where that field crosses a level. scripts/prepare-forest-crowns.mjs builds one tree's far crown
-// from it, and scripts/prepare-forest-stands.mjs spaces a grove's trees by the crowns their leaves make.
+// surface where that field crosses a level. scripts/prepare-forest-stands.mjs spaces a grove's trees by the
+// crowns their leaves make. The leaves are read from the pack's own mesh, every leaf as it was modelled.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { FOREST_CLUSTER_VERTEX_WORDS } from '../js/forest-clusters.js';
 
-// What forestClusterVertex and forestNativeLeafDepthFS do to far leaves (js/forest-clusters.js, js/forest-scenery.js).
+// How far a far leaf card was grown, and its coverage raised, when the stands were first spaced: kept so they space alike.
 export const FAR_INFLATE_BROADLEAF = 0.48, FAR_INFLATE_OTHER = 0.18, FAR_COVERAGE_GAIN = 2.25;
 // A ray through leaves at every angle meets about half their area.
 export const PROJECTED_SHARE = 0.5;
@@ -20,7 +19,8 @@ export function sampleImage(image, u, v, out) {
   out[0] = image.rgb[i * 3]; out[1] = image.rgb[i * 3 + 1]; out[2] = image.rgb[i * 3 + 2]; out[3] = image.alpha[i];
 }
 
-// A unit vector on the square, as packForestClusterVertex keeps normals: the shader reads it back with forestClusterOctahedral.
+// A unit vector on the square, as the one continuum's vertices keep normals (js/continuum-format.js); the shader reads
+// it back with continuumOctahedral.
 export function octahedral([x, y, z]) {
   const length = Math.abs(x) + Math.abs(y) + Math.abs(z) || 1;
   let u = x / length, v = y / length;
@@ -35,14 +35,16 @@ export const CLOSE_METRES = 1;
 // A tree's far crown is found in a leaf field this many of its own cells coarse, and the level its
 // manifest names (stats.level) is the level of that field.
 export const CROWN_FINE_CELLS = 1.4;
-export const CARD_VERTICES = 6, CARD_TRIANGLES = [0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5], CLUSTER_WORDS = 16;
+// A pack's source vertex (its vertices.bin.gz): position, normal, a spare float, its exposure, its UV, its colour, its
+// layer among its prototype's materials.
+export const SOURCE_STRIDE = 14;
 
-// One pack's clusters and leaf maps, opened once.
+// One pack's leaves and leaf maps, opened once: its mesh, its canopy light, and each leaf map as it is read.
 export function openForestLeaves(dir) {
   const gunzip = (file) => zlib.gunzipSync(fs.readFileSync(path.join(dir, file)));
-  const clusterManifest = JSON.parse(fs.readFileSync(path.join(dir, 'clusters/manifest.json'), 'utf8'));
-  const words = (file) => { const b = gunzip(file); return new Uint32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); };
-  const clusterVertices = words('clusters/vertices.bin.gz'), clusterIndices = words('clusters/indices.bin.gz'), clusterWords = words('clusters/clusters.bin.gz'), clusterFloats = new Float32Array(clusterWords.buffer);
+  const copy = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+  const source = new Float32Array(copy(gunzip('vertices.bin.gz'))), indices = new Uint32Array(copy(gunzip('indices.bin.gz')));
+  const canopy = fs.existsSync(path.join(dir, 'canopy-shade.bin.gz')) ? gunzip('canopy-shade.bin.gz') : null;
   const images = new Map();
   // A leaf map as linear colour and coverage.
   function leafImage(file) {
@@ -63,37 +65,24 @@ export function openForestLeaves(dir) {
     images.set(file, image);
     return image;
   }
-  // The leaf cards of one cut of a tree's clusters. At no error it is every leaf as modelled.
-  function leafCut(p, errorMetres = 0) {
-    const c = clusterManifest.prototypes.find((q) => q.id === p.id);
-    if (!c) throw Error(`No clusters for ${p.species}`);
-    const cards = [];
-    for (let i = c.firstCluster; i < c.firstCluster + c.clusterCount; i++) {
-      const at = i * CLUSTER_WORDS;
-      if (!(clusterWords[at + 15] & 1) || clusterFloats[at + 12] > errorMetres || clusterFloats[at + 13] <= errorMetres) continue;
-      for (let l = 0; l < (clusterWords[at + 15] >>> 1) / 4; l++) cards.push(clusterWords[at + 14] + l * CARD_VERTICES);
-    }
-    return { c, cards };
+  // Every leaf triangle of a prototype, as modelled: each a triple of source vertices.
+  function leafTriangles(p) {
+    const out = [];
+    for (let at = p.leaf.firstIndex; at < p.leaf.firstIndex + p.leaf.indexCount; at += 3) out.push([indices[at], indices[at + 1], indices[at + 2]]);
+    return out;
   }
-  function clusterVertex(c, index) {
-    const at = index * FOREST_CLUSTER_VERTEX_WORDS, w0 = clusterVertices[at], w1 = clusterVertices[at + 1], w2 = clusterVertices[at + 2], w3 = clusterVertices[at + 3], w4 = clusterVertices[at + 4];
-    const e = [(w2 & 65535) / 65535 * 2 - 1, (w2 >>> 16) / 65535 * 2 - 1];
-    let n = [e[0], e[1], 1 - Math.abs(e[0]) - Math.abs(e[1])];
-    if (n[2] < 0) { const x = n[0]; n[0] = (1 - Math.abs(n[1])) * (x >= 0 ? 1 : -1); n[1] = (1 - Math.abs(x)) * (n[1] >= 0 ? 1 : -1); }
-    return {
-      position: [c.low[0] + (w0 & 65535) / 65535 * c.posScale, c.low[1] + (w0 >>> 16) / 65535 * c.posScale, c.low[2] + (w1 & 65535) / 65535 * c.posScale],
-      normal: normalize(n), uv: [c.uvLow[0] + (w3 & 65535) / 65535 * c.uvScale[0], c.uvLow[1] + (w3 >>> 16) / 65535 * c.uvScale[1]],
-      colour: [w4 & 255, (w4 >>> 8) & 255, (w4 >>> 16) & 255].map((v) => (v / 255) ** 2), material: (w1 >>> 16) & 255, shade: (w1 >>> 24) / 255, canopy: (w4 >>> 24) / 255,
-    };
+  function sourceVertex(index) {
+    const at = index * SOURCE_STRIDE, read = (k, n) => Array.from(source.subarray(at + k, at + k + n));
+    return { position: read(0, 3), normal: normalize(read(3, 3)), uv: read(8, 2), colour: read(10, 3), material: Math.round(source[at + 13]), shade: source[at + 7], canopy: canopy ? canopy[index] / 255 : 1 };
   }
   // Every leaf as points over its far, pushed-out card: where, how opaque, and what a viewer sees there.
-  function leafSamples(p, cell, errorMetres = 0) {
+  function leafSamples(p, cell) {
     const broadleaf = Boolean(p.cohort) || p.species === 'ceiba' || p.species === 'mangrove';
     const inflate = broadleaf ? FAR_INFLATE_BROADLEAF : FAR_INFLATE_OTHER;
-    const { c, cards } = leafCut(p, errorMetres);
-    // forestClusterVertex, at the range where its push outward is complete.
+    const triangles = leafTriangles(p);
+    // Each leaf corner pushed out along its card from the card's middle, as far as a far card grew.
     const far = (index) => {
-      const v = clusterVertex(c, index), n = v.normal;
+      const v = sourceVertex(index), n = v.normal;
       const t1 = normalize(cross(n, Math.abs(n[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0])), t2 = cross(n, t1);
       const du = Math.min(0.65, Math.max(-0.65, v.uv[0] - 0.5)), dv = Math.min(0.65, Math.max(-0.65, v.uv[1] - 0.5));
       return { ...v, at: v.position.map((q, k) => q + (t1[k] * du + t2[k] * dv) * inflate), lean: normalize(n.map((q, k) => q + (t1[k] * du + t2[k] * dv) * 0.1)) };
@@ -102,10 +91,10 @@ export function openForestLeaves(dir) {
     const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
     let leafArea = 0;
     const corners = [];
-    for (const first of cards) {
-      const v = Array.from({ length: CARD_VERTICES }, (_, k) => far(first + k));
+    for (const triangle of triangles) {
+      const v = triangle.map(far);
       for (const q of v) for (let k = 0; k < 3; k++) { low[k] = Math.min(low[k], q.at[k]); high[k] = Math.max(high[k], q.at[k]); }
-      for (let t = 0; t < CARD_TRIANGLES.length; t += 3) corners.push([v[CARD_TRIANGLES[t]], v[CARD_TRIANGLES[t + 1]], v[CARD_TRIANGLES[t + 2]]]);
+      corners.push(v);
     }
     const step = cell(low, high);
     // Points of a fixed, even pattern: the same bake always gives the same crown.
@@ -132,9 +121,9 @@ export function openForestLeaves(dir) {
       for (const s of local) points.push({ ...s, normal, area: share, opacity, seen: share * opacity * s.alpha / coverage });
       leafArea += area;
     }
-    return { points, low, high, step, leafArea, broadleaf, cards: cards.length };
+    return { points, low, high, step, leafArea, broadleaf, triangles: triangles.length };
   }
-  return { clusterManifest, clusterVertices, clusterIndices, clusterWords, clusterFloats, leafImage, leafCut, clusterVertex, leafSamples };
+  return { source, indices, canopy, leafImage, sourceVertex, leafSamples };
 }
 
 // Leaf area in each cell of a grid, as how much of a ray crossing the cell it would stop.

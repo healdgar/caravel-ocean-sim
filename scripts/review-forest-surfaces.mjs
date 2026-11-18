@@ -30,10 +30,9 @@ const specimens=SPECIES.map(name=>{
   return{name,root:best,x:r[0],y:r[1],z:r[2],scale:r[3],height:p.high[1]*r[3],crown:p.crownRadius*r[3]};
 });
 const trees=specimens.map(s=>s.root);
-const pick=trees.map(id=>`tree!=${id}u`).join('&&');
+// The forest's stand (js/wgsl/forest-continuum.js) lists only the specimens' roots for the one cut.
 const isolate=[
-  ['forest-clusters.js','let tree=forestClusterTree(id.x);if(tree==0xffffffffu){return;}',`let tree=forestClusterTree(id.x);if(tree==0xffffffffu||(${pick})){return;}`],
-  ['forest-scenery.js','if(id.x>=u32(parameters.x)){return;}',`if((${trees.map(id=>`id.x!=${id}u`).join('&&')})||id.x>=u32(parameters.x)){return;}`],
+  ['wgsl/forest-continuum.js','if(i>=forestStand.counts.x){return;}',`if((${trees.map(id=>`i!=${id}u`).join('&&')})||i>=forestStand.counts.x){return;}`],
   ['main.js','const cam = {','const cam = window.surfaceCamera = {'],
 ];
 // SURFACE_SCENE=far looks over the whole forest with every level of detail on, for the far canopy.

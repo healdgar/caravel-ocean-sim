@@ -3,7 +3,7 @@
 // the GPU side by side. Compare rows within one run: other work on the machine moves every number.
 //   npm run perf                                     the scene as it stands
 //   npm run perf -- '[["no crew",{"crew":"0"}]]'     rows of [label, URL parameters]
-//   rows may add source edits to try: [label, parameters, [["forest-clusters.js","find","replace"]]]
+//   rows may add source edits to try: [label, parameters, [["wgsl/forest-continuum.js","find","replace"]]]
 //   npm run perf -- '[["battle",{"battle":"1"}]]'    fires a broadside into her first, then measures
 //   rows with {"fort":...} look at Lisbon's bastion: "look" as it stands, "ruin" once shot down and settled,
 //   "siege" while shots keep landing all through the sample

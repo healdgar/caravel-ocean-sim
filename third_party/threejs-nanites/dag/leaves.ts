@@ -13,6 +13,20 @@ import type { LeafMask } from './types.ts';
 // a quarter of the leaf triangles far off, the same image (`d550`: a few crown edges thinner).
 export const LEAF_ERR = 0.175;
 
+// A group's sphere about its members' spheres, centred on their box when that is tighter than mergeSpheres's
+// weighted mean. Each level's sphere holds the last's, so the slack of a loose merge compounds up a crown many levels
+// deep: the radius-weighted centre alone grew a 19 m oak's root sphere to 46 m, and a cut that bounds its clusters
+// by its type's sphere (js/wgsl/continuum-cut.js continuumPrefix) then misses those that poke out. (Added here.)
+function enclosingSphere(spheres: Sphere[]): Sphere {
+  const merged = mergeSpheres(spheres);
+  const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+  for (const s of spheres) for (let k = 0; k < 3; k++) { low[k] = Math.min(low[k], s[k] - s[3]); high[k] = Math.max(high[k], s[k] + s[3]); }
+  const c = [0, 1, 2].map((k) => (low[k] + high[k]) / 2);
+  let r = 0;
+  for (const s of spheres) r = Math.max(r, Math.hypot(s[0] - c[0], s[1] - c[1], s[2] - c[2]) + s[3]);
+  return r < merged[3] ? [c[0], c[1], c[2], r] : merged;
+}
+
 /**
  * `leafErr`: a coarser level's error as a share of its leaf size (see gErr); `mask`: the leaf texture's alpha (null:
  * grow by sqrt(2)); `growth`: filled with each level's mean growth.
@@ -139,7 +153,7 @@ export function buildLeaves(lv: LeafVerts, vpl: number, out: LeafCluster[], leaf
       const avgSize = kept.reduce((s, l) => s + l.size, 0) / kept.length;
       const childMax = Math.max(...g.map((c) => c.err));
       const gErr = Math.max(childMax * 1.05 + 1e-4, avgSize * leafErr);
-      const gSphere = mergeSpheres(g.map((c) => c.lod).concat(g.map((c) => c.cull)));
+      const gSphere = enclosingSphere(g.map((c) => c.lod).concat(g.map((c) => c.cull)));
       for (const c of g) { c.parentErr = gErr; c.parentLod = gSphere; }
       for (const c of chunk(kept, level, gErr, gSphere)) {
         out.push(c);

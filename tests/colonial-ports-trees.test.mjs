@@ -16,10 +16,8 @@ import { streetEdgeAt } from '../js/town-streets.js';
 import { createCityTargets } from '../js/city-targets.js';
 import { refreshOldWorldBoardCountry } from '../js/old-world.js';
 import { retargetForestPackToProcedural } from '../js/terrain.js';
-import { FOREST_VERTEX_WGSL, forestPackRoots } from '../js/forest-scenery.js';
-import { FOREST_CLUSTER_VERTEX_WGSL } from '../js/forest-clusters.js';
-import { FOREST_WIND_SKIN_WGSL } from '../js/forest-wind.js';
-import { loadForestCrowns, PORTUGAL_FOREST_CROWN_ASSETS } from '../js/forest-crowns.js';
+import { forestPackRoots } from '../js/forest-scenery.js';
+import { forestContinuumMaterial } from '../js/wgsl/forest-continuum.js';
 import { loadForestGroves, PORTUGAL_FOREST_GROVE_ASSETS } from '../js/forest-groves.js';
 
 const localFetch = async (relPath) => {
@@ -129,16 +127,14 @@ test('Deliverable 1: procedural colonial ports generate distinct topography-adap
 
 test('Deliverable 2: WGSL root grounding plunges horizontal root webs smoothly downward with subRoot=0, pinned collar wind, and strict town/water tree clearance', async () => {
   // 1. Verify WGSL shader contracts
+  // Each tree's foot is flared into its ground once, in its bake (scripts/prepare-forest-continuum.mjs flareRoot), and
+  // its wind weight pins the wood's collar; the one continuum then draws the tree as baked.
   const sceneryJs = fs.readFileSync('js/forest-scenery.js', 'utf8');
-  const clustersJs = fs.readFileSync('js/forest-clusters.js', 'utf8');
+  const prepareJs = fs.readFileSync('scripts/prepare-forest-continuum.mjs', 'utf8');
   assert.equal(/\?\s*256\s*:\s*0/.test(sceneryJs), false, 'subRoot = 256 removed from forest-scenery.js');
-  assert.equal(/\?\s*256\s*:\s*0/.test(clustersJs), false, 'subRoot = 256 removed from forest-clusters.js');
-  assert.equal(FOREST_VERTEX_WGSL.includes('select(posLocal,vec3f(0.),buried)'), false, 'Broken per-vertex vec3f(0.) root spear snap removed from forestPlaceSkinned');
-  assert.equal(FOREST_CLUSTER_VERTEX_WGSL.includes('if(buried){position=vec3f(0.);}'), false, 'Broken per-vertex vec3f(0.) root spear snap removed from forestClusterVertex');
-  assert.ok(FOREST_VERTEX_WGSL.includes('fn forestGroundRoot('), 'forestGroundRoot defined in FOREST_VERTEX_WGSL');
-  assert.ok(FOREST_VERTEX_WGSL.includes('if(!fallen&&kind.x>=3.5){o.world.y=max(o.world.y,r.rootScale.y);}'), 'Upward rootScale.y clamp restricted strictly to leaves (kind.x >= 3.5)');
-  assert.ok(FOREST_WIND_SKIN_WGSL.includes('smoothstep(0.22,1.05,posProto.y)'), 'Cluster wind skinning pins wood collar at y <= 0.22');
-  assert.ok(FOREST_VERTEX_WGSL.includes('smoothstep(0.22,1.05,model.y)'), 'Analytical forestWind pins wood collar at y <= 0.22');
+  assert.ok(prepareJs.includes('function flareRoot('), 'the bake flares each tree\'s foot into its ground');
+  assert.ok(prepareJs.includes('const r = Math.hypot(x, z), envelope = 0.32 + 0.14 * Math.min(r, 4) - 0.46 * smooth(1.15, 2.6, r);'), 'by the buttress envelope verified below');
+  assert.ok(prepareJs.includes('(y - 0.22) / (1.05 - 0.22)'), 'the wind weight pins the wood collar at y <= 0.22');
 
   // 2. Numerically verify forestGroundRoot law on extreme 15m..40.9m subterranean root webs (including ceiba & portugal maple)
   const smoothstep = (a, b, x) => {
@@ -214,35 +210,24 @@ test('Deliverable 2: WGSL root grounding plunges horizontal root webs smoothly d
 });
 
 test('Deliverable 3 & Terrain Interface Hooks: Forest Modeler visual parity, Portugal crown/grove un-attenuation, woodAO, and terrain hooks', async () => {
+  const forestWGSL = forestContinuumMaterial('').wgsl();
   // 1. Native textured bark & leaves ignore baked vertex colour (`v[10:13]`)
   assert.ok(
-    FOREST_VERTEX_WGSL.includes('let baseCol=select(colour,vec3f(1.),nativeMaterial>=0.);'),
-    'forestPlaceSkinned ignores baked vertex colour when nativeMaterial >= 0'
+    forestWGSL.includes('(*v).colour=select(word.rgb*word.rgb,vec3f(1.0),textured)*tint;'),
+    'the forest\'s material ignores baked vertex colour where a surface is textured'
   );
 
-  // 2. Wood canopy self-occlusion incorporates kind.y exposure when canopyAO == 1
+  // 2. Wood canopy self-occlusion incorporates exposure when the canopy is open
   assert.ok(
-    FOREST_VERTEX_WGSL.includes('let woodAO=min(in.canopyAO,select(1.0,mix(0.30,1.0,exposure),in.canopyAO>0.995&&exposure<0.995));'),
-    'forestNativeOpaqueFS computes woodAO from kind.y exposure when canopyAO == 1'
+    forestWGSL.includes('let woodAO=min(canopy,select(1.0,mix(0.30,1.0,exposure),canopy>0.995&&exposure<0.995));'),
+    'the forest\'s material computes woodAO from exposure when the canopy is open'
   );
 
-  // 3. Reduced mid-range isSubBroadleaf leaf-card inflation (0.18 / 0.22)
-  assert.ok(
-    FOREST_CLUSTER_VERTEX_WGSL.includes('select(.16,.18,isSubBroadleaf)'),
-    'forestClusterVertex reduces isSubBroadleaf mid-range inflation from 0.48 to 0.18'
-  );
-  assert.ok(
-    !/tierId|forestCanopyVertex/.test(FOREST_VERTEX_WGSL),
-    'no native canopy tier inflates leaf cards: the cluster cut is the only near and mid representation'
-  );
+  // 3. No canopy tier inflates leaf cards: the one cut is the only near and mid representation, and a coarser level's
+  // cards are grown in the bake to cover what the finer drew (third_party/threejs-nanites/dag/leaves.ts).
+  assert.ok(!/tierId|forestCanopyVertex|isSubBroadleaf/.test(forestWGSL), 'no leaf card is inflated as it is drawn');
 
-  // 4. Portugal prebaked crowns & groves un-attenuate arch.colour after SHA-256 verification
-  const rawCrownManifest = JSON.parse(fs.readFileSync(PORTUGAL_FOREST_CROWN_ASSETS['manifest.json'], 'utf8'));
-  const rawOakGreen = rawCrownManifest.prototypes[0].splat.colour[1];
-  const loadedCrowns = await loadForestCrowns({ assets: PORTUGAL_FOREST_CROWN_ASSETS, fetchAsset: localFetch });
-  const unattenuatedOakGreen = loadedCrowns.manifest.prototypes[0].splat.colour[1];
-  assert.ok(rawOakGreen < 0.05 && unattenuatedOakGreen > 0.095, `Portugal oak splat green un-attenuated from ${rawOakGreen.toFixed(4)} to ${unattenuatedOakGreen.toFixed(4)}`);
-
+  // 4. Portugal's groves pass their SHA-256 verification
   const loadedGroves = await loadForestGroves({ assets: PORTUGAL_FOREST_GROVE_ASSETS, fetchAsset: localFetch });
   assert.ok(loadedGroves.trees.length > 0 && loadedGroves.manifest.maxTrees > 1, 'Portugal grove trees pass SHA-256 verification');
 

@@ -13,7 +13,7 @@ const hash = (value) => {
   x = Math.imul(x ^ (x >>> 15), 0x846ca68b) >>> 0;
   return (x ^ (x >>> 16)) >>> 0;
 };
-// forestCrownSamples as js/forest-scenery.js has it, before the core.
+// The forest's own sample split (forestCrownSamples) as it stood before the core took it over.
 const forestSamples = (share, px, py, samples) => {
   if (share <= 0) return 0;
   const random = hash(px ^ hash((Math.imul(py, 0x9e3779b9) + 0x51ed270b) >>> 0));

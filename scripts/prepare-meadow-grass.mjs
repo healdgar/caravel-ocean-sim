@@ -58,7 +58,7 @@ const BODY_CELLS = 8, BODY_QUANTILE = 0.5, BODY_FLOOR = MEADOW_BODY_FLOOR;
 // The body's error: how far from its top this share of the sward seen from above lies, ground in its gaps included.
 const BODY_ERROR_QUANTILE = 0.9;
 // A coarser level's error: this share of the mean width its kept organs are grown to, as the forest's leaves
-// (scripts/prepare-forest-clusters.mjs, third_party/threejs-nanites/dag/leaves.ts).
+// (scripts/prepare-forest-continuum.mjs, third_party/threejs-nanites/dag/leaves.ts).
 const ORGAN_ERROR_SHARE = 0.35;
 const CHAIN_LEAST_TRIANGLES = 6;
 // Between steps whose errors rise by at least this share, the error rises in proportion (on a log scale), and no step

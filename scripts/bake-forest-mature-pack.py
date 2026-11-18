@@ -26,10 +26,8 @@ gardenplans/plan.py and gardenplans/organs.py:
 After this, bake the derived sets in order:
 
     python3 scripts/prepare-forest-surfaces.py portugal --builtin --reuse saba
-    node scripts/prepare-forest-clusters.mjs portugal
-    node scripts/prepare-forest-crowns.mjs portugal
     node scripts/prepare-forest-stands.mjs portugal
-    node scripts/prepare-forest-wind.mjs portugal
+    node scripts/prepare-forest-continuum.mjs portugal
 
 and name the new vertices.bin, indices.bin and roots.bin (their sha256 in the manifest's `files`) in
 CERTIFIED_FOREST_STREAM_SHAS of js/forest-scenery.js.

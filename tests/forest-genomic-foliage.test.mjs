@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { FOREST_CLUSTER_VERTEX_WGSL } from '../js/forest-clusters.js';
+import { forestContinuumMaterial } from '../js/wgsl/forest-continuum.js';
 
 const PORTUGAL_DIR = 'assets/forest-scenery/portugal';
 const SABA_DIR = 'assets/forest-scenery/saba';
@@ -92,7 +92,7 @@ test('Portugal foliage maps are canonical 256x256 single-leaf botanical textures
   }
 
   assert.equal(fs.existsSync('scripts/prepare-forest-sprays.py'), false, 'multi-leaf spray generator script must be removed');
-  assert.ok(!FOREST_CLUSTER_VERTEX_WGSL.includes('crossLayer'), 'runtime cluster shader must not duplicate axillary cards');
+  assert.ok(!forestContinuumMaterial('').wgsl().includes('crossLayer'), 'the forest\'s material must not duplicate axillary cards');
 });
 
 test('every Portugal tree places individual leaves along 3D meshed woody shoots with 0.0% detachment and species-accurate genomic phyllotaxy', () => {

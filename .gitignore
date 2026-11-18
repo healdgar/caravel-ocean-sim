@@ -41,3 +41,7 @@ docs/assets/ships/
 assets/prefab-continuum/*.bin.gz
 docs/assets/prefab-continuum/
 assets/ground-cover/tropical/meadows/
+# Saba's forest continuum atlas is past GitHub's 100 MB a file: npm run deploy publishes it,
+# scripts/prepare-forest-continuum.mjs saba bakes it (its manifest, with the atlas's digest, is tracked).
+assets/forest-scenery/saba/continuum/atlas.bin.gz
+docs/assets/forest-scenery/saba/continuum/atlas.bin.*gz

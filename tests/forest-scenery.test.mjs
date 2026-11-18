@@ -4,7 +4,8 @@ import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
-import {validateForestScenery,validateForestMaterials,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS,FOREST_VERTEX_WGSL,FOREST_CULL_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
+import {validateForestScenery,validateForestMaterials,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
+import {forestContinuumMaterial,forestContinuumStandWGSL} from '../js/wgsl/forest-continuum.js';
 
 function fixture(){
   const vertices=new Float32Array([3,4,4].flatMap(kind=>[[-1,0,0],[1,0,0],[0,2,0]].flatMap(p=>[...p,0,0,1,kind,.5,0,0,.1,.2,.05])));
@@ -137,31 +138,26 @@ test('root transport verifies both encoded and decoded receipts',async()=>{
 });
 test('forest rendering cannot fall back to the legacy generic mask or threshold averaged coverage',async()=>{
   const source=await readFile(new URL('../js/forest-scenery.js',import.meta.url),'utf8');
-  const clusters=await readFile(new URL('../js/forest-clusters.js',import.meta.url),'utf8');
-  // Buried roots press flat at the soil line in the vertex stage, which keeps opaque trees
-  // free of discard. Leaves are cut by sample coverage only, never a threshold on it.
-  assert.equal(FOREST_VERTEX_WGSL.split('o.world.y=max(o.world.y,r.rootScale.y);').length-1,1,'canopy roots stop at the soil');
-  assert.doesNotMatch(FOREST_VERTEX_WGSL,/leafSpray|tree-foliage|canopyLeafFS/);
-  assert.doesNotMatch(FOREST_VERTEX_WGSL,/discard/,'native trees never discard');
-  // The forest draws through its clusters and crowns alone: no vertex stream, no visible-root list of its own.
-  assert.doesNotMatch(FOREST_VERTEX_WGSL,/forestCanopyVS|forestCanopyVertex|forestVisible|tierId|@location\(7\)nativeMaterial/);
-  assert.match(FOREST_VERTEX_WGSL,/forestNativeOpaqueFS/);assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafFS/);
-  assert.match(FOREST_VERTEX_WGSL,/return vec4f\(lit\.rgb,pigment\.a\)/);
-  assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafDepthFS/,'leaves lay depth first, so hidden layers are never lit');
-  assert.match(FOREST_VERTEX_WGSL,/@builtin\(sample_mask\)mask:u32/);
+  // The forest is one family of the one continuum (js/wgsl/forest-continuum.js): its leaves are cut by sample
+  // coverage alone (AGENTS.md rule 2), never a threshold on it, and nothing of it discards.
+  const material=forestContinuumMaterial('');
+  assert.equal(material.coverage,true,'leaves are cut by the sample mask');
+  assert.doesNotMatch(material.wgsl(),/discard/,'trees never discard');
+  assert.doesNotMatch(material.wgsl(),/leafSpray|tree-foliage|canopyLeafFS/);
+  assert.match(material.wgsl(),/fn forestContinuumCoverage\(v:ContinuumVarying,front:bool\)->u32/);
   assert.match(FOREST_SURFACE_MIPS_WGSL,/forestMipLinear\(c\.rgb\)\*c\.a/);
   assert.match(FOREST_SURFACE_MIPS_WGSL,/colour\*\.25/);assert.doesNotMatch(FOREST_SURFACE_MIPS_WGSL,/discard|step\(/);
-  assert.match(clusters,/multisample: \{ count: samples, alphaToCoverageEnabled: false \}/);
-  assert.match(source,/pixelError=3/);
-  assert.doesNotMatch(source,/setVertexBuffer|drawIndexedIndirect|nativeLod|nativeMid|previousLod|forestResidency|deferNative|loadNative/);
+  // No selection, list, pipeline or ladder of its own: the forest stands its records and the one cut does the rest.
+  assert.doesNotMatch(source,/setVertexBuffer|drawIndexedIndirect|nativeLod|nativeMid|previousLod|forestResidency|deferNative|loadNative|createRenderPipeline/);
 });
-test('the cull puts each tree in view once on its species\' one list, and sorts nothing by distance',()=>{
-  assert.equal(FOREST_CULL_WGSL.split('atomicAdd(&visibleCounts[pi],1u)').length-1,1);
-  assert.match(FOREST_CULL_WGSL,/if\(slot<p\.roots\.y\)\{visible\[p\.roots\.x\+slot\]=i;\}/);
+test('the stand lists each tree in view or in the light box once, and sorts nothing by distance',()=>{
+  const stand=forestContinuumStandWGSL();
+  assert.equal(stand.split('atomicAdd(&forestStood[3],1u)').length-1,1);
+  assert.match(stand,/if\(slot>=forestStand\.counts\.y\)\{return;\}/,'never past the scene\'s capacity');
   // Past 65,535 workgroups the roots spread over a second dimension, and their count is read exactly, not as a float.
-  assert.equal(FOREST_CULL_WGSL.split('let i=id.x+id.y*groups.x*64u;').length-1,2);
-  assert.equal(FOREST_CULL_WGSL.split('if(i>=parameters.rootCount){return;}').length-1,2);
-  assert.doesNotMatch(FOREST_CULL_WGSL,/nearLod|midLod|farLod|previousLod|commands|atlasThreshold/);
+  assert.equal(stand.split('let i=id.x+id.y*groups.x*64u;').length-1,1);
+  assert.equal(stand.split('if(i>=forestStand.counts.x){return;}').length-1,1);
+  assert.doesNotMatch(stand,/nearLod|midLod|farLod|previousLod|commands|atlasThreshold|sort/);
 });
 test('a procedural landfall skips the pack\'s roots, and a device with prebuilt surfaces its maps',async()=>{
   const f=nativeFixture(),{requests,assets,fetchAsset}=served(f);
