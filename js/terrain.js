@@ -10,8 +10,9 @@ import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_ASSETS,
 import {loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {createPortFractures} from './building-fracture.js';
-import {paveCityStreets,streetEdgeAt} from './town-streets.js';
-import {oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard} from './old-world.js';
+import {layTownStreets,paveCityStreets,streetEdgeAt} from './town-streets.js';
+import {layPortProps} from './port-props.js';
+import {oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard,runtimeBoardPortKey} from './old-world.js';
 import {nativeOwnGroundFor} from './native-towns.js';
 import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
@@ -56,6 +57,7 @@ import {
   synthesizeCoastalBeaches,
   synthesizeCoastalBiome,
   synthesizeCoastalAlbedo,
+  seedCoastalVegetation,
   buildCoastalMesh,
   classifyKoppenClimateFromNormals,
   estimateLocalClimateProfile,
@@ -1098,12 +1100,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // An Old World city is the board Castle and Commons' model founded for its port ahead of time: the board is fetched
   // while the rest loads, and handed over before the land is made. A city whose board is missing has no town.
   const bakedBoardPath=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?bakedBoardAsset(regionParam,resolvedYear):null;
+  const runtimeKeepKey=!bakedBoardPath&&useProcedural&&search.get('board')!=='off'&&!placement?runtimeBoardPortKey({id:regionParam||undefined,latitude:targetLat,longitude:targetLon}):null;
   // If the model has lived here since (js/board-keep.js), the land is laid from the board as the traveller left it:
   // whatever was built, burnt or thrown down while they were away is there on their return, never changed in sight.
   // `boardKept` is {clock, dateMs}: whose calendar the kept world must be of, and the game's date now.
   const bakedBoardPromise=bakedBoardPath?Promise.all([fetch(bakedBoardPath).then(response=>response.ok?response.json():null).catch(()=>null),
-    boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionParam,resolvedYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs)):null;
-  if(bakedBoardPath)requestBoardStampPipelines({device,shader}).catch(()=>{});
+    boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionParam,resolvedYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs))
+    :(runtimeKeepKey&&boardKept?keptBoard(runtimeKeepKey,resolvedYear,{clock:boardKept.clock}).then(kept=>kept?.board?{port:runtimeKeepKey,year:resolvedYear,board:kept.board,lived:{day:kept.day,days:0,keptAt:kept.keptAt??null}}:null).catch(()=>null):null);
+  if(bakedBoardPath||runtimeKeepKey)requestBoardStampPipelines({device,shader}).catch(()=>{});
   let forestFailure=null;
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
     assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
@@ -2540,7 +2544,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     async refreshBoardFabric(nextBoardJson){
       if(terrainDisposed||!proceduralPack||!nextBoardJson)return false;
       const portObj=proceduralPack.port;
-      const country=refreshOldWorldBoardCountry(nextBoardJson,activeRegion,heights,portObj,proceduralPack.surveyHeights??heights);
+      if(!proceduralPack.surveyHeights)proceduralPack.surveyHeights=heights.slice();
+      const country=refreshOldWorldBoardCountry(nextBoardJson,activeRegion,heights,portObj,proceduralPack.surveyHeights);
       if(!country)return false;
       device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
       if(portObj){
@@ -2554,13 +2559,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         };
         portObj.riverCut=country.riverCut??null;
         if(country.watch)portObj.watch=country.watch;
-        // Its works and its waterfront as the board stands them now; the dock is read from its moles again.
+        // Its works and its waterfront as the board stands them now; the dock, ways and props are read from them again.
         portObj.works=country.works??[];
         settlePortOnWaterfront(portObj,heights,activeRegion,country.waterfront??[]);
+        const sampleGround=(x,z)=>terrainSurfaceSample(heights,x,z,activeRegion);
+        portObj.streets=layTownStreets(portObj,sampleGround,{suppressSyntheticCountryRoads:true});
+        portObj.streetsOwn=null;
+        portObj.props=layPortProps(portObj,sampleGround);
         if(country.plan?.paving?.length){
           portObj.streets=paveCityStreets(portObj.streets,country.plan.paving);
-          rebindNearTownField(portObj.streets);
         }
+        rebindNearTownField(portObj.streets);
       }
       const nextBaseCity=country.plan?{
         blocks:country.plan.blocks,
@@ -2576,6 +2585,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       proceduralPack.inlandWater=country.inlandWater??null;
       proceduralPack.city=nextBaseCity;
       proceduralPack.herds=country.herds??null;
+      const nextBiome=synthesizeCoastalBiome(activeRegion,heights,proceduralPack.beaches,portObj);
+      biome.set(nextBiome);
+      proceduralPack.biome=biome;
+      device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
+      proceduralPack.albedo=synthesizeCoastalAlbedo(activeRegion,heights,proceduralPack.beaches,portObj,biome);
+      proceduralPack.vegetation=seedCoastalVegetation(activeRegion,heights,biome,proceduralPack.beaches,portObj);
       // The board cut its rivers into the lattice again and meshed their banks anew: the land is baked from both.
       landCentre(portObj?.riverCut);
       craters?.invalidate(activeRegion);
@@ -2594,6 +2609,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         boardStamp.stamp(albedo,activeRegion.albedoSize);
       }
       regenerateAlbedoMips();
+      for(const [,block] of groundResident){boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
+      groundResident.clear();groundWanted=[];
+      rebuildNeighborTreeInstances();
       cityStruckIndices.clear();cityHitIndices.clear();
       setCityBuildings(proceduralPack).catch(error=>console.warn('city continuum',error));
       activeCity=proceduralPack.city??null;cityTargets=cityTargetsFor(activeCity,portObj);

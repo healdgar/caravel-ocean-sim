@@ -13,6 +13,8 @@ import { CITY_TREES } from './old-world-city.js';
 import { layBoardCountry } from './old-world-board.js';
 import { nativeTownHeld } from './native-towns.js';
 import { colonialTownHeld } from './colonial-towns.js';
+import { BOARD_RIVERS, boardRequest, boardSeat } from './board-model.js';
+import { FORT_RECORDS, fortPhaseFor, fortRecordsFor } from './fort-records.js';
 
 const DEG = Math.PI / 180;
 const OLD_WORLD_METRES_PER_DEGREE = 111195;
@@ -235,7 +237,8 @@ export function registerBakedBoard(baked) {
   if (baked && baked.board && baked.port) bakedBoards.set(`${baked.port}:${baked.year}`, baked);
 }
 export function bakedBoardFor(region) {
-  return bakedBoards.get(`${region.id}:${region.year ?? 1550}`) || null;
+  const key = runtimeBoardPortKey(region);
+  return key ? bakedBoards.get(`${key}:${region.year ?? 1550}`) || null : null;
 }
 // A city on ground that holds it, with no board founded there: it has no town and no country, and says why once.
 const unbakedSaid = new Set();
@@ -248,26 +251,162 @@ function unbakedCity(city, region, baked) {
     : `${city.name} has no board for ${region.id} in ${region.year ?? 1550}: bake one (node scripts/bake-board.mjs ${region.id})`);
 }
 
+const RUNTIME_BOARD_CROWN = Object.freeze({
+  spain: Object.freeze({ culture: 'iberian', manner: 'traza' }),
+  portugal: Object.freeze({ culture: 'portuguese', manner: 'ladeira' }),
+  england: Object.freeze({ culture: 'anglo', manner: null }),
+  netherlands: Object.freeze({ culture: 'dutch', manner: null }),
+  france: Object.freeze({ culture: 'french', manner: null }),
+});
+const RUNTIME_BOARD_WORK_KIND = Object.freeze({ tower: 'tower', 'artillery-tower': 'tower', battery: 'battery', enclosed: 'fort', bastioned: 'fort', citadel: 'fort' });
+const RUNTIME_BOARD_WORK_SIZE = Object.freeze({ tower: [12, 12], 'artillery-tower': [22, 22], battery: [44, 14], enclosed: [52, 52], bastioned: [76, 76], citadel: [120, 120] });
+
+function runtimeBoardNativeCulture(cultureId, latitude = 0) {
+  switch (cultureId) {
+    case 'abenaki-algonquian': return latitude >= 45.5 ? 'iroquoian' : 'massachusett';
+    case 'mid-atlantic-algonquian': return latitude >= 38.6 ? 'lenape' : 'powhatan';
+    case 'tupinamba-brazil-guiana': return 'tupi';
+    case 'pacific-indigenous-coast': return latitude >= 20 ? 'powhatan' : 'taino';
+    default: return 'taino';
+  }
+}
+
+function runtimeBoardFoundingSite(heights, span, x, z) {
+  const n = Math.round(Math.sqrt(heights.length)), step = span / Math.max(1, n - 1);
+  const at = (i, j) => (i < 0 || j < 0 || i >= n || j >= n ? -1 : heights[j * n + i]);
+  const clampX = Math.max(-span * 0.42, Math.min(span * 0.42, x));
+  const clampZ = Math.max(-span * 0.42, Math.min(span * 0.42, z));
+  const i0 = Math.round((clampX + span / 2) / step), j0 = Math.round((clampZ + span / 2) / step);
+  if (at(i0, j0) >= 1) return { x: clampX, z: clampZ };
+  const fits = (i, j) => at(i, j) >= 4 && [[-2, 0], [2, 0], [0, -2], [0, 2], [-2, -2], [2, 2], [-2, 2], [2, -2]].every(([di, dj]) => at(i + di, j + dj) > 1);
+  let best = null, least = Infinity;
+  for (let r = 0; r * step <= 2000 && r <= least; r++) for (let j = j0 - r; j <= j0 + r; j++) for (let i = i0 - r; i <= i0 + r; i++) {
+    if (Math.max(Math.abs(i - i0), Math.abs(j - j0)) !== r || !fits(i, j)) continue;
+    const d = Math.hypot(i - i0, j - j0);
+    if (d < least) { least = d; best = { x: i * step - span / 2, z: j * step - span / 2 }; }
+  }
+  if (best) return best;
+  for (let r = 0; r * step <= 2000 && r <= least; r++) for (let j = j0 - r; j <= j0 + r; j++) for (let i = i0 - r; i <= i0 + r; i++) {
+    if (Math.max(Math.abs(i - i0), Math.abs(j - j0)) !== r || at(i, j) < 1.2) continue;
+    const d = Math.hypot(i - i0, j - j0);
+    if (d < least) { least = d; best = { x: i * step - span / 2, z: j * step - span / 2 }; }
+  }
+  return best ?? { x: clampX, z: clampZ };
+}
+
+export function runtimeBoardPortKey(region) {
+  if (!region) return null;
+  if (region.id) return region.id;
+  if (Number.isFinite(region.latitude) && Number.isFinite(region.longitude)) {
+    return `coast_${region.latitude.toFixed(3)}_${region.longitude.toFixed(3)}`;
+  }
+  return null;
+}
+
+// Builds a runtime Castle & Commons board request for any unbaked inhabited coast (native villages, non-1550 years,
+// and English, Dutch, French, Spanish or Portuguese colonial ports); returns null on uninhabited pelagic shores.
+export function runtimeBoardFor({ region, heights, port }) {
+  if (!region || !heights || !port?.center || !Number.isFinite(region.latitude) || !Number.isFinite(region.longitude)) return null;
+  const year = Math.round(region.year ?? 1550), span = region.span;
+  const cos = Math.max(0.1, Math.cos(region.latitude * DEG));
+  const east = (lon) => (lon - region.longitude) * cos * OLD_WORLD_METRES_PER_DEGREE;
+  const south = (lat) => (region.latitude - lat) * OLD_WORLD_METRES_PER_DEGREE;
+  const held = boardTownHeld(region);
+  const indig = port.indigenousSettlement ?? null;
+  const isColonial = Boolean(port.hasColonialPort);
+  const isIndigenous = Boolean(!isColonial && indig?.hasIndigenousSettlement);
+  if (!held && !isColonial && !isIndigenous) return null;
+
+  let name, culture, seat, walls = null, manner = null, founded = null, settled = null, places = [];
+  let rawX = port.center.x - (region.x ?? 0), rawZ = port.center.z - (region.z ?? 0);
+  if (held) {
+    const people = oldWorldPeople(held, year);
+    name = held.name;
+    culture = held.culture;
+    seat = held.seat ?? boardSeat(people);
+    walls = held.walls ?? null;
+    manner = held.manner ?? null;
+    founded = held.founded ?? null;
+    settled = held.settled ?? null;
+    places = (OLD_WORLD_PLACES[held.id] || held.places || []).map(([n, lat, lon, w]) => ({ name: n, x: east(lon), z: south(lat), weight: w }));
+    if (held.native || held.colonial) { rawX = Math.round(east(held.longitude)); rawZ = Math.round(south(held.latitude)); }
+  } else if (isColonial) {
+    const crownKey = port.colonyGrowth?.crown ?? region.crown ?? 'spain';
+    const crownSpec = RUNTIME_BOARD_CROWN[crownKey] ?? RUNTIME_BOARD_CROWN.spain;
+    const people = Math.max(120, port.colonyGrowth?.population || 600);
+    name = String(region.name || 'Port').split(' · ')[0];
+    culture = crownSpec.culture;
+    manner = crownSpec.manner;
+    founded = port.colonyGrowth?.foundedYear ?? region.foundedYear ?? year;
+    settled = Math.max(0.08, Math.min(0.65, 0.1 + Math.max(0, year - founded) / 220));
+    seat = Math.max(0.05, Math.min(2.0, people / (manner ? 4500 : 12400)));
+    walls = { capital: 0, town: 0, village: 0 };
+  } else {
+    const people = Math.max(180, indig.estimatedVillagePopulation || 300);
+    culture = runtimeBoardNativeCulture(indig.cultureId, region.latitude);
+    name = indig.capitalName || String(region.name || indig.shortName || 'Village').split(' · ')[0];
+    seat = Math.max(0.28, Math.min(0.75, people / 750));
+    walls = { capital: (indig.fortified || indig.isSovereignPolity || culture === 'tupi') ? 1 : 0, town: 0, village: 0 };
+  }
+
+  const works = [];
+  if (isColonial || (held && !held.native)) {
+    const named = new Set();
+    for (const id of Object.keys(FORT_RECORDS)) for (const record of fortRecordsFor(id, year).forts) {
+      const phase = fortPhaseFor(record, year);
+      if (named.has(record.name) || !phase) continue;
+      const wx = Math.round(east(record.lon)), wz = Math.round(south(record.lat));
+      if (Math.abs(wx) >= span * 0.47 || Math.abs(wz) >= span * 0.47) continue;
+      named.add(record.name);
+      const form = phase.form, kind = RUNTIME_BOARD_WORK_KIND[form];
+      const size = form === 'battery' ? [record.sizeM?.[0] ?? RUNTIME_BOARD_WORK_SIZE.battery[0], Math.min(16, Math.max(10, record.sizeM?.[1] ?? RUNTIME_BOARD_WORK_SIZE.battery[1]))]
+        : form === 'tower' ? RUNTIME_BOARD_WORK_SIZE.tower
+          : form === 'artillery-tower' ? (record.sizeM ?? (phase.battery ? [36, 40] : RUNTIME_BOARD_WORK_SIZE['artillery-tower']))
+            : record.sizeM ?? RUNTIME_BOARD_WORK_SIZE[form];
+      works.push({
+        kind, form, ...(phase.round ? { round: true } : {}), ...(phase.battery ? { battery: true } : {}), ...(phase.earth ?? record.earth ? { earth: true } : {}),
+        name: record.name, x: wx, z: wz, size, from: phase.from, until: record.until ?? null,
+        role: record.role ?? '', side: record.side ?? '', ...(record.rough ? { rough: true } : {}),
+        ...(record.landmark ? { landmark: record.landmark } : {}), ...(record.encloses ? { encloses: record.encloses } : {}), ...(record.gate ? { gate: record.gate } : {}),
+      });
+    }
+  }
+
+  const sitePos = runtimeBoardFoundingSite(heights, span, rawX, rawZ);
+  const seed = (region.vegetationSeed ?? region.seed ?? ((Math.imul(Math.round(region.latitude * 1000), 73856093) ^ Math.imul(Math.round(region.longitude * 1000), 19349663)) >>> 0)) || 1550;
+  const request = boardRequest({
+    heights, span, seed, era: year, seat,
+    ...(walls ? { walls } : {}),
+    site: { name, culture, x: sitePos.x, z: sitePos.z },
+    places,
+    lived: false,
+    ...(manner ? { manner, founded, settled } : founded != null ? { founded, settled } : {}),
+    works,
+    rivers: BOARD_RIVERS,
+  });
+  return { port: runtimeBoardPortKey(region) ?? 'coast', year, request, runtime: true, world: null };
+}
+
 // The country a board founded on a region's ground, or null where none stands and the rules of a wild shore hold.
 // One is made per elevation field and kept, since land cover, ground colour and planting all ask.
 export function oldWorldCountry(region, heights, port = null) {
   if (!region || !heights || !Number.isFinite(region.latitude) || !Number.isFinite(region.longitude)) return null;
-  if (!inIberia(region.latitude, region.longitude) && !boardTownHeld(region)) return null;
   const kept = countries.get(heights);
   if (kept && kept.port === port) return kept.country;
+  if (!inIberia(region.latitude, region.longitude) && !boardTownHeld(region) && !bakedBoardFor(region)) return null;
   const country = makeCountry(region, heights, port);
   countries.set(heights, { port, country });
   return country;
 }
 
 export function refreshOldWorldBoardCountry(nextBoardJson, region, heights, port = null, surveyHeights = null) {
-  if (!nextBoardJson || !region || !heights || !inIberia(region.latitude, region.longitude) && !boardTownHeld(region)) return null;
+  if (!nextBoardJson || !region || !heights) return null;
   if (surveyHeights instanceof Float32Array && surveyHeights.length === heights.length && !uncarvedSurveys.has(heights)) {
     uncarvedSurveys.set(heights, surveyHeights.slice());
   }
   const baseBaked = bakedBoardFor(region);
   const nextBaked = {
-    ...(baseBaked || { port: region.id || 'lisbon', year: region.year ?? 1550 }),
+    ...(baseBaked || { port: runtimeBoardPortKey(region) || 'lisbon', year: region.year ?? 1550 }),
     board: nextBoardJson,
   };
   registerBakedBoard(nextBaked);
@@ -283,11 +422,11 @@ function makeCountry(region, heights, port, explicitBaked = null) {
   const year = region.year ?? 1550;
   const people = city ? oldWorldPeople(city, year) : 0;
   // A native town stands by an anchorage, with no port cleared for it.
-  const holdsCity = Boolean(held && port && (port.clearRadius > 0 || held.native) && port.center);
-  // The city is its board, founded for this port on the ground the game makes for it (scripts/bake-board.mjs). A
-  // city with no board founded for this ground has no town: it is baked, never grown here. Ground with no board
-  // standing has no country.
-  const baked = explicitBaked ?? (holdsCity ? bakedBoardFor(region) : null);
+  const registered = bakedBoardFor(region);
+  const holdsCity = Boolean((held || registered) && port && (port.clearRadius > 0 || held?.native || registered) && port.center);
+  // The city is its board, founded for this port on the ground the game makes for it (scripts/bake-board.mjs) or
+  // founded at runtime by the board worker. Ground with no board standing has no country.
+  const baked = explicitBaked ?? (holdsCity ? registered : null);
   const standsBoard = Boolean(baked && baked.board?.span === region.span);
   if (uncarvedSurveys.has(heights)) heights.set(uncarvedSurveys.get(heights));
   if (!standsBoard) {

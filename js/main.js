@@ -114,7 +114,7 @@ import { createStoryteller, mateShortlist, storytellerScene } from './storytelle
 import { createMateFigure, mateDoing, stepMateFigure } from './first-mate.js';
 import { mateAbout, mateCandidateAccount, mateCandidateLine, mateCounsel, mateReply, mateTopics } from './mate-counsel.js';
 import { WALKER_WORDS, townSolids } from './town-streets.js';
-import { bakedBoardFor } from './old-world.js';
+import { bakedBoardFor, runtimeBoardFor, runtimeBoardPortKey } from './old-world.js';
 import { createProps } from './props.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
@@ -882,7 +882,11 @@ async function main() {
     // Land is about to be made. If it is the living board's own port, the world is kept first, so that the port come
     // back to is laid as the model has it now; a keeping that is slow in coming is not waited for (the last stands).
     const living=window.oceanBoard;
-    if(BOARD_KEPT&&living?.state==='alive'&&living.port===region?.id)await Promise.race([living.keep(),new Promise(resolve=>setTimeout(resolve,BOARD_KEEP_WAIT_MS))]);
+    const nextPortKey=runtimeBoardPortKey({id:region?.id,latitude:lat??region?.latitude,longitude:lon??region?.longitude});
+    if(!placement&&living){
+      if(BOARD_KEPT&&living.state==='alive')await Promise.race([living.keep(),new Promise(resolve=>setTimeout(resolve,BOARD_KEEP_WAIT_MS))]);
+      if(living.port!==nextPortKey||living.year!==liveYear){living.close();if(boardLife===living)boardLife=null;}
+    }
     const nextTerrain=await createTerrain({
       waterOptics,oceanBridge,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,
       region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude,year:liveYear},
@@ -4490,12 +4494,25 @@ async function main() {
 
   function wakeBoard(){
     if(boardLife||qs.get('boardLife')==='off')return;
-    const region=terrain?.region,baked=region&&window.oceanLand?.pack?.board?bakedBoardFor(region):null;
-    if(!baked?.world)return;
-    // The model is taken up from the kept world the land was laid from, and from no other; it is kept as it lives.
+    const region=terrain?.region,pack=window.oceanLand?.pack;
+    let baked=region&&pack?.board?bakedBoardFor(region):null;
+    let runtimeFounded=false;
+    if(!baked?.world&&region&&pack?.heights&&pack?.port&&qs.get('board')!=='off'&&!castleDuel.active){
+      baked=runtimeBoardFor({region,heights:pack.surveyHeights??pack.heights,port:pack.port});
+      runtimeFounded=Boolean(baked);
+    }
+    if(!baked?.world&&!runtimeFounded)return;
+    // The model is taken up from the kept world the land was laid from, or founded here when unbaked; it is kept as it lives.
     boardLife=createBoardLife({baked,
-      kept:()=>BOARD_KEPT&&baked.lived?keptBoard(baked.port,baked.year,{clock:boardKeepClock()}).then(left=>left?.day===baked.lived.day?left:null):null,
+      kept:()=>BOARD_KEPT?(runtimeFounded?keptBoard(baked.port,baked.year,{clock:boardKeepClock()}):baked.lived?keptBoard(baked.port,baked.year,{clock:boardKeepClock()}).then(left=>left?.day===baked.lived.day?left:null):null):null,
       keep:record=>BOARD_KEPT?keepBoard({...record,clock:boardKeepClock()}):false,
+      onFounded:async nextBoard=>{
+        if(!nextBoard||terrain?.region!==region)return;
+        if(!pack?.board)await terrain?.refreshBoardFabric?.(nextBoard);
+        activePortRef=null;
+        folkPlan.at=-Infinity;folkPlan.day=-1;
+        caravanPlan.at=-Infinity;
+      },
       onNews:lines=>{
         recordBoardHistoricalLog();
         if(!hasLivePortContact()){

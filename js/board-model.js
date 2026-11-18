@@ -169,6 +169,7 @@ export const BAKED_BOARDS = Object.freeze({
   'goa:1550': 'assets/boards/goa-1550.json',
   'malacca:1550': 'assets/boards/malacca-1550.json',
   'malacca:1600': 'assets/boards/malacca-1600.json',
+  'nagasaki:1550': 'assets/boards/nagasaki-1550.json',
 });
 export function bakedBoardAsset(port, year) { return BAKED_BOARDS[`${port}:${year}`] ?? null; }
 // And the whole world each was founded as: the model's own save of everything it holds, frozen on its first day.
@@ -220,6 +221,7 @@ export const BAKED_WORLDS = Object.freeze({
   'goa:1550': 'assets/boards/goa-1550.world',
   'malacca:1550': 'assets/boards/malacca-1550.world',
   'malacca:1600': 'assets/boards/malacca-1600.world',
+  'nagasaki:1550': 'assets/boards/nagasaki-1550.world',
 });
 export function bakedWorldAsset(port, year) { return BAKED_WORLDS[`${port}:${year}`] ?? null; }
 

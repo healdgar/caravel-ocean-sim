@@ -529,6 +529,11 @@
     "bytes": 5222725,
     "sha256": "8f0c1881afe3427ee68647e0a0d1d6a24a122e65ba8df699155551ac5a437fa4"
   },
+  "assets/boards/nagasaki-1550.world": {
+    "url": "assets/boards/nagasaki-1550.b7e62862adff4151.world",
+    "bytes": 5000018,
+    "sha256": "b7e62862adff415175e2bec80b65b77f83f0f9d2ea1e07e29cc985e53a906f03"
+  },
   "assets/board/game.js": {
     "url": "assets/board/game.bedab35f7c445a2b.js",
     "bytes": 2998786,
@@ -983,6 +988,11 @@
     "url": "assets/boards/malacca-1600.311bedc8bd7a831b.json",
     "bytes": 861185,
     "sha256": "311bedc8bd7a831b6295b2d2cc77a4f9a6a7c71ce6f67a2d466729968c6e98ee"
+  },
+  "assets/boards/nagasaki-1550.json": {
+    "url": "assets/boards/nagasaki-1550.0a8596d9d2957ec9.json",
+    "bytes": 814686,
+    "sha256": "0a8596d9d2957ec914bf880fb0627ff280ac7896ec9c1255c3135a99db0e0378"
   },
   "assets/world/land.json": {
     "url": "assets/world/land.171586c7917a28dc.json",

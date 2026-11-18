@@ -35,8 +35,10 @@ export const BOARD_KEEP_DAYS = 10;
 // which case the board stands as it was founded and nothing else is lost. `kept()` answers the world as it was last
 // kept for this port (js/board-keep.js), which is then taken up in place of the founding one; `keep(record)` keeps
 // it, and is given the world as it stands every BOARD_KEEP_DAYS days it lives and whenever `life.keep()` is asked.
-export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onNewsAll = null, onState = null, stride = null, kept = null, keep = null, keepEvery = BOARD_KEEP_DAYS }) {
-  const world = baked?.world ?? null, asset = world ? bakedWorldAsset(baked.port, baked.year) : null;
+export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onNewsAll = null, onState = null, onFounded = null, stride = null, kept = null, keep = null, keepEvery = BOARD_KEEP_DAYS }) {
+  let world = baked?.world ?? null;
+  const asset = world ? bakedWorldAsset(baked.port, baked.year) : null;
+  const runtime = Boolean(baked?.runtime && baked?.request);
   let model = null, busy = false, told = world?.day ?? 0, keeping = null;
   let pendingMaritime = null;
   const life = {
@@ -104,26 +106,46 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
 
   async function start() {
     if (life.state !== 'asleep') return life;
-    if (!world || !asset) { state('failed', 'This port has no frozen world'); return life; }
+    if (!runtime && (!world || !asset)) { state('failed', 'This port has no frozen world'); return life; }
     state('waking');
     try {
-      // The world as the traveller left it, if this program kept one; else the world as it was founded.
+      // The world as the traveller left it, if this program kept one; else the world as it was founded (ahead of time or here).
       const left = kept ? await Promise.resolve().then(kept).catch(() => null) : null;
-      let bytes = left?.world && left.program === world.program && left.port === baked.port && left.year === baked.year ? new Uint8Array(left.world) : null;
-      if (bytes) life.resumed = left.day;
-      else {
-        const response = await fetchImpl(asset);
-        if (!response.ok) throw new Error(`The frozen world could not be fetched: ${response.status}`);
-        bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.length !== world.bytes) throw new Error(`The frozen world is ${bytes.length} bytes, not the ${world.bytes} its board was founded with`);
+      if (runtime) {
+        const keptBytes = left?.world && left.port === baked.port && left.year === baked.year ? new Uint8Array(left.world) : null;
+        model = await open(baked.request, { world: keptBytes, fetchImpl });
+        if (keptBytes && left.program && model.program !== left.program) {
+          model.close();
+          model = await open(baked.request, { world: null, fetchImpl });
+        } else if (keptBytes) {
+          life.resumed = left.day;
+        }
+        model.on.fault = (fault) => state('failed', String(fault?.error || fault));
+        const summary = await model.ready;
+        world = { program: model.program, day: left?.day ?? summary.day, year: summary.year ?? baked.year };
+        const foundedBoard = (life.resumed != null && left?.board) ? left.board : await model.hook('board');
+        if (foundedBoard) await onFounded?.(foundedBoard);
+        life.day = summary.day; told = summary.day; life.keptDay = summary.day; life.wanted = Math.max(life.wanted, summary.day);
+        life.status = await model.request('view', { kind: 'ui', panel: 'advisor-state' });
+        state('alive');
+        if (life.resumed == null && keep) keepNow();
+      } else {
+        let bytes = left?.world && left.program === world.program && left.port === baked.port && left.year === baked.year ? new Uint8Array(left.world) : null;
+        if (bytes) life.resumed = left.day;
+        else {
+          const response = await fetchImpl(asset);
+          if (!response.ok) throw new Error(`The frozen world could not be fetched: ${response.status}`);
+          bytes = new Uint8Array(await response.arrayBuffer());
+          if (bytes.length !== world.bytes) throw new Error(`The frozen world is ${bytes.length} bytes, not the ${world.bytes} its board was founded with`);
+        }
+        model = await open(baked.request, { world: bytes, fetchImpl });
+        if (model.program !== world.program) throw new Error('The frozen world was saved by another program than the one here');
+        model.on.fault = (fault) => state('failed', String(fault?.error || fault));
+        const summary = await model.ready;
+        life.day = summary.day; told = summary.day; life.keptDay = summary.day; life.wanted = Math.max(life.wanted, summary.day);
+        life.status = await model.request('view', { kind: 'ui', panel: 'advisor-state' });
+        state('alive');
       }
-      model = await open(baked.request, { world: bytes, fetchImpl });
-      if (model.program !== world.program) throw new Error('The frozen world was saved by another program than the one here');
-      model.on.fault = (fault) => state('failed', String(fault?.error || fault));
-      const summary = await model.ready;
-      life.day = summary.day; told = summary.day; life.keptDay = summary.day; life.wanted = Math.max(life.wanted, summary.day);
-      life.status = await model.request('view', { kind: 'ui', panel: 'advisor-state' });
-      state('alive');
     } catch (error) { model?.close(); model = null; state('failed', String(error?.message || error)); }
     return life;
   }
