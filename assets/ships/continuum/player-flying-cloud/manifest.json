@@ -6,16 +6,16 @@
  "model": "flying-cloud",
  "label": "Flying Cloud · 1851",
  "source": {
-  "vertices": 95865,
-  "indices": 286533,
+  "vertices": 96033,
+  "indices": 287325,
   "shards": 288,
-  "key": "5c94dab28ea8ad69bdfe16b88cd234a63459505788b6e61cbda8416f394d294c",
+  "key": "f100454f9bc84ff6c5bbe9495055bd5a1d2b47216d528a62b745490d3a57f532",
   "surface": {
-   "area": 272.89647074117727,
+   "area": 274.97926096596484,
    "centroid": [
-    -0.004085718836821487,
-    2.2219265142582145,
-    -0.002767590107611666
+    -0.004054772156607608,
+    2.2334649280747376,
+    0.05215171405006127
    ],
    "materials": {
     "0": 31.615203115285148,
@@ -36,8 +36,8 @@
     "20": 64.7658109541534,
     "23": 10.648392390760545,
     "25": 0.2811562827626881,
-    "29": 1.8168916717878574,
-    "30": 0.2658985529996585
+    "29": 3.6337833435757148,
+    "30": 0.531797105999317
    }
   },
   "designScale": [
@@ -46,30 +46,23 @@
    5.715
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 2908,
- "indexCount": 545688,
- "copyCount": 282,
+ "detail": {
+  "clusters": 37,
+  "ironTriangles": 284,
+  "lineVertices": 12810,
+  "rode": 350
+ },
  "clusters": {
-  "triangles": 181896,
-  "levels": 9,
-  "roots": 744,
-  "groups": 284,
+  "count": 2982,
+  "triangles": 183531,
+  "levels": 10,
+  "roots": 729,
+  "groups": 293,
   "parts": 516,
-  "rootError": 34.1707
+  "rootError": 34.1707,
+  "rootTriangles": 25466
  },
  "far": {
-  "vertexCount": 4000,
-  "triangleCount": 8000,
-  "stepCount": 3995,
-  "offsets": {
-   "vertices": 0,
-   "records": 24000,
-   "triangles": 28000,
-   "steps": 52000
-  },
   "voxel": 0.2766,
   "pieces": [
    {
@@ -111,7 +104,8 @@
    37.4411
   ],
   "inflateMax": 3.0432,
-  "euler": 0
+  "euler": 0,
+  "farFirst": 0
  },
  "splat": {
   "centre": [
@@ -138,49 +132,22 @@
  },
  "poses": 1,
  "files": {
-  "clusters.bin": {
-   "bytes": 186112,
-   "sha256": "c85672452a898262e90469bf34116ee1f51b28dc05569a60e9737511f610c2af",
+  "body.bin": {
+   "bytes": 5370996,
+   "sha256": "085f740cd8400b268bde62d82f0b5b4540c5f18dedb3f77c7a7d4eaf4aef04b5",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 77078,
-    "sha256": "ee0af7f91d7ef00d715f79c993359baca938c3033cd981c2cfb5555f5b084d47"
-   }
-  },
-  "indices.bin": {
-   "bytes": 2182752,
-   "sha256": "fc41b8fc8b177bf1504702c2470482400cd40a47eec7109751c9253d6df6fd2b",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 631414,
-    "sha256": "16bfb72ad59495e1938b7b80ad61722cddb34bc4db9c689ab92c95aa764d1438"
-   }
-  },
-  "copies.bin": {
-   "bytes": 1128,
-   "sha256": "0da57b480369903fc1add687b7af9b64990722dd36999e74a9f02e98d35ea596",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 569,
-    "sha256": "cbc33c883eb8913677500b8283c66a2d54a9d5dd134465102f9ee4051af5cb46"
-   }
-  },
-  "far.bin": {
-   "bytes": 271936,
-   "sha256": "1748b8d51665ae6b1f822f6927f3f94e5723b723a4ef38bd2af1e7163305ae9f",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 155946,
-    "sha256": "044be3aad153e28a015fdbd5a2c39cdf782d8a8c521dfd8638e2f7c97a65a4b1"
+    "file": "body.bin.gz",
+    "bytes": 1677044,
+    "sha256": "0ddc6f5ab07e3e74ce9ce23f176fffd1ead085ac75070f9457f5d245eaa678a8"
    }
   },
   "corners.bin": {
-   "bytes": 1146132,
-   "sha256": "b5ea39853151bf034a8e9e92771bd5c147cdd9ef56d0edd66c0fde3a0304caeb",
+   "bytes": 1149300,
+   "sha256": "a2155e0ac7bf72b8bcb3357de5e5d25fa57bf63006b03c409c05b0733b6629d3",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 303542,
-    "sha256": "0bcbacd2874760fb9b69e1ef6cf4c20789e37e9a097f0e1332dee489ef16b9d4"
+    "bytes": 304245,
+    "sha256": "019397356395f6a293f4b16009c9325bff1a395b5e362e930d577f8d7418e8a5"
    }
   }
  }

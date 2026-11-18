@@ -58,6 +58,10 @@ export const CONTINUUM_MATERIAL_WORDS = CONTINUUM_TYPE_WORDS - CONTINUUM_TYPE.ma
 // PIECES: a body of pieces (a struck building's), drawn as clusters alone: it has no far body and no splat.
 export const CONTINUUM_TYPE_SLIGHT = 1;
 export const CONTINUUM_TYPE_PIECES = 2;
+// The count of a type's leading clusters that are its detail layer (relief thinner than a ball, rule 3.6: a ship's
+// lines and her anchor's iron), in its flags from this bit up. Each is a root of error 0, so it is drawn with the
+// clusters; its coarse cut (the shadow map's, and what is seen under water) takes it too, whole or not.
+export const CONTINUUM_TYPE_DETAIL_SHIFT = 8;
 export const CONTINUUM_CLUSTER_WORDS = 16;
 export const CONTINUUM_VERTEX_WORDS = 4;
 export const CONTINUUM_TRIANGLE_WORDS = 4;
@@ -175,8 +179,10 @@ export function packContinuumCluster({ lod, parentLod, cull, error, parentError,
 // CONTINUUM_MATERIAL_WORDS words), `vertex(v)` a welded vertex's { high, word }, `farWord(t)` a far triangle's word,
 // `streams` a stream's words for a welded vertex (`{ uv: (v) => [word] }`; a far vertex reads zeros), each packed
 // only where some vertex's words are not all zero, and `splatArea` the outline's area (an ellipse's if not given).
+// `farStreams` gives a far vertex's words the same way (`{ rider: (i) => [word] }`), for a family whose far body is
+// posed by what its vertices ride.
 export function packContinuumBody(packing, { welded, clusters, far }) {
-  const { triangles = 0, flags = 0, material = [], vertex = () => ({}), farWord = () => 0, streams = {}, splat = far.splat } = packing;
+  const { triangles = 0, flags = 0, material = [], vertex = () => ({}), farWord = () => 0, streams = {}, farStreams = {}, splat = far.splat } = packing;
   if (material.length > CONTINUUM_MATERIAL_WORDS) throw Error(`A continuum material block holds ${material.length} words`);
   const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
   for (const P of [welded.position, far.position]) for (let v = 0; v < P.length / 3; v++) for (let k = 0; k < 3; k++) { low[k] = Math.min(low[k], P[v * 3 + k]); high[k] = Math.max(high[k], P[v * 3 + k]); }
@@ -189,7 +195,8 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
   const ownVertices = clusters.order.length, V = far.position.length / 3, T = far.index.length / 3, S = far.chain.steps.length, vertices = ownVertices + V;
   if (V > 65535) throw Error(`A far body of ${V} vertices: its collapse records hold 16-bit targets`);
   // Which streams it carries: those with a word that is not zero.
-  const carried = CONTINUUM_STREAMS.filter(({ name }) => streams[name] && clusters.order.some((v) => streams[name](v).some((w) => w !== 0)));
+  const farCarries = (name) => farStreams[name] && Array.from({ length: V }, (_, i) => i).some((i) => farStreams[name](i).some((w) => w !== 0));
+  const carried = CONTINUUM_STREAMS.filter(({ name }) => (streams[name] && clusters.order.some((v) => streams[name](v).some((w) => w !== 0))) || farCarries(name));
   const streamWords = carried.reduce((n, { words }) => n + words * vertices, 0);
   const chainWords = V + T * CONTINUUM_TRIANGLE_WORDS + far.steps.length;
   const typeAt = CONTINUUM_BODY_HEAD, clustersAt = typeAt + CONTINUUM_TYPE_WORDS, verticesAt = clustersAt + clusters.count * CONTINUUM_CLUSTER_WORDS;
@@ -211,7 +218,8 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
   words.set(far.steps, chainAt + stepsAt);
   let streamAt = streamsAt;
   for (const { name, words: n } of carried) {
-    clusters.order.forEach((v, i) => words.set(streams[name](v), streamAt + i * n));
+    if (streams[name]) clusters.order.forEach((v, i) => words.set(streams[name](v), streamAt + i * n));
+    if (farStreams[name]) for (let i = 0; i < V; i++) words.set(farStreams[name](i), streamAt + (ownVertices + i) * n);
     streamAt += n * vertices;
   }
   // The type's record, its places counted from the body's own clusters, vertices and far body.

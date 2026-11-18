@@ -6,20 +6,20 @@
  "model": "victory",
  "label": "HMS Victory · 1805",
  "source": {
-  "vertices": 146062,
-  "indices": 283887,
+  "vertices": 146084,
+  "indices": 284445,
   "shards": 755,
-  "key": "c82c7fc14d63cd44a3ae03096398b427fd4408e53bb61ff281fd5b6ed9b73b67",
+  "key": "1579d690798dd6c465587d17339ec723c9f0083589bbe8db300fdd732d99a607",
   "surface": {
-   "area": 755.1581012682727,
+   "area": 757.6119907755307,
    "centroid": [
-    -0.00087017512185878,
-    1.967356444555628,
-    -0.09080515649270161
+    -0.001058808580267262,
+    1.9805938773883736,
+    -0.06415074661461444
    ],
    "materials": {
     "0": 159.96142456717718,
-    "1": 164.21152742404692,
+    "1": 164.0855118368595,
     "2": 3.0573209111183015,
     "3": 10.863425197292813,
     "4": 5.281734586118029,
@@ -35,12 +35,11 @@
     "20": 84.5769137231236,
     "21": 55.577947307359054,
     "22": 58.368909962972396,
-    "23": 12.258862861451128,
-    "24": 33.53913045876844,
+    "23": 11.953794875563693,
+    "24": 33.36462612590858,
     "25": 4.7667031041915235,
-    "26": 0.09989997307062026,
-    "29": 2.751429321793921,
-    "30": 0.40794806446938026
+    "29": 5.502858643587842,
+    "30": 0.8158961289387605
    }
   },
   "designScale": [
@@ -49,30 +48,23 @@
    4.7244
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 3628,
- "indexCount": 491877,
- "copyCount": 5,
+ "detail": {
+  "clusters": 22,
+  "ironTriangles": 284,
+  "lineVertices": 7248,
+  "rode": 260
+ },
  "clusters": {
-  "triangles": 163959,
-  "levels": 11,
-  "roots": 1541,
-  "groups": 302,
-  "parts": 1041,
-  "rootError": 38.0835
+  "count": 3579,
+  "triangles": 161829,
+  "levels": 6,
+  "roots": 1526,
+  "groups": 284,
+  "parts": 1040,
+  "rootError": 36.2059,
+  "rootTriangles": 57098
  },
  "far": {
-  "vertexCount": 3814,
-  "triangleCount": 8000,
-  "stepCount": 3784,
-  "offsets": {
-   "vertices": 0,
-   "records": 22884,
-   "triangles": 26698,
-   "steps": 50698
-  },
   "voxel": 0.2716,
   "pieces": [
    {
@@ -86,7 +78,7 @@
     "count": 2,
     "dropped": 0,
     "genus": 102,
-    "surfaceTriangles": 1187912
+    "surfaceTriangles": 1183728
    },
    {
     "kind": "canvas",
@@ -104,31 +96,32 @@
   ],
   "baseTriangles": 8000,
   "baseVertices": 3814,
-  "baseError": 1.0394,
-  "baseGeometric": 0.1313,
-  "steps": 3784,
+  "baseError": 1.038,
+  "baseGeometric": 0.178,
+  "steps": 3790,
   "coreTriangles": 4,
   "depth": 9,
   "errorRange": [
-   1.0394,
-   36.8332
+   1.038,
+   42.3031
   ],
   "inflateMax": 2.9823,
-  "euler": -186
+  "euler": -186,
+  "farFirst": 0
  },
  "splat": {
   "centre": [
    -0.0888,
-   26.8848,
-   -0.9104
+   26.8847,
+   -0.9099
   ],
-  "ry": 35.9712,
-  "rxSide": 25.9375,
-  "rxEnd": 12.0758,
+  "ry": 35.9713,
+  "rxSide": 25.8645,
+  "rxEnd": 12.0534,
   "colour": [
-   0.3995,
-   0.31818,
-   0.2368
+   0.40002,
+   0.31881,
+   0.23743
   ]
  },
  "bound": {
@@ -141,49 +134,22 @@
  },
  "poses": 1,
  "files": {
-  "clusters.bin": {
-   "bytes": 232192,
-   "sha256": "820ebfc1ed0a7bf1809c278c97c1cbf0dad7f2ab96ba50f1491d663e7e90a411",
+  "body.bin": {
+   "bytes": 6179132,
+   "sha256": "90863af1189eefdeb00b1c6d38b0104f3d0a2fca2ed66739a180769fea921a11",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 92026,
-    "sha256": "c97af20a24270a72ea6d09e235f6737591e669ecef6a09a6105e020af0233b49"
-   }
-  },
-  "indices.bin": {
-   "bytes": 1967508,
-   "sha256": "58b129568b6b03ff935308bada5d0f0c5aea5eaaafafa89e63d25a25befe1f05",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 637289,
-    "sha256": "2d5979c1f2d11be87514da7c6b4870a127e11a369bcddaaf000c67108fb89279"
-   }
-  },
-  "copies.bin": {
-   "bytes": 20,
-   "sha256": "69d1ac08e91bf00f9822332dca88cc0be83a30cc68cb1f593d203dd30648a7a1",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 36,
-    "sha256": "10b53b007fb398e81bacee71138def9256e9a97dfec5ada16cf34fd02479f916"
-   }
-  },
-  "far.bin": {
-   "bytes": 263352,
-   "sha256": "f5652ce57e0c1a47fbd01eabb40c40127e3465bf92cb0aba16e6c0a6eb06d4df",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 151210,
-    "sha256": "dd339888bd70b4694dd94a3e27175d724e387e607d9b4089f24d39301ad85747"
+    "file": "body.bin.gz",
+    "bytes": 1813574,
+    "sha256": "5ec6de8dab6231cb2aad51d4c34db2ee89305d96593e0a25a841062b546dbef1"
    }
   },
   "corners.bin": {
-   "bytes": 1135548,
-   "sha256": "b479ef2d252ff6dae720f571a2c184a7cac38c912bfcbe745491133c0284cfcc",
+   "bytes": 1137780,
+   "sha256": "0b49b407fe72af99a5bf09a5b1f1d52e338863e52469bc901effed426b598a15",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 357274,
-    "sha256": "1b36091f6e9a153fb4cec57d1fb8e1f0bdbe0577bf6df44562ce015fb1d6e599"
+    "bytes": 357628,
+    "sha256": "3492a8aa71c1fc768d832b56db850d706f8252a713c034adb8654f3fd33a6ab1"
    }
   }
  }

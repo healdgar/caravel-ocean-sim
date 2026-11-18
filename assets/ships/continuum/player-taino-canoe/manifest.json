@@ -33,30 +33,23 @@
    1.166667
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 1009,
- "indexCount": 161733,
- "copyCount": 0,
+ "detail": {
+  "clusters": 4,
+  "ironTriangles": 0,
+  "lineVertices": 1272,
+  "rode": 0
+ },
  "clusters": {
+  "count": 1013,
   "triangles": 53911,
   "levels": 7,
   "roots": 218,
   "groups": 101,
   "parts": 149,
-  "rootError": 2.9881
+  "rootError": 2.9881,
+  "rootTriangles": 6341
  },
  "far": {
-  "vertexCount": 4002,
-  "triangleCount": 8000,
-  "stepCount": 3998,
-  "offsets": {
-   "vertices": 0,
-   "records": 24012,
-   "triangles": 28014,
-   "steps": 52014
-  },
   "voxel": 0.0389,
   "pieces": [
    {
@@ -85,7 +78,8 @@
    2.9107
   ],
   "inflateMax": 0.4547,
-  "euler": 2
+  "euler": 2,
+  "farFirst": 830
  },
  "splat": {
   "centre": [
@@ -112,40 +106,13 @@
  },
  "poses": 1,
  "files": {
-  "clusters.bin": {
-   "bytes": 64576,
-   "sha256": "b3d38cd93cc62526c86191e14645c7834e4b2e73587b22f978f7120ef1c48736",
+  "body.bin": {
+   "bytes": 1707364,
+   "sha256": "d8111d745464261e8cf0cac9bad13e2ab7a0403e4f5d57d4db0e1c124f821b41",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 23645,
-    "sha256": "6da2fc2d71a701af50f0df0043ae021d9de6d05e17eac18581242a562f9c4cc8"
-   }
-  },
-  "indices.bin": {
-   "bytes": 646932,
-   "sha256": "45fdb57a0fbf39ef973ba26f2d3a90aed3abb74f254944334ff0f21d30871988",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 189843,
-    "sha256": "360f9155efc940c708c88fc2d019183406fe0f2bc52c8fafcb29dae10e278cd4"
-   }
-  },
-  "copies.bin": {
-   "bytes": 0,
-   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 20,
-    "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837"
-   }
-  },
-  "far.bin": {
-   "bytes": 272040,
-   "sha256": "38e9bb35eecdc887e5b715d8d0f850f5c7bf72e8540317be9759ff04393116be",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 151834,
-    "sha256": "4399d1e61249f1ad96d6db901a7aef7a823401f8dfdb87e40787ef17ff5a3e39"
+    "file": "body.bin.gz",
+    "bytes": 635983,
+    "sha256": "d83c3eb4b7f3204b7710bf4954b67612ee05c21f575c7aa9315131573028c61e"
    }
   },
   "corners.bin": {

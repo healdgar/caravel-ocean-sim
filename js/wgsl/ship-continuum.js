@@ -10,7 +10,7 @@
 import { FRAME_WGSL } from './common.js';
 import { SHADOW_FRAME } from './shadows.js';
 import { CONTINUUM_CORE_WGSL, continuumClusterPrefixWGSL, continuumMorphStepWGSL } from '../continuum-core.js';
-import { SHIP_CONTINUUM_CLUSTER_WORDS, SHIP_CONTINUUM_FAR_VERTEX_WORDS, SHIP_CONTINUUM_STEP_WORDS, SHIP_CONTINUUM_NEVER, SHIP_CONTINUUM_MAX_DEPTH } from '../ship-continuum.js';
+const SHIP_CONTINUUM_CLUSTER_WORDS = 16, SHIP_CONTINUUM_FAR_VERTEX_WORDS = 6, SHIP_CONTINUUM_STEP_WORDS = 4, SHIP_CONTINUUM_NEVER = 65535, SHIP_CONTINUUM_MAX_DEPTH = 96;
 
 // Ships a frame can hold that are damaged at once, each with its own list (and its fracture's posed vertices).
 export const SHIP_CONTINUUM_DAMAGED_SLOTS = 16;

@@ -2,7 +2,8 @@
 // Ships drawn through the one continuum (AGENTS.md rule 3): each family's bodies loaded once onto the GPU, and one
 // cut a frame (js/wgsl/ship-continuum.js) that enters every ship in the lists its draws read. A family supplies its
 // bodies and its ships' instance records; how they are cut, handed off and counted is here and in the shared core.
-import { SHIP_CONTINUUM_ASSETS, SHIP_CONTINUUM_FAR_VERTEX_WORDS, shipContinuumStreams, shipContinuumSourceKey, shipContinuumSurface, shipContinuumSurfaceMatches, validateShipContinuumManifest } from './ship-continuum.js';
+const SHIP_CONTINUUM_FAR_VERTEX_WORDS = 6;
+import { SHIP_CONTINUUM_ASSETS, shipContinuumStreams, shipContinuumSourceKey, shipContinuumSurface, shipContinuumSurfaceMatches, validateShipContinuumManifest } from './ship-continuum.js';
 import {
   SHIP_CONTINUUM_LISTS, SHIP_CONTINUUM_INSTANCE_VERTICES, SHIP_CONTINUUM_DRAW_BYTES, SHIP_CONTINUUM_DAMAGED_LIST, SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST, SHIP_CONTINUUM_LINE_LIST,
   SHIP_CONTINUUM_BODY_LIMIT, SHIP_CONTINUUM_BODY_BYTES, SHIP_CONTINUUM_CUT_BYTES, shipContinuumCutWGSL,

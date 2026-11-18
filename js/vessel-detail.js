@@ -91,12 +91,15 @@ export function appendVesselStations(model, raw, groups) {
       for (const [p, n, r, k, e] of corners) put(at(p, n, r), n, material, k / sides, e);
     }
   };
-  // A sheet of cloth in the plane x = base x, its corners (u along the fly, v down the hoist) placed by `place`.
+  // Bunting in the plane x = base x, its corners (u along the fly, v down the hoist) placed by `place`: both its faces,
+  // each wound outward (its normal's x the face's side), which the stations pass flies a cloth's thickness apart.
   const cloth = (columns, rows, material, place) => {
-    const corner = (i, j) => put(place(i / columns, j / rows), [1, 0, 0], material, i / columns, j / rows);
-    for (let i = 0; i < columns; i++) for (let j = 0; j < rows; j++) {
-      corner(i, j); corner(i + 1, j); corner(i, j + 1);
-      corner(i, j + 1); corner(i + 1, j); corner(i + 1, j + 1);
+    for (const face of [1, -1]) {
+      const corner = (i, j) => { const p = place(i / columns, j / rows); put([p[0] + face * 1e-3, p[1], p[2]], [face, 0, 0], material, i / columns, j / rows); };
+      for (let i = 0; i < columns; i++) for (let j = 0; j < rows; j++) {
+        if (face > 0) { corner(i, j); corner(i + 1, j); corner(i, j + 1); corner(i, j + 1); corner(i + 1, j); corner(i + 1, j + 1); }
+        else { corner(i, j); corner(i, j + 1); corner(i + 1, j); corner(i, j + 1); corner(i + 1, j + 1); corner(i + 1, j); }
+      }
     }
   };
   const WOOD = 1, IRON = 3, GILT = 25;

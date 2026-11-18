@@ -6,16 +6,16 @@
  "archetype": 2,
  "label": "Underway Carrack",
  "source": {
-  "vertices": 72477,
-  "indices": 180723,
+  "vertices": 72645,
+  "indices": 181515,
   "shards": 252,
-  "key": "ecc3641ed087a3813ef97ae5aeb4906c5a42d8546869b64d6dd89b1fb50e2385",
+  "key": "2df408b7d4ce1630f5d0769d871a669c641cbaa59e57c19998b636210f506348",
   "surface": {
-   "area": 319.2725171748613,
+   "area": 322.0520286567922,
    "centroid": [
-    0.016402529425230735,
-    1.8971985126085518,
-    0.2798717037845337
+    0.016260965283994653,
+    1.9186974850299592,
+    0.3417191592297895
    ],
    "materials": {
     "0": 58.43939729692847,
@@ -38,8 +38,8 @@
     "19": 3.1915338743317325,
     "23": 0.3197071778147259,
     "25": 0.15753671673867112,
-    "29": 2.428512966208416,
-    "30": 0.35099851572252305
+    "29": 4.857025932416832,
+    "30": 0.7019970314450461
    }
   },
   "designScale": [
@@ -48,30 +48,23 @@
    1.966667
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 1870,
- "indexCount": 317484,
- "copyCount": 1041,
+ "detail": {
+  "clusters": 0,
+  "ironTriangles": 0,
+  "lineVertices": 0,
+  "rode": 0
+ },
  "clusters": {
-  "triangles": 105828,
-  "levels": 7,
-  "roots": 664,
-  "groups": 160,
+  "count": 1906,
+  "triangles": 108090,
+  "levels": 6,
+  "roots": 668,
+  "groups": 166,
   "parts": 439,
-  "rootError": 12.7549
+  "rootError": 14.5728,
+  "rootTriangles": 26712
  },
  "far": {
-  "vertexCount": 4012,
-  "triangleCount": 8000,
-  "stepCount": 4007,
-  "offsets": {
-   "vertices": 0,
-   "records": 24072,
-   "triangles": 28084,
-   "steps": 52084
-  },
   "voxel": 0.0994,
   "pieces": [
    {
@@ -113,7 +106,8 @@
    18.3523
   ],
   "inflateMax": 1.1092,
-  "euler": 12
+  "euler": 12,
+  "farFirst": 0
  },
  "splat": {
   "centre": [
@@ -140,58 +134,31 @@
  },
  "poses": 3,
  "files": {
-  "clusters.bin": {
-   "bytes": 119680,
-   "sha256": "8746bad6cab234db3044582fccce15b8668916d84a51d422bcff802cb59ce2cc",
+  "body.bin": {
+   "bytes": 3492184,
+   "sha256": "ad16d7d314bcb6fcc0649e3644ddd6fa228ddde642811a729d897cf9b92445f1",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 48874,
-    "sha256": "7c55a02774a672fc89e8829eb03b7fee8f524fc2aaea8f2a246a857b3084e64f"
-   }
-  },
-  "indices.bin": {
-   "bytes": 1269936,
-   "sha256": "1e4e902dddd74127b51230a4782f1bbf603a5f623c12257d419cf0944c952fdd",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 387565,
-    "sha256": "748addb959af29d971777d0a1bc9003cf1565337c343f34bc335355a6f5bf165"
-   }
-  },
-  "copies.bin": {
-   "bytes": 4164,
-   "sha256": "d169d4f5731f5620b723f876e76236526ab1560865bd583a29b6ce9f50dca521",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 2058,
-    "sha256": "6b365d31f4ec6112fd06db3f08eb46c566f3bc83d0507dfcee5d53cb9f018bfb"
-   }
-  },
-  "far.bin": {
-   "bytes": 272464,
-   "sha256": "f4e0ff257c6eb3fe45a6a5fc96c11f233e84a24e8c1ea424d39a2b97840f096e",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 158346,
-    "sha256": "dae22a3ae6dbc1391cacf73bcef81f6b100932c71e4cd351b736b40dde98ebaf"
+    "file": "body.bin.gz",
+    "bytes": 1163279,
+    "sha256": "1402c37110867f566bf442b4be4480aa44d6248d9ed6376f32893fae44a293bd"
    }
   },
   "vertices.bin": {
-   "bytes": 2609172,
-   "sha256": "cf117dff75a3e0b169b0b5a092866ae1a2ce080c7f53cd4b87f76a4a5da873f3",
+   "bytes": 2615220,
+   "sha256": "34c309db42316bf6deb009b9b7ffe1f31ef6f218e1b4369878840b6f7b6ef168",
    "gzip": {
     "file": "vertices.bin.gz",
-    "bytes": 771384,
-    "sha256": "44303a820f7399e94a63c8f27824c7ac115920381e98e224d44f5ca9e5bc9260"
+    "bytes": 772565,
+    "sha256": "91de89f4eaacb30814ca22d05b8cedfa840882b484169dab52b654b096231124"
    }
   },
   "shards.bin": {
-   "bytes": 289908,
-   "sha256": "9aff228ba63b86cb9fe83280bdf013b3f1f15c3ab1811024c511095e7bad002c",
+   "bytes": 290580,
+   "sha256": "404f7323b9a0fc8ab59c95f22ecd06af0d2def87626fdac48b85a204d1239ec5",
    "gzip": {
     "file": "shards.bin.gz",
-    "bytes": 5465,
-    "sha256": "f6f5c30d9d609238dcda675e1010400718491339432ddd8c3ba2cd3c5d884ea6"
+    "bytes": 5467,
+    "sha256": "11fabcdd647f7bb6d0988cde40014e0b4226a9281085e33414783c7e06ea77c1"
    }
   }
  }

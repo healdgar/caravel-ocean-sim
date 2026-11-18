@@ -639,28 +639,6 @@ export function createVictoryMesh({groups,parts}={}){
     tube([x-.07,y+.075,z],[x+.07,y+.075,z],.018,1,.018,6);
     group('rig.working.'+m.id,'rig.'+m.id+'.fall',start);
   }
-  // Stern ensign on an aft staff. A small authored cloth flag keeps the ship's
-  // national identity legible without adding another animated sail control.
-  const flagStart=out.length;
-  tube([0,2.565,5.92],[0,4.12,6.42],.017,1,.008,8);
-  quad([0,4.02,6.43],[.63,3.97,6.43],[.63,3.60,6.43],[0,3.65,6.43],23);
-  const canton=(u,v,z)=>[.27*u,4.02-.05/ .63*(.27*u)-.185*v,z];
-  const flagQuad=(uv,m,z)=>quad(...uv.map(p=>canton(...p,z)),m);
-  for(const side of [-1,1]){
-    const z=6.43+side*.002;
-    quad([.275,4.0,z],[.35,3.995,z],[.35,3.615,z],[.275,3.62,z],24);
-    quad([0,3.85,z],[.63,3.80,z],[.63,3.735,z],[0,3.785,z],24);
-    flagQuad([[0,0],[1,0],[1,1],[0,1]],26,z+side*.002);
-    flagQuad([[0,0],[.14,0],[1,.86],[1,1]],23,z+side*.004);
-    flagQuad([[0,1],[0,.86],[.86,0],[1,0]],23,z+side*.004);
-    flagQuad([[0,0],[.06,0],[1,.94],[1,1]],24,z+side*.006);
-    flagQuad([[0,1],[0,.94],[.94,0],[1,0]],24,z+side*.006);
-    flagQuad([[.40,0],[.60,0],[.60,1],[.40,1]],23,z+side*.008);
-    flagQuad([[0,.37],[1,.37],[1,.63],[0,.63]],23,z+side*.008);
-    flagQuad([[.45,0],[.55,0],[.55,1],[.45,1]],24,z+side*.010);
-    flagQuad([[0,.43],[1,.43],[1,.57],[0,.57]],24,z+side*.010);
-  }
-  for(let i=flagStart+1;i<out.length;i+=9)out[i]+=VICTORY_DESIGN.decks.poop.height-2.48;
-  group('flag.ensign','hull',flagStart);
+  // Her ensign is her colours' own (js/vessel-detail.js appendVesselStations): flown on her stern staff, not authored here.
   return new Float32Array(out);
 }

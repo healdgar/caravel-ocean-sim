@@ -36,10 +36,12 @@ import { createShipAssetCache } from '../js/ship-mesh.js';
 import { vesselHull } from '../js/hull.js';
 import { anchorEquipment } from '../js/anchor-state.js';
 import { VESSEL_ENSIGN_MATERIAL, VESSEL_PENNANT_MATERIAL } from '../js/wgsl/ship-colours.js';
+import { CONTINUUM_STEP_WORDS, CONTINUUM_HOPS } from '../js/continuum-core.js';
+import { CONTINUUM_CLUSTER_TRIANGLES } from '../js/continuum-format.js';
+import { SHIP_RIDER_LINE } from '../js/wgsl/ship-kinds.js';
 import {
-  SHIP_CONTINUUM_FORMAT, SHIP_CONTINUUM_VERSION, SHIP_CONTINUUM_CLUSTER_WORDS, SHIP_CONTINUUM_FAR_VERTEX_WORDS, SHIP_CONTINUUM_STEP_WORDS,
-  SHIP_CONTINUUM_NEVER, SHIP_CONTINUUM_MAX_DEPTH, SHIP_CONTINUUM_BODIES,
-  packShipContinuumCluster, packShipContinuumFarVertex, shipContinuumSourceKey, shipContinuumSurface, validateShipContinuumManifest,
+  SHIP_CONTINUUM_FORMAT, SHIP_CONTINUUM_VERSION, SHIP_CONTINUUM_BODIES,
+  packShipContinuumBody, shipContinuumSourceKey, shipContinuumSurface, validateShipContinuumManifest,
 } from '../js/ship-continuum.js';
 
 const args = process.argv.slice(2);
@@ -214,9 +216,9 @@ function posedReach(posed, vertices, centre) {
   return r;
 }
 
-async function bakeClusters(body, posed) {
+async function bakeClusters(body, posed, index) {
   const dag = await buildDag({
-    id: 0, bark: { pos: body.position, nrm: body.normal, uv: body.uv, idx: body.index },
+    id: 0, bark: { pos: body.position, nrm: body.normal, uv: body.uv, idx: index },
     leaves: { pos: new Float32Array(0), nrm: new Float32Array(0), uv: new Float32Array(0), vpl: 8 },
     barkParts: body.part, barkGroupError: posedGroupError(body, posed),
   });
@@ -252,20 +254,34 @@ async function bakeClusters(body, posed) {
       error: r[12], parentError: parent >= 0 ? r[13] : Infinity, level: dag.meta[c * 4 + 2],
     });
   }
-  // Coarsest parent first: what an instance can draw at its nearest point is then a prefix.
+  // Coarsest parent first: what an instance can draw at its nearest point is then a prefix. Each keeps its corners
+  // (the body's vertices) and its part, which every one of its triangles shares.
   records.sort((p, q) => q.parentError - p.parentError || q.error - p.error);
-  const indices = new Uint32Array(dag.idx.length), clusters = new Uint32Array(count * SHIP_CONTINUUM_CLUSTER_WORDS);
-  let first = 0, triangles = 0, rootError = 0;
-  records.forEach((record, k) => {
+  let triangles = 0, rootError = 0, rootTriangles = 0;
+  for (const record of records) {
     const at = dag.meta[record.cluster * 4], tris = dag.meta[record.cluster * 4 + 1];
-    if (tris > 128) throw Error(`A cluster holds ${tris} triangles`);
-    indices.set(dag.idx.subarray(at, at + tris * 3), first);
-    clusters.set(packShipContinuumCluster({ ...record, first, triangles: tris }), k * SHIP_CONTINUUM_CLUSTER_WORDS);
-    first += tris * 3;
+    if (tris > CONTINUUM_CLUSTER_TRIANGLES) throw Error(`A cluster holds ${tris} triangles`);
+    record.corners = dag.idx.subarray(at, at + tris * 3);
+    record.triangles = tris;
+    record.part = body.part[record.corners[0]];
     triangles += tris;
-    if (record.parentError === Infinity) rootError = Math.max(rootError, record.error);
-  });
-  return { indices, clusters, count, triangles, groupCount, levels: dag.stats.barkLevels, roots: dag.stats.barkRoots, rootError };
+    if (record.parentError === Infinity) { rootError = Math.max(rootError, record.error); rootTriangles += tris; }
+  }
+  return { records, count, triangles, rootTriangles, groupCount, levels: dag.stats.barkLevels, roots: dag.stats.barkRoots, rootError };
+}
+
+// The detail layer (rule 3.6): triangles in clusters of at most CONTINUUM_CLUSTER_TRIANGLES, each a root of error 0
+// keyed by its part, bound by `sphere` (everywhere they can go).
+function detailClusters(triangles, corners, partOf, sphere) {
+  const byPart = new Map(), out = [];
+  for (const t of triangles) { const p = partOf(t); if (!byPart.has(p)) byPart.set(p, []); byPart.get(p).push(t); }
+  for (const [part, list] of [...byPart].sort((a, b) => a[0] - b[0])) {
+    for (let at = 0; at < list.length; at += CONTINUUM_CLUSTER_TRIANGLES) {
+      const chunk = list.slice(at, at + CONTINUUM_CLUSTER_TRIANGLES);
+      out.push({ lod: sphere, parentLod: sphere, cull: sphere, error: 0, parentError: Infinity, level: 0, part, triangles: chunk.length, corners: Uint32Array.from(chunk.flatMap((t) => [corners(t, 0), corners(t, 1), corners(t, 2)])) });
+    }
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------------ far body
@@ -355,7 +371,7 @@ function bakeFar(arch, body, poses, lap) {
   const chain = collapseChain(position, index, CHAIN_LEAST_TRIANGLES, { region }), S = chain.steps.length;
   let depth = 0;
   for (let v = 0; v < V; v++) { let d = 0; for (let w = v; chain.dieStep[w] >= 0; w = chain.target[w]) d++; depth = Math.max(depth, d); }
-  if (depth > SHIP_CONTINUUM_MAX_DEPTH) throw Error(`The far body's collapses run ${depth} deep`);
+  if (depth >= CONTINUUM_HOPS) throw Error(`The far body's collapses run ${depth} deep`);
   lap(`chain ${S} steps to ${chain.living} triangles, ${depth} deep`);
   // Errors and inflation, measured at every eighth step and the last few, between them taken in proportion.
   const baseFans = Array.from({ length: V }, () => []);
@@ -422,17 +438,17 @@ function bakeFar(arch, body, poses, lap) {
 
   // Triangles in order of death, latest first: those alive at step s are a prefix.
   const order = allBase.slice().sort((p, q) => (chain.death[q] < 0 ? Infinity : chain.death[q]) - (chain.death[p] < 0 ? Infinity : chain.death[p]));
-  const steps = new Uint32Array((S + 1) * SHIP_CONTINUUM_STEP_WORDS), stepFloats = new Float32Array(steps.buffer);
+  const steps = new Uint32Array((S + 1) * CONTINUUM_STEP_WORDS), stepFloats = new Float32Array(steps.buffer);
   const dying = new Int32Array(S + 2);
   for (let t = 0; t < T; t++) if (chain.death[t] >= 0) dying[chain.death[t]]++;
   let alive = T;
   for (let step = 0; step <= S; step++) {
     alive -= dying[step];
-    steps[step * SHIP_CONTINUUM_STEP_WORDS] = alive;
-    stepFloats[step * SHIP_CONTINUUM_STEP_WORDS + 1] = errors[step];
-    stepFloats[step * SHIP_CONTINUUM_STEP_WORDS + 2] = inflates[step];
+    steps[step * CONTINUUM_STEP_WORDS] = alive;
+    stepFloats[step * CONTINUUM_STEP_WORDS + 1] = errors[step];
+    stepFloats[step * CONTINUUM_STEP_WORDS + 2] = inflates[step];
   }
-  if (steps[0] !== T || steps[S * SHIP_CONTINUUM_STEP_WORDS] !== chain.living) throw Error('Chain prefix counts disagree');
+  if (steps[0] !== T || steps[S * CONTINUUM_STEP_WORDS] !== chain.living) throw Error('Chain prefix counts disagree');
 
   // The splat: the far body's bounds, its outline's area end on and side on, and the colour the side shows.
   const bottom = low[1] + 0.5, top = high[1] - 0.5, cellArea = (frame.size / frame.cells) ** 2, ry = (top - bottom) / 2;
@@ -445,7 +461,7 @@ function bakeFar(arch, body, poses, lap) {
     colour: mean.map((v) => +v.toFixed(5)),
   };
   return {
-    V, T, S, index, order, steps, chain, design, designNormal, colour, region, rides, depth, splat,
+    V, T, S, position, normal, index, order, steps, chain, design, designNormal, colour, region, rides, depth, splat,
     stats: {
       voxel: +h.toFixed(4), pieces: pieces.map((p) => ({ kind: p.piece ? 'canvas' : 'rigid', close: +p.close.toFixed(4), grid: p.voxels.dims, count: p.count, dropped: p.voxels.droppedPieces, genus: p.genus, surfaceTriangles: p.surface })),
       baseTriangles: T, baseVertices: V, baseError: +baseError.toFixed(4), baseGeometric: +geometric.toFixed(4), steps: S, coreTriangles: chain.living, depth,
@@ -473,7 +489,7 @@ function playerAssembly(modelId) {
   const letGo = new Uint8Array(asset.vertices.length / 9);
   for (const g of asset.groups) if (g.id === 'anchor.port.iron') for (let i = g.firstVertex; i < g.firstVertex + g.vertexCount; i++) letGo[asset.indices[i]] = 1;
   return {
-    letGo, rode: anchorEquipment({ modelId })?.maxRode ?? 0,
+    letGo, rode: anchorEquipment({ modelId })?.maxRode ?? 0, lineVertexCount: asset.detail?.lineVertexCount ?? 0,
     index: -1, label: model.name, length: model.runtime.length,
     designScale: Float32Array.of(model.runtime.beam / frame.beam, frame.verticalScale, model.runtime.length / frame.length),
     vertices: asset.vertices, indices: asset.indices, groups: asset.groups, fracture: asset.fracture,
@@ -490,6 +506,7 @@ function playerSlack(arch, body) {
   return slack;
 }
 
+
 async function bake(entry) {
   const started = Date.now(), lap = (label) => console.log(`  ${((Date.now() - started) / 1000).toFixed(1).padStart(6)} s  ${label}`);
   const player = entry.family === 'player';
@@ -499,41 +516,58 @@ async function bake(entry) {
   body.posed = posePoints(arch.index, arch.designScale, poses, { count: body.count, design: body.design, designNormal: body.designNormal, material: body.material, uv: body.uv, rest: body.position });
   if (player) body.posed.slack = playerSlack(arch, body);
   lap(`${body.parts} parts, ${body.copies} seam copies, ${poses.length} poses`);
-  const clusters = await bakeClusters(body, body.posed);
+  // Her working anchor's iron is her detail layer, not her hierarchy: once let go it lies as far off as her rode runs.
+  const T = body.index.length / 3, iron = [], kept = [];
+  for (let t = 0; t < T; t++) (arch.letGo?.[body.source[body.index[t * 3]]] ? iron : kept).push(t);
+  const dagIndex = Uint32Array.from(kept.flatMap((t) => [body.index[t * 3], body.index[t * 3 + 1], body.index[t * 3 + 2]]));
+  const clusters = await bakeClusters(body, body.posed, dagIndex);
   lap(`${clusters.count} clusters, ${clusters.levels} levels, root error ${clusters.rootError.toFixed(3)} m`);
   const far = bakeFar(arch, body, poses, lap);
 
-  // The ship's bound, in every pose, cordage and all; her anchor let go is bound by its own clusters, not hers.
-  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], drawnVertices = [...new Set(body.index)].filter((v) => !arch.letGo?.[body.source[v]]);
+  // The ship's bound, in every pose, cordage and all, less her anchor's iron.
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], drawnVertices = [...new Set(dagIndex)];
   for (const X of body.posed) for (const v of drawnVertices) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], X[v * 3 + k]); hi[k] = Math.max(hi[k], X[v * 3 + k]); }
-  const centre = lo.map((l, k) => (l + hi[k]) / 2);
-  let radius = 0;
-  radius = posedReach(body.posed, drawnVertices, centre);
+  const centre = lo.map((l, k) => (l + hi[k]) / 2), radius = posedReach(body.posed, drawnVertices, centre) + SPHERE_MARGIN;
 
-  // The far body: its vertices, each vertex's collapse (the step it goes at, and where), its triangles in order of
-  // death, and its steps.
-  const { V, T, S } = far, farWords = new Uint32Array(V * SHIP_CONTINUUM_FAR_VERTEX_WORDS + V + T * 3 + far.steps.length);
-  for (let i = 0; i < V; i++) farWords.set(packShipContinuumFarVertex({
-    position: far.design.subarray(i * 3, i * 3 + 3), normal: far.designNormal.subarray(i * 3, i * 3 + 3), colour: far.colour.subarray(i * 3, i * 3 + 3), kind: far.region[i], source: far.rides[i],
-  }), i * SHIP_CONTINUUM_FAR_VERTEX_WORDS);
-  const recordsAt = V * SHIP_CONTINUUM_FAR_VERTEX_WORDS, trianglesAt = recordsAt + V, stepsAt = trianglesAt + T * 3;
-  for (let i = 0; i < V; i++) farWords[recordsAt + i] = ((far.chain.dieStep[i] < 0 ? SHIP_CONTINUUM_NEVER : far.chain.dieStep[i]) | ((far.chain.target[i] < 0 ? i : far.chain.target[i]) << 16)) >>> 0;
-  far.order.forEach((t, k) => { for (let c = 0; c < 3; c++) farWords[trianglesAt + k * 3 + c] = far.index[t * 3 + c]; });
-  farWords.set(far.steps, stepsAt);
+  // Her points: the body's own, then her detail layer's line vertices, which her pose pass lays each frame.
+  const L = arch.lineVertexCount ?? 0, n = body.count + L;
+  const vertices = { position: new Float32Array(n * 3), normal: new Float32Array(n * 3), material: new Float32Array(n), uv: new Float32Array(n * 2), rider: new Uint32Array(n) };
+  vertices.position.set(body.position); vertices.normal.set(body.normal); vertices.material.set(body.material); vertices.uv.set(body.uv); vertices.rider.set(body.source);
+  for (let j = 0; j < L; j++) { vertices.position.set(centre, (body.count + j) * 3); vertices.normal[(body.count + j) * 3 + 1] = 1; vertices.rider[body.count + j] = (SHIP_RIDER_LINE | j) >>> 0; }
+  // The detail layer, first of her clusters: her iron by its parts, and her lines (a part of their own), each bound by
+  // everywhere they can go: her bound grown by her rode.
+  const reach = [...centre, radius + (arch.rode ?? 0)];
+  const detail = [
+    ...detailClusters(iron, (t, k) => body.index[t * 3 + k], (t) => body.part[body.index[t * 3]], reach),
+    ...detailClusters(Array.from({ length: L / 3 }, (_, t) => t), (t, k) => body.count + t * 3 + k, () => body.parts, reach),
+  ];
+  const records = [...detail, ...clusters.records], order = [], local = new Int32Array(n).fill(-1), indices = [];
+  const packed = records.map((record) => {
+    const first = indices.length;
+    for (const v of record.corners) { if (local[v] < 0) { local[v] = order.length; order.push(v); } indices.push(local[v]); }
+    return { lod: record.lod, parentLod: record.parentLod, cull: record.cull, error: record.error, parentError: record.parentError, first, triangles: record.triangles, level: record.level, part: record.part };
+  });
+  // The far body is drawn from the first step no heavier than her hierarchy's roots.
+  let farFirst = 0;
+  while (farFirst < far.S && far.steps[farFirst * CONTINUUM_STEP_WORDS] > clusters.rootTriangles) farFirst++;
+  const splat = { rx: far.splat.rxSide, ry: far.splat.ry, centre: far.splat.centre, colour: far.splat.colour };
+  const words = packShipContinuumBody({
+    triangles: T, designScale: arch.designScale, detail: detail.length, vertices,
+    clusters: { records: packed, order, indices: Uint32Array.from(indices), count: packed.length },
+    far: { ...far, stats: { inflateMax: far.stats.inflateMax }, farFirst, splat },
+  }).words;
 
   const dir = path.join(OUT, entry.id);
   fs.mkdirSync(dir, { recursive: true });
-  const copies = body.source.subarray(body.original);
+  // The old format's streams go: a body is its packed words and its family's files.
+  for (const old of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, old));
   const files = {
-    'clusters.bin': receipt(asBytes(clusters.clusters), dir, 'clusters.bin'),
-    'indices.bin': receipt(asBytes(clusters.indices), dir, 'indices.bin'),
-    'copies.bin': receipt(asBytes(copies), dir, 'copies.bin'),
-    'far.bin': receipt(asBytes(farWords), dir, 'far.bin'),
+    'body.bin': receipt(asBytes(words), dir, 'body.bin'),
     ...(player ? {
-      // The assembly's corners as baked, by which the runtime renumbers the clusters onto the ship as built there.
+      // The assembly's corners as baked, by which the runtime renumbers her riders onto the ship as built there.
       'corners.bin': receipt(asBytes(Uint32Array.from(arch.indices)), dir, 'corners.bin'),
     } : {
-      // The assembly as baked: the vertices the clusters name and the shard each one flies with when the ship breaks.
+      // The assembly as baked: the vertices the riders name and the shard each one flies with when the ship breaks.
       'vertices.bin': receipt(asBytes(arch.vertices), dir, 'vertices.bin'),
       'shards.bin': receipt(asBytes(Uint32Array.from(arch.fracture.vertexShards)), dir, 'shards.bin'),
     }),
@@ -547,18 +581,16 @@ async function bake(entry) {
       surface: { area: surface.area, centroid: surface.centroid, materials: surface.materials },
       designScale: Array.from(arch.designScale, (v) => +v.toFixed(6)),
     },
-    clusterWords: SHIP_CONTINUUM_CLUSTER_WORDS, farVertexWords: SHIP_CONTINUUM_FAR_VERTEX_WORDS, stepWords: SHIP_CONTINUUM_STEP_WORDS,
-    clusterCount: clusters.count, indexCount: clusters.indices.length, copyCount: copies.length,
-    clusters: { triangles: clusters.triangles, levels: clusters.levels, roots: clusters.roots, groups: clusters.groupCount, parts: body.parts, rootError: +clusters.rootError.toFixed(4) },
-    far: { vertexCount: V, triangleCount: T, stepCount: S, offsets: { vertices: 0, records: recordsAt, triangles: trianglesAt, steps: stepsAt }, ...far.stats },
-    splat: far.splat,
-    bound: { centre: centre.map((v) => +v.toFixed(4)), radius: +(radius + SPHERE_MARGIN).toFixed(4) },
+    detail: { clusters: detail.length, ironTriangles: iron.length, lineVertices: L, rode: arch.rode ?? 0 },
+    clusters: { count: packed.length, triangles: clusters.triangles, levels: clusters.levels, roots: clusters.roots, groups: clusters.groupCount, parts: body.parts, rootError: +clusters.rootError.toFixed(4), rootTriangles: clusters.rootTriangles },
+    far: { ...far.stats, farFirst }, splat: far.splat,
+    bound: { centre: centre.map((v) => +v.toFixed(4)), radius: +radius.toFixed(4) },
     poses: poses.length, files,
   };
   validateShipContinuumManifest(manifest);
   fs.writeFileSync(path.join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 1)}\n`);
   const gz = Object.values(files).reduce((sum, f) => sum + f.gzip.bytes, 0);
-  console.log(`  ${clusters.count} clusters (${clusters.triangles} triangles) · far body ${T} → ${far.stats.coreTriangles} triangles in ${S} steps, ${far.stats.errorRange.join('–')} m · ${(gz / 1048576).toFixed(2)} MiB gzipped · ${((Date.now() - started) / 1000).toFixed(0)} s`);
+  console.log(`  ${packed.length} clusters (${detail.length} detail) · far body ${far.T} → ${far.stats.coreTriangles} triangles in ${far.S} steps from ${farFirst} · ${(gz / 1048576).toFixed(2)} MiB gzipped · ${((Date.now() - started) / 1000).toFixed(0)} s`);
   return manifest;
 }
 

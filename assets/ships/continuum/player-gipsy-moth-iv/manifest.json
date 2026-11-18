@@ -6,16 +6,16 @@
  "model": "gipsy-moth-iv",
  "label": "Gipsy Moth IV · 1966",
  "source": {
-  "vertices": 24485,
-  "indices": 79227,
+  "vertices": 24653,
+  "indices": 80019,
   "shards": 132,
-  "key": "20a97a2e0fc7eda844d5220b88112ee1d75d82bfb232b2fa7603021f9870183f",
+  "key": "3b21b85ac8607fb24a446ee10fd349abbf67a21b0f6982c0492750b2371c1381",
   "surface": {
-   "area": 178.1782543812191,
+   "area": 180.4326601068582,
    "centroid": [
-    0.00028577654988334465,
-    1.5608995480167638,
-    0.3065554803387813
+    0.00028220593085057723,
+    1.5884460019648705,
+    0.3889825546483273
    ],
    "materials": {
     "0": 24.811459666136535,
@@ -33,8 +33,8 @@
     "18": 0.7136625361588074,
     "23": 72.0327219788208,
     "25": 0.38009355202699324,
-    "29": 1.9658634788538052,
-    "30": 0.2885422467852585
+    "29": 3.9317269577076104,
+    "30": 0.577084493570517
    }
   },
   "designScale": [
@@ -43,30 +43,23 @@
    1.34874
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 911,
- "indexCount": 151281,
- "copyCount": 228,
+ "detail": {
+  "clusters": 13,
+  "ironTriangles": 284,
+  "lineVertices": 3744,
+  "rode": 180
+ },
  "clusters": {
-  "triangles": 50427,
-  "levels": 9,
-  "roots": 205,
-  "groups": 100,
+  "count": 967,
+  "triangles": 51787,
+  "levels": 8,
+  "roots": 202,
+  "groups": 99,
   "parts": 160,
-  "rootError": 5.4836
+  "rootError": 8.407,
+  "rootTriangles": 6506
  },
  "far": {
-  "vertexCount": 4006,
-  "triangleCount": 8000,
-  "stepCount": 4001,
-  "offsets": {
-   "vertices": 0,
-   "records": 24036,
-   "triangles": 28042,
-   "steps": 52042
-  },
   "voxel": 0.0565,
   "pieces": [
    {
@@ -86,7 +79,7 @@
     "kind": "canvas",
     "close": 0.113,
     "grid": [
-     9,
+     10,
      248,
      349
     ],
@@ -98,17 +91,18 @@
   ],
   "baseTriangles": 8000,
   "baseVertices": 4006,
-  "baseError": 0.157,
-  "baseGeometric": 0.0453,
-  "steps": 4001,
+  "baseError": 0.1571,
+  "baseGeometric": 0.0451,
+  "steps": 4002,
   "coreTriangles": 4,
-  "depth": 11,
+  "depth": 12,
   "errorRange": [
-   0.157,
-   13.2883
+   0.1571,
+   13.4218
   ],
   "inflateMax": 0.6464,
-  "euler": 6
+  "euler": 6,
+  "farFirst": 747
  },
  "splat": {
   "centre": [
@@ -117,12 +111,12 @@
    2.0422
   ],
   "ry": 8.4767,
-  "rxSide": 4.968,
-  "rxEnd": 0.4247,
+  "rxSide": 4.9605,
+  "rxEnd": 0.426,
   "colour": [
-   0.55091,
-   0.47938,
-   0.38444
+   0.5496,
+   0.47837,
+   0.38381
   ]
  },
  "bound": {
@@ -135,49 +129,22 @@
  },
  "poses": 1,
  "files": {
-  "clusters.bin": {
-   "bytes": 58304,
-   "sha256": "dba68c945ef1fa459c539005808df9005dc909d7840d077259794217ed756348",
+  "body.bin": {
+   "bytes": 1693124,
+   "sha256": "37fa4a3694de22cc9b16a851090be1e7a19de70c3ec9f6e42afefdb3982e9b8a",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 21877,
-    "sha256": "e3e6cc9cec6a5fac16f56e605dfab5e9bda34d5b83e28149a44763a90e02f171"
-   }
-  },
-  "indices.bin": {
-   "bytes": 605124,
-   "sha256": "93a744c49d7f4c3a4fba1f7d0f507aef06a780bbbfec11e5137ee3ea9f2f2922",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 178517,
-    "sha256": "fbfe26903eaed1ff29e6891c867d12090fee92d119c214748ad9377d8a6f9c99"
-   }
-  },
-  "copies.bin": {
-   "bytes": 912,
-   "sha256": "ae810183891063dcb73da148922caa15a1c3f73d1a21b220214eb4b2b4d7c828",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 464,
-    "sha256": "902f37948d4ab69a68e79262d037be3e5fef9c172644e7affdb3726457f6fb2c"
-   }
-  },
-  "far.bin": {
-   "bytes": 272200,
-   "sha256": "80d3072dfe5e6ba49d442a5afb661fbec99c14a128537f60ba565ccea64be14e",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 154632,
-    "sha256": "bb5f9258415f6b343ba740139eac351d524d20140cf001f39868274d727cdf1c"
+    "file": "body.bin.gz",
+    "bytes": 579765,
+    "sha256": "ea2e4a01f2646f46aabd85f5d74d68668d93b556b1e48d21ca7e3dbf79569424"
    }
   },
   "corners.bin": {
-   "bytes": 316908,
-   "sha256": "201e41a3410322c2ee4907c0e06f31b0b347ad89f4e75a1863ab4cf64f3a84d6",
+   "bytes": 320076,
+   "sha256": "37c52db1627c082e08af6b101637e8c58a21bc6109ea458d1bf7ae66d9bc898d",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 92630,
-    "sha256": "74784e6d8ff93e7c4e7bf4a690ba257f15e2c859dd5f1e38d15bbe656d67cf86"
+    "bytes": 93259,
+    "sha256": "a3d49e04e58ce15cf10558c799b14e7d882656e562598eef66c5560345de55c2"
    }
   }
  }

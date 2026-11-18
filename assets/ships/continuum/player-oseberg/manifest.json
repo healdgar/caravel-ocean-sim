@@ -6,16 +6,16 @@
  "model": "oseberg",
  "label": "Oseberg-based vessel · c. 850",
  "source": {
-  "vertices": 73647,
-  "indices": 175014,
+  "vertices": 73815,
+  "indices": 175806,
   "shards": 103,
-  "key": "184b6777fc634110ffdaeac7a26cf80fb77ac6bdc70f04e8e8f746a7acbcb7ce",
+  "key": "a533d80c5620af21c5a2f36442a7c2c2200e0eecd377c2a22c55047bc65183bb",
   "surface": {
-   "area": 191.61197210655504,
+   "area": 194.25143755870076,
    "centroid": [
-    -0.00017726762263795733,
-    0.7504365903625985,
-    0.14672304271786815
+    -0.00017485893124489878,
+    0.7796353750594409,
+    0.24206875421508356
    ],
    "materials": {
     "0": 21.99354646691704,
@@ -30,8 +30,8 @@
     "17": 0.2905522598233671,
     "19": 0.5796995181342764,
     "25": 0.02070976418349203,
-    "29": 2.3001165589712684,
-    "30": 0.33934889317451145
+    "29": 4.600233117942537,
+    "30": 0.6786977863490229
    }
   },
   "designScale": [
@@ -40,30 +40,23 @@
    1.791667
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 2168,
- "indexCount": 318672,
- "copyCount": 70,
+ "detail": {
+  "clusters": 12,
+  "ironTriangles": 284,
+  "lineVertices": 3288,
+  "rode": 110
+ },
  "clusters": {
-  "triangles": 106224,
-  "levels": 6,
-  "roots": 726,
-  "groups": 185,
+  "count": 2202,
+  "triangles": 106263,
+  "levels": 7,
+  "roots": 722,
+  "groups": 188,
   "parts": 431,
-  "rootError": 10.2828
+  "rootError": 6.5914,
+  "rootTriangles": 25729
  },
  "far": {
-  "vertexCount": 3848,
-  "triangleCount": 8000,
-  "stepCount": 3816,
-  "offsets": {
-   "vertices": 0,
-   "records": 23088,
-   "triangles": 26936,
-   "steps": 50936
-  },
   "voxel": 0.0775,
   "pieces": [
    {
@@ -105,7 +98,8 @@
    14.2836
   ],
   "inflateMax": 0.8753,
-  "euler": -152
+  "euler": -152,
+  "farFirst": 0
  },
  "splat": {
   "centre": [
@@ -132,49 +126,22 @@
  },
  "poses": 1,
  "files": {
-  "clusters.bin": {
-   "bytes": 138752,
-   "sha256": "812d106d91fb95a0e6e4d8d6db6d2eb0a2e18865d4348f741087f51bb4440598",
+  "body.bin": {
+   "bytes": 3581804,
+   "sha256": "137574eb07637941ff1e0a7b49f72f982ed437dd5ffa0a332e505fb374cf1d72",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 55327,
-    "sha256": "46d2e995c5a52abcbf5d4d5c61dbe09e102e99a67f1fca45771068611c89480f"
-   }
-  },
-  "indices.bin": {
-   "bytes": 1274688,
-   "sha256": "0d48e601c659ca2b913914915917777c6d87db33dc8358296e3836adfb33d7ac",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 409382,
-    "sha256": "c26a3d16b1ed0094a5f8923d21db6ad9884dc4c3ee53e2f3c0816ab27737fa3a"
-   }
-  },
-  "copies.bin": {
-   "bytes": 280,
-   "sha256": "6a1f8ef4c65d45f8d2da1a217986eb5fc746a73770bdbed0189b3a767ea25560",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 168,
-    "sha256": "c31cb673e462dc4c0cf2caaf09d605e445c44eebea6ee4744600ad0a8632ecff"
-   }
-  },
-  "far.bin": {
-   "bytes": 264816,
-   "sha256": "4447a61297a2302746425668e8868ac4e5c5f9da26f1823e2237060a0377a624",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 150620,
-    "sha256": "3902ce99230dc4a6723ed1018430ecacfcfad13bd2147300184865a2c04fd903"
+    "file": "body.bin.gz",
+    "bytes": 1291660,
+    "sha256": "134712a4aac5d5be66b5c101b7acbb59ae680d2102975a0ea180d3752631ff44"
    }
   },
   "corners.bin": {
-   "bytes": 700056,
-   "sha256": "bf981ce7e385c3f803451c571c747c4e5ef73aefa94fff281a9483c7363aa059",
+   "bytes": 703224,
+   "sha256": "577e9aee55d99ba359300d746005c28923cc153800215f20c078b1331d5b8396",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 202263,
-    "sha256": "4ac6cbf8ba840b0afedd450f28aa11427f594d7fa0d38854f8eeee7bd2112325"
+    "bytes": 203068,
+    "sha256": "2cab4e548101b5f2a9e2f320707d2f479e88f98d24d97f0198eb1275c5929fa5"
    }
   }
  }

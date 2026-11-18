@@ -88,8 +88,9 @@ export const VESSEL_DETAIL_STATIONS = VESSEL_DETAIL_COMMON + /* wgsl */ `
   let sag=u*(1.0-0.35*u)*select(0.14,0.26,surrendered);
   let reach=max(0.85,s.x);
   let world=hoist+stream*(u*select(2.25,2.85,pennant)*reach)+side*(flutter*reach)-vec3f(0.0,sag*s.y,0.0);
-  let normal=normalize(side-stream*(cos(phase)*0.85*u*0.32)+vec3f(0.0,0.12,0.0));
-  vesselDetailPosed[v*2u]=vec4f(vesselDetailDesign(world),round(state.colours.x)+select(0.0,16.0,pennant));
+  // Each face of the bunting (its rest normal's side) faces its own way, the two a cloth's thickness apart.
+  let normal=normalize(side-stream*(cos(phase)*0.85*u*0.32)+vec3f(0.0,0.12,0.0))*select(1.0,-1.0,restNormal.x<0.0);
+  vesselDetailPosed[v*2u]=vec4f(vesselDetailDesign(world+normal*0.0015),round(state.colours.x)+select(0.0,16.0,pennant));
   vesselDetailPosed[v*2u+1u]=vec4f(vesselDetailDesignNormal(normal),damage);
 }
 `;

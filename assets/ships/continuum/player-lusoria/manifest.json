@@ -6,16 +6,16 @@
  "model": "lusoria",
  "label": "Lusoria Rhenana interpretation · c. 350",
  "source": {
-  "vertices": 33275,
-  "indices": 100140,
+  "vertices": 33443,
+  "indices": 100932,
   "shards": 59,
-  "key": "e549ada3ec450f22c97ceb9984b15d7415e745210ca3ebf1645739af882f5f2a",
+  "key": "ae265a009d930e741e17036f0a0bc6d8826fba6118d95b7321b17fbd47915b79",
   "surface": {
-   "area": 185.73244820654605,
+   "area": 187.68007069670375,
    "centroid": [
-    0.0005941493633015876,
-    0.48794387763661706,
-    0.08844250123445307
+    0.0005879836651633496,
+    0.5112395071797993,
+    0.15933422068583472
    ],
    "materials": {
     "0": 30.41198501076421,
@@ -30,8 +30,8 @@
     "17": 0.39608524557155944,
     "19": 0.7991233070851084,
     "25": 0.02070976418349203,
-    "29": 1.6995584916506061,
-    "30": 0.24806399850702832
+    "29": 3.3991169833012123,
+    "30": 0.49612799701405663
    }
   },
   "designScale": [
@@ -40,30 +40,23 @@
    1.5
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 1285,
- "indexCount": 196707,
- "copyCount": 70,
+ "detail": {
+  "clusters": 12,
+  "ironTriangles": 284,
+  "lineVertices": 3288,
+  "rode": 110
+ },
  "clusters": {
-  "triangles": 65569,
+  "count": 1310,
+  "triangles": 64147,
   "levels": 9,
-  "roots": 262,
-  "groups": 135,
+  "roots": 260,
+  "groups": 132,
   "parts": 198,
-  "rootError": 7.1709
+  "rootError": 7.3053,
+  "rootTriangles": 7295
  },
  "far": {
-  "vertexCount": 3886,
-  "triangleCount": 8000,
-  "stepCount": 3864,
-  "offsets": {
-   "vertices": 0,
-   "records": 23316,
-   "triangles": 27202,
-   "steps": 51202
-  },
   "voxel": 0.062,
   "pieces": [
    {
@@ -105,7 +98,8 @@
    8.7048
   ],
   "inflateMax": 0.7055,
-  "euler": -114
+  "euler": -114,
+  "farFirst": 353
  },
  "splat": {
   "centre": [
@@ -132,49 +126,22 @@
  },
  "poses": 1,
  "files": {
-  "clusters.bin": {
-   "bytes": 82240,
-   "sha256": "5ba1de43adc990fe0a44181b3f887e0bc6e403f395bc27fb4ff0ef9afded36b9",
+  "body.bin": {
+   "bytes": 2052228,
+   "sha256": "318ce8b60c31e9f36b09355e1ef3c401f5653c14cc6f7175f264e92c1c8afb9d",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 30632,
-    "sha256": "9695de3f42eb4f1cc17d02786da4feb01922cd28543a316d488a77f90d41b4d9"
-   }
-  },
-  "indices.bin": {
-   "bytes": 786828,
-   "sha256": "0579222659b3055a84e86085133a14acea44ae1aa28561e868f9e7ec9a35edfa",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 229531,
-    "sha256": "499720c3736d2b250e3327c4b850b0007b8737df4a3551054f02604f43d3c2fd"
-   }
-  },
-  "copies.bin": {
-   "bytes": 280,
-   "sha256": "eff8ab2e6ef18cde12b915ebfa2ff6c09e941eb563f165a8d4c7a8810806d3a4",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 179,
-    "sha256": "3361e30f39be09f42452ca8c9b2d09194454faac6ff5658815d564b9bbfcda23"
-   }
-  },
-  "far.bin": {
-   "bytes": 266648,
-   "sha256": "0701701119f1a74bf23772c838bfc4c38e34a118752170b2ac35950ebe691a60",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 150898,
-    "sha256": "75543ea957cd611e5dbd9a897466138c77d600fb9e28b29e811541a76e77c9d4"
+    "file": "body.bin.gz",
+    "bytes": 728786,
+    "sha256": "5b98ac7ad5a3b69dc3dc4f69aa185774d6e9674d8deb41c4b67c1cfe1ebe67f1"
    }
   },
   "corners.bin": {
-   "bytes": 400560,
-   "sha256": "676e029bc0cff1d6214ab974bbb58b298b0d7e6486e228f99aa812b1f3c1faba",
+   "bytes": 403728,
+   "sha256": "743ec2bdff99e1f26233751c1a9e4b10416b4e851b85724dd5bab2e04b9173a8",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 110042,
-    "sha256": "1991a5c918763111b47a15f008e304da17b7ed46738fb4150d17452ffb75405e"
+    "bytes": 110796,
+    "sha256": "e13d8d52c85cd153a6d50c35a9ca7b109251f28e0eef92532a2be002e5598ce8"
    }
   }
  }

@@ -19,7 +19,7 @@ import { CONTINUUM_CORE_WGSL, CONTINUUM_STEP_WORDS, CONTINUUM_HOPS, continuumClu
 import {
   CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_CLUSTER_WORDS, CONTINUUM_VERTEX_WORDS, CONTINUUM_TRIANGLE_WORDS, CONTINUUM_NEVER,
   CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES, CONTINUUM_VIEW_LISTS,
-  CONTINUUM_TYPE_PIECES, CONTINUUM_KIND_SHIFT, CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_BROKEN, CONTINUUM_EXACT, CONTINUUM_SEA,
+  CONTINUUM_TYPE_PIECES, CONTINUUM_TYPE_DETAIL_SHIFT, CONTINUUM_KIND_SHIFT, CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_BROKEN, CONTINUUM_EXACT, CONTINUUM_SEA,
   CONTINUUM_IMPORTANT_FLAG, CONTINUUM_SHATTERED, CONTINUUM_DAMAGED, CONTINUUM_STRETCHED, CONTINUUM_STREAMS, CONTINUUM_SURFACE_RANGE,
   CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY,
 } from '../continuum-format.js';
@@ -238,14 +238,14 @@ fn continuumFocal()->f32 { return F.screen.y/max(2.0*length(F.camUp.xyz),1e-4); 
   let vertices=array<u32,${CONTINUUM_LISTS.length}>(${CONTINUUM_ENTRY_VERTICES.map((n) => `${n}u`).join(',')});
   if(i<${CONTINUUM_DRAW_WORDS + CONTINUUM_VIEW_LISTS}u){atomicStore(&continuumDraws[i],select(0u,vertices[min(i/4u,${CONTINUUM_LISTS.length - 1}u)],i%4u==0u&&i<${CONTINUUM_DRAW_WORDS}u));}
 }
-var<workgroup> continuumSelected:array<vec4u,2>; // clusters to try, the first, where the far body's pieces go, how many; the shadow's far pieces, how many, its clusters to try
+var<workgroup> continuumSelected:array<vec4u,2>; // clusters to try, the first, where the far body's pieces go, how many; the shadow's far pieces, how many, its clusters to try, its detail clusters
 var<workgroup> continuumSelectedView:vec4f;      // focal, allowed pixels, scale, the shadow's allowed error (metres of the type)
 var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // real triangles listed in each of the view's lists
 @compute @workgroup_size(64) fn continuumSelect(@builtin(workgroup_id) group:vec3u,@builtin(local_invocation_index) lane:u32){
   let instance=group.x+group.y*${CONTINUUM_ROW}u;
   if(lane==0u){
     var candidates=0u;var firstCluster=0u;var farAt=CONTINUUM_FULL;var farChunks=0u;
-    var shadowAt=CONTINUUM_FULL;var shadowChunks=0u;var shadowCandidates=0u;
+    var shadowAt=CONTINUUM_FULL;var shadowChunks=0u;var shadowCandidates=0u;var detail=0u;
     var focal=1.0;var pixels=1.0;var scale=1.0;var shadowAllowed=0.0;
     if(instance<continuumView.counts.x){
       let record=continuumRecords[instance];
@@ -274,6 +274,8 @@ var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // r
         continuumStepsAt=continuumType(model,${CONTINUUM_TYPE.steps}u);
         firstCluster=continuumType(model,${CONTINUUM_TYPE.clusterFirst}u);
         let clusterCount=continuumType(model,${CONTINUUM_TYPE.clusterCount}u);
+        // Its detail layer: its leading clusters, cast and seen under water with its coarse cut, whole or not.
+        detail=min(continuumType(model,${CONTINUUM_TYPE.flags}u)>>${CONTINUUM_TYPE_DETAIL_SHIFT}u,clusterCount);
         // Its shadow, cut coarse enough for the shadow map, is cast whether it is seen or not: the far body of one
         // drawn whole, the clusters of one drawn alone, each a cut of its own.
         if(continuumView.counts.z!=0u){
@@ -285,6 +287,7 @@ var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // r
               shadowStep=max(farFirst,u32(continuumMorphStep(steps,allowed).x));
               shadowChunks=continuumChunks(model,shadowStep);
               shadowAt=continuumAppend(4u,shadowChunks);
+              shadowCandidates=detail;
             }else{
               shadowAllowed=allowed;
               shadowCandidates=continuumPrefix(firstCluster,clusterCount,allowed);
@@ -328,7 +331,7 @@ var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // r
       continuumLists[instance*2u+1u]=vec2u(bitcast<u32>(morph),bitcast<u32>(splatScale));
     }
     continuumSelected[0]=vec4u(candidates,firstCluster,farAt,farChunks);
-    continuumSelected[1]=vec4u(shadowAt,shadowChunks,shadowCandidates,0u);
+    continuumSelected[1]=vec4u(shadowAt,shadowChunks,shadowCandidates,detail);
     continuumSelectedView=vec4f(focal,pixels,scale,shadowAllowed);
   }
   let chosen=workgroupUniformLoad(&continuumSelected);
@@ -362,7 +365,7 @@ var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // r
       }
       // The shadow map's light is parallel: the same test with every sphere at unit distance under a unit focal length
       // compares errors directly against the error it allows.
-      if(i<chosen[1].z&&continuumClusterDrawn(ownError,vec3f(0.0,0.0,1.0),0.0,parentError,vec3f(0.0,0.0,1.0),0.0,1.0,view.w*view.z)){
+      if(i<chosen[1].z&&(i<chosen[1].w||continuumClusterDrawn(ownError,vec3f(0.0,0.0,1.0),0.0,parentError,vec3f(0.0,0.0,1.0),0.0,1.0,view.w*view.z))){
         let entry=continuumAppend(5u,1u);
         if(entry!=CONTINUUM_FULL){continuumLists[entry]=vec2u(instance,c|(CONTINUUM_CLUSTER_ENTRY<<28u));}
       }
@@ -447,6 +450,8 @@ fn continuumEye()->vec3f { return F.camPos.xyz-continuumShift(); }
 //   cullMode  'back' for closed bodies wound outward, 'none' for open shells.
 //   air       whether it calls continuumAir (the air between it and the eye, surfaceAir; bypassed under water).
 //   capture   whether it is drawn under water too (its prelude then must leave group 3 free).
+//   mask      whether it brings <name>Mask(v:ContinuumVarying, front:bool)->u32, the samples of a fragment it keeps
+//             (what shot and tearing have taken away is none), ANDed into the handoff's: no discard, rule 2.
 function continuumVaryingWGSL(material) {
   const fields = material.varyings.map(([name, type, flat], i) => `  @location(${3 + i})${flat ? ' @interpolate(flat)' : ''} ${name}:${type},`).join('\n');
   return /* wgsl */`
@@ -527,7 +532,7 @@ export function continuumModuleWGSL({ pass, material = null, capture = null }) {
 @fragment fn continuumFS(v:ContinuumVarying,@builtin(front_facing) front:bool)->ContinuumCoverage {
   var out:ContinuumCoverage;
   out.colour=${material.name}Shade(v,front);
-  out.mask=continuumMask(v.coverage,v.position.xy,${material.salt}u);
+  out.mask=continuumMask(v.coverage,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''};
   return out;
 }
 `;

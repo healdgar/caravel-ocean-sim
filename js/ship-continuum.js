@@ -1,27 +1,24 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Ships in the one continuum (AGENTS.md rule 3). Each ship body, assembled from its real parts (the trade vessels'
-// archetypes of js/trade-vessels.js), is baked by scripts/prepare-ship-continuum.mjs into a cluster hierarchy of its
-// own triangles, split where a part or a fracture shard ends, and a closed far body that collapses one half-edge at a
-// time to a few triangles, then a single splat. The GPU cuts every ship by projected error through the shared core
-// (js/continuum-core.js, js/wgsl/ship-continuum.js); this module supplies only the family's data and its format.
+// Ships in the one continuum (AGENTS.md rule 3). Each ship body, assembled from its real parts (a trade vessel's
+// archetype, js/trade-vessels.js, or a ship the player sails, js/ship-mesh.js), is baked by
+// scripts/prepare-ship-continuum.mjs into one body of the one atlas format (js/continuum-format.js): a cluster
+// hierarchy of its own triangles, split where a part or a fracture shard ends; a closed far body that collapses one
+// half-edge at a time to a few triangles; a splat; and, first among its clusters, its detail layer (her lines and her
+// anchor's iron, rule 3.6). Every atlas vertex names the assembly vertex it rides (js/wgsl/ship-kinds.js), so the one
+// cut draws a ship posed as her physics poses her. This module is the family's data: its bodies, their receipts, and
+// how a family's atlas is assembled from them.
+import {
+  CONTINUUM_ATLAS_VERSION, CONTINUUM_STREAMS, CONTINUUM_TYPE, CONTINUUM_TYPE_DETAIL_SHIFT, assembleContinuumAtlas, checkContinuumAtlas, continuumBodyParts,
+  continuumFloatWord, packContinuumBody, packContinuumUV,
+} from './continuum-format.js';
+import { SHIP_RIDER_FAR, SHIP_RIDER_LINE } from './wgsl/ship-kinds.js';
 
 export const SHIP_CONTINUUM_FORMAT = 'waterworld.ship-continuum';
-export const SHIP_CONTINUUM_VERSION = 2;
-// A cluster: its LOD sphere, its parent's, its culling sphere (each xyz r, metres in the ship's frame at scale 1),
-// its error and its parent's (metres), the first word of its triangles in the body's index stream, and
-// triangles | level << 8. Every sphere holds its points in every pose the body takes, so none is posed on the GPU.
-export const SHIP_CONTINUUM_CLUSTER_WORDS = 16;
-// A far-body vertex: x y z (f32, design units, as the vertex stage takes the ship's own vertices), its normal
-// (octahedral, 2 x 16 bits, design units), its colour (sqrt-encoded rgb8) and class (8 bits), and the ship vertex it
-// rides: the far body moves as that vertex does (oars, helm, brailed canvas).
-export const SHIP_CONTINUUM_FAR_VERTEX_WORDS = 6;
-// A far-body step: triangles alive (a prefix), error in metres, how far along its normals the surface is grown to
-// keep the outline the collapses take in, and a spare word.
-export const SHIP_CONTINUUM_STEP_WORDS = 4;
-// A far-body vertex that never collapses holds this step in its record (step | target << 16).
-export const SHIP_CONTINUUM_NEVER = 65535;
-// Every ancestor walk on the GPU stops after this many hops; the bake holds each chain under it.
-export const SHIP_CONTINUUM_MAX_DEPTH = 96;
+// A ship manifest is of the atlas's own version: a rebake is the only way to a new one.
+export const SHIP_CONTINUUM_VERSION = CONTINUUM_ATLAS_VERSION;
+// A ship type's material block (CONTINUUM_TYPE.material): design units to the type's metres (x, y, z, f32), and the
+// colour her far body's outline shows side on (sqrt-encoded rgb8).
+export const SHIP_CONTINUUM_MATERIAL = Object.freeze({ designScale: CONTINUUM_TYPE.material, splat: CONTINUUM_TYPE.material + 3 });
 
 // The bodies, by id: each trade vessel archetype (js/trade-vessels.js ARCHETYPE_SPECS) and each ship the player can
 // sail (js/ship-models.js SHIP_MODELS), each baked from the assembly the game builds of it.
@@ -43,185 +40,137 @@ export const SHIP_CONTINUUM_BODIES = Object.freeze([
   { id: 'player-flying-cloud', family: 'player', model: 'flying-cloud' },
   { id: 'player-gipsy-moth-iv', family: 'player', model: 'gipsy-moth-iv' },
 ].map(Object.freeze));
-// The streams of a body, by family: its clusters and their corners, the seam copies they name and its far body; then
-// for a trade vessel the assembly it was baked from (vertices of 9 floats: position, normal, material, uv) with each
-// vertex's fracture shard, which it draws and breaks; and for a player's ship the assembly's own corners (its index
-// buffer as baked), by which the corners and the far body's riders are renumbered onto the ship as built where it is
-// drawn (an engine that rounds a sine in the last place welds a few vertices otherwise), so the ship draws, poses,
-// wets and breaks the one mesh its physics uses.
+// The files of a body, by family: its packed body; then for a trade vessel the assembly it was baked from (vertices of
+// 9 floats: position, normal, material, uv) with each vertex's fracture shard, which a damaged vessel scars and breaks;
+// and for a player's ship the assembly's own corners as baked (its index buffer), by which her riders are renumbered
+// onto the ship as built where she is drawn (an engine that rounds a sine in the last place welds a few vertices
+// otherwise), so she draws, poses, wets and breaks the one mesh her physics uses.
 export const SHIP_CONTINUUM_STREAMS = Object.freeze({
-  trade: Object.freeze(['clusters.bin', 'indices.bin', 'copies.bin', 'far.bin', 'vertices.bin', 'shards.bin']),
-  player: Object.freeze(['clusters.bin', 'indices.bin', 'copies.bin', 'far.bin', 'corners.bin']),
+  trade: Object.freeze(['body.bin', 'vertices.bin', 'shards.bin']),
+  player: Object.freeze(['body.bin', 'corners.bin']),
 });
 export const shipContinuumStreams = (family) => SHIP_CONTINUUM_STREAMS[family] ?? [];
 // Every file of every body, by body and file name, for loading and for build.mjs to publish. Spelled out, not
-// composed, because the build publishes (and versions) only the asset paths it finds quoted in the source; the bake
-// test holds this table to SHIP_CONTINUUM_BODIES and their family's SHIP_CONTINUUM_STREAMS.
+// composed, because the build publishes (and versions) only the asset paths it finds quoted in the source.
 export const SHIP_CONTINUUM_ASSETS = Object.freeze({
   'trade-cog-underway': Object.freeze({
     'manifest.json': 'assets/ships/continuum/trade-cog-underway/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/trade-cog-underway/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/trade-cog-underway/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/trade-cog-underway/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/trade-cog-underway/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/trade-cog-underway/body.bin.gz',
     'vertices.bin.gz': 'assets/ships/continuum/trade-cog-underway/vertices.bin.gz',
     'shards.bin.gz': 'assets/ships/continuum/trade-cog-underway/shards.bin.gz',
   }),
   'trade-cog-anchored': Object.freeze({
     'manifest.json': 'assets/ships/continuum/trade-cog-anchored/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/trade-cog-anchored/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/trade-cog-anchored/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/trade-cog-anchored/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/trade-cog-anchored/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/trade-cog-anchored/body.bin.gz',
     'vertices.bin.gz': 'assets/ships/continuum/trade-cog-anchored/vertices.bin.gz',
     'shards.bin.gz': 'assets/ships/continuum/trade-cog-anchored/shards.bin.gz',
   }),
   'trade-carrack-underway': Object.freeze({
     'manifest.json': 'assets/ships/continuum/trade-carrack-underway/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/trade-carrack-underway/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/trade-carrack-underway/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/trade-carrack-underway/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/trade-carrack-underway/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/trade-carrack-underway/body.bin.gz',
     'vertices.bin.gz': 'assets/ships/continuum/trade-carrack-underway/vertices.bin.gz',
     'shards.bin.gz': 'assets/ships/continuum/trade-carrack-underway/shards.bin.gz',
   }),
   'trade-carrack-anchored': Object.freeze({
     'manifest.json': 'assets/ships/continuum/trade-carrack-anchored/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/trade-carrack-anchored/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/trade-carrack-anchored/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/trade-carrack-anchored/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/trade-carrack-anchored/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/trade-carrack-anchored/body.bin.gz',
     'vertices.bin.gz': 'assets/ships/continuum/trade-carrack-anchored/vertices.bin.gz',
     'shards.bin.gz': 'assets/ships/continuum/trade-carrack-anchored/shards.bin.gz',
   }),
   'trade-river-barge': Object.freeze({
     'manifest.json': 'assets/ships/continuum/trade-river-barge/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/trade-river-barge/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/trade-river-barge/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/trade-river-barge/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/trade-river-barge/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/trade-river-barge/body.bin.gz',
     'vertices.bin.gz': 'assets/ships/continuum/trade-river-barge/vertices.bin.gz',
     'shards.bin.gz': 'assets/ships/continuum/trade-river-barge/shards.bin.gz',
   }),
   'trade-lateen-caravel': Object.freeze({
     'manifest.json': 'assets/ships/continuum/trade-lateen-caravel/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/trade-lateen-caravel/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/trade-lateen-caravel/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/trade-lateen-caravel/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/trade-lateen-caravel/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/trade-lateen-caravel/body.bin.gz',
     'vertices.bin.gz': 'assets/ships/continuum/trade-lateen-caravel/vertices.bin.gz',
     'shards.bin.gz': 'assets/ships/continuum/trade-lateen-caravel/shards.bin.gz',
   }),
   'trade-harbor-barque': Object.freeze({
     'manifest.json': 'assets/ships/continuum/trade-harbor-barque/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/trade-harbor-barque/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/trade-harbor-barque/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/trade-harbor-barque/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/trade-harbor-barque/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/trade-harbor-barque/body.bin.gz',
     'vertices.bin.gz': 'assets/ships/continuum/trade-harbor-barque/vertices.bin.gz',
     'shards.bin.gz': 'assets/ships/continuum/trade-harbor-barque/shards.bin.gz',
   }),
   'player-victory': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-victory/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-victory/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-victory/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-victory/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-victory/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-victory/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-victory/corners.bin.gz',
   }),
   'player-nina': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-nina/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-nina/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-nina/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-nina/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-nina/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-nina/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-nina/corners.bin.gz',
   }),
   'player-pinta': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-pinta/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-pinta/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-pinta/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-pinta/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-pinta/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-pinta/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-pinta/corners.bin.gz',
   }),
   'player-santa-maria': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-santa-maria/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-santa-maria/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-santa-maria/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-santa-maria/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-santa-maria/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-santa-maria/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-santa-maria/corners.bin.gz',
   }),
   'player-oseberg': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-oseberg/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-oseberg/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-oseberg/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-oseberg/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-oseberg/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-oseberg/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-oseberg/corners.bin.gz',
   }),
   'player-lusoria': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-lusoria/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-lusoria/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-lusoria/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-lusoria/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-lusoria/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-lusoria/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-lusoria/corners.bin.gz',
   }),
   'player-taino-canoe': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-taino-canoe/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-taino-canoe/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-taino-canoe/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-taino-canoe/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-taino-canoe/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-taino-canoe/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-taino-canoe/corners.bin.gz',
   }),
   'player-flying-cloud': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-flying-cloud/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-flying-cloud/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-flying-cloud/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-flying-cloud/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-flying-cloud/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-flying-cloud/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-flying-cloud/corners.bin.gz',
   }),
   'player-gipsy-moth-iv': Object.freeze({
     'manifest.json': 'assets/ships/continuum/player-gipsy-moth-iv/manifest.json',
-    'clusters.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/clusters.bin.gz',
-    'indices.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/indices.bin.gz',
-    'copies.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/copies.bin.gz',
-    'far.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/far.bin.gz',
+    'body.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/body.bin.gz',
     'corners.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/corners.bin.gz',
   }),
 });
 
-const shipUnit16 = (v) => Math.max(0, Math.min(65535, Math.round(v * 65535)));
 const shipUnit8 = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));
-// Octahedral normal, so two 16-bit values hold a whole direction.
-export function shipContinuumOctahedral([x, y, z]) {
-  const length = Math.abs(x) + Math.abs(y) + Math.abs(z) || 1;
-  let u = x / length, v = y / length;
-  if (z / length < 0) { const a = u; u = (1 - Math.abs(v)) * (a >= 0 ? 1 : -1); v = (1 - Math.abs(a)) * (v >= 0 ? 1 : -1); }
-  return [u * 0.5 + 0.5, v * 0.5 + 0.5];
-}
-// One far-body vertex as six words.
-export function packShipContinuumFarVertex({ position, normal, colour, kind = 0, source }) {
-  const words = new ArrayBuffer(SHIP_CONTINUUM_FAR_VERTEX_WORDS * 4), f = new Float32Array(words), u = new Uint32Array(words);
-  f.set(position, 0);
-  const n = shipContinuumOctahedral(normal);
-  u[3] = (shipUnit16(n[0]) | (shipUnit16(n[1]) << 16)) >>> 0;
-  u[4] = (shipUnit8(Math.sqrt(Math.max(0, colour[0]))) | (shipUnit8(Math.sqrt(Math.max(0, colour[1]))) << 8) | (shipUnit8(Math.sqrt(Math.max(0, colour[2]))) << 16) | ((kind & 255) << 24)) >>> 0;
-  u[5] = source >>> 0;
-  return u;
-}
-// One cluster as sixteen words.
-export function packShipContinuumCluster({ lod, parentLod, cull, error, parentError, first, triangles, level }) {
-  const words = new ArrayBuffer(SHIP_CONTINUUM_CLUSTER_WORDS * 4), f = new Float32Array(words), u = new Uint32Array(words);
-  f.set(lod, 0); f.set(parentLod, 4); f.set(cull, 8);
-  f[12] = error; f[13] = Math.min(parentError, 1e30);
-  u[14] = first;
-  u[15] = (triangles | (level << 8)) >>> 0;
-  return u;
+// A linear colour as one word, sqrt-encoded, with a byte above it.
+export const shipContinuumColourWord = (colour, top = 0) => (shipUnit8(Math.sqrt(Math.max(0, colour[0]))) | (shipUnit8(Math.sqrt(Math.max(0, colour[1]))) << 8) | (shipUnit8(Math.sqrt(Math.max(0, colour[2]))) << 16) | ((top & 255) << 24)) >>> 0;
+
+// One ship as a body of the atlas (js/continuum-format.js packContinuumBody). `vertices` are its welded points: their
+// metres, normals, materials, UVs and riders (the assembly vertex each is, or SHIP_RIDER_LINE | j for a line vertex);
+// `clusters` its detail layer's `detail` clusters first, then its hierarchy; `far` its far body, with the assembly
+// vertex each far vertex rides and each far vertex's colour and class. Its material block is its design scale and its
+// splat's colour.
+export function packShipContinuumBody({ triangles, designScale, detail, vertices, clusters, far }) {
+  const own = clusters.order.length, at = new Map();
+  clusters.order.forEach((v, i) => { const r = vertices.rider[v]; if (!(r & SHIP_RIDER_LINE) && !at.has(r)) at.set(r, i); });
+  const unit = (x) => Math.max(0, Math.min(1, x));
+  return packContinuumBody({
+    triangles, flags: detail << CONTINUUM_TYPE_DETAIL_SHIFT,
+    material: [...Array.from(designScale, continuumFloatWord), shipContinuumColourWord(far.splat.colour)],
+    vertex: (v) => ({ word: continuumFloatWord(vertices.material[v]) }),
+    farWord: (t) => {
+      const c = [0, 1, 2].map((k) => (far.colour[far.index[t * 3] * 3 + k] + far.colour[far.index[t * 3 + 1] * 3 + k] + far.colour[far.index[t * 3 + 2] * 3 + k]) / 3);
+      return shipContinuumColourWord(c, far.region[far.index[t * 3]]);
+    },
+    streams: { uv: (v) => [packContinuumUV([unit(vertices.uv[v * 2]), unit(vertices.uv[v * 2 + 1])])], rider: (v) => [vertices.rider[v] >>> 0] },
+    farStreams: {
+      rider: (i) => {
+        if (!at.has(far.rides[i])) throw Error(`Far vertex ${i} rides vertex ${far.rides[i]}, which no cluster draws`);
+        return [(SHIP_RIDER_FAR | (own + i - at.get(far.rides[i]))) >>> 0];
+      },
+    },
+  }, { welded: vertices, clusters, far });
 }
 
 // What a body is baked from, in terms every JavaScript engine builds alike: its triangles' part groups and fracture
@@ -261,21 +210,69 @@ export function shipContinuumSurfaceMatches(baked, built, tolerance = SHIP_CONTI
 }
 
 export function validateShipContinuumManifest(manifest) {
-  if (manifest?.format !== SHIP_CONTINUUM_FORMAT || manifest.version !== SHIP_CONTINUUM_VERSION || manifest.clusterWords !== SHIP_CONTINUUM_CLUSTER_WORDS || manifest.farVertexWords !== SHIP_CONTINUUM_FAR_VERTEX_WORDS || manifest.stepWords !== SHIP_CONTINUUM_STEP_WORDS) throw Error('Invalid ship continuum manifest');
+  if (manifest?.format !== SHIP_CONTINUUM_FORMAT || manifest.version !== SHIP_CONTINUUM_VERSION) throw Error(`Invalid ship continuum manifest ${manifest?.id ?? ''}: rebake it`);
   const body = SHIP_CONTINUUM_BODIES.find((b) => b.id === manifest.id);
   if (!body || body.family !== manifest.family || body.archetype !== manifest.archetype || body.model !== manifest.model) throw Error(`Unknown ship continuum body: ${manifest.id}`);
-  const { source, clusterCount, indexCount, copyCount, far, splat, bound, files } = manifest;
+  const { source, files, detail } = manifest;
   if (!(source?.vertices > 0) || !(source.indices > 0) || !/^[0-9a-f]{64}$/.test(source.key ?? '') || !(source.surface?.area > 0) || source.surface.centroid?.length !== 3 || source.designScale?.length !== 3) throw Error(`Ship continuum source is malformed: ${manifest.id}`);
-  if (!(clusterCount > 0) || !(indexCount > 0) || indexCount % 3 || !(copyCount >= 0)) throw Error(`Ship continuum counts are malformed: ${manifest.id}`);
-  if (!(far?.vertexCount > 0 && far.vertexCount < SHIP_CONTINUUM_NEVER) || !(far.triangleCount >= 4) || !(far.stepCount >= 1 && far.stepCount < SHIP_CONTINUUM_NEVER) || !(far.depth <= SHIP_CONTINUUM_MAX_DEPTH)) throw Error(`Ship continuum far body is malformed: ${manifest.id}`);
-  const { vertices, records, triangles, steps } = far.offsets ?? {};
-  if (vertices !== 0 || records !== far.vertexCount * SHIP_CONTINUUM_FAR_VERTEX_WORDS || triangles !== records + far.vertexCount || steps !== triangles + far.triangleCount * 3 || files?.['far.bin']?.bytes !== (steps + (far.stepCount + 1) * SHIP_CONTINUUM_STEP_WORDS) * 4) throw Error(`Ship continuum far body layout is malformed: ${manifest.id}`);
-  if (!(far.baseError > 0)) throw Error(`Ship continuum far body has no error: ${manifest.id}`);
-  if (!splat || splat.centre?.length !== 3 || !(splat.ry > 0) || !(splat.rxSide > 0) || !(splat.rxEnd > 0) || splat.colour?.length !== 3) throw Error(`Ship continuum splat is malformed: ${manifest.id}`);
-  if (!bound || bound.centre?.length !== 3 || !(bound.radius > 0)) throw Error(`Ship continuum bound is malformed: ${manifest.id}`);
-  if (files?.['clusters.bin']?.bytes !== clusterCount * SHIP_CONTINUUM_CLUSTER_WORDS * 4 || files?.['indices.bin']?.bytes !== indexCount * 4 || files?.['copies.bin']?.bytes !== copyCount * 4) throw Error(`Ship continuum stream sizes disagree: ${manifest.id}`);
-  const streams = shipContinuumStreams(body.family), sized = { 'vertices.bin': source.vertices * 36, 'shards.bin': source.vertices * 4, 'corners.bin': source.indices * 4 };
-  for (const name of streams) if (name in sized && files?.[name]?.bytes !== sized[name]) throw Error(`Ship continuum stream sizes disagree: ${manifest.id} ${name}`);
-  for (const name of streams) if (!files?.[name]?.gzip?.file || !/^[0-9a-f]{64}$/.test(files[name].sha256 ?? '')) throw Error(`Ship continuum stream missing: ${manifest.id} ${name}`);
+  if (!(detail?.clusters >= 0) || !(manifest.clusters?.count > detail.clusters) || !(manifest.far?.baseTriangles >= 4)) throw Error(`Ship continuum body is incomplete: ${manifest.id}`);
+  const sized = { 'vertices.bin': source.vertices * 36, 'shards.bin': source.vertices * 4, 'corners.bin': source.indices * 4 };
+  for (const name of shipContinuumStreams(body.family)) {
+    if (name in sized && files?.[name]?.bytes !== sized[name]) throw Error(`Ship continuum stream sizes disagree: ${manifest.id} ${name}`);
+    if (!(files?.[name]?.bytes > 0) || !files[name].gzip?.file || !/^[0-9a-f]{64}$/.test(files[name].sha256 ?? '')) throw Error(`Ship continuum stream missing: ${manifest.id} ${name}`);
+  }
   return manifest;
+}
+
+const shipContinuumHex = (bytes) => Array.from(new Uint8Array(bytes), (v) => v.toString(16).padStart(2, '0')).join('');
+// One file of a body, unpacked and checked against its receipt.
+async function shipContinuumFile(manifest, name, fetchAsset) {
+  const receipt = manifest.files[name], response = await fetchAsset(SHIP_CONTINUUM_ASSETS[manifest.id][receipt.gzip.file]);
+  if (!response.ok) throw Error(`Ship continuum unavailable (${response.status}): ${manifest.id} ${name}`);
+  const bytes = new Uint8Array(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  if (bytes.byteLength !== receipt.bytes) throw Error(`Ship continuum stream has the wrong size: ${manifest.id} ${name}`);
+  if (shipContinuumHex(await crypto.subtle.digest('SHA-256', bytes)) !== receipt.sha256) throw Error(`Ship continuum stream failed verification: ${manifest.id} ${name}`);
+  return bytes;
+}
+// Where a packed body keeps its rider stream, in words from its start.
+function shipContinuumRiders(words) {
+  const parts = continuumBodyParts(words);
+  let from = parts.streamsAt;
+  for (const s of CONTINUUM_STREAMS) {
+    if (!(parts.streams & s.bit)) continue;
+    if (s.name === 'rider') return { at: from, count: parts.ownVertices };
+    from += s.words * parts.vertices;
+  }
+  throw Error('A ship continuum body carries no riders');
+}
+
+// A family's atlas, type b being ids[b]: each body fetched and checked against its receipts and against the ship as
+// built here (`sources[b]`: a body drawn over another assembly would not be the ship the physics strikes, so a stale
+// bake stops the game here). A player's riders are renumbered, corner by corner of her assembly (the same triangles in
+// the same order, whatever an engine's welding), onto her as built. Resolves to { manifest: the bodies' manifests,
+// words, assemblies }: each trade body's assembly as baked (vertices, their shards), for a damaged vessel's own copy.
+export async function loadShipContinuum({ ids, sources, label = 'ship', fetchAsset = fetch }) {
+  const loaded = await Promise.all(ids.map(async (id, b) => {
+    const response = await fetchAsset(SHIP_CONTINUUM_ASSETS[id]['manifest.json']);
+    if (!response.ok) throw Error(`Ship continuum unavailable (${response.status}): ${id}`);
+    const manifest = validateShipContinuumManifest(await response.json()), source = sources[b], names = shipContinuumStreams(manifest.family);
+    const key = shipContinuumHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(shipContinuumSourceKey(source))));
+    if (key !== manifest.source.key || source.fracture.shardCount !== manifest.source.shards || !shipContinuumSurfaceMatches(manifest.source.surface, shipContinuumSurface(source.vertices, source.indices))) {
+      throw Error(`Ship continuum ${manifest.id} was baked from another assembly; run node scripts/prepare-ship-continuum.mjs`);
+    }
+    const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await shipContinuumFile(manifest, name, fetchAsset)])));
+    const words32 = (name) => new Uint32Array(files[name].buffer, files[name].byteOffset, files[name].byteLength / 4);
+    const body = words32('body.bin').slice();
+    if (files['corners.bin']) {
+      const corners = words32('corners.bin'), built = new Uint32Array(manifest.source.vertices);
+      if (corners.length !== source.indices.length) throw Error(`Ship continuum ${manifest.id} has another assembly's corners`);
+      for (let i = 0; i < corners.length; i++) built[corners[i]] = source.indices[i];
+      const { at, count } = shipContinuumRiders(body);
+      for (let i = 0; i < count; i++) { const w = body[at + i]; if (!(w & (SHIP_RIDER_FAR | SHIP_RIDER_LINE))) body[at + i] = built[w]; }
+      return { manifest, body, assembly: null };
+    }
+    const vertices = new Float32Array(files['vertices.bin'].buffer, files['vertices.bin'].byteOffset, files['vertices.bin'].byteLength / 4);
+    return { manifest, body, assembly: { vertices, vertexShards: words32('shards.bin'), vertexCount: vertices.length / 9 } };
+  }));
+  return { manifest: loaded.map((l) => l.manifest), words: checkContinuumAtlas(assembleContinuumAtlas(loaded.map((l) => l.body)), label), assemblies: loaded.map((l) => l.assembly) };
 }

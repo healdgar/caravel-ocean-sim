@@ -6,16 +6,16 @@
  "model": "nina",
  "label": "Niña",
  "source": {
-  "vertices": 93958,
-  "indices": 211821,
+  "vertices": 94126,
+  "indices": 212613,
   "shards": 290,
-  "key": "19ce5dbc0c5c6bc5cd491e2e0240fc96a242e6286fe1b0171194630184201a21",
+  "key": "34abbe81021ff91656d01ab4d7d6813d4d4fe1dd9986a534dd83bc90c6eae8fa",
   "surface": {
-   "area": 414.16483553474376,
+   "area": 417.55015356897417,
    "centroid": [
-    0.06799284040171538,
-    2.183691405655543,
-    0.49350072862275607
+    0.06744158353629921,
+    2.2064928605682246,
+    0.5490836128613791
    ],
    "materials": {
     "0": 34.41447114793769,
@@ -38,8 +38,8 @@
     "18": 0.845990339351365,
     "19": 5.962449556179746,
     "25": 0.020709812362669253,
-    "29": 2.9475582427917857,
-    "30": 0.43775979143855714
+    "29": 5.895116485583571,
+    "30": 0.8755195828771143
    }
   },
   "designScale": [
@@ -48,30 +48,23 @@
    1.666667
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 2112,
- "indexCount": 361518,
- "copyCount": 426,
+ "detail": {
+  "clusters": 15,
+  "ironTriangles": 284,
+  "lineVertices": 4596,
+  "rode": 200
+ },
  "clusters": {
-  "triangles": 120506,
+  "count": 2098,
+  "triangles": 120037,
   "levels": 7,
-  "roots": 803,
-  "groups": 172,
+  "roots": 793,
+  "groups": 166,
   "parts": 455,
-  "rootError": 17.0958
+  "rootError": 17.0958,
+  "rootTriangles": 32643
  },
  "far": {
-  "vertexCount": 4000,
-  "triangleCount": 8000,
-  "stepCount": 3995,
-  "offsets": {
-   "vertices": 0,
-   "records": 24000,
-   "triangles": 28000,
-   "steps": 52000
-  },
   "voxel": 0.0856,
   "pieces": [
    {
@@ -98,36 +91,37 @@
     "count": 2,
     "dropped": 0,
     "genus": 0,
-    "surfaceTriangles": 504540
+    "surfaceTriangles": 504668
    }
   ],
   "baseTriangles": 8000,
   "baseVertices": 4000,
-  "baseError": 0.2632,
-  "baseGeometric": 0.0788,
-  "steps": 3995,
+  "baseError": 0.2631,
+  "baseGeometric": 0.0876,
+  "steps": 3996,
   "coreTriangles": 4,
-  "depth": 11,
+  "depth": 10,
   "errorRange": [
-   0.2632,
-   17.3796
+   0.2631,
+   17.0049
   ],
   "inflateMax": 0.9594,
-  "euler": 0
+  "euler": 0,
+  "farFirst": 0
  },
  "splat": {
   "centre": [
-   0.0222,
+   0.0226,
    9.4205,
    1.4029
   ],
   "ry": 11.7214,
-  "rxSide": 8.3254,
-  "rxEnd": 1.6668,
+  "rxSide": 8.3364,
+  "rxEnd": 1.6625,
   "colour": [
-   0.52465,
-   0.44972,
-   0.35327
+   0.52519,
+   0.45045,
+   0.35409
   ]
  },
  "bound": {
@@ -140,49 +134,22 @@
  },
  "poses": 1,
  "files": {
-  "clusters.bin": {
-   "bytes": 135168,
-   "sha256": "613cf3a318f7bcd248e185efbb931e934e0941467594e3153134c00c6e34fd18",
+  "body.bin": {
+   "bytes": 4280204,
+   "sha256": "98f343d5785036a69f64f3c442ac367654b9f95fc63189f92bc1e4088b91232c",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 53996,
-    "sha256": "373fbea57c076acb7ab5e4b739c1dc2b062d0b0b6164c3f25dd111763c8e521f"
-   }
-  },
-  "indices.bin": {
-   "bytes": 1446072,
-   "sha256": "00a6234ecff5a961d017fa43220b48f14a5632dc0c757fa668bb8fcdf161100b",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 454433,
-    "sha256": "10fe673f07536796d7190462aef53e0860c94ef63c389c0a48ec7e36b1600b19"
-   }
-  },
-  "copies.bin": {
-   "bytes": 1704,
-   "sha256": "1cdfa36be3fccd2cb58455c79173d90093ed374b5bf7b32b68a919d27ebb0adc",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 865,
-    "sha256": "cc29e1297b22cf187cfab4c8668cfc249baffa057e691fa657fa22895c063dcb"
-   }
-  },
-  "far.bin": {
-   "bytes": 271936,
-   "sha256": "0706d6edebd49841619ba5f232ea3cd4637bc597881115813962880296b3309a",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 156377,
-    "sha256": "82b93055fb0d3dccd7441ce571815db3f1f518b108b9bb831692b5421a937556"
+    "file": "body.bin.gz",
+    "bytes": 1333821,
+    "sha256": "a9e8c38f2269a90e4fbe7207378cf3deee17a6adc53788c3aee02e5ad2e63f1e"
    }
   },
   "corners.bin": {
-   "bytes": 847284,
-   "sha256": "ba5a89e38dd30e17e84e969df32f389c37a24ef0f73528428e6fd7793991bd0d",
+   "bytes": 850452,
+   "sha256": "0e871bfb5ece53d36e79b6f52de08b8e0b37216109d11ce9f8957d285bc649aa",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 254554,
-    "sha256": "e6bbee18ff25baf995153257f85462c9eb9d0a05697653d44d09c734b382699c"
+    "bytes": 255277,
+    "sha256": "35403431efae23c6c1a8a08f54171a8be696e538821d5b8eb40d98b310f66c79"
    }
   }
  }

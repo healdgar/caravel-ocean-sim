@@ -39,30 +39,23 @@
    1.083333
   ]
  },
- "clusterWords": 16,
- "farVertexWords": 6,
- "stepWords": 4,
- "clusterCount": 1045,
- "indexCount": 172881,
- "copyCount": 0,
+ "detail": {
+  "clusters": 0,
+  "ironTriangles": 0,
+  "lineVertices": 0,
+  "rode": 0
+ },
  "clusters": {
+  "count": 1045,
   "triangles": 57627,
   "levels": 6,
   "roots": 273,
   "groups": 97,
   "parts": 195,
-  "rootError": 4.6991
+  "rootError": 4.6991,
+  "rootTriangles": 8838
  },
  "far": {
-  "vertexCount": 4006,
-  "triangleCount": 8000,
-  "stepCount": 4002,
-  "offsets": {
-   "vertices": 0,
-   "records": 24036,
-   "triangles": 28042,
-   "steps": 52042
-  },
   "voxel": 0.0362,
   "pieces": [
    {
@@ -104,7 +97,8 @@
    5.4289
   ],
   "inflateMax": 0.4248,
-  "euler": 6
+  "euler": 6,
+  "farFirst": 0
  },
  "splat": {
   "centre": [
@@ -131,40 +125,13 @@
  },
  "poses": 11,
  "files": {
-  "clusters.bin": {
-   "bytes": 66880,
-   "sha256": "bf8cffc115e6efb657fac56f9a2cab0e1c79012122fd41139f11502f97f322b3",
+  "body.bin": {
+   "bytes": 1812644,
+   "sha256": "60673f0fa676c0007d653b51b749f362f9dcd5c2ec9bc87f1fdebacd1a13fa79",
    "gzip": {
-    "file": "clusters.bin.gz",
-    "bytes": 25102,
-    "sha256": "ff924f619097b0122a199292d72ff0884577f66d7d59d1e256e8b65a4fda9b08"
-   }
-  },
-  "indices.bin": {
-   "bytes": 691524,
-   "sha256": "385cef4424a83fcb5c2d53b7d44e943f0d4738694dc8bae72002a7a8b082323c",
-   "gzip": {
-    "file": "indices.bin.gz",
-    "bytes": 201821,
-    "sha256": "83bfe42c83acf2a4e074e85339d707f216d6bc0e0f79dd62b4c317d94b005b42"
-   }
-  },
-  "copies.bin": {
-   "bytes": 0,
-   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "gzip": {
-    "file": "copies.bin.gz",
-    "bytes": 20,
-    "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837"
-   }
-  },
-  "far.bin": {
-   "bytes": 272216,
-   "sha256": "5a3ac3ca3069084dfde1d6c6dc265c94acd7facd153c72402f4d2604013027ae",
-   "gzip": {
-    "file": "far.bin.gz",
-    "bytes": 155245,
-    "sha256": "37849f4028d4b5b5e98d002f5ffea46a88d4468f58406c995016f6c761e37f2b"
+    "file": "body.bin.gz",
+    "bytes": 674323,
+    "sha256": "49c936123358ead71ff2e949f8c2ea53016898db843500abefcffd9559d965d5"
    }
   },
   "vertices.bin": {
