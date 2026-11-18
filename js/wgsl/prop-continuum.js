@@ -43,10 +43,13 @@ struct PropContinuumVertex {
 struct PropContinuumCoverage { @location(0) colour:vec4f, @builtin(sample_mask) mask:u32 };
 fn propContinuumHidden()->PropContinuumVertex { var out:PropContinuumVertex;out.position=PROP_CONTINUUM_HIDDEN;return out; }
 fn propContinuumClip(world:vec3f)->vec4f { return F.viewProj*vec4f(earthCurve(world-F.camPos.xyz,F.camPos.y),1.0); }
-@vertex fn propContinuumVS(@builtin(vertex_index) vertex:u32,listed:CityContinuumEntry)->PropContinuumVertex {
+// One vertex of an entry. Coarse: an entry of the shadow map's lists, its far body at the step its shadow takes,
+// unmorphed (the under-water capture draws those, as the sea blurs anything finer).
+fn propContinuumVertex(vertex:u32,listed:CityContinuumEntry,coarse:bool)->PropContinuumVertex {
   let touched=cityContinuumBindings();
   let instance=listed.entry.x;let what=listed.entry.y>>28u;let item=listed.entry.y&0x0fffffffu;
-  let state=cityContinuumState(instance);
+  var state=cityContinuumState(instance);
+  if(coarse){state.y=state.y>>16u;state.z=0u;state.x=0u;}
   let place=cityContinuumPlaceOf(instance);
   let archetype=cityContinuumTypeOf(instance);
   let levels=f32(textureNumLevels(pigment));
@@ -73,6 +76,8 @@ fn propContinuumClip(world:vec3f)->vec4f { return F.viewProj*vec4f(earthCurve(wo
   out.glow=place.shape.w;
   return out;
 }
+@vertex fn propContinuumVS(@builtin(vertex_index) vertex:u32,listed:CityContinuumEntry)->PropContinuumVertex { return propContinuumVertex(vertex,listed,false); }
+@vertex fn propContinuumSubmergedVS(@builtin(vertex_index) vertex:u32,listed:CityContinuumEntry)->PropContinuumVertex { return propContinuumVertex(vertex,listed,true); }
 // A surface's albedo: its pigment where its own clusters are drawn, a coarse level of it on a far body (whose every
 // triangle carries the UV of the surface nearest it) and its one-texel mean on a splat; a plain type's own.
 fn propContinuumAlbedo(v:PropContinuumVertex)->vec3f {
@@ -81,7 +86,7 @@ fn propContinuumAlbedo(v:PropContinuumVertex)->vec3f {
   let coarse=textureSampleLevel(pigment,pigmentSampler,v.uv,layer,f32(v.surface.y)).rgb;
   return select(select(fine,coarse,v.coverage.x!=${CITY_CONTINUUM_CLUSTER_ENTRY}u),v.plain.rgb,v.surface.x==PROP_CONTINUUM_PLAIN);
 }
-@fragment fn propContinuumFS(v:PropContinuumVertex,@builtin(front_facing) front:bool)->PropContinuumCoverage {
+fn propContinuumShade(v:PropContinuumVertex,front:bool)->vec3f {
   let plain=v.surface.x==PROP_CONTINUUM_PLAIN;
   let weathered=select(1.0,0.0,plain);
   let dx=dpdx(v.world);let dy=dpdy(v.world);
@@ -120,10 +125,17 @@ fn propContinuumAlbedo(v:PropContinuumVertex)->vec3f {
   // Hot shot glows from within, brightest where its face turns to the eye.
   let core=clamp(dot(n,view),0.0,1.0);
   let hot=mix(vec3f(1.6,0.25,0.025),vec3f(3.8,0.95,0.12),core*core)*min(1.0,1.35/max(F.post.x,1e-3));
+  return surfaceAir(select(col,hot,v.glow>0.5),v.world);
+}
+@fragment fn propContinuumFS(v:PropContinuumVertex,@builtin(front_facing) front:bool)->PropContinuumCoverage {
   var out:PropContinuumCoverage;
-  out.colour=vec4f(surfaceAir(select(col,hot,v.glow>0.5),v.world),1.0);
+  out.colour=vec4f(propContinuumShade(v,front),1.0);
   out.mask=cityContinuumMask(v.coverage,v.position.xy,3u);
   return out;
+}
+// Under water, single-sampled, the water's own capture wrapping it (js/water-optics.js).
+@fragment fn propContinuumSubmergedFS(v:PropContinuumVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
+  return vec4f(propContinuumShade(v,front),1.0);
 }
 `;
 

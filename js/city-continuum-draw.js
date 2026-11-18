@@ -180,8 +180,15 @@ export function createContinuumScene({ device, atlas, pipelines: P, capacity, ro
       if (destroyed || !count) return;
       pass.setPipeline(P.shadow);
       pass.setBindGroup(0, shadowGroups[0]); pass.setBindGroup(1, shadowGroups[1]);
+      scene.drawCoarse(pass);
+    },
+    // The shadow map's lists, the coarse cut it casts, by whatever pipeline and groups are bound: the shadow's own, or
+    // an under-water capture of the family's view, whose data group `dataGroup` makes from its layout.
+    drawCoarse(pass) {
+      if (destroyed || !count) return;
       for (let index = CITY_CONTINUUM_VIEW_LISTS; index < CITY_CONTINUUM_LISTS.length; index++) drawList(pass, index);
     },
+    dataGroup(layout) { return group(layout, data.map((buffer, i) => [dataAt + i, buffer])); },
     // For the continuum census (js/continuum-census.js): the view's draws.
     continuumDraws() { return !destroyed && count ? [{ buffer: draws, offset: 0, records: CITY_CONTINUUM_VIEW_LISTS, stride: 4 }] : []; },
     destroy() { destroyed = true; for (const resource of [instances, ownShards, list, draws, view]) resource?.destroy(); },

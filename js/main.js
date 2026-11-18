@@ -825,7 +825,7 @@ async function main() {
   // The first mate ashore is one more such body, in a renderer with room for no one else.
   let mateSoldiers=null;
   try{if(sharedCrew)mateSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,most:1});}catch(error){console.error('The first mate\'s figure:',error);}
-  const props=createProps({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA});
+  const props=createProps({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,waterOptics});
   window.oceanProps=props;
   let townsfolk=null;
   try{if(sharedCrew)townsfolk=await createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)});}catch(error){console.error('Townsfolk initialization:',error);}
@@ -5611,6 +5611,7 @@ async function main() {
       v.continuum.drawCapture(underwater,false,capture=>vesselCaptureGroups(v,capture));
       if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(underwater);
     }
+    props?.drawSubmerged(underwater);
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
     if(cam.y<waterH+Math.min(HB,1.5)){
       const aboveWater=enc.beginRenderPass(aboveWaterPass);
@@ -5620,6 +5621,7 @@ async function main() {
         v.continuum.drawCapture(aboveWater,true,capture=>vesselCaptureGroups(v,capture));
         if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(aboveWater,true);
       }
+      props?.drawSubmerged(aboveWater,true);
       dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
     }
     const useNeuralLight = P.neuralLight > 0.001;

@@ -14,7 +14,7 @@ import { GUNNERY_FX_LIMITS } from './gunnery-effects.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { PROP_CONTINUUM_SHOT, PROP_CONTINUUM_TYPES, PROP_CONTINUUM_PIGMENT_SIZE } from './prop-continuum.js';
 import { CITY_CONTINUUM_BROKEN, CITY_CONTINUUM_GONE } from './wgsl/city-continuum.js';
-import { requestPropContinuumAtlas, requestPropContinuumPipelines, createPropContinuumScene } from './prop-continuum-draw.js';
+import { requestPropContinuumAtlas, requestPropContinuumPipelines, createPropContinuumScene, requestPropContinuumSubmerged, propContinuumSubmergedDraw } from './prop-continuum-draw.js';
 
 const PROP_REACH_M = 3000;
 const PROP_CHECK_FRAMES = 30;
@@ -38,7 +38,7 @@ async function uploadPigments(device, models) {
   return texture;
 }
 
-export function createProps({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4 }) {
+export function createProps({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, waterOptics = null }) {
   const B = GPUBufferUsage;
   const neuralPbr = sharedNeuralPbrBank(device);
   const buffer = (label, data, usage) => { const b = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: usage | B.COPY_DST }); device.queue.writeBuffer(b, 0, data); return b; };
@@ -50,18 +50,19 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
   // Shot is plain iron and reads no pigment: until a port's are loaded the array is one empty texel.
   let pigment = device.createTexture({ label: 'prop pigments (none yet)', size: [1, 1, 1], format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING });
   let ready = null, sceneGroup = null, kit = null, kitLoading = null, unavailable = false, activePort = null, scene = null, shot = null, frameCount = 0, destroyed = false;
-  let shotPlaced = null;
+  let shotPlaced = null, submerged = null, under = null;
 
   function makeSceneGroup() {
     if (!ready) return;
-    sceneGroup = device.createBindGroup({
-      label: 'prop continuum', layout: ready.pipelines.view.getBindGroupLayout(0),
-      entries: [
-        [0, { buffer: frameUBO }], [1, { buffer: hull }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
-        [11, pigment.createView({ dimension: '2d-array' })], [12, sampler], ...neuralPbr.propResources,
-      ].map(([binding, resource]) => ({ binding, resource })),
-    });
+    const entries = [
+      [0, { buffer: frameUBO }], [1, { buffer: hull }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
+      [11, pigment.createView({ dimension: '2d-array' })], [12, sampler], ...neuralPbr.propResources,
+    ].map(([binding, resource]) => ({ binding, resource }));
+    sceneGroup = device.createBindGroup({ label: 'prop continuum', layout: ready.pipelines.view.getBindGroupLayout(0), entries });
+    under = propContinuumSubmergedDraw(submerged, entries, shadows);
   }
+  // Under water, a jetty's pilings and whatever else stands in the sea, through the water's own capture.
+  requestPropContinuumSubmerged(waterOptics).then((pipeline) => { if (destroyed || !pipeline) return; submerged = pipeline; makeSceneGroup(); }, (error) => console.warn('props under water', error));
 
   // The atlas and the programs are wanted from the start: a ball may be fired anywhere.
   Promise.all([requestPropContinuumAtlas(device), requestPropContinuumPipelines({ device, shader, format, samples, shadowFormat: LAND_SHADOW_FORMAT })]).then(([atlas, pipelines]) => {
@@ -233,6 +234,8 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
       scene?.continuum.drawShadow(pass);
       shot?.drawShadow(pass);
     },
+    // Under water, single-sampled through the water's own capture: the coarse cut the shadow map's lists hold.
+    drawSubmerged(pass, above = false) { under?.draw(pass, [scene?.continuum, shot], above); },
     // For the continuum census (js/continuum-census.js).
     continuumSources() {
       return [['props', scene?.continuum], ['shot', shot]].map(([name, family]) => ({ name, draws: family?.continuumDraws() ?? [] })).filter((source) => source.draws.length);

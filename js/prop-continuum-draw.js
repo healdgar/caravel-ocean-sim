@@ -44,6 +44,35 @@ export function requestPropContinuumPipelines({ device, shader, format, samples,
   });
 }
 
+// The props' view under water: single-sampled, wrapped by the water's own capture (js/water-optics.js), drawing the
+// coarse cut the shadow map's lists hold, as the sea blurs anything finer. Null without the water's optics.
+export async function requestPropContinuumSubmerged(waterOptics) {
+  const optics = await waterOptics;
+  return optics?.capture({
+    source: withNeuralPbrProps(propContinuumRenderWGSL()), entry: 'propContinuumSubmergedFS', world: 'v.world',
+    vertex: { entryPoint: 'propContinuumSubmergedVS', buffers: CITY_CONTINUUM_ENTRY_LAYOUT }, groups: 3,
+  }) ?? null;
+}
+// A family's groups for it, from its own view's: `main` its group 0's entries, `shadows` the shadow set it is lit by.
+// `draw(pass, scenes, above)` then draws each scene's coarse cut.
+export function propContinuumSubmergedDraw(submerged, main, shadows) {
+  if (!submerged) return null;
+  const g0 = submerged.bindGroup(main, 0), g1 = shadows.bind(submerged.pipeline), groups = new WeakMap();
+  return {
+    draw(pass, scenes, above = false) {
+      const drawn = scenes.filter((scene) => scene?.count);
+      if (!drawn.length) return;
+      submerged.bind(pass, above);
+      pass.setBindGroup(0, g0); pass.setBindGroup(1, g1);
+      for (const scene of drawn) {
+        if (!groups.has(scene)) groups.set(scene, scene.dataGroup(submerged.pipeline.getBindGroupLayout(2)));
+        pass.setBindGroup(2, groups.get(scene));
+        scene.drawCoarse(pass);
+      }
+    },
+  };
+}
+
 // Each list's room in a scene that can hold `counts` instances of each type: all of them at once.
 export function propContinuumRoom(atlas, counts) {
   let clusters = 0, far = 0, capacity = 0;

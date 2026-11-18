@@ -13,7 +13,7 @@ import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { CITY_CONTINUUM_GONE, CITY_CONTINUUM_INSTANCE_WORDS } from './wgsl/city-continuum.js';
 import { PROP_CONTINUUM_TOOLS, PROP_CONTINUUM_TOOL_FIRST, PROP_CONTINUUM_TYPES, propContinuumTool } from './prop-continuum.js';
-import { requestPropContinuumAtlas, requestPropContinuumPipelines, createPropContinuumScene } from './prop-continuum-draw.js';
+import { requestPropContinuumAtlas, requestPropContinuumPipelines, createPropContinuumScene, requestPropContinuumSubmerged, propContinuumSubmergedDraw } from './prop-continuum-draw.js';
 
 // A record: one end and the piece (its place in PROP_CONTINUUM_TOOLS, -1 for none), then the other end. A piece runs
 // from its type's origin at the first end towards the second.
@@ -154,9 +154,9 @@ export function requestGunneryToolPrograms({ device, shader, format, samples }) 
 }
 
 // One company's tools: its records and pose, the pass that stands them, and its scene of the one cut, lit by its own
-// vessel (`hullUBO`, and `shadows`, her shadow set) as her people are.
-export async function createGunneryTools({ device, frameUBO, hullUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format, samples }) {
-  const B = GPUBufferUsage, { atlas, pipelines, place } = await requestGunneryToolPrograms({ device, shader, format, samples });
+// vessel (`hullUBO`, and `shadows`, her shadow set) as her people are, and under water through `waterOptics`.
+export async function createGunneryTools({ device, frameUBO, hullUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format, samples, waterOptics = null }) {
+  const B = GPUBufferUsage, [{ atlas, pipelines, place }, submerged] = await Promise.all([requestGunneryToolPrograms({ device, shader, format, samples }), requestPropContinuumSubmerged(waterOptics)]);
   const records = new Float32Array(GUNNERY_TOOL_RECORDS * GUNNERY_TOOL_RECORD_FLOATS), pose = new Float32Array(16), placed = [];
   const tubes = device.createBuffer({ label: 'crew gun tool records', size: records.byteLength, usage: B.STORAGE | B.COPY_DST });
   const poseBuffer = device.createBuffer({ label: 'crew gun tool pose', size: 64, usage: B.UNIFORM | B.COPY_DST });
@@ -167,14 +167,12 @@ export async function createGunneryTools({ device, frameUBO, hullUBO, transView,
   // The props' view, lit by this vessel. Every piece is plain: the pigments are one texel no piece reads.
   const pigment = device.createTexture({ label: 'gun tool pigments (none)', size: [1, 1, 1], format: 'rgba8unorm-srgb', usage: globalThis.GPUTextureUsage?.TEXTURE_BINDING ?? 4 });
   const sampler = device.createSampler({ label: 'gun tool pigment', magFilter: 'linear', minFilter: 'linear' });
-  const sceneGroup = device.createBindGroup({
-    label: 'gun tools', layout: pipelines.view.getBindGroupLayout(0),
-    entries: [
-      [0, { buffer: frameUBO }], [1, { buffer: hullUBO }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
-      [11, pigment.createView({ dimension: '2d-array' })], [12, sampler], ...sharedNeuralPbrBank(device).propResources,
-    ].map(([binding, resource]) => ({ binding, resource })),
-  });
-  const lighting = shadows.bind(pipelines.view);
+  const main = [
+    [0, { buffer: frameUBO }], [1, { buffer: hullUBO }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
+    [11, pigment.createView({ dimension: '2d-array' })], [12, sampler], ...sharedNeuralPbrBank(device).propResources,
+  ].map(([binding, resource]) => ({ binding, resource }));
+  const sceneGroup = device.createBindGroup({ label: 'gun tools', layout: pipelines.view.getBindGroupLayout(0), entries: main });
+  const lighting = shadows.bind(pipelines.view), under = propContinuumSubmergedDraw(submerged, main, shadows);
   let count = 0;
   return {
     // The records, and which of them are arrows still to be placed from their bodies' joints this frame.
@@ -194,6 +192,8 @@ export async function createGunneryTools({ device, frameUBO, hullUBO, transView,
     },
     draw(pass) { if (count) scene.draw(pass, sceneGroup, lighting); },
     drawShadow(pass) { if (count) scene.drawShadow(pass); },
+    // Under water: the coarse cut the shadow map's lists hold, as the crew's own bodies are drawn there.
+    drawSubmerged(pass, above = false) { if (count) under?.draw(pass, [scene], above); },
     continuumDraws() { return count ? scene.continuumDraws() : []; },
     destroy() { scene.destroy(); tubes.destroy(); poseBuffer.destroy(); pigment.destroy(); },
   };

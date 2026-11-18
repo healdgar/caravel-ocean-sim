@@ -647,7 +647,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   });
   const everyPart=batches.flatMap(b=>b.parts);
   // What their hands hold, and the arrows in them: pieces of the props' atlas, cut and lit as this vessel's people are.
-  const gunTools=await createGunneryTools({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples});
+  const gunTools=await createGunneryTools({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics});
   // An arrow in a body is placed on the GPU from the joints that body is drawn with.
   const placeOf=new Map();
   for(const b of batches){
@@ -769,10 +769,11 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       gunTools.encode(pass);
       for(const part of everyPart)part.continuum?.encodeSelect(pass);
     },
-    // Under water, through the water's own capture: the far bodies the shadow list already holds.
+    // Under water, through the water's own capture: the far bodies the shadow list already holds, and the tools' coarse cut.
     drawSubmerged(pass,above=false){
       if(!drawEnabled)return;
       for(const part of everyPart)part.continuum?.drawSubmerged(pass,above);
+      gunTools.drawSubmerged(pass,above);
     },
     // Opaque sailors belong with the opaque scene. Anyone being cut follows it.
     drawOpaque(pass){
