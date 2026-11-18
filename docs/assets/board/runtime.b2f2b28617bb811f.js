@@ -780,9 +780,12 @@ globalThis.BOARD_MODEL = (() => {
       if (!s.harbor) continue;
       if (typeof offRoute === 'function' && offRoute(si)) harborPorts.push(si);
     }
+    // Far ports' merchantmen call only where the people's ways admit them; a people without (`farPorts: false`) trades
+    // along its coast by its own boats, the sea caravans below.
+    const farHarbors = harborPorts.filter((si) => !(typeof waysOf === 'function' && waysOf(S[si])?.farPorts === false));
     if (W.ships.length) {
-      if (harborPorts.length) {
-        const primaryHarbor = harborPorts[0];
+      if (farHarbors.length) {
+        const primaryHarbor = farHarbors[0];
         const primaryS = S[primaryHarbor];
         const primaryRoute = typeof offRoute === 'function' ? offRoute(primaryHarbor) : null;
         for (const sh of W.ships) {
@@ -805,12 +808,12 @@ globalThis.BOARD_MODEL = (() => {
         W.ships = W.ships.filter((sh) => sh && S[sh.port]?.harbor);
       }
     }
-    if (harborPorts.length && farPool.length) {
-      const targetShips = Math.min(6, Math.max(3, harborPorts.length + 2));
+    if (farHarbors.length && farPool.length) {
+      const targetShips = Math.min(6, Math.max(3, farHarbors.length + 2));
       const existingActive = W.ships.filter((sh) => sh && Array.isArray(sh.poly) && sh.poly.length >= 2 && (sh.phase === 'in' || sh.phase === 'dock' || (sh.phase === 'out' && sh.t1 > now)));
       let needed = Math.max(0, targetShips - existingActive.length);
       for (let k = 0; k < needed; k++) {
-        const si = harborPorts[k % harborPorts.length];
+        const si = farHarbors[k % farHarbors.length];
         const s = S[si];
         const R = offRoute(si);
         if (!R || !Array.isArray(R.poly) || R.poly.length < 2) continue;

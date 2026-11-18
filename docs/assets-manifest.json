@@ -350,39 +350,39 @@
     "sha256": "bb9881d737c4fee6946bd4db1af1931e73d285c03cfb9ee9b99dea338a88f864"
   },
   "assets/boards/quebec-1550.world": {
-    "url": "assets/boards/quebec-1550.d40f24836103c271.world",
-    "bytes": 4255431,
-    "sha256": "d40f24836103c27130d2f76d75be35c36d6c02ca93f09f47d013c15b603aa59d"
+    "url": "assets/boards/quebec-1550.246a83dc19726331.world",
+    "bytes": 4250362,
+    "sha256": "246a83dc197263313939536348d2e1d88b94f43874f37b2a9796e1a5700fd80e"
   },
   "assets/boards/boston-1550.world": {
-    "url": "assets/boards/boston-1550.edd953f0dc57df15.world",
-    "bytes": 4687166,
-    "sha256": "edd953f0dc57df15fb5580d42d40d659640cb55fc99e910753605a8b97e97543"
+    "url": "assets/boards/boston-1550.8b37ff6dbcaf89a5.world",
+    "bytes": 4681091,
+    "sha256": "8b37ff6dbcaf89a55ab4998710f20b6be289ab93eb93ed0d182dbbb905cbc556"
   },
   "assets/boards/plymouth-colony-1550.world": {
-    "url": "assets/boards/plymouth-colony-1550.ceac4cd13ec7879a.world",
-    "bytes": 4594071,
-    "sha256": "ceac4cd13ec7879a0d4b6ed1070736de89940e44156477dbb54f23df705db5fc"
+    "url": "assets/boards/plymouth-colony-1550.1e620c57340fcc8e.world",
+    "bytes": 4595027,
+    "sha256": "1e620c57340fcc8ecaa0fa9fdb2cc6c86079982024a2e1945293f49968feada8"
   },
   "assets/boards/new-amsterdam-1550.world": {
-    "url": "assets/boards/new-amsterdam-1550.9df1f8bf62e9b42c.world",
-    "bytes": 4301096,
-    "sha256": "9df1f8bf62e9b42c8d7a5a26a76c98c129281a89b94d801e711e03b603487536"
+    "url": "assets/boards/new-amsterdam-1550.6bac35ca8cd0b2fe.world",
+    "bytes": 4298850,
+    "sha256": "6bac35ca8cd0b2fe4cbef84c171f9052dc116a158c4c3c12895ee9ea64b72483"
   },
   "assets/boards/philadelphia-1550.world": {
-    "url": "assets/boards/philadelphia-1550.8ba29c76416d7b62.world",
-    "bytes": 4653388,
-    "sha256": "8ba29c76416d7b627b65f2088fef9efc85f7a092b6d1e5bb8287932b26fb59b7"
+    "url": "assets/boards/philadelphia-1550.89f04fda28d93cfa.world",
+    "bytes": 4651404,
+    "sha256": "89f04fda28d93cfafa3a5aa7da2c0d9ad1d04ecaf000a493c2f1a206b38107df"
   },
   "assets/boards/jamestown-1550.world": {
-    "url": "assets/boards/jamestown-1550.0223db872c80dcad.world",
-    "bytes": 4116203,
-    "sha256": "0223db872c80dcaddadcbbd314dc9e47b28007fa96fc15ed297c283653b89a14"
+    "url": "assets/boards/jamestown-1550.f68235eb4a4e0b74.world",
+    "bytes": 4111832,
+    "sha256": "f68235eb4a4e0b74d4fc3674185aaa64adcf00e52c264a3bf8e1cbf55c13e3c4"
   },
   "assets/boards/rio-de-janeiro-1550.world": {
-    "url": "assets/boards/rio-de-janeiro-1550.59f99c017c63af48.world",
-    "bytes": 4492184,
-    "sha256": "59f99c017c63af4814d994177f000ec020a3ba145d9699402150efe6c2ff52b8"
+    "url": "assets/boards/rio-de-janeiro-1550.5223e64b0cab93cc.world",
+    "bytes": 4485681,
+    "sha256": "5223e64b0cab93ccfbb041ad382e276fdfb609b550a7d445da9f01bb1266ddc1"
   },
   "assets/board/game.js": {
     "url": "assets/board/game.11f69247dce3180d.js",
@@ -390,9 +390,9 @@
     "sha256": "11f69247dce3180d474762a23ffd8e68e41d4071c323e705c67e9cb6015dcdf0"
   },
   "assets/board/runtime.js": {
-    "url": "assets/board/runtime.b48dd488461836ae.js",
-    "bytes": 155822,
-    "sha256": "b48dd488461836ae1652fd03edbf1ba42f4ea94c4e4b4b6fa3b546b5e6866e93"
+    "url": "assets/board/runtime.b2f2b28617bb811f.js",
+    "bytes": 156122,
+    "sha256": "b2f2b28617bb811f7682aa74ae607255df27ceebd0857fe34c3d5345e5203746"
   },
   "assets/boards/partner-ports-1550.json": {
     "url": "assets/boards/partner-ports-1550.c2f3349eda0fa2dc.json",
@@ -910,39 +910,39 @@
     "sha256": "0930a9fbee03bb674d86b10a6e1b223e78bbd8bef91a9dd0abe70ccf615b1d59"
   },
   "assets/boards/quebec-1550.json": {
-    "url": "assets/boards/quebec-1550.0979e34beb354fcb.json",
+    "url": "assets/boards/quebec-1550.9cfa8aac3ab2ee05.json",
     "bytes": 695648,
-    "sha256": "0979e34beb354fcb0640eec9a7e1e0fc801d97c04c0a4b316a12df579b906573"
+    "sha256": "9cfa8aac3ab2ee0511733092063f2ec702e45fca72cb33be62d9dcfc92658139"
   },
   "assets/boards/boston-1550.json": {
-    "url": "assets/boards/boston-1550.1ce2e881f62debb3.json",
+    "url": "assets/boards/boston-1550.425bffdd727d2b3b.json",
     "bytes": 748587,
-    "sha256": "1ce2e881f62debb3f23b650f36c36e6b286935d3335b9b755a97c7def53290ba"
+    "sha256": "425bffdd727d2b3bbb1648d8d68ebc6348a5c57dab7d2035b338accfa4292706"
   },
   "assets/boards/plymouth-colony-1550.json": {
-    "url": "assets/boards/plymouth-colony-1550.f9442c0526d0fca8.json",
+    "url": "assets/boards/plymouth-colony-1550.92bf3a54473111c1.json",
     "bytes": 768906,
-    "sha256": "f9442c0526d0fca8cd6121dee5ecb553b173ab9fd555685505361b7745e1d981"
+    "sha256": "92bf3a54473111c10f220f1969a8fdf3d26a4c9c40dcd5a53b99312c399e81df"
   },
   "assets/boards/new-amsterdam-1550.json": {
-    "url": "assets/boards/new-amsterdam-1550.172bcbbd57b7ba6e.json",
+    "url": "assets/boards/new-amsterdam-1550.928c76cc40d52e39.json",
     "bytes": 712943,
-    "sha256": "172bcbbd57b7ba6ea864a395ae64d4624997dff84eed90a631d2a9b54201958c"
+    "sha256": "928c76cc40d52e39393d02a18f6fa3c0ae655610e68e8ef14362d9fa45fb720f"
   },
   "assets/boards/philadelphia-1550.json": {
-    "url": "assets/boards/philadelphia-1550.9f8d52a44626cf89.json",
+    "url": "assets/boards/philadelphia-1550.6e70a55195201f01.json",
     "bytes": 758242,
-    "sha256": "9f8d52a44626cf898baba00de0a1c1fb5725a42c8c7530e46559ca3914b83eec"
+    "sha256": "6e70a55195201f011af7d77e29deeddc7cf3ba08bab4833af0c24e12aa77ba08"
   },
   "assets/boards/jamestown-1550.json": {
-    "url": "assets/boards/jamestown-1550.b1d84d10cf5ad86d.json",
+    "url": "assets/boards/jamestown-1550.de96f07052860caf.json",
     "bytes": 685893,
-    "sha256": "b1d84d10cf5ad86da78a643e61d106d8625da26ceba43b6189688bdf7429b599"
+    "sha256": "de96f07052860caff1194c1413903c02f7bf995848271ae8acc91dd51f96ad12"
   },
   "assets/boards/rio-de-janeiro-1550.json": {
-    "url": "assets/boards/rio-de-janeiro-1550.36954b840f4a011b.json",
+    "url": "assets/boards/rio-de-janeiro-1550.1b0d3e9ca70ddd0c.json",
     "bytes": 717346,
-    "sha256": "36954b840f4a011be4197b8ff44d3d9d023a3627579237867651321ac443bd7b"
+    "sha256": "1b0d3e9ca70ddd0c4152f141df4d2a78a1b25b6242a5bf23536abac301daa40d"
   },
   "assets/ports/1550/buildings-1550-lrm.bin": {
     "url": "assets/ports/1550/buildings-1550-lrm.070f343b9c5ba729.bin",
