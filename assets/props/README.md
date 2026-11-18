@@ -1,6 +1,6 @@
 # Generated props
 
-Models generated with Tripo on paid API credits, reduced and baked here. `js/port-props.js` places them and `js/props.js` draws them. Sources stay in `.tripo/`, which git ignores.
+Models generated with Tripo on paid API credits, reduced and baked here. `js/port-props.js` places them and breaks them; `scripts/prepare-prop-continuum.mjs` bakes them, shard by shard, into the prop continuum (`assets/prop-continuum/`), which `js/props.js` draws. Rerun that bake whenever a model here changes (`tests/prop-continuum-bake.test.mjs` fails until it is). Sources stay in `.tripo/`, which git ignores.
 
 | File | Model | Triangles | Texture |
 |---|---|---|---|

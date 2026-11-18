@@ -362,11 +362,9 @@ export const GUNNERY_RENDER=FRAME_WGSL+ATMO_CORE_WGSL+VESSEL_LIGHTING+/* wgsl */
 @group(0)@binding(6)var gunnerySea:texture_2d_array<f32>;
 @group(0)@binding(7)var gunnerySeaSampler:sampler;
 struct GunneryVolume{centre:vec4f,axisX:vec4f,axisY:vec4f,axisZ:vec4f,optical:vec4f};
-struct GunneryBall{positionRadius:vec4f};
 struct GunneryContact{root:vec4f,motion:vec4f,detail:vec4f,extra:vec4f};
 struct GunneryArcSegment{p0:vec4f,p1:vec4f,style:vec4f};
 @group(0)@binding(8)var<storage,read>gunneryVolumes:array<GunneryVolume>;
-@group(0)@binding(9)var<storage,read>gunneryBalls:array<GunneryBall>;
 @group(0)@binding(10)var<storage,read>gunneryContacts:array<GunneryContact>;
 @group(0)@binding(11)var gunnerySceneDepth:texture_2d<f32>;
 @group(0)@binding(12)var<storage,read>gunneryArcs:array<GunneryArcSegment>;
@@ -810,27 +808,6 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let alpha=select(rawAlpha,fireVeilCap*(1.0-exp(-rawAlpha*2.45/fireVeilCap)),isFireSmokeVol);
   let averageWorld=F.camPos.xyz+ray*(enter+exit)*.5;
   return vec4f(surfaceAir(radiance/max(rawAlpha,.0001),averageWorld)*alpha,alpha);
-}
-
-struct GunneryBallVertex{@builtin(position)position:vec4f,@location(0)world:vec3f,@location(1)normal:vec3f,@location(2)hot:f32};
-@vertex fn gunneryBallVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryBallVertex{
-  let ball=gunneryBalls[id].positionRadius;let cell=vertex/6u;let uv=gunneryCorner(vertex);
-  let longitude=(f32(cell%12u)+uv.x)*(2.0*PI)/12.0;let latitude=(f32(cell/12u)+uv.y)*PI/8.0;
-  let r=abs(ball.w);let isHot=select(0.0,1.0,ball.w<0.0);
-  let normal=vec3f(cos(longitude)*sin(latitude),cos(latitude),sin(longitude)*sin(latitude));let world=ball.xyz+normal*r;
-  return GunneryBallVertex(F.viewProj*vec4f(world-F.camPos.xyz,1),world,normal,isHot);
-}
-@fragment fn gunneryBallFS(v:GunneryBallVertex)->@location(0)vec4f{
-  let n=normalize(v.normal);let eye=normalize(F.camPos.xyz-v.world);
-  if(v.hot>0.5){
-    let core=clamp(dot(n,eye),0.0,1.0);
-    let hotGlow=mix(vec3f(1.6,0.25,0.025),vec3f(3.8,0.95,0.12),core*core)*min(1.0,1.35/max(F.post.x,1e-3));
-    return vec4f(surfaceAir(hotGlow,v.world),1);
-  }
-  let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),8.0).rgb;let sea=textureSampleLevel(envCube,sampC,vec3f(0,-.4,1),8.0).rgb;
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);let nl=max(0.0,dot(n,F.sunDir.xyz));
-  let albedo=vec3f(.038,.034,.029);let light=albedo*(vesselAmbient(n,sky,sea)+direct*nl/PI)+vesselSpecular(n,eye,F.sunDir.xyz,.62,vec3f(.045))*direct*nl;
-  return vec4f(surfaceAir(light+lightningSurface(n,eye,albedo,.62),v.world),1);
 }
 
 fn gunnerySeaDisplacement(q:vec2f)->vec3f{

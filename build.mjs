@@ -22,6 +22,7 @@ import { PORTUGAL_MEADOW_GRASS_ASSETS } from './js/meadow-grass.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 import { CREW_CONTINUUM_ASSETS } from './js/crew-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
+import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/neural-post.js', 'js/wgsl/neural-pbr.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js', 'js/wgsl/crew-solve.js'];
@@ -59,10 +60,10 @@ order.splice(order.indexOf('js/crew.js'),0,'js/crew-overboard.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js','js/crew-components.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
-wgslModules.push('js/wgsl/part-assembly.js','js/wgsl/rig-surfaces.js','js/wgsl/vessel-recoil.js','js/wgsl/hull-flood.js','js/wgsl/townsfolk.js','js/wgsl/props.js');
+wgslModules.push('js/wgsl/part-assembly.js','js/wgsl/rig-surfaces.js','js/wgsl/vessel-recoil.js','js/wgsl/hull-flood.js','js/wgsl/townsfolk.js');
 // Shaders read these constants as they are built, so they come first, after the fort plan the streets import.
 order.unshift('js/fort-plan.js','js/fort-records.js','js/harbour-geography.js','js/harbour-defences.js','js/town-streets.js','js/indigenous-dress.js');
-order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/town-clips.js','js/town-shots.js','js/townsfolk.js','js/wgsl/props.js','js/props.js','js/free-cannon.js','js/castle-duel.js');
+order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/town-clips.js','js/town-shots.js','js/townsfolk.js','js/prop-continuum.js','js/wgsl/prop-continuum.js','js/prop-continuum-draw.js','js/props.js','js/free-cannon.js','js/castle-duel.js');
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/port-props.js','js/tripo-pier-assets.js');
 wgslModules.push('js/wgsl/ship-fracture.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js')+1,0,'js/wgsl/part-assembly.js');
@@ -190,6 +191,9 @@ if(fs.existsSync(path.join(root,'assets/ground-cover/portugal/meadows-gpu/manife
 }
 // The city continuum's atlas (scripts/prepare-city-continuum.mjs), kept in git: the city is drawn from nothing else.
 for(const file of Object.values(CITY_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
+// The prop continuum's atlas (scripts/prepare-prop-continuum.mjs), kept in git: port props and round shot are drawn
+// from nothing else.
+for(const file of Object.values(PROP_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The people continuum's bodies, each where it has been baked (scripts/prepare-crew-continuum.mjs). Their streams are
 // not committed; a checkout without them draws the old bodies.
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files)){
@@ -269,7 +273,7 @@ const TIGHT_WGSL_RELS = new Set([
   'js/forest-surfaces.js', 'js/forest-native-lod.js',
   'js/forest-wind.js', 'js/forest-trunks.js', 'js/ship-colors.js',
   'js/building-fracture.js', 'js/ship-fracture.js',
-  'js/wgsl/terrain.js', 'js/wgsl/caravel.js', 'js/wgsl/props.js',
+  'js/wgsl/terrain.js', 'js/wgsl/caravel.js', 'js/wgsl/prop-continuum.js',
   'js/wgsl/vessel.js', 'js/wgsl/neural-post.js', 'js/wgsl/ground-detail.js', 'js/wgsl/lateen.js',
 ]);
 const SEMI_TIGHT_WGSL_RELS = new Set();

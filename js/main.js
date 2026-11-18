@@ -882,6 +882,8 @@ async function main() {
     hullContactProbePromise,
     probePipePromise,
   ]);
+  // Every ball in the air is placed in the prop continuum, and drawn there.
+  gunEffects.shot=props.shot;
   if(terrain&&sharedCrew)terrain.setSharedCrew?.(sharedCrew);
   // Deck hands aboard the land's vessels are drawn through the people continuum, with the scene's frame and lights.
   const peopleOfTheLand=land=>{if(sharedCrew)land?.tradeVessels?.setPeople?.({frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shared:sharedCrew});};
@@ -5701,7 +5703,7 @@ async function main() {
       shipColorsRenderer?.draw(rp,vessels.length);
     }
     if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(rp);
-    dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawProjectiles(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);weatherRenderer.draw(rp);
+    dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);weatherRenderer.draw(rp);
     rp.end();
 
     if(gunVolumes){
@@ -5768,7 +5770,7 @@ async function main() {
       const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
       // Damaged trade vessels and their pre-selection fallback are sized on the CPU, beside their indirect draws.
       continuumCensus.report('trade vessels',terrain?.tradeVessels?.cpuTriangles??0);
-      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...(people.length?[{name:'people',draws:people}]:[])]);
+      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...props.continuumSources(),...(people.length?[{name:'people',draws:people}]:[])]);
     }
     const doTs=profiler.resolve(enc);
     let readBuf = null;

@@ -187,11 +187,11 @@ export function createGunneryEffectState(){
 export async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,surfaceWaves=null,hulls=null,hullCount=1}){
   const state=createGunneryEffectState(),B=GPUBufferUsage,T=GPUTextureUsage,L=GUNNERY_FX_LIMITS;
   const slots=gunneryVolumeSlots(L),width=GUNNERY_SMOKE_RECORD_FLOATS;
-  const balls=new Float32Array(L.projectiles*4),contacts=new Float32Array(L.impacts*16),arcs=new Float32Array(L.arcSegments*12);
+  const balls=new Float32Array(L.projectiles*4),ballSeeds=new Uint32Array(L.projectiles),contacts=new Float32Array(L.impacts*16),arcs=new Float32Array(L.arcSegments*12);
   const shotRecords=new Float32Array(L.shots*width),bankRecords=new Float32Array(L.banks*width);
   const make=(label,bytes,usage=B.STORAGE|B.COPY_DST)=>device.createBuffer({label,size:bytes,usage});
   // Every volume drawn is written here by the GPU; nothing uploads to it.
-  const volumeBuffer=make('black powder smoke volumes',slots.total*80,B.STORAGE|B.COPY_SRC),ballBuffer=make('iron roundshot positions',balls.byteLength),contactBuffer=make('roundshot water contacts',contacts.byteLength),arcBuffer=make('ballistic aiming arcs',arcs.byteLength);
+  const volumeBuffer=make('black powder smoke volumes',slots.total*80,B.STORAGE|B.COPY_SRC),contactBuffer=make('roundshot water contacts',contacts.byteLength),arcBuffer=make('ballistic aiming arcs',arcs.byteLength);
   const shotBuffer=make('cannon smoke shots',shotRecords.byteLength),bankBuffer=make('cannon smoke banks',bankRecords.byteLength);
   const stateBuffer=make('cannon smoke wind carry',32+(L.shots+L.banks)*16,B.STORAGE);
   const fires=createGunneryFireLedger(L.fires),hullSlots=Math.max(1,Math.floor(hullCount));
@@ -210,7 +210,9 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   // Every program here is asked for before any is waited on: they compile together, not one after another.
   const source=surfaceWaves?coupleSurfaceHeight(GUNNERY_RENDER,'gunnerySeaDisplacement(q).y','p',{group:1,uniformBinding:0,textureBinding:1,samplerName:'gunnerySeaSampler'}):GUNNERY_RENDER;
   const transparent={color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}};
-  const types=[['gunneryBall',false],['gunneryVolume',true],['gunneryCrown',true],['gunneryDrop',true],['gunneryRing',true],['gunneryArc',true],['gunneryEarth',true],['gunneryDust',true]];
+  // Iron in flight is not drawn here: every ball is placed in the prop continuum (js/props.js shot), as a physical body.
+  const types=[['gunneryVolume',true],['gunneryCrown',true],['gunneryDrop',true],['gunneryRing',true],['gunneryArc',true],['gunneryEarth',true],['gunneryDust',true]];
+  const VOLUME=0,CROWN=1,DROP=2,RING=3,ARC=4,EARTH=5,DUST=6;
   const buildEntries=[['gunnerySmokeAdvance','cannon smoke wind carry',[0,8,9,11]],['gunneryBuildSmoke','cannon smoke volumes',[0,3,8,9,11]],['gunneryBuildFires','fire volumes',[0,1,2,3,4]],
     ['gunnerySortVolumes','cannon smoke draw order',[0,3,4,5,6]],['gunneryFireLighting','fire lights',[0,1,2,4,7]]];
   const noisePipesPromise=shader(GUNNERY_NOISE,'cannon smoke billows').then(noiseModule=>Promise.all(['gunneryMakeNoise','gunneryHalveNoise'].map(entryPoint=>device.createComputePipelineAsync({label:'cannon smoke billows',layout:'auto',compute:{module:noiseModule,entryPoint}}))));
@@ -218,8 +220,8 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   // its depth, so they draw afterwards, onto the resolved colour, in a pass with no depth and one sample.
   const pipelinesPromise=shader(source,'black powder cannon effects').then(module=>Promise.all(types.map(([entry,blend],i)=>device.createRenderPipelineAsync({label:entry,layout:'auto',
     vertex:{module,entryPoint:entry+'VS'},fragment:{module,entryPoint:entry+'FS',targets:[{format,...(blend?{blend:transparent}:{})}]},
-    primitive:{topology:'triangle-list',cullMode:i===1?'front':'none'},
-    ...(i===1?{multisample:{count:1}}:{depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})}))));
+    primitive:{topology:'triangle-list',cullMode:i===VOLUME?'front':'none'},
+    ...(i===VOLUME?{multisample:{count:1}}:{depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:samples}})}))));
   const depthPipelinePromise=shader(GUNNERY_DEPTH_RESOLVE(samples),'cannon effects depth snapshot').then(depthModule=>device.createComputePipelineAsync({label:'resolve cannon effects depth',layout:'auto',compute:{module:depthModule,entryPoint:'gunneryResolveDepth'}}));
   const buildPipesPromise=shader(GUNNERY_BUILD(L),'cannon smoke and fire volumes').then(buildModule=>Promise.all(buildEntries.map(([entryPoint,label])=>device.createComputePipelineAsync({label,layout:'auto',compute:{module:buildModule,entryPoint}}))));
   for(const pending of [pipelinesPromise,depthPipelinePromise,buildPipesPromise])pending.catch(()=>{});
@@ -239,17 +241,17 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
     device.queue.submit([encoder.finish()]);
   }
   const pipelines=await pipelinesPromise;
-  const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:volumeBuffer},{buffer:ballBuffer},{buffer:contactBuffer},null,{buffer:arcBuffer},{buffer:orderBuffer},
+  const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:volumeBuffer},null,{buffer:contactBuffer},null,{buffer:arcBuffer},{buffer:orderBuffer},
     {buffer:stateBuffer},noise.createView(),noiseSampler];
   // Auto layouts reflect each entry point. Keep this table explicit so resource
   // changes are checked by native pipeline creation and integration tests.
-  const bindings=[[0,1,2,3,4,5,9],[0,1,2,3,5,8,11,13,14,15,16],[0,1,2,3,4,5,6,7,10],[0,1,2,3,4,5,10],[0,1,2,3,4,5,6,7,10],[0,1,2,3,5,12],[0,1,2,3,5,10],[0,1,2,3,5,10]];
-  const crownWaves=surfaceWaveGroups(device,pipelines[2],surfaceWaves);
-  const ringWaves=surfaceWaveGroups(device,pipelines[4],surfaceWaves);
-  let impactCount=0,ballCount=0,arcSegmentCount=0,depthTexture=null,depthWidth=0,depthHeight=0,depthSource=null,depthGroup=null;
+  const bindings=[[0,1,2,3,5,8,11,13,14,15,16],[0,1,2,3,4,5,6,7,10],[0,1,2,3,4,5,10],[0,1,2,3,4,5,6,7,10],[0,1,2,3,5,12],[0,1,2,3,5,10],[0,1,2,3,5,10]];
+  const crownWaves=surfaceWaveGroups(device,pipelines[CROWN],surfaceWaves);
+  const ringWaves=surfaceWaveGroups(device,pipelines[RING],surfaceWaves);
+  let impactCount=0,ballCount=0,shotSink=null,arcSegmentCount=0,depthTexture=null,depthWidth=0,depthHeight=0,depthSource=null,depthGroup=null;
   // settle: smoke has just gone, and the GPU has one more pass to make to write that down.
   let volumeGroup=null,depthReady=false,sorted=false,settle=false;
-  const groups=pipelines.map((pipe,i)=>i===1?null:device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:bindings[i].map(binding=>({binding,resource:resources[binding]}))}));
+  const groups=pipelines.map((pipe,i)=>i===VOLUME?null:device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:bindings[i].map(binding=>({binding,resource:resources[binding]}))}));
   const depthPipeline=await depthPipelinePromise;
   // Smoke and fire volumes, the order they are drawn in and the light fires throw are all worked out on the GPU.
   const buildPipes=await buildPipesPromise;
@@ -289,7 +291,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
     }
   }
   if(ownHulls)device.queue.writeBuffer(ownHulls,0,new Float32Array([1,0,0,1,0,1,0,0,0,0,-1,0,3.6,12,0,0,0,0,0,0,0,0,0,0]));
-  const volumeEntries=()=>bindings[1].map(binding=>({binding,resource:binding===11?depthTexture.createView():resources[binding]}));
+  const volumeEntries=()=>bindings[VOLUME].map(binding=>({binding,resource:binding===11?depthTexture.createView():resources[binding]}));
   return {state,emitShot:state.emitShot,emitImpact:state.emitImpact,setProjectiles:state.setProjectiles,setAimArcs:state.setAimArcs,
     get active(){return state.active||fires.count>0;},get transparentActive(){return !!(state.smoke||impactCount||arcSegmentCount||fires.count);},
     // Whether there is smoke or fire for the volumes pass to draw. With neither, the frame takes no snapshot of
@@ -307,24 +309,27 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       state.step(dt,options);depthReady=sorted=false;ballCount=arcSegmentCount=0;
       sendFires(fires.sync(Array.isArray(options.fires)?options.fires:null,options.fireHulls,state.clock));
       sendSmoke();if(state.smoke)settle=true;
+      // Each bead keeps one seed while it flies (its projectile's and its place on it), so the far end of the
+      // continuum thins the same balls frame after frame.
+      const bead=(p,k)=>{ballSeeds[ballCount]=(((p.id??0)>>>0)*8+k)>>>0;return ballCount++*4;};
       for(const p of state.projectiles){
         if(ballCount>=L.projectiles)break;
         if(isArrowAmmo(p.ammo)&&p.velocity){
           if(ballCount+3>L.projectiles)break;
           const speed=Math.hypot(...p.velocity)||1,lit=p.ammo==='fire-arrow';
-          for(const[back,radius]of[[0,lit?-.075:.022],[.32,.016],[.64,.016]]){
-            balls.set([p.position[0]-p.velocity[0]/speed*back,p.position[1]-p.velocity[1]/speed*back,p.position[2]-p.velocity[2]/speed*back,radius],ballCount++*4);
-          }
+          [[0,lit?-.075:.022],[.32,.016],[.64,.016]].forEach(([back,radius],k)=>{
+            balls.set([p.position[0]-p.velocity[0]/speed*back,p.position[1]-p.velocity[1]/speed*back,p.position[2]-p.velocity[2]/speed*back,radius],bead(p,k));
+          });
           continue;
         }
         const signedRadius=p.ammo==='hot'?-p.radius:p.radius;
         if(p.ammo==='chain'&&ballCount+1<L.projectiles){
           const spin=(p.age??0)*24.0+(p.id??0)*1.7;
           const offX=Math.cos(spin)*p.radius*2.2,offY=Math.sin(spin)*p.radius*1.4;
-          balls.set([p.position[0]+offX,p.position[1]+offY,p.position[2],p.radius*0.88],ballCount++*4);
-          balls.set([p.position[0]-offX,p.position[1]-offY,p.position[2],p.radius*0.88],ballCount++*4);
+          balls.set([p.position[0]+offX,p.position[1]+offY,p.position[2],p.radius*0.88],bead(p,0));
+          balls.set([p.position[0]-offX,p.position[1]-offY,p.position[2],p.radius*0.88],bead(p,1));
         }else{
-          balls.set([...p.position,signedRadius],ballCount++*4);
+          balls.set([...p.position,signedRadius],bead(p,0));
         }
       }
       for(const seg of state.aimArcs){
@@ -332,13 +337,13 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         arcs.set([...seg.p0,...seg.p1,...seg.style],arcSegmentCount++*12);
       }
       sendCounts();
-      if(ballCount)device.queue.writeBuffer(ballBuffer,0,balls,0,ballCount*4);
+      shotSink?.place(balls,ballSeeds,ballCount);
       if(arcSegmentCount)device.queue.writeBuffer(arcBuffer,0,arcs,0,arcSegmentCount*12);
     },
-    drawProjectiles(pass){
-      if(!ballCount)return;
-      pass.setPipeline(pipelines[0]);pass.setBindGroup(0,groups[0]);pass.draw(12*8*6,ballCount);
-    },
+    // Where every ball in flight is placed each update: x, y, z and its radius (negative for hot shot), with its seed.
+    // js/props.js's shot scene, which cuts and draws them through the one continuum.
+    get shot(){return shotSink;},
+    set shot(sink){shotSink=sink;shotSink?.place(balls,ballSeeds,ballCount);},
     // Fire light for this frame, put where the frame's and each burning hull's shaders read it. Encode it
     // before any pass that lights a surface. frame is the frame uniform; hull(i) gives vessel i's own.
     encodeLights(encoder,{frame=frameUBO,hull=null}={}){
@@ -370,7 +375,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         depthTexture?.destroy();depthWidth=width;depthHeight=height;
         depthTexture=device.createTexture({label:'cannon smoke opaque depth',size:[width,height],format:'r32float',usage:T.STORAGE_BINDING|T.TEXTURE_BINDING});
         depthSource=null;
-        volumeGroup=device.createBindGroup({layout:pipelines[1].getBindGroupLayout(0),entries:volumeEntries()});
+        volumeGroup=device.createBindGroup({layout:pipelines[VOLUME].getBindGroupLayout(0),entries:volumeEntries()});
         // This reaches the GPU before the frame's commands run, so the sort already encoded dispatches by it.
         counts[2]=Math.ceil(width/8);counts[3]=Math.ceil(height/8);sendCounts();
       }
@@ -381,27 +386,27 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
     // In the scene's own pass: aiming arcs, and what a strike throws up.
     drawInPass(pass){
       if(arcSegmentCount){
-        pass.setPipeline(pipelines[5]);pass.setBindGroup(0,groups[5]);pass.draw(6,arcSegmentCount);
+        pass.setPipeline(pipelines[ARC]);pass.setBindGroup(0,groups[ARC]);pass.draw(6,arcSegmentCount);
       }
       if(impactCount){
-        pass.setPipeline(pipelines[2]);pass.setBindGroup(0,groups[2]);if(crownWaves)pass.setBindGroup(1,crownWaves[surfaceWaves.current]);pass.draw(GUNNERY_CROWN_SEGMENTS*GUNNERY_CROWN_ROWS*6,impactCount);
-        pass.setPipeline(pipelines[3]);pass.setBindGroup(0,groups[3]);pass.draw(6,impactCount*GUNNERY_DROP_COUNT);
-        pass.setPipeline(pipelines[7]);pass.setBindGroup(0,groups[7]);pass.draw(6,impactCount*GUNNERY_DUST_COUNT);
-        pass.setPipeline(pipelines[6]);pass.setBindGroup(0,groups[6]);pass.draw(6,impactCount*GUNNERY_EARTH_COUNT);
-        pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);if(ringWaves)pass.setBindGroup(1,ringWaves[surfaceWaves.current]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
+        pass.setPipeline(pipelines[CROWN]);pass.setBindGroup(0,groups[CROWN]);if(crownWaves)pass.setBindGroup(1,crownWaves[surfaceWaves.current]);pass.draw(GUNNERY_CROWN_SEGMENTS*GUNNERY_CROWN_ROWS*6,impactCount);
+        pass.setPipeline(pipelines[DROP]);pass.setBindGroup(0,groups[DROP]);pass.draw(6,impactCount*GUNNERY_DROP_COUNT);
+        pass.setPipeline(pipelines[DUST]);pass.setBindGroup(0,groups[DUST]);pass.draw(6,impactCount*GUNNERY_DUST_COUNT);
+        pass.setPipeline(pipelines[EARTH]);pass.setBindGroup(0,groups[EARTH]);pass.draw(6,impactCount*GUNNERY_EARTH_COUNT);
+        pass.setPipeline(pipelines[RING]);pass.setBindGroup(0,groups[RING]);if(ringWaves)pass.setBindGroup(1,ringWaves[surfaceWaves.current]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
       }
     },
     // After the scene pass has ended and `resolveDepth` has run, in a pass on the resolved colour. The GPU's sort
     // says how many volumes: only those in view, nearest last.
     drawVolumes(pass){
-      if(depthReady&&sorted){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,volumeGroup);pass.drawIndirect(drawBuffer,0);}
+      if(depthReady&&sorted){pass.setPipeline(pipelines[VOLUME]);pass.setBindGroup(0,volumeGroup);pass.drawIndirect(drawBuffer,0);}
     },
     clear(){
-      state.clear();sendFires(fires.clear());ballCount=arcSegmentCount=0;depthReady=sorted=false;
+      state.clear();sendFires(fires.clear());ballCount=arcSegmentCount=0;shotSink?.place(balls,ballSeeds,0);depthReady=sorted=false;
       // No shot or bank has generation zero: emptied records are smoke that never was.
       shotRecords.fill(0);bankRecords.fill(0);device.queue.writeBuffer(shotBuffer,0,shotRecords);device.queue.writeBuffer(bankBuffer,0,bankRecords);
       sendSmoke();sendCounts();settle=true;
     },
-    destroy(){for(const buffer of [volumeBuffer,ballBuffer,contactBuffer,arcBuffer,shotBuffer,bankBuffer,stateBuffer,fireBuffer,orderBuffer,drawBuffer,countBuffer,lightBuffer,ownHulls])buffer?.destroy();noise.destroy();depthTexture?.destroy();},
+    destroy(){for(const buffer of [volumeBuffer,contactBuffer,arcBuffer,shotBuffer,bankBuffer,stateBuffer,fireBuffer,orderBuffer,drawBuffer,countBuffer,lightBuffer,ownHulls])buffer?.destroy();noise.destroy();depthTexture?.destroy();},
   };
 }

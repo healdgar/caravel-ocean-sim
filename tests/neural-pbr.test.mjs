@@ -28,7 +28,7 @@ import {
 } from '../js/wgsl/neural-pbr.js';
 import { CARAVEL, CARAVEL_DAMAGED } from '../js/wgsl/caravel.js';
 import { TERRAIN } from '../js/wgsl/terrain.js';
-import { PROPS_RENDER } from '../js/wgsl/props.js';
+import { propContinuumRenderWGSL } from '../js/wgsl/prop-continuum.js';
 import { withPosedVesselVertices } from '../js/vessel-pose.js';
 import { createSubmergedShader } from '../js/water-optics.js';
 
@@ -124,7 +124,7 @@ test('WGSL transforms respect zero-sampled-texture budget, minification invarian
   const minify = src => src.replace(/\s+/g, ' ').replace(/ ?([{}()[\],;:=<>*&|^!%@.]) ?/g, '$1');
   assert.match(withNeuralPbrVessel(minify(CARAVEL)), /neuralPbrAnisoSpecular/);
   assert.match(withNeuralPbrTerrain(minify(TERRAIN)), /evalNeuralPbr/);
-  assert.match(withNeuralPbrProps(minify(PROPS_RENDER)), /neuralPbrAnisoSpecular/);
+  assert.match(withNeuralPbrProps(minify(propContinuumRenderWGSL())), /neuralPbrAnisoSpecular/);
 
   assert.throws(() => withNeuralPbrVessel('fn broken() {}'), /missing anchor/);
   assert.throws(() => withNeuralPbrTerrain('fn broken() {}'), /missing anchor/);
@@ -133,17 +133,15 @@ test('WGSL transforms respect zero-sampled-texture budget, minification invarian
 
 test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero errors and isolates non-landSurface bindings', { timeout: 120000 }, async () => {
   // Load actual `main` branch shader modules directly from git to prove zero-conflict portability!
-  const [mainCaravel, mainTerrain, mainProps] = await Promise.all([
+  const [mainCaravel, mainTerrain] = await Promise.all([
     importFromGitRef('main', 'js/wgsl/caravel.js'),
     importFromGitRef('main', 'js/wgsl/terrain.js'),
-    importFromGitRef('main', 'js/wgsl/props.js'),
   ]);
 
   const mainVariants = {
     caravel: withNeuralPbrVessel(mainCaravel.CARAVEL),
     caravelDamaged: withNeuralPbrVessel(mainCaravel.CARAVEL_DAMAGED),
     terrain: withNeuralPbrTerrain(mainTerrain.TERRAIN),
-    props: withNeuralPbrProps(mainProps.PROPS_RENDER),
   };
 
   const headVariants = {
@@ -152,7 +150,7 @@ test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero 
     terrain: withNeuralPbrTerrain(TERRAIN),
     terrainSubmerged: createSubmergedShader(withNeuralPbrTerrain(TERRAIN), 'fs', 'in.world', true, true),
     vesselSubmerged: createSubmergedShader(withNeuralPbrVessel(withPosedVesselVertices(CARAVEL)), 'fs', 'in.world', false, false),
-    props: withNeuralPbrProps(PROPS_RENDER),
+    props: withNeuralPbrProps(propContinuumRenderWGSL()),
   };
 
   const page = await pbrBrowser.newPage();

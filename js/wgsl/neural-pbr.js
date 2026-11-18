@@ -496,8 +496,8 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
 
 /**
  * Injects Shared Neural PBR Material Bank evaluation & anisotropic GGX specular
- * into PROPS_RENDER (dockside crates, barrels, timber balks, cordage, stone bollards, canvas bales).
- * Works across both `main` and feature branches (plus minified WGSL).
+ * into the prop continuum's view shader (js/wgsl/prop-continuum.js propContinuumRenderWGSL: dockside timber, cleats,
+ * round shot), plain or minified.
  */
 export function withNeuralPbrProps(source, { group = 0, latentBinding = 14, weightBinding = 15 } = {}) {
   const block = createNeuralPbrWGSL({ group, latentBinding, weightBinding });
@@ -510,8 +510,8 @@ export function withNeuralPbrProps(source, { group = 0, latentBinding = 14, weig
 
   out = neuralPbrReplaceRequired(
     out,
-    /let\s+albedo\s*=\s*textureSample\(\s*pigment\s*,\s*pigmentSampler\s*,\s*v\.uv\s*\)\.rgb\s*;/,
-    'var albedo=textureSample(pigment,pigmentSampler,v.uv).rgb;',
+    /let\s+albedo\s*=\s*propContinuumAlbedo\(\s*v\s*\)\s*;/,
+    'var albedo=propContinuumAlbedo(v);',
     'props mutable albedo'
   );
 

@@ -33,6 +33,8 @@ function installGunneryFxRig(){
     const sampler=device.createSampler({minFilter:'linear',magFilter:'linear'}),seaSampler=device.createSampler({minFilter:'linear',magFilter:'linear',addressModeU:'repeat',addressModeV:'repeat'});
     const shader=async(code,label)=>{const module=device.createShaderModule({code,label});errors.push(...(await module.getCompilationInfo()).messages.filter(v=>v.type==='error').map(v=>label+': '+v.message));return module;};
     const fx=await createGunneryEffects({device,frameUBO:frame,hulls,hullCount:2,transView:trans.createView(),skyView:sky.createView(),sampler,envView:env.createView({dimension:'cube'}),sunVis:sun,seaView:sea.createView({dimension:'2d-array'}),seaSampler,shader,format:'rgba16float',samples:4});
+    // Where the game's prop continuum takes the balls (js/props.js shot): each placing, as it was handed over.
+    const placedShot=[];fx.shot={place:(balls,seeds,n)=>placedShot.push({balls:Array.from(balls.subarray(0,n*4)),seeds:Array.from(seeds.subarray(0,n))})};
     const ms=device.createTexture({size:[256,256],sampleCount:4,format:'rgba16float',usage:T.RENDER_ATTACHMENT});
     const target=device.createTexture({size:[256,256],format:'rgba16float',usage:T.RENDER_ATTACHMENT|T.COPY_SRC});
     const depth=device.createTexture({size:[256,256],sampleCount:4,format:'depth32float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
@@ -46,9 +48,9 @@ function installGunneryFxRig(){
     async function render(occlusion=0,backgroundAlpha=1){
       const encoder=device.createCommandEncoder();fx.encodeLights(encoder,{frame,hull:i=>hullUniforms[i]});fx.encode(encoder);
       let pass=encoder.beginRenderPass({colorAttachments:[{view:ms.createView(),resolveTarget:target.createView(),clearValue:[.02,.04,.06,backgroundAlpha],loadOp:'clear',storeOp:'store'}],depthStencilAttachment:{view:depthView,depthClearValue:occlusion,depthLoadOp:'clear',depthStoreOp:'store'}});
-      // As the game draws them: balls, splashes and debris in the scene's multisampled pass, then the smoke and
-      // flame volumes onto its resolved colour, marched against a resolved copy of its depth.
-      fx.drawProjectiles(pass);fx.drawInPass(pass);pass.end();
+      // As the game draws them: splashes and debris in the scene's multisampled pass, then the smoke and flame
+      // volumes onto its resolved colour, marched against a resolved copy of its depth. Balls are the continuum's.
+      fx.drawInPass(pass);pass.end();
       if(fx.volumesActive){fx.resolveDepth(encoder,depthView,256,256);pass=encoder.beginRenderPass({colorAttachments:[{view:target.createView(),loadOp:'load',storeOp:'store'}]});fx.drawVolumes(pass);pass.end();}
       encoder.copyTextureToBuffer({texture:target},{buffer:read,bytesPerRow:256*8},[256,256]);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);const data=Array.from(new Uint16Array(read.getMappedRange()),half);read.unmap();return data;
     }
@@ -67,7 +69,7 @@ function installGunneryFxRig(){
     // What the GPU's sort left for the passes after it: how many volumes it draws, and the workgroups the depth is copied with.
     const sorted=async()=>{const encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(fx.drawBuffer,0,readFloats,0,32);device.queue.submit([encoder.finish()]);
       await readFloats.mapAsync(GPUMapMode.READ,0,32);const words=Array.from(new Uint32Array(readFloats.getMappedRange(0,32)));readFloats.unmap();return {volumes:words[1],depthGroups:words.slice(4,7)};};
-    return {device,errors,f,frame,setFrame,hulls,hullData,hullUniforms,write:original,fx,render,advance,floats,sorted,changed,panel,uploads,made,finish};
+    return {device,errors,f,frame,setFrame,hulls,hullData,hullUniforms,write:original,fx,render,advance,floats,sorted,changed,panel,uploads,made,finish,placedShot};
   };
 }
 async function gunneryFxPage(){
@@ -75,11 +77,11 @@ async function gunneryFxPage(){
   await page.goto(`http://localhost:${gunneryFxPort}/__gunnery-fx`);await page.evaluate(installGunneryFxRig);return page;
 }
 
-test('a gun leaves a flash, a jet and a bank of dense smoke that the GPU carries off on the wind; roundshot and splashes draw with correct depth',{timeout:180000},async()=>{
+test('a gun leaves a flash, a jet and a bank of dense smoke that the GPU carries off on the wind; roundshot is handed to the continuum and splashes draw with correct depth',{timeout:180000},async()=>{
   const page=await gunneryFxPage();
   try{
     const result=await page.evaluate(async()=>{
-      const {errors,f,setFrame,fx,render,advance,floats,sorted,changed,panel,uploads,made,finish}=await gunneryFxRig();
+      const {errors,f,setFrame,fx,render,advance,floats,sorted,changed,panel,uploads,made,finish,placedShot}=await gunneryFxRig();
       let clock=590;
       // The frame carries the clock and the wind, and the smoke takes both from it on the GPU. The effects are
       // handed the clock, and the wind only to know when a bank's record can be dropped.
@@ -118,7 +120,7 @@ test('a gun leaves a flash, a jet and a bank of dense smoke that the GPU carries
       fx.clear();air(0,0);run(.05);for(let gun=0;gun<8;gun++)fx.emitShot({position:[-3,1,-2.4*gun],direction:[1,0,0],chargeKg:3});run(1);
       const jets=[];for(const shot of fx.state.shots){const v=await floats(fx.volumeBuffer,20,(fx.volumeSlots.jets+shot.slot)*20);jets.push({centre:v.slice(0,3),radii:[v[7],v[11],v[15]],aim:v.slice(12,15),extinction:v[16]});}
       const rowPixels=await render();panel(rowPixels,'1 s: eight guns');
-      fx.clear();air(0,0);f[35]=2;sky();fx.setProjectiles([{position:[0,1,0],radius:.3}]);fx.update(0,{time:clock});const ball=changed(await render());
+      fx.clear();air(0,0);f[35]=2;sky();fx.setProjectiles([{id:7,position:[0,1,0],radius:.3},{id:8,position:[1,1,0],radius:.1,ammo:'hot'}]);fx.update(0,{time:clock});const ball={placed:placedShot.at(-1),drawn:changed(await render())};fx.update(0,{time:clock});ball.again=placedShot.at(-1);
       fx.clear();fx.emitImpact({position:[0,0,0],velocity:[25,-35,-5],massKg:12});run(.3,.05);const splashPixels=await render(),splash=changed(splashPixels),splashOccluded=changed(await render(.03));panel(splashPixels,'300 ms: real water impact');
       const birth=Array.from(fx.state.impacts[0].position);fx.clear();run(.1);const cleared=changed(await render());
       await finish();return {errors,idleWrites,idleWork,fired,flash,smoke,occluded,night,billow,peakOpacity,calm,walled,facing,behind,away,sent,at4,at8,drifting,banksAt8,torn,gone,kept,stillWorking,groupsMadeLater,jets,ball,splash,splashOccluded,birth,cleared,smokeCounts};
@@ -163,7 +165,9 @@ test('a gun leaves a flash, a jet and a bank of dense smoke that the GPU carries
     let widest=1;for(const a of jets)for(const b of jets)widest=Math.min(widest,a.aim.reduce((sum,v,k)=>sum+v*b.aim[k],0));
     assert.ok(widest<Math.cos(10*Math.PI/180),'lean: '+thrown);
     for(const jet of jets)assert.ok(jet.extinction>0&&jet.aim[0]>.9&&jet.centre[0]>-3&&jet.radii.every(r=>r>.5&&r<9),'each still a jet along its own gun\'s line: '+thrown);
-    assert.ok(result.ball.count>5&&result.ball.min<.035,told);
+    // The effects draw no ball of their own: each is placed, at its radius (hot shot's negative), on a seed it keeps.
+    assert.deepEqual(result.ball.placed.balls.map(v=>+v.toFixed(3)),[0,1,0,.3,1,1,0,-.1],told);assert.equal(result.ball.drawn.count,0,told);
+    assert.deepEqual(result.ball.again.seeds,result.ball.placed.seeds,told);assert.notEqual(result.ball.placed.seeds[0],result.ball.placed.seeds[1],told);
     assert.ok(result.splash.count>20,told);assert.equal(result.splashOccluded.count,0,told);
     assert.deepEqual(result.birth,[0,0,0]);assert.equal(result.cleared.count,0,told);
   }finally{await page.close();}
