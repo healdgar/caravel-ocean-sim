@@ -40,3 +40,4 @@ docs/assets/ships/
 # The historical ports' baked prefab bodies: npm run deploy publishes them, scripts/prepare-prefab-continuum.mjs bakes them.
 assets/prefab-continuum/*.bin.gz
 docs/assets/prefab-continuum/
+assets/ground-cover/tropical/meadows/
