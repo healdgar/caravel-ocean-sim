@@ -85,21 +85,24 @@ const people = oldWorldPeople(city, year), seat = Number(option('seat', city.sea
 const east = (longitude) => (longitude - region.longitude) * Math.cos(region.latitude * Math.PI / 180) * 111195;
 const south = (latitude) => (region.latitude - latitude) * 111195;
 const number = (name, fallback) => Number(option(name, fallback));
-// The model founds a town only on dry ground some metres above the sea. Where this ground puts a town's recorded
-// site in the water or on the strand (a harbour's channel surveyed a little wide), the town stands on the nearest
-// ground that is, as its founders stood it on the shore of the water the survey shows.
-const FOUNDING_GROUND = 4, FOUNDING_REACH = 1600;
+// A town's recorded site on dry ground, however low on its bank, is where it is founded. Only where this ground puts
+// the site in the water or on the strand (a harbour's channel surveyed a little wide, a record's point set in the
+// river) does the town stand elsewhere: on the nearest terrace some metres above the water, with dry ground about it,
+// as its founders stood it on the shore of the water the survey shows.
+const STRAND = 1, FOUNDING_GROUND = 4, FOUNDING_REACH = 1600;
 function onFoundingGround(x, z) {
   const n = Math.round(Math.sqrt(land.heights.length)), step = region.span / (n - 1), at = (i, j) => i < 0 || j < 0 || i >= n || j >= n ? -1 : land.heights[j * n + i];
   const i0 = Math.round((x + region.span / 2) / step), j0 = Math.round((z + region.span / 2) / step);
-  const fits = (i, j) => at(i, j) >= FOUNDING_GROUND && [[-2, 0], [2, 0], [0, -2], [0, 2], [-2, -2], [2, 2], [-2, 2], [2, -2]].every(([di, dj]) => at(i + di, j + dj) > 1);
-  if (fits(i0, j0)) return { x, z }; // a site already on such ground stands where it is recorded
+  const fits = (i, j) => at(i, j) >= FOUNDING_GROUND && [[-2, 0], [2, 0], [0, -2], [0, 2], [-2, -2], [2, 2], [-2, 2], [2, -2]].every(([di, dj]) => at(i + di, j + dj) > STRAND);
+  say(`recorded site (${x}, ${z}) stands on ${at(i0, j0).toFixed(1)} m of ground`);
+  if (at(i0, j0) >= STRAND) return { x, z };
   let best = null, least = Infinity;
   for (let r = 0; r * step <= FOUNDING_REACH && r <= least; r++) for (let j = j0 - r; j <= j0 + r; j++) for (let i = i0 - r; i <= i0 + r; i++) {
     if (Math.max(Math.abs(i - i0), Math.abs(j - j0)) !== r || !fits(i, j)) continue;
     const d = Math.hypot(i - i0, j - j0);
     if (d < least) { least = d; best = { x: i * step - region.span / 2, z: j * step - region.span / 2 }; }
   }
+  if (best) say(`  in the water: founded ${Math.round(Math.hypot(best.x - x, best.z - z))} m off, at (${Math.round(best.x)}, ${Math.round(best.z)})`);
   return best ?? { x, z };
 }
 // A port already baked for this year keeps the country it was given: its seed, unless another is asked for.

@@ -415,9 +415,9 @@
     "sha256": "02c07b72c91b884b9bb330453fb0e1f7e08d25beaefe336b4a2d754157112bb9"
   },
   "assets/boards/campeche-1550.world": {
-    "url": "assets/boards/campeche-1550.69b2a1dc1b83d3c0.world",
-    "bytes": 3501750,
-    "sha256": "69b2a1dc1b83d3c05b8977779b4eca0c34ff533e3a30b1df30b88d2c647c5a18"
+    "url": "assets/boards/campeche-1550.43b8ac9ca39c3149.world",
+    "bytes": 3480962,
+    "sha256": "43b8ac9ca39c3149d69486f66be4de6a9e9a35cabddbec00e387f0cd49f385c2"
   },
   "assets/boards/santa-marta-1550.world": {
     "url": "assets/boards/santa-marta-1550.4171b8a071962d12.world",
@@ -1075,9 +1075,9 @@
     "sha256": "60621d82b2f96839f6ffdf8bc00922ec4c6098702af3296c076faac313e69dd2"
   },
   "assets/boards/campeche-1550.json": {
-    "url": "assets/boards/campeche-1550.169731f41a24b0ed.json",
-    "bytes": 627817,
-    "sha256": "169731f41a24b0ed7aef3db59afd39836320692c7d7e04a3398848f92aeb07a0"
+    "url": "assets/boards/campeche-1550.b541c1a59b9a11aa.json",
+    "bytes": 629459,
+    "sha256": "b541c1a59b9a11aae77cd3e2a70407b3b79d3fde05f9f9bac0ead801710342a6"
   },
   "assets/boards/santa-marta-1550.json": {
     "url": "assets/boards/santa-marta-1550.4bea7c5dd6ccf4d8.json",
@@ -1115,9 +1115,9 @@
     "sha256": "c2a7aade126843c9b6091e02806c84286cbd1dfa6277207db79d5cf6dce6b782"
   },
   "assets/boards/callao-1550.json": {
-    "url": "assets/boards/callao-1550.4c64053f3ffc2f8a.json",
+    "url": "assets/boards/callao-1550.d925859e6a58e51a.json",
     "bytes": 653917,
-    "sha256": "4c64053f3ffc2f8af8a1688fbe85eabd91375f59c301e37910c8b0f5cd4db946"
+    "sha256": "d925859e6a58e51a1560f7b45600dae8b10a2ddf30fe8af4bedb9c364880ecf1"
   },
   "assets/boards/las-palmas-1550.json": {
     "url": "assets/boards/las-palmas-1550.ed933236cf4771fc.json",
@@ -1140,9 +1140,9 @@
     "sha256": "01600cdbc6ba642c8d742a8a99c52e203e72cc92f1cd8a3f7332227ce27602cf"
   },
   "assets/boards/ribeira-grande-1550.json": {
-    "url": "assets/boards/ribeira-grande-1550.31a2edab4f22ad79.json",
-    "bytes": 789906,
-    "sha256": "31a2edab4f22ad795f0f2cd7282b58b17f99e0cf4865b19135904f0b2f26eccd"
+    "url": "assets/boards/ribeira-grande-1550.c6c2a3058212494e.json",
+    "bytes": 789905,
+    "sha256": "c6c2a3058212494eef960bcc4a250115e69995a70b0fe2e6d7ae0064feb10e31"
   },
   "assets/boards/salvador-da-bahia-1550.json": {
     "url": "assets/boards/salvador-da-bahia-1550.cbf360a4e0db84f7.json",
