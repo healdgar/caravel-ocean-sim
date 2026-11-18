@@ -580,7 +580,6 @@ struct Land {domain:vec4f};
 @group(0) @binding(7) var landAlbedo:texture_2d<f32>;
 @group(0) @binding(8) var landSampler:sampler;
 @group(0) @binding(9) var vegetationMask:texture_2d<f32>;
-@group(0) @binding(10) var leafSpray:texture_2d<f32>;
 @group(0) @binding(11) var<uniform> leafMean:vec4f;
 struct NearLand {domain:vec4f,grid:vec4f};
 @group(0) @binding(12) var<uniform> nearTerrain:NearLand;
@@ -770,35 +769,6 @@ fn cityRoofAge(root:vec4f,tone:f32)->f32{return fract(tone*3.17+root.x*0.071+roo
   let shifted=o.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
   return o;
-}
-fn treeWindForce()->f32{return clamp(F.windP[0].z/12.0,0.0,2.2)*0.018;}
-fn treeWindDirection(phase:f32)->vec2f{
-  let wind=F.windP[0].xy;let crosswind=vec2f(-wind.y,wind.x);
-  let gust=0.7+0.3*sin(F.camPos.w*0.65+phase);
-  return wind*gust+crosswind*sin(F.camPos.w*0.49+phase)*0.22;
-}
-// Where one vertex of a tree stands: root.w is its width, shape.x its height and shape.y its turn.
-// The colour pass and the shadow pass both place trees with this, so a shadow lies under its tree.
-fn treeWorld(position:vec3f,root:vec4f,shape:vec4f)->vec3f{
-  let phase=shape.y*2.0*PI;let c=cos(phase);let s=sin(phase);
-  let local=vec3f((position.x*c-position.z*s)*root.w,position.y*shape.x,(position.x*s+position.z*c)*root.w);
-  // Bend the entire connected structure by height. The same wind field and
-  // seed at every tier preserve branch attachments and tree identity at LODs.
-  let swayXZ=treeWindDirection(phase)*treeWindForce()*shape.x*position.y*position.y;
-  return root.xyz+local+vec3f(swayXZ.x,0.0,swayXZ.y);
-}
-@vertex fn treeVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
-  @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
-  let phase=shape.y*2.0*PI;
-  let angle=phase;let c=cos(angle);let s=sin(angle);
-  let windForce=treeWindForce();
-  let windDirection=treeWindDirection(phase);
-  var o:LandVertex;o.world=treeWorld(position,root,shape);
-  let scaled=normal/max(vec3f(root.w,shape.x,root.w),vec3f(0.001));
-  var rotated=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
-  rotated.y-=dot(rotated.xz,windDirection)*windForce*2.0*position.y;
-  o.normal=normalize(rotated);o.leafUV=leafUV;
-  o.kind=kind;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1.0);return o;
 }
 @vertex fn groundVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
   @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
@@ -1610,85 +1580,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   color+=lightningSurface(n,vEye,albedo,roughness)+worldFireSurface(world,n,vEye,albedo,roughness);
   return vec4f(surfaceAir(color,world),1);
 }
-@fragment fn leafFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
-  let world=in.world;
-  let uvCentered=in.leafUV-vec2f(0.5,0.5);
-  let n=normalize(in.normal*select(-1.0,1.0,front)+vec3f(uvCentered.x*0.24,uvCentered.y*0.20,0.0));
-  let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
-  // Derivative-dependent samples precede discard; this shader alone is cutout.
-  let leaf=textureSampleBias(leafSpray,landSampler,in.leafUV,0.1);
-  let source=pow(textureSample(landAlbedo,landSampler,uv).rgb,vec3f(2.2));
-  let regionalTint=clamp(source/vec3f(0.10,0.14,0.06),vec3f(0.7),vec3f(1.3));
-  let exposure=clamp(in.kind.y,0.0,1.0);let nDotL=dot(n,F.sunDir.xyz);
-  let backlit=max(-nDotL,0.0)*0.52;
-  let warmTrans=mix(vec3f(1.0),vec3f(1.12,1.16,0.78),backlit*exposure);
-  let albedo=pow(leaf.rgb,vec3f(2.2))*mix(vec3f(1),regionalTint,0.2)*warmTrans*(0.76+exposure*0.34);
-  let diffuse=(max(nDotL,0.0)+backlit)*(0.22+0.78*exposure*exposure);
-  let ambientVisibility=0.12+exposure*0.56+abs(n.y)*0.09;
-  if(leaf.a<0.015){discard;}
-  let color=landFinishShadowed(world,n,albedo,diffuse,ambientVisibility,0.16*exposure,0.52,mix(0.68,1.0,landShadowVisibility(world,n)));
-  return vec4f(color.rgb,leaf.a);
-}
 `+LAND_CRATER_RENDER+/* wgsl */ `
-// Imported canopy streams already contain absolute Y-up world positions and
-// source linear material factors. Do not run treeVS's root/scale/yaw/sway again.
-struct CanopyVertex {
-  @builtin(position) pos:vec4f,
-  @location(0) world:vec3f,
-  @location(1) normal:vec3f,
-  @location(2) kind:vec2f,
-  @location(3) leafUV:vec2f,
-  @location(4) colour:vec3f,
-};
-@vertex fn bakedCanopyVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
-  @location(5) leafUV:vec2f,@location(6) colour:vec3f)->CanopyVertex{
-  var o:CanopyVertex;o.world=position;o.normal=normal;o.kind=kind;o.leafUV=leafUV;o.colour=colour;
-  o.pos=F.viewProj*vec4f(earthCurve(position-F.camPos.xyz,F.camPos.y),1);return o;
-}
-// Opaque imported wood/crowns stay in the opaque visibility path. Their call
-// graph has no discard or foliage texture; source RGB replaces shared green.
-@fragment fn canopyOpaqueFS(in:CanopyVertex)->@location(0) vec4f{
-  let dx=dpdx(in.world);let dy=dpdy(in.world);
-  let footprint=max(length(dx),length(dy));
-  let crown=in.kind.x>3.5;
-  let exposure=clamp(in.kind.y,0.0,1.0);
-  var n=normalize(in.normal);
-  var col=in.colour;
-  var relief=0.0;
-  if(crown){
-    let clump=landFilteredNoise(in.world.xz*0.42+vec2f(in.world.y*0.28),footprint*0.42);
-    let subClump=landFilteredNoise(in.world.xz*1.15-vec2f(in.world.y*0.65),footprint*1.15);
-    relief=(clump*0.16+subClump*0.08)*(0.45+0.55*exposure);
-    col=col*(0.88+0.22*exposure+clump*0.10+subClump*0.06);
-  }
-  let rx=dpdx(relief);let ry=dpdy(relief);
-  if(crown){n=landFilteredBump(n,dx,dy,rx,ry);}
-  let nDotL=dot(n,F.sunDir.xyz);
-  let diffuse=max(nDotL,0.0)+select(0.0,max(-nDotL,0.0)*0.22*exposure,crown);
-  let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.48+max(n.y,0)*.09,crown);
-  return landFinishShadowed(in.world,n,col,diffuse,ambient,0,select(0.94,0.92,crown),mix(0.62,1.0,landShadowVisibility(in.world,n)));
-}
-@fragment fn canopyLeafFS(in:CanopyVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
-  let uvCentered=in.leafUV-vec2f(0.5,0.5);
-  let n=normalize(in.normal*select(-1.0,1.0,front)+vec3f(uvCentered.x*0.22,uvCentered.y*0.18,0.0));
-  // This borrowed alpha is an explicit approximation: the supplied GLB/native
-  // streams contain no leaf image. Never replace their linear RGB with it.
-  let alpha=textureSampleBias(leafSpray,landSampler,in.leafUV,.1).a;
-  let exposure=clamp(in.kind.y,0,1);let nDotL=dot(n,F.sunDir.xyz);
-  let backlit=max(-nDotL,0)*.50;
-  let warmCol=in.colour*mix(vec3f(1.0),vec3f(1.10,1.14,0.82),backlit*exposure);
-  let diffuse=(max(nDotL,0)+backlit)*(.22+.78*exposure*exposure);
-  let ambient=.12+exposure*.56+abs(n.y)*.09;
-  if(alpha<.015){discard;}
-  let color=landFinishShadowed(in.world,n,warmCol,diffuse,ambient,0,.92,mix(0.62,1.0,landShadowVisibility(in.world,n)));
-  return vec4f(color.rgb,alpha);
-}
 @vertex fn portShadowVS(@location(0) position:vec3f)->@builtin(position) vec4f{
   return landSH.lightView*vec4f(position-landSH.origin.xyz,1.0);
-}
-@vertex fn treeShadowVS(@location(0) position:vec3f,@location(3) root:vec4f,@location(4) shape:vec4f)->@builtin(position) vec4f{
-  let rc=landSH.lightView*vec4f(root.xyz+vec3f(0.0,0.5*shape.x,0.0)-landSH.origin.xyz,1.0);
-  if(abs(rc.x)>1.22||abs(rc.y)>1.22||rc.z<-0.08||rc.z>1.08){return vec4f(2.0,2.0,0.0,1.0);}
-  return landSH.lightView*vec4f(treeWorld(position,root,shape)-landSH.origin.xyz,1.0);
 }
 `;

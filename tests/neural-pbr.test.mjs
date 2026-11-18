@@ -187,7 +187,7 @@ test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero 
         errors.push(...res.errs);
       }
 
-      // Verify auto-layout isolation: `groundFS` and `leafFS` in TERRAIN must NOT require bindings 22 or 23,
+      // Verify auto-layout isolation: `groundFS` in TERRAIN must NOT require bindings 22 or 23,
       // whereas `fs` (landOpaque -> landSurface) MUST accept bindings 22 and 23!
       let layoutIsolationOk = false;
       if (errors.length === 0) {
@@ -216,15 +216,8 @@ test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero 
           vertex: { module: compiledHead.terrain, entryPoint: 'groundVS', buffers: treeBuffers },
           fragment: { module: compiledHead.terrain, entryPoint: 'groundFS', targets: [{ format: 'rgba16float' }] },
         });
-        const leafPipe = await device.createRenderPipelineAsync({
-          label: 'leafFS isolation check',
-          layout: 'auto',
-          vertex: { module: compiledHead.terrain, entryPoint: 'treeVS', buffers: treeBuffers },
-          fragment: { module: compiledHead.terrain, entryPoint: 'leafFS', targets: [{ format: 'rgba16float' }] },
-        });
-        // Check that groundPipe & leafPipe layouts exist and raise zero uncaptured errors when queried
+        // Check that groundPipe's layout exists and raises zero uncaptured errors when queried
         groundPipe.getBindGroupLayout(0);
-        leafPipe.getBindGroupLayout(0);
         layoutIsolationOk = true;
       }
 

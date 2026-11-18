@@ -1386,8 +1386,8 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/sharing.js` | Shareable scene settings, camera modes, and storm preset |
 | `js/caravel.js` | Niña hull, decks, swivel cannon, lookout, lateen rig and helm geometry |
 | `js/models/victory.js`, `js/victory.js`, `js/victory-motion.js`, `js/wgsl/victory.js` | Victory construction, shared square/fore-and-aft rig poses, support contact and rope leads |
-| `js/terrain-model.js`, `js/terrain.js`, `js/vegetation.js`, `js/wgsl/terrain.js` | Registered regional relief/color, safe starts and deterministic procedural tree LOD |
-| `js/canopy-scenery.js`, `scripts/prepare-canopy-scenery.py`, `CANOPY_SCENERY.md` | Bounded Forestmodeler import, source-coloured baked geometry and conservative LOD contract |
+| `js/terrain-model.js`, `js/terrain.js`, `js/vegetation.js`, `js/wgsl/terrain.js` | Registered regional relief/color, safe starts and procedural tree placement |
+| `scripts/prepare-canopy-scenery.py`, `CANOPY_SCENERY.md` | Forestmodeler source reader for the forest packs; its baked-canopy runtime is retired |
 | `js/dolphins.js`, `js/marine-life.js`, `js/marine-life-state.js`, `js/marine-loader.js`, `js/marine-ui.js` | Bounded wildlife encounters, deferred marine assets, wet animals, contact effects and debug controls |
 | `js/water-optics.js`, `js/wgsl/water-optics.js` | Shared submerged geometry capture, wave refraction, Fresnel and depth/turbidity attenuation |
 | `js/shadows.js`, `js/wgsl/shadows.js`, `js/wgsl/vessel.js` | Boat-relative sunlight shadow maps, cloth transmission, and shared visible/caster rig deformation |

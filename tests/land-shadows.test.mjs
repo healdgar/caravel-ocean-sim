@@ -92,14 +92,12 @@ test('a ship keeps its full shadow filter and the land map takes four taps', () 
   assert.ok(body.indexOf('if(isLand){result+=vec3f(solid*weight);continue;}') < body.indexOf('textureSampleCompareLevel(canvasShadow'), 'the land map reads no cloth');
 });
 
-test('land is shaded by whichever light the map was drawn from, and trees cast where they stand', () => {
+test('land is shaded by whichever light the map was drawn from', () => {
   const finish = TERRAIN.slice(TERRAIN.indexOf('fn landFinishShadowed('), TERRAIN.indexOf('fn landFinish('));
   assert.match(finish, /sunIlluminance\(\)\*sunlight\*solarShadowVisibility\(vec3f\(shadowVis\)\)\.x/);
   assert.match(finish, /lunarSurface\([^;]*lunarShadowVisibility\(vec3f\(shadowVis\)\)\);/);
-  const shadow = TERRAIN.slice(TERRAIN.indexOf('@vertex fn treeShadowVS('));
-  const colour = TERRAIN.slice(TERRAIN.indexOf('@vertex fn treeVS('), TERRAIN.indexOf('@vertex fn groundVS('));
-  assert.match(shadow, /treeWorld\(position,root,shape\)/, 'the shadow pass places a tree as the colour pass does');
-  assert.match(colour, /o\.world=treeWorld\(position,root,shape\)/);
+  // The land draws no trees of its own: every tree casts through the forest's cluster cut (below).
+  assert.ok(!/treeShadowVS|treeVS|treeWorld/.test(TERRAIN));
   const canopy = TERRAIN.slice(TERRAIN.indexOf('let beyondShadowMap='), TERRAIN.indexOf('let diffuse=', TERRAIN.indexOf('let beyondShadowMap=')));
   assert.match(canopy, /1\.0-landShadowCoverage\(world\)/, 'the stand-in canopy shade applies only where the map does not reach');
   assert.match(canopy, /beyondShadowMap>0\.0\)\{[^}]*vegetationMask/, 'and its texture is read only there');

@@ -1,5 +1,10 @@
 # Baked canopy scenery
 
+**Retired runtime.** `js/canopy-scenery.js`, its near/far patch tiers and the `canopy=near|far`
+modes are gone (git history): every tree draws through the forest continuum, and a coast whose
+forest pack cannot load has no trees. `scripts/prepare-canopy-scenery.py` remains as the source
+reader `scripts/prepare-forest-instances.py` uses. The record below is historical.
+
 **Status:** published in `3ba18f9cc6b88cc4be5d116e6110bdcb45f2a8da`.
 Root's serialized native Metal suite passed **709/709**; eight importer checks
 passed separately. Actual modular/Pages rendering, corrupt-pack fallback and

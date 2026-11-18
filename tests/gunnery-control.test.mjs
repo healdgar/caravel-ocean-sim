@@ -384,12 +384,11 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  assert.ok(state.records.some((value,i)=>i%16===15&&value===-1),'what broke flies by a record the GPU reads');
  assert.ok(state.scorch.some(value=>value>.05),'what it did not break is scorched');
 
- // 4. Scenery sweep against coastal 3D palms and procedural trees
+ // 4. Scenery sweep against coastal 3D palms
  const px=port.palms[0],py=port.palms[1],pz=port.palms[2];
  const terrainMock={
   ports:[port],
   height:()=>1.8,
-  treeData:new Float32Array([50,2.0,50,1.2,0,1,0,0]),
  };
  // At the foot, where the trunk stands: higher up it leans away, as it is drawn to.
  const palmHit=sweepScenerySegment([px-8,py+.3,pz],[px+8,py+.3,pz],0.08,terrainMock);

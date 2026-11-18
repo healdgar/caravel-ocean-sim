@@ -28,7 +28,6 @@ const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.
 const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astronomy.js', 'js/continuum-core.js', 'js/continuum-census.js', 'js/crew-skeleton.js', 'js/rig-definition.js', 'js/hull-loft.js', 'js/models/additional.js', 'js/models/rowing.js', 'js/models/later-sail.js', 'js/models/procedural.js', 'js/models/nina.js', 'js/models/victory.js', 'js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/additional-rig.js', 'js/rig-surface.js', 'js/rowing.js', 'js/procedural-models.js', 'js/ship-models.js', 'js/victory-motion.js', 'js/sail-aerodynamics.js', 'js/sailing.js', 'js/dolphin-state.js', 'js/marine-life-state.js', 'js/hull-lateral.js', 'js/boat.js', 'js/gunnery-state.js', 'js/gunnery-models.js', ...wgslModules, 'js/celestial.js', 'js/fleet.js', 'js/surface-waves.js', 'js/surface-bindings.js', 'js/rowing-water.js', 'js/rowing-surface-events.js', 'js/gunnery-effects.js', 'js/gunnery-sea-probe.js', 'js/gunport-safety.js', 'js/hull-contact.js', 'js/vessels.js', 'js/follower.js', 'js/anchor-state.js', 'js/ship-parts.js', 'js/water-optics.js', 'js/underwater.js', 'js/anchor-iron.js', 'js/anchor.js', 'js/dolphin-mesh.js', 'js/dolphins.js', 'js/dolphin-ui.js', 'js/gltf.js', 'js/marine-asset.js', 'js/marine-rig.js', 'js/marine-life.js', 'js/marine-loader.js', 'js/marine-ui.js', 'js/caravel.js', 'js/mesh-writer.js', 'js/victory.js', 'js/additional-ships.js', 'js/rowing-ships.js', 'js/later-sail-ships.js', 'js/ship-mesh.js', 'js/crew-work.js', 'js/gunnery-tools.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/camera.js', 'js/free-cam-mobile.js', 'js/vessel-pose.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/vegetation.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/voice-assets.js', 'js/voice-lines.js', 'js/gunnery-audio-assets.js', 'js/gunnery-audio.js', 'js/gunnery-control.js', 'js/gunnery-ui.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
 // Baked stand loading is deferred to landfall; preserve existing module order.
 order.splice(order.indexOf('js/vegetation.js')+1,0,'js/indigenous-sovereignty.js','js/cairn-primitives.js','js/coastal-world.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/canopy-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/coastal-field.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/sea-colour.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/scenery-cull.js');
@@ -151,11 +150,6 @@ const runtimeAssetTypes = new Map([
   ['assets/world/saba/manifest.json','application/json'],
   ['assets/world/land.json','application/json'],
   ['assets/world/hyg-stars.bin','application/octet-stream'],
-  ['assets/canopy-scenery/saba/manifest.json','application/json'],
-  ['assets/canopy-scenery/saba/near.bin','application/octet-stream'],
-  ['assets/canopy-scenery/saba/leaf.bin','application/octet-stream'],
-  ['assets/canopy-scenery/saba/far.bin','application/octet-stream'],
-  ['assets/canopy-scenery/saba/instances.bin','application/octet-stream'],
   ['assets/ports/1550/buildings-1550-lrm.bin','application/octet-stream'],
   ['assets/ports/1550/buildings-1550-photo-atlas.jpg','image/jpeg'],
   ['assets/ports/1550/land-materials-pbr.png','image/png'],

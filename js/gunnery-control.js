@@ -3798,41 +3798,6 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
   };
 }
 
-function intersectVerticalCylinder(from, to, cx, cz, yMin, yMax, cylRadius) {
-  const dx = to[0] - from[0];
-  const dy = to[1] - from[1];
-  const dz = to[2] - from[2];
-  const ox = from[0] - cx;
-  const oz = from[2] - cz;
-  const a = dx * dx + dz * dz;
-  if (a < 1e-9) {
-    if (ox * ox + oz * oz > cylRadius * cylRadius) return -1;
-    const minY = Math.min(from[1], to[1]);
-    const maxY = Math.max(from[1], to[1]);
-    if (maxY < yMin || minY > yMax) return -1;
-    return 0;
-  }
-  const b = 2 * (ox * dx + oz * dz);
-  const c = ox * ox + oz * oz - cylRadius * cylRadius;
-  const disc = b * b - 4 * a * c;
-  if (disc < 0) return -1;
-  const sqrtD = Math.sqrt(disc);
-  let t0 = (-b - sqrtD) / (2 * a);
-  let t1 = (-b + sqrtD) / (2 * a);
-  if (t1 < 0 || t0 > 1) return -1;
-  const tEnter = Math.max(0, t0);
-  const tExit = Math.min(1, t1);
-  const yEnter = from[1] + dy * tEnter;
-  const yExit = from[1] + dy * tExit;
-  if (Math.max(yEnter, yExit) < yMin || Math.min(yEnter, yExit) > yMax) return -1;
-  if (yEnter >= yMin && yEnter <= yMax) return tEnter;
-  if (Math.abs(dy) > 1e-6) {
-    const tCap = dy > 0 ? (yMin - from[1]) / dy : (yMax - from[1]) / dy;
-    if (tCap >= tEnter && tCap <= tExit) return tCap;
-  }
-  return tEnter;
-}
-
 const FORESHORE_PALMS_SHOOTABLE = 520, PALM_FELLED_AT = 3;
 function foreshorePalmGrid(port) {
   if (port.palmGrid?.palms === port.palms) return port.palmGrid.grid;
@@ -3848,11 +3813,6 @@ function foreshorePalmGrid(port) {
 
 export function sweepScenerySegment(from, to, radius = 0.08, terrain, options = null) {
   if (!terrain) return null;
-  const midX = (from[0] + to[0]) * 0.5;
-  const midZ = (from[2] + to[2]) * 0.5;
-  const segHalf = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) * 0.5;
-  const segMinY = Math.min(from[1], to[1]);
-  const segMaxY = Math.max(from[1], to[1]);
   let best = null;
 
   // A live forest draws every tree and foreshore palm, so its roots are what a ball meets.
@@ -3868,34 +3828,6 @@ export function sweepScenerySegment(from, to, radius = 0.08, terrain, options = 
       const hit = sweepForestTrunks(foreshorePalmGrid(port), from, to, radius);
       if (hit && (!best || hit.fraction < best.fraction)) {
         best = { fraction: hit.fraction, kind: 'scenery', sceneryType: 'palm', port, palmIndex: hit.treeIndex, sceneryPos: hit.sceneryPos, normal: hit.normal };
-      }
-    }
-  }
-
-  const trees = terrain.treeData;
-  if (trees && trees.length >= 8 && !options?.previewOnly) {
-    const reachSq = (segHalf + 5.5) ** 2;
-    for (let i = 0; i < trees.length; i += 8) {
-      const scale = trees[i + 3];
-      if (!(scale > 0.25)) continue;
-      const tx = trees[i], ty = trees[i + 1], tz = trees[i + 2];
-      const tdx = midX - tx, tdz = midZ - tz;
-      if (tdx * tdx + tdz * tdz > reachSq) continue;
-      if (segMaxY < ty - 0.5 - radius || segMinY > ty + 11.5 * scale + radius) continue;
-      const tTree = intersectVerticalCylinder(from, to, tx, tz, ty, ty + 11.0 * scale, 1.9 * scale + radius);
-      if (tTree >= 0 && (!best || tTree < best.fraction)) {
-        const hx = from[0] + (to[0] - from[0]) * tTree;
-        const hz = from[2] + (to[2] - from[2]) * tTree;
-        const nx = hx - tx, nz = hz - tz;
-        const nLen = Math.hypot(nx, 0.35, nz) || 1;
-        best = {
-          fraction: tTree,
-          kind: 'scenery',
-          sceneryType: 'tree',
-          treeIndex: i,
-          sceneryPos: [tx, ty, tz],
-          normal: [nx / nLen, 0.35 / nLen, nz / nLen],
-        };
       }
     }
   }

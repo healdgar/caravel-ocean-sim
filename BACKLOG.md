@@ -189,7 +189,7 @@ Wind (`forestWind`) is three motions at three speeds: the tree bends with height
 
 Still to do, largest first:
 
-- **Old tiers remain** as the fallback if clusters fail to load, and for `?forestClusters=0`: `forestNativeLod` mid tiers, `lod/` sidecars, and the subtropical `lod/`, `middle/` and `volumes/`, which still describe the old models and are unused. `js/forest-lod-pilot.js` and its helpers are an earlier isolated attempt at this and can probably go.
+- [x] **Old tiers retired** (2026-11-17): the native tiers (`js/forest-native-lod.js`), `?forestClusters=0`, the LOD pilot (`js/forest-lod-*.js`), the procedural tree ladder in `js/terrain.js` and the baked canopy fallback (`js/canopy-scenery.js`) are gone; the `lod/`, `middle/` and `volumes/` packs stay on disk, unloaded and unpublished. Remaining outside the continuum: the groves' baked canopy (`js/forest-groves.js`), whose trees are to be planted as forest roots, and `TREE_CULL` in `js/scenery-cull.js` with the tree geometry in `js/vegetation.js` it reads, now drawn by nothing.
 - **Mobile** skips native trees, so with the port's palms gone a phone sees only far models on tropical shores.
 - **Upland tropics are palms and ceiba only.** With mangroves off the hills, nothing fills the understory, and a real tropical hillside would have many more species.
 - **The far crown shells cost 1.65 M triangles.** Clusters could do the same job for less, if the look holds.
@@ -451,7 +451,7 @@ Implementation order:
       biological growth or leaf-area accounting.
 
 **Implementation checkpoint:** the bounded two-species pilot is now code, not
-only a design document. [FOREST_LOD_PILOT.md](FOREST_LOD_PILOT.md) records the
+only a design document. `FOREST_LOD_PILOT.md` (retired, in git history) records the
 source-leaf hierarchy, original material/depth bakes, three woody LODs, paged
 inspection leaves, curved two-triangle source leaf ribbons with offline
 preauthored index assets (~706KB gzipped for oak+birch), shared pixel lighting,

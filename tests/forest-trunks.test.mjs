@@ -64,7 +64,7 @@ test('a tree stands where the shader puts it: turned and scaled, and the ball pa
 
 test('a ball meets a tree of the live forest through the scenery sweep, and only the nearest', () => {
   const grid = gridOf(['oak'], root(0, 0, 0, 1.2, 0), root(30, 0, 0, 1.2, 0));
-  const terrain = { forestTrunks: grid, ports: [], treeData: new Float32Array(0) };
+  const terrain = { forestTrunks: grid, ports: [] };
   const hit = sweepScenerySegment([40, 1.5, 0], [-40, 1.5, 0], 0.07, terrain);
   assert.equal(hit.kind, 'scenery');
   assert.equal(hit.sceneryType, 'tree');

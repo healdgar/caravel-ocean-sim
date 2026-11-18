@@ -206,7 +206,7 @@ for(const entry of ['index.html','ocean.min.html','docs/index.html'])test(`landf
     await page.waitForFunction(()=>check.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
     assert.equal(await page.locator('#err').textContent(),'');
     const frame=await step(page);
-    assert.equal(frame.render.island,1);assert.equal(frame.render['island trees'],1);
+    assert.equal(frame.render.island,1);assert.equal(frame.render['island trees'],undefined,'trees are the forest\'s alone: no procedural ladder stands in for them');
     assert.equal(frame.compute['island sunlight'].length,1);
     await page.getByRole('button',{name:'Landfall',exact:true}).click();
     const hide=page.getByRole('button',{name:'Hide landfall'});

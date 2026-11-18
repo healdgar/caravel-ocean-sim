@@ -79,7 +79,7 @@ export async function readLiveGame(shipIds, regions = []) {
           const { buildingReach, traceShotAtBuilding } = await import('/js/building-fracture.js');
           const t = oceanFleet.terrain, ports = t.ports ?? [];
           return {
-            region, roots: t.trees, treeData: (t.treeData?.length ?? 0) / 8 + (t.forestTrunks?.trees ?? 0), ports: ports.length,
+            region, roots: t.trees, treeData: t.forestTrunks?.trees ?? 0, ports: ports.length,
             instances: ports.reduce((n, p) => n + (p.instances?.length ?? 0), 0),
             meshed: ports.reduce((n, p) => n + (p.instances?.filter((i) => buildingReach(i)).length ?? 0), 0),
             traced: ports.reduce((n, p) => n + (p.instances?.filter((i) => traceShotAtBuilding(i, [0, 0, 0], [1, 0, 0])).length ?? 0), 0),
@@ -127,7 +127,7 @@ export function auditForestTrees(lib, fan = {}) {
       const standing = (scale, yaw, x, y, z) => lib.buildForestTrunkGrid(new Float32Array([x, y, z, scale, yaw, 1, 1, 1, 0, 0, -2, 0]), 1, [p.species]);
       const drawn = A.forestPrototypeIndex(manifest, vertices, indices, i, { scale: 1.1, origin: [0, 5, 0] });
       // What a live forest offers a ball: its own roots.
-      rows.push({ mode: 'forest', set, species: p.species, heightClaimM: p.heightMetres, ...A.auditTreeCollision(drawn, { ports: [], treeData: new Float32Array(0), forestTrunks: standing(1.1, 0, 0, 5, 0) }, lib.sweepScenerySegment, fan) });
+      rows.push({ mode: 'forest', set, species: p.species, heightClaimM: p.heightMetres, ...A.auditTreeCollision(drawn, { ports: [], forestTrunks: standing(1.1, 0, 0, 5, 0) }, lib.sweepScenerySegment, fan) });
       if (p.species === 'palm') {
         // The foreshore fringe: planted by terrain.js where the port records its palms, and drawn and struck as the forest's own.
         for (const shape of [0.2, 0.5, 0.8]) {
