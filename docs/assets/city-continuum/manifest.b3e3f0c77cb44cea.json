@@ -1,0 +1,6508 @@
+{
+ "format": "waterworld.city-continuum",
+ "version": 2,
+ "generator": "scripts/prepare-city-continuum.mjs",
+ "layout": {
+  "atlasVersion": 2,
+  "header": {
+   "magic": 0,
+   "version": 1,
+   "typeCount": 2,
+   "typesAt": 3,
+   "clustersAt": 4,
+   "clusterCount": 5,
+   "verticesAt": 6,
+   "vertexCount": 7,
+   "indicesAt": 8,
+   "indexCount": 9,
+   "chainsAt": 10,
+   "words": 11,
+   "hops": 12,
+   "chunkTriangles": 13,
+   "clusterTriangles": 14,
+   "streams": 15,
+   "skin": 16,
+   "uv": 17,
+   "rider": 18,
+   "wind": 19,
+   "surface": 20
+  },
+  "material": {
+   "roofShare": 24,
+   "wallKind": 25,
+   "roofKind": 27
+  },
+  "streams": 0
+ },
+ "totals": {
+  "types": 86,
+  "clusters": 5602,
+  "vertices": 311813,
+  "indices": 727773,
+  "sourceTriangles": 153716,
+  "farTriangles": 145520
+ },
+ "types": [
+  {
+   "id": 0,
+   "name": "Casa térrea (single-storey house, eaves to the street)",
+   "fingerprint": "f92c9f6b5ca87d27d5923e45a57e308e00ae0e7f0dbea63f92d3398c08be9e25",
+   "sourceTriangles": 1016,
+   "parts": 10,
+   "quantization": {
+    "low": [
+     -3.75012,
+     -6.5,
+     -5.17
+    ],
+    "span": 12.16013
+   },
+   "sphere": [
+    -0.0721,
+    -0.4199,
+    0.0093,
+    9.7214
+   ],
+   "clusters": {
+    "count": 31,
+    "levels": 2,
+    "roots": 15,
+    "finestTriangles": 1016,
+    "rootError": 1.3009
+   },
+   "chain": {
+    "cell": 0.1501,
+    "cells": [
+     59,
+     91,
+     80
+    ],
+    "wellComposedCells": 9,
+    "wrapTriangles": 65560,
+    "baseTriangles": 2112,
+    "baseVertices": 1058,
+    "baseError": 0.3434,
+    "outward": 0.3306,
+    "inward": 0.3434,
+    "simplifyError": 0.0394,
+    "steps": 1053,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.3434,
+     8.5441
+    ],
+    "inflateMax": 1.2154,
+    "rootTriangles": 720,
+    "farFirst": 696,
+    "farFirstTriangles": 720,
+    "handoffError": 0.5452
+   },
+   "splat": {
+    "centre": [
+     -0.0721,
+     2.8301,
+     0.0093
+    ],
+    "ry": 2.8301,
+    "rx": 4.2845,
+    "roofShare": 0.2308,
+    "wallKind": [
+     12.02,
+     0.56222
+    ],
+    "roofKind": [
+     13.02,
+     0.90351
+    ]
+   },
+   "bakeMs": 2602
+  },
+  {
+   "id": 1,
+   "name": "Sobrado (two-storey house, eaves to the street)",
+   "fingerprint": "532f857dd80ad639a20f59c8aa968ea79783ef83f040534067a170890043d27a",
+   "sourceTriangles": 1552,
+   "parts": 12,
+   "quantization": {
+    "low": [
+     -3.68975,
+     -6.5,
+     -5.92
+    ],
+    "span": 15.36975
+   },
+   "sphere": [
+    -0.0845,
+    1.1849,
+    0.0571,
+    11.6485
+   ],
+   "clusters": {
+    "count": 39,
+    "levels": 2,
+    "roots": 22,
+    "finestTriangles": 1552,
+    "rootError": 0.5328
+   },
+   "chain": {
+    "cell": 0.1898,
+    "cells": [
+     48,
+     91,
+     74
+    ],
+    "wellComposedCells": 17,
+    "wrapTriangles": 50444,
+    "baseTriangles": 1528,
+    "baseVertices": 766,
+    "baseError": 0.4506,
+    "outward": 0.428,
+    "inward": 0.4506,
+    "simplifyError": 0.0318,
+    "steps": 761,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.4506,
+     9.3254
+    ],
+    "inflateMax": 1.5362,
+    "rootTriangles": 1158,
+    "farFirst": 185,
+    "farFirstTriangles": 1158,
+    "handoffError": 0.6408
+   },
+   "splat": {
+    "centre": [
+     -0.0845,
+     4.4349,
+     0.0571
+    ],
+    "ry": 4.4349,
+    "rx": 4.9958,
+    "roofShare": 0.1308,
+    "wallKind": [
+     12.02,
+     0.69107
+    ],
+    "roofKind": [
+     13.02,
+     0.93601
+    ]
+   },
+   "bakeMs": 2145
+  },
+  {
+   "id": 2,
+   "name": "Casa de três andares (three-storey house, eaves to the street)",
+   "fingerprint": "998860ed208510540d69a71f564533aee9e350b4fe17f9eabb6435444d1c1a62",
+   "sourceTriangles": 2262,
+   "parts": 27,
+   "quantization": {
+    "low": [
+     -3.62937,
+     -6.5,
+     -6.85
+    ],
+    "span": 18.57938
+   },
+   "sphere": [
+    -0.0741,
+    2.7897,
+    -0.0834,
+    13.7032
+   ],
+   "clusters": {
+    "count": 70,
+    "levels": 2,
+    "roots": 46,
+    "finestTriangles": 2262,
+    "rootError": 1.7313
+   },
+   "chain": {
+    "cell": 0.2294,
+    "cells": [
+     41,
+     91,
+     70
+    ],
+    "wellComposedCells": 15,
+    "wrapTriangles": 42340,
+    "baseTriangles": 1512,
+    "baseVertices": 758,
+    "baseError": 0.551,
+    "outward": 0.5362,
+    "inward": 0.551,
+    "simplifyError": 0.0601,
+    "steps": 753,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.551,
+     8.977
+    ],
+    "inflateMax": 1.857,
+    "rootTriangles": 1894,
+    "farFirst": 0,
+    "farFirstTriangles": 1512,
+    "handoffError": 0.551
+   },
+   "splat": {
+    "centre": [
+     -0.0741,
+     6.0397,
+     -0.0834
+    ],
+    "ry": 6.0397,
+    "rx": 5.4177,
+    "roofShare": 0.097,
+    "wallKind": [
+     12.02,
+     0.58056
+    ],
+    "roofKind": [
+     13.02,
+     1
+    ]
+   },
+   "bakeMs": 1737
+  },
+  {
+   "id": 3,
+   "name": "Casa de quatro andares (four-storey house, eaves to the street)",
+   "fingerprint": "55b92f67fcb70fbb1a7dbba539cbe7f2f952fc656518258e0e188429c9b659a4",
+   "sourceTriangles": 2758,
+   "parts": 29,
+   "quantization": {
+    "low": [
+     -3.66563,
+     -6.5,
+     -6.85
+    ],
+    "span": 21.51563
+   },
+   "sphere": [
+    -0.0797,
+    4.2578,
+    -0.0766,
+    15.1646
+   ],
+   "clusters": {
+    "count": 70,
+    "levels": 2,
+    "roots": 54,
+    "finestTriangles": 2758,
+    "rootError": 0.6813
+   },
+   "chain": {
+    "cell": 0.2656,
+    "cells": [
+     37,
+     91,
+     62
+    ],
+    "wellComposedCells": 12,
+    "wrapTriangles": 34548,
+    "baseTriangles": 1380,
+    "baseVertices": 692,
+    "baseError": 0.6563,
+    "outward": 0.6563,
+    "inward": 0.5153,
+    "simplifyError": 0.0557,
+    "steps": 687,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.6563,
+     13.8783
+    ],
+    "inflateMax": 2.1505,
+    "rootTriangles": 2465,
+    "farFirst": 0,
+    "farFirstTriangles": 1380,
+    "handoffError": 0.6563
+   },
+   "splat": {
+    "centre": [
+     -0.0797,
+     7.5078,
+     -0.0766
+    ],
+    "ry": 7.5078,
+    "rx": 5.544,
+    "roofShare": 0.086,
+    "wallKind": [
+     12.02,
+     0.67995
+    ],
+    "roofKind": [
+     13.02,
+     0.99604
+    ]
+   },
+   "bakeMs": 1749
+  },
+  {
+   "id": 4,
+   "name": "Casa alta (five-storey house, eaves to the street)",
+   "fingerprint": "6f4081f0e65859442b99806b12dfe8ab29831858af4ccc93755fc2f80f0b1bcc",
+   "sourceTriangles": 3138,
+   "parts": 31,
+   "quantization": {
+    "low": [
+     -3.7,
+     -6.5,
+     -7.1
+    ],
+    "span": 24.3
+   },
+   "sphere": [
+    -0.1,
+    5.65,
+    -0.05,
+    16.7243
+   ],
+   "clusters": {
+    "count": 81,
+    "levels": 2,
+    "roots": 60,
+    "finestTriangles": 3138,
+    "rootError": 1.8031
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     34,
+     92,
+     58
+    ],
+    "wellComposedCells": 7,
+    "wrapTriangles": 30964,
+    "baseTriangles": 1692,
+    "baseVertices": 848,
+    "baseError": 0.7,
+    "outward": 0.7,
+    "inward": 0.6557,
+    "simplifyError": 0.0503,
+    "steps": 843,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.7,
+     8.9737
+    ],
+    "inflateMax": 2.4288,
+    "rootTriangles": 2812,
+    "farFirst": 0,
+    "farFirstTriangles": 1692,
+    "handoffError": 0.7
+   },
+   "splat": {
+    "centre": [
+     -0.1,
+     8.9,
+     -0.05
+    ],
+    "ry": 8.9,
+    "rx": 5.9525,
+    "roofShare": 0.0721,
+    "wallKind": [
+     12.02,
+     0.70153
+    ],
+    "roofKind": [
+     13.02,
+     0.91314
+    ]
+   },
+   "bakeMs": 1865
+  },
+  {
+   "id": 5,
+   "name": "Casa térrea de empena (single-storey house, gable to the street)",
+   "fingerprint": "7bb3db5b83d1c76e2f9922d8102de35610886b0c293360c81f8b95c058d3e634",
+   "sourceTriangles": 1104,
+   "parts": 10,
+   "quantization": {
+    "low": [
+     -3.72,
+     -6.5,
+     -5.20013
+    ],
+    "span": 12.16013
+   },
+   "sphere": [
+    0.0331,
+    -0.4199,
+    -0.0208,
+    9.7515
+   ],
+   "clusters": {
+    "count": 35,
+    "levels": 2,
+    "roots": 17,
+    "finestTriangles": 1104,
+    "rootError": 1.2402
+   },
+   "chain": {
+    "cell": 0.1501,
+    "cells": [
+     61,
+     91,
+     79
+    ],
+    "wellComposedCells": 10,
+    "wrapTriangles": 65768,
+    "baseTriangles": 1986,
+    "baseVertices": 995,
+    "baseError": 0.3555,
+    "outward": 0.3421,
+    "inward": 0.3555,
+    "simplifyError": 0.0492,
+    "steps": 990,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.3555,
+     8.9449
+    ],
+    "inflateMax": 1.2154,
+    "rootTriangles": 800,
+    "farFirst": 593,
+    "farFirstTriangles": 800,
+    "handoffError": 0.6243
+   },
+   "splat": {
+    "centre": [
+     0.0331,
+     2.8301,
+     -0.0208
+    ],
+    "ry": 2.8301,
+    "rx": 4.4123,
+    "roofShare": 0.2428,
+    "wallKind": [
+     12.02,
+     0.55688
+    ],
+    "roofKind": [
+     13.02,
+     1
+    ]
+   },
+   "bakeMs": 2903
+  },
+  {
+   "id": 6,
+   "name": "Sobrado de empena (two-storey house, gable to the street)",
+   "fingerprint": "274fd4a537ee8fbbbe0d14d0d2e1e9e9231e292a37cbe82fe57945fc23b7c0ca",
+   "sourceTriangles": 1676,
+   "parts": 12,
+   "quantization": {
+    "low": [
+     -3.62,
+     -6.5,
+     -5.98975
+    ],
+    "span": 15.36975
+   },
+   "sphere": [
+    0.0801,
+    1.1849,
+    -0.0126,
+    11.6168
+   ],
+   "clusters": {
+    "count": 40,
+    "levels": 2,
+    "roots": 24,
+    "finestTriangles": 1676,
+    "rootError": 0.5328
+   },
+   "chain": {
+    "cell": 0.1898,
+    "cells": [
+     50,
+     91,
+     73
+    ],
+    "wellComposedCells": 7,
+    "wrapTriangles": 50244,
+    "baseTriangles": 1652,
+    "baseVertices": 828,
+    "baseError": 0.4455,
+    "outward": 0.428,
+    "inward": 0.4455,
+    "simplifyError": 0.0318,
+    "steps": 823,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.4455,
+     11.0593
+    ],
+    "inflateMax": 1.5362,
+    "rootTriangles": 1290,
+    "farFirst": 181,
+    "farFirstTriangles": 1290,
+    "handoffError": 0.6354
+   },
+   "splat": {
+    "centre": [
+     0.0801,
+     4.4349,
+     -0.0126
+    ],
+    "ry": 4.4349,
+    "rx": 4.9451,
+    "roofShare": 0.1637,
+    "wallKind": [
+     12.02,
+     0.68747
+    ],
+    "roofKind": [
+     13.02,
+     0.92982
+    ]
+   },
+   "bakeMs": 2767
+  },
+  {
+   "id": 7,
+   "name": "Casa de três andares de empena (three-storey house, gable to the street)",
+   "fingerprint": "19d4c1efd7add60b3adae4bf622305ccdab6e0005a7d8a5afd5926acb1441eac",
+   "sourceTriangles": 2426,
+   "parts": 27,
+   "quantization": {
+    "low": [
+     -3.52,
+     -6.5,
+     -6.85
+    ],
+    "span": 18.57938
+   },
+   "sphere": [
+    0.0353,
+    2.7897,
+    -0.0834,
+    13.7032
+   ],
+   "clusters": {
+    "count": 73,
+    "levels": 2,
+    "roots": 49,
+    "finestTriangles": 2426,
+    "rootError": 0.6156
+   },
+   "chain": {
+    "cell": 0.2294,
+    "cells": [
+     42,
+     91,
+     70
+    ],
+    "wellComposedCells": 6,
+    "wrapTriangles": 41872,
+    "baseTriangles": 1202,
+    "baseVertices": 603,
+    "baseError": 0.5362,
+    "outward": 0.5362,
+    "inward": 0.4527,
+    "simplifyError": 0.0308,
+    "steps": 598,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.5362,
+     8.8637
+    ],
+    "inflateMax": 1.857,
+    "rootTriangles": 2078,
+    "farFirst": 0,
+    "farFirstTriangles": 1202,
+    "handoffError": 0.5362
+   },
+   "splat": {
+    "centre": [
+     0.0353,
+     6.0397,
+     -0.0834
+    ],
+    "ry": 6.0397,
+    "rx": 5.3651,
+    "roofShare": 0.1226,
+    "wallKind": [
+     12.02,
+     0.57422
+    ],
+    "roofKind": [
+     13.02,
+     1
+    ]
+   },
+   "bakeMs": 1646
+  },
+  {
+   "id": 8,
+   "name": "Casa de quatro andares de empena (four-storey house, gable to the street)",
+   "fingerprint": "44a2e5a95115abe8df890256acdaf758b5132f7659140b49552278f887a9976d",
+   "sourceTriangles": 2922,
+   "parts": 29,
+   "quantization": {
+    "low": [
+     -3.52,
+     -6.5,
+     -6.85
+    ],
+    "span": 21.51563
+   },
+   "sphere": [
+    0.0659,
+    4.2578,
+    -0.0766,
+    15.1646
+   ],
+   "clusters": {
+    "count": 75,
+    "levels": 2,
+    "roots": 57,
+    "finestTriangles": 2922,
+    "rootError": 1.1614
+   },
+   "chain": {
+    "cell": 0.2656,
+    "cells": [
+     38,
+     91,
+     62
+    ],
+    "wellComposedCells": 4,
+    "wrapTriangles": 34136,
+    "baseTriangles": 998,
+    "baseVertices": 501,
+    "baseError": 0.6563,
+    "outward": 0.6563,
+    "inward": 0.5021,
+    "simplifyError": 0.0696,
+    "steps": 496,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.6563,
+     8.9378
+    ],
+    "inflateMax": 2.1505,
+    "rootTriangles": 2648,
+    "farFirst": 0,
+    "farFirstTriangles": 998,
+    "handoffError": 0.6563
+   },
+   "splat": {
+    "centre": [
+     0.0659,
+     7.5078,
+     -0.0766
+    ],
+    "ry": 7.5078,
+    "rx": 5.5076,
+    "roofShare": 0.0895,
+    "wallKind": [
+     12.02,
+     0.58577
+    ],
+    "roofKind": [
+     13.02,
+     0.98995
+    ]
+   },
+   "bakeMs": 1102
+  },
+  {
+   "id": 9,
+   "name": "Casa alta de empena (five-storey house, gable to the street)",
+   "fingerprint": "3294bd3d78c51817822438bf6d7d635ed66d57fd72bec3add7d116a22ee0dbb2",
+   "sourceTriangles": 3314,
+   "parts": 31,
+   "quantization": {
+    "low": [
+     -3.52,
+     -6.5,
+     -7.1
+    ],
+    "span": 24.3
+   },
+   "sphere": [
+    0.08,
+    5.65,
+    -0.05,
+    16.7243
+   ],
+   "clusters": {
+    "count": 89,
+    "levels": 2,
+    "roots": 64,
+    "finestTriangles": 3314,
+    "rootError": 1.1614
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     35,
+     92,
+     58
+    ],
+    "wellComposedCells": 2,
+    "wrapTriangles": 30844,
+    "baseTriangles": 1144,
+    "baseVertices": 574,
+    "baseError": 0.7,
+    "outward": 0.7,
+    "inward": 0.653,
+    "simplifyError": 0.0403,
+    "steps": 569,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.7,
+     8.9879
+    ],
+    "inflateMax": 2.4288,
+    "rootTriangles": 2957,
+    "farFirst": 0,
+    "farFirstTriangles": 1144,
+    "handoffError": 0.7
+   },
+   "splat": {
+    "centre": [
+     0.08,
+     8.9,
+     -0.05
+    ],
+    "ry": 8.9,
+    "rx": 5.9166,
+    "roofShare": 0.0744,
+    "wallKind": [
+     12.02,
+     0.70153
+    ],
+    "roofKind": [
+     13.02,
+     0.98665
+    ]
+   },
+   "bakeMs": 5424
+  },
+  {
+   "id": 10,
+   "name": "Casa térrea com loja (single-storey house, a shop below, eaves to the street)",
+   "fingerprint": "f0487f5754307c5df29206e77804c28b08fc1fb951b7423d2b07c9774f7f2576",
+   "sourceTriangles": 1000,
+   "parts": 12,
+   "quantization": {
+    "low": [
+     -3.95296,
+     -6.5,
+     -5.37422
+    ],
+    "span": 12.04854
+   },
+   "sphere": [
+    -0.0112,
+    -0.4757,
+    0.0551,
+    9.6323
+   ],
+   "clusters": {
+    "count": 32,
+    "levels": 2,
+    "roots": 16,
+    "finestTriangles": 1000,
+    "rootError": 1.3009
+   },
+   "chain": {
+    "cell": 0.1487,
+    "cells": [
+     63,
+     91,
+     84
+    ],
+    "wellComposedCells": 14,
+    "wrapTriangles": 68404,
+    "baseTriangles": 2014,
+    "baseVertices": 1009,
+    "baseError": 0.412,
+    "outward": 0.4014,
+    "inward": 0.412,
+    "simplifyError": 0.039,
+    "steps": 1004,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.412,
+     8.9453
+    ],
+    "inflateMax": 1.2043,
+    "rootTriangles": 686,
+    "farFirst": 664,
+    "farFirstTriangles": 686,
+    "handoffError": 0.6811
+   },
+   "splat": {
+    "centre": [
+     -0.0112,
+     2.7743,
+     0.0551
+    ],
+    "ry": 2.7743,
+    "rx": 4.3286,
+    "roofShare": 0.2221,
+    "wallKind": [
+     12.02,
+     0.5895
+    ],
+    "roofKind": [
+     13.02,
+     0.87646
+    ]
+   },
+   "bakeMs": 3066
+  },
+  {
+   "id": 11,
+   "name": "Casa térrea de quatro águas (single-storey house, a hipped roof and a great chimney, eaves to the street)",
+   "fingerprint": "010d7cc07ebf2ea30b99bdfa60e39d3728227cc6a4cd44a013b266606898e2bc",
+   "sourceTriangles": 1004,
+   "parts": 11,
+   "quantization": {
+    "low": [
+     -3.95887,
+     -6.5,
+     -5.52887
+    ],
+    "span": 12.86888
+   },
+   "sphere": [
+    -0.0664,
+    -0.0656,
+    -0.0477,
+    10.0456
+   ],
+   "clusters": {
+    "count": 32,
+    "levels": 2,
+    "roots": 16,
+    "finestTriangles": 1004,
+    "rootError": 0.7952
+   },
+   "chain": {
+    "cell": 0.1589,
+    "cells": [
+     59,
+     91,
+     79
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 58388,
+    "baseTriangles": 1338,
+    "baseVertices": 671,
+    "baseError": 0.4286,
+    "outward": 0.4286,
+    "inward": 0.4137,
+    "simplifyError": 0.0416,
+    "steps": 666,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.4286,
+     8.7186
+    ],
+    "inflateMax": 1.2863,
+    "rootTriangles": 726,
+    "farFirst": 306,
+    "farFirstTriangles": 726,
+    "handoffError": 0.6437
+   },
+   "splat": {
+    "centre": [
+     -0.0664,
+     3.1844,
+     -0.0477
+    ],
+    "ry": 3.1844,
+    "rx": 3.7565,
+    "roofShare": 0.2341,
+    "wallKind": [
+     12.02,
+     0.68576
+    ],
+    "roofKind": [
+     13.02,
+     0.87876
+    ]
+   },
+   "bakeMs": 1833
+  },
+  {
+   "id": 12,
+   "name": "Sobrado de ressalto (two-storey house, timber-framed floors jettied over the street, eaves to the street)",
+   "fingerprint": "eca3ab258c1c891af9d987f4bf432935f27a986dc752d0cef0ea2cbcd806ec30",
+   "sourceTriangles": 2048,
+   "parts": 28,
+   "quantization": {
+    "low": [
+     -3.74949,
+     -6.5,
+     -6.61761
+    ],
+    "span": 15.35893
+   },
+   "sphere": [
+    -0.052,
+    1.1795,
+    -0.2655,
+    11.7152
+   ],
+   "clusters": {
+    "count": 71,
+    "levels": 2,
+    "roots": 42,
+    "finestTriangles": 2048,
+    "rootError": 0.5757
+   },
+   "chain": {
+    "cell": 0.1896,
+    "cells": [
+     49,
+     91,
+     77
+    ],
+    "wellComposedCells": 6,
+    "wrapTriangles": 52236,
+    "baseTriangles": 2068,
+    "baseVertices": 1036,
+    "baseError": 0.4825,
+    "outward": 0.4323,
+    "inward": 0.4825,
+    "simplifyError": 0.0497,
+    "steps": 1031,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.4825,
+     8.9752
+    ],
+    "inflateMax": 1.5351,
+    "rootTriangles": 1578,
+    "farFirst": 245,
+    "farFirstTriangles": 1578,
+    "handoffError": 0.6741
+   },
+   "splat": {
+    "centre": [
+     -0.052,
+     4.4295,
+     -0.2655
+    ],
+    "ry": 4.4295,
+    "rx": 5.105,
+    "roofShare": 0.1341,
+    "wallKind": [
+     12.02,
+     0.58083
+    ],
+    "roofKind": [
+     13.02,
+     0.93742
+    ]
+   },
+   "bakeMs": 2655
+  },
+  {
+   "id": 13,
+   "name": "Sobrado com loja (two-storey house, a shop below, eaves to the street)",
+   "fingerprint": "f296dc09ec8cfbdc7879f19c2ef67301a963c6c56eced2f69c8818eafcf3bbe6",
+   "sourceTriangles": 1654,
+   "parts": 24,
+   "quantization": {
+    "low": [
+     -3.87842,
+     -6.5,
+     -6.25
+    ],
+    "span": 15.56136
+   },
+   "sphere": [
+    -0.0361,
+    1.2807,
+    -0.0062,
+    11.7303
+   ],
+   "clusters": {
+    "count": 53,
+    "levels": 2,
+    "roots": 33,
+    "finestTriangles": 1654,
+    "rootError": 1.5161
+   },
+   "chain": {
+    "cell": 0.1921,
+    "cells": [
+     50,
+     91,
+     76
+    ],
+    "wellComposedCells": 3,
+    "wrapTriangles": 51848,
+    "baseTriangles": 2840,
+    "baseVertices": 1422,
+    "baseError": 0.7031,
+    "outward": 0.4152,
+    "inward": 0.7031,
+    "simplifyError": 0.0206,
+    "steps": 1417,
+    "coreTriangles": 6,
+    "depth": 11,
+    "errorRange": [
+     0.7031,
+     9.4128
+    ],
+    "inflateMax": 1.5554,
+    "rootTriangles": 1162,
+    "farFirst": 839,
+    "farFirstTriangles": 1162,
+    "handoffError": 0.9682
+   },
+   "splat": {
+    "centre": [
+     -0.0361,
+     4.5307,
+     -0.0062
+    ],
+    "ry": 4.5307,
+    "rx": 4.9681,
+    "roofShare": 0.1439,
+    "wallKind": [
+     12.02,
+     0.68747
+    ],
+    "roofKind": [
+     13.02,
+     0.9712
+    ]
+   },
+   "bakeMs": 4455
+  },
+  {
+   "id": 14,
+   "name": "Sobrado de cantaria (two-storey house, dressed stone, tall windows on balconies, eaves to the street)",
+   "fingerprint": "7e68029fd63399a1956e2625c8c3dcb6777174503a9dfa7543fd61ee360cf8a5",
+   "sourceTriangles": 1964,
+   "parts": 29,
+   "quantization": {
+    "low": [
+     -3.78196,
+     -6.5,
+     -6.1
+    ],
+    "span": 15.22679
+   },
+   "sphere": [
+    -0.0223,
+    1.1134,
+    0.0095,
+    11.5402
+   ],
+   "clusters": {
+    "count": 82,
+    "levels": 3,
+    "roots": 39,
+    "finestTriangles": 1964,
+    "rootError": 1.5161
+   },
+   "chain": {
+    "cell": 0.188,
+    "cells": [
+     50,
+     91,
+     76
+    ],
+    "wellComposedCells": 5,
+    "wrapTriangles": 53424,
+    "baseTriangles": 2708,
+    "baseVertices": 1356,
+    "baseError": 0.552,
+    "outward": 0.4845,
+    "inward": 0.552,
+    "simplifyError": 0.0616,
+    "steps": 1351,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.552,
+     11.8056
+    ],
+    "inflateMax": 1.5219,
+    "rootTriangles": 1378,
+    "farFirst": 665,
+    "farFirstTriangles": 1378,
+    "handoffError": 0.8068
+   },
+   "splat": {
+    "centre": [
+     -0.0223,
+     4.3634,
+     0.0095
+    ],
+    "ry": 4.3634,
+    "rx": 5.2401,
+    "roofShare": 0.1412,
+    "wallKind": [
+     12.02,
+     0.68747
+    ],
+    "roofKind": [
+     13.02,
+     0.96945
+    ]
+   },
+   "bakeMs": 5811
+  },
+  {
+   "id": 15,
+   "name": "Casa de três andares de ressalto (three-storey house, timber-framed floors jettied over the street, eaves to the street)",
+   "fingerprint": "9ba69d234c1e32722a296d716d108a04e99d81a1e489e199b0c52ed327ec399a",
+   "sourceTriangles": 2910,
+   "parts": 48,
+   "quantization": {
+    "low": [
+     -3.76604,
+     -6.5,
+     -7.68151
+    ],
+    "span": 18.57686
+   },
+   "sphere": [
+    -0.0965,
+    2.7884,
+    -0.3425,
+    13.7335
+   ],
+   "clusters": {
+    "count": 127,
+    "levels": 2,
+    "roots": 71,
+    "finestTriangles": 2910,
+    "rootError": 1.7341
+   },
+   "chain": {
+    "cell": 0.2293,
+    "cells": [
+     42,
+     91,
+     75
+    ],
+    "wellComposedCells": 20,
+    "wrapTriangles": 43448,
+    "baseTriangles": 1814,
+    "baseVertices": 909,
+    "baseError": 0.5685,
+    "outward": 0.5371,
+    "inward": 0.5685,
+    "simplifyError": 0.0601,
+    "steps": 904,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.5685,
+     12.8619
+    ],
+    "inflateMax": 1.8568,
+    "rootTriangles": 2324,
+    "farFirst": 0,
+    "farFirstTriangles": 1814,
+    "handoffError": 0.5685
+   },
+   "splat": {
+    "centre": [
+     -0.0965,
+     6.0384,
+     -0.3425
+    ],
+    "ry": 6.0384,
+    "rx": 5.6228,
+    "roofShare": 0.101,
+    "wallKind": [
+     12.02,
+     0.9075
+    ],
+    "roofKind": [
+     13.02,
+     0.9495
+    ]
+   },
+   "bakeMs": 2296
+  },
+  {
+   "id": 16,
+   "name": "Casa de três andares de cantaria (three-storey house, dressed stone, tall windows on balconies, eaves to the street)",
+   "fingerprint": "1c2abb302a5526ee2ac1c07f0f2310f959184455bc4d1341dd53512126c5b8f1",
+   "sourceTriangles": 2436,
+   "parts": 32,
+   "quantization": {
+    "low": [
+     -3.83907,
+     -6.5,
+     -6.8804
+    ],
+    "span": 18.52239
+   },
+   "sphere": [
+    -0.066,
+    2.7612,
+    0.0941,
+    13.6612
+   ],
+   "clusters": {
+    "count": 86,
+    "levels": 2,
+    "roots": 50,
+    "finestTriangles": 2436,
+    "rootError": 0.6074
+   },
+   "chain": {
+    "cell": 0.2287,
+    "cells": [
+     43,
+     91,
+     72
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 42796,
+    "baseTriangles": 1284,
+    "baseVertices": 644,
+    "baseError": 0.6915,
+    "outward": 0.5535,
+    "inward": 0.6915,
+    "simplifyError": 0.0599,
+    "steps": 639,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.6915,
+     9.1382
+    ],
+    "inflateMax": 1.8513,
+    "rootTriangles": 1944,
+    "farFirst": 0,
+    "farFirstTriangles": 1284,
+    "handoffError": 0.6915
+   },
+   "splat": {
+    "centre": [
+     -0.066,
+     6.0112,
+     0.0941
+    ],
+    "ry": 6.0112,
+    "rx": 5.4409,
+    "roofShare": 0.1543,
+    "wallKind": [
+     12.02,
+     0.75938
+    ],
+    "roofKind": [
+     13.02,
+     0.91008
+    ]
+   },
+   "bakeMs": 1545
+  },
+  {
+   "id": 17,
+   "name": "Casa de três andares de arcada (three-storey house, the ground floor behind an arcade of columns, eaves to the street)",
+   "fingerprint": "7e3fe7f575bc10821877c23de02003506de08eb067b75f641a3d68dc40263ff4",
+   "sourceTriangles": 2504,
+   "parts": 39,
+   "quantization": {
+    "low": [
+     -3.73565,
+     -6.5,
+     -6.85
+    ],
+    "span": 18.61828
+   },
+   "sphere": [
+    -0.058,
+    2.8091,
+    0.0457,
+    13.6368
+   ],
+   "clusters": {
+    "count": 99,
+    "levels": 2,
+    "roots": 51,
+    "finestTriangles": 2504,
+    "rootError": 1.7313
+   },
+   "chain": {
+    "cell": 0.2299,
+    "cells": [
+     42,
+     91,
+     71
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 44464,
+    "baseTriangles": 2432,
+    "baseVertices": 1210,
+    "baseError": 0.6062,
+    "outward": 0.5238,
+    "inward": 0.6062,
+    "simplifyError": 0.0753,
+    "steps": 1204,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.6062,
+     14.033
+    ],
+    "inflateMax": 1.8609,
+    "rootTriangles": 1949,
+    "farFirst": 242,
+    "farFirstTriangles": 1948,
+    "handoffError": 0.9321
+   },
+   "splat": {
+    "centre": [
+     -0.058,
+     6.0591,
+     0.0457
+    ],
+    "ry": 6.0591,
+    "rx": 5.3656,
+    "roofShare": 0.105,
+    "wallKind": [
+     12.02,
+     0.69803
+    ],
+    "roofKind": [
+     13.02,
+     0.90947
+    ]
+   },
+   "bakeMs": 3860
+  },
+  {
+   "id": 18,
+   "name": "Casa de quatro andares de ressalto (four-storey house, timber-framed floors jettied over the street, eaves to the street)",
+   "fingerprint": "9d972d9c7b23bb3ab0096fa0a154b79b8551ab9cc4c7be429a4525d2e2d5d960",
+   "sourceTriangles": 3406,
+   "parts": 50,
+   "quantization": {
+    "low": [
+     -3.72792,
+     -6.5,
+     -7.50643
+    ],
+    "span": 21.63155
+   },
+   "sphere": [
+    -0.1227,
+    4.3158,
+    -0.2959,
+    15.3136
+   ],
+   "clusters": {
+    "count": 130,
+    "levels": 2,
+    "roots": 79,
+    "finestTriangles": 3406,
+    "rootError": 1.7338
+   },
+   "chain": {
+    "cell": 0.2671,
+    "cells": [
+     37,
+     91,
+     65
+    ],
+    "wellComposedCells": 11,
+    "wrapTriangles": 35064,
+    "baseTriangles": 1464,
+    "baseVertices": 734,
+    "baseError": 0.6248,
+    "outward": 0.6248,
+    "inward": 0.5769,
+    "simplifyError": 0.07,
+    "steps": 729,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.6248,
+     8.8896
+    ],
+    "inflateMax": 2.1621,
+    "rootTriangles": 2880,
+    "farFirst": 0,
+    "farFirstTriangles": 1464,
+    "handoffError": 0.6248
+   },
+   "splat": {
+    "centre": [
+     -0.1227,
+     7.5658,
+     -0.2959
+    ],
+    "ry": 7.5658,
+    "rx": 5.7194,
+    "roofShare": 0.081,
+    "wallKind": [
+     12.02,
+     0.58577
+    ],
+    "roofKind": [
+     13.02,
+     0.94449
+    ]
+   },
+   "bakeMs": 2444
+  },
+  {
+   "id": 19,
+   "name": "Casa de quatro andares de arcada (four-storey house, the ground floor behind an arcade of columns, eaves to the street)",
+   "fingerprint": "10335de4081c60280a5843db20eee9184e3e444a6952df277a46afcc3e465d65",
+   "sourceTriangles": 3506,
+   "parts": 58,
+   "quantization": {
+    "low": [
+     -3.80599,
+     -6.5,
+     -7.20226
+    ],
+    "span": 21.64105
+   },
+   "sphere": [
+    -0.0656,
+    4.3205,
+    -0.1222,
+    15.2194
+   ],
+   "clusters": {
+    "count": 150,
+    "levels": 2,
+    "roots": 80,
+    "finestTriangles": 3506,
+    "rootError": 1.7326
+   },
+   "chain": {
+    "cell": 0.2672,
+    "cells": [
+     38,
+     91,
+     64
+    ],
+    "wellComposedCells": 12,
+    "wrapTriangles": 36848,
+    "baseTriangles": 1838,
+    "baseVertices": 913,
+    "baseError": 0.6222,
+    "outward": 0.6222,
+    "inward": 0.6219,
+    "simplifyError": 0.0875,
+    "steps": 908,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.6222,
+     9.4099
+    ],
+    "inflateMax": 2.163,
+    "rootTriangles": 2738,
+    "farFirst": 0,
+    "farFirstTriangles": 1838,
+    "handoffError": 0.6222
+   },
+   "splat": {
+    "centre": [
+     -0.0656,
+     7.5705,
+     -0.1222
+    ],
+    "ry": 7.5705,
+    "rx": 5.6,
+    "roofShare": 0.0841,
+    "wallKind": [
+     12.02,
+     0.67995
+    ],
+    "roofKind": [
+     13.02,
+     0.94113
+    ]
+   },
+   "bakeMs": 2692
+  },
+  {
+   "id": 20,
+   "name": "Casa alta de arcada (five-storey house, the ground floor behind an arcade of columns, eaves to the street)",
+   "fingerprint": "dea3095f721c9eed09a24ab9e9d8dfe1b602bb44847ae13936a224fa0136804e",
+   "sourceTriangles": 3992,
+   "parts": 59,
+   "quantization": {
+    "low": [
+     -3.84364,
+     -6.5,
+     -7.54797
+    ],
+    "span": 24.6
+   },
+   "sphere": [
+    -0.0936,
+    5.8,
+    -0.198,
+    16.9172
+   ],
+   "clusters": {
+    "count": 158,
+    "levels": 3,
+    "roots": 88,
+    "finestTriangles": 3992,
+    "rootError": 1.8047
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     35,
+     93,
+     60
+    ],
+    "wellComposedCells": 13,
+    "wrapTriangles": 32612,
+    "baseTriangles": 1906,
+    "baseVertices": 947,
+    "baseError": 0.7569,
+    "outward": 0.7564,
+    "inward": 0.7569,
+    "simplifyError": 0.0786,
+    "steps": 942,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.7569,
+     9.0286
+    ],
+    "inflateMax": 2.4588,
+    "rootTriangles": 3292,
+    "farFirst": 0,
+    "farFirstTriangles": 1906,
+    "handoffError": 0.7569
+   },
+   "splat": {
+    "centre": [
+     -0.0936,
+     9.05,
+     -0.198
+    ],
+    "ry": 9.05,
+    "rx": 5.873,
+    "roofShare": 0.0759,
+    "wallKind": [
+     12.02,
+     0.83007
+    ],
+    "roofKind": [
+     13.02,
+     0.97791
+    ]
+   },
+   "bakeMs": 3544
+  },
+  {
+   "id": 21,
+   "name": "Casa térrea com loja de empena (single-storey house, a shop below, gable to the street)",
+   "fingerprint": "d30dc7260f4bff6eb212526395024a90863f0b1cca9c4ce14e050e5758ee0d04",
+   "sourceTriangles": 1098,
+   "parts": 13,
+   "quantization": {
+    "low": [
+     -3.88279,
+     -6.5,
+     -5.35
+    ],
+    "span": 12.39852
+   },
+   "sphere": [
+    0.0204,
+    -0.3007,
+    0.0074,
+    9.868
+   ],
+   "clusters": {
+    "count": 38,
+    "levels": 3,
+    "roots": 19,
+    "finestTriangles": 1098,
+    "rootError": 1.2402
+   },
+   "chain": {
+    "cell": 0.1531,
+    "cells": [
+     62,
+     91,
+     81
+    ],
+    "wellComposedCells": 10,
+    "wrapTriangles": 65232,
+    "baseTriangles": 2050,
+    "baseVertices": 1027,
+    "baseError": 0.51,
+    "outward": 0.3773,
+    "inward": 0.51,
+    "simplifyError": 0.0401,
+    "steps": 1022,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.51,
+     8.6145
+    ],
+    "inflateMax": 1.2392,
+    "rootTriangles": 794,
+    "farFirst": 628,
+    "farFirstTriangles": 794,
+    "handoffError": 0.7966
+   },
+   "splat": {
+    "centre": [
+     0.0204,
+     2.9493,
+     0.0074
+    ],
+    "ry": 2.9493,
+    "rx": 4.3743,
+    "roofShare": 0.27,
+    "wallKind": [
+     12.02,
+     0.70175
+    ],
+    "roofKind": [
+     13.02,
+     0.89143
+    ]
+   },
+   "bakeMs": 10367
+  },
+  {
+   "id": 22,
+   "name": "Casa térrea de quatro águas de empena (single-storey house, a hipped roof and a great chimney, gable to the street)",
+   "fingerprint": "0f09a2d31e8d79b783a3cbbf9fa06287813e91003e79c32fc7507eddb6275839",
+   "sourceTriangles": 1080,
+   "parts": 11,
+   "quantization": {
+    "low": [
+     -3.92,
+     -6.5,
+     -5.40887
+    ],
+    "span": 12.86888
+   },
+   "sphere": [
+    0.0519,
+    -0.0656,
+    -0.0071,
+    10.0333
+   ],
+   "clusters": {
+    "count": 33,
+    "levels": 2,
+    "roots": 17,
+    "finestTriangles": 1080,
+    "rootError": 0.6315
+   },
+   "chain": {
+    "cell": 0.1589,
+    "cells": [
+     61,
+     91,
+     78
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 58844,
+    "baseTriangles": 1720,
+    "baseVertices": 862,
+    "baseError": 0.5011,
+    "outward": 0.3884,
+    "inward": 0.5011,
+    "simplifyError": 0.0416,
+    "steps": 857,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.5011,
+     8.7966
+    ],
+    "inflateMax": 1.2863,
+    "rootTriangles": 806,
+    "farFirst": 457,
+    "farFirstTriangles": 806,
+    "handoffError": 0.7257
+   },
+   "splat": {
+    "centre": [
+     0.0519,
+     3.1844,
+     -0.0071
+    ],
+    "ry": 3.1844,
+    "rx": 3.8453,
+    "roofShare": 0.2516,
+    "wallKind": [
+     12.02,
+     0.55688
+    ],
+    "roofKind": [
+     13.02,
+     0.91149
+    ]
+   },
+   "bakeMs": 2379
+  },
+  {
+   "id": 23,
+   "name": "Sobrado de ressalto de empena (two-storey house, timber-framed floors jettied over the street, gable to the street)",
+   "fingerprint": "52a991806fae048bcaa5cbbc6e12290e54898a02533022618114df84ba0bea50",
+   "sourceTriangles": 2224,
+   "parts": 31,
+   "quantization": {
+    "low": [
+     -3.62945,
+     -6.5,
+     -6.51289
+    ],
+    "span": 15.3702
+   },
+   "sphere": [
+    0.0708,
+    1.1851,
+    -0.3458,
+    11.833
+   ],
+   "clusters": {
+    "count": 83,
+    "levels": 2,
+    "roots": 48,
+    "finestTriangles": 2224,
+    "rootError": 0.6185
+   },
+   "chain": {
+    "cell": 0.1898,
+    "cells": [
+     50,
+     91,
+     75
+    ],
+    "wellComposedCells": 5,
+    "wrapTriangles": 50948,
+    "baseTriangles": 1814,
+    "baseVertices": 909,
+    "baseError": 0.5478,
+    "outward": 0.4278,
+    "inward": 0.5478,
+    "simplifyError": 0.0255,
+    "steps": 904,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.5478,
+     11.6208
+    ],
+    "inflateMax": 1.5363,
+    "rootTriangles": 1708,
+    "farFirst": 53,
+    "farFirstTriangles": 1708,
+    "handoffError": 0.7377
+   },
+   "splat": {
+    "centre": [
+     0.0708,
+     4.4351,
+     -0.3458
+    ],
+    "ry": 4.4351,
+    "rx": 5.0946,
+    "roofShare": 0.1572,
+    "wallKind": [
+     12.02,
+     0.70536
+    ],
+    "roofKind": [
+     13.02,
+     0.92008
+    ]
+   },
+   "bakeMs": 2737
+  },
+  {
+   "id": 24,
+   "name": "Sobrado com loja de empena (two-storey house, a shop below, gable to the street)",
+   "fingerprint": "639adb3a79cc73f9d80caedbfe66344c76a27a27286f5579367c418342253610",
+   "sourceTriangles": 1794,
+   "parts": 24,
+   "quantization": {
+    "low": [
+     -3.74029,
+     -6.5,
+     -6.25
+    ],
+    "span": 15.59653
+   },
+   "sphere": [
+    0.0144,
+    1.2983,
+    -0.0884,
+    11.8419
+   ],
+   "clusters": {
+    "count": 57,
+    "levels": 2,
+    "roots": 34,
+    "finestTriangles": 1794,
+    "rootError": 1.8029
+   },
+   "chain": {
+    "cell": 0.1925,
+    "cells": [
+     50,
+     91,
+     75
+    ],
+    "wellComposedCells": 8,
+    "wrapTriangles": 51220,
+    "baseTriangles": 1654,
+    "baseVertices": 829,
+    "baseError": 0.6594,
+    "outward": 0.4138,
+    "inward": 0.6594,
+    "simplifyError": 0.0505,
+    "steps": 824,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.6594,
+     11.0688
+    ],
+    "inflateMax": 1.5589,
+    "rootTriangles": 1300,
+    "farFirst": 177,
+    "farFirstTriangles": 1300,
+    "handoffError": 0.8534
+   },
+   "splat": {
+    "centre": [
+     0.0144,
+     4.5483,
+     -0.0884
+    ],
+    "ry": 4.5483,
+    "rx": 4.9721,
+    "roofShare": 0.1626,
+    "wallKind": [
+     12.02,
+     0.68747
+    ],
+    "roofKind": [
+     13.02,
+     0.96272
+    ]
+   },
+   "bakeMs": 2761
+  },
+  {
+   "id": 25,
+   "name": "Sobrado de cantaria de empena (two-storey house, dressed stone, tall windows on balconies, gable to the street)",
+   "fingerprint": "facb1f6f26a77d4f3ecb71f0efcd9e1ed0df2efe5a62bbecd4fcccf81828002c",
+   "sourceTriangles": 1904,
+   "parts": 23,
+   "quantization": {
+    "low": [
+     -3.79366,
+     -6.5,
+     -6.1
+    ],
+    "span": 15.37393
+   },
+   "sphere": [
+    0.0024,
+    1.187,
+    -0.0263,
+    11.6423
+   ],
+   "clusters": {
+    "count": 68,
+    "levels": 2,
+    "roots": 36,
+    "finestTriangles": 1904,
+    "rootError": 1.8209
+   },
+   "chain": {
+    "cell": 0.1898,
+    "cells": [
+     51,
+     91,
+     75
+    ],
+    "wellComposedCells": 8,
+    "wrapTriangles": 51928,
+    "baseTriangles": 1632,
+    "baseVertices": 818,
+    "baseError": 0.5575,
+    "outward": 0.4263,
+    "inward": 0.5575,
+    "simplifyError": 0.0498,
+    "steps": 813,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.5575,
+     11.2252
+    ],
+    "inflateMax": 1.5366,
+    "rootTriangles": 1339,
+    "farFirst": 147,
+    "farFirstTriangles": 1338,
+    "handoffError": 0.7478
+   },
+   "splat": {
+    "centre": [
+     0.0024,
+     4.437,
+     -0.0263
+    ],
+    "ry": 4.437,
+    "rx": 5.0871,
+    "roofShare": 0.1595,
+    "wallKind": [
+     12.02,
+     0.70536
+    ],
+    "roofKind": [
+     13.02,
+     0.95033
+    ]
+   },
+   "bakeMs": 2460
+  },
+  {
+   "id": 26,
+   "name": "Casa de três andares de ressalto de empena (three-storey house, timber-framed floors jettied over the street, gable to the street)",
+   "fingerprint": "81d2ca2aac9ecaea5b6283cec30f338991f4eb55bf3edd6345745f8833ac7184",
+   "sourceTriangles": 2920,
+   "parts": 53,
+   "quantization": {
+    "low": [
+     -3.65845,
+     -6.5,
+     -7.79287
+    ],
+    "span": 18.52591
+   },
+   "sphere": [
+    0.001,
+    2.763,
+    -0.474,
+    13.8256
+   ],
+   "clusters": {
+    "count": 139,
+    "levels": 3,
+    "roots": 75,
+    "finestTriangles": 2920,
+    "rootError": 0.6473
+   },
+   "chain": {
+    "cell": 0.2287,
+    "cells": [
+     43,
+     91,
+     74
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 43684,
+    "baseTriangles": 1620,
+    "baseVertices": 812,
+    "baseError": 0.5487,
+    "outward": 0.5487,
+    "inward": 0.5177,
+    "simplifyError": 0.0307,
+    "steps": 807,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.5487,
+     8.8522
+    ],
+    "inflateMax": 1.8517,
+    "rootTriangles": 2365,
+    "farFirst": 0,
+    "farFirstTriangles": 1620,
+    "handoffError": 0.5487
+   },
+   "splat": {
+    "centre": [
+     0.001,
+     6.013,
+     -0.474
+    ],
+    "ry": 6.013,
+    "rx": 5.6335,
+    "roofShare": 0.1372,
+    "wallKind": [
+     12.02,
+     0.69803
+    ],
+    "roofKind": [
+     13.02,
+     0.91418
+    ]
+   },
+   "bakeMs": 1820
+  },
+  {
+   "id": 27,
+   "name": "Casa de três andares de cantaria de empena (three-storey house, dressed stone, tall windows on balconies, gable to the street)",
+   "fingerprint": "2c8ae01c09f714e00ca6fa55f701c8b739055076d6ec5e4b801520cb2f841453",
+   "sourceTriangles": 2634,
+   "parts": 32,
+   "quantization": {
+    "low": [
+     -3.54404,
+     -6.5,
+     -6.85
+    ],
+    "span": 18.73896
+   },
+   "sphere": [
+    0.0418,
+    2.8695,
+    -0.0253,
+    13.6946
+   ],
+   "clusters": {
+    "count": 93,
+    "levels": 2,
+    "roots": 53,
+    "finestTriangles": 2634,
+    "rootError": 0.5991
+   },
+   "chain": {
+    "cell": 0.2313,
+    "cells": [
+     42,
+     91,
+     70
+    ],
+    "wellComposedCells": 4,
+    "wrapTriangles": 41376,
+    "baseTriangles": 812,
+    "baseVertices": 408,
+    "baseError": 0.485,
+    "outward": 0.485,
+    "inward": 0.48,
+    "simplifyError": 0.0758,
+    "steps": 403,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.485,
+     8.8708
+    ],
+    "inflateMax": 1.873,
+    "rootTriangles": 2090,
+    "farFirst": 0,
+    "farFirstTriangles": 812,
+    "handoffError": 0.485
+   },
+   "splat": {
+    "centre": [
+     0.0418,
+     6.1195,
+     -0.0253
+    ],
+    "ry": 6.1195,
+    "rx": 5.3243,
+    "roofShare": 0.1377,
+    "wallKind": [
+     12.02,
+     0.58577
+    ],
+    "roofKind": [
+     13.02,
+     0.92041
+    ]
+   },
+   "bakeMs": 1059
+  },
+  {
+   "id": 28,
+   "name": "Casa de três andares de arcada de empena (three-storey house, the ground floor behind an arcade of columns, gable to the street)",
+   "fingerprint": "dc55233a152982d96771b8062919c02fbef9eb5dc84142450e01789439b66efb",
+   "sourceTriangles": 2814,
+   "parts": 44,
+   "quantization": {
+    "low": [
+     -3.6245,
+     -6.5,
+     -6.85
+    ],
+    "span": 18.53752
+   },
+   "sphere": [
+    0.0372,
+    2.7688,
+    0.0157,
+    13.5777
+   ],
+   "clusters": {
+    "count": 115,
+    "levels": 2,
+    "roots": 59,
+    "finestTriangles": 2814,
+    "rootError": 1.1614
+   },
+   "chain": {
+    "cell": 0.2289,
+    "cells": [
+     43,
+     91,
+     71
+    ],
+    "wellComposedCells": 2,
+    "wrapTriangles": 44496,
+    "baseTriangles": 2080,
+    "baseVertices": 1034,
+    "baseError": 0.5443,
+    "outward": 0.5443,
+    "inward": 0.4975,
+    "simplifyError": 0.048,
+    "steps": 1029,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.5443,
+     13.2072
+    ],
+    "inflateMax": 1.8528,
+    "rootTriangles": 2074,
+    "farFirst": 3,
+    "farFirstTriangles": 2074,
+    "handoffError": 0.6301
+   },
+   "splat": {
+    "centre": [
+     0.0372,
+     6.0188,
+     0.0157
+    ],
+    "ry": 6.0188,
+    "rx": 5.3361,
+    "roofShare": 0.1254,
+    "wallKind": [
+     12.02,
+     0.70081
+    ],
+    "roofKind": [
+     13.02,
+     1
+    ]
+   },
+   "bakeMs": 2906
+  },
+  {
+   "id": 29,
+   "name": "Casa de quatro andares de ressalto de empena (four-storey house, timber-framed floors jettied over the street, gable to the street)",
+   "fingerprint": "9529079cb730410372f4bea2af47679b1f5a30b15bf8a4dcfc0cbbe7c8a1b8bf",
+   "sourceTriangles": 3416,
+   "parts": 55,
+   "quantization": {
+    "low": [
+     -3.58987,
+     -6.5,
+     -7.74078
+    ],
+    "span": 21.80198
+   },
+   "sphere": [
+    0.0438,
+    4.401,
+    -0.4735,
+    15.4341
+   ],
+   "clusters": {
+    "count": 134,
+    "levels": 2,
+    "roots": 82,
+    "finestTriangles": 3416,
+    "rootError": 0.6157
+   },
+   "chain": {
+    "cell": 0.2692,
+    "cells": [
+     38,
+     91,
+     64
+    ],
+    "wellComposedCells": 3,
+    "wrapTriangles": 34408,
+    "baseTriangles": 1350,
+    "baseVertices": 677,
+    "baseError": 0.5785,
+    "outward": 0.5785,
+    "inward": 0.5612,
+    "simplifyError": 0.0361,
+    "steps": 672,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.5785,
+     9.0081
+    ],
+    "inflateMax": 2.1791,
+    "rootTriangles": 2852,
+    "farFirst": 0,
+    "farFirstTriangles": 1350,
+    "handoffError": 0.5785
+   },
+   "splat": {
+    "centre": [
+     0.0438,
+     7.651,
+     -0.4735
+    ],
+    "ry": 7.651,
+    "rx": 5.5544,
+    "roofShare": 0.1017,
+    "wallKind": [
+     12.02,
+     0.67995
+    ],
+    "roofKind": [
+     13.02,
+     1
+    ]
+   },
+   "bakeMs": 1644
+  },
+  {
+   "id": 30,
+   "name": "Casa de quatro andares de arcada de empena (four-storey house, the ground floor behind an arcade of columns, gable to the street)",
+   "fingerprint": "b39910432788748a7c21b3935c32735e871dae488a234c85d6ed2b18cd77d732",
+   "sourceTriangles": 3992,
+   "parts": 77,
+   "quantization": {
+    "low": [
+     -3.63058,
+     -6.5,
+     -7.83765
+    ],
+    "span": 21.39622
+   },
+   "sphere": [
+    0.0675,
+    4.1981,
+    -0.5735,
+    15.3204
+   ],
+   "clusters": {
+    "count": 178,
+    "levels": 2,
+    "roots": 102,
+    "finestTriangles": 3992,
+    "rootError": 1.2835
+   },
+   "chain": {
+    "cell": 0.2642,
+    "cells": [
+     39,
+     91,
+     65
+    ],
+    "wellComposedCells": 2,
+    "wrapTriangles": 37144,
+    "baseTriangles": 1704,
+    "baseVertices": 846,
+    "baseError": 0.8024,
+    "outward": 0.6887,
+    "inward": 0.8024,
+    "simplifyError": 0.0692,
+    "steps": 841,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.8024,
+     9.0852
+    ],
+    "inflateMax": 2.1386,
+    "rootTriangles": 3172,
+    "farFirst": 0,
+    "farFirstTriangles": 1704,
+    "handoffError": 0.8024
+   },
+   "splat": {
+    "centre": [
+     0.0675,
+     7.4481,
+     -0.5735
+    ],
+    "ry": 7.4481,
+    "rx": 5.6063,
+    "roofShare": 0.1015,
+    "wallKind": [
+     12.02,
+     0.69626
+    ],
+    "roofKind": [
+     13.02,
+     0.93375
+    ]
+   },
+   "bakeMs": 2468
+  },
+  {
+   "id": 31,
+   "name": "Casa alta de arcada de empena (five-storey house, the ground floor behind an arcade of columns, gable to the street)",
+   "fingerprint": "7267d3b40ff8f3543757196ae7a23dcaf3bbe2a4bc7d9e1292138de314061f0f",
+   "sourceTriangles": 4194,
+   "parts": 61,
+   "quantization": {
+    "low": [
+     -3.93593,
+     -6.5,
+     -7.61608
+    ],
+    "span": 24.3
+   },
+   "sphere": [
+    -0.0359,
+    5.65,
+    -0.2661,
+    16.8685
+   ],
+   "clusters": {
+    "count": 160,
+    "levels": 2,
+    "roots": 94,
+    "finestTriangles": 4194,
+    "rootError": 1.1075
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     36,
+     92,
+     59
+    ],
+    "wellComposedCells": 4,
+    "wrapTriangles": 32592,
+    "baseTriangles": 2076,
+    "baseVertices": 1032,
+    "baseError": 0.685,
+    "outward": 0.6839,
+    "inward": 0.685,
+    "simplifyError": 0.0629,
+    "steps": 1027,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.685,
+     9.086
+    ],
+    "inflateMax": 2.4288,
+    "rootTriangles": 3542,
+    "farFirst": 0,
+    "farFirstTriangles": 2076,
+    "handoffError": 0.685
+   },
+   "splat": {
+    "centre": [
+     -0.0359,
+     8.9,
+     -0.2661
+    ],
+    "ry": 8.9,
+    "rx": 5.9046,
+    "roofShare": 0.0716,
+    "wallKind": [
+     12.02,
+     0.56479
+    ],
+    "roofKind": [
+     13.02,
+     0.94172
+    ]
+   },
+   "bakeMs": 3293
+  },
+  {
+   "id": 32,
+   "name": "Igreja paroquial (parish church, tower to the left)",
+   "fingerprint": "22a16b6e6a113bd4887b638487fd65a4279d32766473c0e7936c0c7c36a43a59",
+   "sourceTriangles": 5360,
+   "parts": 14,
+   "quantization": {
+    "low": [
+     -10.5,
+     -6.5,
+     -13.89
+    ],
+    "span": 30.6
+   },
+   "sphere": [
+    -2.25,
+    8.8,
+    0.06,
+    25.0597
+   ],
+   "clusters": {
+    "count": 117,
+    "levels": 3,
+    "roots": 53,
+    "finestTriangles": 5360,
+    "rootError": 1.4055
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     66,
+     113,
+     104
+    ],
+    "wellComposedCells": 16,
+    "wrapTriangles": 80328,
+    "baseTriangles": 1316,
+    "baseVertices": 660,
+    "baseError": 0.8,
+    "outward": 0.8,
+    "inward": 0.7545,
+    "simplifyError": 0.0403,
+    "steps": 655,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.8,
+     17.1688
+    ],
+    "inflateMax": 3.0585,
+    "rootTriangles": 3125,
+    "farFirst": 0,
+    "farFirstTriangles": 1316,
+    "handoffError": 0.8
+   },
+   "splat": {
+    "centre": [
+     -2.25,
+     12.05,
+     0.06
+    ],
+    "ry": 12.05,
+    "rx": 9.0178,
+    "roofShare": 0.1372,
+    "wallKind": [
+     11.02,
+     0.56083
+    ],
+    "roofKind": [
+     13.02,
+     0.99111
+    ]
+   },
+   "bakeMs": 2284
+  },
+  {
+   "id": 33,
+   "name": "Igreja paroquial (parish church, tower to the right)",
+   "fingerprint": "54b225fc6ff940d073cf2bc31560bb32fb6c4eef0e241f6b16e46a5dd7194a20",
+   "sourceTriangles": 5360,
+   "parts": 14,
+   "quantization": {
+    "low": [
+     -5.97,
+     -6.5,
+     -13.89
+    ],
+    "span": 30.6
+   },
+   "sphere": [
+    2.28,
+    8.8,
+    0.06,
+    25.0597
+   ],
+   "clusters": {
+    "count": 129,
+    "levels": 4,
+    "roots": 49,
+    "finestTriangles": 5360,
+    "rootError": 2.2283
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     66,
+     113,
+     104
+    ],
+    "wellComposedCells": 14,
+    "wrapTriangles": 80132,
+    "baseTriangles": 1256,
+    "baseVertices": 630,
+    "baseError": 0.8,
+    "outward": 0.8,
+    "inward": 0.6899,
+    "simplifyError": 0.0503,
+    "steps": 625,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.8,
+     13.5164
+    ],
+    "inflateMax": 3.0585,
+    "rootTriangles": 2917,
+    "farFirst": 0,
+    "farFirstTriangles": 1256,
+    "handoffError": 0.8
+   },
+   "splat": {
+    "centre": [
+     2.28,
+     12.05,
+     0.06
+    ],
+    "ry": 12.05,
+    "rx": 9.0522,
+    "roofShare": 0.1605,
+    "wallKind": [
+     11.02,
+     0.59501
+    ],
+    "roofKind": [
+     13.02,
+     0.91816
+    ]
+   },
+   "bakeMs": 2079
+  },
+  {
+   "id": 34,
+   "name": "Sé (great church, two towers)",
+   "fingerprint": "73fc28bbd353308fbc51c18e0e5de06d81509166318afc524190403ad97ec30d",
+   "sourceTriangles": 8574,
+   "parts": 18,
+   "quantization": {
+    "low": [
+     -13.9,
+     -6.5,
+     -20.39
+    ],
+    "span": 40.8
+   },
+   "sphere": [
+    0.05,
+    10.75,
+    0.01,
+    34.0242
+   ],
+   "clusters": {
+    "count": 196,
+    "levels": 3,
+    "roots": 73,
+    "finestTriangles": 8574,
+    "rootError": 1.1963
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     104,
+     126,
+     147
+    ],
+    "wellComposedCells": 14,
+    "wrapTriangles": 165952,
+    "baseTriangles": 2694,
+    "baseVertices": 1349,
+    "baseError": 0.8,
+    "outward": 0.8,
+    "inward": 0.6719,
+    "simplifyError": 0.0403,
+    "steps": 1344,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.8,
+     20.5813
+    ],
+    "inflateMax": 4.078,
+    "rootTriangles": 4247,
+    "farFirst": 0,
+    "farFirstTriangles": 2694,
+    "handoffError": 0.8
+   },
+   "splat": {
+    "centre": [
+     0.05,
+     14,
+     0.01
+    ],
+    "ry": 14,
+    "rx": 16.2621,
+    "roofShare": 0.1119,
+    "wallKind": [
+     11.02,
+     0.61571
+    ],
+    "roofKind": [
+     13.02,
+     0.94438
+    ]
+   },
+   "bakeMs": 5739
+  },
+  {
+   "id": 35,
+   "name": "Torre da cerca (wall tower)",
+   "fingerprint": "0defd13b9d45c009df217c3fc2a271d80e3f77d04cf830aca3d31f2022a76c1a",
+   "sourceTriangles": 824,
+   "parts": 12,
+   "quantization": {
+    "low": [
+     -3.36,
+     -6.5,
+     -3.36
+    ],
+    "span": 20.09813
+   },
+   "sphere": [
+    0.1138,
+    3.5491,
+    0.1138,
+    13.1298
+   ],
+   "clusters": {
+    "count": 34,
+    "levels": 2,
+    "roots": 16,
+    "finestTriangles": 824,
+    "rootError": 0.5745
+   },
+   "chain": {
+    "cell": 0.2481,
+    "cells": [
+     39,
+     91,
+     39
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 26732,
+    "baseTriangles": 1072,
+    "baseVertices": 538,
+    "baseError": 0.5613,
+    "outward": 0.545,
+    "inward": 0.5613,
+    "simplifyError": 0.065,
+    "steps": 533,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.5613,
+     8.4374
+    ],
+    "inflateMax": 2.0088,
+    "rootTriangles": 524,
+    "farFirst": 274,
+    "farFirstTriangles": 524,
+    "handoffError": 0.8482
+   },
+   "splat": {
+    "centre": [
+     0.1138,
+     6.7991,
+     0.1138
+    ],
+    "ry": 6.7991,
+    "rx": 4.0525,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.50536
+    ],
+    "roofKind": [
+     11.02,
+     0.50536
+    ]
+   },
+   "bakeMs": 937
+  },
+  {
+   "id": 36,
+   "name": "Torre de menagem (keep)",
+   "fingerprint": "4fcd2510e0279f0cf28e43664a2914491b5a15c54a59371a96c8bd80d6c26c43",
+   "sourceTriangles": 1644,
+   "parts": 16,
+   "quantization": {
+    "low": [
+     -6.76,
+     -6.5,
+     -6.76
+    ],
+    "span": 28.5
+   },
+   "sphere": [
+    0.14,
+    7.75,
+    0.14,
+    20.1295
+   ],
+   "clusters": {
+    "count": 52,
+    "levels": 2,
+    "roots": 28,
+    "finestTriangles": 1644,
+    "rootError": 0.8122
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     57,
+     106,
+     57
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 52652,
+    "baseTriangles": 1420,
+    "baseVertices": 712,
+    "baseError": 0.7,
+    "outward": 0.7,
+    "inward": 0.607,
+    "simplifyError": 0.0629,
+    "steps": 707,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.7,
+     12.1375
+    ],
+    "inflateMax": 2.8486,
+    "rootTriangles": 1100,
+    "farFirst": 160,
+    "farFirstTriangles": 1100,
+    "handoffError": 0.9739
+   },
+   "splat": {
+    "centre": [
+     0.14,
+     11,
+     0.14
+    ],
+    "ry": 11,
+    "rx": 8.3741,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.52356
+    ],
+    "roofKind": [
+     11.02,
+     0.52356
+    ]
+   },
+   "bakeMs": 1469
+  },
+  {
+   "id": 37,
+   "name": "Porta da cidade (city gate)",
+   "fingerprint": "196e97cd7171cda1e5bd3b9ab71b1a597bc6640b8b5e8671efbdf7d8b3ae2767",
+   "sourceTriangles": 740,
+   "parts": 6,
+   "quantization": {
+    "low": [
+     -5.23562,
+     -6.5,
+     -1.63963
+    ],
+    "span": 19.08563
+   },
+   "sphere": [
+    -0.0519,
+    3.0428,
+    -0.1081,
+    12.8849
+   ],
+   "clusters": {
+    "count": 23,
+    "levels": 2,
+    "roots": 11,
+    "finestTriangles": 740,
+    "rootError": 4.4488
+   },
+   "chain": {
+    "cell": 0.2356,
+    "cells": [
+     54,
+     91,
+     23
+    ],
+    "wellComposedCells": 13,
+    "wrapTriangles": 17516,
+    "baseTriangles": 796,
+    "baseVertices": 407,
+    "baseError": 0.5637,
+    "outward": 0.4179,
+    "inward": 0.5637,
+    "simplifyError": 0.1206,
+    "steps": 395,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.5637,
+     13.3009
+    ],
+    "inflateMax": 1.9076,
+    "rootTriangles": 516,
+    "farFirst": 140,
+    "farFirstTriangles": 516,
+    "handoffError": 0.9285
+   },
+   "splat": {
+    "centre": [
+     -0.0519,
+     6.2928,
+     -0.1081
+    ],
+    "ry": 6.2928,
+    "rx": 2.7672,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.67959
+    ],
+    "roofKind": [
+     11.02,
+     0.67959
+    ]
+   },
+   "bakeMs": 665
+  },
+  {
+   "id": 38,
+   "name": "Pano de muralha (short length of wall)",
+   "fingerprint": "5d5226771de143dcaf6c7ba6f5c7e71d32fa627c3fe5217bb3cba27c9c985793",
+   "sourceTriangles": 330,
+   "parts": 3,
+   "quantization": {
+    "low": [
+     -1.216,
+     -6.5,
+     -3.70438
+    ],
+    "span": 16.55438
+   },
+   "sphere": [
+    0.0103,
+    1.7772,
+    -0.0256,
+    10.8051
+   ],
+   "clusters": {
+    "count": 10,
+    "levels": 2,
+    "roots": 5,
+    "finestTriangles": 330,
+    "rootError": 0.5852
+   },
+   "chain": {
+    "cell": 0.2044,
+    "cells": [
+     23,
+     91,
+     46
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 22028,
+    "baseTriangles": 378,
+    "baseVertices": 195,
+    "baseError": 0.5731,
+    "outward": 0.5731,
+    "inward": 0.4419,
+    "simplifyError": 0.1046,
+    "steps": 185,
+    "coreTriangles": 4,
+    "depth": 8,
+    "errorRange": [
+     0.5731,
+     6.9417
+    ],
+    "inflateMax": 1.6546,
+    "rootTriangles": 207,
+    "farFirst": 86,
+    "farFirstTriangles": 206,
+    "handoffError": 0.8624
+   },
+   "splat": {
+    "centre": [
+     0.0103,
+     5.0272,
+     -0.0256
+    ],
+    "ry": 5.0272,
+    "rx": 2.9443,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.5854
+    ],
+    "roofKind": [
+     11.02,
+     0.5854
+    ]
+   },
+   "bakeMs": 330
+  },
+  {
+   "id": 39,
+   "name": "Pano de muralha (long length of wall)",
+   "fingerprint": "54373453a593c7469c17a7d7532f6be0e0ee049cee1a0951975d77c05259af71",
+   "sourceTriangles": 448,
+   "parts": 3,
+   "quantization": {
+    "low": [
+     -1.216,
+     -6.5,
+     -5.20437
+    ],
+    "span": 16.55438
+   },
+   "sphere": [
+    0.0103,
+    1.7772,
+    -0.095,
+    11.4687
+   ],
+   "clusters": {
+    "count": 13,
+    "levels": 2,
+    "roots": 6,
+    "finestTriangles": 448,
+    "rootError": 0.5855
+   },
+   "chain": {
+    "cell": 0.2044,
+    "cells": [
+     23,
+     91,
+     60
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 29000,
+    "baseTriangles": 644,
+    "baseVertices": 332,
+    "baseError": 0.5731,
+    "outward": 0.5731,
+    "inward": 0.5253,
+    "simplifyError": 0.067,
+    "steps": 312,
+    "coreTriangles": 4,
+    "depth": 8,
+    "errorRange": [
+     0.5731,
+     7.5275
+    ],
+    "inflateMax": 1.6546,
+    "rootTriangles": 330,
+    "farFirst": 157,
+    "farFirstTriangles": 330,
+    "handoffError": 0.8209
+   },
+   "splat": {
+    "centre": [
+     0.0103,
+     5.0272,
+     -0.095
+    ],
+    "ry": 5.0272,
+    "rx": 3.8195,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.87294
+    ],
+    "roofKind": [
+     11.02,
+     0.87294
+    ]
+   },
+   "bakeMs": 582
+  },
+  {
+   "id": 40,
+   "name": "Paço (castle hall)",
+   "fingerprint": "943c8de97f9ccb2fbf8be71229773127111bdcbe5068636612c79e31d31322a0",
+   "sourceTriangles": 6700,
+   "parts": 13,
+   "quantization": {
+    "low": [
+     -6.52,
+     -6.5,
+     -15.7
+    ],
+    "span": 31.2
+   },
+   "sphere": [
+    0.08,
+    3.7,
+    -0.1,
+    22.5661
+   ],
+   "clusters": {
+    "count": 159,
+    "levels": 3,
+    "roots": 74,
+    "finestTriangles": 6700,
+    "rootError": 0.7499
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     55,
+     79,
+     114
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 67124,
+    "baseTriangles": 698,
+    "baseVertices": 351,
+    "baseError": 0.8,
+    "outward": 0.8,
+    "inward": 0.5337,
+    "simplifyError": 0.0503,
+    "steps": 346,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.8,
+     17.1078
+    ],
+    "inflateMax": 3.1185,
+    "rootTriangles": 4256,
+    "farFirst": 0,
+    "farFirstTriangles": 698,
+    "handoffError": 0.8
+   },
+   "splat": {
+    "centre": [
+     0.08,
+     6.95,
+     -0.1
+    ],
+    "ry": 6.95,
+    "rx": 12.6512,
+    "roofShare": 0.1647,
+    "wallKind": [
+     12.02,
+     0.86478
+    ],
+    "roofKind": [
+     13.02,
+     0.91544
+    ]
+   },
+   "bakeMs": 1743
+  },
+  {
+   "id": 41,
+   "name": "Alpendre (pentice over a shop front)",
+   "fingerprint": "6e368c6c2f3a6832751ba67f2075cba1962e5d87cb9f7ca8b6668c38186c3c0c",
+   "sourceTriangles": 52,
+   "parts": 4,
+   "quantization": {
+    "low": [
+     -2,
+     -0.24,
+     -1.4
+    ],
+    "span": 4.05
+   },
+   "sphere": [
+    0.025,
+    -0.065,
+    -0.7,
+    2.3754
+   ],
+   "clusters": {
+    "count": 8,
+    "levels": 2,
+    "roots": 4,
+    "finestTriangles": 52,
+    "rootError": 0.0013
+   },
+   "chain": {
+    "cell": 0.05,
+    "cells": [
+     91,
+     18,
+     39
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 13100,
+    "baseTriangles": 48,
+    "baseVertices": 26,
+    "baseError": 0.0865,
+    "outward": 0.064,
+    "inward": 0.0865,
+    "simplifyError": 0.05,
+    "steps": 21,
+    "coreTriangles": 6,
+    "depth": 5,
+    "errorRange": [
+     0.0865,
+     0.4363
+    ],
+    "inflateMax": 0.2157,
+    "rootTriangles": 43,
+    "farFirst": 3,
+    "farFirstTriangles": 42,
+    "handoffError": 0.1572
+   },
+   "splat": {
+    "centre": [
+     0.025,
+     0.055,
+     -0.7
+    ],
+    "ry": 0.055,
+    "rx": 1.2925,
+    "roofShare": 0,
+    "wallKind": [
+     12.02,
+     0.92375
+    ],
+    "roofKind": [
+     12.02,
+     0.92375
+    ]
+   },
+   "bakeMs": 135
+  },
+  {
+   "id": 42,
+   "name": "Tabuleta (sign board on its bracket)",
+   "fingerprint": "07a26b9546b7851dc24b73f40576ca7b52bfb5b1209dfeda7bacce2f15df995c",
+   "sourceTriangles": 50,
+   "parts": 5,
+   "quantization": {
+    "low": [
+     -0.07,
+     -0.94,
+     -1.72
+    ],
+    "span": 1.72
+   },
+   "sphere": [
+    0.01,
+    -0.4,
+    -0.86,
+    1.2005
+   ],
+   "clusters": {
+    "count": 5,
+    "levels": 1,
+    "roots": 5,
+    "finestTriangles": 50,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0.04,
+    "cells": [
+     15,
+     37,
+     53
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 4392,
+    "baseTriangles": 132,
+    "baseVertices": 66,
+    "baseError": 0.0721,
+    "outward": 0.0721,
+    "inward": 0.0418,
+    "simplifyError": 0.0084,
+    "steps": 61,
+    "coreTriangles": 6,
+    "depth": 4,
+    "errorRange": [
+     0.0721,
+     0.7829
+    ],
+    "inflateMax": 0.1719,
+    "rootTriangles": 50,
+    "farFirst": 41,
+    "farFirstTriangles": 50,
+    "handoffError": 0.1121
+   },
+   "splat": {
+    "centre": [
+     0.01,
+     0.07,
+     -0.86
+    ],
+    "ry": 0.07,
+    "rx": 0.5717,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     6.4796
+    ],
+    "roofKind": [
+     10.02,
+     6.4796
+    ]
+   },
+   "bakeMs": 183
+  },
+  {
+   "id": 43,
+   "name": "Ramo (the ale-stake and its bush)",
+   "fingerprint": "bf6da063addba1c79ce5c213e8f443cd80effb794f352c562f7d23fefe6f3640",
+   "sourceTriangles": 52,
+   "parts": 3,
+   "quantization": {
+    "low": [
+     -0.34633,
+     -0.62,
+     -2.35148
+    ],
+    "span": 2.36
+   },
+   "sphere": [
+    0.0137,
+    -0.14,
+    -1.1715,
+    1.4613
+   ],
+   "clusters": {
+    "count": 6,
+    "levels": 2,
+    "roots": 3,
+    "finestTriangles": 52,
+    "rootError": 0.6906
+   },
+   "chain": {
+    "cell": 0.04,
+    "cells": [
+     28,
+     34,
+     70
+    ],
+    "wellComposedCells": 32,
+    "wrapTriangles": 6340,
+    "baseTriangles": 2366,
+    "baseVertices": 1185,
+    "baseError": 0.0944,
+    "outward": 0.0944,
+    "inward": 0.0704,
+    "simplifyError": 0.0131,
+    "steps": 1180,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.0944,
+     0.5542
+    ],
+    "inflateMax": 0.2359,
+    "rootTriangles": 29,
+    "farFirst": 1169,
+    "farFirstTriangles": 28,
+    "handoffError": 0.373
+   },
+   "splat": {
+    "centre": [
+     0.0137,
+     0.17,
+     -1.1715
+    ],
+    "ry": 0.17,
+    "rx": 0.4787,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     6.74619
+    ],
+    "roofKind": [
+     10.02,
+     6.74619
+    ]
+   },
+   "bakeMs": 2440
+  },
+  {
+   "id": 44,
+   "name": "Banca de mercado (market stall)",
+   "fingerprint": "027335b5510b9410516a65b7c4bcf345269e796210f593c44e08f402987c9c2b",
+   "sourceTriangles": 152,
+   "parts": 8,
+   "quantization": {
+    "low": [
+     -1.445,
+     -0.6,
+     -1.845
+    ],
+    "span": 3.69
+   },
+   "sphere": [
+    -0.005,
+    0.9075,
+    0,
+    3.1627
+   ],
+   "clusters": {
+    "count": 16,
+    "levels": 2,
+    "roots": 8,
+    "finestTriangles": 152,
+    "rootError": 0.0033
+   },
+   "chain": {
+    "cell": 0.045,
+    "cells": [
+     74,
+     78,
+     91
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 62316,
+    "baseTriangles": 780,
+    "baseVertices": 394,
+    "baseError": 0.095,
+    "outward": 0.095,
+    "inward": 0.076,
+    "simplifyError": 0.0118,
+    "steps": 390,
+    "coreTriangles": 4,
+    "depth": 8,
+    "errorRange": [
+     0.095,
+     3.1101
+    ],
+    "inflateMax": 0.3688,
+    "rootTriangles": 83,
+    "farFirst": 349,
+    "farFirstTriangles": 82,
+    "handoffError": 0.2299
+   },
+   "splat": {
+    "centre": [
+     -0.005,
+     1.2075,
+     0
+    ],
+    "ry": 1.2075,
+    "rx": 0.9676,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     6.75113
+    ],
+    "roofKind": [
+     10.02,
+     6.75113
+    ]
+   },
+   "bakeMs": 1124
+  },
+  {
+   "id": 45,
+   "name": "Cruzeiro do mercado (market cross)",
+   "fingerprint": "bf3ab9808e9d6c7d3ba4355998f780b2cd65a817734d23a5794dca2fce1f8187",
+   "sourceTriangles": 88,
+   "parts": 6,
+   "quantization": {
+    "low": [
+     -1.6,
+     -1.2,
+     -1.6
+    ],
+    "span": 6.48
+   },
+   "sphere": [
+    0.04,
+    2.04,
+    0.04,
+    4.6423
+   ],
+   "clusters": {
+    "count": 12,
+    "levels": 2,
+    "roots": 6,
+    "finestTriangles": 88,
+    "rootError": 1.2133
+   },
+   "chain": {
+    "cell": 0.08,
+    "cells": [
+     52,
+     91,
+     52
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 23012,
+    "baseTriangles": 206,
+    "baseVertices": 105,
+    "baseError": 0.1951,
+    "outward": 0.157,
+    "inward": 0.1951,
+    "simplifyError": 0.08,
+    "steps": 100,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.1951,
+     3.9974
+    ],
+    "inflateMax": 0.6477,
+    "rootTriangles": 58,
+    "farFirst": 74,
+    "farFirstTriangles": 58,
+    "handoffError": 0.5861
+   },
+   "splat": {
+    "centre": [
+     0.04,
+     2.64,
+     0.04
+    ],
+    "ry": 2.64,
+    "rx": 0.5721,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.90383
+    ],
+    "roofKind": [
+     11.02,
+     0.90383
+    ]
+   },
+   "bakeMs": 485
+  },
+  {
+   "id": 46,
+   "name": "Poço (well under its roof)",
+   "fingerprint": "78837c851f6db2f99dc68eb56d5ffac557d8a40ed3e4b5ea91dcc65aa0e4e313",
+   "sourceTriangles": 148,
+   "parts": 6,
+   "quantization": {
+    "low": [
+     -2.26875,
+     -1.56875,
+     -2.26875
+    ],
+    "span": 6.24375
+   },
+   "sphere": [
+    -0.075,
+    1.5531,
+    -0.075,
+    4.2069
+   ],
+   "clusters": {
+    "count": 18,
+    "levels": 3,
+    "roots": 6,
+    "finestTriangles": 148,
+    "rootError": 3.4755
+   },
+   "chain": {
+    "cell": 0.1687,
+    "cells": [
+     36,
+     47,
+     36
+    ],
+    "wellComposedCells": 141,
+    "wrapTriangles": 9764,
+    "baseTriangles": 2750,
+    "baseVertices": 1373,
+    "baseError": 0.3721,
+    "outward": 0.3721,
+    "inward": 0.2011,
+    "simplifyError": 0.0553,
+    "steps": 1368,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.3721,
+     3.9014
+    ],
+    "inflateMax": 0.6241,
+    "rootTriangles": 50,
+    "farFirst": 1350,
+    "farFirstTriangles": 50,
+    "handoffError": 1.5292
+   },
+   "splat": {
+    "centre": [
+     -0.075,
+     2.3375,
+     -0.075
+    ],
+    "ry": 2.3375,
+    "rx": 1.1798,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.89675
+    ],
+    "roofKind": [
+     11.02,
+     0.89675
+    ]
+   },
+   "bakeMs": 4967
+  },
+  {
+   "id": 47,
+   "name": "Moinho de vento (tower windmill, four sails of cloth)",
+   "fingerprint": "f975710cf01e2dd95527661492f61f3d628c440ebb60e8c19635433e2250a299",
+   "sourceTriangles": 322,
+   "parts": 14,
+   "quantization": {
+    "low": [
+     -3.62039,
+     -6.5,
+     -2.99
+    ],
+    "span": 16.44339
+   },
+   "sphere": [
+    0.0337,
+    1.7217,
+    0.0551,
+    10.7531
+   ],
+   "clusters": {
+    "count": 34,
+    "levels": 3,
+    "roots": 14,
+    "finestTriangles": 322,
+    "rootError": 8.1767
+   },
+   "chain": {
+    "cell": 0.3045,
+    "cells": [
+     35,
+     65,
+     31
+    ],
+    "wellComposedCells": 14,
+    "wrapTriangles": 12576,
+    "baseTriangles": 2596,
+    "baseVertices": 1300,
+    "baseError": 0.6711,
+    "outward": 0.6711,
+    "inward": 0.4312,
+    "simplifyError": 0.0798,
+    "steps": 1295,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.6711,
+     7.3737
+    ],
+    "inflateMax": 1.6435,
+    "rootTriangles": 129,
+    "farFirst": 1234,
+    "farFirstTriangles": 128,
+    "handoffError": 2.1369
+   },
+   "splat": {
+    "centre": [
+     0.0337,
+     4.9717,
+     0.0551
+    ],
+    "ry": 4.9717,
+    "rx": 2.9811,
+    "roofShare": 0,
+    "wallKind": [
+     12.02,
+     0.6715
+    ],
+    "roofKind": [
+     12.02,
+     0.6715
+    ]
+   },
+   "bakeMs": 2391
+  },
+  {
+   "id": 48,
+   "name": "Azenha (watermill, its wheel under a launder)",
+   "fingerprint": "250329da77488b392757a799f60c9390f7e2b05b67a206f95f1ed7b3cb1efbd1",
+   "sourceTriangles": 2066,
+   "parts": 31,
+   "quantization": {
+    "low": [
+     -5.1215,
+     -6.5,
+     -4.97
+    ],
+    "span": 14.661
+   },
+   "sphere": [
+    0.7157,
+    0.8305,
+    1.546,
+    12.4644
+   ],
+   "clusters": {
+    "count": 88,
+    "levels": 2,
+    "roots": 43,
+    "finestTriangles": 2066,
+    "rootError": 1.7428
+   },
+   "chain": {
+    "cell": 0.2715,
+    "cells": [
+     53,
+     65,
+     59
+    ],
+    "wellComposedCells": 8,
+    "wrapTriangles": 28976,
+    "baseTriangles": 2092,
+    "baseVertices": 1049,
+    "baseError": 1.2188,
+    "outward": 0.736,
+    "inward": 1.2188,
+    "simplifyError": 0.089,
+    "steps": 1043,
+    "coreTriangles": 4,
+    "depth": 9,
+    "errorRange": [
+     1.2188,
+     10.1944
+    ],
+    "inflateMax": 1.4654,
+    "rootTriangles": 1341,
+    "farFirst": 376,
+    "farFirstTriangles": 1340,
+    "handoffError": 1.5518
+   },
+   "splat": {
+    "centre": [
+     0.7157,
+     4.0805,
+     1.546
+    ],
+    "ry": 4.0805,
+    "rx": 6.1217,
+    "roofShare": 0.1715,
+    "wallKind": [
+     11.02,
+     0.55626
+    ],
+    "roofKind": [
+     13.02,
+     0.99648
+    ]
+   },
+   "bakeMs": 4224
+  },
+  {
+   "id": 49,
+   "name": "Celeiro (granary raised on staddle stones)",
+   "fingerprint": "146d18321bcca9c5330b61254ebe2f8ebeb8b67a0f905da33e05819120c13ced",
+   "sourceTriangles": 1382,
+   "parts": 33,
+   "quantization": {
+    "low": [
+     -4.5,
+     -6.5,
+     -4.64
+    ],
+    "span": 13.5675
+   },
+   "sphere": [
+    0.0225,
+    0.2838,
+    -0.1175,
+    9.994
+   ],
+   "clusters": {
+    "count": 74,
+    "levels": 2,
+    "roots": 34,
+    "finestTriangles": 1382,
+    "rootError": 0.7855
+   },
+   "chain": {
+    "cell": 0.1675,
+    "cells": [
+     65,
+     91,
+     65
+    ],
+    "wellComposedCells": 3,
+    "wrapTriangles": 54880,
+    "baseTriangles": 1362,
+    "baseVertices": 683,
+    "baseError": 0.95,
+    "outward": 0.4475,
+    "inward": 0.95,
+    "simplifyError": 0.0439,
+    "steps": 678,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.95,
+     10.4716
+    ],
+    "inflateMax": 1.3561,
+    "rootTriangles": 916,
+    "farFirst": 223,
+    "farFirstTriangles": 916,
+    "handoffError": 1.1521
+   },
+   "splat": {
+    "centre": [
+     0.0225,
+     3.5338,
+     -0.1175
+    ],
+    "ry": 3.5338,
+    "rx": 4.4332,
+    "roofShare": 0.2133,
+    "wallKind": [
+     11.02,
+     0.55497
+    ],
+    "roofKind": [
+     13.02,
+     0.89858
+    ]
+   },
+   "bakeMs": 2031
+  },
+  {
+   "id": 50,
+   "name": "Telheiro (outbuilding, open to its yard)",
+   "fingerprint": "fa0a4c8e04ae416f933da2cf15128319c988cf27f45c03c9d10dc173ae035127",
+   "sourceTriangles": 604,
+   "parts": 12,
+   "quantization": {
+    "low": [
+     -2.92412,
+     -6.5,
+     -2.67
+    ],
+    "span": 10.05413
+   },
+   "sphere": [
+    -0.0072,
+    -1.4729,
+    0.0607,
+    7.1229
+   ],
+   "clusters": {
+    "count": 28,
+    "levels": 2,
+    "roots": 14,
+    "finestTriangles": 604,
+    "rootError": 1.2073
+   },
+   "chain": {
+    "cell": 0.1241,
+    "cells": [
+     57,
+     91,
+     55
+    ],
+    "wellComposedCells": 7,
+    "wrapTriangles": 56404,
+    "baseTriangles": 1628,
+    "baseVertices": 814,
+    "baseError": 0.3506,
+    "outward": 0.3506,
+    "inward": 0.3107,
+    "simplifyError": 0.0325,
+    "steps": 809,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.3506,
+     7.982
+    ],
+    "inflateMax": 1.0049,
+    "rootTriangles": 368,
+    "farFirst": 630,
+    "farFirstTriangles": 368,
+    "handoffError": 0.599
+   },
+   "splat": {
+    "centre": [
+     -0.0072,
+     1.7771,
+     0.0607
+    ],
+    "ry": 1.7771,
+    "rx": 3.0294,
+    "roofShare": 0.2324,
+    "wallKind": [
+     11.02,
+     0.60949
+    ],
+    "roofKind": [
+     13.02,
+     0.83814
+    ]
+   },
+   "bakeMs": 2822
+  },
+  {
+   "id": 51,
+   "name": "Celeiro grande (barn or storehouse, great doors to the street)",
+   "fingerprint": "7b513aa46f6482b75266693775434334b9581c370efa28e93307b34065e83200",
+   "sourceTriangles": 1958,
+   "parts": 14,
+   "quantization": {
+    "low": [
+     -6.52975,
+     -6.5,
+     -6.64975
+    ],
+    "span": 14.55975
+   },
+   "sphere": [
+    -0.0587,
+    0.7799,
+    -0.0889,
+    12.8145
+   ],
+   "clusters": {
+    "count": 59,
+    "levels": 2,
+    "roots": 27,
+    "finestTriangles": 1958,
+    "rootError": 0.9071
+   },
+   "chain": {
+    "cell": 0.1798,
+    "cells": [
+     82,
+     91,
+     83
+    ],
+    "wellComposedCells": 1,
+    "wrapTriangles": 83128,
+    "baseTriangles": 2630,
+    "baseVertices": 1317,
+    "baseError": 0.3885,
+    "outward": 0.3885,
+    "inward": 0.307,
+    "simplifyError": 0.0193,
+    "steps": 1312,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.3885,
+     10.2648
+    ],
+    "inflateMax": 1.4553,
+    "rootTriangles": 1261,
+    "farFirst": 685,
+    "farFirstTriangles": 1260,
+    "handoffError": 0.6089
+   },
+   "splat": {
+    "centre": [
+     -0.0587,
+     4.0299,
+     -0.0889
+    ],
+    "ry": 4.0299,
+    "rx": 7.0321,
+    "roofShare": 0.2602,
+    "wallKind": [
+     11.02,
+     0.6693
+    ],
+    "roofKind": [
+     13.02,
+     0.8917
+    ]
+   },
+   "bakeMs": 5768
+  },
+  {
+   "id": 52,
+   "name": "Pombal (dovecote)",
+   "fingerprint": "c470f397bfb855f1e1f2153ed8bd6fb4bb75d06306e8bc146b48ba715d98a425",
+   "sourceTriangles": 302,
+   "parts": 11,
+   "quantization": {
+    "low": [
+     -2.75,
+     -6.5,
+     -2.75
+    ],
+    "span": 14.63062
+   },
+   "sphere": [
+    0.0948,
+    0.8153,
+    0.0948,
+    9.3691
+   ],
+   "clusters": {
+    "count": 22,
+    "levels": 2,
+    "roots": 11,
+    "finestTriangles": 302,
+    "rootError": 2.314
+   },
+   "chain": {
+    "cell": 0.2709,
+    "cells": [
+     32,
+     65,
+     32
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 12968,
+    "baseTriangles": 2406,
+    "baseVertices": 1205,
+    "baseError": 0.589,
+    "outward": 0.589,
+    "inward": 0.4636,
+    "simplifyError": 0.0888,
+    "steps": 1200,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.589,
+     7.271
+    ],
+    "inflateMax": 1.4623,
+    "rootTriangles": 175,
+    "farFirst": 1116,
+    "farFirstTriangles": 174,
+    "handoffError": 1.2505
+   },
+   "splat": {
+    "centre": [
+     0.0948,
+     4.0653,
+     0.0948
+    ],
+    "ry": 4.0653,
+    "rx": 2.7505,
+    "roofShare": 0.2621,
+    "wallKind": [
+     11.02,
+     0.61829
+    ],
+    "roofKind": [
+     13.02,
+     0.90489
+    ]
+   },
+   "bakeMs": 4453
+  },
+  {
+   "id": 53,
+   "name": "Portagem (toll house, its bar swung back along the wall)",
+   "fingerprint": "198d78dd5f68496a7cac55278080e6a71884a26960fe3f621d0184ae255d23c7",
+   "sourceTriangles": 920,
+   "parts": 12,
+   "quantization": {
+    "low": [
+     -3.6435,
+     -6.5,
+     -3.52
+    ],
+    "span": 11.6235
+   },
+   "sphere": [
+    -0.1278,
+    -0.6883,
+    -0.0042,
+    8.5012
+   ],
+   "clusters": {
+    "count": 33,
+    "levels": 2,
+    "roots": 17,
+    "finestTriangles": 920,
+    "rootError": 1.1976
+   },
+   "chain": {
+    "cell": 0.1435,
+    "cells": [
+     59,
+     91,
+     60
+    ],
+    "wellComposedCells": 2,
+    "wrapTriangles": 52772,
+    "baseTriangles": 1792,
+    "baseVertices": 898,
+    "baseError": 0.415,
+    "outward": 0.3295,
+    "inward": 0.415,
+    "simplifyError": 0.047,
+    "steps": 893,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.415,
+     8.5268
+    ],
+    "inflateMax": 1.1618,
+    "rootTriangles": 622,
+    "farFirst": 585,
+    "farFirstTriangles": 622,
+    "handoffError": 0.7421
+   },
+   "splat": {
+    "centre": [
+     -0.1278,
+     2.5617,
+     -0.0042
+    ],
+    "ry": 2.5617,
+    "rx": 3.7784,
+    "roofShare": 0.2447,
+    "wallKind": [
+     11.02,
+     0.55554
+    ],
+    "roofKind": [
+     13.02,
+     1
+    ]
+   },
+   "bakeMs": 4236
+  },
+  {
+   "id": 54,
+   "name": "Choça (cottar's hovel under thatch)",
+   "fingerprint": "9f692b8cecca4b4df9f6d7a02a94c683e9aac8a510695c047b6e2ca6e7a89110",
+   "sourceTriangles": 700,
+   "parts": 10,
+   "quantization": {
+    "low": [
+     -3.13225,
+     -6.5,
+     -3.00225
+    ],
+    "span": 10.71225
+   },
+   "sphere": [
+    -0.0244,
+    -1.1439,
+    -0.0266,
+    7.46
+   ],
+   "clusters": {
+    "count": 22,
+    "levels": 2,
+    "roots": 14,
+    "finestTriangles": 700,
+    "rootError": 0.0266
+   },
+   "chain": {
+    "cell": 0.1322,
+    "cells": [
+     57,
+     91,
+     55
+    ],
+    "wellComposedCells": 19,
+    "wrapTriangles": 47204,
+    "baseTriangles": 2346,
+    "baseVertices": 1176,
+    "baseError": 1.4192,
+    "outward": 0.2843,
+    "inward": 1.4192,
+    "simplifyError": 0.0277,
+    "steps": 1170,
+    "coreTriangles": 4,
+    "depth": 9,
+    "errorRange": [
+     1.4192,
+     9.155
+    ],
+    "inflateMax": 1.0707,
+    "rootTriangles": 534,
+    "farFirst": 906,
+    "farFirstTriangles": 534,
+    "handoffError": 1.6819
+   },
+   "splat": {
+    "centre": [
+     -0.0244,
+     2.1061,
+     -0.0266
+    ],
+    "ry": 2.1061,
+    "rx": 3.0045,
+    "roofShare": 0.3132,
+    "wallKind": [
+     11.02,
+     0.60288
+    ],
+    "roofKind": [
+     15.02,
+     0.92412
+    ]
+   },
+   "bakeMs": 4334
+  },
+  {
+   "id": 55,
+   "name": "Casa de colmo (villager's house under thatch)",
+   "fingerprint": "c925378f53fb9610f1ee91d470a5561a349dd4541af75b924d933aef36a2be73",
+   "sourceTriangles": 968,
+   "parts": 10,
+   "quantization": {
+    "low": [
+     -4.20725,
+     -6.5,
+     -4.67
+    ],
+    "span": 12.73725
+   },
+   "sphere": [
+    -0.0401,
+    -0.1314,
+    0.0475,
+    9.7052
+   ],
+   "clusters": {
+    "count": 32,
+    "levels": 2,
+    "roots": 16,
+    "finestTriangles": 968,
+    "rootError": 2.6744
+   },
+   "chain": {
+    "cell": 0.1572,
+    "cells": [
+     63,
+     91,
+     71
+    ],
+    "wellComposedCells": 29,
+    "wrapTriangles": 60048,
+    "baseTriangles": 2838,
+    "baseVertices": 1421,
+    "baseError": 2.3978,
+    "outward": 0.3673,
+    "inward": 2.3978,
+    "simplifyError": 0.0264,
+    "steps": 1416,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     2.3978,
+     12.2622
+    ],
+    "inflateMax": 1.2731,
+    "rootTriangles": 710,
+    "farFirst": 1064,
+    "farFirstTriangles": 710,
+    "handoffError": 2.6753
+   },
+   "splat": {
+    "centre": [
+     -0.0401,
+     3.1186,
+     0.0475
+    ],
+    "ry": 3.1186,
+    "rx": 4.4324,
+    "roofShare": 0.3618,
+    "wallKind": [
+     11.02,
+     0.55233
+    ],
+    "roofKind": [
+     15.02,
+     0.90037
+    ]
+   },
+   "bakeMs": 8155
+  },
+  {
+   "id": 56,
+   "name": "Casal comprido de colmo (longhouse under thatch, its byre at one end)",
+   "fingerprint": "bdcfad1fa1f3f59415d81fcf218fb61dba93d49be75096d29de5a1fc1ec52b34",
+   "sourceTriangles": 1440,
+   "parts": 10,
+   "quantization": {
+    "low": [
+     -7.73875,
+     -6.5,
+     -4.17
+    ],
+    "span": 15.4775
+   },
+   "sphere": [
+    0,
+    -0.2712,
+    0.0769,
+    11.7447
+   ],
+   "clusters": {
+    "count": 41,
+    "levels": 2,
+    "roots": 20,
+    "finestTriangles": 1440,
+    "rootError": 2.436
+   },
+   "chain": {
+    "cell": 0.1888,
+    "cells": [
+     91,
+     77,
+     56
+    ],
+    "wellComposedCells": 13,
+    "wrapTriangles": 60484,
+    "baseTriangles": 2718,
+    "baseVertices": 1361,
+    "baseError": 2.3767,
+    "outward": 0.4013,
+    "inward": 2.3767,
+    "simplifyError": 0.0495,
+    "steps": 1356,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     2.3767,
+     11.0838
+    ],
+    "inflateMax": 1.547,
+    "rootTriangles": 936,
+    "farFirst": 891,
+    "farFirstTriangles": 936,
+    "handoffError": 2.6445
+   },
+   "splat": {
+    "centre": [
+     0,
+     2.9788,
+     0.0769
+    ],
+    "ry": 2.9788,
+    "rx": 6.5233,
+    "roofShare": 0.4228,
+    "wallKind": [
+     11.02,
+     0.60757
+    ],
+    "roofKind": [
+     15.02,
+     0.89774
+    ]
+   },
+   "bakeMs": 6725
+  },
+  {
+   "id": 57,
+   "name": "Lagar (winepress under its roof, open to the yard)",
+   "fingerprint": "42c82c046c4d3e3031c72575c5126677b1aa5c8d68452f665c0495ecc63444a4",
+   "sourceTriangles": 1212,
+   "parts": 21,
+   "quantization": {
+    "low": [
+     -5.0765,
+     -6.7265,
+     -4.6965
+    ],
+    "span": 12.4575
+   },
+   "sphere": [
+    -0.0935,
+    -0.4978,
+    -0.0532,
+    10.1422
+   ],
+   "clusters": {
+    "count": 53,
+    "levels": 2,
+    "roots": 26,
+    "finestTriangles": 1212,
+    "rootError": 2.1665
+   },
+   "chain": {
+    "cell": 0.2265,
+    "cells": [
+     54,
+     65,
+     51
+    ],
+    "wellComposedCells": 12,
+    "wrapTriangles": 40888,
+    "baseTriangles": 2798,
+    "baseVertices": 1391,
+    "baseError": 0.6,
+    "outward": 0.6,
+    "inward": 0.5482,
+    "simplifyError": 0.0475,
+    "steps": 1385,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.6,
+     10.6353
+    ],
+    "inflateMax": 1.2451,
+    "rootTriangles": 783,
+    "farFirst": 1008,
+    "farFirstTriangles": 782,
+    "handoffError": 1.0532
+   },
+   "splat": {
+    "centre": [
+     -0.0935,
+     2.8655,
+     -0.0532
+    ],
+    "ry": 2.8655,
+    "rx": 5.2234,
+    "roofShare": 0.2875,
+    "wallKind": [
+     11.02,
+     0.6207
+    ],
+    "roofKind": [
+     13.02,
+     0.96882
+    ]
+   },
+   "bakeMs": 7353
+  },
+  {
+   "id": 58,
+   "name": "Oficina de curtidor ou tintureiro (tannery or dye works: vats in the yard, cloths on the frames)",
+   "fingerprint": "4a378b62fbd5a5de8dc16c0cb9e2e72386e03038cff5f6093885a635f4002c65",
+   "sourceTriangles": 1562,
+   "parts": 36,
+   "quantization": {
+    "low": [
+     -7.57375,
+     -6.5,
+     -4
+    ],
+    "span": 15.05625
+   },
+   "sphere": [
+    -0.0456,
+    -1.025,
+    0.2431,
+    11.5451
+   ],
+   "clusters": {
+    "count": 97,
+    "levels": 3,
+    "roots": 37,
+    "finestTriangles": 1562,
+    "rootError": 2.0068
+   },
+   "chain": {
+    "cell": 0.2738,
+    "cells": [
+     65,
+     51,
+     42
+    ],
+    "wellComposedCells": 4,
+    "wrapTriangles": 32076,
+    "baseTriangles": 2198,
+    "baseVertices": 1095,
+    "baseError": 0.7512,
+    "outward": 0.7512,
+    "inward": 0.4752,
+    "simplifyError": 0.0897,
+    "steps": 1090,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.7512,
+     10.1826
+    ],
+    "inflateMax": 1.5049,
+    "rootTriangles": 817,
+    "farFirst": 691,
+    "farFirstTriangles": 816,
+    "handoffError": 1.2036
+   },
+   "splat": {
+    "centre": [
+     -0.0456,
+     2.225,
+     0.2431
+    ],
+    "ry": 2.225,
+    "rx": 6.2421,
+    "roofShare": 0.2162,
+    "wallKind": [
+     11.02,
+     0.61488
+    ],
+    "roofKind": [
+     13.02,
+     0.88441
+    ]
+   },
+   "bakeMs": 5027
+  },
+  {
+   "id": 59,
+   "name": "Casa de pedra (stone hall: chapter house, refectory, hospital, bath, guildhall)",
+   "fingerprint": "219b47aa2c8c246465dfbd9723e152d89f376559e2354281a6c77bdafc701ac3",
+   "sourceTriangles": 3812,
+   "parts": 38,
+   "quantization": {
+    "low": [
+     -8.55875,
+     -6.5,
+     -5.62
+    ],
+    "span": 17.1175
+   },
+   "sphere": [
+    0,
+    1.6413,
+    0.0163,
+    14.3619
+   ],
+   "clusters": {
+    "count": 148,
+    "levels": 3,
+    "roots": 68,
+    "finestTriangles": 3812,
+    "rootError": 2.4324
+   },
+   "chain": {
+    "cell": 0.2088,
+    "cells": [
+     91,
+     89,
+     65
+    ],
+    "wellComposedCells": 20,
+    "wrapTriangles": 75836,
+    "baseTriangles": 2994,
+    "baseVertices": 1499,
+    "baseError": 0.6084,
+    "outward": 0.4462,
+    "inward": 0.6084,
+    "simplifyError": 0.0438,
+    "steps": 1494,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.6084,
+     11.3364
+    ],
+    "inflateMax": 1.7109,
+    "rootTriangles": 2565,
+    "farFirst": 215,
+    "farFirstTriangles": 2564,
+    "handoffError": 0.8179
+   },
+   "splat": {
+    "centre": [
+     0,
+     4.8913,
+     0.0163
+    ],
+    "ry": 4.8913,
+    "rx": 8.2048,
+    "roofShare": 0.2263,
+    "wallKind": [
+     11.02,
+     0.67575
+    ],
+    "roofKind": [
+     13.02,
+     1
+    ]
+   },
+   "bakeMs": 10687
+  },
+  {
+   "id": 60,
+   "name": "Claustro (cloister: a covered walk about its garth)",
+   "fingerprint": "b60d5b6a6d7cb387eb3b087f907fd1be7dcd872a26e3bc6176176bfa8c94c918",
+   "sourceTriangles": 3234,
+   "parts": 46,
+   "quantization": {
+    "low": [
+     -10.22145,
+     -7.12145,
+     -11.66945
+    ],
+    "span": 22.99365
+   },
+   "sphere": [
+    -0.2783,
+    -1.5284,
+    -0.1726,
+    18.5047
+   ],
+   "clusters": {
+    "count": 132,
+    "levels": 5,
+    "roots": 49,
+    "finestTriangles": 3234,
+    "rootError": 0.9617
+   },
+   "chain": {
+    "cell": 0.6215,
+    "cells": [
+     42,
+     28,
+     47
+    ],
+    "wellComposedCells": 1,
+    "wrapTriangles": 14204,
+    "baseTriangles": 928,
+    "baseVertices": 466,
+    "baseError": 1.5284,
+    "outward": 1.5284,
+    "inward": 1.4401,
+    "simplifyError": 0.0834,
+    "steps": 461,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     1.5284,
+     8.8555
+    ],
+    "inflateMax": 2.2982,
+    "rootTriangles": 1739,
+    "farFirst": 0,
+    "farFirstTriangles": 928,
+    "handoffError": 1.5284
+   },
+   "splat": {
+    "centre": [
+     -0.2783,
+     2.0323,
+     -0.1726
+    ],
+    "ry": 2.0323,
+    "rx": 13.9314,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.64133
+    ],
+    "roofKind": [
+     13.02,
+     0.98573
+    ]
+   },
+   "bakeMs": 2681
+  },
+  {
+   "id": 61,
+   "name": "Casa de pátio (courtyard house: four ranges about a court, a gateway to the street)",
+   "fingerprint": "d88904621857aca05eba714189ab6892d316b289af27972b4cb9ae7a97925424",
+   "sourceTriangles": 6538,
+   "parts": 40,
+   "quantization": {
+    "low": [
+     -8.42,
+     -6.5,
+     -8.42
+    ],
+    "span": 17.0505
+   },
+   "sphere": [
+    0.1052,
+    0.6044,
+    0.1052,
+    15.3254
+   ],
+   "clusters": {
+    "count": 192,
+    "levels": 3,
+    "roots": 96,
+    "finestTriangles": 6538,
+    "rootError": 2.5788
+   },
+   "chain": {
+    "cell": 0.3158,
+    "cells": [
+     65,
+     56,
+     65
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 44412,
+    "baseTriangles": 2584,
+    "baseVertices": 1294,
+    "baseError": 1.2226,
+    "outward": 0.8165,
+    "inward": 1.2226,
+    "simplifyError": 0.0217,
+    "steps": 1289,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     1.2226,
+     12.3318
+    ],
+    "inflateMax": 1.7042,
+    "rootTriangles": 4994,
+    "farFirst": 0,
+    "farFirstTriangles": 2584,
+    "handoffError": 1.2226
+   },
+   "splat": {
+    "centre": [
+     0.1052,
+     3.8544,
+     0.1052
+    ],
+    "ry": 3.8544,
+    "rx": 10.5598,
+    "roofShare": 0.1767,
+    "wallKind": [
+     11.02,
+     0.61005
+    ],
+    "roofKind": [
+     13.02,
+     1
+    ]
+   },
+   "bakeMs": 6156
+  },
+  {
+   "id": 62,
+   "name": "Cais de madeira (timber wharf on its piles)",
+   "fingerprint": "df6bf997b68ffded59d203a689d0d73d63a6436715737a76c06ed2cb88d4e550",
+   "sourceTriangles": 860,
+   "parts": 34,
+   "quantization": {
+    "low": [
+     -3.5,
+     -6.5,
+     -15.04
+    ],
+    "span": 30.3
+   },
+   "sphere": [
+    0.1,
+    -2.6,
+    0.11,
+    18.8967
+   ],
+   "clusters": {
+    "count": 95,
+    "levels": 5,
+    "roots": 10,
+    "finestTriangles": 860,
+    "rootError": 1.8551
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     35,
+     36,
+     112
+    ],
+    "wellComposedCells": 1,
+    "wrapTriangles": 20280,
+    "baseTriangles": 2530,
+    "baseVertices": 1267,
+    "baseError": 0.7,
+    "outward": 0.7,
+    "inward": 0.5296,
+    "simplifyError": 0.0786,
+    "steps": 1262,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.7,
+     9.194
+    ],
+    "inflateMax": 3.0285,
+    "rootTriangles": 164,
+    "farFirst": 1183,
+    "farFirstTriangles": 164,
+    "handoffError": 2.1088
+   },
+   "splat": {
+    "centre": [
+     0.1,
+     0.65,
+     0.11
+    ],
+    "ry": 0.65,
+    "rx": 5.1941,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     6.8042
+    ],
+    "roofKind": [
+     10.02,
+     6.8042
+    ]
+   },
+   "bakeMs": 1896
+  },
+  {
+   "id": 63,
+   "name": "Pedreira (quarry: the worked face, cut stone, shear-legs)",
+   "fingerprint": "da49d348fc33140055aac94ba760bc4fb20a4aebd6c572316be4eb64fb5e966a",
+   "sourceTriangles": 1098,
+   "parts": 18,
+   "quantization": {
+    "low": [
+     -10,
+     -6.5,
+     -7
+    ],
+    "span": 20.25
+   },
+   "sphere": [
+    0.125,
+    -0.875,
+    0.125,
+    15.6326
+   ],
+   "clusters": {
+    "count": 49,
+    "levels": 2,
+    "roots": 24,
+    "finestTriangles": 1098,
+    "rootError": 0.6442
+   },
+   "chain": {
+    "cell": 0.25,
+    "cells": [
+     91,
+     56,
+     67
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 63364,
+    "baseTriangles": 1636,
+    "baseVertices": 820,
+    "baseError": 0.6403,
+    "outward": 0.55,
+    "inward": 0.6403,
+    "simplifyError": 0.0524,
+    "steps": 815,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.6403,
+     8.2401
+    ],
+    "inflateMax": 2.024,
+    "rootTriangles": 679,
+    "farFirst": 479,
+    "farFirstTriangles": 678,
+    "handoffError": 1.0222
+   },
+   "splat": {
+    "centre": [
+     0.125,
+     2.375,
+     0.125
+    ],
+    "ry": 2.375,
+    "rx": 5.7483,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.6058
+    ],
+    "roofKind": [
+     11.02,
+     0.6058
+    ]
+   },
+   "bakeMs": 2397
+  },
+  {
+   "id": 64,
+   "name": "Ruína (a house burnt to its walls)",
+   "fingerprint": "26ca6dfa8e82f4b114d3953e6ec91e6510048958ead0ba489f8086fe22666603",
+   "sourceTriangles": 646,
+   "parts": 27,
+   "quantization": {
+    "low": [
+     -4,
+     -6.5,
+     -4.02
+    ],
+    "span": 10.63125
+   },
+   "sphere": [
+    0.0031,
+    -1.1844,
+    0.0487,
+    8.8723
+   ],
+   "clusters": {
+    "count": 58,
+    "levels": 3,
+    "roots": 27,
+    "finestTriangles": 646,
+    "rootError": 0.0502
+   },
+   "chain": {
+    "cell": 0.1313,
+    "cells": [
+     72,
+     91,
+     73
+    ],
+    "wellComposedCells": 7,
+    "wrapTriangles": 88224,
+    "baseTriangles": 2814,
+    "baseVertices": 1405,
+    "baseError": 0.3313,
+    "outward": 0.3313,
+    "inward": 0.2309,
+    "simplifyError": 0.0275,
+    "steps": 1400,
+    "coreTriangles": 4,
+    "depth": 11,
+    "errorRange": [
+     0.3313,
+     7.2217
+    ],
+    "inflateMax": 1.0626,
+    "rootTriangles": 375,
+    "farFirst": 1220,
+    "farFirstTriangles": 374,
+    "handoffError": 0.7542
+   },
+   "splat": {
+    "centre": [
+     0.0031,
+     2.0656,
+     0.0487
+    ],
+    "ry": 2.0656,
+    "rx": 4.3539,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.61322
+    ],
+    "roofKind": [
+     11.02,
+     0.61322
+    ]
+   },
+   "bakeMs": 6811
+  },
+  {
+   "id": 65,
+   "name": "Entulho (the heap where a building stood)",
+   "fingerprint": "19ca0f7be1c6804beb3cb416a83d24fe0119d78e02e0c6ee71481c682ef03a5d",
+   "sourceTriangles": 336,
+   "parts": 9,
+   "quantization": {
+    "low": [
+     -3.75563,
+     -6.5,
+     -3.61244
+    ],
+    "span": 8.40384
+   },
+   "sphere": [
+    -0.0206,
+    -2.2981,
+    0.0448,
+    7.5569
+   ],
+   "clusters": {
+    "count": 19,
+    "levels": 2,
+    "roots": 8,
+    "finestTriangles": 336,
+    "rootError": 2.8585
+   },
+   "chain": {
+    "cell": 0.1556,
+    "cells": [
+     58,
+     65,
+     58
+    ],
+    "wellComposedCells": 4,
+    "wrapTriangles": 43632,
+    "baseTriangles": 2972,
+    "baseVertices": 1488,
+    "baseError": 0.3368,
+    "outward": 0.3193,
+    "inward": 0.3368,
+    "simplifyError": 0.0167,
+    "steps": 1483,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.3368,
+     7.1686
+    ],
+    "inflateMax": 0.84,
+    "rootTriangles": 214,
+    "farFirst": 1379,
+    "farFirstTriangles": 214,
+    "handoffError": 0.8275
+   },
+   "splat": {
+    "centre": [
+     -0.0206,
+     0.9519,
+     0.0448
+    ],
+    "ry": 0.9519,
+    "rx": 2.5919,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.59936
+    ],
+    "roofKind": [
+     11.02,
+     0.59936
+    ]
+   },
+   "bakeMs": 4971
+  },
+  {
+   "id": 66,
+   "name": "Bark longhouse (Iroquoian: a vault of elm bark, a door at each end, a hearth to each two families)",
+   "fingerprint": "d4e9a56e4e0f8d01629b381777cd81f5361febf97ac9d69ca492652cb778e289",
+   "sourceTriangles": 1986,
+   "parts": 38,
+   "quantization": {
+    "low": [
+     -15.15,
+     -4.5,
+     -3.50371
+    ],
+    "span": 30.3
+   },
+   "sphere": [
+    0,
+    1.65,
+    0.0963,
+    19.476
+   ],
+   "clusters": {
+    "count": 81,
+    "levels": 2,
+    "roots": 41,
+    "finestTriangles": 1986,
+    "rootError": 0.8924
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     112,
+     52,
+     35
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 37340,
+    "baseTriangles": 554,
+    "baseVertices": 279,
+    "baseError": 0.72,
+    "outward": 0.72,
+    "inward": 0.3563,
+    "simplifyError": 0.0258,
+    "steps": 274,
+    "coreTriangles": 6,
+    "depth": 6,
+    "errorRange": [
+     0.72,
+     8.4994
+    ],
+    "inflateMax": 2.7237,
+    "rootTriangles": 1394,
+    "farFirst": 0,
+    "farFirstTriangles": 554,
+    "handoffError": 0.72
+   },
+   "splat": {
+    "centre": [
+     0,
+     3.9,
+     0.0963
+    ],
+    "ry": 3.9,
+    "rx": 11.9533,
+    "roofShare": 0,
+    "wallKind": [
+     17.02,
+     0.55127
+    ],
+    "roofKind": [
+     17.02,
+     0.55127
+    ]
+   },
+   "bakeMs": 865
+  },
+  {
+   "id": 67,
+   "name": "Wetu (Massachusett: an oval dome of bark over bent saplings)",
+   "fingerprint": "e36d9876194372ec6da42ff80566d37b5410f85a855343cac947d3207761e9bb",
+   "sourceTriangles": 394,
+   "parts": 8,
+   "quantization": {
+    "low": [
+     -2.75,
+     -4.5,
+     -2.54
+    ],
+    "span": 8.1405
+   },
+   "sphere": [
+    0.0766,
+    -0.4297,
+    0.0604,
+    6.42
+   ],
+   "clusters": {
+    "count": 16,
+    "levels": 2,
+    "roots": 8,
+    "finestTriangles": 394,
+    "rootError": 2.2945
+   },
+   "chain": {
+    "cell": 0.2261,
+    "cells": [
+     36,
+     47,
+     34
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 12008,
+    "baseTriangles": 332,
+    "baseVertices": 168,
+    "baseError": 0.4871,
+    "outward": 0.4523,
+    "inward": 0.4871,
+    "simplifyError": 0.2261,
+    "steps": 163,
+    "coreTriangles": 6,
+    "depth": 6,
+    "errorRange": [
+     0.4871,
+     5.2358
+    ],
+    "inflateMax": 0.8137,
+    "rootTriangles": 293,
+    "farFirst": 20,
+    "farFirstTriangles": 292,
+    "handoffError": 0.6022
+   },
+   "splat": {
+    "centre": [
+     0.0766,
+     1.8203,
+     0.0604
+    ],
+    "ry": 1.8203,
+    "rx": 2.6417,
+    "roofShare": 0,
+    "wallKind": [
+     17.02,
+     0.65769
+    ],
+    "roofKind": [
+     17.02,
+     0.65769
+    ]
+   },
+   "bakeMs": 1185
+  },
+  {
+   "id": 68,
+   "name": "Arbour house (Lenape and Powhatan: a long low vault of reed mats, \"like garden arbors\")",
+   "fingerprint": "80e6b6b104317b7906f7168b4d6f61a138f3f86521c5f8eb696da51191aa12e0",
+   "sourceTriangles": 2338,
+   "parts": 34,
+   "quantization": {
+    "low": [
+     -7.1,
+     -4.5,
+     -3.00251
+    ],
+    "span": 14.3775
+   },
+   "sphere": [
+    0.0887,
+    0.6475,
+    0.015,
+    10.7894
+   ],
+   "clusters": {
+    "count": 59,
+    "levels": 2,
+    "roots": 35,
+    "finestTriangles": 2338,
+    "rootError": 0.6396
+   },
+   "chain": {
+    "cell": 0.1775,
+    "cells": [
+     91,
+     69,
+     45
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 47780,
+    "baseTriangles": 460,
+    "baseVertices": 232,
+    "baseError": 0.36,
+    "outward": 0.36,
+    "inward": 0.22,
+    "simplifyError": 0.0465,
+    "steps": 227,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.36,
+     7.3021
+    ],
+    "inflateMax": 1.437,
+    "rootTriangles": 1804,
+    "farFirst": 0,
+    "farFirstTriangles": 460,
+    "handoffError": 0.36
+   },
+   "splat": {
+    "centre": [
+     0.0887,
+     2.8975,
+     0.015
+    ],
+    "ry": 2.8975,
+    "rx": 5.9063,
+    "roofShare": 0.9592,
+    "wallKind": [
+     10.02,
+     4.76687
+    ],
+    "roofKind": [
+     15.02,
+     0.6278
+    ]
+   },
+   "bakeMs": 890
+  },
+  {
+   "id": 69,
+   "name": "Bohío (Taíno: a round wall of canes under a cone of palm thatch)",
+   "fingerprint": "7ec7a65472ef753d55fc54636b0a56200c712de23ebc656bc6aa4a0e76304065",
+   "sourceTriangles": 470,
+   "parts": 13,
+   "quantization": {
+    "low": [
+     -4.15,
+     -4.5,
+     -4.08695
+    ],
+    "span": 12.15
+   },
+   "sphere": [
+    0.0687,
+    1.575,
+    0.1318,
+    9.7392
+   ],
+   "clusters": {
+    "count": 26,
+    "levels": 3,
+    "roots": 10,
+    "finestTriangles": 470,
+    "rootError": 18.1206
+   },
+   "chain": {
+    "cell": 0.3375,
+    "cells": [
+     36,
+     47,
+     36
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 10548,
+    "baseTriangles": 2372,
+    "baseVertices": 1188,
+    "baseError": 0.8995,
+    "outward": 0.8995,
+    "inward": 0.4968,
+    "simplifyError": 0.0885,
+    "steps": 1183,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.8995,
+     5.5773
+    ],
+    "inflateMax": 1.2144,
+    "rootTriangles": 215,
+    "farFirst": 1079,
+    "farFirstTriangles": 214,
+    "handoffError": 1.7355
+   },
+   "splat": {
+    "centre": [
+     0.0687,
+     3.825,
+     0.1318
+    ],
+    "ry": 3.825,
+    "rx": 3.4303,
+    "roofShare": 0.6197,
+    "wallKind": [
+     10.02,
+     2.44891
+    ],
+    "roofKind": [
+     15.02,
+     0.68405
+    ]
+   },
+   "bakeMs": 3849
+  },
+  {
+   "id": 70,
+   "name": "Caney (Taíno: the cacique's house, walls of cane under a high gable of palm thatch, a porch before it)",
+   "fingerprint": "fb840fec76b0a1cb9bf73273ba0414952a2d1408d184d967a5f0293aa051ea46",
+   "sourceTriangles": 1116,
+   "parts": 14,
+   "quantization": {
+    "low": [
+     -6.74375,
+     -4.74375,
+     -5.15868
+    ],
+    "span": 13.40625
+   },
+   "sphere": [
+    -0.0406,
+    1.8375,
+    -0.5274,
+    11.8235
+   ],
+   "clusters": {
+    "count": 40,
+    "levels": 2,
+    "roots": 18,
+    "finestTriangles": 1116,
+    "rootError": 2.568
+   },
+   "chain": {
+    "cell": 0.2438,
+    "cells": [
+     65,
+     64,
+     48
+    ],
+    "wellComposedCells": 22,
+    "wrapTriangles": 35964,
+    "baseTriangles": 2658,
+    "baseVertices": 1323,
+    "baseError": 3.0824,
+    "outward": 0.5687,
+    "inward": 3.0824,
+    "simplifyError": 0.0511,
+    "steps": 1318,
+    "coreTriangles": 6,
+    "depth": 10,
+    "errorRange": [
+     3.0824,
+     11.1118
+    ],
+    "inflateMax": 1.34,
+    "rootTriangles": 769,
+    "farFirst": 945,
+    "farFirstTriangles": 768,
+    "handoffError": 3.4565
+   },
+   "splat": {
+    "centre": [
+     -0.0406,
+     4.2094,
+     -0.5274
+    ],
+    "ry": 4.2094,
+    "rx": 5.5984,
+    "roofShare": 0.5847,
+    "wallKind": [
+     10.02,
+     4.53505
+    ],
+    "roofKind": [
+     15.02,
+     0.94381
+    ]
+   },
+   "bakeMs": 4753
+  },
+  {
+   "id": 71,
+   "name": "Maloca (Tupinambá: a long house of many families, palm thatch vaulted from the ground, a door at each end)",
+   "fingerprint": "f45182b62c816ce2ab8ee32ac267b472f73a8a3197f830f85cb914a92514f244",
+   "sourceTriangles": 2744,
+   "parts": 31,
+   "quantization": {
+    "low": [
+     -23.4,
+     -4.5,
+     -2.80214
+    ],
+    "span": 46.8
+   },
+   "sphere": [
+    0,
+    0.15,
+    -0.1021,
+    28.4829
+   ],
+   "clusters": {
+    "count": 69,
+    "levels": 2,
+    "roots": 45,
+    "finestTriangles": 2744,
+    "rootError": 1.1674
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     166,
+     42,
+     28
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 41724,
+    "baseTriangles": 730,
+    "baseVertices": 367,
+    "baseError": 0.72,
+    "outward": 0.72,
+    "inward": 0.3627,
+    "simplifyError": 0.0258,
+    "steps": 362,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.72,
+     6.8463
+    ],
+    "inflateMax": 4.6777,
+    "rootTriangles": 2268,
+    "farFirst": 0,
+    "farFirstTriangles": 730,
+    "handoffError": 0.72
+   },
+   "splat": {
+    "centre": [
+     0,
+     2.4,
+     -0.1021
+    ],
+    "ry": 2.4,
+    "rx": 16.0756,
+    "roofShare": 0.9897,
+    "wallKind": [
+     10.02,
+     4.81755
+    ],
+    "roofKind": [
+     15.02,
+     0.61028
+    ]
+   },
+   "bakeMs": 19061
+  },
+  {
+   "id": 72,
+   "name": "Long house of a chief (a vault of bark, his kin and his guard within)",
+   "fingerprint": "2f5ebcf74e59005ac0d9c2f54960ee6bbc514df156173ee87d6dfb40fa2c3103",
+   "sourceTriangles": 1308,
+   "parts": 35,
+   "quantization": {
+    "low": [
+     -6.273,
+     -4.5,
+     -3.50287
+    ],
+    "span": 12.546
+   },
+   "sphere": [
+    0,
+    0.9315,
+    0.0161,
+    10.1712
+   ],
+   "clusters": {
+    "count": 73,
+    "levels": 2,
+    "roots": 36,
+    "finestTriangles": 1308,
+    "rootError": 0.6155
+   },
+   "chain": {
+    "cell": 0.153,
+    "cells": [
+     91,
+     82,
+     57
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 63868,
+    "baseTriangles": 688,
+    "baseVertices": 346,
+    "baseError": 0.3031,
+    "outward": 0.3031,
+    "inward": 0.2187,
+    "simplifyError": 0.0205,
+    "steps": 341,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.3031,
+     7.7622
+    ],
+    "inflateMax": 1.254,
+    "rootTriangles": 871,
+    "farFirst": 0,
+    "farFirstTriangles": 688,
+    "handoffError": 0.3031
+   },
+   "splat": {
+    "centre": [
+     0,
+     3.1815,
+     0.0161
+    ],
+    "ry": 3.1815,
+    "rx": 5.7455,
+    "roofShare": 0,
+    "wallKind": [
+     17.02,
+     0.57712
+    ],
+    "roofKind": [
+     17.02,
+     0.57712
+    ]
+   },
+   "bakeMs": 9490
+  },
+  {
+   "id": 73,
+   "name": "Charnel house (Powhatan: a vault of mats on a scaffold of poles, the dead of the chiefs within; carved posts before it)",
+   "fingerprint": "3ebc0fed472887b53f465ef76f3d4a6ab608017abe7ed70f185a5400b5f78ad7",
+   "sourceTriangles": 2022,
+   "parts": 32,
+   "quantization": {
+    "low": [
+     -6.76217,
+     -4.5,
+     -2.50224
+    ],
+    "span": 12.9217
+   },
+   "sphere": [
+    -0.3013,
+    0.6049,
+    0.0502,
+    9.9222
+   ],
+   "clusters": {
+    "count": 61,
+    "levels": 2,
+    "roots": 37,
+    "finestTriangles": 2022,
+    "rootError": 1.4
+   },
+   "chain": {
+    "cell": 0.1595,
+    "cells": [
+     91,
+     75,
+     43
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 49772,
+    "baseTriangles": 180,
+    "baseVertices": 92,
+    "baseError": 0.4925,
+    "outward": 0.317,
+    "inward": 0.4925,
+    "simplifyError": 0.1595,
+    "steps": 87,
+    "coreTriangles": 6,
+    "depth": 5,
+    "errorRange": [
+     0.4925,
+     6.0694
+    ],
+    "inflateMax": 1.2915,
+    "rootTriangles": 1738,
+    "farFirst": 0,
+    "farFirstTriangles": 180,
+    "handoffError": 0.4925
+   },
+   "splat": {
+    "centre": [
+     -0.3013,
+     2.8549,
+     0.0502
+    ],
+    "ry": 2.8549,
+    "rx": 5.4652,
+    "roofShare": 0.9332,
+    "wallKind": [
+     10.02,
+     2.44758
+    ],
+    "roofKind": [
+     15.02,
+     0.71015
+    ]
+   },
+   "bakeMs": 1261
+  },
+  {
+   "id": 74,
+   "name": "Sweat lodge (a small dome of bark, its stones heated at the door)",
+   "fingerprint": "21a70898947a1f2f3ef04c1e3ffced175ca35cd02b925aec27cb8f0d78c8cb40",
+   "sourceTriangles": 324,
+   "parts": 8,
+   "quantization": {
+    "low": [
+     -1.25,
+     -4.5,
+     -2.04641
+    ],
+    "span": 6.62175
+   },
+   "sphere": [
+    0.0376,
+    -1.1891,
+    -0.391,
+    4.5911
+   ],
+   "clusters": {
+    "count": 15,
+    "levels": 2,
+    "roots": 7,
+    "finestTriangles": 324,
+    "rootError": 1.5907
+   },
+   "chain": {
+    "cell": 0.1226,
+    "cells": [
+     32,
+     65,
+     38
+    ],
+    "wellComposedCells": 5,
+    "wrapTriangles": 16072,
+    "baseTriangles": 1874,
+    "baseVertices": 939,
+    "baseError": 0.3315,
+    "outward": 0.3315,
+    "inward": 0.1638,
+    "simplifyError": 0.0257,
+    "steps": 934,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.3315,
+     4.9913
+    ],
+    "inflateMax": 0.6619,
+    "rootTriangles": 195,
+    "farFirst": 840,
+    "farFirstTriangles": 194,
+    "handoffError": 0.6135
+   },
+   "splat": {
+    "centre": [
+     0.0376,
+     1.0609,
+     -0.391
+    ],
+    "ry": 1.0609,
+    "rx": 1.2566,
+    "roofShare": 0,
+    "wallKind": [
+     17.02,
+     0.64402
+    ],
+    "roofKind": [
+     17.02,
+     0.64402
+    ]
+   },
+   "bakeMs": 2542
+  },
+  {
+   "id": 75,
+   "name": "Cerca (post-and-rail fence, a length)",
+   "fingerprint": "d51ad1154a2c6092c0370b16605db99ab955bc8fb03e7d03559a373a58b82dee",
+   "sourceTriangles": 118,
+   "parts": 7,
+   "quantization": {
+    "low": [
+     -0.105,
+     -1.3,
+     -2.515
+    ],
+    "span": 5.09288
+   },
+   "sphere": [
+    0.0208,
+    -0.0111,
+    0.0314,
+    3.3758
+   ],
+   "clusters": {
+    "count": 14,
+    "levels": 2,
+    "roots": 7,
+    "finestTriangles": 118,
+    "rootError": 0.0035
+   },
+   "chain": {
+    "cell": 0.0629,
+    "cells": [
+     15,
+     52,
+     91
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 6856,
+    "baseTriangles": 224,
+    "baseVertices": 110,
+    "baseError": 0.1036,
+    "outward": 0.1036,
+    "inward": 0.0687,
+    "simplifyError": 0.0322,
+    "steps": 105,
+    "coreTriangles": 4,
+    "depth": 6,
+    "errorRange": [
+     0.1036,
+     2.268
+    ],
+    "inflateMax": 0.509,
+    "rootTriangles": 94,
+    "farFirst": 65,
+    "farFirstTriangles": 94,
+    "handoffError": 0.2752
+   },
+   "splat": {
+    "centre": [
+     0.0208,
+     0.6389,
+     0.0314
+    ],
+    "ry": 0.6389,
+    "rx": 0.7637,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     2.52996
+    ],
+    "roofKind": [
+     10.02,
+     2.52996
+    ]
+   },
+   "bakeMs": 169
+  },
+  {
+   "id": 76,
+   "name": "Muro de pedra solta (dry-stone wall, a length)",
+   "fingerprint": "48a7a4d2cba810d7541f3e91270cfe36256311584cd68b24243e3b167aa60985",
+   "sourceTriangles": 124,
+   "parts": 10,
+   "quantization": {
+    "low": [
+     -0.4135,
+     -1.3,
+     -2.6035
+    ],
+    "span": 5.207
+   },
+   "sphere": [
+    -0.0007,
+    -0.0617,
+    0,
+    3.4428
+   ],
+   "clusters": {
+    "count": 18,
+    "levels": 2,
+    "roots": 10,
+    "finestTriangles": 124,
+    "rootError": 0.0022
+   },
+   "chain": {
+    "cell": 0.0635,
+    "cells": [
+     23,
+     50,
+     91
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 28020,
+    "baseTriangles": 382,
+    "baseVertices": 193,
+    "baseError": 0.1725,
+    "outward": 0.1725,
+    "inward": 0.086,
+    "simplifyError": 0.0085,
+    "steps": 188,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.1725,
+     1.7764
+    ],
+    "inflateMax": 0.5204,
+    "rootTriangles": 108,
+    "farFirst": 137,
+    "farFirstTriangles": 108,
+    "handoffError": 0.2617
+   },
+   "splat": {
+    "centre": [
+     -0.0007,
+     0.5882,
+     0
+    ],
+    "ry": 0.5882,
+    "rx": 1.8621,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.63846
+    ],
+    "roofKind": [
+     11.02,
+     0.63846
+    ]
+   },
+   "bakeMs": 452
+  },
+  {
+   "id": 77,
+   "name": "Pontão (timber bridge of a track)",
+   "fingerprint": "60925434e7935386a0c682c1303aa126de90a0afea6e55a7f7fec7ad718571ca",
+   "sourceTriangles": 556,
+   "parts": 31,
+   "quantization": {
+    "low": [
+     -1.6125,
+     -5.8,
+     -4.5
+    ],
+    "span": 9.1125
+   },
+   "sphere": [
+    -0.0375,
+    -2.3688,
+    0.0563,
+    6.838
+   ],
+   "clusters": {
+    "count": 70,
+    "levels": 3,
+    "roots": 23,
+    "finestTriangles": 556,
+    "rootError": 1.0923
+   },
+   "chain": {
+    "cell": 0.1125,
+    "cells": [
+     38,
+     72,
+     91
+    ],
+    "wellComposedCells": 3,
+    "wrapTriangles": 29288,
+    "baseTriangles": 2604,
+    "baseVertices": 1288,
+    "baseError": 0.275,
+    "outward": 0.2675,
+    "inward": 0.275,
+    "simplifyError": 0.0236,
+    "steps": 1283,
+    "coreTriangles": 6,
+    "depth": 10,
+    "errorRange": [
+     0.275,
+     6.2559
+    ],
+    "inflateMax": 0.9108,
+    "rootTriangles": 251,
+    "farFirst": 1177,
+    "farFirstTriangles": 250,
+    "handoffError": 0.8325
+   },
+   "splat": {
+    "centre": [
+     -0.0375,
+     0.5312,
+     0.0563
+    ],
+    "ry": 0.5312,
+    "rx": 1.8681,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     6.80411
+    ],
+    "roofKind": [
+     10.02,
+     6.80411
+    ]
+   },
+   "bakeMs": 5001
+  },
+  {
+   "id": 78,
+   "name": "Ponte de pedra (stone bridge of a track, arched with cutwaters)",
+   "fingerprint": "be47754064b0af6fb601ff4474280b34dd687e2dbccbc4f405d754de4051acfd",
+   "sourceTriangles": 880,
+   "parts": 30,
+   "quantization": {
+    "low": [
+     -2.35,
+     -6.2,
+     -4.52
+    ],
+    "span": 9.153
+   },
+   "sphere": [
+    0.023,
+    -2.5275,
+    0.0565,
+    7.1732
+   ],
+   "clusters": {
+    "count": 64,
+    "levels": 2,
+    "roots": 32,
+    "finestTriangles": 880,
+    "rootError": 0.8764
+   },
+   "chain": {
+    "cell": 0.113,
+    "cells": [
+     53,
+     76,
+     91
+    ],
+    "wellComposedCells": 2,
+    "wrapTriangles": 64308,
+    "baseTriangles": 2678,
+    "baseVertices": 1341,
+    "baseError": 0.4509,
+    "outward": 0.291,
+    "inward": 0.4509,
+    "simplifyError": 0.0296,
+    "steps": 1336,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.4509,
+     6.6476
+    ],
+    "inflateMax": 0.9149,
+    "rootTriangles": 574,
+    "farFirst": 1052,
+    "farFirstTriangles": 574,
+    "handoffError": 0.7253
+   },
+   "splat": {
+    "centre": [
+     0.023,
+     0.5725,
+     0.0565
+    ],
+    "ry": 0.5725,
+    "rx": 3.5915,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.63038
+    ],
+    "roofKind": [
+     11.02,
+     0.63038
+    ]
+   },
+   "bakeMs": 11435
+  },
+  {
+   "id": 79,
+   "name": "Ponte de pedra — level interior arch span without mid-river ramp dips",
+   "fingerprint": "ceb638fb60ca622c3a3a4cd013dbc109c69805b74d3b7b7e8ae5cabc34d636ec",
+   "sourceTriangles": 856,
+   "parts": 28,
+   "quantization": {
+    "low": [
+     -2.35,
+     -6.2,
+     -4.52
+    ],
+    "span": 9.153
+   },
+   "sphere": [
+    0.023,
+    -2.5275,
+    0.0565,
+    7.1732
+   ],
+   "clusters": {
+    "count": 61,
+    "levels": 2,
+    "roots": 30,
+    "finestTriangles": 856,
+    "rootError": 0.8764
+   },
+   "chain": {
+    "cell": 0.113,
+    "cells": [
+     53,
+     76,
+     91
+    ],
+    "wellComposedCells": 2,
+    "wrapTriangles": 64228,
+    "baseTriangles": 2620,
+    "baseVertices": 1312,
+    "baseError": 0.4509,
+    "outward": 0.291,
+    "inward": 0.4509,
+    "simplifyError": 0.0296,
+    "steps": 1307,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.4509,
+     4.6029
+    ],
+    "inflateMax": 0.9149,
+    "rootTriangles": 554,
+    "farFirst": 1033,
+    "farFirstTriangles": 554,
+    "handoffError": 0.7266
+   },
+   "splat": {
+    "centre": [
+     0.023,
+     0.5725,
+     0.0565
+    ],
+    "ry": 0.5725,
+    "rx": 3.5915,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.92517
+    ],
+    "roofKind": [
+     11.02,
+     0.92517
+    ]
+   },
+   "bakeMs": 8841
+  },
+  {
+   "id": 80,
+   "name": "Campas (graves of a churchyard)",
+   "fingerprint": "326b050e0605daa960cbf330b8dfa1129536eb4e937b4f4f9ef14b2b43b4ceaf",
+   "sourceTriangles": 150,
+   "parts": 15,
+   "quantization": {
+    "low": [
+     -2.66687,
+     -0.4,
+     -2.46688
+    ],
+    "span": 5.48375
+   },
+   "sphere": [
+    0.075,
+    0.4025,
+    0.0409,
+    4.2673
+   ],
+   "clusters": {
+    "count": 15,
+    "levels": 1,
+    "roots": 15,
+    "finestTriangles": 150,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0.0669,
+    "cells": [
+     91,
+     35,
+     85
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 26284,
+    "baseTriangles": 2136,
+    "baseVertices": 1077,
+    "baseError": 0.175,
+    "outward": 0.175,
+    "inward": 0.1317,
+    "simplifyError": 0.0175,
+    "steps": 1073,
+    "coreTriangles": 4,
+    "depth": 10,
+    "errorRange": [
+     0.175,
+     3.8707
+    ],
+    "inflateMax": 0.5481,
+    "rootTriangles": 150,
+    "farFirst": 993,
+    "farFirstTriangles": 150,
+    "handoffError": 0.6665
+   },
+   "splat": {
+    "centre": [
+     0.075,
+     0.6025,
+     0.0409
+    ],
+    "ry": 0.6025,
+    "rx": 1.0824,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.89663
+    ],
+    "roofKind": [
+     11.02,
+     0.89663
+    ]
+   },
+   "bakeMs": 10073
+  },
+  {
+   "id": 81,
+   "name": "Moledro (memorial cairn)",
+   "fingerprint": "e098a3c697879677b88e5b0c47076139a293d8e180cc6f512e014801acf8f568",
+   "sourceTriangles": 41,
+   "parts": 3,
+   "quantization": {
+    "low": [
+     -1.08116,
+     -0.6,
+     -1.16991
+    ],
+    "span": 2.43
+   },
+   "sphere": [
+    0.0663,
+    0.615,
+    0.0451,
+    2.0754
+   ],
+   "clusters": {
+    "count": 6,
+    "levels": 2,
+    "roots": 3,
+    "finestTriangles": 41,
+    "rootError": 2.4383
+   },
+   "chain": {
+    "cell": 0.135,
+    "cells": [
+     28,
+     29,
+     29
+    ],
+    "wellComposedCells": 41,
+    "wrapTriangles": 3160,
+    "baseTriangles": 1578,
+    "baseVertices": 791,
+    "baseError": 0.2674,
+    "outward": 0.2674,
+    "inward": 0.2102,
+    "simplifyError": 0.0553,
+    "steps": 786,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.2674,
+     1.27
+    ],
+    "inflateMax": 0.2429,
+    "rootTriangles": 26,
+    "farFirst": 776,
+    "farFirstTriangles": 26,
+    "handoffError": 1.0994
+   },
+   "splat": {
+    "centre": [
+     0.0663,
+     0.915,
+     0.0451
+    ],
+    "ry": 0.915,
+    "rx": 0.6208,
+    "roofShare": 0,
+    "wallKind": [
+     11.02,
+     0.60524
+    ],
+    "roofKind": [
+     11.02,
+     0.60524
+    ]
+   },
+   "bakeMs": 4614
+  },
+  {
+   "id": 82,
+   "name": "Tenda (a tent of a camp)",
+   "fingerprint": "39893df25491991d8cadf65f70c1bcfad31550da0fb0c06caff1e3184e2c5d17",
+   "sourceTriangles": 44,
+   "parts": 3,
+   "quantization": {
+    "low": [
+     -1.9,
+     -0.3,
+     -1.9
+    ],
+    "span": 3.8475
+   },
+   "sphere": [
+    0.0238,
+    1.223,
+    0.0238,
+    2.9508
+   ],
+   "clusters": {
+    "count": 6,
+    "levels": 2,
+    "roots": 3,
+    "finestTriangles": 44,
+    "rootError": 5.2925
+   },
+   "chain": {
+    "cell": 0.1603,
+    "cells": [
+     35,
+     30,
+     35
+    ],
+    "wellComposedCells": 75,
+    "wrapTriangles": 5224,
+    "baseTriangles": 2848,
+    "baseVertices": 1426,
+    "baseError": 0.3244,
+    "outward": 0.3244,
+    "inward": 0.1909,
+    "simplifyError": 0.0657,
+    "steps": 1421,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.3244,
+     2.2615
+    ],
+    "inflateMax": 0.3846,
+    "rootTriangles": 28,
+    "farFirst": 1410,
+    "farFirstTriangles": 28,
+    "handoffError": 1.3322
+   },
+   "splat": {
+    "centre": [
+     0.0238,
+     1.373,
+     0.0238
+    ],
+    "ry": 1.373,
+    "rx": 1.2711,
+    "roofShare": 0,
+    "wallKind": [
+     12.02,
+     0.62379
+    ],
+    "roofKind": [
+     12.02,
+     0.62379
+    ]
+   },
+   "bakeMs": 13887
+  },
+  {
+   "id": 83,
+   "name": "Estandarte (the standard of a host)",
+   "fingerprint": "74e965d9c6a8897870befa4541a5509c910987b584ca1e11d015a01c72ed2506",
+   "sourceTriangles": 52,
+   "parts": 2,
+   "quantization": {
+    "low": [
+     -0.05,
+     -1,
+     -0.05
+    ],
+    "span": 7.0875
+   },
+   "sphere": [
+    0.9125,
+    2.5438,
+    0.0375,
+    3.833
+   ],
+   "clusters": {
+    "count": 4,
+    "levels": 2,
+    "roots": 2,
+    "finestTriangles": 52,
+    "rootError": 0.0009
+   },
+   "chain": {
+    "cell": 0.0875,
+    "cells": [
+     33,
+     91,
+     13
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 2672,
+    "baseTriangles": 16,
+    "baseVertices": 10,
+    "baseError": 0.1152,
+    "outward": 0.1152,
+    "inward": 0.075,
+    "simplifyError": 0.0875,
+    "steps": 5,
+    "coreTriangles": 6,
+    "depth": 1,
+    "errorRange": [
+     0.1152,
+     1.8675
+    ],
+    "inflateMax": 0.1498,
+    "rootTriangles": 36,
+    "farFirst": 0,
+    "farFirstTriangles": 16,
+    "handoffError": 0.1152
+   },
+   "splat": {
+    "centre": [
+     0.9125,
+     3.0438,
+     0.0375
+    ],
+    "ry": 3.0438,
+    "rx": 0.2349,
+    "roofShare": 0,
+    "wallKind": [
+     12.02,
+     0.88115
+    ],
+    "roofKind": [
+     12.02,
+     0.88115
+    ]
+   },
+   "bakeMs": 177
+  },
+  {
+   "id": 84,
+   "name": "Andaime (a work in hand: scaffold, stone and timber stacked by it)",
+   "fingerprint": "a4c2e35d7fb072a8c5f08f3c9f2262552b1f1d8f24730d106496a5c0a63a8e85",
+   "sourceTriangles": 458,
+   "parts": 20,
+   "quantization": {
+    "low": [
+     -2.985,
+     -0.8,
+     -2.9
+    ],
+    "span": 6.885
+   },
+   "sphere": [
+    -0.0525,
+    2.6425,
+    -0.095,
+    5.8402
+   ],
+   "clusters": {
+    "count": 42,
+    "levels": 3,
+    "roots": 20,
+    "finestTriangles": 458,
+    "rootError": 0.0104
+   },
+   "chain": {
+    "cell": 0.085,
+    "cells": [
+     79,
+     91,
+     77
+    ],
+    "wellComposedCells": 6,
+    "wrapTriangles": 37692,
+    "baseTriangles": 2430,
+    "baseVertices": 1207,
+    "baseError": 0.24,
+    "outward": 0.24,
+    "inward": 0.1121,
+    "simplifyError": 0.0091,
+    "steps": 1200,
+    "coreTriangles": 4,
+    "depth": 9,
+    "errorRange": [
+     0.24,
+     5.5944
+    ],
+    "inflateMax": 0.6882,
+    "rootTriangles": 254,
+    "farFirst": 1088,
+    "farFirstTriangles": 254,
+    "handoffError": 0.6978
+   },
+   "splat": {
+    "centre": [
+     -0.0525,
+     3.0425,
+     -0.095
+    ],
+    "ry": 3.0425,
+    "rx": 0.806,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     4.80962
+    ],
+    "roofKind": [
+     10.02,
+     4.80962
+    ]
+   },
+   "bakeMs": 7294
+  },
+  {
+   "id": 85,
+   "name": "Palisade (stakes set in a bank of earth, pointed, bound with two rails; a length)",
+   "fingerprint": "f3d57e25592f0eb7fbdfbfdbbcfc27f7ec804457733df1c121f0712470c765f0",
+   "sourceTriangles": 591,
+   "parts": 33,
+   "quantization": {
+    "low": [
+     -0.66062,
+     -1.3,
+     -2.63063
+    ],
+    "span": 5.97375
+   },
+   "sphere": [
+    -0.0522,
+    1.6869,
+    -0.0309,
+    4.6133
+   ],
+   "clusters": {
+    "count": 67,
+    "levels": 3,
+    "roots": 33,
+    "finestTriangles": 591,
+    "rootError": 1.5976
+   },
+   "chain": {
+    "cell": 0.1106,
+    "cells": [
+     21,
+     65,
+     57
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 15896,
+    "baseTriangles": 2314,
+    "baseVertices": 1159,
+    "baseError": 0.2387,
+    "outward": 0.2387,
+    "inward": 0.2157,
+    "simplifyError": 0.0232,
+    "steps": 1154,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.2387,
+     2.9519
+    ],
+    "inflateMax": 0.5971,
+    "rootTriangles": 323,
+    "farFirst": 996,
+    "farFirstTriangles": 322,
+    "handoffError": 0.5935
+   },
+   "splat": {
+    "centre": [
+     -0.0522,
+     2.3369,
+     -0.0309
+    ],
+    "ry": 2.3369,
+    "rx": 1.6777,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     2.50857
+    ],
+    "roofKind": [
+     10.02,
+     2.50857
+    ]
+   },
+   "bakeMs": 7836
+  }
+ ],
+ "atlas": {
+  "words": 3012261,
+  "bytes": 12049044,
+  "sha256": "34baa858db5cd6b36f27d8ec1a7a7087959f9e435316eda6f0bb7435c7016ac8",
+  "gzip": {
+   "file": "atlas.bin.gz",
+   "bytes": 4182391,
+   "sha256": "9b8688b6ee01a668c851cefeadf29aca1624a9eb4d0b4f1e42b997975f217bf1"
+  }
+ },
+ "bakeSeconds": 329.8
+}

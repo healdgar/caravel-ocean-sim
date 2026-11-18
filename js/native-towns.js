@@ -13,7 +13,7 @@
 export const NATIVE_TOWNS = Object.freeze([
   { id: 'stadacona', name: 'Stadacona', port: 'quebec', latitude: 46.818, longitude: -71.218, culture: 'iroquoian', people: [[1550, 600]], seat: 0.4, walls: { capital: 1, town: 1, village: 0 } },
   { id: 'mishawum', name: 'Mishawum', port: 'boston', latitude: 42.372, longitude: -71.062, culture: 'massachusett', people: [[1550, 300]], seat: 0.4, walls: { capital: 0, town: 0, village: 0 } },
-  { id: 'patuxet', name: 'Patuxet', port: 'plymouth', latitude: 41.957, longitude: -70.666, culture: 'massachusett', people: [[1550, 450]], seat: 0.6, walls: { capital: 0, town: 0, village: 0 } },
+  { id: 'patuxet', name: 'Patuxet', port: 'plymouth-colony', latitude: 41.957, longitude: -70.666, culture: 'massachusett', people: [[1550, 450]], seat: 0.6, walls: { capital: 0, town: 0, village: 0 } },
   { id: 'werpoes', name: 'Werpoes', port: 'new-amsterdam', latitude: 40.716, longitude: -74.002, culture: 'lenape', people: [[1550, 300]], seat: 0.4, walls: { capital: 0, town: 0, village: 0 } },
   { id: 'shackamaxon', name: 'Shackamaxon', port: 'philadelphia', latitude: 39.969, longitude: -75.128, culture: 'lenape', people: [[1550, 300]], seat: 0.4, walls: { capital: 0, town: 0, village: 0 } },
   { id: 'paspahegh', name: 'Paspahegh', port: 'jamestown', latitude: 37.226, longitude: -76.800, culture: 'powhatan', people: [[1550, 300]], seat: 0.4, walls: { capital: 1, town: 0, village: 0 } },

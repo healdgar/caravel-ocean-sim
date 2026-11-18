@@ -112,7 +112,7 @@ export const BAKED_BOARDS = Object.freeze({
   // The towns of the peoples of the Americas in 1550 (js/native-towns.js), by the port later planted there.
   'quebec:1550': 'assets/boards/quebec-1550.json',
   'boston:1550': 'assets/boards/boston-1550.json',
-  'plymouth:1550': 'assets/boards/plymouth-1550.json',
+  'plymouth-colony:1550': 'assets/boards/plymouth-colony-1550.json',
   'new-amsterdam:1550': 'assets/boards/new-amsterdam-1550.json',
   'philadelphia:1550': 'assets/boards/philadelphia-1550.json',
   'jamestown:1550': 'assets/boards/jamestown-1550.json',
@@ -134,7 +134,7 @@ export const BAKED_WORLDS = Object.freeze({
   'cadiz-sanlucar:1550': 'assets/boards/cadiz-sanlucar-1550.world',
   'quebec:1550': 'assets/boards/quebec-1550.world',
   'boston:1550': 'assets/boards/boston-1550.world',
-  'plymouth:1550': 'assets/boards/plymouth-1550.world',
+  'plymouth-colony:1550': 'assets/boards/plymouth-colony-1550.world',
   'new-amsterdam:1550': 'assets/boards/new-amsterdam-1550.world',
   'philadelphia:1550': 'assets/boards/philadelphia-1550.world',
   'jamestown:1550': 'assets/boards/jamestown-1550.world',
