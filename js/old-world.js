@@ -30,20 +30,20 @@ const HOLDING_BEND_METRES = 80;
 
 // People by year, read from period counts and later estimates, to the nearest few thousand; where
 // the record is thin the figure is a judgement. A city's ground follows from its people. `port` is the
-// coast (js/coastal-world.js) whose ground holds the city and under whose name its board is baked; a
-// city with none has no ground of this game's making to stand on yet (see `unboarded`).
+// coast (js/coastal-world.js) whose ground holds the city and under whose name its board is baked. `culture`
+// is the tongue its board's people speak and name their places in (scripts/board-tuning.mjs adds the
+// Portuguese and Dutch tongues to the eight of Castle and Commons). Seville and Porto stand on tidal rivers
+// whose water the survey reads above the datum; their ground reads it at its own level (js/river-water.js).
 export const OLD_WORLD_CITIES = Object.freeze([
-  { id: 'lisbon', name: 'Lisboa', latitude: 38.7075, longitude: -9.1365, port: 'lisbon', people: [[1500, 65000], [1550, 100000], [1620, 150000], [1690, 180000]] },
-  // Both stand on rivers whose water the elevation survey reads metres above the sea: the land is made where the
-  // coast is found instead (Seville's 50 km down the Guadalquivir, Porto's at the Douro bar), never round the city.
-  { id: 'seville', name: 'Sevilla', latitude: 37.3826, longitude: -5.9963, port: null, unboarded: 'the Guadalquivir at the Arenal reads above sea level; its coast is 50 km downriver', people: [[1500, 60000], [1550, 100000], [1600, 130000], [1650, 70000], [1690, 80000]] },
-  { id: 'porto', name: 'Porto', latitude: 41.1406, longitude: -8.6110, port: null, unboarded: 'the Douro at the Ribeira reads above sea level; its coast is the bar, 4 km downriver', people: [[1500, 12000], [1620, 20000], [1690, 25000]] },
-  { id: 'cadiz', name: 'Cádiz', latitude: 36.5297, longitude: -6.2927, port: 'cadiz', people: [[1500, 3000], [1600, 7000], [1650, 22000], [1690, 40000]] },
-  { id: 'sanlucar', name: 'Sanlúcar de Barrameda', latitude: 36.7783, longitude: -6.3515, port: 'sanlucar', people: [[1500, 6000], [1580, 10000], [1690, 9000]] },
-  { id: 'palos', name: 'Palos de la Frontera', latitude: 37.2289, longitude: -6.8936, port: 'palos-huelva', people: [[1500, 2700], [1550, 1500], [1690, 600]] },
-  { id: 'huelva', name: 'Huelva', latitude: 37.2583, longitude: -6.9508, port: 'huelva', people: [[1500, 3500], [1690, 5000]] },
-  { id: 'la-coruna', name: 'La Coruña', latitude: 43.3709, longitude: -8.3959, port: 'la-coruna', people: [[1500, 3000], [1600, 5000], [1690, 7000]] },
-  { id: 'setubal', name: 'Setúbal', latitude: 38.5244, longitude: -8.8926, port: 'setubal', people: [[1500, 6000], [1690, 12000]] },
+  { id: 'lisbon', name: 'Lisboa', latitude: 38.7075, longitude: -9.1365, port: 'lisbon', culture: 'portuguese', people: [[1500, 65000], [1550, 100000], [1620, 150000], [1690, 180000]] },
+  { id: 'seville', name: 'Sevilla', latitude: 37.3826, longitude: -5.9963, port: 'seville', culture: 'iberian', people: [[1500, 60000], [1550, 100000], [1600, 130000], [1650, 70000], [1690, 80000]] },
+  { id: 'porto', name: 'Porto', latitude: 41.1406, longitude: -8.6110, port: 'porto', culture: 'portuguese', people: [[1500, 12000], [1620, 20000], [1690, 25000]] },
+  { id: 'cadiz', name: 'Cádiz', latitude: 36.5297, longitude: -6.2927, port: 'cadiz', culture: 'iberian', people: [[1500, 3000], [1600, 7000], [1650, 22000], [1690, 40000]] },
+  { id: 'sanlucar', name: 'Sanlúcar de Barrameda', latitude: 36.7783, longitude: -6.3515, port: 'sanlucar', culture: 'iberian', people: [[1500, 6000], [1580, 10000], [1690, 9000]] },
+  { id: 'palos', name: 'Palos de la Frontera', latitude: 37.2289, longitude: -6.8936, port: 'palos-huelva', culture: 'iberian', people: [[1500, 2700], [1550, 1500], [1690, 600]] },
+  { id: 'huelva', name: 'Huelva', latitude: 37.2583, longitude: -6.9508, port: 'huelva', culture: 'iberian', people: [[1500, 3500], [1690, 5000]] },
+  { id: 'la-coruna', name: 'La Coruña', latitude: 43.3709, longitude: -8.3959, port: 'la-coruna', culture: 'iberian', people: [[1500, 3000], [1600, 5000], [1690, 7000]] },
+  { id: 'setubal', name: 'Setúbal', latitude: 38.5244, longitude: -8.8926, port: 'setubal', culture: 'portuguese', people: [[1500, 6000], [1690, 12000]] },
 ].map((city) => Object.freeze({ ...city, people: Object.freeze(city.people.map(Object.freeze)) })));
 
 // The towns, villages and religious houses that stood round a city by the middle of the sixteenth century: name,
@@ -67,6 +67,16 @@ export const OLD_WORLD_PLACES = Object.freeze({
   ].map(Object.freeze)),
   // The river beach the fleets sailed from, and the anchorage of Bonanza up the Guadalquivir.
   sanlucar: Object.freeze([['Bajo de Guía', 36.7841, -6.3584, 6], ['Bonanza', 36.8025, -6.3355, 6]].map(Object.freeze)),
+  // Triana over the river from the Arenal, the arrabales outside the walls, and the Carthusians and Hieronymites.
+  seville: Object.freeze([
+    ['Triana', 37.3846, -6.0030, 9], ['San Bernardo', 37.3815, -5.9830, 6], ['San Roque', 37.3880, -5.9800, 6],
+    ['Santa María de las Cuevas', 37.3997, -6.0045, 6], ['San Jerónimo de Buenavista', 37.4170, -5.9850, 6],
+  ].map(Object.freeze)),
+  // Gaia over the Douro from the Ribeira, and the parishes outside the walls.
+  porto: Object.freeze([
+    ['Vila Nova de Gaia', 41.1345, -8.6125, 8], ['Miragaia', 41.1435, -8.6190, 6], ['Massarelos', 41.1480, -8.6320, 6],
+    ['Cedofeita', 41.1560, -8.6205, 6], ['Campanhã', 41.1490, -8.5860, 6],
+  ].map(Object.freeze)),
 });
 
 // How far a city shapes the use of the land around it, beyond its own edge.
@@ -126,6 +136,16 @@ export function oldWorldCityNear(latitude, longitude, withinMetres = 16000) {
     if (d < least) { least = d; best = city; }
   }
   return best;
+}
+
+// An Old World port stands on the ground of the city it serves. A port recorded between two (Cádiz and Sanlúcar,
+// each some 14 km off) would have ground holding neither, and no board: its ground is laid round the site of the
+// nearest city within that city's country instead, which its board then founds. A port whose recorded site already
+// holds a city on ground `span` metres across keeps it.
+export function oldWorldPortOnCity(port, span) {
+  if (!port || !inIberia(port.latitude, port.longitude) || oldWorldCityHeld({ ...port, span })) return port;
+  const city = oldWorldCityNear(port.latitude, port.longitude);
+  return city ? Object.freeze({ ...port, latitude: city.latitude, longitude: city.longitude }) : port;
 }
 
 // One 32-bit hash of a lattice cell. Integer arithmetic only, so WGSL gives the same bits.

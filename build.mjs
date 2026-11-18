@@ -89,7 +89,7 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/animal-continuum.js','js/
 wgslModules.push('js/wgsl/animal-continuum.js');
 // A port's country as Castle and Commons' model founded it: what is asked of the model, how it stands here, and the GPU's stamp of it.
 // The herds go first: board-folk.js reads herds.js's STREET_MOUNT_FLAG as it loads.
-order.splice(order.indexOf('js/coastal-world.js'),0,'js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
+order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');

@@ -35,7 +35,8 @@ import {
   safeLandfallStart,
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
-import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityHeld, oldWorldCityNear, oldWorldPeople } from './old-world.js';
+import { readCrossingRiver } from './river-water.js';
+import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityHeld, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
 import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, buildColonialCityFabric, cityMasonry, footprint, planColonialStreets } from './old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 import { boardRoadCrossings, widenBoardRiverHalfWidth, widenBoardRivers } from './old-world-board.js';
@@ -574,6 +575,9 @@ export const HISTORICAL_1550_PORTS = Object.freeze([
   Object.freeze({ id: 'sanlucar', name: 'Sanlúcar de Barrameda', latitude: 36.7783, longitude: -6.3515, shoreBearing: 150, seawardBearing: 300, coastalArchetype: 'river-mouth', foundedYear: 1297, crown: 'spain', baseTier: 2 }),
   Object.freeze({ id: 'huelva', name: 'Huelva', latitude: 37.2583, longitude: -6.9508, shoreBearing: 35, seawardBearing: 215, coastalArchetype: 'estuary-bay', foundedYear: 1262, crown: 'spain', baseTier: 2 }),
   Object.freeze({ id: 'setubal', name: 'Setúbal', latitude: 38.5244, longitude: -8.8926, shoreBearing: 5, seawardBearing: 235, coastalArchetype: 'estuary-bay', foundedYear: 1249, crown: 'portugal', baseTier: 2 }),
+  // The river ports: Seville's Arenal on the Guadalquivir, the port of the Indies, and Porto's Ribeira on the Douro.
+  Object.freeze({ id: 'seville', name: 'Sevilla · Arenal', latitude: 37.3826, longitude: -5.9963, shoreBearing: 100, seawardBearing: 215, coastalArchetype: 'river-mouth', foundedYear: 1248, crown: 'spain', baseTier: 4 }),
+  Object.freeze({ id: 'porto', name: 'Porto · Ribeira', latitude: 41.1406, longitude: -8.6110, shoreBearing: 0, seawardBearing: 265, coastalArchetype: 'river-mouth', foundedYear: 868, crown: 'portugal', baseTier: 3 }),
   Object.freeze({ id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136, shoreBearing: 355, seawardBearing: 245, coastalArchetype: 'estuary-bay', foundedYear: 1147, fortProgramYear: 1515, crown: 'portugal', baseTier: 4 }),
   Object.freeze({ id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396, shoreBearing: 220, seawardBearing: 25, coastalArchetype: 'headland-bay', foundedYear: 1208, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
   Object.freeze({ id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43, shoreBearing: 260, seawardBearing: 80, coastalArchetype: 'headland-bay', foundedYear: 1478, crown: 'spain', baseTier: 2 }),
@@ -584,7 +588,8 @@ export const HISTORICAL_1550_PORTS = Object.freeze([
   Object.freeze({ id: 'goa', name: 'Velha Goa', latitude: 15.498, longitude: 73.828, shoreBearing: 75, seawardBearing: 255, coastalArchetype: 'river-mouth', foundedYear: 1510, fortProgramYear: 1595, crown: 'portugal', baseTier: 3 }),
   Object.freeze({ id: 'malacca', name: 'Malacca', latitude: 2.193, longitude: 102.249, shoreBearing: 45, seawardBearing: 225, coastalArchetype: 'river-mouth', foundedYear: 1511, fortProgramYear: 1641, crown: 'portugal', baseTier: 3 }),
   Object.freeze({ id: 'nagasaki', name: 'Nagasaki Bay', latitude: 32.75, longitude: 129.867, shoreBearing: 45, seawardBearing: 225, coastalArchetype: 'harbor-channel', foundedYear: 1543, fortProgramYear: 1571, crown: 'portugal', baseTier: 2 }),
-]);
+// An Old World port stands on the ground of the city it serves (js/old-world.js), on ground as wide as a region's.
+].map((port) => oldWorldPortOnCity(port, 8192)));
 
 // Complete chronological gazetteer of colonial ports from 1492 through the 1680s (1550–1689).
 export const HISTORICAL_COLONIAL_PORTS = Object.freeze([
@@ -4080,7 +4085,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     ? coastalFrame(region, orthoFootprints.clusterX, orthoFootprints.clusterZ)
     : null;
   const scaleFactor = Math.min(1, region.span / 4096);
-  const probeOffshoreM = Math.max(24, 72 * scaleFactor);
+  // Ground whose only water is a river (js/river-water.js) is looked across at a river's width, not the sea's.
+  let wetCells = 0;
+  for (let k = 0; k < heights.length; k++) if (heights[k] <= 0.25) wetCells++;
+  const probeOffshoreM = wetCells < 0.06 * heights.length ? 24 : Math.max(24, 72 * scaleFactor);
   const probeInlandM = Math.max(18, 48 * scaleFactor);
 
   // Scan a 2D coastal window (anchored to the 1550 orthophoto settlement cluster when present)
@@ -11039,15 +11047,22 @@ export async function upgradeProceduralPackWithRealDEM(
     let sumWaterX = 0, sumWaterZ = 0, waterCount = 0;
     let sumLandX = 0, sumLandZ = 0;
     for (let j = 0; j < n; j++) {
-      const vNorm = j / (n - 1) - 0.5;
-      const z = region.z + vNorm * span;
-      const lat = region.latitude - (vNorm * sampleSpan) / 111195;
+      const lat = region.latitude - ((j / (n - 1) - 0.5) * sampleSpan) / 111195;
       for (let i = 0; i < n; i++) {
-        const uNorm = i / (n - 1) - 0.5;
-        const x = region.x + uNorm * span;
-        const lon = region.longitude + (uNorm * sampleSpan) / (111195 * cosLat);
-        const elev = sampleTerrarium(lat, lon);
-        rawDem[j * n + i] = elev;
+        rawDem[j * n + i] = sampleTerrarium(lat, region.longitude + ((i / (n - 1) - 0.5) * sampleSpan) / (111195 * cosLat));
+      }
+    }
+    // Ground that holds no sea may hold a tidal river, which the survey reads above the datum: its water is read at
+    // its own level (js/river-water.js), and the ground is a river port's.
+    let seaCells = 0;
+    for (let k = 0; k < n * n; k++) if (rawDem[k] <= 0.25) seaCells++;
+    const river = seaCells < 0.06 * n * n ? readCrossingRiver(rawDem, n, sampleSpan / (n - 1)) : null;
+    if (river) for (let k = 0; k < n * n; k++) if (river.water[k]) rawDem[k] = Math.min(rawDem[k], 0);
+    for (let j = 0; j < n; j++) {
+      const z = region.z + (j / (n - 1) - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const x = region.x + (i / (n - 1) - 0.5) * span;
+        const elev = rawDem[j * n + i];
         if (elev > 0.25) {
           landCount++;
           sumLandX += x - region.x;
@@ -11064,7 +11079,8 @@ export async function upgradeProceduralPackWithRealDEM(
     const landRatio = landCount / (n * n);
     // If user clicked or entered coordinates slightly inland (landRatio > 0.94) or offshore (landRatio < 0.02),
     // search the surrounding ~300km x 300km real AWS Terrarium Zoom-8 DEM to snap to the true 0m shoreline and retry once!
-    if (!isNeighborSection && (landRatio < 0.02 || landRatio > 0.94) && !_snapAttempted && !fetchTile && typeof fetch === 'function') {
+    // Ground that holds its river is its river port's, and stays where its city is.
+    if (!isNeighborSection && !river && (landRatio < 0.02 || landRatio > 0.94) && !_snapAttempted && !fetchTile && typeof fetch === 'function') {
       for (const item of satLoaded) item?.bmp?.close?.();
       let snapped = await findNearestCoastlineInRealDEM(region.latitude, region.longitude, fetch);
       if (!snapped) {
@@ -11085,7 +11101,7 @@ export async function upgradeProceduralPackWithRealDEM(
       }
     }
     // Require real land and real water in the primary coastal window (neighbor sections preserve any real DEM land/water ratio!)
-    if (!isNeighborSection && (landRatio < 0.015 || landRatio > 0.97 || maxDem < 0.35)) {
+    if (!isNeighborSection && (landRatio < 0.015 || (landRatio > 0.97 && !river) || maxDem < 0.35)) {
       for (const item of satLoaded) item?.bmp?.close?.();
       return ensureFallback(pack);
     }
