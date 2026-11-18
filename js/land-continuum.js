@@ -5,7 +5,8 @@
 // cuts every piece at the scene's one pixel error and draws each piece's lists with indirect calls.
 //
 // The finest cut is the lattice itself, which the height queries read (terrainSurfaceSample in js/terrain-model.js),
-// and below it, where shot has dug, the pits on it to the crater tiles' own cell (landContinuumDig).
+// and below it, where shot has dug or a river runs, the pits to the crater tiles' own cell and the banks to theirs
+// (landContinuumDig).
 import { requestOnce } from './gpu-program-cache.js';
 import {
   LAND_CONTINUUM_PATCH, LAND_CONTINUUM_TESSELLATIONS, LAND_CONTINUUM_LISTS, LAND_CONTINUUM_SLOTS, LAND_CONTINUUM_DRAW_WORDS,
@@ -35,7 +36,8 @@ const landFround = Math.fround;
  *   edges                      lattice units between the points each edge shares with its neighbour, [x = 0, x = N,
  *                              z = 0, z = N]; the edge's other points must already lie on the line between those
  *   grid                       the grid every piece is placed on: {x0, z0, g}
- *   craters                    ground shot has dug, each {x0, x1, z0, z1, amount} (landContinuumDig)
+ *   marks                      what lies on the lattice finer than it: pits shot has dug, a river's banks
+ *                              (landContinuumDig)
  * Returns the lattice records, the node records and the piece's numbers, the nodes in finest units
  * (landContinuumFinest); the lattice's own units are worked in here and in the helpers it returns, nowhere else.
  */
@@ -229,7 +231,7 @@ export function bakeLandContinuumPiece(spec) {
     heightAt: h,
     forPoints, pinned, range,
   };
-  for (const m of spec.craters ?? []) landContinuumDig(baked, m);
+  for (const m of spec.marks ?? []) landContinuumDig(baked, m);
   return baked;
 }
 
@@ -253,26 +255,28 @@ function landContinuumAppend(baked, parent, x0, z0, level) {
 }
 
 /**
- * Ground shot has dug, `mark` {x0, x1, z0, z1, amount}: the world squares of the crater tiles it reaches and the most
- * it digs or throws up there (landCraterTiles and landCraterAmount in js/land-craters.js). Every node over it keeps
- * that much error and room in its sphere, every leaf over it splits on down to the finest units, every lattice point
- * in it waits for as much, and every ancestor stays above. The GPU reads the same tiles and amounts for the points
- * between the lattice's (landCraterWaits), the least of the tiles round a point, so no point waits for more than
- * every patch holding it. Returns the nodes changed, whether any were added, and the lattice's records changed
- * ([first, last] float, the piece's own lattice and the survey's apart).
+ * What lies on the lattice finer than it, `mark`: a pit shot has dug (landCraterMark in js/land-craters.js) or a
+ * river's banks (js/land-banks.js). {x0, x1, z0, z1} the world square it reaches at all; over(x0, x1, z0, z1) the most
+ * it moves the ground over the blocks a world rectangle touches; at(x, z) over the block a point is in, the figure
+ * the GPU reads for a point between the lattice's (landContinuumDug); finest, the level its own cell is drawn at.
+ * Every node keeps as much error as the mark moves the ground under it, and room in its sphere; every leaf where it
+ * moves the ground at all splits on down to its finest level; every lattice point waits for what it does there; and
+ * every ancestor stays above. No point between the lattice's waits for more than any patch holding it keeps, so no
+ * crack opens, and ground it leaves flat is not split. Returns the nodes changed, whether any were added, and the
+ * lattice's records changed ([first, last] float, the piece's own lattice and the survey's apart).
  */
 export function landContinuumDig(baked, mark) {
-  const W = LAND_CONTINUUM_NODE_WORDS, { grid, gx, gz } = baked.place, amount = mark.amount;
+  const W = LAND_CONTINUUM_NODE_WORDS, { grid, gx, gz } = baked.place, finest = mark.finest ?? 0;
   const unit = grid.g * 2 ** baked.shiftF, ox = grid.x0 + gx * grid.g, oz = grid.z0 + gz * grid.g;
-  const reaches = (i) => {
+  const amountOf = (i) => {
     const o = i * W, words = baked.nodes, w = words[o + 9] * 2 ** words[o + 8] * unit, x0 = ox + words[o + 6] * unit, z0 = oz + words[o + 7] * unit;
-    return !(mark.x1 < x0 || mark.x0 > x0 + w || mark.z1 < z0 || mark.z0 > z0 + w);
+    return mark.over(x0, x0 + w, z0, z0 + w);
   };
   const changed = new Set(), stack = [];
   let grew = false;
-  for (let i = 0; i < baked.count; i++) if (reaches(i)) stack.push(i);
+  for (let i = 0; i < baked.count; i++) { const amount = amountOf(i); if (amount > 0) stack.push(i, amount); }
   while (stack.length) {
-    const i = stack.pop(), o = i * W, words = baked.nodes, floats = new Float32Array(words.buffer, words.byteOffset, words.length);
+    const amount = stack.pop(), i = stack.pop(), o = i * W, words = baked.nodes, floats = new Float32Array(words.buffer, words.byteOffset, words.length);
     if (baked.dug[i] < amount) { baked.dug[i] = amount; changed.add(i); }
     floats[o + 3] = Math.max(floats[o + 3], baked.base[i] + 3 * baked.dug[i]);
     if (!words[o + 11]) {
@@ -280,14 +284,15 @@ export function landContinuumDig(baked, mark) {
       continue;
     }
     const level = words[o + 8], x0 = words[o + 6], z0 = words[o + 7];
-    if (level === 0 || words[o + 9] !== LAND_CONTINUUM_PATCH) continue;
-    // A leaf it reaches gives way to four children a level finer, which split on while it reaches them.
+    if (level <= finest || words[o + 9] !== LAND_CONTINUUM_PATCH) continue;
+    // A leaf where it moves the ground gives way to four children a level finer, which split on where it moves theirs.
     words[o + 11] = 0; floats[o + 4] = Math.max(floats[o + 4], amount); changed.add(i);
     const half = LAND_CONTINUUM_PATCH * 2 ** (level - 1);
     for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
       const c = landContinuumAppend(baked, i, x0 + dx * half, z0 + dz * half, level - 1);
       changed.add(c); grew = true;
-      if (reaches(c)) stack.push(c);
+      const under = amountOf(c);
+      if (under > 0) stack.push(c, under);
     }
   }
   // Every ancestor above its children, and round them.
@@ -301,10 +306,13 @@ export function landContinuumDig(baked, mark) {
       changed.add(parent);
     }
   }
-  // And every lattice point in it waits for as much, but the pinned, which never leave their line.
+  // And every lattice point waits for what it does there, but the pinned, which never leave their line.
   const lattice = baked.lattice, split = baked.window ? baked.window.first : Infinity, spans = [[Infinity, -1], [Infinity, -1]];
+  const fine = 2 ** (baked.shiftF + baked.R) * grid.g;
   baked.forPoints(mark, (k, x, z) => {
-    if (baked.pinned(x, z) || lattice[k + 2] >= amount) return;
+    if (baked.pinned(x, z)) return;
+    const amount = mark.at(ox + x * fine, oz + z * fine);
+    if (lattice[k + 2] >= amount) return;
     lattice[k + 2] = amount;
     const span = spans[k >= split ? 1 : 0];
     span[0] = Math.min(span[0], k); span[1] = Math.max(span[1], k);
@@ -463,12 +471,12 @@ export function createLandContinuum({ device, pipelines: P, view: viewPipeline, 
       pass.drawIndexedIndirect(draws, ((cut * LAND_CONTINUUM_SLOTS + piece.slot) * LAND_CONTINUUM_LISTS + list) * LAND_CONTINUUM_DRAW_WORDS * 4);
     });
   }
-  // Shot has dug ground in `rect` (world x0 x1 z0 z1: the crater tiles it reaches) to `amount` metres
-  // (landContinuumDig): only the nodes and points changed are written, or the nodes made again where there are more.
-  function raise(key, rect, amount) {
+  // Shot has dug ground, `mark` as landContinuumDig has it: only the nodes and points changed are written, or the
+  // nodes made again where there are more.
+  function raise(key, mark) {
     const piece = pieces.get(key);
     if (!piece) return 0;
-    const { baked } = piece, W = LAND_CONTINUUM_NODE_WORDS, { changed, grew, spans } = landContinuumDig(baked, { ...rect, amount });
+    const { baked } = piece, W = LAND_CONTINUUM_NODE_WORDS, { changed, grew, spans } = landContinuumDig(baked, mark);
     if (grew) fit(piece);
     else for (const i of changed) device.queue.writeBuffer(piece.nodes, i * W * 4, baked.nodes.buffer, baked.nodes.byteOffset + i * W * 4, W * 4);
     const lattice = baked.lattice;

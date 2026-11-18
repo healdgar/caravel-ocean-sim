@@ -100,9 +100,9 @@ order.splice(order.indexOf('js/main.js'),0,'js/vessel-continuum.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/city-continuum-draw.js','js/prefab-continuum-ports.js','js/prefab-continuum.js');
 // The land's continuum: its programs ahead of the land shader its drawing is appended to, its bake and cut ahead of the land.
-order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-continuum.js');
-wgslModules.push('js/wgsl/land-continuum.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/land-continuum.js');
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
+wgslModules.push('js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/land-continuum.js','js/land-banks.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js','js/debug-world.js');
 order.splice(order.indexOf('js/main.js'),0,'js/webgpu-adapter.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');

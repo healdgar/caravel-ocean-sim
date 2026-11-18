@@ -42,11 +42,17 @@ test('the land\'s cut covers every piece once and draws no crack across patches,
       const frameUBO = make(frame, B.UNIFORM);
       const hill = (x, z) => 40 * Math.sin(x * 0.0021) * Math.cos(z * 0.0017) + 12 * Math.sin(x * 0.013 + z * 0.007) + 3 * Math.sin(x * 0.07) * Math.sin(z * 0.05) + 8;
       // A pit as the drawing has one (landContinuumRelief), and what a point between the lattice's waits for inside
-      // the crater tiles that hold it (landContinuumDug): `mark` its tiles and amount, as the bake and a strike have it.
-      const pitOf = (cx, cz, radius, depth, mark) => ({
-        mark,
+      // the rectangle it moves the ground in (landContinuumDug): `rect` that rectangle and the amount, worked into a
+      // mark as the bake and a strike take one (landContinuumDig). The mark keeps the amount over every rectangle that
+      // touches its own; the GPU waits for it only strictly inside.
+      const pitOf = (cx, cz, radius, depth, rect) => ({
+        mark: {
+          ...rect, finest: 0,
+          over: (ax, bx, az, bz) => (bx < rect.x0 - 0.01 || ax > rect.x1 + 0.01 || bz < rect.z0 - 0.01 || az > rect.z1 + 0.01 ? 0 : rect.amount),
+          at: (x, z) => (x >= rect.x0 && x <= rect.x1 && z >= rect.z0 && z <= rect.z1 ? rect.amount : 0),
+        },
         probe: [`let d=distance(xz,vec2f(${cx.toFixed(3)},${cz.toFixed(3)}))/${radius.toFixed(3)};return max(h-${depth.toFixed(3)}*max(0.0,1.0-d*d),min(h,0.01));`,
-          `return select(0.0,${mark.amount.toFixed(3)},xz.x>${mark.x0.toFixed(1)}&&xz.x<${mark.x1.toFixed(1)}&&xz.y>${mark.z0.toFixed(1)}&&xz.y<${mark.z1.toFixed(1)});`],
+          `return select(0.0,${rect.amount.toFixed(3)},xz.x>${rect.x0.toFixed(1)}&&xz.x<${rect.x1.toFixed(1)}&&xz.y>${rect.z0.toFixed(1)}&&xz.y<${rect.z1.toFixed(1)});`],
         centre: [cx, cz], depth,
       });
       const probes = new Map(), probeOf = async (pit) => {
@@ -88,12 +94,12 @@ test('the land\'s cut covers every piece once and draws no crack across patches,
         const land = createLandContinuum({ device, pipelines, view: null, frame: frameUBO, grid: scene.grid });
         const baked = new Map();
         for (const p of scene.pieces) {
-          const b = bakeLandContinuumPiece({ ...p.spec, craters: pit && !late ? [pit.mark] : [] });
+          const b = bakeLandContinuumPiece({ ...p.spec, marks: pit && !late ? [pit.mark] : [] });
           baked.set(p.key, { ...p, b });
           land.set(p.key, b, { gx: p.gx, gz: p.gz, land: null });
         }
         // A pit dug after the bake, as a strike digs one: raised in place, in every piece it reaches.
-        if (pit && late) for (const p of scene.pieces) land.raise(p.key, pit.mark, pit.mark.amount);
+        if (pit && late) for (const p of scene.pieces) land.raise(p.key, pit.mark);
         frame.set([camera[0], camera[1], camera[2], 0], 16); device.queue.writeBuffer(frameUBO, 0, frame);
         land.setPixelError(pixels);
         const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass();

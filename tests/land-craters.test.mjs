@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {createLandCraterLedger,landCraterReach,landCraterSize} from '../js/land-craters.js';
+import {createLandCraterLedger,landCraterReach,landCraterSize,landCraterMark,landCraterEnvelope} from '../js/land-craters.js';
 import {applyTerrainImpactDamage} from '../js/gunnery-control.js';
 import {createPortDamageStore} from '../js/port-damage.js';
 import {LAND_CRATER_TEXELS,LAND_CRATER_CELLS,LAND_CRATER_GUTTER} from '../js/wgsl/land-craters.js';
@@ -55,6 +55,24 @@ test('a flat shot and a plunging one are told apart, and a flat one reaches furt
   assert.ok(flat.grazing>.9&&steep.grazing<.3,`${flat.grazing} ${steep.grazing}`);
   assert.ok(flat.hx<-.99,'its heading is saved with it');
   assert.ok(landCraterReach(flat)>landCraterReach(steep));
+});
+
+test('the land\'s cut keeps a pit block by block, so ground the pit leaves flat is not split for it',()=>{
+  const record=createLandCraterLedger().strike({x:101,z:203,energyJ:STRIKE_J,velocity:[-100,-430,0]});
+  const mark=landCraterMark(record),{depth}=landCraterSize(record.energyJ),reach=landCraterReach(record);
+  assert.equal(mark.finest,0,'a pit is worked out to the crater tiles\' cell');
+  assert.ok(mark.at(record.x,record.z)>=depth,'its bowl is kept to the floor');
+  for(let d=0;d<12;d+=.25)assert.ok(landCraterEnvelope(record,d+.25)<=landCraterEnvelope(record,d),`never more further out: ${d} m`);
+  // The far corner of the square of tiles the pit reaches: the tiles hold it, but the pit does nothing there.
+  const T=8,tx1=(Math.floor((record.x+reach)/T)+1)*T,tz1=(Math.floor((record.z+reach)/T)+1)*T;
+  assert.ok(tx1-2>=record.x+reach-1e-9||tz1-2>=record.z+reach-1e-9);
+  assert.equal(mark.over(tx1-2,tx1,tz1-2,tz1),0,'the corner block is not split');
+  // Whatever a rectangle holds, it keeps at least what each point in it waits for (landCraterWaits).
+  for(let i=0;i<200;i++){
+    const ax=record.x-8+((i*37)%160)/10,az=record.z-8+((i*53)%160)/10,w=.5+(i%7);
+    const over=mark.over(ax,ax+w,az,az+w);
+    for(let k=0;k<=4;k++)assert.ok(mark.at(ax+w*k/4,az+w*((k*3)%5)/4)<=over,`a point of [${ax}, ${ax+w}] x [${az}, ${az+w}]`);
+  }
 });
 
 test('craters are saved in few numbers and come back the same, on a coast laid out anywhere',()=>{

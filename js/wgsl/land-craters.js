@@ -16,8 +16,11 @@ export const LAND_CRATER_PER_TILE = 32;
 // How far a crater's spoil reaches at most, in crater radii, before a flat shot draws it out.
 export const LAND_CRATER_REACH = 3.05;
 export const LAND_CRATER_LOOKUP_SIZE = 1024;
-// Tile layers at most, each with the most its craters dig or throw up (landCraterPlace.amounts).
+// Tile layers at most, each with the most its craters dig or throw up over each of its blocks (landCraterPlace.amounts).
 export const LAND_CRATER_MOST_LAYERS = 384;
+// A tile's blocks, four a side: what the land's cut keeps of a crater is kept block by block (landCraterWaits).
+export const LAND_CRATER_BLOCK_M = 2;
+export const LAND_CRATER_BLOCKS = LAND_CRATER_TILE_M / LAND_CRATER_BLOCK_M;
 const CELL = LAND_CRATER_CELL_M.toFixed(4);
 const GUTTER = LAND_CRATER_GUTTER.toFixed(1);
 const TEXELS = LAND_CRATER_TEXELS.toFixed(1);
@@ -115,28 +118,22 @@ export const LAND_CRATER_PIT = LAND_CRATER_SAMPLE_WGSL + /* wgsl */ `
 @group(2)@binding(55) var landCraterField:texture_2d_array<f32>;
 @group(2)@binding(56) var landCraterSampler:sampler;
 // The lookup's origin x z and 1 to look; then the world rectangle every tile in use lies in (x0 x1 z0 z1), outside
-// which nothing is read at all; then each layer's most dug or thrown up, four a vector.
-struct LandCraterPlace{origin:vec4f,bounds:vec4f,amounts:array<vec4f,${LAND_CRATER_MOST_LAYERS / 4}>};
+// which nothing is read at all; then, for each layer, the most its craters dig or throw up over each of its blocks,
+// a row of blocks a vector (landCraterBlockAmount in js/land-craters.js).
+struct LandCraterPlace{origin:vec4f,bounds:vec4f,amounts:array<vec4f,${LAND_CRATER_MOST_LAYERS * LAND_CRATER_BLOCKS}>};
 @group(2)@binding(57) var<uniform> landCraterPlace:LandCraterPlace;
 struct LandCraterSpot{layer:i32,uv:vec2f};
 fn landCraterNear(xz:vec2f)->bool{let b=landCraterPlace.bounds;return xz.x>=b.x&&xz.x<=b.y&&xz.y>=b.z&&xz.y<=b.w;}
 // The error the land's cut waits for before it brings in a point between its lattice's (js/wgsl/land-continuum.js):
-// the least of what the tiles holding the point dig or throw up, nothing where any of them is not in use. The cut
-// splits every patch over such a tile at least that far (landContinuumDig in js/land-continuum.js).
+// what the craters do over the block the point is in, nothing where its tile is not in use. The cut keeps at least
+// that much over every patch that reaches the block (landContinuumDig in js/land-continuum.js), and splits it.
 fn landCraterWaits(xz:vec2f)->f32{
   if(!landCraterNear(xz)){return 0.0;}
-  let t=(xz-landCraterPlace.origin.xy)*${(1 / LAND_CRATER_TILE_M).toFixed(4)};
-  let c=floor(t);
-  let lo=vec2i(c)-vec2i(select(vec2f(0.0),vec2f(1.0),t==c));
-  var least=3.0e38;
-  for(var z=lo.y;z<=i32(c.y);z++){
-    for(var x=lo.x;x<=i32(c.x);x++){
-      let layer=landCraterLayerAt(vec2i(x,z),landCraterPlace.origin.z,landCraterLookup);
-      if(layer<0){return 0.0;}
-      least=min(least,landCraterPlace.amounts[layer/4][layer%4]);
-    }
-  }
-  return least;
+  let b=vec2i(floor((xz-landCraterPlace.origin.xy)*${(1 / LAND_CRATER_BLOCK_M).toFixed(4)}));
+  let layer=landCraterLayerAt(b>>vec2u(${Math.log2(LAND_CRATER_BLOCKS)}u),landCraterPlace.origin.z,landCraterLookup);
+  if(layer<0){return 0.0;}
+  let q=b&vec2i(${LAND_CRATER_BLOCKS - 1});
+  return landCraterPlace.amounts[layer*${LAND_CRATER_BLOCKS}+q.y][q.x];
 }
 fn landCraterSpot(xz:vec2f)->LandCraterSpot{
   let cell=landCraterLookupCell(xz,landCraterPlace.origin.xy);

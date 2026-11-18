@@ -91,7 +91,8 @@ const compare=(a,b)=>{
 const CLEAR_MS=7000;
 
 test('a ball on the ground leaves a pit with a rim, the land around it is as it was, and more shot makes it bigger',async()=>{
-  const cam=await aimedFrom(FIELD,[16,5.5,12]);
+  // From 12 m up, some 30 degrees down: the pit's own rim, now drawn, hides its floor from lower down.
+  const cam=await aimedFrom(FIELD,[16,12,12]);
   const {page,errors}=await open(FIELD,{cam});
   let untouched,grown,link;
   try{

@@ -6,7 +6,7 @@
 //
 // Height queries do not see the pits: shot, walkers and hulls keep the land's lattice (js/terrain.js height and
 // groundSample), and the land's cut comes down to that lattice wherever a pit lies (js/land-continuum.js).
-import { LAND_CRATER_BAKE, LAND_CRATER_CELL_M, LAND_CRATER_GUTTER, LAND_CRATER_LOOKUP_SIZE, LAND_CRATER_MOST_LAYERS, LAND_CRATER_PER_TILE, LAND_CRATER_REACH, LAND_CRATER_TEXELS, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
+import { LAND_CRATER_BAKE, LAND_CRATER_BLOCK_M, LAND_CRATER_BLOCKS, LAND_CRATER_CELL_M, LAND_CRATER_GUTTER, LAND_CRATER_LOOKUP_SIZE, LAND_CRATER_MOST_LAYERS, LAND_CRATER_PER_TILE, LAND_CRATER_REACH, LAND_CRATER_TEXELS, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
 
 const CRATER_REFERENCE_J = 1.1e6;
 const CRATER_MERGE_WITHIN = 0.8;
@@ -27,15 +27,50 @@ export function landCraterSize(energyJ) {
 export function landCraterReach(record) {
   return landCraterSize(record.energyJ).radius * 1.14 * LAND_CRATER_REACH * (1 + 0.32 * record.grazing);
 }
-// The most a crater digs or throws up, which the land's cut keeps as error over every tile it reaches.
-export function landCraterAmount(record) {
-  const size = landCraterSize(record.energyJ);
-  return size.depth + size.rim;
+// Less than this a crater does to the ground is left to the lattice's own triangles.
+const LAND_CRATER_LEAST_M = 0.01;
+// Edges this near a block's are counted as touching it, whichever side of the edge a float rounds a point to.
+const LAND_CRATER_EDGE_M = 0.01;
+/**
+ * The most a crater can dig or throw up `distance` metres from its centre: landCraterStamp in js/wgsl/land-craters.js,
+ * bounded. Its bowl to the crest of its rim, then the spoil thinning as the cube of the distance and the clods on it,
+ * nothing past its reach; never more further out. A flat shot drives the bowl long and on ahead, and its noise
+ * moves its edge, so the bowl is taken as far out as either can carry it.
+ */
+export function landCraterEnvelope(record, distance) {
+  const size = landCraterSize(record.energyJ), sand = record.sand ?? 0, grazing = record.grazing ?? 0;
+  const radius = size.radius * (1 + 0.14 * sand), depth = size.depth * (1 - 0.28 * sand), rim = depth * 0.32 * (1.06 + 0.38 * grazing);
+  if (distance >= radius * LAND_CRATER_REACH * (1 + 0.32 * grazing)) return 0;
+  const r = 0.85 * Math.max(0, distance - 0.22 * grazing * radius) / ((1 + 0.32 * grazing) * radius);
+  const fading = Math.min(1, Math.max(0, (r - 1.2) / 1.8)), clods = 0.078 * depth * (1 - 0.55 * sand) * (1 - fading * fading * (3 - 2 * fading));
+  const amount = (r < 1.06 ? Math.max(depth, rim) : rim / (r * r * r)) + clods;
+  return amount < LAND_CRATER_LEAST_M ? 0 : amount;
 }
-// The tiles a crater reaches, as world squares: x0 x1 z0 z1, each a whole number of tiles.
-export function landCraterTiles(record) {
-  const reach = landCraterReach(record), T = LAND_CRATER_TILE_M;
-  return { x0: Math.floor((record.x - reach) / T) * T, x1: (Math.floor((record.x + reach) / T) + 1) * T, z0: Math.floor((record.z - reach) / T) * T, z1: (Math.floor((record.z + reach) / T) + 1) * T };
+const craterDistance = (record, x0, x1, z0, z1) => Math.hypot(Math.max(x0 - record.x, 0, record.x - x1), Math.max(z0 - record.z, 0, record.z - z1));
+// The most a crater does over one block, by the block's corner: what the GPU reads for a point in it (landCraterWaits).
+export function landCraterBlockAmount(record, x, z) {
+  return landCraterEnvelope(record, craterDistance(record, x, x + LAND_CRATER_BLOCK_M, z, z + LAND_CRATER_BLOCK_M));
+}
+/**
+ * A crater as the land's cut keeps it (landContinuumDig in js/land-continuum.js): the square of blocks it reaches at
+ * all; `over`, the most it does over the blocks a world rectangle touches; `at`, over the block a point is in. A patch
+ * keeps what its pit does where it is, so ground the pit leaves flat is not split for it. Its pits are worked out to
+ * the crater tiles' cell, the finest the land is cut (level 0).
+ */
+export function landCraterMark(record) {
+  const B = LAND_CRATER_BLOCK_M, E = LAND_CRATER_EDGE_M;
+  const reach = landCraterSize(record.energyJ).radius * (1 + 0.14 * (record.sand ?? 0)) * LAND_CRATER_REACH * (1 + 0.32 * (record.grazing ?? 0));
+  const x0 = Math.floor((record.x - reach) / B) * B, x1 = (Math.floor((record.x + reach) / B) + 1) * B;
+  const z0 = Math.floor((record.z - reach) / B) * B, z1 = (Math.floor((record.z + reach) / B) + 1) * B;
+  const lo = (v) => (Math.ceil((v - E) / B) - 1) * B, hi = (v) => (Math.floor((v + E) / B) + 1) * B;
+  return {
+    x0, x1, z0, z1, finest: 0,
+    over(ax, bx, az, bz) {
+      if (bx < x0 - E || ax > x1 + E || bz < z0 - E || az > z1 + E) return 0;
+      return landCraterEnvelope(record, craterDistance(record, lo(ax), hi(bx), lo(az), hi(bz)));
+    },
+    at(x, z) { return landCraterBlockAmount(record, Math.floor(x / B) * B, Math.floor(z / B) * B); },
+  };
 }
 
 const craterSeed = (x, z) => { const value = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return value - Math.floor(value); };
@@ -142,10 +177,11 @@ export function createLandCraters({ device, computePipe, ledger, sectionAt, grou
     format: 'r16sint',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
-  // Where the lookup starts and 1 to look, then the rectangle every tile in use lies in, then each layer's most dug or
-  // thrown up: what the land reads (landCraterPlace), so that ground with no pit near reads no texture and the land's
-  // cut knows how much a tile's points wait for.
-  const placed = new Float32Array(8 + LAND_CRATER_MOST_LAYERS);
+  // Where the lookup starts and 1 to look, then the rectangle every tile in use lies in, then the most each layer's
+  // craters dig or throw up over each of its blocks: what the land reads (landCraterPlace), so that ground with no pit
+  // near reads no texture and the land's cut knows how much a point there waits for.
+  const blocks = LAND_CRATER_BLOCKS * LAND_CRATER_BLOCKS;
+  const placed = new Float32Array(8 + LAND_CRATER_MOST_LAYERS * blocks);
   const place = device.createBuffer({ label: 'land crater lookup place', size: placed.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const writePlace = () => {
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -153,7 +189,12 @@ export function createLandCraters({ device, computePipe, ledger, sectionAt, grou
     for (const tile of tiles.values()) {
       x0 = Math.min(x0, tile.x); x1 = Math.max(x1, tile.x + LAND_CRATER_TILE_M);
       z0 = Math.min(z0, tile.z); z1 = Math.max(z1, tile.z + LAND_CRATER_TILE_M);
-      for (const index of tile.craters) placed[8 + tile.layer] = Math.max(placed[8 + tile.layer], landCraterAmount(ledger.records[index]));
+      for (let b = 0; b < blocks; b++) {
+        const bx = tile.x + (b % LAND_CRATER_BLOCKS) * LAND_CRATER_BLOCK_M, bz = tile.z + Math.floor(b / LAND_CRATER_BLOCKS) * LAND_CRATER_BLOCK_M;
+        let most = 0;
+        for (const index of tile.craters) most = Math.max(most, landCraterBlockAmount(ledger.records[index], bx, bz));
+        placed[8 + tile.layer * blocks + b] = most;
+      }
     }
     placed.set([regionOrigin[0], regionOrigin[1], 1, 0, ...(tiles.size ? [x0, x1, z0, z1] : [1, 0, 1, 0])]);
     device.queue.writeBuffer(place, 0, placed);

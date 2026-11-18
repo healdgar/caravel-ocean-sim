@@ -29,7 +29,8 @@ import {cityContinuumRenderWGSL} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,requestCityContinuumPipelines,cityContinuumViewPipeline,createCityContinuum} from './city-continuum-draw.js';
 import {createCityTargets} from './city-targets.js';
 import {isPrefabContinuumInstance,prefabContinuumAtlas,prefabContinuumPlan,resolvePrefabContinuum} from './prefab-continuum.js';
-import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize,landCraterTiles,landCraterAmount} from './land-craters.js';
+import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize,landCraterMark} from './land-craters.js';
+import {createLandBanks} from './land-banks.js';
 import {bakeLandContinuumPiece,landContinuumSeams,requestLandContinuumPipelines,landContinuumViewPipeline,createLandContinuum} from './land-continuum.js';
 import {LAND_CONTINUUM_RENDER,LAND_CONTINUUM_ENTRY_LAYOUT} from './wgsl/land-continuum.js';
 import {sharedGroundDetail} from './ground-detail.js';
@@ -1632,15 +1633,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const [sx,sz]=key.split(',').map(Number);
     for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++){const near=`${sx+dx},${sz+dz}`;if(near===key||landSpecs.has(near))landDirty.add(near);}
   }
-  // Where shot has dug, as the land's cut keeps it: the crater tiles each crater reaches, and the most it digs or
-  // throws up, the same figures the tiles give the GPU (landCraterWaits).
-  const landCraterMark=record=>({...landCraterTiles(record),amount:landCraterAmount(record)});
+  // What lies on the lattice finer than it, as the land's cut keeps it: every pit shot has dug and the coast's river
+  // banks, the same figures the GPU reads (landCraterWaits, landBankWaits).
   function landBake(key){
     const spec=landSpecs.get(key);
     if(!spec){landContinuum.remove(key);return;}
     const seam=spec.window?null:landContinuumSeams(landSpecs,key);
     const baked=bakeLandContinuumPiece({n:spec.n,cell:spec.cell,heights:seam?seam.heights:spec.heights,kind:spec.kind,window:spec.window,
-      gx:spec.sx*1024,gz:spec.sz*1024,edges:seam?.edges,grid:landGrid,craters:craterLedger.records.map(landCraterMark)});
+      gx:spec.sx*1024,gz:spec.sz*1024,edges:seam?.edges,grid:landGrid,marks:[...craterLedger.records.map(landCraterMark),...(landBanks.mark?[landBanks.mark]:[])]});
     landContinuum.set(key,baked,{gx:spec.sx*1024,gz:spec.sz*1024,land:spec.land(),captureLand:spec.captureLand(),near:spec.near});
   }
   // One piece a frame, the nearest the camera first.
@@ -1651,7 +1651,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const key=[...landDirty].sort((a,b)=>away(a)-away(b))[0];
     landDirty.delete(key);landBake(key);
   }
-  landPiece('0,0',landCentreSpec());
+  // A coast's river banks, which the board meshes finer than the lattice (riverCut), laid into the land with its centre.
+  const landBanks=createLandBanks({device});
+  // `riverCut` the coast's own port's, whichever port stands on it.
+  function landCentre(riverCut){
+    landBanks.set(riverCut,activeRegion,baseGroundSample);
+    landPiece('0,0',landCentreSpec());
+  }
+  landCentre(proceduralPack?.port?.riverCut);
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
   try {
@@ -2101,7 +2108,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         proceduralPack._cachedForestPlanted=null;
         device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
         mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,savedPortOverride?null:proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
-        landPiece('0,0',landCentreSpec());
+        landCentre((savedPortOverride?.port??proceduralPack.port)?.riverCut);
         craters?.invalidate(activeRegion);
       }
     }
@@ -2282,7 +2289,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     mesh=upgradedPack.mesh;
     // A coast laid out wider or narrower puts every piece of land on another grid.
     if(landGrid.g!==activeRegion.span/1024){landGrid=landGridFor();landContinuum?.regrid(landGrid);for(const key of landSpecs.keys())landDirty.add(key);}
-    landPiece('0,0',landCentreSpec());
+    landCentre(portOwner.port?.riverCut);
     // The buildings moved, so their ways did too.
     if(!upgradedPack.frontierParcels?.length){
       planUngrownFrontierParcels(upgradedPack,heights,{playerPos:boat?{x:boat.x,z:boat.z}:null});
@@ -2516,10 +2523,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   });
   meadowGrass?.bindCraters?.(craters);
   // The land's cut and draw, its pits read from the crater tiles in the same draw.
-  landContinuum=createLandContinuum({device,pipelines:await requestLandContinuumPipelines({device,shader}),view:landPipe,capture:submerged??null,frame:frameUBO,grid:landGrid,shared:craters.resources()});
+  const landShared=()=>[...craters.resources(),...landBanks.resources()];
+  landContinuum=createLandContinuum({device,pipelines:await requestLandContinuumPipelines({device,shader}),view:landPipe,capture:submerged??null,frame:frameUBO,grid:landGrid,shared:landShared()});
   landClouds=clouds.bindVolume(landPipe);
   landContinuum.setPixelError(currentPixelError);landContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
-  craters.onReallocate(()=>landContinuum?.setShared(craters.resources()));
+  craters.onReallocate(()=>landContinuum?.setShared(landShared()));
+  landBanks.onChange(()=>landContinuum?.setShared(landShared()));
   landFlush();
   const recentBlastRings=[];
   const EMPTY_BALLISTIC_LIST=[];
@@ -2738,6 +2747,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         proceduralPack.city=nextBaseCity;
         proceduralPack.herds=country.herds??null;
       }
+      // The board cut its rivers into the lattice again and meshed their banks anew: the land is baked from both.
+      landCentre(portObj?.riverCut);
+      craters?.invalidate(activeRegion);
       inlandWaterSampler=createInlandWaterSampler(portObj?.country??null);
       inlandWater?.setGeometry?.(proceduralPack.inlandWater??null);
       herds?.setBridges?.(portObj?.country?.bridges??null);
@@ -2897,7 +2909,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       landContinuum?.destroy();landContinuum=null;landSpecs.clear();landDirty.clear();
       portDamage?.capture(proceduralPack?.port);
       for(const sec of loadedSections.values())portDamage?.capture(sec.port);
-      craters?.dispose();
+      craters?.dispose();landBanks.destroy();
       portFractures?.destroy();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
       elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();groundDetail.dispose();boardStamp?.dispose();
@@ -2937,7 +2949,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           const local={...hit,x:hit.x-worldOffset.x,z:hit.z-worldOffset.z},record=craters.strike(local),radius=landCraterSize(record.energyJ).radius;
           // The land's cut comes down to the pit's own cell where it is, in every piece it reaches.
           const mark=landCraterMark(record);
-          for(const key of landSpecs.keys())landContinuum?.raise(key,mark,mark.amount);
+          for(const key of landSpecs.keys())landContinuum?.raise(key,mark);
           recordBlastRing(hit.x,hit.z,Math.min(2.0,Math.max(0.45,Math.cbrt((hit.energyJ??4e5)/1.1e6))),Boolean(hit.heated||hit.hot));
           forest?.strike?.(record.x,record.z,now,groundSample);
         }

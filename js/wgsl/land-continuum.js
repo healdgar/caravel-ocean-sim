@@ -14,12 +14,14 @@
 // holds it, so a coarser patch drawn beside a finer one always finds the finer one's edge points on its own edge, and
 // a patch that splits brings in its points already lying where the coarse one drew them: no crack and no pop.
 //
-// Below the lattice the quadtree goes on, but only where shot has dug: a patch over a crater tile splits down to the
-// tile's own cell, its points between the lattice's lying on the lattice's triangles with the pit in them, and
-// waiting for as much error as the pit there holds (landCraterWaits). Every piece counts in one finest unit, a power
-// of two of the grid's, so two pieces still meet at the same points.
+// Below the lattice the quadtree goes on, but only where something finer lies on it: where shot has dug, a patch
+// splits down to the crater tiles' cell, and over a river's banks down to the banks' (js/wgsl/land-banks.js). Its
+// points between the lattice's lie on the lattice's triangles with the pit or the bank in them, and wait for as much
+// error as the pit or bank moves the ground over the 2 m block they are in (landCraterWaits, landBankWaits). Every
+// piece counts in one finest unit, a power of two of the grid's, so two pieces still meet at the same points.
 import { FRAME_WGSL } from './common.js';
 import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
+import { LAND_BANK_WGSL, LAND_BANK_LEVEL, LAND_BANK_CELL_M } from './land-banks.js';
 
 export const LAND_CONTINUUM_PATCH = 16;
 // The patch sizes a list draws, finest first: the quadtree's patches, then the root's own far end.
@@ -179,9 +181,10 @@ fn landContinuumXZ(p:vec2i)->vec2f {
   return landPiece.grid.xy+g*landPiece.grid.z;
 }
 // The ground a point stands for, and the error it waits for. The ground is the lattice with whatever lies on it that
-// is a function of the world alone (landContinuumRelief: the pits shot has dug, where the drawing has them), so every
-// patch and piece that holds the point walks the same ground. A point between the lattice's waits for what is dug
-// there (landContinuumDug), except on the survey's border, where the piece's own lattice outside draws a line.
+// is a function of the world alone (landContinuumRelief: the banks and the pits shot has dug, where the drawing has
+// them), so every patch and piece that holds the point walks the same ground. A point between the lattice's waits for
+// what lies there as fine as its level (landContinuumDug; its level, the finest stride its place is a multiple of),
+// except on the survey's border, where the piece's own lattice outside draws a line.
 fn landContinuumTrue(p:vec2i)->vec2f {
   let xz=landContinuumXZ(p);
   if(landContinuumOnLattice(p)){
@@ -190,7 +193,8 @@ fn landContinuumTrue(p:vec2i)->vec2f {
   }
   let w=landPiece.window;
   let rim=w.z>0&&landContinuumWindowed(p)&&(p.x==w.x||p.x==w.x+w.z||p.y==w.y||p.y==w.y+w.z);
-  return vec2f(landContinuumRelief(xz,landContinuumGround(p).x),select(landContinuumDug(xz),0.0,rim));
+  let level=min(countTrailingZeros(u32(p.x)),countTrailingZeros(u32(p.y)));
+  return vec2f(landContinuumRelief(xz,landContinuumGround(p).x),select(landContinuumDug(xz,level),0.0,rim));
 }
 // A point brought in at its level: its coarser neighbours' line, and as much of the ground's departure from it as
 // the error it waits for, seen from where it is, calls for.
@@ -242,13 +246,13 @@ fn landContinuumNormal(p:vec2i)->vec3f {
 // What the GPU draws at given points of one piece, read back: for tests and for looking into what went wrong. The
 // cut's bindings 0 to 4 (4 unread), then the points (finest units) and the heights out. `relief` is the body of
 // landContinuumRelief(xz, h): the lattice alone unless a test lays something on it, as the pits are in the drawing;
-// `dug` the body of landContinuumDug(xz), what a point between the lattice's waits for.
+// `dug` the body of landContinuumDug(xz, level), what a point between the lattice's waits for.
 export function landContinuumProbeWGSL(relief = 'return h;', dug = 'return 0.0;') {
   return FRAME_WGSL + CONTINUUM_CORE_WGSL + /* wgsl */`
 @group(0) @binding(0) var<uniform> F:Frame;
 ` + landContinuumData(0, 1, 'read') + LAND_CONTINUUM_HEIGHT + /* wgsl */`
 fn landContinuumRelief(xz:vec2f,h:f32)->f32 { ${relief} }
-fn landContinuumDug(xz:vec2f)->f32 { ${dug} }
+fn landContinuumDug(xz:vec2f,level:u32)->f32 { ${dug} }
 @group(0) @binding(5) var<storage,read> landProbePoints:array<vec4i>;
 @group(0) @binding(6) var<storage,read_write> landProbeHeights:array<vec4f>;
 @compute @workgroup_size(64) fn landContinuumProbe(@builtin(global_invocation_id) id:vec3u){
@@ -262,10 +266,12 @@ fn landContinuumDug(xz:vec2f)->f32 { ${dug} }
 
 // --------------------------------------------------------------------------------------------- the drawing
 // Appended to the land's own module (js/wgsl/terrain.js), whose surface it shades with.
-export const LAND_CONTINUUM_RENDER = landContinuumData(2, 50, 'read') + LAND_CONTINUUM_HEIGHT + /* wgsl */`
-// The pits shot has dug (LAND_CRATER_PIT in js/wgsl/land-craters.js). Dug ground never goes under the water.
-fn landContinuumRelief(xz:vec2f,h:f32)->f32 { return max(h+landCraterDepth(xz),min(h,0.01)); }
-fn landContinuumDug(xz:vec2f)->f32 { return landCraterWaits(xz); }
+export const LAND_CONTINUUM_RENDER = landContinuumData(2, 50, 'read') + LAND_CONTINUUM_HEIGHT + LAND_BANK_WGSL + /* wgsl */`
+// A river's banks (js/wgsl/land-banks.js), then the pits shot has dug in them (LAND_CRATER_PIT in
+// js/wgsl/land-craters.js). Dug ground never goes under the water.
+fn landContinuumRelief(xz:vec2f,h:f32)->f32 { let hb=h+landBankAt(xz).x;return max(hb+landCraterDepth(xz),min(hb,0.01)); }
+// The banks are worked out to their own cell, so the points finer than it wait only for the pits.
+fn landContinuumDug(xz:vec2f,level:u32)->f32 { return max(landCraterWaits(xz),select(0.0,landBankWaits(xz),level>=${LAND_BANK_LEVEL}u)); }
 fn landContinuumVertex(vertex:u32,node:u32,pixels:f32)->LandVertex {
   let at=node*${LAND_CONTINUUM_NODE_WORDS}u;
   let corner=vec2i(i32(landNodes[at+6u]),i32(landNodes[at+7u]));
@@ -274,9 +280,14 @@ fn landContinuumVertex(vertex:u32,node:u32,pixels:f32)->LandVertex {
   let xz=landContinuumXZ(p);
   var o:LandVertex;
   o.world=vec3f(xz.x,landContinuumHeight(p,pixels),xz.y);
-  o.normal=landContinuumNormal(p);
+  // The lattice's slope, and the banks' across their own cell.
+  let bank=landBankAt(xz);let e=${(LAND_BANK_CELL_M).toFixed(3)};
+  let slope=vec2f(landBankAt(xz-vec2f(e,0.0)).x-landBankAt(xz+vec2f(e,0.0)).x,landBankAt(xz-vec2f(0.0,e)).x-landBankAt(xz+vec2f(0.0,e)).x)/(2.0*e);
+  let lattice=landContinuumNormal(p);
+  o.normal=normalize(vec3f(lattice.x/lattice.y+slope.x,1.0,lattice.z/lattice.y+slope.y));
   let n=landPiece.near;
-  o.kind=vec2f(select(0.0,1.0,xz.x>=n.x&&xz.x<=n.y&&xz.y>=n.z&&xz.y<=n.w),landContinuumGround(p).y);
+  // Bank where the banks cover the ground, wet as they are; else the lattice's own kind.
+  o.kind=select(vec2f(select(0.0,1.0,xz.x>=n.x&&xz.x<=n.y&&xz.y>=n.z&&xz.y<=n.w),landContinuumGround(p).y),vec2f(2.0,bank.z),bank.y>0.5);
   o.leafUV=vec2f(0.0);
   o.pos=F.viewProj*vec4f(earthCurve(o.world+landContinuumShift()-F.camPos.xyz,F.camPos.y),1.0);
   return o;
