@@ -4,7 +4,7 @@ import { CLOUD_SAMPLE } from './clouds.js';
 import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
 import { LAND_CRATER_PIT } from './land-craters.js';
 import { GROUND_DETAIL_RENDER } from './ground-detail.js';
-import { SHADOW_FRAME } from './shadows.js';
+import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
 
 // Procedurals need their sampling rate in material coordinates, just as image
@@ -590,6 +590,7 @@ struct NearLand {domain:vec4f,grid:vec4f};
 @group(0) @binding(19) var<uniform> landSH:ShadowFrame;
 @group(0) @binding(20) var landSolidShadow:texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare:sampler_comparison;
+` + LAND_CLOTH_SHADOW + /* wgsl */ `
 // How far inside the shadow map a place lies: 0 at its edge and beyond, 1 well within. Reads no texture.
 fn landShadowCover(p:vec4f)->f32{
   let uv=p.xy*vec2f(0.5,-0.5)+0.5;
@@ -601,24 +602,26 @@ fn landShadowCoverage(world:vec3f)->f32{
   return landShadowCover(landSH.lightView*vec4f(world-landSH.origin.xyz,1.0));
 }
 // The light is the sun by day and the moon once it takes over (F.celestial.w), and the map is drawn from
-// whichever it is. Callers pass the result through solarShadowVisibility and lunarShadowVisibility.
-fn landShadowVisibility(world:vec3f,normal:vec3f)->f32{
-  if(landSH.origin.w<0.5){return 1.0;}
+// whichever it is. Callers pass the result through solarShadowVisibility and lunarShadowVisibility. What
+// canvas stands between colours it (LAND_CLOTH_SHADOW).
+fn landShadowVisibility(world:vec3f,normal:vec3f)->vec3f{
+  if(landSH.origin.w<0.5){return vec3f(1.0);}
   let facing=select(-1.0,1.0,dot(normal,landSH.sun.xyz)>=0.0);
   let offset=normal*facing*0.032+landSH.sun.xyz*0.025;
   let p=landSH.lightView*vec4f(world-landSH.origin.xyz+offset,1.0);
   let uv=p.xy*vec2f(0.5,-0.5)+0.5;
   let fade=landShadowCover(p);
-  if(fade<=0.0){return 1.0;}
+  if(fade<=0.0){return vec3f(1.0);}
   // Eight centimetres along the ray, whatever depth the box was fitted to.
   let refZ=min(p.z-0.08/max(landSH.sun.w,1.0),0.99999);
+  let cloth=landClothShadow(uv,refZ);
   let camDelta=world-F.camPos.xyz;
   // Far ground takes one filtered tap and near ground four. The change is scattered over a band of
   // distance, pixel by pixel, so it never draws a ring on the ground.
   let scatter=fract(52.9829189*fract(dot(floor(world.xz*6.0),vec2f(0.06711056,0.00583715))));
   if(dot(camDelta,camDelta)>mix(4225.0,7225.0,scatter)){
     let s1=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv,refZ);
-    return mix(1.0,s1,fade);
+    return mix(vec3f(1.0),s1*cloth,fade);
   }
   let dim=vec2f(textureDimensions(landSolidShadow));
   let texel=0.65/max(dim,vec2f(1.0));
@@ -627,7 +630,7 @@ fn landShadowVisibility(world:vec3f,normal:vec3f)->f32{
   sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,-texel.y),refZ)*0.25;
   sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,texel.y),refZ)*0.25;
   sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,texel.y),refZ)*0.25;
-  return mix(1.0,sum,fade);
+  return mix(vec3f(1.0),sum*cloth,fade);
 }
 const ARCH_LAYER_STRIDE:u32=87360u;
 fn archMipOffset(mip:u32)->u32{
@@ -761,7 +764,7 @@ fn cityRoofAge(root:vec4f,tone:f32)->f32{return fract(tone*3.17+root.x*0.071+roo
 // (Kaplanyan and Tokuyoshi's geometric specular antialiasing). Set where a normal has its relief.
 var<private> landNormalSpread:f32=0.0;
 var<private> landWindowEmission:vec3f=vec3f(0.0);
-fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32,shadowVis:f32)->vec4f{
+fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32,shadowVis:vec3f)->vec4f{
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
   let isPrimary=select(0.0,1.0,LAND.domain.w>0.05);
@@ -777,7 +780,7 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
     sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
   }
   // By day the map shades the sun; once the moon is the light it shades the moon and the sun is down.
-  let direct=sunIlluminance()*sunlight*solarShadowVisibility(vec3f(shadowVis)).x;
+  let direct=sunIlluminance()*sunlight*solarShadowVisibility(shadowVis);
   // Directional sky-hemisphere + ground/sea bounce irradiance from envCube
   let skyDir=normalize(vec3f(n.x*0.65,max(n.y,0.12),n.z*0.65));
   let skyIrr=textureSampleLevel(envCube,sampC,skyDir,6.0).rgb;
@@ -821,7 +824,7 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   let skyRefl=envSpec*reflStrength;
   let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*(0.08+0.92*effWet),0.65,isMetal);
   col+=direct*min(specBRDF,1.5)*specMask*(0.25+0.75*archShadow)+skyRefl;
-  col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain))*lunarShadowVisibility(vec3f(shadowVis)));
+  col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain))*lunarShadowVisibility(shadowVis));
   col+=lightningSurface(n,v,albedo,effRough)+worldFireSurface(world,n,v,albedo,effRough)+landWindowEmission;
   col=surfaceAir(col,world);
   // Clip cloud integration at high mountain surfaces: clouds behind mountain peaks
@@ -1444,9 +1447,11 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     roughness=mix(roughness,mix(.97,.05,pit.pool),pit.cover);
     canopyBackscatter*=1.0-pit.cover;
     surfaceWet=mix(surfaceWet,pit.pool*.96,pit.cover);
-    ambientVisibility*=pit.sky;
     n=pit.normal;
   }
+  // The sky that reaches it: a pit's walls shut some out, as does the body a far surface stands for (its optical
+  // moments, js/wgsl/continuum-cut.js continuumOpticLight).
+  ambientVisibility*=pit.sky;
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   n=landFilteredBump(n,dx,dy,reliefX,reliefY);
   let turnX=dpdx(n);let turnY=dpdy(n);

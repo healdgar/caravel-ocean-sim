@@ -12,7 +12,7 @@ const INLAND_WATER_LAYOUT = [{
   ],
 }];
 
-const WANTED_BASE_BINDINGS = new Set([0, 1, 2, 3, 4, 12, 19, 20, 21]);
+const WANTED_BASE_BINDINGS = new Set([0, 1, 2, 3, 4, 12, 19, 20, 21, 24]);
 const f32Scratch = new ArrayBuffer(4);
 const f32View = new Float32Array(f32Scratch);
 const u32View = new Uint32Array(f32Scratch);

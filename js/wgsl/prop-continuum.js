@@ -86,9 +86,11 @@ fn propContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   albedo=clamp(albedo*npbr.albedoMul*npbr.cavityAO,vec3f(0.015),vec3f(0.96));
   n=applyNeuralPbrNormal(n,npbrBasis,npbr.normalTS);
   let shadowSample=vesselShadow(v.world,n);
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
-  let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS - 1}.0).rgb;
-  let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS - 1}.0).rgb;
+  // Far, the sun and sky its optical moments say reach what is seen of the prop; near, all of them.
+  let reach=continuumOpticLight(n,sun,v.optics);
+  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample)*clamp(reach.x+reach.y,0.0,1.0);
+  let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS - 1}.0).rgb*reach.z;
+  let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS - 1}.0).rgb*reach.z;
   let view=normalize(eye-v.world);
   // Timber by the tide: cavity shade, the waterline darkened, edges worn pale where hawsers chafe. Iron in the air
   // wears none of it.

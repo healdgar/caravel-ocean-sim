@@ -6,7 +6,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CLOUD_SAMPLE } from './clouds.js';
-import { SHADOW_FRAME } from './shadows.js';
+import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { COASTAL_WATER } from './terrain.js';
 import { surfaceWaveSource } from './surface-coupling.js';
 
@@ -33,7 +33,7 @@ struct InlandNearDomain {
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
-
+` + LAND_CLOTH_SHADOW + /* wgsl */ `
 const ENV_MAXMIP: f32 = ${ENV_MIPS - 1}.0;
 const ENV_TEXELS_PER_RAD: f32 = ${ENV_SIZE}.0 / 1.5708;
 const TEX_N: f32 = ${N}.0;
@@ -49,16 +49,16 @@ struct InlandWaterOut {
   @location(6) rel: vec3f,        // camera-relative displaced position
 };
 
-fn inlandShadowVis(world: vec3f) -> f32 {
-  if (landSH.origin.w < 0.5) { return 1.0; }
+fn inlandShadowVis(world: vec3f) -> vec3f {
+  if (landSH.origin.w < 0.5) { return vec3f(1.0); }
   let p = landSH.lightView * vec4f(world - landSH.origin.xyz + vec3f(0.0, 0.04, 0.0) + landSH.sun.xyz * 0.03, 1.0);
   let uv = p.xy * vec2f(0.5, -0.5) + 0.5;
   let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
   let fade = smoothstep(0.0, 0.06, edge) * step(0.0, p.z) * step(p.z, 1.0);
-  if (fade <= 0.0) { return 1.0; }
+  if (fade <= 0.0) { return vec3f(1.0); }
   let refZ = min(p.z - 0.08 / max(landSH.sun.w, 1.0), 0.99999);
   let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, uv, refZ);
-  return mix(1.0, s, fade);
+  return mix(vec3f(1.0), s * landClothShadow(uv, refZ), fade);
 }
 
 fn inlandCloudShadow(world: vec3f) -> f32 {
@@ -412,11 +412,11 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let V = normalize(F.camPos.xyz - in.world);
   let Ld = F.sunDir.xyz;
   let shadow = inlandShadowVis(in.world) * inlandCloudShadow(in.world);
-  let sunVisNorm = solarShadowVisibility(vec3f(shadow));
+  let sunVisNorm = solarShadowVisibility(shadow);
   let sunlight = sunIlluminance() * sunVis[0];
   let sunE = sunlight * sunVisNorm;
   let waterSun = sunE;
-  let moonE = lunarIlluminance() * sunVis[1] * lunarShadowVisibility(vec3f(shadow));
+  let moonE = lunarIlluminance() * sunVis[1] * lunarShadowVisibility(shadow);
 
   let skyUp = textureSampleLevel(envCube, sampC, vec3f(0.0, 1.0, 0.0), ENV_MAXMIP).rgb;
   let skyHemi = skyUp * 0.4 + 0.15 * (

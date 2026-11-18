@@ -14,7 +14,7 @@ import { FRAME_WGSL, ATMO_CORE_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { continuumGroundWGSL } from '../continuum-ground.js';
 import { CLOUD_SAMPLE } from './clouds.js';
-import { SHADOW_FRAME } from './shadows.js';
+import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CONTINUUM_KIND } from '../continuum-format.js';
 import { CONTINUUM_RECORD_WGSL } from './continuum-cut.js';
@@ -679,19 +679,20 @@ const herdContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ 
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
-`;
+` + LAND_CLOTH_SHADOW;
 
 const HERD_CONTINUUM_MATERIAL_WGSL = () => /* wgsl */ `
 
-fn herdShadowVis(world: vec3f, normal: vec3f) -> f32 {
-  if (landSH.origin.w < 0.5) { return 1.0; }
+fn herdShadowVis(world: vec3f, normal: vec3f) -> vec3f {
+  if (landSH.origin.w < 0.5) { return vec3f(1.0); }
   let p = landSH.lightView * vec4f(world - landSH.origin.xyz + normal * 0.03 + landSH.sun.xyz * 0.025, 1.0);
   let uv = p.xy * vec2f(0.5, -0.5) + 0.5;
   let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
   let fade = smoothstep(0.0, 0.06, edge) * step(0.0, p.z) * step(p.z, 1.0);
   let refZ = min(p.z - 0.08 / max(landSH.sun.w, 1.0), 0.99999);
-  let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, clamp(uv, vec2f(0.0), vec2f(1.0)), refZ);
-  return mix(1.0, s, fade);
+  let at = clamp(uv, vec2f(0.0), vec2f(1.0));
+  let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, at, refZ);
+  return mix(vec3f(1.0), s * landClothShadow(at, refZ), fade);
 }
 
 fn herdCloudShadow(world: vec3f) -> f32 {
@@ -877,7 +878,7 @@ fn livestockCoatAlbedo(species: u32, coatCode: f32, texColor: vec3f, seed: f32, 
 
 fn shadeHerdSurface(world: vec3f, n: vec3f, albedo: vec3f, ao: f32, species: u32, zone: u32) -> vec3f {
   let shadow = herdShadowVis(world, n) * herdCloudShadow(world);
-  let sunVis = solarShadowVisibility(vec3f(shadow));
+  let sunVis = solarShadowVisibility(shadow);
   let nDotL = max(dot(n, F.sunDir.xyz), 0.0);
   let wrap = max(0.0, dot(n, F.sunDir.xyz) * 0.65 + 0.35) * select(0.12, 0.28, species == 0u);
   let direct = sunIlluminance() * sunVis * (nDotL + wrap);
@@ -899,7 +900,7 @@ fn shadeHerdSurface(world: vec3f, n: vec3f, albedo: vec3f, ao: f32, species: u32
   let sheen = pow(max(dot(n, h), 0.0), specPow) * sheenAmt * nDotL;
 
   var col = albedo * (direct / PI + ambient) + sunIlluminance() * sunVis * sheen;
-  col += lunarSurface(n, v, albedo, rough, vec3f(0.035), lunarShadowVisibility(vec3f(shadow)));
+  col += lunarSurface(n, v, albedo, rough, vec3f(0.035), lunarShadowVisibility(shadow));
   return surfaceAir(col, world);
 }
 
@@ -938,6 +939,8 @@ fn herdContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>)
     coat = coatA;
     ao = clamp(0.42 + 0.33 * clamp(rest.y / max(continuumTypeF(s.model, ${ANIMAL_CONTINUUM_MATERIAL.height}u), 0.4), 0.0, 1.0) + 0.23 * (0.5 + 0.5 * s.normal.y), 0.12, 0.96);
   }
+  // Far, the sky its optical moments say reaches what is seen of the beast, morphed with its points.
+  if (s.what == CONTINUUM_FAR_ENTRY) { ao = clamp(s.optics.x, 0.08, 0.98); }
   (*v).coatInfo = vec4f(coat, ao, seed, f32(species));
   (*v).texColor = herdTexColor(coatA);
   (*v).localXZ = vec2f(rest.z, rest.y);

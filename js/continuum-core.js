@@ -36,15 +36,42 @@ export const CONTINUUM_STEP_WORDS = 4;
 // The most collapses one far-body vertex may pass through, as far as the GPU follows them: the bake refuses a body
 // deeper than this, and an atlas records it in its header.
 export const CONTINUUM_HOPS = 256;
+// A far-body vertex's optical moments, as the one bake writes them after its steps (js/continuum-bake.js
+// continuumFarOptics) and the one cut morphs them (js/wgsl/continuum-cut.js continuumFarOptic): its own and its
+// region's normal, agreement, sky, depth, through and albedo, in this many words; one more entry, the whole body's.
+export const CONTINUUM_OPTICS_WORDS = 5;
 
-let continuumScenePixelError = CONTINUUM_BASE_PIXEL_ERROR;
+// How fast the scalar glides toward the error a governor aims it at: it closes this share of the way a second (as a
+// ratio: in its logarithm), and never moves faster than CONTINUUM_GLIDE_MOST of its logarithm a second, so detail comes
+// and goes through the morph and the sample-mask bands, a little each frame, and never at once (rule 3, item 5).
+export const CONTINUUM_GLIDE_RATE = 2.5;
+export const CONTINUUM_GLIDE_MOST = 0.6;
+
+let continuumScenePixelError = CONTINUUM_BASE_PIXEL_ERROR, continuumScenePixelAim = CONTINUUM_BASE_PIXEL_ERROR;
 // The scene's one pixel-error scalar. Every family's cut reads it each frame; only a frame-time or budget governor
-// sets it, and it is the only thing a governor may move.
+// moves it, and it is the only thing a governor may move.
 export function continuumPixelError() { return continuumScenePixelError; }
+// The error the scalar is gliding toward.
+export function continuumAimedPixelError() { return continuumScenePixelAim; }
 // How much coarser than its own base each family's cut is drawn: 1 at the base error, 2 when it has doubled.
 export function continuumCoarsening() { return continuumScenePixelError / CONTINUUM_BASE_PIXEL_ERROR; }
+// Sets the scalar at once, where nothing is yet drawn by it (a scene laid out, a test's measure).
 export function setContinuumPixelError(pixels) {
-  if (Number.isFinite(pixels) && pixels > 0) continuumScenePixelError = pixels;
+  if (Number.isFinite(pixels) && pixels > 0) continuumScenePixelError = continuumScenePixelAim = pixels;
+  return continuumScenePixelError;
+}
+// A governor's word: the error the scalar is to glide to (stepContinuumPixelError).
+export function aimContinuumPixelError(pixels) {
+  if (Number.isFinite(pixels) && pixels > 0) continuumScenePixelAim = pixels;
+  return continuumScenePixelAim;
+}
+// The scalar moved `seconds` further toward its aim, once a frame before the cuts read it.
+export function stepContinuumPixelError(seconds) {
+  const gap = Math.log(continuumScenePixelAim / continuumScenePixelError);
+  if (!(Math.abs(gap) > 1e-4)) { continuumScenePixelError = continuumScenePixelAim; return continuumScenePixelError; }
+  if (!(seconds > 0)) return continuumScenePixelError;
+  const step = Math.sign(gap) * Math.min(Math.abs(gap) * (1 - Math.exp(-CONTINUUM_GLIDE_RATE * Math.min(seconds, 0.25))), CONTINUUM_GLIDE_MOST * Math.min(seconds, 0.25));
+  continuumScenePixelError *= Math.exp(step);
   return continuumScenePixelError;
 }
 

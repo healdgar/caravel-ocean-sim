@@ -130,10 +130,13 @@ const POLYGON_MODE_ALIASES = Object.freeze({
 // `minimum` is how far the governor may lower the budget by itself. A budget the player or the address
 // bar chose is given as chosen, down to the least the game can draw with.
 const POLYGON_CHOSEN_MINIMUM = 0.06;
-// The scene's triangle budget moves the same scale in bounded steps, so detail yields through the morph and the
-// sample-mask bands rather than at once: never below this share of itself per count read, and back up only once
-// the count is under this share of the budget.
-const POLYGON_BUDGET_STEP = 0.85;
+// The scene's triangle budget aims the same scale at the share of the budget it would fill (POLYGON_BUDGET_AIM), from
+// the count and the error the count was taken at, as submitted triangles go as the scale; never below this share of
+// that scale for one count read, and back up only once the count is under POLYGON_BUDGET_RECOVER of the budget. The
+// scalar glides to its aim (js/continuum-core.js stepContinuumPixelError), so detail yields through the morph and the
+// sample-mask bands rather than at once.
+const POLYGON_BUDGET_STEP = 0.5;
+const POLYGON_BUDGET_AIM = 0.95;
 const POLYGON_BUDGET_RECOVER = 0.8;
 export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = CONTINUUM_BASE_PIXEL_ERROR, minimum = POLYGON_CHOSEN_MINIMUM, targetFPS = 60 } = {}) {
   let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
@@ -164,16 +167,19 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
       probe.cancel(); reset();
     },
     // The scene's one triangle budget (AGENTS.md rule 3, item 5), from the continuum census's count of submitted
-    // triangles, read a few frames late. Submitted triangles go as 1 / pixelError², that is as the scale granted,
-    // so over budget the scale is brought toward budget / total of itself, a bounded step at a time; well under, it
-    // recovers the same way. A fixed budget (tests, comparisons) is never moved. True when the pixel error changed.
-    observeTriangles(total, budget = CONTINUUM_TRIANGLE_BUDGET) {
+    // triangles, read a few frames late, and `pixels`, the scene's error that count was taken at (the scalar glides,
+    // so it may not yet be the one aimed at; without it, the one granted). Submitted triangles go as 1 / pixelError²,
+    // that is as the scale granted, so over budget, or well under it, the scale is aimed at the one that fills
+    // POLYGON_BUDGET_AIM of it, by no more than a bounded step a count. A fixed budget (tests, comparisons) is never
+    // moved. True when the pixel error aimed at changed.
+    observeTriangles(total, budget = CONTINUUM_TRIANGLE_BUDGET, pixels = null) {
       if (mode === 'fixed' || !(total > 0) || !(budget > 0)) return false;
-      const before = granted();
+      const before = granted(), at = pixels > 0 ? Math.min(1, (basePixelError / pixels) ** 2) : before;
+      const filled = at * (budget * POLYGON_BUDGET_AIM) / total;
       let next = budgetScale;
-      if (total > budget * 1.02) next = Math.max(POLYGON_CHOSEN_MINIMUM, before * Math.max(POLYGON_BUDGET_STEP, budget / total));
+      if (total > budget) next = Math.max(POLYGON_CHOSEN_MINIMUM, Math.min(before, Math.max(at * POLYGON_BUDGET_STEP, filled)));
       else if (budgetScale < 1 && budgetScale <= timeGranted() && total < budget * POLYGON_BUDGET_RECOVER) {
-        next = Math.min(1, budgetScale * Math.min(1 / POLYGON_BUDGET_STEP, (budget * 0.9) / total));
+        next = Math.min(1, Math.max(budgetScale, Math.min(at / POLYGON_BUDGET_STEP, filled)));
       }
       next = Math.round(next * 1000) / 1000;
       if (next === budgetScale) return false;

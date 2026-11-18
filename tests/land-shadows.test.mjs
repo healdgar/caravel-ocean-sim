@@ -89,13 +89,15 @@ test('a ship keeps its full shadow filter and the land map takes four taps', () 
   assert.match(body, /normal\*facing\*select\(0\.008,0\.005,isLand\)\+SH\.sun\.xyz\*select\(0\.006,0\.004,isLand\)/, 'a ship\'s receivers keep the offset they were tuned with');
   assert.match(body, /clamp\(distance\*0\.004675\/SH\.texel\.xy,vec2f\(1\.5\),vec2f\(6\.0\)\)/, 'a ship\'s penumbra is never narrower than the filter was designed for');
   assert.match(body, /corner<4u&&!isLand/, 'the land map skips the blocker search');
-  assert.ok(body.indexOf('if(isLand){result+=vec3f(solid*weight);continue;}') < body.indexOf('textureSampleCompareLevel(canvasShadow'), 'the land map reads no cloth');
+  assert.ok(!body.includes('if(isLand){result+=vec3f(solid*weight);continue;}'), 'the land map reads its canvas map too');
+  assert.match(body, /let cloth=textureSampleCompareLevel\(canvasShadow,shadowCompare,q,depth\);/);
 });
 
 test('land is shaded by whichever light the map was drawn from', () => {
   const finish = TERRAIN.slice(TERRAIN.indexOf('fn landFinishShadowed('), TERRAIN.indexOf('fn landFinish('));
-  assert.match(finish, /sunIlluminance\(\)\*sunlight\*solarShadowVisibility\(vec3f\(shadowVis\)\)\.x/);
-  assert.match(finish, /lunarSurface\([^;]*lunarShadowVisibility\(vec3f\(shadowVis\)\)\);/);
+  assert.match(finish, /shadowVis:vec3f\)->vec4f/, 'the canvas between colours the light');
+  assert.match(finish, /sunIlluminance\(\)\*sunlight\*solarShadowVisibility\(shadowVis\)/);
+  assert.match(finish, /lunarSurface\([^;]*lunarShadowVisibility\(shadowVis\)\);/);
   // The land draws no trees of its own: every tree casts through the forest's cluster cut (below).
   assert.ok(!/treeShadowVS|treeVS|treeWorld/.test(TERRAIN));
   const canopy = TERRAIN.slice(TERRAIN.indexOf('let beyondShadowMap='), TERRAIN.indexOf('let diffuse=', TERRAIN.indexOf('let beyondShadowMap=')));
@@ -116,9 +118,11 @@ test('forest shadow casters are stood from every tree against the light box, not
   assert.ok(!/F\.viewProj/.test(light), 'the light box test must not depend on what the camera can see');
 });
 
-test('the land shadow map is 2048 square on every device: 16 MiB, not 64', () => {
+test('the land shadow map is 2048 square on every device: 16 MiB, not 64; its canvas map half as fine', () => {
   assert.equal(LAND_SHADOW_RESOLUTION, 2048);
   assert.equal(LAND_SHADOW_RESOLUTION ** 2 * 4 / 2 ** 20, 16);
+  // Canvas depth (4 bytes), what it lets through (8) and both packed for the land's receivers (8), a quarter the texels.
+  assert.equal((LAND_SHADOW_RESOLUTION / 2) ** 2 * (4 + 8 + 8) / 2 ** 20, 20);
   const main = fs.readFileSync(new URL('../js/main.js', import.meta.url), 'utf8');
   assert.match(main, /createLandShadows\(device\)/, 'the game asks for the default size, with no larger map for desktops');
 });

@@ -5,7 +5,7 @@
 // the ground is green and its top faces the sky, wet near the sea, lit by the land's own light and shadow.
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
-import { SHADOW_FRAME } from './shadows.js';
+import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { BOULDER_CONTINUUM_MATERIAL } from '../boulder-continuum.js';
 
 // Group 0: the land's resources a boulder is shaded by (js/boulder-continuum.js BOULDER_CONTINUUM_BINDINGS of
@@ -25,7 +25,7 @@ struct BoulderLand { domain:vec4f };
 @group(0) @binding(19) var<uniform> landSH:ShadowFrame;
 @group(0) @binding(20) var landSolidShadow:texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare:sampler_comparison;
-` + SKY_RENDER_FUNCS;
+` + LAND_CLOTH_SHADOW + SKY_RENDER_FUNCS;
 
 const BOULDER_CONTINUUM_MATERIAL_WGSL = /* wgsl */`
 // An archetype's lithology (its tag, (archetype + 0.5) / 6), in a rock's own tint by its seed.
@@ -41,13 +41,14 @@ fn boulderContinuumPalette(archTag:f32,seed:f32)->vec3f {
 }
 // Its stone (its archetype's, in its own tint: the record's identity is its seed), and how lit its facet is and how
 // high it stands in its type's own units, by which its foot takes the soil. A point carries its facet's light in its
-// word, a far-body triangle that of the surface nearest it; a splat stands lit as a top.
+// word; the far body and the splat are lit by the sky their optical moments say reaches what is seen of the stone,
+// morphed down the chain with their points, never face by face.
 fn boulderContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   (*v).stone=boulderContinuumPalette(continuumTypeF(s.model,${BOULDER_CONTINUUM_MATERIAL.archetype}u),bitcast<f32>(s.record.spare.x));
-  (*v).lit=vec2f(select(bitcast<f32>(s.word),0.8,s.what==CONTINUUM_SPLAT_ENTRY),s.local.y);
+  (*v).lit=vec2f(select(s.optics.x,bitcast<f32>(s.word),s.what==CONTINUUM_CLUSTER_ENTRY),s.local.y);
 }
-fn boulderContinuumLandShadow(world:vec3f,normal:vec3f)->f32 {
-  if(landSH.origin.w<0.5){return 1.0;}
+fn boulderContinuumLandShadow(world:vec3f,normal:vec3f)->vec3f {
+  if(landSH.origin.w<0.5){return vec3f(1.0);}
   let facing=select(-1.0,1.0,dot(normal,landSH.sun.xyz)>=0.0);
   let offset=normal*facing*0.032+landSH.sun.xyz*0.025;
   let p=landSH.lightView*vec4f(world-landSH.origin.xyz+offset,1.0);
@@ -55,18 +56,16 @@ fn boulderContinuumLandShadow(world:vec3f,normal:vec3f)->f32 {
   let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
   let fade=smoothstep(0.0,0.06,edge)*step(0.0,p.z)*step(p.z,1.0);
   let refZ=min(p.z-0.08/max(landSH.sun.w,1.0),0.99999);
-  let s1=textureSampleCompareLevel(landSolidShadow,landShadowCompare,clamp(uv,vec2f(0.0),vec2f(1.0)),refZ);
-  return mix(1.0,s1,fade);
+  let at=clamp(uv,vec2f(0.0),vec2f(1.0));
+  let s1=textureSampleCompareLevel(landSolidShadow,landShadowCompare,at,refZ);
+  return mix(vec3f(1.0),s1*landClothShadow(at,refZ),fade);
 }
 fn boulderContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
-  // The far body is shaded flat, each face by its own plane; a splat leans its normal to the sky.
-  let across=dpdx(v.world);let down=dpdy(v.world);
-  let plane=cross(down,across);
+  // The far body is shaded by the mean normal of the stone it stands for (its optical moments'), so a far boulder is
+  // the rounded stone it is and never a cut gem; a splat leans its normal to the sky.
   let eye=continuumEye();
-  let faceted=select(v.normal,normalize(plane)*select(-1.0,1.0,dot(plane,eye-v.world)>=0.0),dot(plane,plane)>1e-16);
   var base=normalize(v.normal);
-  if(v.coverage.x==CONTINUUM_FAR_ENTRY){base=faceted;}
-  else if(v.coverage.x==CONTINUUM_SPLAT_ENTRY){base=normalize(vec3f(0.0,1.0,0.0)+v.normal*0.6);}
+  if(v.coverage.x==CONTINUUM_SPLAT_ENTRY){base=normalize(vec3f(0.0,1.0,0.0)+v.normal*0.6);}
   let world=v.world;
   let camDist=distance(world,eye);
   let grainFade=smoothstep(48.0,10.0,camDist);
@@ -89,8 +88,8 @@ fn boulderContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
 
   let roughness=clamp(0.76-crystal*0.05+lichen*0.14,0.54,0.92);
   let sunlight=textureSampleLevel(landLight,sampC,uv,0.0);
-  let shadowed=vec3f(boulderContinuumLandShadow(world,n));
-  let direct=sunIlluminance()*sunlight.r*solarShadowVisibility(shadowed).x;
+  let shadowed=boulderContinuumLandShadow(world,n);
+  let direct=sunIlluminance()*sunlight.r*solarShadowVisibility(shadowed);
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),7.0).rgb;
   let diffuse=max(dot(n,F.sunDir.xyz),0.0);
   let visibility=0.35+0.32*max(n.y,0.0);

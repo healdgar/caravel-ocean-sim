@@ -12,7 +12,8 @@
 //              its clump's hash (4 bits); word: its colour (each channel's square root, 8 bits); the wind stream its
 //              sway weight and its clump's phase.
 //   a far vertex    the wind stream: the sway weight of the sward at its height, and a phase by where it lies.
-//   a far triangle  its colour (square roots, 8 bits a channel) | the share of ground its sward hides from above << 24.
+//   a far body's optical moments  its albedo the sward's colour, and the share of ground it hides from above
+//              (scripts/prepare-meadow-grass.mjs, js/continuum-bake.js packFarOptics).
 //   a type's material block  its colour from above and from the side (far words), the along its seen sward shows, its
 //              cover from above, its canopy's height, its sway at full weight, its mix.
 // Every type shares one quantization frame (its manifest's `frame`), so every patch drapes over the ground alike and two
@@ -65,16 +66,15 @@ export function meadowContinuumVertex({ colour, along, stiffness, clump }) {
 }
 // How a patch is packed (js/continuum-format.js packContinuumBody). `high`, `word` and `wind` hold each welded sward
 // vertex's words (meadowContinuumVertex, packContinuumWind); `farWind` each far vertex's wind word, so its canopy body
-// sways as its sward does; `farTriangle(t)` gives a far triangle's { colour, cover }; `look` the type's { top, side,
+// sways as its sward does; `look` the type's { top, side,
 // seenAlong, coverage, canopy, mix }; `sway` the metres its tips move at full gust strength; `frame` the quantization
 // every patch shares.
-export function packMeadowContinuumBody({ triangles, high, word, wind, farWind, farTriangle, look, sway, frame }, baked) {
+export function packMeadowContinuumBody({ triangles, high, word, wind, farWind, look, sway, frame }, baked) {
   return packContinuumBody({
     triangles, frame,
     material: [meadowContinuumColourWord(look.top), meadowContinuumColourWord(look.side), continuumFloatWord(look.seenAlong), continuumFloatWord(look.coverage),
       continuumFloatWord(look.canopy), continuumFloatWord(sway), look.mix >>> 0],
     vertex: (v) => ({ high: high[v], word: word[v] }),
-    farWord: (t) => { const { colour, cover } = farTriangle(t); return meadowContinuumColourWord(colour, cover); },
     streams: { wind: (v) => [wind[v]] },
     farStreams: { wind: (i) => [farWind[i]] },
   }, baked);

@@ -769,7 +769,7 @@ export async function createLivestockHerds({
   let shotsSentLastFrame = 0;
   let simClockSec = 0;
 
-  const wantedBindings = new Set([0, 1, 2, 3, 4, 19, 20, 21]);
+  const wantedBindings = new Set([0, 1, 2, 3, 4, 19, 20, 21, 24]);
   let activeResources = resources;
   let state = null;
   let pastureHerds = initialHerds;

@@ -173,18 +173,24 @@ test('a floor on the governor does not override a polygon budget that was chosen
   assert.ok(Math.abs(governed.oceanRangeScale-Math.sqrt(.1))<1e-9,'and a later choice below the floor is honoured');
 });
 
-test('the scene triangle budget moves the one pixel error in bounded steps, and gives it back', () => {
+test('the scene triangle budget aims the one pixel error at the budget in bounded steps, and gives it back', () => {
   const budget=3_000_000,polygons=createAdaptivePolygons('auto',{minimum:.35});
-  // Triangles go as the scale granted: a scene of 12M at full scale.
+  // Triangles go as the scale granted: a scene of 12M at full scale, each count taken at the error then aimed at.
   const submitted=()=>12_000_000*Math.min(1,(3/polygons.pixelError)**2);
   const steps=[];
-  for(let i=0;i<40;i++){const before=polygons.pixelError;polygons.observeTriangles(submitted(),budget);steps.push(polygons.pixelError/before);}
-  assert.ok(steps.every(r=>r<=1/Math.sqrt(.85)+2e-3),'never more than one bounded step a count, to the scale\'s rounding');
+  for(let i=0;i<40;i++){const before=polygons.pixelError;polygons.observeTriangles(submitted(),budget,before);steps.push(polygons.pixelError/before);}
+  assert.ok(steps.every(r=>r<=1/Math.sqrt(.5)+2e-3),'never more than one bounded step a count, to the scale\'s rounding');
   assert.ok(Math.abs(submitted()-budget)/budget<.03,`the scene settles on its budget (${submitted()})`);
   assert.ok(polygons.pixelError>3*1.9,'four times over budget doubles the pixel error');
   assert.equal(polygons.scale,1,'the frame-time scale is untouched; the budget is its own limit');
   // A lighter scene gives the detail back.
-  for(let i=0;i<60;i++)polygons.observeTriangles(1_000_000*(3/polygons.pixelError)**2,budget);
+  for(let i=0;i<60;i++)polygons.observeTriangles(1_000_000*(3/polygons.pixelError)**2,budget,polygons.pixelError);
+  // A count taken while the scalar still glides is judged at the error it was taken at, not the one aimed at.
+  const gliding=createAdaptivePolygons('auto',{minimum:.35});
+  gliding.observeTriangles(6_000_000,budget,3);
+  const aimed=gliding.pixelError;
+  gliding.observeTriangles(6_000_000,budget,3);
+  assert.equal(gliding.pixelError,aimed,'a second count at the same error aims at the same place, not further');
   assert.equal(polygons.budgetScale,1);assert.equal(polygons.pixelError,3);
   const fixed=createAdaptivePolygons('fixed');
   assert.equal(fixed.observeTriangles(30_000_000,budget),false,'a fixed budget is never moved');

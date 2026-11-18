@@ -3082,5 +3082,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       meadowGrass?.drawShadow(pass);
       tradeVessels?.drawShadow?.(pass);
     },
+    // What casts canvas into the land's canvas map (js/shadows.js createLandShadows): the fleet's sails, while any
+    // vessel is out; else null.
+    clothShadow(){
+      return tradeVessels?.casting?pass=>tradeVessels.drawShadow(pass,true):null;
+    },
   };
 }

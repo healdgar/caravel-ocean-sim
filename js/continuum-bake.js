@@ -21,7 +21,7 @@
 // position, normal, kind) in triangles, and each triangle's part.
 import { MeshoptSimplifier } from 'meshoptimizer';
 import { buildDag } from '../third_party/threejs-nanites/dag/build.ts';
-import { CONTINUUM_STEP_WORDS, CONTINUUM_HOPS } from './continuum-core.js';
+import { CONTINUUM_STEP_WORDS, CONTINUUM_HOPS, CONTINUUM_OPTICS_WORDS } from './continuum-core.js';
 
 // ------------------------------------------------------------------------------------------------ measures
 export const closest = new Float64Array(3);
@@ -863,7 +863,359 @@ function normalsOf(position, index) {
   return { normal, face };
 }
 
+// ------------------------------------------------------------------------------------------------ the body's faces
+// A body's drawn triangles (`F`, 8 floats a corner, `T` of them) in a uniform grid of cells, each listing the triangles
+// whose bounds reach it, for lines cast through the body and the faces about a point; `keep(t)` leaves out the rest.
+// Each triangle's normal is its plane's, turned the way its drawn corners face.
+function faceGrid(F, T, cell, keep = null) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let t = 0; t < T; t++) {
+    if (keep && !keep(t)) continue;
+    for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) { const x = F[t * 24 + c * 8 + k]; if (x < lo[k]) lo[k] = x; if (x > hi[k]) hi[k] = x; }
+  }
+  if (!(lo[0] <= hi[0])) return null;
+  const n = [0, 1, 2].map((k) => Math.max(1, Math.floor((hi[k] - lo[k]) / cell) + 1)), N = n[0] * n[1] * n[2];
+  const normal = new Float32Array(T * 3), area = new Float32Array(T), range = new Int32Array(T * 6), start = new Uint32Array(N + 1);
+  const index = (x, k) => Math.min(n[k] - 1, Math.max(0, Math.floor((x - lo[k]) / cell)));
+  for (let t = 0; t < T; t++) {
+    if (keep && !keep(t)) { range[t * 6] = 1; continue; }
+    const a = t * 24, b = a + 8, c = a + 16;
+    const ex = F[b] - F[a], ey = F[b + 1] - F[a + 1], ez = F[b + 2] - F[a + 2], fx = F[c] - F[a], fy = F[c + 1] - F[a + 1], fz = F[c + 2] - F[a + 2];
+    let nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
+    const l = Math.hypot(nx, ny, nz);
+    area[t] = l / 2;
+    if (l > 1e-20) {
+      nx /= l; ny /= l; nz /= l;
+      if (nx * (F[a + 3] + F[b + 3] + F[c + 3]) + ny * (F[a + 4] + F[b + 4] + F[c + 4]) + nz * (F[a + 5] + F[b + 5] + F[c + 5]) < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    }
+    normal[t * 3] = nx; normal[t * 3 + 1] = ny; normal[t * 3 + 2] = nz;
+    for (let k = 0; k < 3; k++) { range[t * 6 + k] = index(Math.min(F[a + k], F[b + k], F[c + k]), k); range[t * 6 + 3 + k] = index(Math.max(F[a + k], F[b + k], F[c + k]), k); }
+    for (let k = range[t * 6 + 2]; k <= range[t * 6 + 5]; k++) for (let j = range[t * 6 + 1]; j <= range[t * 6 + 4]; j++) for (let i = range[t * 6]; i <= range[t * 6 + 3]; i++) start[(k * n[1] + j) * n[0] + i + 1]++;
+  }
+  for (let c = 0; c < N; c++) start[c + 1] += start[c];
+  const list = new Uint32Array(start[N]), fill = start.slice(0, N);
+  for (let t = 0; t < T; t++) for (let k = range[t * 6 + 2]; k <= range[t * 6 + 5]; k++) for (let j = range[t * 6 + 1]; j <= range[t * 6 + 4]; j++) for (let i = range[t * 6]; i <= range[t * 6 + 3]; i++) list[fill[(k * n[1] + j) * n[0] + i]++] = t;
+  return { F, T, lo, n, cell, normal, area, start, list, stamp: new Uint32Array(T), hitAt: new Float64Array(T), done: new Uint8Array(T), query: 0 };
+}
+// Where a line from o along d meets triangle t (both its sides), or Infinity (Möller and Trumbore).
+function faceHit(F, t, ox, oy, oz, dx, dy, dz) {
+  const a = t * 24, b = a + 8, c = a + 16;
+  const ex = F[b] - F[a], ey = F[b + 1] - F[a + 1], ez = F[b + 2] - F[a + 2], fx = F[c] - F[a], fy = F[c + 1] - F[a + 1], fz = F[c + 2] - F[a + 2];
+  const px = dy * fz - dz * fy, py = dz * fx - dx * fz, pz = dx * fy - dy * fx, det = ex * px + ey * py + ez * pz;
+  if (Math.abs(det) < 1e-14) return Infinity;
+  const inv = 1 / det, sx = ox - F[a], sy = oy - F[a + 1], sz = oz - F[a + 2], u = (sx * px + sy * py + sz * pz) * inv;
+  if (u < 0 || u > 1) return Infinity;
+  const qx = sy * ez - sz * ey, qy = sz * ex - sx * ez, qz = sx * ey - sy * ex, v = (dx * qx + dy * qy + dz * qz) * inv;
+  if (v < 0 || u + v > 1) return Infinity;
+  const at = (fx * qx + fy * qy + fz * qz) * inv;
+  return at > 1e-7 ? at : Infinity;
+}
+// Every face of grid G a line from o along unit d meets within `reach`, nearest first, each handed to visit(t, at),
+// which returns false to stop; `ignore` is a face the line leaves from.
+const castCell = new Int32Array(3), castNext = new Float64Array(3), castHits = [];
+function castFaces(G, ox, oy, oz, dx, dy, dz, reach, ignore, visit) {
+  const { F, lo, n, cell, start, list, stamp, hitAt, done } = G, q = ++G.query, o = [ox, oy, oz], d = [dx, dy, dz];
+  let t0 = 0, t1 = reach;
+  for (let k = 0; k < 3; k++) {
+    const a = lo[k], b = lo[k] + n[k] * cell;
+    if (Math.abs(d[k]) < 1e-12) { if (o[k] < a || o[k] > b) return; continue; }
+    let u = (a - o[k]) / d[k], v = (b - o[k]) / d[k];
+    if (u > v) { const w = u; u = v; v = w; }
+    if (u > t0) t0 = u;
+    if (v < t1) t1 = v;
+  }
+  if (t0 > t1) return;
+  for (let k = 0; k < 3; k++) {
+    castCell[k] = Math.min(n[k] - 1, Math.max(0, Math.floor((o[k] + d[k] * t0 - lo[k]) / cell)));
+    castNext[k] = d[k] > 0 ? (lo[k] + (castCell[k] + 1) * cell - o[k]) / d[k] : d[k] < 0 ? (lo[k] + castCell[k] * cell - o[k]) / d[k] : Infinity;
+  }
+  for (;;) {
+    const out = Math.min(castNext[0], castNext[1], castNext[2], t1), c = (castCell[2] * n[1] + castCell[1]) * n[0] + castCell[0];
+    castHits.length = 0;
+    for (let s = start[c]; s < start[c + 1]; s++) {
+      const t = list[s];
+      if (t === ignore) continue;
+      if (stamp[t] !== q) { stamp[t] = q; done[t] = 0; hitAt[t] = faceHit(F, t, ox, oy, oz, dx, dy, dz); }
+      if (!done[t] && hitAt[t] <= out + 1e-9 && hitAt[t] <= reach) { done[t] = 1; castHits.push(t); }
+    }
+    if (castHits.length) {
+      const hits = castHits.slice().sort((a, b) => hitAt[a] - hitAt[b]);
+      for (const t of hits) if (visit(t, hitAt[t]) === false) return;
+    }
+    if (out >= t1) return;
+    const k = castNext[0] < castNext[1] ? (castNext[0] < castNext[2] ? 0 : 2) : (castNext[1] < castNext[2] ? 1 : 2);
+    castCell[k] += d[k] > 0 ? 1 : -1;
+    if (castCell[k] < 0 || castCell[k] >= n[k]) return;
+    castNext[k] += cell / Math.abs(d[k]);
+  }
+}
+// K directions over a half sphere about +z, as many to each equal share of its cosine-weighted light (Hammersley).
+function cosineHalfSphere(K) {
+  return Array.from({ length: K }, (_, i) => {
+    let r2 = 0;
+    for (let b = i, f = 0.5; b; b >>= 1, f /= 2) if (b & 1) r2 += f;
+    const u = (i + 0.5) / K, r = Math.sqrt(u), phi = 2 * Math.PI * r2;
+    return [r * Math.cos(phi), r * Math.sin(phi), Math.sqrt(1 - u)];
+  });
+}
+// Two directions square to unit n and to each other.
+function frameAbout(nx, ny, nz) {
+  const s = Math.abs(nx) > 0.9 ? [0, 1, 0] : [1, 0, 0];
+  let tx = s[1] * nz - s[2] * ny, ty = s[2] * nx - s[0] * nz, tz = s[0] * ny - s[1] * nx;
+  const l = Math.hypot(tx, ty, tz) || 1;
+  tx /= l; ty /= l; tz /= l;
+  return [tx, ty, tz, ny * tz - nz * ty, nz * tx - nx * tz, nx * ty - ny * tx];
+}
+
+// ------------------------------------------------------------------------------------------------ plain faces
+// The wrap's corners stood on the body's own faces where they are plain (rule 1: the far body is the body). Each
+// corner goes to the point nearest every face about it that looks its way, as dual contouring places a cell's point
+// (Lindstrom and Turk's quadric, drawn gently to those faces' nearest points): a wall's face becomes one plane and an
+// arris one line wherever the grid cut them, so the simplifier takes a plain face down to a few triangles of one plane,
+// with no ridge between them to catch the light. A corner whose faces agree on no point (a crown of leaves), or would
+// go further than a cell and a half, or would fold a triangle, stays where the grid put it. Glass, recesses and iron
+// are not faces the far body keeps (APERTURES): the wall's plane runs over them.
+function snapWrap(wrapped, type, welded) {
+  const h = wrapped.h, reach = 1.5 * h, F = type.vertices, T = type.triangles;
+  const plain = (t) => !APERTURES.has(Math.floor(welded.kind[welded.index[t * 3] * 2] + 0.01));
+  const G = faceGrid(F, T, reach, plain);
+  if (!G) return wrapped.position;
+  const P = wrapped.position, V = P.length / 3, was = normalsOf(P, wrapped.index), out = Float32Array.from(P);
+  const { lo, n, cell, start, list, stamp, normal } = G;
+  for (let v = 0; v < V; v++) {
+    const px = P[v * 3], py = P[v * 3 + 1], pz = P[v * 3 + 2], Nx = was.normal[v * 3], Ny = was.normal[v * 3 + 1], Nz = was.normal[v * 3 + 2];
+    const q = ++G.query, A = [0, 0, 0, 0, 0, 0], b = [0, 0, 0], m = [0, 0, 0], planes = [];
+    let weight = 0;
+    const range = [0, 1, 2].map((k) => [Math.max(0, Math.floor((P[v * 3 + k] - reach - lo[k]) / cell)), Math.min(n[k] - 1, Math.floor((P[v * 3 + k] + reach - lo[k]) / cell))]);
+    for (let k = range[2][0]; k <= range[2][1]; k++) for (let j = range[1][0]; j <= range[1][1]; j++) for (let i = range[0][0]; i <= range[0][1]; i++) {
+      const c = (k * n[1] + j) * n[0] + i;
+      for (let s = start[c]; s < start[c + 1]; s++) {
+        const t = list[s];
+        if (stamp[t] === q) continue;
+        stamp[t] = q;
+        const nx = normal[t * 3], ny = normal[t * 3 + 1], nz = normal[t * 3 + 2];
+        if (nx * Nx + ny * Ny + nz * Nz < 0.3) continue;
+        const a = t * 24, bb = a + 8, cc = a + 16;
+        closestOnTriangle(px, py, pz, F[a], F[a + 1], F[a + 2], F[bb], F[bb + 1], F[bb + 2], F[cc], F[cc + 1], F[cc + 2]);
+        if (closest[0] > reach * reach) continue;
+        const s1 = closest[1], s2 = closest[2];
+        const cx = F[a] + (F[bb] - F[a]) * s1 + (F[cc] - F[a]) * s2, cy = F[a + 1] + (F[bb + 1] - F[a + 1]) * s1 + (F[cc + 1] - F[a + 1]) * s2, cz = F[a + 2] + (F[bb + 2] - F[a + 2]) * s1 + (F[cc + 2] - F[a + 2]) * s2;
+        const d = nx * cx + ny * cy + nz * cz;
+        A[0] += nx * nx; A[1] += nx * ny; A[2] += nx * nz; A[3] += ny * ny; A[4] += ny * nz; A[5] += nz * nz;
+        b[0] += nx * d; b[1] += ny * d; b[2] += nz * d; m[0] += cx; m[1] += cy; m[2] += cz; weight++;
+        planes.push(nx, ny, nz, d);
+      }
+    }
+    if (!weight) continue;
+    // (A + λI) x = b + λ m: the quadric's point, drawn toward the faces' nearest points where it is free to slide.
+    const lambda = 0.05 * weight, M = [A[0] + lambda, A[1], A[2], A[1], A[3] + lambda, A[4], A[2], A[4], A[5] + lambda];
+    const r = [b[0] + lambda * m[0] / weight, b[1] + lambda * m[1] / weight, b[2] + lambda * m[2] / weight];
+    const det = M[0] * (M[4] * M[8] - M[5] * M[7]) - M[1] * (M[3] * M[8] - M[5] * M[6]) + M[2] * (M[3] * M[7] - M[4] * M[6]);
+    if (!(Math.abs(det) > 1e-18)) continue;
+    const x = [
+      (r[0] * (M[4] * M[8] - M[5] * M[7]) - M[1] * (r[1] * M[8] - M[5] * r[2]) + M[2] * (r[1] * M[7] - M[4] * r[2])) / det,
+      (M[0] * (r[1] * M[8] - M[5] * r[2]) - r[0] * (M[3] * M[8] - M[5] * M[6]) + M[2] * (M[3] * r[2] - r[1] * M[6])) / det,
+      (M[0] * (M[4] * r[2] - r[1] * M[7]) - M[1] * (M[3] * r[2] - r[1] * M[6]) + r[0] * (M[3] * M[7] - M[4] * M[6])) / det,
+    ];
+    let residual = 0;
+    for (let p = 0; p < planes.length; p += 4) residual += (planes[p] * x[0] + planes[p + 1] * x[1] + planes[p + 2] * x[2] - planes[p + 3]) ** 2;
+    if (residual / weight > (0.1 * h) ** 2 || Math.hypot(x[0] - px, x[1] - py, x[2] - pz) > reach) continue;
+    out.set(x, v * 3);
+  }
+  // Undo whatever folds a triangle, until nothing does.
+  for (let round = 0; round < 4; round++) {
+    const now = normalsOf(out, wrapped.index).face;
+    let undone = 0;
+    for (let t = 0; t < wrapped.index.length / 3; t++) {
+      if (now[t * 3] * was.face[t * 3] + now[t * 3 + 1] * was.face[t * 3 + 1] + now[t * 3 + 2] * was.face[t * 3 + 2] > 0.2) continue;
+      for (let k = 0; k < 3; k++) { const v = wrapped.index[t * 3 + k]; if (out[v * 3] !== P[v * 3] || out[v * 3 + 1] !== P[v * 3 + 1] || out[v * 3 + 2] !== P[v * 3 + 2]) { out.set(P.subarray(v * 3, v * 3 + 3), v * 3); undone++; } }
+    }
+    if (!undone) break;
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------------------------------------ optical moments
+// The far body's optical moments (rule 3.3): what a line of sight that meets the far surface goes on to meet of the
+// body it stands for, cast against the body's own triangles, each stopping its `cover` (0 to 1: a leaf card's share of
+// leaf; 1 if not given) of the light that reaches it. From each far vertex lines of sight are cast inward about its
+// normal, and of what each meets, as much as it sees, a vertex keeps:
+//   sky      the ambient light that reaches it: how much of the half sky facing the eye each face it sees has, past
+//            the rest of the body
+//   depth    the optical depth at which it is seen: 0 on an opaque face, about 1 a crown's outer leaves deep
+//   through  how much light passes clean through the body along the line
+//   normal   the mean of the normals it sees, turned toward the eye; its length, align, how much they agree. The far
+//            surface's own stands in as they disagree
+//   albedo   the mean of `albedo(t)` (linear [r, g, b, a], the family's own fourth) over what it sees, if given
+// Each vertex holds its own and its region's: the area-weighted mean over every vertex collapsed into it by the step
+// it collapses itself (a survivor's, by the last), so that the morph carries the moments down the chain as it carries
+// the points (js/wgsl/continuum-cut.js continuumFarOptic). A last entry holds the whole body's, which the splat wears.
+// CONTINUUM_OPTICS_WORDS a vertex: [own oct normal u | v << 8 | align << 16 | sky << 24, the region's alike, own
+// depth | own through << 8 | the region's depth << 16 | its through << 24 (depth as τ / (1 + τ)), own albedo (each
+// colour's square root) | a << 24, the region's alike], bytes of unit range.
+const OPTICS_SIGHTS = cosineHalfSphere(16), OPTICS_SKY = cosineHalfSphere(12), OPTICS_FIELDS = 12;
+export function continuumFarOptics(far, body, { cover = null, albedo = null } = {}) {
+  const V = far.position.length / 3, W = CONTINUUM_OPTICS_WORDS;
+  if (!V) return new Uint32Array(0);
+  const F = body.vertices, T = body.triangles, P = far.position, N = far.normal;
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let v = 0; v < V; v++) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], P[v * 3 + k]); hi[k] = Math.max(hi[k], P[v * 3 + k]); }
+  const extent = Math.max(...hi.map((x, k) => x - lo[k]), 1e-3), lift = extent * 1e-3 + 1e-4, reach = extent * 4;
+  const opacity = new Float32Array(T), tone = albedo ? new Float32Array(T * 4) : null;
+  for (let t = 0; t < T; t++) {
+    opacity[t] = Math.max(0, Math.min(1, cover ? cover(t) : 1));
+    if (tone) tone.set(albedo(t), t * 4);
+  }
+  const G = faceGrid(F, T, Math.max(extent / 48, 0.02), (t) => opacity[t] > 0);
+  // The ambient light a face's side has, past the rest of the body, cached a face's side at a time.
+  const skies = new Float32Array(T * 2).fill(-1);
+  const skyOf = (t, side) => {
+    if (skies[t * 2 + side] >= 0) return skies[t * 2 + side];
+    const a = t * 24, sign = side ? -1 : 1, nx = G.normal[t * 3] * sign, ny = G.normal[t * 3 + 1] * sign, nz = G.normal[t * 3 + 2] * sign;
+    const ox = (F[a] + F[a + 8] + F[a + 16]) / 3 + nx * lift, oy = (F[a + 1] + F[a + 9] + F[a + 17]) / 3 + ny * lift, oz = (F[a + 2] + F[a + 10] + F[a + 18]) / 3 + nz * lift;
+    const [tx, ty, tz, bx, by, bz] = frameAbout(nx, ny, nz);
+    let sum = 0;
+    for (const [u, w, z] of OPTICS_SKY) {
+      let light = 1;
+      castFaces(G, ox, oy, oz, tx * u + bx * w + nx * z, ty * u + by * w + ny * z, tz * u + bz * w + nz * z, reach, t, (h) => (light *= 1 - opacity[h]) > 0.02);
+      sum += light;
+    }
+    return (skies[t * 2 + side] = sum / OPTICS_SKY.length);
+  };
+  // Own: sky, depth, through, albedo (4), normal (3), align, and whether anything was seen.
+  const own = new Float64Array(V * OPTICS_FIELDS), seenAny = new Uint8Array(V);
+  for (let v = 0; v < V; v++) {
+    const Nx = N[v * 3], Ny = N[v * 3 + 1], Nz = N[v * 3 + 2], ox = P[v * 3] + Nx * lift, oy = P[v * 3 + 1] + Ny * lift, oz = P[v * 3 + 2] + Nz * lift;
+    const [tx, ty, tz, bx, by, bz] = frameAbout(-Nx, -Ny, -Nz);
+    let seen = 0, skyWeight = 0, sky = 0, depth = 0, through = 0, r = 0, g = 0, bl = 0, a = 0, mx = 0, my = 0, mz = 0;
+    const lit = [];
+    for (const [u, w, z] of OPTICS_SIGHTS) {
+      const dx = tx * u + bx * w - Nx * z, dy = ty * u + by * w - Ny * z, dz = tz * u + bz * w - Nz * z;
+      let light = 1;
+      if (G) castFaces(G, ox, oy, oz, dx, dy, dz, reach, -1, (t) => {
+        const share = light * opacity[t], nx = G.normal[t * 3], ny = G.normal[t * 3 + 1], nz = G.normal[t * 3 + 2], side = nx * dx + ny * dy + nz * dz < 0 ? 0 : 1, sign = side ? -1 : 1;
+        seen += share; depth += share * -Math.log(Math.max(light, 1e-4));
+        // Its sky is cast for once the line is done: a cast is not to be begun inside another.
+        if (share > 0.02) lit.push(t, side, share);
+        if (tone) { r += share * tone[t * 4]; g += share * tone[t * 4 + 1]; bl += share * tone[t * 4 + 2]; a += share * tone[t * 4 + 3]; }
+        mx += share * nx * sign; my += share * ny * sign; mz += share * nz * sign;
+        light *= 1 - opacity[t];
+        return light > 0.01;
+      });
+      through += light;
+    }
+    for (let i = 0; i < lit.length; i += 3) { sky += lit[i + 2] * skyOf(lit[i], lit[i + 1]); skyWeight += lit[i + 2]; }
+    const o = v * OPTICS_FIELDS;
+    own[o + 2] = through / OPTICS_SIGHTS.length;
+    if (seen > 1e-3) {
+      seenAny[v] = 1;
+      own[o] = skyWeight > 0 ? sky / skyWeight : 1; own[o + 1] = depth / seen;
+      own[o + 3] = r / seen; own[o + 4] = g / seen; own[o + 5] = bl / seen; own[o + 6] = a / seen;
+      const length = Math.hypot(mx, my, mz) / seen, align = Math.min(1, length);
+      let sx = Nx, sy = Ny, sz = Nz;
+      if (length > 1e-6 && (mx * Nx + my * Ny + mz * Nz) / (length * seen) > -0.2) {
+        const k = align / (length * seen);
+        sx = Nx * (1 - align) + mx * k; sy = Ny * (1 - align) + my * k; sz = Nz * (1 - align) + mz * k;
+      }
+      const l = Math.hypot(sx, sy, sz) || 1;
+      own[o + 7] = sx / l; own[o + 8] = sy / l; own[o + 9] = sz / l; own[o + 10] = align;
+    } else {
+      own[o] = 1; own[o + 7] = Nx; own[o + 8] = Ny; own[o + 9] = Nz;
+    }
+  }
+  return packFarOptics(far, own, seenAny);
+}
+// A far body's optical moments packed (continuumFarOptics) from each vertex's own: `own` OPTICS_FIELDS a vertex (sky,
+// depth, through, albedo r, g, b, a, unit normal x, y, z, align), `seen` (1 a vertex) those that saw anything; the
+// rest wear the mean of those that did. A family that knows its far body's moments without casting for them (a
+// meadow's sward, a slab of known cover over the ground) packs its own here.
+export function packFarOptics(far, own, seen) {
+  const V = far.position.length / 3, W = CONTINUUM_OPTICS_WORDS, P = far.position, N = far.normal, seenAny = seen;
+  // What a vertex that sees nothing (it spans a gap the wrap bridged) wears: the mean of those that see something.
+  const area = new Float64Array(V);
+  for (let t = 0; t < far.index.length / 3; t++) {
+    const [a, b, c] = [0, 1, 2].map((k) => far.index[t * 3 + k] * 3), e = [0, 1, 2].map((k) => P[b + k] - P[a + k]), f = [0, 1, 2].map((k) => P[c + k] - P[a + k]);
+    const s = Math.hypot(e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]) / 6;
+    for (const x of [a, b, c]) area[x / 3] += s;
+  }
+  const mean = new Float64Array(OPTICS_FIELDS);
+  let meanArea = 0;
+  for (let v = 0; v < V; v++) if (seenAny[v]) { meanArea += area[v]; for (let k = 0; k < OPTICS_FIELDS; k++) mean[k] += own[v * OPTICS_FIELDS + k] * area[v]; }
+  for (let v = 0; v < V; v++) if (!seenAny[v] && meanArea > 0) for (const k of [0, 1, 3, 4, 5, 6]) own[v * OPTICS_FIELDS + k] = mean[k] / meanArea;
+  // Down the chain: each vertex's region at its death, then given to the vertex it joins.
+  const acc = new Float64Array(V * OPTICS_FIELDS), region = new Float64Array(V * OPTICS_FIELDS), weight = Float64Array.from(area, (x) => x + 1e-12);
+  for (let v = 0; v < V; v++) for (let k = 0; k < OPTICS_FIELDS; k++) acc[v * OPTICS_FIELDS + k] = own[v * OPTICS_FIELDS + k] * weight[v];
+  const settle = (v) => {
+    for (let k = 0; k < OPTICS_FIELDS; k++) region[v * OPTICS_FIELDS + k] = acc[v * OPTICS_FIELDS + k] / weight[v];
+    // The region's normal is the mean of its own; its agreement is that mean's length, of the normals' own.
+    const o = v * OPTICS_FIELDS, l = Math.hypot(region[o + 7], region[o + 8], region[o + 9]);
+    if (l > 1e-9) { region[o + 7] /= l; region[o + 8] /= l; region[o + 9] /= l; } else { region[o + 7] = N[v * 3]; region[o + 8] = N[v * 3 + 1]; region[o + 9] = N[v * 3 + 2]; }
+    region[o + 10] *= Math.min(1, l);
+  };
+  for (const { u, v } of far.chain.steps) {
+    settle(u);
+    for (let k = 0; k < OPTICS_FIELDS; k++) acc[v * OPTICS_FIELDS + k] += acc[u * OPTICS_FIELDS + k];
+    weight[v] += weight[u];
+  }
+  const whole = new Float64Array(OPTICS_FIELDS);
+  let wholeWeight = 0;
+  for (let v = 0; v < V; v++) {
+    if (far.chain.dieStep[v] >= 0) continue;
+    settle(v);
+    wholeWeight += weight[v];
+    for (let k = 0; k < OPTICS_FIELDS; k++) whole[k] += acc[v * OPTICS_FIELDS + k];
+  }
+  for (let k = 0; k < OPTICS_FIELDS; k++) whole[k] /= wholeWeight || 1;
+  whole[7] = 0; whole[8] = 1; whole[9] = 0;
+  // Packed.
+  const byte = (x) => Math.max(0, Math.min(255, Math.round(x * 255)));
+  const depthByte = (x) => byte(x / (1 + x));
+  const lead = (m, o) => {
+    const x = m[o + 7], y = m[o + 8], z = m[o + 9], s = Math.abs(x) + Math.abs(y) + Math.abs(z) || 1;
+    let u = x / s, w = y / s;
+    if (z < 0) { const p = u; u = (1 - Math.abs(w)) * (p >= 0 ? 1 : -1); w = (1 - Math.abs(p)) * (w >= 0 ? 1 : -1); }
+    return (byte(u * 0.5 + 0.5) | (byte(w * 0.5 + 0.5) << 8) | (byte(m[o + 10]) << 16) | (byte(m[o]) << 24)) >>> 0;
+  };
+  const colour = (m, o) => (byte(Math.sqrt(Math.max(0, m[o + 3]))) | (byte(Math.sqrt(Math.max(0, m[o + 4]))) << 8) | (byte(Math.sqrt(Math.max(0, m[o + 5]))) << 16) | (byte(m[o + 6]) << 24)) >>> 0;
+  const out = new Uint32Array((V + 1) * W);
+  const put = (at, a, oa, b, ob) => {
+    out[at] = lead(a, oa); out[at + 1] = lead(b, ob);
+    out[at + 2] = (depthByte(a[oa + 1]) | (byte(a[oa + 2]) << 8) | (depthByte(b[ob + 1]) << 16) | (byte(b[ob + 2]) << 24)) >>> 0;
+    out[at + 3] = colour(a, oa); out[at + 4] = colour(b, ob);
+  };
+  for (let v = 0; v < V; v++) put(v * W, own, v * OPTICS_FIELDS, region, v * OPTICS_FIELDS);
+  put(V * W, whole, 0, whole, 0);
+  return out;
+}
+
+// Each far triangle's kind, one to a plain face (rule 1): the triangles of one plane and one material, joined edge to
+// edge, all wear the kind that covers most of it, so no seam of shade runs across a wall where the grid's triangles
+// happened to take a neighbouring course's or a merlon's.
+function plainKinds(position, index, face, kinds) {
+  const T = index.length / 3, root = Int32Array.from({ length: T }, (_, t) => t), edges = new Map();
+  const find = (t) => { while (root[t] !== t) t = root[t] = root[root[t]]; return t; };
+  const material = (t) => Math.floor(kinds[t * 2] + 0.01);
+  for (let t = 0; t < T; t++) for (let k = 0; k < 3; k++) {
+    const a = index[t * 3 + k], b = index[t * 3 + ((k + 1) % 3)], key = a < b ? `${a},${b}` : `${b},${a}`, other = edges.get(key);
+    if (other === undefined) { edges.set(key, t); continue; }
+    if (material(t) !== material(other) || face[t * 3] * face[other * 3] + face[t * 3 + 1] * face[other * 3 + 1] + face[t * 3 + 2] * face[other * 3 + 2] < 0.9995) continue;
+    const p = find(t), q = find(other);
+    if (p !== q) root[p] = q;
+  }
+  const votes = new Map();
+  for (let t = 0; t < T; t++) {
+    const r = find(t), key = `${kinds[t * 2]},${kinds[t * 2 + 1]}`, size = surfaceArea(index, [t], position) + 1e-12;
+    if (!votes.has(r)) votes.set(r, new Map());
+    const tally = votes.get(r);
+    tally.set(key, (tally.get(key) ?? 0) + size);
+  }
+  const winner = new Map([...votes].map(([r, tally]) => [r, [...tally].sort((p, q) => q[1] - p[1])[0][0].split(',').map(Number)]));
+  for (let t = 0; t < T; t++) { const [x, y] = winner.get(find(t)); kinds[t * 2] = x; kinds[t * 2 + 1] = y; }
+}
+
 // ------------------------------------------------------------------------------------------------ far body
+// `type.snap` false: the wrap is not stood on the body's faces (a crown of leaves has no plain face). `type.optics`
+// ({ cover, albedo }): how its triangles stop and colour the light, for its optical moments (continuumFarOptics).
 function bakeFar(type, welded) {
   let wrapped, base;
   if (type.closed) {
@@ -881,9 +1233,17 @@ function bakeFar(type, welded) {
     base = { position: Float32Array.from(position), index, error: 0, census };
     wrapped = { h: 0, cells: [0, 0, 0], added: 0, index, exteriorAt: () => true };
   }
-  // A wrap the simplifier cannot bring down and keep manifold is taken again in coarser cells.
+  // A wrap the simplifier cannot bring down and keep manifold is stood less far onto the body's faces (where opposite
+  // sides of a part thinner than a cell come too near each other), then taken again in coarser cells.
   else for (let coarser = 1; ; coarser *= 1.5) {
-    try { wrapped = wrap(type, coarser); base = simplifyWrap(type.name, wrapped); } catch (error) { if (coarser > 5) throw error; continue; }
+    let failed = null;
+    wrapped = wrap(type, coarser);
+    const grid = wrapped.position, snapped = type.snap !== false ? snapWrap(wrapped, type, welded) : grid;
+    for (const share of snapped === grid ? [0] : coarser > 5 ? [1, 0.5, 0] : [1, 0.5]) {
+      wrapped.position = share === 1 ? snapped : share === 0 ? grid : Float32Array.from(grid, (x, i) => x + (snapped[i] - x) * share);
+      try { base = simplifyWrap(type.name, wrapped); failed = null; break; } catch (error) { failed = error; }
+    }
+    if (failed) { if (coarser > 5) throw failed; continue; }
     if (base.index.length / 3 <= WRAP_MOST_TRIANGLES || coarser > 5) break;
   }
   const position = base.position, index = base.index;
@@ -928,6 +1288,7 @@ function bakeFar(type, welded) {
     const v = found >= 0 ? welded.index[found * 3] : 0;
     kinds[t * 2] = welded.kind[v * 2]; kinds[t * 2 + 1] = welded.kind[v * 2 + 1];
   }
+  if (type.snap !== false) plainKinds(position, index, face, kinds);
 
   const chain = collapseChain(position, index, CHAIN_LEAST_TRIANGLES), S = chain.steps.length;
   let depth = 0;
@@ -1039,8 +1400,9 @@ function bakeFar(type, welded) {
     centre: [(low[0] + high[0]) / 2, (top + floor) / 2, (low[2] + high[2]) / 2].map((v) => +v.toFixed(4)), ry: +ry.toFixed(4), rx: +Math.max(area / (Math.PI * ry), 0.05).toFixed(4),
     roofShare: +(roofKind && cellsAbove ? roofCells / cellsAbove : 0).toFixed(4), wallKind: (wallKind ?? roofKind).map((v) => +v.toFixed(5)), roofKind: (roofKind ?? wallKind).map((v) => +v.toFixed(5)),
   };
+  const optics = continuumFarOptics({ position, normal, index, chain }, type, type.optics ?? {});
   return {
-    position, normal, index, kinds, chain, steps, order, splat, face, baseError,
+    position, normal, index, kinds, chain, steps, order, splat, face, baseError, optics,
     stats: {
       cell: +wrapped.h.toFixed(4), cells: wrapped.cells, wellComposedCells: wrapped.added, wrapTriangles: wrapped.index.length / 3, baseTriangles: T, baseVertices: V,
       baseError: +baseError.toFixed(4), outward: +outward.toFixed(4), inward: +inward.toFixed(4), simplifyError: +base.error.toFixed(4),

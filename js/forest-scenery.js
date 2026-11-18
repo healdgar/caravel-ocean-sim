@@ -752,7 +752,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     stats.wind={skeletons,lanes:P*FOREST_WIND_LANES,own:FOREST_WIND_OWN,bones:types.map(type=>{let n=0;for(let b=0;b<CONTINUUM_WIND_BONES;b++)if((type.wind.bones[b*16+3]>>8)&1)n++;return n;})};
     makeScene();
     // The view's groups: the land's scene (its frame, sky, light and shadow map), the clouds, and the pack's maps.
-    const sceneIds=[0,1,2,3,4,5,6,19,20,21];
+    const sceneIds=[0,1,2,3,4,5,6,19,20,21,24];
     const sceneGroup=device.createBindGroup({label:'forest scene',layout:view.pipeline.getBindGroupLayout(0),entries:resources.filter(([i])=>sceneIds.includes(i)).map(([binding,resource])=>({binding,resource}))});
     const cloudGroup=clouds.bindVolume(view.pipeline);
     const surfaceEntries=[];

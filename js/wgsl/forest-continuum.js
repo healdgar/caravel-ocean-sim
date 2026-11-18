@@ -564,13 +564,11 @@ fn forestCrownMottle(world:vec3f)->f32{
 }
 // The surface lies just inside its outermost leaves, which the land's shadow map holds: its shadow is looked up beyond them.
 const FOREST_CROWN_SHADOW_LIFT=.45;
-// A far triangle's word and a splat's: leaf | layer << 1 | exposure << 5 | canopy light << 11 | colour << 17.
-struct ForestFarLook {leaf:bool,layer:u32,exposure:f32,escape:f32,colour:vec3f};
+// A far triangle's word and a splat's: leaf | layer << 1. What it looks like is its vertices' optical moments.
+struct ForestFarLook {leaf:bool,layer:u32};
 fn forestFarLook(word:u32)->ForestFarLook{
  var o:ForestFarLook;
- o.leaf=(word&1u)!=0u;o.layer=(word>>1u)&15u;o.exposure=f32((word>>5u)&63u)/63.;o.escape=f32((word>>11u)&63u)/63.;
- let root=vec3f(f32((word>>17u)&31u),f32((word>>22u)&31u),f32((word>>27u)&31u))/31.;
- o.colour=root*root;
+ o.leaf=(word&1u)!=0u;o.layer=(word>>1u)&15u;
  return o;
 }
 fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
@@ -604,19 +602,23 @@ fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
   (*v).layer=select(FOREST_UNTEXTURED,first+layer,textured)|(leaf<<16u);
   return;
  }
- // The far body and the splat: a crown of leaves, or the bare wood below it.
+ // The far body and the splat: a crown of leaves, or the bare wood below it. Its triangle (or its type's splat) says
+ // which, and in what leaf; what it looks like is its vertex's optical moments (rule 3.3), morphed down the chain with
+ // its points: the colour of what is seen there, the sky that reaches it, how deep in it is seen and how much light
+ // passes through, so a crown is lit as the volume of leaves it stands for and never face by face.
  var look:ForestFarLook;
  if(s.what==CONTINUUM_FAR_ENTRY){look=forestFarLook(s.word);}else{look=forestFarLook(continuumType(s.model,${M.splat}u));}
  let textured=look.layer!=${FOREST_CONTINUUM_UNTEXTURED}u;
  let material=forestNativeMaterials[select(0u,first+look.layer,textured)];
- var colour=look.colour;
+ var colour=s.albedo.rgb;
  if(textured){colour=forestNativeMean(material);}
  colour*=tint;
  (*v).layer=FOREST_UNTEXTURED;
+ let sky=clamp(s.optics.x,0.,1.);
  if(!look.leaf){
-  let n=s.normal;
+  let n=s.normal;let reach=continuumOpticLight(n,F.sunDir.xyz,s.optics);
   (*v).colour=colour;
-  (*v).crown=vec4f(max(dot(n,F.sunDir.xyz),0.)*(.35+.65*look.escape),(.36+max(n.y,0.)*.25)*look.escape,0.,.95);
+  (*v).crown=vec4f(max(dot(n,F.sunDir.xyz),0.)*reach.x,(.36+max(n.y,0.)*.25)*sky,0.,.95);
   return;
  }
  var outward=s.normal;
@@ -627,9 +629,11 @@ fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
  }
  // Its leaves' undersides, as a leaf near shows them.
  let back=select(colour,forestLeafUnderside(colour,material,tint),textured);
- let lit=forestCrownLight(s.world,normalize(outward+vec3f(0.,.35,0.)),outward,colour,back,look.exposure,look.escape,material.optics.z,material.optics.x);
- (*v).colour=lit.colour;(*v).normal=lit.normal;(*v).crown=vec4f(lit.light,lit.finish);
- (*v).surface=vec4f(look.exposure,1.0,0.0,0.0);
+ let lit=forestCrownLight(s.world,normalize(outward+vec3f(0.,.35,0.)),outward,colour,back,sky,1.0,material.optics.z,material.optics.x);
+ // The sun on its leaves as deep as they are seen, and what of it comes clean through the crown from behind.
+ let reach=continuumOpticLight(outward,F.sunDir.xyz,s.optics);
+ (*v).colour=lit.colour;(*v).normal=lit.normal;(*v).crown=vec4f(lit.light.x*reach.x+reach.y*(.35+.65*material.optics.z),lit.light.y,lit.finish);
+ (*v).surface=vec4f(sky,1.0,0.0,0.0);
 }
 fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
  let dx=dpdx(v.world);let dy=dpdy(v.world);let ux=dpdx(v.uv);let uy=dpdy(v.uv);
@@ -638,14 +642,12 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
  var shadowAt=v.world;
  let exposure=clamp(v.surface.x,0.,1.);
  if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){
-  // A crown, each face by its own plane, mottled as its leaves would be.
-  let across=cross(dx,dy);
-  let outward=normalize(across*select(-1.,1.,dot(across,toEye)>=0.)+toEye*1e-9);
-  shadowAt=v.world+outward*FOREST_CROWN_SHADOW_LIFT;
+  // A crown, mottled as its leaves would be. Its shadow is looked up toward the sun past its outermost leaves.
+  shadowAt=v.world+F.sunDir.xyz*FOREST_CROWN_SHADOW_LIFT;
   let mottle=mix(1.,forestCrownMottle(v.world),clamp(v.surface.y,0.,1.));
   // An edge-on triangle's pixel reads its varyings from past its corners: each is held to what a leaf can be.
   let span=dot(v.normal,v.normal);
-  n=select(outward,v.normal*inverseSqrt(max(span,1e-12)),span>1e-6&&span<1e6);
+  n=select(normalize(toEye),v.normal*inverseSqrt(max(span,1e-12)),span>1e-6&&span<1e6);
   colour=clamp(v.colour,vec3f(0.),vec3f(4.));let light=clamp(v.crown.xy,vec2f(0.),vec2f(4.,1.));
   let finish=clamp(v.crown.zw,vec2f(0.,.05),vec2f(1.));
   diffuse=light.x*mottle;ambient=light.y*mix(1.,mottle,.6);wet=finish.x;roughness=finish.y;

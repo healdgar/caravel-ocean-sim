@@ -12,7 +12,7 @@
 // vertex count and the instance count of a triangle list; they count what is submitted, padding and all. A family whose
 // fixed-size entries hide degenerate triangles (the one cut, js/wgsl/continuum-cut.js) counts its real triangles as it
 // lists them and offers those words, stride 1. Every family is counted from its draws: nothing is sized on the CPU.
-import { CONTINUUM_TRIANGLE_BUDGET } from './continuum-core.js';
+import { CONTINUUM_TRIANGLE_BUDGET, continuumPixelError } from './continuum-core.js';
 
 const CONTINUUM_CENSUS_WGSL = /* wgsl */`
 struct CensusRegion { first: u32, records: u32, stride: u32, family: u32 }
@@ -38,7 +38,7 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
   const pipeline = device.createComputePipeline({ label: 'continuum census', layout: 'auto', compute: { module: device.createShaderModule({ label: 'continuum census', code: CONTINUUM_CENSUS_WGSL }), entryPoint: 'main' } });
   let gather = null, regionBuffer = null, group = null, shape = '', regionCount = 0;
   let copies = [];
-  let reading = false, copiedThisFrame = false, latest = null;
+  let reading = false, copiedThisFrame = false, latest = null, copiedPixels = 0;
 
   const familyOf = (name) => {
     let at = names.indexOf(name);
@@ -76,7 +76,8 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
     get budget() { return CONTINUUM_TRIANGLE_BUDGET; },
     // No read is in flight: a count encoded now is read back.
     get idle() { return !reading; },
-    // The last count read: { families: { name: triangles }, total, budget }, or null before the first arrives.
+    // The last count read: { families: { name: triangles }, total, budget, pixels }, or null before the first arrives;
+    // `pixels` is the scene's pixel error the count was taken at.
     get latest() { return latest; },
     // After the frame's selections: copy each family's records and sum them. sources: [{ name, draws }].
     encode(encoder, sources) {
@@ -89,19 +90,20 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
         pass.setPipeline(pipeline); pass.setBindGroup(0, group); pass.dispatchWorkgroups(Math.ceil(regionCount / 64));
         pass.end();
       }
-      if (!reading) { encoder.copyBufferToBuffer(totals, 0, staging, 0, maxFamilies * 4); copiedThisFrame = true; }
+      if (!reading) { encoder.copyBufferToBuffer(totals, 0, staging, 0, maxFamilies * 4); copiedThisFrame = true; copiedPixels = continuumPixelError(); }
     },
     // After the frame is submitted: start reading this frame's count if it was copied out.
     afterSubmit() {
       if (!copiedThisFrame || reading) return;
       reading = true; copiedThisFrame = false;
+      const pixels = copiedPixels;
       staging.mapAsync(GPUMapMode.READ).then(() => {
         const counts = new Uint32Array(staging.getMappedRange().slice(0));
         staging.unmap();
         const families = {};
         let total = 0;
         names.forEach((name, i) => { families[name] = counts[i]; total += counts[i]; });
-        latest = { families, total, budget: CONTINUUM_TRIANGLE_BUDGET };
+        latest = { families, total, budget: CONTINUUM_TRIANGLE_BUDGET, pixels };
       }).catch(() => {}).finally(() => { reading = false; });
     },
     destroy() { gather?.destroy(); regionBuffer?.destroy(); totals.destroy(); staging.destroy(); },

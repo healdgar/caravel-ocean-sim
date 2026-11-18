@@ -24,7 +24,9 @@
 //           kind.y and its material | fraction << 8. A type's cluster vertices come first, then its far body's.
 //   far     a type's far body: a record a vertex (the step it collapses at | the far vertex it joins << 16), its
 //           triangles (three far vertices and a word the material reads: a building's kind, a prop's UV), and its
-//           steps (CONTINUUM_STEP_WORDS each, js/continuum-core.js).
+//           steps (CONTINUUM_STEP_WORDS each, js/continuum-core.js), then its optical moments (CONTINUUM_OPTICS_WORDS a
+//           far vertex and one more for the whole body: js/continuum-bake.js continuumFarOptics), which the morph carries
+//           down the chain with the points.
 //   streams optional, each a run of words a vertex in the vertices' own order, so a stream is read by the same
 //           index as the vertex: skin (two words: four joints, four weights), UV (u | v << 16, unorm), rider source
 //           (the posed vertex it rides), wind (the family's sway word) and surface (raw | scorch << 8, unorm over
@@ -37,11 +39,11 @@
 //   << 16 | flags), pose (where its pose data begins in the scene's pose buffer, in vec4f), seed (u32, which thins
 //   its splat and splits its samples), reach (f32: how far past its type's sphere its points may lie), and four spare
 //   words its family's fetch and material read as they will: identity, phase, motion, furl.
-import { CONTINUUM_STEP_WORDS, CONTINUUM_HOPS, CONTINUUM_SPLAT_AREA, CONTINUUM_TRIANGLE_BUDGET } from './continuum-core.js';
+import { CONTINUUM_STEP_WORDS, CONTINUUM_HOPS, CONTINUUM_OPTICS_WORDS, CONTINUUM_SPLAT_AREA, CONTINUUM_TRIANGLE_BUDGET } from './continuum-core.js';
 
 // ------------------------------------------------------------------------------------------------ the atlas
 export const CONTINUUM_ATLAS_MAGIC = 0x4d54_4e43;
-export const CONTINUUM_ATLAS_VERSION = 2;
+export const CONTINUUM_ATLAS_VERSION = 3;
 export const CONTINUUM_HEADER_WORDS = 32;
 export const CONTINUUM_HEADER = Object.freeze({
   magic: 0, version: 1, typeCount: 2, typesAt: 3, clustersAt: 4, clusterCount: 5, verticesAt: 6, vertexCount: 7, indicesAt: 8, indexCount: 9,
@@ -208,7 +210,9 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
   const farCarries = (name) => farStreams[name] && Array.from({ length: V }, (_, i) => i).some((i) => farStreams[name](i).some((w) => w !== 0));
   const carried = CONTINUUM_STREAMS.filter(({ name }) => (streams[name] && clusters.order.some((v) => streams[name](v).some((w) => w !== 0))) || farCarries(name));
   const streamWords = carried.reduce((n, { words }) => n + words * vertices, 0);
-  const chainWords = V + T * CONTINUUM_TRIANGLE_WORDS + far.steps.length;
+  const optics = far.optics ?? null;
+  if (V && optics?.length !== (V + 1) * CONTINUUM_OPTICS_WORDS) throw Error(`A far body of ${V} vertices has ${optics?.length ?? 'no'} words of optical moments: bake them (js/continuum-bake.js continuumFarOptics)`);
+  const chainWords = V + T * CONTINUUM_TRIANGLE_WORDS + far.steps.length + (V ? optics.length : 0);
   const typeAt = CONTINUUM_BODY_HEAD, clustersAt = typeAt + CONTINUUM_TYPE_WORDS, verticesAt = clustersAt + clusters.count * CONTINUUM_CLUSTER_WORDS;
   const indicesAt = verticesAt + vertices * CONTINUUM_VERTEX_WORDS, chainAt = indicesAt + clusters.indices.length, streamsAt = chainAt + chainWords;
   const words = new Uint32Array(streamsAt + streamWords), floats = new Float32Array(words.buffer);
@@ -226,6 +230,7 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
     words[chainAt + trianglesAt + k * CONTINUUM_TRIANGLE_WORDS + 3] = farWord(t) >>> 0;
   });
   words.set(far.steps, chainAt + stepsAt);
+  if (V) words.set(optics, chainAt + stepsAt + far.steps.length);
   let streamAt = streamsAt;
   for (const { name, words: n } of carried) {
     if (streams[name]) clusters.order.forEach((v, i) => words.set(streams[name](v), streamAt + i * n));
@@ -249,7 +254,7 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
 export function continuumPiecesFar() {
   return {
     position: new Float32Array(0), normal: new Float32Array(0), index: new Uint32Array(0), order: [],
-    chain: { steps: [], dieStep: new Int32Array(0), target: new Int32Array(0) }, steps: new Uint32Array(0), stats: { inflateMax: 0 },
+    chain: { steps: [], dieStep: new Int32Array(0), target: new Int32Array(0) }, steps: new Uint32Array(0), optics: new Uint32Array(0), stats: { inflateMax: 0 },
     farFirst: 0, splat: { rx: 0, ry: 0, centre: [0, 0, 0] },
   };
 }

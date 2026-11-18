@@ -71,12 +71,14 @@ fn vesselContinuumFarShade(v:ContinuumVarying,front:bool)->vec4f {
   let toSun=normalize(F.sunDir.xyz);
   let eye=normalize(continuumEye()-v.world);
   let shadowed=vesselShadow(v.world,n);
+  // The sun and sky her optical moments say reach what is seen of her: her canvas lets some through.
+  let reach=continuumOpticLight(n,toSun,v.optics);
   let sunLight=sunIlluminance()*sunVis[0]*step(0.0,toSun.y)*solarShadowVisibility(shadowed);
-  let lit=max(dot(n,toSun),0.0);
-  let skyLight=skyAtmo(normalize(vec3f(n.x*0.35,max(n.y,0.14),n.z*0.35)));
-  let seaLight=skyAtmo(vec3f(0.0,0.25,0.0))*0.45+F.waterCol.rgb*0.65;
+  let lit=max(dot(n,toSun),0.0)*reach.x+reach.y;
+  let skyLight=skyAtmo(normalize(vec3f(n.x*0.35,max(n.y,0.14),n.z*0.35)))*reach.z;
+  let seaLight=(skyAtmo(vec3f(0.0,0.25,0.0))*0.45+F.waterCol.rgb*0.65)*reach.z;
   let f0=vec3f(0.04);
-  var col=v.colour*vesselAmbient(n,skyLight,seaLight)*0.82+(v.colour/PI)*sunLight*lit+vesselSpecular(n,eye,toSun,0.86,f0)*sunLight*lit;
+  var col=v.colour*vesselAmbient(n,skyLight,seaLight)*0.82+(v.colour/PI)*sunLight*lit+vesselSpecular(n,eye,toSun,0.86,f0)*sunLight*max(dot(n,toSun),0.0)*reach.x;
   col+=lunarSurface(n,eye,v.colour,0.86,f0,sunVis[1]*lunarShadowVisibility(shadowed));
   return vec4f(continuumAir(col,v.world),1.0);
 }

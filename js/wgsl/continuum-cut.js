@@ -23,7 +23,7 @@
 // (js/continuum-scene.js continuumAtlasPaging); its header and types always lie in the first.
 import { FRAME_WGSL } from './common.js';
 import { SHADOW_FRAME } from './shadows.js';
-import { CONTINUUM_CORE_WGSL, CONTINUUM_STEP_WORDS, CONTINUUM_HOPS, continuumClusterPrefixWGSL, continuumMorphStepWGSL } from '../continuum-core.js';
+import { CONTINUUM_CORE_WGSL, CONTINUUM_STEP_WORDS, CONTINUUM_HOPS, CONTINUUM_OPTICS_WORDS, continuumClusterPrefixWGSL, continuumMorphStepWGSL } from '../continuum-core.js';
 import {
   CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_CLUSTER_WORDS, CONTINUUM_VERTEX_WORDS, CONTINUUM_TRIANGLE_WORDS, CONTINUUM_NEVER,
   CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES, CONTINUUM_VIEW_LISTS,
@@ -112,8 +112,9 @@ struct ContinuumView {
 struct ContinuumPoint { position:vec3f, normal:vec3f, high:u32, word:u32 };
 // A point as its kind poses it, in its type's own metres; wear (0 to ${CONTINUUM_SURFACE_RANGE}) how worn it is.
 struct ContinuumPosed { position:vec3f, normal:vec3f, wear:f32, hidden:bool };
-// One corner of an entry: posed, its material's words, the atlas vertex its side streams are read by.
-struct ContinuumCorner { posed:ContinuumPosed, high:u32, word:u32, vertex:u32, shown:bool };
+// One corner of an entry: posed, its material's words, the atlas vertex its side streams are read by, and its
+// optical moments (ContinuumOptic).
+struct ContinuumCorner { posed:ContinuumPosed, high:u32, word:u32, vertex:u32, shown:bool, optics:vec4f, albedo:vec4f };
 const CONTINUUM_NEVER:u32=${CONTINUUM_NEVER}u;
 const CONTINUUM_WHOLE:u32=0xffffffffu;
 const CONTINUUM_NO_VERTEX:u32=0xffffffffu;
@@ -190,8 +191,38 @@ fn continuumAncestor(model:u32,vertex:u32,step:u32)->u32 {
   return v;
 }
 fn continuumUnposed(position:vec3f,normal:vec3f)->ContinuumPosed { var p:ContinuumPosed;p.position=position;p.normal=normal;p.wear=0.0;p.hidden=false;return p; }
+// A far body's optical moments (rule 3.3; js/continuum-bake.js continuumFarOptics): what a line of sight meets of the
+// body the far surface stands for. normal: the mean of what it sees, leaning to the far surface's own as that
+// disagrees; optics: x the sky that reaches what it sees, y the optical depth it is seen at, z the share of light
+// that passes clean through, w how far the normals it sees agree (1 a plain face, about .4 leaves at every angle);
+// albedo: the family's, if it gave one (linear colour, and its own fourth). Near, the clusters are the body:
+// CONTINUUM_NEAR_OPTICS.
+struct ContinuumOptic { normal:vec3f, optics:vec4f, albedo:vec4f };
+const CONTINUUM_NEAR_OPTICS=vec4f(1.0,0.0,0.0,1.0);
+// Far vertex v's moments (its whole body's past its last vertex), its own leaning to its region's by t: 0 at the
+// far body's finest, 1 as it collapses into the vertex it joins.
+fn continuumFarOptic(model:u32,v:u32,t:f32)->ContinuumOptic {
+  let at=continuumType(model,${CONTINUUM_TYPE.steps}u)+(continuumType(model,${CONTINUUM_TYPE.stepCount}u)+1u)*${CONTINUUM_STEP_WORDS}u+v*${CONTINUUM_OPTICS_WORDS}u;
+  let own=unpack4x8unorm(continuumWord(at));let region=unpack4x8unorm(continuumWord(at+1u));let deep=unpack4x8unorm(continuumWord(at+2u));
+  var o:ContinuumOptic;
+  o.normal=normalize(mix(continuumOctahedral(own.xy),continuumOctahedral(region.xy),t)+vec3f(0.0,1e-5,0.0));
+  let depth=mix(deep.xy,deep.zw,t);
+  o.optics=vec4f(mix(own.w,region.w,t),depth.x/max(1.0-depth.x,1e-3),depth.y,mix(own.z,region.z,t));
+  let colour=mix(unpack4x8unorm(continuumWord(at+3u)),unpack4x8unorm(continuumWord(at+4u)),t);
+  o.albedo=vec4f(colour.rgb*colour.rgb,colour.a);
+  return o;
+}
+// How far along its life far vertex v is at (fractional) step 'when': 0 at the finest, 1 as it collapses.
+fn continuumFarAge(model:u32,v:u32,when:f32)->f32 {
+  var dies=continuumWord(continuumType(model,${CONTINUUM_TYPE.records}u)+v)&65535u;
+  if(dies==CONTINUUM_NEVER){dies=continuumType(model,${CONTINUUM_TYPE.stepCount}u);}
+  return clamp(when/f32(dies+1u),0.0,1.0);
+}
+// The whole body's moments, which its splat wears.
+fn continuumBodyOptic(model:u32)->ContinuumOptic { return continuumFarOptic(model,continuumType(model,${CONTINUUM_TYPE.chainVertexCount}u),0.0); }
 // One corner of the far body at a step, on its way to where the next collapse takes it, grown along its normals by
-// what the collapses have taken off the outline, then posed. Its word is its triangle's.
+// what the collapses have taken off the outline, then posed. Its word is its triangle's; its normal and moments are
+// its vertex's, morphed with it.
 fn continuumFarCorner(record:ContinuumRecord,model:u32,chunk:u32,vertex:u32,step:u32,morph:f32)->ContinuumCorner {
   var out:ContinuumCorner;
   let triangle=chunk*${CONTINUUM_CHUNK_TRIANGLES}u+vertex/3u;
@@ -205,7 +236,10 @@ fn continuumFarCorner(record:ContinuumRecord,model:u32,chunk:u32,vertex:u32,step
   let pa=continuumPointAt(model,first+a);let pb=continuumPointAt(model,first+b);
   let grow=mix(bitcast<f32>(continuumStepWord(model,step,2u)),bitcast<f32>(continuumStepWord(model,next,2u)),morph);
   out.vertex=first+a;
-  out.posed=continuumPose(record,0u,out.vertex,continuumUnposed(mix(pa.position+pa.normal*grow,pb.position+pb.normal*grow,morph),normalize(mix(pa.normal,pb.normal,morph))));
+  let when=f32(step)+morph;
+  let oa=continuumFarOptic(model,a,continuumFarAge(model,a,when));let ob=continuumFarOptic(model,b,continuumFarAge(model,b,when));
+  out.optics=mix(oa.optics,ob.optics,morph);out.albedo=mix(oa.albedo,ob.albedo,morph);
+  out.posed=continuumPose(record,0u,out.vertex,continuumUnposed(mix(pa.position+pa.normal*grow,pb.position+pb.normal*grow,morph),normalize(mix(oa.normal,ob.normal,morph))));
   out.shown=!out.posed.hidden;
   return out;
 }
@@ -218,7 +252,7 @@ fn continuumClusterCorner(record:ContinuumRecord,cluster:u32,vertex:u32)->Contin
   if(!out.shown){return out;}
   out.vertex=continuumWord(continuumAtlas[${CONTINUUM_HEADER.indicesAt}u]+continuumWord(at+14u)+vertex);
   let p=continuumPointAt(continuumTypeOf(record),out.vertex);
-  out.high=p.high;out.word=p.word;
+  out.high=p.high;out.word=p.word;out.optics=CONTINUUM_NEAR_OPTICS;out.albedo=vec4f(0.0);
   out.posed=continuumPose(record,packed>>16u,out.vertex,continuumUnposed(p.position,p.normal));
   out.shown=!out.posed.hidden;
   return out;
@@ -613,7 +647,23 @@ struct ContinuumSurface {
   high:u32, word:u32,
   wear:f32,      // how worn it is: its kind's wear (a shard's scorch) or its surface stream's, whichever is more
   corner:vec2f,  // a splat's corner: (0, 2) at its apex, (±√3, -1) at its base
+  optics:vec4f,  // its optical moments (ContinuumOptic): a cluster's CONTINUUM_NEAR_OPTICS, a splat's its whole body's
+  albedo:vec4f,  // the far body's albedo moment, where its family gave one (a cluster's: zero)
 };
+// What of the light reaches what a pixel of a far body sees (rule 3.3), from its optical moments, for a material to
+// light it by: x the sun on the side it is seen from, after the body above it (as deep as it is seen, along the way
+// the sun comes in); y the sun from behind that passes clean through to the eye; z the sky that reaches it; w how
+// soft its normal is (0 a plain face, toward 1 leaves at every angle), so how far its light wraps past the terminator.
+// Near, (1, 0, 1, 0): the clusters are the body.
+fn continuumOpticLight(n:vec3f,sun:vec3f,optics:vec4f)->vec4f {
+  let nl=dot(n,sun);
+  // A line of sight comes in about the normal, a third of its depth aslant.
+  let deep=optics.y*0.67;
+  let front=exp(-deep/max(nl+0.25,0.12));
+  let behind=max(-nl,0.0);
+  let through=behind*pow(clamp(optics.z,0.0,1.0),1.0/max(behind,0.25));
+  return vec4f(front,through,optics.x,1.0-clamp(optics.w,0.0,1.0));
+}
 // Where a point of the scene's frame is drawn; 'pull' metres nearer the eye along its line of sight for its depth.
 fn continuumClipPulled(world:vec3f,pull:f32)->vec4f {
   let relative=world+continuumShift()-F.camPos.xyz;
@@ -630,6 +680,7 @@ fn continuumSurfaceOf(s:ptr<function,ContinuumSurface>,record:ContinuumRecord,wh
   if(!corner.shown){return false;}
   (*s).local=corner.posed.position;(*s).world=continuumPlace(record,(*s).local)+lift;(*s).normal=continuumTurnNormal(record,corner.posed.normal);
   (*s).high=corner.high;(*s).word=corner.word;(*s).vertex=corner.vertex;(*s).wear=max(corner.posed.wear,continuumSurfaceWear(corner.vertex));
+  (*s).optics=corner.optics;(*s).albedo=corner.albedo;
   return true;
 }
 `;
@@ -679,7 +730,8 @@ struct ContinuumVarying {
   @location(0) world:vec3f,
   @location(1) normal:vec3f,
   @location(2) @interpolate(flat) coverage:vec4u,   // x the entry (1 clusters, 2 far body, 3 splat), y handoff | splat << 8, z the record's seed, w samples
-${continuumVaryingFields(material.varyings, 3)}
+  @location(3) optics:vec4f,                         // its optical moments (ContinuumSurface.optics)
+${continuumVaryingFields(material.varyings, 4)}
 };
 struct ContinuumCoverage { @location(0) colour:vec4f, @builtin(sample_mask) mask:u32 };
 // One corner of an entry. Coarse: an entry of the shadow map's lists, its far body at the step its shadow takes,
@@ -702,9 +754,10 @@ fn continuumVertex(vertex:u32,listed:ContinuumEntry,coarse:bool)->ContinuumVaryi
   if(what==CONTINUUM_SPLAT_ENTRY){
     let splat=continuumSplatCorner(record,continuumEye(),vertex,unpack2x16float(state.w).x);
     s.local=splat.local;s.world=splat.world+lift;s.normal=splat.toward;s.corner=splat.corner;pull=splat.pull;
+    let body=continuumBodyOptic(s.model);s.optics=body.optics;s.albedo=body.albedo;
   }else if(!continuumSurfaceOf(&s,record,what,item,vertex,state.y&65535u,bitcast<f32>(state.z),lift)){out.position=CONTINUUM_HIDDEN;return out;}
   out.world=s.world+vec3f(touched);
-  out.normal=s.normal;
+  out.normal=s.normal;out.optics=s.optics;
   out.position=continuumClipPulled(out.world,pull);
   out.coverage=vec4u(what,state.x&65535u,record.tag.z,continuumView.counts.y);
   ${material.name}Varying(s,&out);

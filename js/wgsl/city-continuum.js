@@ -63,7 +63,8 @@ fn cityContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   (*v).normal=s.normal*(1.0+s.wear);
 }
 fn cityContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
-  // The far body is shaded flat, each face by its own plane: its corners' normals are the wrap's, rounded over edges.
+  // The far body is shaded flat, each face by its own plane: its faces are the building's own (the bake stood the
+  // wrap on them), its corners' normals rounded over its edges.
   let across=dpdx(v.world);let down=dpdy(v.world);
   let plane=cross(down,across);
   let faceted=select(v.normal,normalize(plane)*select(-1.0,1.0,dot(plane,continuumEye()-v.world)>=0.0),dot(plane,plane)>1e-16);
@@ -74,7 +75,10 @@ fn cityContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
     kind=select(v.splatKinds.xy,v.splatKinds.zw,roof);
     normal=select(v.normal,normalize(vec3f(0.0,1.0,0.0)+v.normal*0.6),roof);
   }
-  return landOpaque(LandVertex(v.position,v.world,normal,kind,v.leafUV));
+  // Far, the sun and sky its optical moments say reach what is seen of the building: the sky shut out beneath its
+  // eaves, in its yards and at the foot of its towers. Near they are (1, 0, 1, 0).
+  let reach=continuumOpticLight(normalize(normal),F.sunDir.xyz,v.optics);
+  return landSurface(LandVertex(v.position,v.world,normal,kind,v.leafUV),LandPit(vec3f(0.0),-1.0,vec3f(0.0),0.0,clamp(reach.x+reach.y,0.0,1.0),reach.z,0.0,1.0,0.0));
 }
 `;
 

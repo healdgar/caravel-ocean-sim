@@ -10,8 +10,10 @@
 //              (each channel's square root, 8 bits) | the light its own canopy lets through << 24 (8 bits); the UV
 //              stream its texture coordinates over its type's range; the wind stream the bones that carry it
 //              (packContinuumWindBones), as does every vertex of its far body.
-//   a far triangle  leaf | material << 1 | exposure << 5 (6 bits) | canopy light << 11 (6 bits) | colour << 17
-//              (5 bits a channel, square roots), of the surface nearest it.
+//   a far triangle  leaf | material << 1, of the surface nearest it. What the far body and the splat look like (the
+//              colour of what is seen, whether it is leaf, the sky, depth and light through) is their optical moments
+//              (js/continuum-bake.js continuumFarOptics), which scripts/prepare-forest-continuum.mjs casts against
+//              the bark and the cards.
 //   a type's material block  its texture coordinates' range, its splat's look (a far word), and its first layer
 //              among the pack's materials.
 //   its manifest's type  its skeleton's rest (wind.bones: CONTINUUM_WIND_BONES of FOREST_CONTINUUM_BONE_FLOATS, as
@@ -65,10 +67,8 @@ export function forestContinuumVertex({ material, leaf, colour, exposure, canopy
     word: (forestUnit(root[0], 8) | (forestUnit(root[1], 8) << 8) | (forestUnit(root[2], 8) << 16) | (forestUnit(canopy, 8) << 24)) >>> 0,
   };
 }
-export function forestContinuumFarWord({ material, leaf, colour, exposure, canopy }) {
-  const root = colour.map((c) => Math.sqrt(Math.max(0, c)));
-  return ((leaf ? 1 : 0) | (forestContinuumLayer(material) << 1) | (forestUnit(exposure, 6) << 5) | (forestUnit(canopy, 6) << 11)
-    | (forestUnit(root[0], 5) << 17) | (forestUnit(root[1], 5) << 22) | (forestUnit(root[2], 5) << 27)) >>> 0;
+export function forestContinuumFarWord({ material, leaf }) {
+  return ((leaf ? 1 : 0) | (forestContinuumLayer(material) << 1)) >>> 0;
 }
 // How a tree is packed (js/continuum-format.js packContinuumBody). `surface(v)` gives a packed vertex's source
 // attributes (forestContinuumVertex's), `uv(v)` its texture coordinates and `wind(v)` its wind word (its bones,

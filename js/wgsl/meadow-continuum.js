@@ -17,7 +17,7 @@
 //             samples (rule 2: a cut by the sample mask alone): clump by clump for the sward, evenly for the rest.
 // Grass is never a target: shot passes through it.
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
-import { SHADOW_FRAME } from './shadows.js';
+import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 import { LAND_CRATER_SAMPLE_WGSL, LAND_CRATER_TEXELS, LAND_CRATER_CELL_M, LAND_CRATER_TILE_M } from './land-craters.js';
@@ -401,6 +401,9 @@ fn meadowGrainFrom(band: u32, s: i32) -> u32 { return select(u32(min((i32(band) 
   for (var b = 0u; b < MEADOW_BANDS; b++) { atomicStore(&meadowBlockWork[MEADOW_GRAIN + b], meadowGrainFrom(b, s)); }
 }
 
+// A point of a patch's square (x, z) turned about the vertical as its record's turn of cosine and sine cs turns it.
+fn meadowTurned(p: vec2f, cs: vec2f) -> vec2f { return vec2f(p.x * cs.x + p.y * cs.y, p.y * cs.x - p.x * cs.y); }
+
 // One patch stood as a record of the one cut, if grass grows on it and it is in view or in the sun's box: a patch of
 // the cover map's own, or at a coarser grain (its band's, meadowStandBudget) as many patches to a side, one record
 // stretched over them.
@@ -422,33 +425,49 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   if (max(cover.r, corners) < 0.02) { return; }
   let ground = meadowGroundY(middle, cfg.domain, elevation);
   if (ground < cfg.domain.w) { return; }
-  // Its variant: the mix (lowland, upland, margin) with the most of its middle, one of four by a hash of where it lies.
+  // Its variant: the mix (lowland, upland, margin) with the most of its middle, one of four, and turned a quarter
+  // turn one way or another about its middle, each by a hash of where it lies, so no variant's grain runs the same
+  // way down a row of patches. Every variant's square is alike at its edge, so turned it still meets its neighbours.
   let seed = meadowHash2(cell);
+  let pick = meadowHash(seed ^ 0x68e31da4u);
   let mixes = meadowMixWeights(cover.g, middle);
-  let model = select(select(0u, 1u, mixes.y > mixes.x), 2u, mixes.z > max(mixes.x, mixes.y)) * 4u + (seed & 3u);
+  let model = select(select(0u, 1u, mixes.y > mixes.x), 2u, mixes.z > max(mixes.x, mixes.y)) * 4u + (pick & 3u);
+  let quarter = (pick >> 2u) & 3u;
+  // The turn's cosine and sine, and the quaternion that turns its type's +x toward -z by as much (continuumQuat).
+  let turnCS = array<vec2f, 4>(vec2f(1.0, 0.0), vec2f(0.0, 1.0), vec2f(-1.0, 0.0), vec2f(0.0, -1.0))[quarter];
+  let turn = array<vec4f, 4>(vec4f(0.0, 0.0, 0.0, 1.0), vec4f(0.0, 0.70710678, 0.0, 0.70710678), vec4f(0.0, 1.0, 0.0, 0.0), vec4f(0.0, 0.70710678, 0.0, -0.70710678))[quarter];
   let shift = meadowShift();
   // It stands on the true ground under its middle, and the one cut raises it at its anchor (GROUNDED) to the ground
-  // the land draws there: the view's cut in the view and its shadow, the captures' under water. It is as tall as the
-  // meadow's lushness and billow grow it (a patch a little taller or shorter than its neighbours), pressed down by shot
-  // and blast and sunk into a crater.
-  let place = vec3f(origin.x, ground, origin.y);
-  let lifted = continuumGroundLift(origin + shift.xz);
+  // the land draws there: the view's cut in the view and its shadow, the captures' under water. Its anchor is where its
+  // type's corner falls, turned about the middle.
+  let anchor = middle - meadowTurned(vec2f(half), turnCS);
+  let place = vec3f(anchor.x, ground, anchor.y);
+  let lifted = continuumGroundLift(anchor + shift.xz);
   let ballistics = meadowEvalBallistics(middle, ground, seed);
-  let vigour = 0.92 + 0.16 * f32((seed >> 16u) & 255u) / 255.0;
-  let tall = clamp((0.82 + 0.44 * cover.b) * meadowWorldBillow(middle).x * vigour * (1.0 - 0.7 * ballistics.pressDown) * (1.0 - ballistics.buryDepth), 0.05, 2.0);
   // Draped over the ground the view draws under the corners of its type's square (the WIND kind's DRAPED form), from
   // where its anchor is raised to, and sunk by as much as that drape would float over the ground drawn at its middle.
   // A capture raises it by its own cut at the anchor, and the drape carries it over the view's ground between. A
-  // coarse patch's square is its type's stretched by its grain.
+  // coarse patch's square is its type's stretched by its grain; its corners, in its type's order, where its turn puts
+  // them.
   let low = vec2f(meadowStandTypeF(model, ${T.low}u), meadowStandTypeF(model, ${T.low + 2}u)) * g;
   let span = meadowStandTypeF(model, ${T.span}u) * g;
-  let c0 = origin + low;
+  let c0 = anchor + meadowTurned(low, turnCS);
+  let c1 = anchor + meadowTurned(low + vec2f(span, 0.0), turnCS);
+  let c2 = anchor + meadowTurned(low + vec2f(0.0, span), turnCS);
+  let c3 = anchor + meadowTurned(low + vec2f(span), turnCS);
   let stood = place.y + lifted;
-  var drape = vec4f(meadowDrawnGround(c0, shift), meadowDrawnGround(c0 + vec2f(span, 0.0), shift), meadowDrawnGround(c0 + vec2f(0.0, span), shift), meadowDrawnGround(c0 + vec2f(span), shift)) - vec4f(stood);
+  var drape = vec4f(meadowDrawnGround(c0, shift), meadowDrawnGround(c1, shift), meadowDrawnGround(c2, shift), meadowDrawnGround(c3, shift)) - vec4f(stood);
   drape -= vec4f(max(dot(drape, vec4f(0.25)) - (meadowDrawnGround(middle, shift) - stood), 0.0));
-  // Where the cover thins toward a path, a beach or a bank, its plants stand lower: the share standing at the corners.
-  let thins = vec4f(meadowCoverAt(c0).r, meadowCoverAt(c0 + vec2f(span, 0.0)).r, meadowCoverAt(c0 + vec2f(0.0, span)).r, meadowCoverAt(c0 + vec2f(span)).r);
-  let standing = smoothstep(vec4f(0.06), vec4f(0.55), thins);
+  // As tall as the meadow's lushness and billow grow it where each corner stands, pressed down by shot and blast and
+  // sunk into a crater: the height is the ground's own field, so neighbours meet at one height and no row of patches
+  // steps up or down from the next. Where the cover thins toward a path, a beach or a bank, its plants stand lower.
+  // Both are the share standing at the corners, of the tallest.
+  let k0 = meadowCoverAt(c0); let k1 = meadowCoverAt(c1); let k2 = meadowCoverAt(c2); let k3 = meadowCoverAt(c3);
+  let pressed = (1.0 - 0.7 * ballistics.pressDown) * (1.0 - ballistics.buryDepth);
+  let grows = clamp((vec4f(0.82) + 0.44 * vec4f(k0.b, k1.b, k2.b, k3.b)) * vec4f(meadowWorldBillow(c0).x, meadowWorldBillow(c1).x, meadowWorldBillow(c2).x, meadowWorldBillow(c3).x) * pressed, vec4f(0.05), vec4f(2.0));
+  let tall = max(max(grows.x, grows.y), max(grows.z, grows.w));
+  let thins = mix(vec4f(0.4), vec4f(1.0), smoothstep(vec4f(0.06), vec4f(0.55), vec4f(k0.r, k1.r, k2.r, k3.r))) * grows / tall;
+  let standing = clamp((thins - vec4f(0.4)) / 0.6, vec4f(0.0), vec4f(1.0));
   // The gust fronts: the wind field's 14 m rollers rolling downwind (meadowWindField), each patch's sward bent as the
   // front crosses it (the kind's phase, less its wave number times how far downwind a point stands), as strongly as
   // the gust packet over it and the wind's speed bend it.
@@ -482,11 +501,12 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   meadowPoses[pose] = vec4f(g, tall, g, 0.0);
   meadowPoses[pose + 1u] = vec4f(phase, strength / g, packet, ${W.DRAPED}.0);
   meadowPoses[pose + 2u] = drape / tall;
-  meadowPoses[pose + 3u] = vec4f(ballistics.pushXZ.x / g, 0.0, ballistics.pushXZ.y / g, wave);
+  let push = meadowTurned(ballistics.pushXZ, vec2f(turnCS.x, -turnCS.y)) / g;
+  meadowPoses[pose + 3u] = vec4f(push.x, 0.0, push.y, wave);
   meadowPoses[pose + 4u] = standing;
   // Its seed is where it lies, so its samples' pattern and its splat's thinning are its own however the patches are
   // listed.
-  meadowRecords[slot] = ContinuumRecord(vec4f(place, 1.0), vec4f(0.0, 0.0, 0.0, 1.0), vec4u(model | ${tag}u, pose, seed, 0u), vec4u(0u));
+  meadowRecords[slot] = ContinuumRecord(vec4f(place, 1.0), turn, vec4u(model | ${tag}u, pose, seed, 0u), vec4u(0u));
 }
 
 // One workgroup a listed block, at its band's grain: four of its patches a lane at the finest, fewer and larger coarser.
@@ -537,19 +557,20 @@ const meadowContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FR
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
 @group(0) @binding(22) var landCraterField: texture_2d_array<f32>;
+` + LAND_CLOTH_SHADOW + /* wgsl */ `
 fn meadowGroundColour(unshiftedXZ: vec2f) -> vec3f {
   return pow(textureSampleLevel(landAlbedo, landSampler, meadowDomainUV(unshiftedXZ), 0.0).rgb, vec3f(2.2));
 }
-fn meadowShadowVis(world: vec3f, normal: vec3f) -> f32 {
-  if (landSH.origin.w < 0.5) { return 1.0; }
+fn meadowShadowVis(world: vec3f, normal: vec3f) -> vec3f {
+  if (landSH.origin.w < 0.5) { return vec3f(1.0); }
   let p = landSH.lightView * vec4f(world - landSH.origin.xyz + normal * 0.05 + landSH.sun.xyz * 0.04, 1.0);
   let uv = p.xy * vec2f(0.5, -0.5) + 0.5;
   let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
   let fade = smoothstep(0.0, 0.06, edge) * step(0.0, p.z) * step(p.z, 1.0);
-  if (fade <= 0.0) { return 1.0; }
+  if (fade <= 0.0) { return vec3f(1.0); }
   let refZ = min(p.z - 0.08 / max(landSH.sun.w, 1.0), 0.99999);
   let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, uv, refZ);
-  return mix(1.0, s, fade);
+  return mix(vec3f(1.0), s * landClothShadow(uv, refZ), fade);
 }
 fn meadowTendrilCloud(bentXZ: vec2f, camDist: f32, windDir: vec2f, gust: f32) -> vec2f {
   let pixel = camDist * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0);
@@ -594,14 +615,14 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   let splat = s.what == CONTINUUM_SPLAT_ENTRY;
   let cluster = s.what == CONTINUUM_CLUSTER_ENTRY;
   // A splat is read at its patch's middle; every other corner where it stands.
-  let at = select(s.world.xz, s.record.place.xz + vec2f(MEADOW_PATCH * 0.5), splat);
+  let at = select(s.world.xz, continuumPlace(s.record, vec3f(MEADOW_PATCH * 0.5, 0.0, MEADOW_PATCH * 0.5)).xz, splat);
   let eye = continuumEye();
   // The ground's slope under the patch, from the heights its drape holds at its square's corners.
   let data = continuumKindData(s.record);
   let tall = continuumStretch(s.record).y;
   let h = continuumPoses[data + 1u] * tall;
   let span = max(continuumTypeF(s.model, ${T.span}u), 1e-3);
-  let slope = normalize(vec3f(-0.5 * (h.y - h.x + h.w - h.z) / span, 1.0, -0.5 * (h.z - h.x + h.w - h.y) / span));
+  let slope = continuumQuat(s.record.turn, normalize(vec3f(-0.5 * (h.y - h.x + h.w - h.z) / span, 1.0, -0.5 * (h.z - h.x + h.w - h.y) / span)));
   let cover = meadowCoverAt(at);
   let groundY = meadowGroundY(at, cfg.domain, elevation);
   let ballistics = meadowEvalBallistics(at, groundY, seed);
@@ -627,17 +648,20 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
     colour = meadowColourOf(s.word);
     rest = s.normal;
   } else if (s.what == CONTINUUM_FAR_ENTRY) {
-    // A far triangle's colour and cover are its metre of sward's. As collapse makes each stand for more, they go to the
-    // mean of the mixes growing where it stands, so the coarse body shows no triangle of its own; at the edge, which
-    // every variant shares, they are that mean at every step, so no line runs between patches, nor where the mix changes.
+    // A far vertex's colour and cover are its optical moments' (its albedo and its share of ground hidden), the mean
+    // of the sward seen about it, morphed down the chain with it. Far off a patch is one with the field it lies in: its
+    // colour and cover are mostly the mean of the mixes growing where it stands (the world's own, which runs on
+    // across patches), its own sward's showing only as a little unevenness, and none of it as collapse makes each
+    // vertex stand for more; at the edge, which every variant shares, they are that mean at every step, so no line runs
+    // between patches, nor where the mix changes, and no patch reads as a tile of its own.
     let state = continuumState(s.instance);
     let farFirst = f32(continuumType(s.model, ${T.farFirst}u));
     let steps = f32(continuumType(s.model, ${T.stepCount}u));
     let coarse = clamp((f32(state.y & 65535u) + bitcast<f32>(state.z) - farFirst) / max(steps - farFirst, 1.0), 0.0, 1.0);
     let inside = max(abs(s.local.x - MEADOW_PATCH * 0.5), abs(s.local.z - MEADOW_PATCH * 0.5));
-    let whole = max(smoothstep(0.0, 0.15, coarse), smoothstep(MEADOW_PATCH * 0.5 - 0.5, MEADOW_PATCH * 0.5, inside));
-    colour = mix(meadowColourOf(s.word), mean.rgb, whole);
-    hides = meadowHides(mix(f32(s.word >> 24u) / 255.0, mean.a, whole), dot(normalize(eye - s.world), slope));
+    let whole = max(max(0.75, smoothstep(0.0, 0.15, coarse)), smoothstep(MEADOW_PATCH * 0.5 - 0.5, MEADOW_PATCH * 0.5, inside));
+    colour = mix(s.albedo.rgb, mean.rgb, whole);
+    hides = meadowHides(mix(s.albedo.a, mean.a, whole), dot(normalize(eye - s.world), slope));
   } else {
     // The splat: seen from above, the mean of the mixes growing here, as the far body's coarse colour is; from the
     // side, the variant's side colour in proportion.
@@ -802,7 +826,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   }
   // The shadow map is drawn in the scene's frame, as the one cut casts into it.
   let shadowVis = meadowShadowVis(v.world, n);
-  let direct = sunIlluminance() * sunlight * solarShadowVisibility(vec3f(shadowVis)).x;
+  let direct = sunIlluminance() * sunlight * solarShadowVisibility(shadowVis);
 
   let nDotL = max(dot(n, F.sunDir.xyz), 0.0);
   let wrap = max(0.0, dot(n, F.sunDir.xyz) * 0.50 + 0.50) * (0.14 + 0.14 * along) * swardWeight;
@@ -844,7 +868,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
           + transAlbedo * (direct * backscatter * 0.52 / PI)
           + (direct / PI) * waveSheen * vec3f(0.94, 0.98, 0.72)
           + skyWaveSheen;
-  col += lunarSurface(n, view, albedo, 0.76, vec3f(0.034), vec3f(mix(1.0, bakedLight.g, inDomain)) * lunarShadowVisibility(vec3f(shadowVis)));
+  col += lunarSurface(n, view, albedo, 0.76, vec3f(0.034), vec3f(mix(1.0, bakedLight.g, inDomain)) * lunarShadowVisibility(shadowVis));
   return vec4f(continuumAir(col, world), 1.0);
 }
 `;

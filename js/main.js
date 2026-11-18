@@ -69,7 +69,7 @@ import { createWorldDebugUI } from './debug-world.js';
 import { deepSeaColour } from './sea-colour.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
 import { createAdaptiveResolution, createAdaptivePolygons, POLYGON_COMFORT } from './resolution.js';
-import { setContinuumPixelError } from './continuum-core.js';
+import { setContinuumPixelError, aimContinuumPixelError, stepContinuumPixelError } from './continuum-core.js';
 import { createContinuumCensus } from './continuum-census.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower, commandFriendlyFleet, stepVesselCombatAI } from './follower.js';
@@ -4117,7 +4117,7 @@ async function main() {
   polygonInput.value=polygons.mode;polygonInput.disabled=fixedPolygons;
   const polygonStatus=document.createElement('p');polygonStatus.id='polygon-status';
   const updatePolygonStatus=()=>{polygonStatus.textContent=`${polygons.mode==='fixed'?'fixed by URL':Math.round(polygons.scale*100)+'% budget'} · ${polygons.pixelError.toFixed(1)} px LOD threshold${polygons.mode==='auto'?' · target '+polygons.targetFPS+' FPS':''}`;};
-  polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);setContinuumPixelError(polygons.pixelError);updatePolygonStatus();});
+  polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);aimContinuumPixelError(polygons.pixelError);updatePolygonStatus();});
   polygonLabel.append(polygonInput);
   seaBody.append(polygonLabel,polygonStatus);
   const neuralModeLabel=document.createElement('label');neuralModeLabel.className='resolution-control';neuralModeLabel.textContent='Neural light mode';
@@ -5230,10 +5230,12 @@ async function main() {
     // wait until the image is at half size, and come back before any sharpness does.
     const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
     if(resChanged)polygons.reset();
-    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))setContinuumPixelError(polygons.pixelError);
-    // Each new count of the scene's submitted triangles holds it to the one budget through the same scalar.
+    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))aimContinuumPixelError(polygons.pixelError);
+    // Each new count of the scene's submitted triangles holds it to the one budget through the same scalar, judged
+    // at the error the count was taken at; the scalar glides to wherever the governors aim it.
     const census=continuumCensus?.latest;
-    if(census&&census!==censusSeen){censusSeen=census;if(polygons.observeTriangles(census.total,census.budget))setContinuumPixelError(polygons.pixelError);}
+    if(census&&census!==censusSeen){censusSeen=census;if(polygons.observeTriangles(census.total,census.budget,census.pixels))aimContinuumPixelError(polygons.pixelError);}
+    stepContinuumPixelError(elapsed);
     resize();
     let camDt = Math.min(0.1, elapsed);
     last = now;
@@ -5602,7 +5604,7 @@ async function main() {
         fortSoldiers?.drawShadow?.(pass);mateSoldiers?.drawShadow?.(pass);
         // A dolphin's leap or a whale's breach shades what it rises beside.
         dolphins.drawShadow(pass);marineLife.drawShadow(pass);
-      });
+      },terrain.clothShadow());
     }
     frameStages.mark('Scenery');
     submergedPass.timestampWrites=profiler.writes('Submerged geometry');

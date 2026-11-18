@@ -29,7 +29,7 @@ import { buildDag } from '../third_party/threejs-nanites/dag/build.ts';
 // The one simplifier every family's bake shares (js/continuum-bake.js): its chain, its voxel pieces and rides, its
 // measures, used here as they are there.
 import {
-  closest, closestOnTriangle, triangleSpheres, triangleGrid, surfaceArea, ancestor, collapseChain, outline, voxelPieces, pointGrid,
+  closest, closestOnTriangle, triangleSpheres, triangleGrid, surfaceArea, ancestor, collapseChain, outline, voxelPieces, pointGrid, continuumFarOptics,
 } from '../js/continuum-bake.js';
 import { getTradeVesselArchetype, poseTradeVesselPoint, tradeMaterialLinearColor } from '../js/trade-vessels.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
@@ -460,8 +460,18 @@ function bakeFar(arch, body, poses, lap) {
     rxSide: +((sideOn.covered * cellArea) / (Math.PI * ry)).toFixed(4), rxEnd: +((endOn.covered * cellArea) / (Math.PI * ry)).toFixed(4),
     colour: mean.map((v) => +v.toFixed(5)),
   };
+  // Its optical moments (js/continuum-bake.js continuumFarOptics), cast against the ship's own surfaces at rest, her
+  // canvas letting a little light through.
+  const sources = [...keep[0], ...keep[1]], corners = new Float32Array(sources.length * 24);
+  sources.forEach((t, i) => {
+    for (let c = 0; c < 3; c++) {
+      const v = arch.indices[t * 3 + c], n = [0, 1, 2].map((k) => arch.vertices[v * 9 + 3 + k] / s[k]), l = Math.hypot(...n) || 1;
+      corners.set([metres[v * 3], metres[v * 3 + 1], metres[v * 3 + 2], n[0] / l, n[1] / l, n[2] / l, i < keep[0].length ? 0 : 1, v], (i * 3 + c) * 8);
+    }
+  });
+  const optics = continuumFarOptics({ position, normal, index, chain }, { vertices: corners, triangles: sources.length }, { cover: (i) => (i < keep[0].length ? 1 : 0.85) });
   return {
-    V, T, S, position, normal, index, order, steps, chain, design, designNormal, colour, region, rides, depth, splat,
+    V, T, S, position, normal, index, order, steps, chain, design, designNormal, colour, region, rides, depth, splat, optics,
     stats: {
       voxel: +h.toFixed(4), pieces: pieces.map((p) => ({ kind: p.piece ? 'canvas' : 'rigid', close: +p.close.toFixed(4), grid: p.voxels.dims, count: p.count, dropped: p.voxels.droppedPieces, genus: p.genus, surfaceTriangles: p.surface })),
       baseTriangles: T, baseVertices: V, baseError: +baseError.toFixed(4), baseGeometric: +geometric.toFixed(4), steps: S, coreTriangles: chain.living, depth,

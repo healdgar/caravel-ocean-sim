@@ -5,8 +5,30 @@ export const SEA_SHADOW_REDUCTION = 4;
 export const SEA_SHADOW_LEVELS = 7;
 const SEA_SHADOW_HEIGHT_RANGE_M = 64;
 export const SHADOW_FRAME = /* wgsl */ `
-// texel.xy is one texel's size in metres. texel.z is 1 for the land's map, which holds no cloth.
+// texel.xy is one texel's size in metres. texel.z is 1 for the land's map, whose texels are too coarse
+// for a penumbra's blocker search.
 struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
+`;
+
+// What the land's canvas map lets through to a receiver of the land's map in its group 0 (js/shadows.js
+// createLandShadows: the canvas map packed, each texel what its canvas lets through and that canvas's depth): white
+// where no canvas stands between the receiver and the light, else what the canvas lets through, as a vessel's own map
+// gives it (vesselShadow), its four texels weighed as a bilinear comparison weighs them. `uv` and `depth` are the
+// receiver's place in the map.
+export const LAND_CLOTH_SHADOW = /* wgsl */ `
+@group(0) @binding(24) var landCanvasShadow:texture_2d<u32>;
+fn landClothShadow(uv:vec2f,depth:f32)->vec3f {
+  let size=vec2i(textureDimensions(landCanvasShadow));
+  let texel=uv*vec2f(size)-0.5;let cell=vec2i(floor(texel));let phase=fract(texel);
+  var light=vec3f(0.0);
+  for(var corner=0;corner<4;corner++){
+    let step=vec2i(corner&1,corner>>1u);
+    let weight=select(1.0-phase.x,phase.x,step.x==1)*select(1.0-phase.y,phase.y,step.y==1);
+    let cloth=textureLoad(landCanvasShadow,clamp(cell+step,vec2i(0),size-1),0);
+    light+=select(vec3f(1.0),unpack4x8unorm(cloth.x).rgb,bitcast<f32>(cloth.y)<depth)*weight;
+  }
+  return light;
+}
 `;
 
 export const SHADOW_CAST = SHADOW_FRAME + VESSEL_RIG + CANVAS_OPTICS + /* wgsl */ `
@@ -75,9 +97,9 @@ fn shadowCanvasTransmission(sample:vec4f)->vec3f {
 }
 fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   if(SH.origin.w<0.5){return vec3f(1);}
-  // People and goods ashore read the land's map with this. It has no cloth, and its texels are too
-  // coarse to resolve a penumbra, so they skip the blocker search and the cloth, and take the four
-  // taps a tent of fixed width needs. A ship's own map keeps the full filter.
+  // People and goods ashore read the land's map with this. Its texels are too coarse to resolve a
+  // penumbra, so they skip the blocker search and take the four taps a tent of fixed width needs, of
+  // the solid map and the canvas's, as a ship's own map does. A ship's own map keeps the full filter.
   let isLand=SH.texel.z>0.5;
   let facing=select(-1.0,1.0,dot(normal,SH.sun.xyz)>=0.0);
   let offset=normal*facing*select(0.008,0.005,isLand)+SH.sun.xyz*select(0.006,0.004,isLand);
@@ -126,7 +148,6 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
       +dot(max(-slope,vec2f(0)),(vec2f(1)-samplePhase)/vec2f(dim));
     let depth=min(reference+dot(slope,delta)-footprintBias,0.99999);
     let solid=textureSampleCompareLevel(solidShadow,shadowCompare,q,depth);
-    if(isLand){result+=vec3f(solid*weight);continue;}
     let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,q,depth);
     let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,q,0.0));
     result+=solid*mix(transmission,vec3f(1),cloth)*weight;

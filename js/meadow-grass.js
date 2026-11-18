@@ -640,7 +640,7 @@ export function requestMeadowStand(device, shader) {
 // What each stand pass binds.
 const MEADOW_STAND_BINDINGS = Object.freeze({ reset: [9, 10], blocks: [0, 1, 2, 6, 10, 12], budget: [1, 10], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17], finish: [1, 7, 9] });
 // What the material's view, and its capture under water, bind in group 0.
-const MEADOW_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+const MEADOW_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24]);
 
 export async function createMeadowGrass({
   device,

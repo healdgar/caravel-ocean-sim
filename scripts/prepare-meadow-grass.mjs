@@ -33,7 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { collapseChain, ancestor, closestOnTriangle, closest, outline, edgeCensus } from '../js/continuum-bake.js';
+import { collapseChain, ancestor, closestOnTriangle, closest, outline, edgeCensus, packFarOptics } from '../js/continuum-bake.js';
 import { CONTINUUM_CLUSTER_TRIANGLES, assembleContinuumAtlas, checkContinuumAtlas, continuumAtlasTypes } from '../js/continuum-format.js';
 import { CONTINUUM_HOPS, CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
 import { packContinuumWind } from '../js/wgsl/continuum-wind.js';
@@ -585,13 +585,8 @@ function bakeBody(sward, rim) {
   for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) canopy += heightAt(i, j) / (side1 * side1);
 
   // The far body as the one format takes it (js/continuum-bake.js bakeFar's), the slab lifted clear of the land it
-  // covers; each triangle carries its corners' mean colour and cover. Its steps are written once every variant's first
-  // error is known (farSteps).
+  // covers. Its steps are written once every variant's first error is known (farSteps).
   const lifted = Float32Array.from(position, (v, i) => (i % 3 === 1 ? v + BODY_FLOOR : v));
-  const triangleLook = (t) => {
-    const corners = [0, 1, 2].map((k) => index[t * 3 + k]);
-    return { colour: [0, 1, 2].map((k) => corners.reduce((s, v) => s + slabColour[v][k], 0) / 3), cover: corners.reduce((s, v) => s + slabCover[v], 0) / 3 };
-  };
   // The splat: the canopy seen from the side, its outline the patch's width by the canopy's height.
   const ry = Math.max(canopy / 2, 0.03), area = P * Math.max(canopy, 0.06);
   const far = {
@@ -599,8 +594,17 @@ function bakeBody(sward, rim) {
     stats: { inflateMax: Math.max(...inflates) },
     splat: { centre: [P / 2, BODY_FLOOR * 2 + canopy / 2, P / 2], ry, rx: area / (Math.PI * ry), area },
   };
+  // Its optical moments (js/continuum-bake.js packFarOptics), known without casting for them: a sward is a thin layer
+  // of blades at every angle over the ground, seen a little way into where it stands thick, the sky shut out of its
+  // depths as much, and nothing let through to the far side. Its albedo is its colour, with its cover beside it.
+  const own = new Float64Array(SV * 12);
+  for (let v = 0; v < SV; v++) {
+    const cover = Math.max(0, Math.min(1, slabCover[v]));
+    own.set([1 - 0.35 * cover, 0.8 * cover, 0, ...slabColour[v], cover, slabN[v * 3], slabN[v * 3 + 1], slabN[v * 3 + 2], 0.35, 0], v * 12);
+  }
+  far.optics = packFarOptics(far, own, new Uint8Array(SV).fill(1));
   return {
-    far, triangleLook, stepErrors, inflates, alive, canopy,
+    far, stepErrors, inflates, alive, canopy,
     chain: { baseTriangles: ST, steps: S, coreTriangles: alive[S], farFirst, baseError, firstError: stepErrors[farFirst], lastError: stepErrors[S], depth, vertices: SV, knots: knots.length },
   };
 }
@@ -681,7 +685,7 @@ async function bakePack(name) {
     b.far.steps = lifted.steps; b.chain.firstError = lifted.firstError; b.chain.lastError = lifted.lastError;
     const clusters = { records: s.clusters, order: Uint32Array.from({ length: s.vertices }, (_, v) => v), indices: s.indices, count: s.clusters.length };
     const body = packMeadowContinuumBody({
-      triangles: s.sourceTriangles, frame, high: s.high, word: s.word, wind: s.wind, farWind: farWindOf(s, b.far), farTriangle: b.triangleLook, sway: s.sway,
+      triangles: s.sourceTriangles, frame, high: s.high, word: s.word, wind: s.wind, farWind: farWindOf(s, b.far), sway: s.sway,
       look: { top: s.topColour, side: s.sideColour, seenAlong: s.seenAlong, coverage: s.coverage, canopy: b.canopy, mix: jobs[id].mixIndex },
     }, { welded: { position: s.position, normal: s.normal }, clusters, far: b.far });
     b.sphere = [...body.centre, body.radius];

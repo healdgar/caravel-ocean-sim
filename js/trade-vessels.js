@@ -4,7 +4,7 @@
 // ship-collider) with real oak/canvas PBR optics and full cannon destructibility.
 import { FRAME_WGSL, ATMO_CORE_WGSL, CASCADES, HULL_HOLE_LIMIT, HULL_CRATER_LIMIT } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
-import { SHADOW_FRAME } from './wgsl/shadows.js';
+import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './wgsl/shadows.js';
 import { VESSEL_LIGHTING, CANVAS_OPTICS } from './wgsl/vessel.js';
 import { SURFACE_WAVE_SAMPLE } from './wgsl/surface-waves.js';
 import { SHIP_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
@@ -4080,7 +4080,7 @@ const tradeVesselContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + SKY_
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
-`;
+` + LAND_CLOTH_SHADOW;
 
 const tradeVesselContinuumRawWGSL = () => /* wgsl */ `
 @group(1) @binding(0) var oakAlbedo: texture_2d<f32>;
@@ -4121,15 +4121,18 @@ fn tradeVesselContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVa
   (*v).colour = colour * colour;
 }
 
-fn tradeShadowVis(world: vec3f, normal: vec3f) -> f32 {
-  if (landSH.origin.w < 0.5) { return 1.0; }
+// The land's map at a point of her: what the solid casters leave of the sun, coloured by any canvas between, hers or
+// another's (LAND_CLOTH_SHADOW).
+fn tradeShadowVis(world: vec3f, normal: vec3f) -> vec3f {
+  if (landSH.origin.w < 0.5) { return vec3f(1.0); }
   let p = landSH.lightView * vec4f(world - landSH.origin.xyz + normal * 0.04 + landSH.sun.xyz * 0.03, 1.0);
-  let uv = p.xy * vec2f(0.5, -0.5) + 0.5;
-  let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+  let at = p.xy * vec2f(0.5, -0.5) + 0.5;
+  let edge = min(min(at.x, 1.0 - at.x), min(at.y, 1.0 - at.y));
   let fade = smoothstep(0.0, 0.06, edge) * step(0.0, p.z) * step(p.z, 1.0);
+  let uv = clamp(at, vec2f(0.001), vec2f(0.999));
   let refZ = min(p.z - 0.08 / max(landSH.sun.w, 1.0), 0.99999);
-  let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, clamp(uv, vec2f(0.001), vec2f(0.999)), refZ);
-  return mix(1.0, s, fade);
+  let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, uv, refZ);
+  return mix(vec3f(1.0), s * landClothShadow(uv, refZ), fade);
 }
 
 fn isWoodMat(m: u32) -> bool {
@@ -4465,7 +4468,7 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
 
   let sunDir = normalize(F.sunDir.xyz);
   let viewDir = normalize(tvEye - in.world);
-  let sunVis = solarShadowVisibility(vec3f(tradeShadowVis(in.world, n)));
+  let sunVis = solarShadowVisibility(tradeShadowVis(in.world, n));
   let sunRad = sunIlluminance() * sunVis;
   let nDotL = max(dot(n, sunDir), 0.0);
   let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35)));
@@ -4494,14 +4497,16 @@ fn tvFarShade(in: ContinuumVarying, front: bool) -> vec4f {
   let n = normalize(in.normal) * select(select(-1.0, 1.0, front), 1.0, in.coverage.x == CONTINUUM_SPLAT_ENTRY);
   let farSun = normalize(F.sunDir.xyz);
   let farView = normalize(continuumEye() - in.world);
-  let sunRad = sunIlluminance() * solarShadowVisibility(vec3f(tradeShadowVis(in.world, n)));
+  let sunRad = sunIlluminance() * solarShadowVisibility(tradeShadowVis(in.world, n));
   let nDotL = max(dot(n, farSun), 0.0);
-  let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35)));
-  let seaCol = skyAtmo(vec3f(0.0, 0.25, 0.0)) * 0.45 + F.waterCol.rgb * 0.65;
+  // The sun and sky her optical moments say reach what is seen of her: her canvas lets some through.
+  let reach = continuumOpticLight(n, farSun, in.optics);
+  let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35))) * reach.z;
+  let seaCol = (skyAtmo(vec3f(0.0, 0.25, 0.0)) * 0.45 + F.waterCol.rgb * 0.65) * reach.z;
   let amb = vesselAmbient(n, skyCol, seaCol);
   let rough = 0.86;
   let f0 = vec3f(0.04);
-  let direct = (in.colour / PI) * sunRad * nDotL;
+  let direct = (in.colour / PI) * sunRad * (nDotL * reach.x + reach.y);
   let spec = select(vec3f(0.0), vesselSpecular(n, farView, farSun, rough, f0) * sunRad * nDotL, nDotL > 0.0);
   let envSpec = textureSampleLevel(envCube, sampC, reflect(-farView, n), rough * 7.0).rgb * vesselEnvironment(n, farView, rough, f0) * 0.28;
   return vec4f(continuumAir(in.colour * amb * 0.82 + direct + spec + envSpec, in.world), 1.0);
@@ -4534,13 +4539,35 @@ fn tradeVesselContinuumMask(in: ContinuumVarying, front: bool) -> u32 {
 // capture by requestContinuumCapture. Its shading is composed once, the neural material bank's evaluation laid into it
 // (js/wgsl/neural-pbr.js withNeuralPbrTradeVessels).
 let tradeVesselContinuumShading = null;
+// Her shadow (js/wgsl/continuum-cut.js, a material's shadow), as the player's ship's (js/vessel-continuum.js): her
+// canvas apart from the rest, its depth into the land's canvas map with what it lets through of the sun by its weave,
+// seams and hems (js/wgsl/vessel.js CANVAS_OPTICS), and all else, her far body and splat too, into the solid map. Her
+// canvas is told by her assembly's material, which the vertex she rides carries (js/wgsl/ship-kinds.js).
+const TRADE_VESSEL_CONTINUUM_SHADOW = Object.freeze({
+  prelude: () => CANVAS_OPTICS,
+  own: false, canvas: true,
+  varyings: [['uv', 'vec2f'], ['material', 'u32', true]],
+  wgsl: () => /* wgsl */`
+fn tradeVesselContinuumShadowVarying(s:ContinuumSurface,v:ptr<function,ContinuumShadowVarying>) {
+  (*v).uv=vec2f(0.5);(*v).material=0u;
+  if(s.what!=CONTINUUM_CLUSTER_ENTRY||s.vertex==CONTINUUM_NO_VERTEX){return;}
+  let rides=shipRiderVertex(s.vertex);
+  (*v).material=u32(max(bitcast<f32>(continuumPointAt(s.model,rides).word),0.0));
+  (*v).uv=continuumUV(rides);
+}
+fn tradeVesselContinuumShadowCanvas(v:ContinuumShadowVarying)->bool { return v.material==9u||v.material==13u; }
+fn tradeVesselContinuumShadowTransmit(v:ContinuumShadowVarying)->vec3f {
+  return canvasTransmission(canvasThickness(v.uv,v.material),abs(dot(normalize(v.normal),SH.sun.xyz)));
+}
+`,
+});
 export const TRADE_VESSEL_CONTINUUM_MATERIAL = Object.freeze({
   name: 'tradeVesselContinuum', prelude: tradeVesselContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['state', 'vec2f'], ['colour', 'vec3f'], ['ids', 'vec4u', true], ['turn', 'vec4f', true]],
   wgsl: () => (tradeVesselContinuumShading ??= withNeuralPbrTradeVessels(tradeVesselContinuumRawWGSL())),
   salt: 5,
   // Sails, awnings and planking are open shells, lit from whichever side is seen.
-  cullMode: 'none', air: true, capture: true, mask: true,
+  cullMode: 'none', air: true, capture: true, mask: true, shadow: TRADE_VESSEL_CONTINUUM_SHADOW,
 });
 
 // Each archetype's DRAPED block (js/wgsl/ship-kinds.js), SHIP_DRAPED_BLOCK + 1 vec4f an archetype in archetype order:
@@ -5400,9 +5427,9 @@ export async function createTradeVessels({
   // The records the scene last sent, which its cut reads.
   let sentIntact = 0;
 
-  // The material's groups: the frame, the sky's light and the land's shadow set (0); the oak, the damaged slots' hull
-  // damage and the neural material bank (1). The scene binds its own (2).
-  const SEEN_BINDINGS = [0, 1, 2, 3, 4, 19, 20, 21];
+  // The material's groups: the frame, the sky's light and the land's shadow set, its canvas map too (0); the oak, the
+  // damaged slots' hull damage and the neural material bank (1). The scene binds its own (2).
+  const SEEN_BINDINGS = [0, 1, 2, 3, 4, 19, 20, 21, 24];
   const neuralPbr = sharedNeuralPbrBank(device, { autoLoad: typeof location !== 'undefined' });
   const seenEntries = (curResources) => {
     const byBinding = new Map(curResources);
@@ -7492,13 +7519,16 @@ export async function createTradeVessels({
         ? { bodies: deckCompany.runs.map((run) => ({ id: run.id, continuum: true, first: run.first, capacity: run.capacity })), counts: crewCountsBuffer }
         : null;
     },
-    // Every vessel's coarse cut casts her shadow, a damaged one's clusters on her posed run; then the deck hands'.
-    drawShadow(pass) {
-      scene.drawShadow(pass);
-      if (crewEncoded && deckCompany) {
+    // Every vessel's coarse cut casts her shadow, a damaged one's clusters on her posed run: with `cloth` her canvas into
+    // the land's canvas map, else all the rest of her, then the deck hands', into its solid map (js/shadows.js).
+    drawShadow(pass, cloth = false) {
+      scene.drawShadow(pass, { part: cloth ? 'canvas' : 'solid' });
+      if (!cloth && crewEncoded && deckCompany) {
         for (const batch of deckCompany.batches) batch.drawShadow(pass);
       }
     },
+    // Whether any vessel is out to cast canvas.
+    get casting() { return Boolean(scene.count); },
     destroy() {
       if (destroyed) return;
       destroyed = true;

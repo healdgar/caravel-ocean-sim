@@ -55,6 +55,13 @@ function leafMask(file) {
   return { size: MASK_SIZE, bits };
 }
 
+// The share of a leaf card its leaves cover (its mask's mean), once a texture.
+const leafCovers = new Map();
+function leafMaskCover(file) {
+  if (!leafCovers.has(file)) { const { bits } = leafMask(file); leafCovers.set(file, bits.reduce((n, b) => n + b, 0) / Math.max(1, bits.length)); }
+  return leafCovers.get(file);
+}
+
 // A tree's foot flares into the ground it stands on, as the land's own roots do: the wood near the ground is drawn
 // outward and down (what the forest's vertex stage did for every frame, here once).
 function flareRoot([x, y, z]) {
@@ -526,7 +533,17 @@ function main(source, indices, canopy) {
     }
     const name = `${p.species}${p.cohort ? `-${p.cohort}` : ''}`;
     const wood = { name, vertices: corners.subarray(0, woodTriangles * 24), triangles: woodTriangles, parts: new Uint32Array(woodTriangles) };
-    const whole = { name, vertices: corners, triangles: woodTriangles + leafTriangles, parts: new Uint32Array(woodTriangles + leafTriangles) };
+    // The far body is wrapped round the whole tree. A crown has no plain face to stand its wrap on; its optical
+    // moments (js/continuum-bake.js continuumFarOptics) are cast against the bark and the cards, each card stopping
+    // the share of light its leaves cover, and wear each source vertex's colour and whether it is a leaf.
+    const cardCover = foliage ? Math.max(0.05, leafMaskCover(foliage.albedo.file)) : 1;
+    const whole = {
+      name, vertices: corners, triangles: woodTriangles + leafTriangles, parts: new Uint32Array(woodTriangles + leafTriangles), snap: false,
+      optics: {
+        cover: (t) => (t < woodTriangles ? 1 : cardCover),
+        albedo: (t) => { const leafy = t >= woodTriangles, s = surfaceOf(corners[t * 24 + 7], leafy); return [...s.colour, leafy ? 1 : 0]; },
+      },
+    };
     const welded = weldDrawn(wood), woodUV = new Float32Array(welded.count * 2);
     for (let v = 0; v < welded.count; v++) woodUV.set(read(welded.kind[v * 2 + 1], 8, 2), v * 2);
     const clusters = await bakeClusters(welded, {
