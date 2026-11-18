@@ -32,16 +32,18 @@ const year = Number(option('year', 1550));
 const say = (text) => process.stderr.write(text + '\n');
 
 // The land as the game makes it for a player arriving at this port in this year: the page's own pipeline, read the
-// moment the land is made (window.oceanLand), before anything is drawn. With a board already baked for the port the
-// page stands it, and the ground read is the one it was laid on (surveyHeights, before its rivers are cut).
-async function groundOf(portId) {
+// moment the land is made (window.oceanLand), before anything is drawn. A board is founded on the land as it is with
+// no board standing (board=off): a board already baked for the port would otherwise lay the ground, and the port's
+// centre, that the next is founded on, and each bake would drift from the last. `standing` reads it with the baked
+// board stood, as the game shows it (surveyHeights: the ground it was laid on, before its rivers are cut).
+async function groundOf(portId, standing = false) {
   const server = createDevServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: process.env.WEBGPU_BACKEND === 'metal'
     ? ['--enable-unsafe-webgpu', '--use-angle=metal', '--disable-gpu-watchdog'] : ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog'] });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
     const url = coastalRegionStageURL('http://127.0.0.1:' + server.address().port + '/', portId, 'dock', 'clear', year);
-    for (const [key, value] of Object.entries({ w: 640, h: 360, clouds: '0', follower: '0', hud: '0', ui: '0' })) url.searchParams.set(key, value);
+    for (const [key, value] of Object.entries({ w: 640, h: 360, clouds: '0', follower: '0', hud: '0', ui: '0', ...(standing ? {} : { board: 'off' }) })) url.searchParams.set(key, value);
     await page.goto(url.toString());
     await page.waitForFunction(() => window.oceanLand?.pack?.heights || window.oceanStartup?.state === 'failed', undefined, { timeout: 300000, polling: 250 });
     const land = await page.evaluate(() => {
@@ -116,7 +118,7 @@ writeFileSync(out, JSON.stringify({
 say(`wrote ${out}`);
 // The land made again, now with this board standing: it must be the ground the board was founded on.
 if (!args.includes('--no-check') && !option('out', null)) {
-  const again = await groundOf(port), off = boardGroundOff(boardGroundSurvey(land.heights), again.heights);
+  const again = await groundOf(port, true), off = boardGroundOff(boardGroundSurvey(land.heights), again.heights);
   say(`made again with the board standing (${again.stood ? 'stood' : 'NOT STOOD'}): ${off.toFixed(2)} m from the ground it was founded on`);
   if (!again.stood || !(off < 1.5)) process.exitCode = 1;
 }
