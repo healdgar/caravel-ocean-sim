@@ -1,0 +1,1078 @@
+{
+ "format": "waterworld.prop-continuum",
+ "version": 1,
+ "generator": "scripts/prepare-prop-continuum.mjs",
+ "layout": {
+  "headerWords": 16,
+  "typeWords": 32,
+  "clusterWords": 16,
+  "vertexWords": 4,
+  "triangleWords": 4,
+  "stepWords": 4,
+  "header": {
+   "magic": 0,
+   "version": 1,
+   "typeCount": 2,
+   "typesAt": 3,
+   "clustersAt": 4,
+   "clusterCount": 5,
+   "verticesAt": 6,
+   "vertexCount": 7,
+   "indicesAt": 8,
+   "indexCount": 9,
+   "chainsAt": 10,
+   "words": 11
+  },
+  "type": {
+   "low": 0,
+   "span": 3,
+   "sphere": 4,
+   "clusterFirst": 8,
+   "clusterCount": 9,
+   "chainVertices": 10,
+   "stepCount": 11,
+   "chainVertexCount": 12,
+   "records": 13,
+   "triangles": 14,
+   "steps": 15,
+   "baseError": 16,
+   "rootError": 17,
+   "splatRx": 18,
+   "splatRy": 19,
+   "splatCentre": 20,
+   "layer": 23,
+   "albedo": 24,
+   "roughness": 27,
+   "chainTriangleCount": 28,
+   "flags": 29,
+   "sourceTriangles": 30,
+   "farFirst": 31
+  }
+ },
+ "totals": {
+  "types": 15,
+  "clusters": 233,
+  "vertices": 10753,
+  "indices": 45324,
+  "sourceTriangles": 9310,
+  "farTriangles": 12522
+ },
+ "types": [
+  {
+   "id": 0,
+   "name": "cleat",
+   "fingerprint": "568b44a7be79ccf39a2119df2679b53989867f05b67220a780f62018ce0539b7",
+   "sourceTriangles": 370,
+   "parts": 8,
+   "layer": 0,
+   "quantization": {
+    "low": [
+     -0.1612,
+     0,
+     -0.44838
+    ],
+    "span": 0.88
+   },
+   "sphere": [
+    0.0188,
+    0.42,
+    -0.0084,
+    0.6735
+   ],
+   "clusters": {
+    "count": 11,
+    "levels": 1,
+    "roots": 11,
+    "finestTriangles": 370,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0.04,
+    "cells": [
+     20,
+     32,
+     32
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 2388,
+    "baseTriangles": 946,
+    "baseVertices": 475,
+    "baseError": 0.0983,
+    "outward": 0.0983,
+    "inward": 0.0557,
+    "simplifyError": 0.0084,
+    "steps": 470,
+    "coreTriangles": 6,
+    "depth": 6,
+    "errorRange": [
+     0.0983,
+     0.4057
+    ],
+    "inflateMax": 0.088,
+    "rootTriangles": 370,
+    "farFirst": 288,
+    "farFirstTriangles": 370,
+    "handoffError": 0.1473
+   },
+   "splat": {
+    "centre": [
+     0.0188,
+     0.42,
+     -0.0084
+    ],
+    "rx": 0.2013,
+    "ry": 0.42
+   },
+   "bakeMs": 906
+  },
+  {
+   "id": 1,
+   "name": "jetty-weathered",
+   "fingerprint": "c1a12f40bb4393beb6b72022f43e12399ae3babf9ad8001d73ae8ed59e3202b5",
+   "sourceTriangles": 1177,
+   "parts": 40,
+   "layer": 1,
+   "quantization": {
+    "low": [
+     -3.19628,
+     -0.3,
+     -8.3
+    ],
+    "span": 16.5
+   },
+   "sphere": [
+    -0.0463,
+    3,
+    -0.05,
+    10.7025
+   ],
+   "clusters": {
+    "count": 64,
+    "levels": 3,
+    "roots": 40,
+    "finestTriangles": 1177,
+    "rootError": 0.94169
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     31,
+     32,
+     65
+    ],
+    "wellComposedCells": 11,
+    "wrapTriangles": 12308,
+    "baseTriangles": 3708,
+    "baseVertices": 1832,
+    "baseError": 0.7427,
+    "outward": 0.7427,
+    "inward": 0.6732,
+    "simplifyError": 0.0786,
+    "steps": 1826,
+    "coreTriangles": 4,
+    "depth": 8,
+    "errorRange": [
+     0.7427,
+     9.8868
+    ],
+    "inflateMax": 1.6492,
+    "rootTriangles": 1065,
+    "farFirst": 1322,
+    "farFirstTriangles": 1064,
+    "handoffError": 1.2809
+   },
+   "splat": {
+    "centre": [
+     -0.0463,
+     3.15,
+     -0.05
+    ],
+    "rx": 4.0112,
+    "ry": 3.15
+   },
+   "bakeMs": 4962
+  },
+  {
+   "id": 2,
+   "name": "jetty-planked",
+   "fingerprint": "838147c491d98ac5cbba69cdc67585f933ebc1137a1127c9f311e34bbe540a35",
+   "sourceTriangles": 1939,
+   "parts": 45,
+   "layer": 2,
+   "quantization": {
+    "low": [
+     -4.4978,
+     0,
+     -9
+    ],
+    "span": 18.225
+   },
+   "sphere": [
+    0.0584,
+    2.1937,
+    0.1125,
+    11.9335
+   ],
+   "clusters": {
+    "count": 66,
+    "levels": 2,
+    "roots": 58,
+    "finestTriangles": 1939,
+    "rootError": 0.37182
+   },
+   "chain": {
+    "cell": 0.3375,
+    "cells": [
+     38,
+     24,
+     65
+    ],
+    "wellComposedCells": 17,
+    "wrapTriangles": 12628,
+    "baseTriangles": 3864,
+    "baseVertices": 1919,
+    "baseError": 0.8654,
+    "outward": 0.8654,
+    "inward": 0.7414,
+    "simplifyError": 0.1106,
+    "steps": 1910,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.8654,
+     5.7867
+    ],
+    "inflateMax": 1.8216,
+    "rootTriangles": 1901,
+    "farFirst": 982,
+    "farFirstTriangles": 1900,
+    "handoffError": 1.2797
+   },
+   "splat": {
+    "centre": [
+     0.0584,
+     2.1937,
+     0.1125
+    ],
+    "rx": 5.6672,
+    "ry": 2.1937
+   },
+   "bakeMs": 5590
+  },
+  {
+   "id": 3,
+   "name": "round-shot",
+   "fingerprint": "472dc329046ad553b4c463fd40166a19dc538d75c3cabd46015d01c30cf99655",
+   "sourceTriangles": 5120,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -1,
+     -1,
+     -1
+    ],
+    "span": 2.04
+   },
+   "sphere": [
+    0.02,
+    0.02,
+    0.02,
+    1.3338
+   ],
+   "clusters": {
+    "count": 81,
+    "levels": 6,
+    "roots": 1,
+    "finestTriangles": 5120,
+    "rootError": 0.10232
+   },
+   "chain": {
+    "cell": 0.06,
+    "cells": [
+     45,
+     45,
+     45
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 11196,
+    "baseTriangles": 3300,
+    "baseVertices": 1652,
+    "baseError": 0.0978,
+    "outward": 0.0978,
+    "inward": 0.064,
+    "simplifyError": 0.0307,
+    "steps": 1647,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.0978,
+     1.1258
+    ],
+    "inflateMax": 0.2039,
+    "rootTriangles": 80,
+    "farFirst": 1610,
+    "farFirstTriangles": 80,
+    "handoffError": 0.3268
+   },
+   "splat": {
+    "centre": [
+     0,
+     0,
+     0
+    ],
+    "rx": 1,
+    "ry": 1
+   },
+   "bakeMs": 6662
+  },
+  {
+   "id": 4,
+   "name": "rammer-staff",
+   "fingerprint": "056a17ba6e6fe232f5550f3b19c571f654cd1640d9ce731ceb39e35d6f129932",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.021,
+     0,
+     -0.021
+    ],
+    "span": 1.32
+   },
+   "sphere": [
+    0,
+    0.66,
+    0,
+    0.6668
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 4,
+    "errorRange": [
+     0,
+     0.021
+    ],
+    "inflateMax": 0.0055,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.66,
+     0
+    ],
+    "rx": 0.021,
+    "ry": 0.8403
+   },
+   "bakeMs": 22
+  },
+  {
+   "id": 5,
+   "name": "rammer-head",
+   "fingerprint": "6db3c2765cd6a1f1ecc4d7fd0ee13e14e382930a537ce971e66f3c52e83c2dbb",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.044,
+     0,
+     -0.044
+    ],
+    "span": 0.12
+   },
+   "sphere": [
+    0,
+    0.06,
+    0,
+    0.0874
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.0413
+    ],
+    "inflateMax": 0.012,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.06,
+     0
+    ],
+    "rx": 0.044,
+    "ry": 0.0764
+   },
+   "bakeMs": 155
+  },
+  {
+   "id": 6,
+   "name": "sponge-head",
+   "fingerprint": "f154edad847a798a7b26dfd80000bd92e0cc3eeb7c309f1b21b52ae88b1e9b0b",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.065,
+     0,
+     -0.065
+    ],
+    "span": 0.13
+   },
+   "sphere": [
+    0,
+    0.06,
+    0,
+    0.1025
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 4,
+    "errorRange": [
+     0,
+     0.0607
+    ],
+    "inflateMax": 0.013,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.06,
+     0
+    ],
+    "rx": 0.065,
+    "ry": 0.0764
+   },
+   "bakeMs": 274
+  },
+  {
+   "id": 7,
+   "name": "spyglass-tube",
+   "fingerprint": "bad2bce782bf685de8c91806bc2be067dc24dd53050a3d226c753a4b71db1dde",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.014,
+     0,
+     -0.014
+    ],
+    "span": 0.38
+   },
+   "sphere": [
+    0,
+    0.19,
+    0,
+    0.198
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 4,
+    "errorRange": [
+     0,
+     0.014
+    ],
+    "inflateMax": 0.0065,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.19,
+     0
+    ],
+    "rx": 0.014,
+    "ry": 0.2419
+   },
+   "bakeMs": 65
+  },
+  {
+   "id": 8,
+   "name": "spyglass-cell",
+   "fingerprint": "40fc7b3d9bb658446473ec27eaeb66de284a2057ea2647010cf3409523a2ee68",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.022,
+     0,
+     -0.022
+    ],
+    "span": 0.14
+   },
+   "sphere": [
+    0,
+    0.07,
+    0,
+    0.0842
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.022
+    ],
+    "inflateMax": 0.0098,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.07,
+     0
+    ],
+    "rx": 0.022,
+    "ry": 0.0891
+   },
+   "bakeMs": 96
+  },
+  {
+   "id": 9,
+   "name": "swivel-chamber",
+   "fingerprint": "b3b8694099458703c5809419c66e11c8064214771bfe58dda7df42dd870fdfb7",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.055,
+     0,
+     -0.055
+    ],
+    "span": 0.24
+   },
+   "sphere": [
+    0,
+    0.12,
+    0,
+    0.157
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.055
+    ],
+    "inflateMax": 0.024,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.12,
+     0
+    ],
+    "rx": 0.055,
+    "ry": 0.1528
+   },
+   "bakeMs": 114
+  },
+  {
+   "id": 10,
+   "name": "cutlass",
+   "fingerprint": "d9e6877f85c180403ce7817047b2c7d156438ae12a9b737eaeea7c53b4b8b83c",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.012,
+     0,
+     -0.012
+    ],
+    "span": 0.72
+   },
+   "sphere": [
+    0,
+    0.36,
+    0,
+    0.3659
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 4,
+    "errorRange": [
+     0,
+     0.012
+    ],
+    "inflateMax": 0.0047,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.36,
+     0
+    ],
+    "rx": 0.012,
+    "ry": 0.4584
+   },
+   "bakeMs": 80
+  },
+  {
+   "id": 11,
+   "name": "macana",
+   "fingerprint": "e631bb4f37bf100d7bbcf53c1c8e57cbe2f4241c3a0239f13da830cef3b66962",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.03,
+     0,
+     -0.03
+    ],
+    "span": 0.66
+   },
+   "sphere": [
+    0,
+    0.33,
+    0,
+    0.3432
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.03
+    ],
+    "inflateMax": 0.0108,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.33,
+     0
+    ],
+    "rx": 0.03,
+    "ry": 0.4202
+   },
+   "bakeMs": 71
+  },
+  {
+   "id": 12,
+   "name": "tackle-fall",
+   "fingerprint": "90c83eb8c4339428bcd1e48a0cc12c3fb727e563950345df513d542c2900acb8",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.019,
+     0,
+     -0.019
+    ],
+    "span": 1
+   },
+   "sphere": [
+    0,
+    0.5,
+    0,
+    0.5076
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.019
+    ],
+    "inflateMax": 0.0062,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.5,
+     0
+    ],
+    "rx": 0.019,
+    "ry": 0.6366
+   },
+   "bakeMs": 116
+  },
+  {
+   "id": 13,
+   "name": "arrow-shaft",
+   "fingerprint": "58e58dd00685b5a9827e2dc5f882297f50c0f3a150f124f4e43629a6b400d785",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.011,
+     0,
+     -0.011
+    ],
+    "span": 0.66
+   },
+   "sphere": [
+    0,
+    0.33,
+    0,
+    0.3379
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 3,
+    "errorRange": [
+     0,
+     0.011
+    ],
+    "inflateMax": 0.0067,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.33,
+     0
+    ],
+    "rx": 0.011,
+    "ry": 0.4202
+   },
+   "bakeMs": 21
+  },
+  {
+   "id": 14,
+   "name": "arrow-fletching",
+   "fingerprint": "84218398842afeaffa779eb715c37b567e152846d8a77233282f33e6c2755fa9",
+   "sourceTriangles": 64,
+   "parts": 1,
+   "layer": null,
+   "quantization": {
+    "low": [
+     -0.02,
+     0,
+     -0.02
+    ],
+    "span": 0.1
+   },
+   "sphere": [
+    0,
+    0.05,
+    0,
+    0.0616
+   ],
+   "clusters": {
+    "count": 1,
+    "levels": 0,
+    "roots": 1,
+    "finestTriangles": 64,
+    "rootError": 0
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 64,
+    "baseTriangles": 64,
+    "baseVertices": 34,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 29,
+    "coreTriangles": 6,
+    "depth": 4,
+    "errorRange": [
+     0,
+     0.0198
+    ],
+    "inflateMax": 0.0067,
+    "rootTriangles": 64,
+    "farFirst": 0,
+    "farFirstTriangles": 64,
+    "handoffError": 0
+   },
+   "splat": {
+    "centre": [
+     0,
+     0.05,
+     0
+    ],
+    "rx": 0.02,
+    "ry": 0.0637
+   },
+   "bakeMs": 138
+  }
+ ],
+ "atlas": {
+  "words": 198656,
+  "bytes": 794624,
+  "sha256": "22574d609bca1120101dc216312cb858dde29a3cd7f368ccfea6e8ee72cc8b88",
+  "gzip": {
+   "file": "atlas.bin.gz",
+   "bytes": 336966,
+   "sha256": "bc7563449af351edfdbcefbbdcebd3e7f18cd75c2772389ffccb4323e8af13dd"
+  }
+ },
+ "bakeSeconds": 19.5
+}
