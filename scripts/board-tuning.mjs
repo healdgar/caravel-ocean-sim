@@ -10,7 +10,9 @@
 //   scripts/board-native.mjs, the peoples of the Americas: extensions of the same kind, with ways of their own (how
 //     they lay out, house, farm and rule a place). Applied after the extensions.
 //   scripts/board-colonial.mjs, the towns the crowns planted overseas: the manners they were laid out by, read from a
-//     real map. Applied last.
+//     real map. Applied after the peoples of the Americas.
+//   scripts/board-forts.mjs, the works a real map records: its forts, batteries and watchtowers, set on their ground
+//     before the towns are laid and stood as buildings of the nearest place. Applied last.
 //
 // What the host sets, read from FURLONG_OPTIONS.board before the program runs:
 //   spanMetres  the side of the ground, in metres (the source offers whole kilometres from 4 to 15)
@@ -27,6 +29,7 @@
 import { BOARD_UPSTREAM } from './board-upstream.mjs';
 import { BOARD_NATIVE } from './board-native.mjs';
 import { BOARD_COLONIAL } from './board-colonial.mjs';
+import { BOARD_FORTS } from './board-forts.mjs';
 
 const BOARD = 'globalThis.FURLONG_OPTIONS?.board';
 
@@ -104,6 +107,7 @@ export const BOARD_TABLES = Object.freeze([
   { name: 'upstream', table: BOARD_UPSTREAM },
   { name: 'native', table: BOARD_NATIVE },
   { name: 'colonial', table: BOARD_COLONIAL },
+  { name: 'forts', table: BOARD_FORTS },
 ]);
 
 // The source's program with the tables applied.

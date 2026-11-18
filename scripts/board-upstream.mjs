@@ -27,6 +27,18 @@
 //              has no castle on the hill, no burgage rows where its manner has none, no new town planted beside it,
 //              no market charter's history, and its quay does not tell its founding; its lots are
 //              taken nearest its plaza or largo first
+//   forts    the works a real map records (scripts/board-forts.mjs), changing the simulation so:
+//            - ARCH has two kinds more, fort and battery (a watchtower is its own tower), never pulled down for a
+//              street, a wall or a plan
+//            - a real map may list its coast's works (REALMAP.works: kind, name, u, v, w, d, from, until, role, side);
+//              none listed, nothing changes
+//            - generateWorld: before the towns are laid, each work standing in the realm's year is set on the nearest
+//              dry ground to its record, turned to the nearest water (open water before a creek no farther off; a
+//              battery, and a work the record set back, brought down to the water's edge) and given to the nearest
+//              place (worksSite)
+//            - layoutSettlement: no street or house on a work's ground (buildable); a citadel is where the place's
+//              castle on the hill stands; a place's works are stood as its buildings once its streets are laid
+//              (worksStand); its wall goes round them
 export const BOARD_UPSTREAM = Object.freeze([
   // Fixes.
   {

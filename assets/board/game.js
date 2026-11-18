@@ -313,7 +313,8 @@ const ARCH={
   tower:[7,7,14,1,'watchtower'], wall:[12,3,7,1,'wall'], keep:[20,24,18,1,'keep'],
   burgher:[13,6.5,6.8,0,'burgher house'], shed:[5,4.5,3,0,'outbuilding'], hall:[18,11,8,0,'town hall'],
   bakery:[8,9,5,0,'bakehouse'], inn:[15,11,7,0,'inn'], tannery:[15,8,4,0,'tannery'],
-  windmill:[6,6,8,1,'windmill'], bath:[12,10,5,0,'bathhouse'], hospital:[20,10,6,0,'hospital'], dyer:[13,8,5,0,'dyeworks'], toll:[6,6,5,0,'toll house'], guildhall:[16,11,8,0,'guildhall'],court:[16,16,7.5,0,'courtyard house'], wharf:[7,30,0.5,1,'wharf'], quarry:[20,14,1.2,1,'quarry'], cot:[5,4.5,2.6,0,'cottar\'s hovel'],winepress:[9,8,4,0,'winepress'],dovecote:[6,6,7,0,'dovecote']
+  windmill:[6,6,8,1,'windmill'], bath:[12,10,5,0,'bathhouse'], hospital:[20,10,6,0,'hospital'], dyer:[13,8,5,0,'dyeworks'], toll:[6,6,5,0,'toll house'], guildhall:[16,11,8,0,'guildhall'],court:[16,16,7.5,0,'courtyard house'], wharf:[7,30,0.5,1,'wharf'], quarry:[20,14,1.2,1,'quarry'], cot:[5,4.5,2.6,0,'cottar\'s hovel'],winepress:[9,8,4,0,'winepress'],dovecote:[6,6,7,0,'dovecote'],
+  fort:[60,60,8.5,1,'fort'],battery:[40,14,5.5,1,'battery']
 };
 const TIERNAME=['hovel-built','timber-framed','stone-built','four storeys, jettied over the street'];
 
@@ -1366,6 +1367,7 @@ async function generateWorld(seed,progress){
   await progress('Laying the king’s roads…',0.62);
   buildRoads();
 
+  worksSite(); // the works a real map records, before the towns that build round them
   await progress('Raising timber and stone…',0.75);
   { // one place at a time, so the bar moves: each post is a plain message the page receives while the next layout runs (not awaited, so no event-loop turn is taken in the worker)
     const n=W.settlements.length;let total=0;for(const s of W.settlements)total+=Math.max(1,s.pop||0);let done=0;
@@ -1937,7 +1939,7 @@ function traceWall(s,margin,old){ // old: the standing circuit, if any — reusi
   const solid=[]; // what the wall must go round (in or out), never through
   for(const b of s.buildings)if(b.inst&&!b.removed&&!b.hill&&['keep','hall','temple'].includes(b.arch))solid.push({x:b.x,z:b.z,r:Math.hypot(b.w,b.d)/2+5});
   if(s.bailey)solid.push({x:s.bailey.x,z:s.bailey.z,r:casR(s,s.bailey)+4,wallRad:s.bailey.wallRad,outer:casR(s,s.bailey)-s.bailey.r+4});if(s.ward)solid.push({x:s.ward.x,z:s.ward.z,r:casR(s,s.ward)+4});if(s.motte)solid.push({x:s.motte.x,z:s.motte.z,r:s.motte.r+7});
-  if(s.burgRing)solid.push({x:s.burgRing.x,z:s.burgRing.z,r:s.burgRing.r+3});
+  if(s.burgRing)solid.push({x:s.burgRing.x,z:s.burgRing.z,r:s.burgRing.r+3});for(const k of s.works||[])if(!k.castle)solid.push({x:k.x,z:k.z,r:Math.hypot(k.w,k.d)/2+4});
   const worth=b=>(['temple','keep','hall','castle','granary','warehouse'].includes(b.arch)?10:1)*(1+0.3*(b.tier||0));
   for(const b of s.buildings){
     if(b.removed||b.inst&&!['keep','hall','temple'].includes(b.arch))continue;
@@ -2252,6 +2254,74 @@ const ROLE_NAME={seat:'seat of the crown',fort:'fortress town',border:'border fo
    Institutions stay where they were founded and are rebuilt larger on the
    same ground; fires clear districts that are rebuilt in stone on straighter
    streets; sieges raze suburbs that grow back. Every town keeps its story. */
+/* ---- WORKS: the forts, batteries and watchtowers a real map records (c. 1450-1750) ----
+   A real map may list the works that stood on its coast (REALMAP.works), each
+     {kind:'fort'|'battery'|'tower', name, u, v (where the record puts it, as a site is put), w, d (metres across its
+      front and back from it), from, until (the years it stood), role, side (the water it held and the side of it)}.
+   A work standing in the realm's year is set before the towns are laid (worksSite): on the nearest dry ground to where
+   the record puts it, clear of the works set before it; turned to the nearest water (open water before a creek no
+   farther off), its front square to it; a
+   battery or a work standing back from the shore brought down to the water's edge. It is a building of the nearest
+   place, of that place's institutions: never pulled down for a street, never a home, kept with the place. A work
+   whose role is citadel holds its place from the height above it: where the place raises a castle on its hill, the
+   castle stands there and is the work. No street is laid and no house built on a work's ground. */
+const WORKS_REACH=800,WORKS_SHORE=1200,WORKS_OPEN=160;
+function worksStanding(){const L=REALMAP?.works,ad=AD();if(!Array.isArray(L)||!L.length)return [];return L.filter(k=>ARCH[k.kind]&&!(k.from>ad)&&!(k.until&&k.until<=ad));}
+function worksWet(x,z){if(Math.abs(x)>SIZE/2-CELL||Math.abs(z)>SIZE/2-CELL)return false;return W.water[cIdx(toCell(x),toCell(z))]===1||hAt(x,z)<SEA||!!riverAt(x,z,0);}
+function worksDryAt(x,z){return Math.abs(x)<SIZE/2-2*CELL&&Math.abs(z)<SIZE/2-2*CELL&&!worksWet(x,z)&&hAt(x,z)>SEA_SURFACE+0.5;}
+function worksFootprintDry(k,x,z,rot){ // how much of a work's ground is dry: its middle and a lattice of five by five over it
+  const c=Math.cos(rot),s=Math.sin(rot);let dry=0;
+  for(let i=-2;i<=2;i++)for(let j=-2;j<=2;j++){const lx=i/2*k.w/2,lz=j/2*k.d/2;if(worksDryAt(x+lx*c+lz*s,z-lx*s+lz*c))dry++;}
+  return worksDryAt(x,z)?dry/25:0;}
+function worksShore(x,z){ // the bearing of the water nearest (x,z) within reach, open water before a creek as near as it, and how far it is; or null
+  const seen=[];
+  for(let k=0;k<48;k++){const a=k/48*Math.PI*2,ca=Math.cos(a),sa=Math.sin(a);
+    for(let r=8;r<WORKS_SHORE;r+=8){if(!worksWet(x+ca*r,z+sa*r))continue;
+      let wet=0,n=0;for(let t=16;t<=WORKS_OPEN;t+=16){n++;if(worksWet(x+ca*(r+t),z+sa*(r+t)))wet++;}
+      seen.push({a,r,open:wet>=n*0.7});break;}}
+  if(!seen.length)return null;
+  const near=Math.min(...seen.map(o=>o.r))+WORKS_OPEN;let best=null;
+  for(const o of seen)if(o.r<=near&&(!best||o.open&&!best.open||o.open===best.open&&o.r<best.r))best=o;
+  return best;}
+// The work's turn: its front (-z of its footprint) toward the water at bearing a.
+const worksRot=a=>Math.atan2(-Math.cos(a),-Math.sin(a));
+function worksSite(){
+  const L=worksStanding();if(!L.length)return;
+  riverStrips();W._works=[];for(const s of W.settlements)s.works=[];
+  const set=[],clear=(x,z,k)=>set.every(o=>dist2d(x,z,o.x,o.z)>(Math.hypot(o.w,o.d)+Math.hypot(k.w,k.d))/2+6);
+  for(const rec of L){
+    const k={kind:rec.kind,name:String(rec.name||ARCH[rec.kind][4]),w:Math.max(6,+rec.w||ARCH[rec.kind][0]),d:Math.max(6,+rec.d||ARCH[rec.kind][1]),from:rec.from??null,until:rec.until??null,role:rec.role||'',side:rec.side||''};
+    const x0=(+rec.u||0)*SIZE,z0=(+rec.v||0)*SIZE,need=k.kind==='fort'?0.7:0.5,sh0=worksShore(x0,z0),rot0=sh0?worksRot(sh0.a):0;
+    // The nearest dry ground to the record, by rings of a few metres, turned as the record's own spot is.
+    let at=null;
+    for(let r=0;r<=WORKS_REACH&&!at;r+=8){const n=Math.max(1,Math.round(2*Math.PI*r/8));
+      for(let q=0;q<n&&!at;q++){const x=x0+Math.cos(q/n*Math.PI*2)*r,z=z0+Math.sin(q/n*Math.PI*2)*r;
+        if(clear(x,z,k)&&worksFootprintDry(k,x,z,rot0)>=need)at={x,z};}}
+    if(!at)continue;
+    let sh=worksShore(at.x,at.z)||sh0,rot=sh?worksRot(sh.a):rot0;
+    // A battery stands at the water's edge, and so does any work but a citadel that the record set back from it.
+    if(sh&&k.role!=='citadel'&&(k.kind==='battery'||sh.r>k.d/2+(k.kind==='tower'?40:60))){
+      const ca=Math.cos(sh.a),sa=Math.sin(sh.a);
+      for(let t=sh.r-k.d/2-4;t>0;t-=4){const x=at.x+ca*t,z=at.z+sa*t;
+        if(clear(x,z,k)&&worksFootprintDry(k,x,z,rot)>=need){at={x,z};sh=worksShore(x,z)||sh;rot=worksRot(sh.a);break;}}}
+    k.x=at.x;k.z=at.z;k.rot=rot;k.face=sh?sh.a:null;
+    set.push(k);W._works.push(k);W.settlements[nearestSettlementIdx(k.x,k.z)].works.push(k);
+  }
+}
+// Whether (x,z) is within pad metres of a work's ground (a citadel's is its castle's).
+function worksAt(x,z,pad){const L=W._works;if(!L||!L.length)return false;
+  for(const k of L){if(k.role==='citadel')continue;const dx=x-k.x,dz=z-k.z,c=Math.cos(k.rot),s=Math.sin(k.rot),lx=dx*c-dz*s,lz=dx*s+dz*c;
+    if(Math.abs(lx)<k.w/2+pad&&Math.abs(lz)<k.d/2+pad)return true;}
+  return false;}
+// The citadel that holds a place, where its castle on the hill is to stand.
+function worksCitadel(s){const k=(s.works||[]).find(o=>o.role==='citadel');return k?{x:k.x,z:k.z}:null;}
+// A place's works stood as its buildings (place: the place's own way of standing one), but the citadel its castle is.
+function worksStand(s,place){
+  for(const k of s.works||[]){
+    if(k.role==='citadel'&&s.hillCastle&&dist2d(k.x,k.z,s.hillCastle.x,s.hillCastle.z)<1){k.castle=true;continue;}
+    place(k.kind,2,{x:k.x,z:k.z,w:k.w,d:k.d,rot:k.rot},'works',1,{inst:true,work:k.name});
+  }
+}
 function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out place's context (worldLoad): its closures are made again over it, and nothing is laid out
   const idx=saved?saved.idx:W.settlements.indexOf(s),rng=layoutRng(idx),rr=()=>rng(),rpick=a=>a[Math.floor(rng()*a.length)];
   const WAYS=waysOf(s);if(WAYS&&!saved&&!s.forceMode)s.forceMode=WAYS.layout;let isCap=saved?saved.isCap:s.kind==='capital',isTown=saved?saved.isTown:s.kind==='town',isVil=saved?saved.isVil:s.kind==='village'||!!WAYS;
@@ -2261,7 +2331,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
   const HW=saved?saved.HW:WAYS?WAYS.path:isCap?3.4:isTown?3:2.4,RHW=saved?saved.RHW:isVil?3.2:4;
   if(!saved)riverStrips();
   const cellOK=(x,z)=>{const ci=toCell(x),cj=toCell(z),i=cIdx(ci,cj);return !W.water[i]&&slopeAt(ci,cj)<0.35&&W.h[i]>1;};
-  const buildable=(x,z)=>cellOK(x,z)&&!riverAt(x,z,1)&&!lakeAt(s,x,z,2);
+  const buildable=(x,z)=>cellOK(x,z)&&!riverAt(x,z,1)&&!lakeAt(s,x,z,2)&&!worksAt(x,z,3);
   if(!saved){s.streets=[];s.places=[];s.roadSpoke={};s.history=[];s.remnants=[];s.oldWalls=[];s.relicWalls=[];s.burns=[];
   s.wallRad=null;s.wallKind=null;s.natDef=0;s.plazaR=0;s.coreR=Rmax;s.radius=80;s.wallR=80;}
   const segH=makeHash(24),placed=makeHash(16);
@@ -2288,7 +2358,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
   const laneBlockers=(a,b,hw)=>placed.near((a.x+b.x)/2,(a.z+b.z)/2,dist2d(a.x,a.z,b.x,b.z)/2+hw+2).filter(o=>!o.removed&&o.state!=='gone'&&streetFootprintOverlap(o,{a,b,hw},0.3));
   const laneHitsBldg=(a,b,hw)=>laneBlockers(a,b,hw).length>0;
   const pathHitsBldg=(P,hw)=>P.some((q,k)=>k>0&&laneHitsBldg(P[k-1],q,hw));
-  const STANDS=new Set(['temple','keep','hall','guildhall','wall','tower','mill','windmill','granary','warehouse','court']),stands=o=>!!o.inst||o.arch==='churchyard'||STANDS.has(o.arch); // never pulled down for a street
+  const STANDS=new Set(['temple','keep','hall','guildhall','wall','tower','mill','windmill','granary','warehouse','court','fort','battery']),stands=o=>!!o.inst||o.arch==='churchyard'||STANDS.has(o.arch); // never pulled down for a street
   const skirtBldg=(E,X,B,hw)=>{ // the shortest way from E to X round a footprint, by its corners set out a street's half-width clear
     const K=obbCorners(B.x,B.z,B.w+2*(hw+0.6),B.d+2*(hw+0.6),B.rot);let best=null,bl=1e18;
     for(let i=0;i<4;i++)for(const dir of[1,-1])for(let n=1;n<=3;n++){const P=[E];for(let j=0;j<n;j++)P.push(K[((i+dir*j)%4+4)%4]);P.push(X);
@@ -2502,7 +2572,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
     foundLine='Founded as a planted market town: a broad market street crossed by a second road, with back streets and plots laid out for settlers.';
   }
   if(!MANNERS[mode]&&!isVil&&!motteAge&&(role==='seat'||role==='fort')&&rr()<0.65){ // Freiburg's Schlossberg: the castle on the hill above the town
-    let best=null,bh=hAt(C.x,C.z)+16;
+    let best=worksCitadel(s),bh=best?Infinity:hAt(C.x,C.z)+16;
     for(let r=160;r<=460;r+=30)for(let a=0;a<32;a++){
       const ang=a/32*Math.PI*2,x=C.x+Math.cos(ang)*r,z=C.z+Math.sin(ang)*r,ci=toCell(x),cj=toCell(z);
       if(!cellOK(x,z)||slopeAt(ci,cj)>0.3)continue;const h=hAt(x,z);if(h>bh){bh=h;best={x,z};}
@@ -2519,7 +2589,7 @@ function layoutSettlement(s,saved,openingMethods=false){ // saved: a laid-out pl
       }
     }
   }}
-  let keep=saved?saved.keep:s._hillKeep||null;if(!saved)delete s._hillKeep;
+  if(!saved)worksStand(s,place);let keep=saved?saved.keep:s._hillKeep||null;if(!saved)delete s._hillKeep;
   if(!saved){if(!WAYS&&!keep&&(role==='seat'||role==='fort')){ // a tower keep on the highest ground near the crossing of the roads
     let best=null,bh=-1e9;
     if(motteAge){ // score the complete earthwork and courtyard on fixed samples, without consuming simulation RNG
@@ -8601,7 +8671,7 @@ function planWallSectionDraft(s,si,stroke,live,named){
   const pts=resample(wallSectionSnap(s,wallStrokeSimplify(stroke)),6,true),per=polyLen(pts),no=why=>({ok:false,why});if(pts.length<2||per<6)return no('Mark at least six metres of wall; you may add another section later.');
   if(pts.some(p=>dist2d(p.x,p.z,s.pos.x,s.pos.z)>(s.radius||90)*2.6))return no('Keep the wall near the town whose ground is being surveyed.');
   if(resample(pts,1).some(p=>!wallSectionGroundOK(s,p.x,p.z)))return no('The wall needs solid, passable ground. End it on the bank, or take it round the water or steep ground.');
-  const stone=constructionCapability(s,'stoneCurtain').available,pathWidth=(stone?2.6:1.4)+4,hit=s.buildings.filter(b=>live(b)&&lineHitsBldg(b,pts,pathWidth/2)),bad=hit.find(b=>b.inst||['temple','keep','hall','guildhall','tower','mill','windmill','court'].includes(b.arch));if(bad)return no(`The line runs through ${named(bad)}; take the wall round it.`);
+  const stone=constructionCapability(s,'stoneCurtain').available,pathWidth=(stone?2.6:1.4)+4,hit=s.buildings.filter(b=>live(b)&&lineHitsBldg(b,pts,pathWidth/2)),bad=hit.find(b=>b.inst||['temple','keep','hall','guildhall','tower','mill','windmill','court','fort','battery'].includes(b.arch));if(bad)return no(`The line runs through ${named(bad)}; take the wall round it.`);
   const standing=[...(s.wallSections||[])];for(const q of W.projects||[])if(!q.dead&&q.section&&q.si===si)standing.push({pts:q.site.path});const runs=standing.flatMap(w=>wallSectionRuns(w,false)),probes=resample(pts,3);if(probes.length>2&&probes.filter(p=>runs.some(r=>segDist(p.x,p.z,r.a,r.b)<1.4)).length>probes.length*.8)return no('Most of that line is already standing or commissioned. Continue from its end.');
   const gates=wallSectionGates(s,pts),need=stone?per*.25:0,works=Math.round(per*(stone?2.4:.8)+gates.length*(stone?150:50)),days=Math.round(20+per/6+gates.length*10),recipe=constructionRecipe(s,works,days,per*(stone?.04:.25),need),site={path:pts,pathWidth,gates};
   if(s._lay.live.planSite&&!s._lay.live.planSite({type:'plan',kind:'wall',section:true,si,payer:s.owner,site,hit},'validate'))return no('The section conflicts with standing buildings or land already reserved for other works.');
@@ -8616,7 +8686,7 @@ function planDraft(kind,stroke,payer,legacyWall=false){
   if(s.owner!==payer)return no(`${s.name} is ${s.owner>0?W.houses[s.owner].name+'’s':'the crown’s'}: its streets are not yours to plan.`);
   if(!s._lay||!s._lay.live)return no('The surveyors cannot read the ground there.');
   if((W.projects||[]).some(q=>!q.dead&&q.type==='plan'&&q.si===si&&q.kind===kind&&(kind!=='wall'||legacyWall)&&kind!=='street'&&kind!=='stopup'&&kind!=='razewall'&&kind!=='raze'))return no(`A ${PLANB[kind].n.toLowerCase()} is already being made at ${s.name}.`);
-  const live=b=>!b.removed&&b.state!=='gone',blocks=b=>b.inst||['temple','keep','hall','guildhall','wall','tower','mill','windmill','court'].includes(b.arch);
+  const live=b=>!b.removed&&b.state!=='gone',blocks=b=>b.inst||['temple','keep','hall','guildhall','wall','tower','mill','windmill','court','fort','battery'].includes(b.arch);
   const name=typeof detailNaming==='function'?detailNaming():buildingName,named=b=>name(b)||ARCH[b.arch][4];
   if(kind==='wall'&&!legacyWall)return planWallSectionDraft(s,si,stroke,live,named);
   if(kind==='street'){

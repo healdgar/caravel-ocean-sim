@@ -28,6 +28,7 @@ import { coastalRegionStageURL } from '../js/landfall.js';
 import { OLD_WORLD_PLACES, boardTownHeld, oldWorldPeople } from '../js/old-world.js';
 import { NATIVE_TOWNS } from '../js/native-towns.js';
 import { COLONIAL_TOWNS } from '../js/colonial-towns.js';
+import { FORT_RECORDS, fortRecordsFor } from '../js/fort-records.js';
 import { openBoard } from './board-host.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -105,6 +106,22 @@ function onFoundingGround(x, z) {
   if (best) say(`  in the water: founded ${Math.round(Math.hypot(best.x - x, best.z - z))} m off, at (${Math.round(best.x)}, ${Math.round(best.z)})`);
   return best ?? { x, z };
 }
+// The works the record says stood on this ground in this year (js/fort-records.js), wherever on it they stood and
+// whichever port's record names them: each a fort, a battery or a watchtower by its shape, as big as the record says
+// or as its kind is, which the model sets on dry ground and stands as a building of the nearest place.
+const WORK_SIZE = Object.freeze({ star: [64, 64], headland: [72, 88], fitted: [70, 70], islet: [52, 52], drum: [30, 30], battery: [44, 14], tower: [14, 14] });
+function workOf(record) {
+  const kind = record.shape === 'battery' ? 'battery' : record.shape === 'drum' && !(record.sizeM?.[0] >= 30) ? 'tower' : 'fort';
+  const size = kind === 'battery' ? [record.sizeM?.[0] ?? WORK_SIZE.battery[0], Math.min(16, Math.max(10, record.sizeM?.[1] ?? WORK_SIZE.battery[1]))]
+    : kind === 'tower' ? WORK_SIZE.tower : record.sizeM ?? WORK_SIZE[record.shape] ?? WORK_SIZE.star;
+  return { kind, name: record.name, x: Math.round(east(record.lon)), z: Math.round(south(record.lat)), size, from: record.from ?? null, until: record.until ?? null, role: record.role ?? '', side: record.side ?? '' };
+}
+const works = [], named = new Set();
+for (const id of Object.keys(FORT_RECORDS)) for (const record of fortRecordsFor(id, year).forts) {
+  if (named.has(record.name)) continue;
+  named.add(record.name);
+  works.push(workOf(record));
+}
 // A port already baked for this year keeps the country it was given: its seed, unless another is asked for.
 const keptRecord = bakedBoardAsset(port, year) && existsSync(resolve(root, bakedBoardAsset(port, year))) ? JSON.parse(readFileSync(resolve(root, bakedBoardAsset(port, year)), 'utf8')).request : null;
 const livedIndex = args.indexOf('--lived');
@@ -117,9 +134,11 @@ const request = boardRequest({
   places: (OLD_WORLD_PLACES[city.id] || city.places || []).map(([name, latitude, longitude, weight]) => ({ name, x: east(longitude), z: south(latitude), weight })),
   lived: livedArg,
   ...(city.manner ? { manner: city.manner, founded: city.founded, settled: city.settled } : {}),
+  works,
   rivers: { catchment: number('catchment', BOARD_RIVERS.catchment), width: number('width', BOARD_RIVERS.width), least: number('least', BOARD_RIVERS.least), carve: number('carve', BOARD_RIVERS.carve) },
 });
 say(`real places on this ground: ${request.places.map((p) => `${p.name} (${p.x}, ${p.z})`).join(', ') || 'none'}`);
+say(`works the record stands on it: ${(request.works ?? []).map((w) => `${w.kind} ${w.name} (${w.x}, ${w.z})`).join(', ') || 'none'}`);
 say(`founding ${city.name} of ${people} people in ${year}: seat ${request.seat}, request ${boardKey(request)}`);
 const began = performance.now();
 const open = await openBoard(request, { onProgress: (text) => { if (!/\(\d+ of \d+\)/.test(text)) say(`  ${((performance.now() - began) / 1000).toFixed(1)} s  ${text}`); } });
@@ -143,7 +162,7 @@ writeFileSync(out, JSON.stringify({
   // The whole world as founded, kept beside this board: the model's own save, taken up only by the same program.
   world: { bytes: world.length, sha256: createHash('sha256').update(world).digest('hex'), program: open.program, day: board.day, year: board.year, holds: held },
   request: { span: request.span, size: request.size, seed: request.seed, fate: request.fate, era: request.era, seat: request.seat, walls: request.walls, site: request.site, places: request.places, rivers: request.rivers, lived: request.lived,
-    ...(request.manner ? { manner: request.manner, founded: request.founded, settled: request.settled } : {}) },
+    ...(request.manner ? { manner: request.manner, founded: request.founded, settled: request.settled } : {}), ...(request.works ? { works: request.works } : {}) },
   board,
 }) + '\n');
 say(`wrote ${out}`);

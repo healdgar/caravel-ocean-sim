@@ -29,8 +29,12 @@ export function boardSeat(people) {
 // which the model's founders favour and whose names its places take. `lived` founds the realm in 850 and lets it
 // live every day to `era` (hours of work for a city: only ever for a board baked ahead). A colony's seat says the
 // `manner` its crown planted its towns by ('traza', 'ladeira': scripts/board-colonial.mjs), the year it was `founded`,
-// and how `settled` its country was (0 to 1 of an Old World country's towns and villages).
-export function boardRequest({ heights, span, site, seed, era = 1550, seat = 1, walls = { capital: 2, town: 1, village: 0 }, fate = 1, places = [], rivers = BOARD_RIVERS, lived = false, manner = null, founded = null, settled = null }) {
+// and how `settled` its country was (0 to 1 of an Old World country's towns and villages). `works` are the forts,
+// batteries and watchtowers the record says stood on this ground ({kind: 'fort', 'battery' or 'tower', name, x, z,
+// size: [across, deep], from, until, role, side}: js/fort-records.js), which the model sets on their ground before its
+// towns are laid and stands as buildings of the nearest place (scripts/board-forts.mjs).
+export const BOARD_WORK_KINDS = Object.freeze(['fort', 'battery', 'tower']);
+export function boardRequest({ heights, span, site, seed, era = 1550, seat = 1, walls = { capital: 2, town: 1, village: 0 }, fate = 1, places = [], rivers = BOARD_RIVERS, lived = false, manner = null, founded = null, settled = null, works = [] }) {
   const n = Math.round(Math.sqrt(heights.length));
   if (n * n !== heights.length || n < 3) throw new Error('A board is founded on a square of heights');
   const size = n - 1, survey = new Float32Array(size * size);
@@ -47,7 +51,16 @@ export function boardRequest({ heights, span, site, seed, era = 1550, seat = 1, 
     rivers: { catchment: Math.round(rivers.catchment), width: +rivers.width, least: +rivers.least, carve: +rivers.carve },
     lived: typeof lived === 'number' && Number.isFinite(lived) && lived > 0 ? Math.round(lived) : Boolean(lived),
     ...(manner ? { manner: String(manner), founded: Math.round(founded ?? era), settled: Math.max(0, Math.min(1, settled ?? 1)) } : {}),
+    ...((kept) => (kept.length ? { works: kept } : {}))(boardWorks(works, span)),
   };
+}
+// A request's works as the model is asked for them: on the ground, of a kind it knows, each to the metre.
+function boardWorks(works, span) {
+  return works.filter((w) => BOARD_WORK_KINDS.includes(w.kind) && Math.abs(w.x) < span * 0.47 && Math.abs(w.z) < span * 0.47).map((w) => ({
+    kind: w.kind, name: String(w.name), x: Math.round(w.x), z: Math.round(w.z),
+    size: [Math.round(Math.max(6, w.size?.[0] ?? 40)), Math.round(Math.max(6, w.size?.[1] ?? w.size?.[0] ?? 40))],
+    from: w.from ?? null, until: w.until ?? null, role: String(w.role || ''), side: String(w.side || ''),
+  }));
 }
 
 // A name for a request that two requests share only if the model would found the same board for both: the ground
@@ -57,7 +70,7 @@ export function boardKey(request) {
   const mix = (v) => { a = Math.imul(a ^ v, 0x01000193) >>> 0; b = (Math.imul(b ^ (v + 0x7f4a7c15), 0x85ebca6b) + (b << 13 | b >>> 19)) >>> 0; };
   for (let k = 0; k < request.heights.length; k++) mix(Math.round(request.heights[k] * 100) | 0);
   const rest = JSON.stringify([request.version, request.span, request.size, request.seed, request.fate, request.era, request.seat, request.walls, request.site, request.places, request.rivers, request.lived,
-    ...(request.manner ? [request.manner, request.founded, request.settled] : [])]);
+    ...(request.manner ? [request.manner, request.founded, request.settled] : []), ...(request.works?.length ? [request.works] : [])]);
   for (let k = 0; k < rest.length; k++) mix(rest.charCodeAt(k));
   return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
 }
@@ -220,5 +233,6 @@ export function boardPrefix(request, program = null) {
   return 'globalThis.FURLONG_HEADLESS=true;globalThis.FURLONG_OPTIONS=' + JSON.stringify(options) + ';' + placeEdgeShim +
     `globalThis.KA_MAPS={board:{w:${request.size},h:${request.size},hgt:${heights},` +
     `vscale:1,crown:${JSON.stringify(request.site.culture)},sites:${JSON.stringify(sites)},title:${JSON.stringify(request.site.name)}` +
-    (request.manner ? `,manners:${JSON.stringify({ [request.site.culture]: request.manner })},founded:${request.founded},settled:${request.settled}` : '') + '}};\n';
+    (request.manner ? `,manners:${JSON.stringify({ [request.site.culture]: request.manner })},founded:${request.founded},settled:${request.settled}` : '') +
+    (request.works?.length ? `,works:${JSON.stringify(request.works.map((w) => ({ kind: w.kind, name: w.name, u: w.x / request.span, v: w.z / request.span, w: w.size[0], d: w.size[1], from: w.from, until: w.until, role: w.role, side: w.side })))}` : '') + '}};\n';
 }
