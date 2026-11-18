@@ -5,7 +5,9 @@
 // With the board goes the whole world as founded (the .world file beside it): the model's own save of everything it
 // holds, which the game takes up and lets live. Nothing of it is chosen or left out.
 //   node scripts/bake-board.mjs lisbon [--year 1550] [--seat n] [--seed n] [--out assets/boards/lisbon-1550.json] [--ground file] [--no-check]
-// The port is the coast whose ground holds the city (js/old-world.js OLD_WORLD_CITIES, its `port`).
+// The port is the coast whose ground holds the city (js/old-world.js OLD_WORLD_CITIES, its `port`), or the town of a
+// people of the Americas in its year (js/native-towns.js NATIVE_TOWNS): its ground is read in that year, the town
+// founded at its recorded site, with the seat, walls and neighbours the record gives it.
 // --lived founds the realm in 850 and lets it live every day to the year: its cities are then grown by their own
 // history. That is hours or days of one core for a great city; the progress is written as the years pass.
 // The model founds another country for every seed; a home port is baked with the one whose seat best matches the record.
@@ -22,7 +24,8 @@ import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
 import { BOARD_RIVERS, boardGroundDigest, boardGroundOff, boardGroundSurvey, boardKey, boardRequest, boardSeat, bakedBoardAsset, bakedWorldAsset } from '../js/board-model.js';
 import { coastalRegionStageURL } from '../js/landfall.js';
-import { OLD_WORLD_PLACES, oldWorldCityHeld, oldWorldPeople } from '../js/old-world.js';
+import { OLD_WORLD_PLACES, boardTownHeld, oldWorldPeople } from '../js/old-world.js';
+import { NATIVE_TOWNS } from '../js/native-towns.js';
 import { openBoard } from './board-host.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,6 +33,8 @@ const args = process.argv.slice(2), port = args.find((a) => !a.startsWith('--'))
 const option = (name, fallback) => { const k = args.indexOf('--' + name); return k >= 0 ? args[k + 1] : fallback; };
 const year = Number(option('year', 1550));
 const say = (text) => process.stderr.write(text + '\n');
+// A native town's coast is asked for in its own year: the coast's own year is its colony's.
+const nativeTown = NATIVE_TOWNS.find((town) => town.port === port) ?? null;
 
 // The land as the game makes it for a player arriving at this port in this year: the page's own pipeline, read the
 // moment the land is made (window.oceanLand), before anything is drawn. A board is founded on the land as it is with
@@ -43,7 +48,7 @@ async function groundOf(portId, standing = false) {
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
     const url = coastalRegionStageURL('http://127.0.0.1:' + server.address().port + '/', portId, 'dock', 'clear', year);
-    for (const [key, value] of Object.entries({ w: 640, h: 360, clouds: '0', follower: '0', hud: '0', ui: '0', ...(standing ? {} : { board: 'off' }) })) url.searchParams.set(key, value);
+    for (const [key, value] of Object.entries({ w: 640, h: 360, clouds: '0', follower: '0', hud: '0', ui: '0', ...(standing ? {} : { board: 'off' }), ...(nativeTown ? { year: String(year) } : {}) })) url.searchParams.set(key, value);
     await page.goto(url.toString());
     await page.waitForFunction(() => window.oceanLand?.pack?.heights || window.oceanStartup?.state === 'failed', undefined, { timeout: 300000, polling: 250 });
     const land = await page.evaluate(() => {
@@ -71,9 +76,9 @@ if (kept && existsSync(kept)) {
 }
 const { region } = land;
 say(`${region.name}: ${region.size} by ${region.size} heights over ${region.span} m, from ${land.source}; port at ${Math.round(land.centre.x - region.x)}, ${Math.round(land.centre.z - region.z)}`);
-const city = oldWorldCityHeld(region);
-if (!city) throw new Error(`${port}'s ground holds no Old World city`);
-const people = oldWorldPeople(city, year), seat = Number(option('seat', boardSeat(people)));
+const city = boardTownHeld(region);
+if (!city) throw new Error(`${port}'s ground holds no Old World city nor native town in ${year}`);
+const people = oldWorldPeople(city, year), seat = Number(option('seat', city.seat ?? boardSeat(people)));
 // Where a spot of the globe lies on this ground: metres east and south of its middle.
 const east = (longitude) => (longitude - region.longitude) * Math.cos(region.latitude * Math.PI / 180) * 111195;
 const south = (latitude) => (region.latitude - latitude) * 111195;
@@ -84,8 +89,10 @@ const livedIndex = args.indexOf('--lived');
 const livedArg = livedIndex >= 0 ? (args[livedIndex + 1] && !args[livedIndex + 1].startsWith('--') && Number.isFinite(Number(args[livedIndex + 1])) ? Number(args[livedIndex + 1]) : true) : false;
 const request = boardRequest({
   heights: land.heights, span: region.span, seed: number('seed', keptRecord?.seed ?? region.seed ?? 1550), era: year, seat,
-  site: { name: city.name, culture: city.culture, x: land.centre.x - region.x, z: land.centre.z - region.z },
-  places: (OLD_WORLD_PLACES[city.id] || []).map(([name, latitude, longitude, weight]) => ({ name, x: east(longitude), z: south(latitude), weight })),
+  ...(city.walls ? { walls: city.walls } : {}),
+  // An Old World city is founded about its port; a native town at its own recorded site, by the anchorage.
+  site: { name: city.name, culture: city.culture, ...(city.native ? { x: Math.round(east(city.longitude)), z: Math.round(south(city.latitude)) } : { x: land.centre.x - region.x, z: land.centre.z - region.z }) },
+  places: (OLD_WORLD_PLACES[city.id] || city.places || []).map(([name, latitude, longitude, weight]) => ({ name, x: east(longitude), z: south(latitude), weight })),
   lived: livedArg,
   rivers: { catchment: number('catchment', BOARD_RIVERS.catchment), width: number('width', BOARD_RIVERS.width), least: number('least', BOARD_RIVERS.least), carve: number('carve', BOARD_RIVERS.carve) },
 });

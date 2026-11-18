@@ -36,7 +36,7 @@ import {
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
 import { readCrossingRiver } from './river-water.js';
-import { bakedBoardFor, oldWorldCountry, oldWorldCityHeld, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
+import { bakedBoardFor, boardTownHeld, oldWorldCountry, oldWorldCityHeld, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
 import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, buildColonialCityFabric, cityMasonry, footprint, planColonialStreets } from './old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 import { boardRoadCrossings, widenBoardRiverHalfWidth, widenBoardRivers } from './old-world-board.js';
@@ -5635,11 +5635,13 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       expansionTier: colonyGrowth.expansionTier,
     });
   } else {
-    // Uncolonized coast or Sovereign Indigenous Polity: check Native American settlement profile for this region & year
+    // Uncolonized coast or Sovereign Indigenous Polity: check Native American settlement profile for this region & year.
+    // A town of the peoples of the Americas founded by Castle and Commons' model stands here as its board
+    // (js/native-towns.js, js/old-world.js): its houses are the board's, and none is placed here.
     const indigenousSettlement =
       region.indigenousSettlement ??
       computeIndigenousSettlementProfile(region, colonyGrowth.year);
-    if (indigenousSettlement?.hasIndigenousSettlement && Array.isArray(indigenousSettlement.prefabMix)) {
+    if (!boardTownHeld(region) && indigenousSettlement?.hasIndigenousSettlement && Array.isArray(indigenousSettlement.prefabMix)) {
       // Organic coastal village layout slots: (alongOffset, inlandOffset, yawOffsetDeg, minElev)
       // Slot 0 is the foreshore canoe beaching & tidal fish weir right at the water's edge;
       // Slots 1..11 arrange the council house / longhouse / batey plaza, palisade stockades, and family wigwams/bohíos on the coastal terrace.
@@ -10388,8 +10390,8 @@ function finalizeProceduralCoastalPack(
 function dressProceduralCoastalPack(pack, heights, port, elevationSource, satelliteData, climateProfile) {
   const { region } = pack;
   if (!pack.skipPortPlacement) {
-    // An Old World city's roads are its board's alone.
-    const suppressSyntheticCountryRoads = Boolean(oldWorldCityHeld(region));
+    // A board's town's roads are its board's alone.
+    const suppressSyntheticCountryRoads = Boolean(boardTownHeld(region));
     port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region), {
       suppressSyntheticCountryRoads,
     });

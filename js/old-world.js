@@ -11,6 +11,7 @@
 
 import { CITY_TREES } from './old-world-city.js';
 import { layBoardCountry } from './old-world-board.js';
+import { nativeTownHeld } from './native-towns.js';
 
 const DEG = Math.PI / 180;
 const OLD_WORLD_METRES_PER_DEGREE = 111195;
@@ -108,6 +109,12 @@ export function oldWorldCityHeld(region) {
     if (Math.hypot(x, z) < least) { least = Math.hypot(x, z); best = city; }
   }
   return best;
+}
+
+// The town a region's ground holds and its board founds: an Old World city, or a town of the peoples of the Americas
+// in its own year (js/native-towns.js).
+export function boardTownHeld(region) {
+  return oldWorldCityHeld(region) ?? nativeTownHeld(region);
 }
 
 // The city whose country this spot lies in, or none.
@@ -243,7 +250,7 @@ function unbakedCity(city, region, baked) {
 // One is made per elevation field and kept, since land cover, ground colour and planting all ask.
 export function oldWorldCountry(region, heights, port = null) {
   if (!region || !heights || !Number.isFinite(region.latitude) || !Number.isFinite(region.longitude)) return null;
-  if (!inIberia(region.latitude, region.longitude)) return null;
+  if (!inIberia(region.latitude, region.longitude) && !nativeTownHeld(region)) return null;
   const kept = countries.get(heights);
   if (kept && kept.port === port) return kept.country;
   const country = makeCountry(region, heights, port);
@@ -252,7 +259,7 @@ export function oldWorldCountry(region, heights, port = null) {
 }
 
 export function refreshOldWorldBoardCountry(nextBoardJson, region, heights, port = null, surveyHeights = null) {
-  if (!nextBoardJson || !region || !heights || !inIberia(region.latitude, region.longitude)) return null;
+  if (!nextBoardJson || !region || !heights || !inIberia(region.latitude, region.longitude) && !nativeTownHeld(region)) return null;
   if (surveyHeights instanceof Float32Array && surveyHeights.length === heights.length && !uncarvedSurveys.has(heights)) {
     uncarvedSurveys.set(heights, surveyHeights.slice());
   }
@@ -270,10 +277,11 @@ export function refreshOldWorldBoardCountry(nextBoardJson, region, heights, port
 
 function makeCountry(region, heights, port, explicitBaked = null) {
   const grid = sampler(heights, region), heightAt = grid.at;
-  const held = oldWorldCityHeld(region), city = held ?? oldWorldCityNear(region.latitude, region.longitude);
+  const held = boardTownHeld(region), city = held ?? oldWorldCityNear(region.latitude, region.longitude);
   const year = region.year ?? 1550;
   const people = city ? oldWorldPeople(city, year) : 0;
-  const holdsCity = Boolean(held && port && port.clearRadius > 0 && port.center);
+  // A native town stands by an anchorage, with no port cleared for it.
+  const holdsCity = Boolean(held && port && (port.clearRadius > 0 || held.native) && port.center);
   // The city is its board, founded for this port on the ground the game makes for it (scripts/bake-board.mjs). A
   // city with no board founded for this ground has no town: it is baked, never grown here. Ground with no board
   // standing has no country.

@@ -95,7 +95,8 @@ export function boardGroundFits(survey, heights, withinMetres = 1.5) {
 }
 
 // The boards founded ahead of time (scripts/bake-board.mjs), by port and year, and where each is kept: one for every
-// Old World city with ground of the game's making (js/old-world.js OLD_WORLD_CITIES, by its `port`). Spelled out,
+// Old World city with ground of the game's making (js/old-world.js OLD_WORLD_CITIES, by its `port`), and every town of
+// the Americas (js/native-towns.js). Spelled out,
 // since the build publishes the files named here.
 export const BAKED_BOARDS = Object.freeze({
   'lisbon:1550': 'assets/boards/lisbon-1550.json',
@@ -108,6 +109,14 @@ export const BAKED_BOARDS = Object.freeze({
   'seville:1550': 'assets/boards/seville-1550.json',
   'porto:1550': 'assets/boards/porto-1550.json',
   'cadiz-sanlucar:1550': 'assets/boards/cadiz-sanlucar-1550.json',
+  // The towns of the peoples of the Americas in 1550 (js/native-towns.js), by the port later planted there.
+  'quebec:1550': 'assets/boards/quebec-1550.json',
+  'boston:1550': 'assets/boards/boston-1550.json',
+  'plymouth:1550': 'assets/boards/plymouth-1550.json',
+  'new-amsterdam:1550': 'assets/boards/new-amsterdam-1550.json',
+  'philadelphia:1550': 'assets/boards/philadelphia-1550.json',
+  'jamestown:1550': 'assets/boards/jamestown-1550.json',
+  'rio-de-janeiro:1550': 'assets/boards/rio-de-janeiro-1550.json',
 });
 export function bakedBoardAsset(port, year) { return BAKED_BOARDS[`${port}:${year}`] ?? null; }
 // And the whole world each was founded as: the model's own save of everything it holds, frozen on its first day.
@@ -123,6 +132,13 @@ export const BAKED_WORLDS = Object.freeze({
   'seville:1550': 'assets/boards/seville-1550.world',
   'porto:1550': 'assets/boards/porto-1550.world',
   'cadiz-sanlucar:1550': 'assets/boards/cadiz-sanlucar-1550.world',
+  'quebec:1550': 'assets/boards/quebec-1550.world',
+  'boston:1550': 'assets/boards/boston-1550.world',
+  'plymouth:1550': 'assets/boards/plymouth-1550.world',
+  'new-amsterdam:1550': 'assets/boards/new-amsterdam-1550.world',
+  'philadelphia:1550': 'assets/boards/philadelphia-1550.world',
+  'jamestown:1550': 'assets/boards/jamestown-1550.world',
+  'rio-de-janeiro:1550': 'assets/boards/rio-de-janeiro-1550.world',
 });
 export function bakedWorldAsset(port, year) { return BAKED_WORLDS[`${port}:${year}`] ?? null; }
 
