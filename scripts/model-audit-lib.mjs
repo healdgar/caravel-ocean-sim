@@ -407,7 +407,7 @@ export function cityTypeSource(type, lib) {
 
 // Fires the fan at one city type's building, through the game's own sweep, in the states a real port holds it in.
 export function auditBuildingCollision(type, lib, fan = {}) {
-  const { CITY_BUILDING_TYPES, cityFamilyOf, cityTypeTarget, createPortFractures, prepareBuildingFracture, buildingFractureStateOf, classifyBuildingMaterial, createBuildingDamageState, sweepBuildingSegment } = lib;
+  const { CITY_BUILDING_TYPES, cityFamilyOf, cityTypeTarget, noteBuildingMesh, prepareBuildingFracture, buildingFractureStateOf, classifyBuildingMaterial, createBuildingDamageState, sweepBuildingSegment } = lib;
   const spec = CITY_BUILDING_TYPES[type], { prefabId } = cityTypeTarget(type);
   const parts = cityTypeSource(type, lib), dims = { width: spec.width, length: spec.length, height: spec.height }, ox = 40, oz = -30, ground = 2;
   const scene = (yaw) => {
@@ -445,7 +445,11 @@ export function auditBuildingCollision(type, lib, fan = {}) {
   // As a mesh: what any port hands the shot before its building is first hit.
   const meshed = newInstance(turned.yaw), meshPort = { center: { x: ox, z: oz }, instances: [meshed] };
   createBuildingDamageState(meshed);
-  createPortFractures({ device: null, port: meshPort, geometry: { vertices: turned.vertices, indices: parts.indices, partAssembly: parts.partAssembly }, portIndices: null, groundAt: () => ground });
+  noteBuildingMesh(meshed, {
+    vertices: turned.vertices, indices: parts.indices, firstIndex: 0, endIndex: parts.indices.length,
+    min: [parts.min[0], ground + parts.min[1], parts.min[2]],
+    max: [parts.max[0], ground + parts.max[1], parts.max[2]],
+  });
   const mesh = fire(meshPort, turned.index);
   // As pieces: once it has been hit and cut up, though nothing has left it yet.
   const cut = ({ vertices, index, yaw }) => {

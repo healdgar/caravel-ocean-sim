@@ -228,7 +228,8 @@ const hasFallbackLandfallCoords=!hasExplicitLatLon&&Number.isFinite(rawLat)&&Num
   (qs.has('landfall')||qs.has('region')||(Boolean(matchedSpanishMain)&&qs.has('boatZ')&&Math.abs(Number(qs.get('boatZ'))-ISLAND.z)<4000));
 const HAS_CUSTOM_COORDS=hasExplicitLatLon||hasFallbackLandfallCoords;
 const IS_HEADLESS_TEST=qs.has('w')||qs.has('h')||qs.has('shot')||Boolean(window.victoryCheck)||Boolean(window.check);
-const DEFAULT_LISBON_DOCK=!BROADSIDE_SCENARIO&&!IS_HEADLESS_TEST&&qs.get('ocean')!=='1'&&!qs.has('landfall')&&!qs.has('region')&&!HAS_CUSTOM_COORDS&&!qs.has('cam')&&!qs.has('boatX')&&!qs.has('boatZ');
+const CASTLES_SCENARIO=qs.get('castles')==='1'||qs.get('mode')==='castles';
+const DEFAULT_LISBON_DOCK=!BROADSIDE_SCENARIO&&!CASTLES_SCENARIO&&!IS_HEADLESS_TEST&&qs.get('ocean')!=='1'&&!qs.has('landfall')&&!qs.has('region')&&!HAS_CUSTOM_COORDS&&!qs.has('cam')&&!qs.has('boatX')&&!qs.has('boatZ');
 const HAS_COASTAL_REGION=(qs.has('region')&&qs.get('region')!=='saba')||HAS_CUSTOM_COORDS||DEFAULT_LISBON_DOCK;
 const VALID_LAND_STAGES=new Set([...Object.keys(LANDFALL_VIEWS),'harbor','dock']);
 const LAND_STAGE=(qs.has('landfall')||HAS_COASTAL_REGION)?(VALID_LAND_STAGES.has(qs.get('landfall'))?qs.get('landfall'):DEFAULT_LISBON_DOCK?'dock':HAS_COASTAL_REGION?'coast':'approach'):null;
@@ -4255,7 +4256,7 @@ async function main() {
   if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true;performancePanel.hidden=true; cameraDock.hidden=true;helm.root.hidden=true;lookHint.hidden=true; }
   if(qs.get('ui')==='0')dolphinControls.toast.style.display='none';
   if(qs.get('profile')==='1')document.body.classList.add('show-performance');
-  if(qs.get('castles')==='1'||qs.get('mode')==='castles')castleDuel.start();
+  if(CASTLES_SCENARIO)await castleDuel.start();
 
 
   const hudFps = document.getElementById('fps');

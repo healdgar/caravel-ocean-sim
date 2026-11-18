@@ -1321,35 +1321,8 @@ export function traceShotThroughBreach(state, from, to) {
 
 const buildingMeshes = new WeakMap();
 
-// Until a building has been cut into pieces, a shot meets the mesh it was drawn from.
-export function noteBuildingMeshes(port, geometry) {
-  const instances = port?.instances, parts = geometry?.partAssembly?.parts;
-  if (!Array.isArray(instances) || !parts || !geometry.vertices || !geometry.indices) return;
-  const ranges = new Map();
-  for (const part of parts) {
-    if (!(part.indexCount > 0)) continue;
-    const range = ranges.get(part.instanceIndex);
-    if (!range) ranges.set(part.instanceIndex, [part.firstIndex, part.firstIndex + part.indexCount]);
-    else { range[0] = Math.min(range[0], part.firstIndex); range[1] = Math.max(range[1], part.firstIndex + part.indexCount); }
-  }
-  for (const [index, [firstIndex, endIndex]] of ranges) {
-    const instance = instances[index];
-    if (!instance) continue;
-    const cosY = Math.cos(instance.yaw ?? 0), sinY = Math.sin(instance.yaw ?? 0), originX = instance.x ?? 0, originZ = instance.z ?? 0;
-    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-    for (let i = firstIndex; i < endIndex; i++) {
-      const at = geometry.indices[i] * STRIDE, dx = geometry.vertices[at] - originX, dz = geometry.vertices[at + 2] - originZ;
-      const lx = dx * cosY - dz * sinY, ly = geometry.vertices[at + 1], lz = dx * sinY + dz * cosY;
-      if (lx < min[0]) min[0] = lx; if (lx > max[0]) max[0] = lx;
-      if (ly < min[1]) min[1] = ly; if (ly > max[1]) max[1] = ly;
-      if (lz < min[2]) min[2] = lz; if (lz > max[2]) max[2] = lz;
-    }
-    buildingMeshes.set(instance, { vertices: geometry.vertices, indices: geometry.indices, firstIndex, endIndex, min, max });
-  }
-}
-
-// One building that is no part of a port's mesh: a city's house, stood in the world when shot came near it
-// (js/city-targets.js). `mesh` is null to forget it again.
+// A building's mesh, stood in the world when shot comes near it (js/city-targets.js) or cleaved as a boulder.
+// `mesh` is null to forget it again.
 export function noteBuildingMesh(instance, mesh) {
   if (mesh) buildingMeshes.set(instance, mesh);
   else buildingMeshes.delete(instance);
@@ -1495,7 +1468,7 @@ function createFracturedContinuum({ device, continuum, grounded = null }) {
       const welded = { position, normal, kind, part: Uint32Array.from(fracture.vertexShards), index: indices, count: V };
       const entry = {
         instance, state, fracture, root, shardCount: fracture.shardCount, block: 0, grounded: Boolean(grounded?.(instance, root)),
-        // A city's house wears its own limewash and tiles; a prefab and a boulder are drawn as they were built.
+        // A city's house wears its own limewash and tiles; a boulder is drawn as it was built.
         word: instance.city?.tint ?? CITY_CONTINUUM_AS_BUILT,
         body: packCityContinuumPieces({ triangles: T }, { welded, clusters: continuumFinestClusters(welded) }).words,
         data: new Float32Array(4 + fracture.shardCount * R + Math.ceil(fracture.shardCount / 4) * 4),
@@ -1557,18 +1530,15 @@ function createFracturedContinuum({ device, continuum, grounded = null }) {
 
 /**
  * The fractured buildings of one port. A building joins the first time it is struck (`onStruck`). Its pieces are
- * cut once from the full assembly, `onFractured` is told so that whoever drew it whole (its continuum) leaves it out,
- * and from then on a hit only writes flight records. `onRebuilt` hears when the town stands it again.
- *
- * A prefab is cut from the port's assembly (`geometry`, the CPU's physical truth); a building with a `fractureSource`
- * brings its own (a city's house, or a cleaved boulder). Every one, once cut, is drawn through the one continuum as its
+ * cut once from its `fractureSource` (a city type stood at its site, or a cleaved boulder), `onFractured` is told so
+ * that whoever drew it whole (its continuum) leaves it out, and from then on a hit only writes flight records.
+ * `onRebuilt` hears when the town stands it again. Every one, once cut, is drawn through the one continuum as its
  * pieces (createFracturedContinuum, given `continuum`): `encode` cuts them in the frame's compute pass, and `draw` (with
  * the city view's groups 0 and 1) and `drawShadow` draw them.
  */
-export function createPortFractures({ device, port, geometry, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, continuum = null, grounded = null, onStruck = null, onFractured = null, onRebuilt = null }) {
+export function createPortFractures({ device, port, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, continuum = null, grounded = null, onStruck = null, onFractured = null, onRebuilt = null }) {
   const live = new Map(), building = new Map(), drawn = createFracturedContinuum({ device, continuum, grounded });
   let frame = 0, lastNow = 0;
-  noteBuildingMeshes(port, geometry);
   const finish = (instance, prepared) => {
     if (!prepared) { live.set(instance, null); return; }
     const damage = instance.damageState;
@@ -1581,13 +1551,13 @@ export function createPortFractures({ device, port, geometry, groundAt, waterAt 
     live.set(instance, drawn.add(instance, prepared, state));
     onFractured?.(instance);
   };
-  const stepsFor = (instance, instanceIndex) => {
+  const stepsFor = (instance) => {
     const source = instance.fractureSource ? instance.fractureSource() : null;
     if (source?.prepared) return (function* () { return source.prepared; })();
-    if (!source && !geometry?.partAssembly) return [][Symbol.iterator]();
+    if (!source?.partAssembly) return [][Symbol.iterator]();
     return prepareBuildingFractureSteps({
-      vertices: source?.vertices ?? geometry.vertices, indices: source?.indices ?? geometry.indices, catalog: source?.partAssembly ?? geometry.partAssembly,
-      instanceIndex: source ? 0 : instanceIndex, instance, materialClass: instance.damageState.materialClass ?? 'masonry', groundAt, waterAt,
+      vertices: source.vertices, indices: source.indices, catalog: source.partAssembly,
+      instanceIndex: 0, instance, materialClass: instance.damageState.materialClass ?? 'masonry', groundAt, waterAt,
     });
   };
   // A first hit waits a few frames in the queue while its building is cut, so nothing stalls a frame.

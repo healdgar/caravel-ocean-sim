@@ -250,6 +250,7 @@ export function createCastleDuelController({
       body.castle-duel-active #share-panel,
       body.castle-duel-active #chart-drawer,
       body.castle-duel-active #spyglass-overlay,
+      body.castle-duel-active #storyteller-says,
       body.castle-duel-active #encounter-notice {
         display: none !important;
       }

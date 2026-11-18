@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// A city's buildings, or a coast's prefabs, as records of the one cut (AGENTS.md rule 3; js/continuum-scene.js). Each
-// building is an instance of its type in the city's atlas (js/city-continuum.js), stood and turned where its plan has
-// it at its type's own baked size (a family's variants are its sizes: js/old-world-buildings.js cityVariant; nothing is
-// stretched), and worn in its own tint by the city's material (js/wgsl/city-continuum.js). The plan is written once;
-// after that only flags change.
+// A city's buildings as records of the one cut (AGENTS.md rule 3; js/continuum-scene.js). Each building is an instance
+// of its type in the city's atlas (js/city-continuum.js), stood and turned where its plan has it at its type's own
+// baked size (a family's variants are its sizes: js/old-world-buildings.js cityVariant; nothing is stretched), and worn
+// in its own tint by the city's material (js/wgsl/city-continuum.js). The plan is written once; after that only flags
+// change.
 import { CITY_TYPED_FLOATS } from './old-world-buildings.js';
 import { loadCityContinuum } from './city-continuum.js';
 import { CONTINUUM_GONE, CONTINUUM_STRUCK, continuumRoom } from './continuum-format.js';
@@ -17,10 +17,10 @@ export function requestCityContinuumAtlas(device, fetchAsset = fetch) {
   return requestContinuumAtlas(device, 'city', () => loadCityContinuum({ fetchAsset }));
 }
 
-// One city, or a coast's prefabs. `typed` and `types` are its plan's (CITY_TYPED_FLOATS a building: x, y, z, yaw and
-// its tint; and its type), written once. `atlas` is the city's (requestCityContinuumAtlas) or a coast's prefab bodies'
-// ({ buffer, types }); `view` the city material's view (js/continuum-scene.js); `grounded` whether each building stands
-// on the land (CONTINUUM_GROUNDED: it is stood on the ground the land draws), or none.
+// One city. `typed` and `types` are its plan's (CITY_TYPED_FLOATS a building: x, y, z, yaw and its tint; and its
+// type), written once. `atlas` is the city's (requestCityContinuumAtlas); `view` the city material's view
+// (js/continuum-scene.js); `grounded` whether each building stands on the land (CONTINUUM_GROUNDED: it is stood on the
+// ground the land draws), or none.
 export function createCityContinuum({ device, atlas, programs, view = null, typed, types, grounded = null, frame, shadowUniform, samples = 4, label = 'city' }) {
   const count = types.length, counts = new Array(atlas.types.length).fill(0);
   for (let i = 0; i < count; i++) counts[types[i]]++;

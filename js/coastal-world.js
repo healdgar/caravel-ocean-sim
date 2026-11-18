@@ -1691,9 +1691,14 @@ export function estimateLocalClimateProfile(latitude = 10.423, longitude = -75.5
   const absLat = Math.abs(lat);
   const latRad = absLat * COASTAL_DEG_TO_RAD;
 
-  // Base sea-level mean temperature and seasonal amplitude
-  const baseMeanTemp = 28.4 - 22.5 * Math.pow(Math.sin(latRad), 1.35);
-  const seasonalAmp = Math.min(16.5, 1.1 + 13.8 * Math.pow(Math.sin(latRad), 1.22));
+  // Base sea-level mean temperature and seasonal amplitude, cooled in winter along mid-latitude eastern continental
+  // margins (the St. Lawrence / Labrador Current coast and Northeast Asia).
+  const eastCoastContinentality =
+    lat >= 36 && ((lon >= -88 && lon <= -50) || (lon >= 115 && lon <= 148))
+      ? coastalSmoothstep(36, 48, lat)
+      : 0;
+  const baseMeanTemp = 28.4 - 22.5 * Math.pow(Math.sin(latRad), 1.35) - 6.8 * eastCoastContinentality;
+  const seasonalAmp = Math.min(18.5, 1.1 + 13.8 * Math.pow(Math.sin(latRad), 1.22) + 5.2 * eastCoastContinentality);
 
   // Regional trade-wind / monsoon / ocean-current moisture & temperature adjustments
   const isCaribbean = lat >= 7 && lat <= 25 && lon >= -92 && lon <= -58;

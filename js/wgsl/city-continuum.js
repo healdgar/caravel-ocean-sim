@@ -63,14 +63,18 @@ fn cityContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   (*v).normal=s.normal*(1.0+s.wear);
 }
 fn cityContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
-  // The far body is shaded flat, each face by its own plane: its faces are the building's own (the bake stood the
-  // wrap on them), its corners' normals rounded over its edges.
+  // Where a far face still stands as one wall (its optical normals agree and align with its plane), keep the wall's
+  // flat plane so houses stay crisp masonry rather than round cylinders; as walls collapse together at coarse steps,
+  // lean smoothly onto the morphed optical normal so coarse bodies never break into flat-shaded facets.
   let across=dpdx(v.world);let down=dpdy(v.world);
   let plane=cross(down,across);
-  let faceted=select(v.normal,normalize(plane)*select(-1.0,1.0,dot(plane,continuumEye()-v.world)>=0.0),dot(plane,plane)>1e-16);
+  let unitN=normalize(v.normal);
+  let faceted=select(unitN,normalize(plane)*select(-1.0,1.0,dot(plane,continuumEye()-v.world)>=0.0),dot(plane,plane)>1e-16);
   var normal=v.normal;var kind=v.kind;
-  if(v.coverage.x==CONTINUUM_FAR_ENTRY){normal=faceted;}
-  else if(v.coverage.x==CONTINUUM_SPLAT_ENTRY){
+  if(v.coverage.x==CONTINUUM_FAR_ENTRY){
+    let agree=dot(faceted,unitN);
+    normal=normalize(mix(unitN,faceted,smoothstep(0.45,0.72,agree)))*length(v.normal);
+  }else if(v.coverage.x==CONTINUUM_SPLAT_ENTRY){
     let roof=v.splat.x>v.splat.y;
     kind=select(v.splatKinds.xy,v.splatKinds.zw,roof);
     normal=select(v.normal,normalize(vec3f(0.0,1.0,0.0)+v.normal*0.6),roof);

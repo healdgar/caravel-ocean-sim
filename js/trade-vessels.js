@@ -4560,7 +4560,7 @@ const TRADE_VESSEL_CONTINUUM_SHADOW = Object.freeze({
   wgsl: () => /* wgsl */`
 fn tradeVesselContinuumShadowVarying(s:ContinuumSurface,v:ptr<function,ContinuumShadowVarying>) {
   (*v).uv=vec2f(0.5);(*v).material=0u;
-  if(s.what!=CONTINUUM_CLUSTER_ENTRY||s.vertex==CONTINUUM_NO_VERTEX){return;}
+  if(s.vertex==CONTINUUM_NO_VERTEX||(shipRiderWord(s.vertex)&SHIP_RIDER_LINE)!=0u){return;}
   let rides=shipRiderVertex(s.vertex);
   (*v).material=u32(max(bitcast<f32>(continuumPointAt(s.model,rides).word),0.0));
   (*v).uv=continuumUV(rides);

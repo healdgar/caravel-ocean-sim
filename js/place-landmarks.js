@@ -69,7 +69,8 @@ export function layPlaceLandmarks({ port, year, region, heightAt, inlandAt, insi
     return f;
   };
   const stand = (name, key, type, T, f) => {
-    const base = seatBlock(f), tone = 0.86 + 0.1 * rr();
+    const front = heightAt(f.x - f.s * (f.d / 2), f.z - f.c * (f.d / 2));
+    const base = seatBlock(f, front), tone = 0.86 + 0.1 * rr();
     pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, T.materialKind === 12 ? 12 : 11, tone, base);
     pushTyped(type, f.x, base.floor, f.z, f.yaw, tone);
     keep(f); occupy(f);

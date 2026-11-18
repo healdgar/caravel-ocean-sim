@@ -199,6 +199,26 @@ fn applyNeuralPbrNormal(n: vec3f, basis: mat2x3f, normalTS: vec2f) -> vec3f {
   return normalize(n + basis[0] * normalTS.x + basis[1] * normalTS.y);
 }
 
+fn neuralPbrFresnel(f0: vec3f, cosine: f32) -> vec3f {
+  let f = 1.0 - clamp(cosine, 0.0, 1.0);
+  let f2 = f * f;
+  return f0 + (1.0 - f0) * f2 * f2 * f;
+}
+
+fn neuralPbrIsoSpecular(n: vec3f, v: vec3f, l: vec3f, rough: f32, f0: vec3f) -> vec3f {
+  let h = (v + l) / max(length(v + l), 0.00001);
+  let nv = clamp(dot(n, v), 0.001, 1.0);
+  let nl = clamp(dot(n, l), 0.0, 1.0);
+  let nh = clamp(dot(n, h), 0.0, 1.0);
+  let vh = clamp(dot(v, h), 0.0, 1.0);
+  let a = rough * rough;
+  let a2 = a * a;
+  let d = a2 / (PI * pow(nh * nh * (a2 - 1.0) + 1.0, 2.0));
+  let k = pow(rough + 1.0, 2.0) / 8.0;
+  let g = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
+  return d * g * neuralPbrFresnel(f0, vh) / (4.0 * nv * max(nl, 0.001));
+}
+
 // Physical Burley/Heitz Anisotropic GGX Specular BRDF.
 // Reduces algebraically bit-for-bit to vesselSpecular when aniso == 0.
 fn neuralPbrAnisoSpecular(
@@ -211,7 +231,7 @@ fn neuralPbrAnisoSpecular(
   f0: vec3f
 ) -> vec3f {
   if (abs(aniso) < 1e-5) {
-    return vesselSpecular(n, v, l, rough, f0);
+    return neuralPbrIsoSpecular(n, v, l, rough, f0);
   }
   let h = (v + l) / max(length(v + l), 0.00001);
   let nv = clamp(dot(n, v), 0.001, 1.0);
@@ -221,7 +241,7 @@ fn neuralPbrAnisoSpecular(
   // Re-orthonormalize tangent frame around perturbed normal n
   var t = basis[0] - n * dot(n, basis[0]);
   if (dot(t, t) < 1e-6) {
-    return vesselSpecular(n, v, l, rough, f0);
+    return neuralPbrIsoSpecular(n, v, l, rough, f0);
   }
   t = normalize(t);
   let b = cross(n, t);
@@ -235,7 +255,7 @@ fn neuralPbrAnisoSpecular(
   let d = 1.0 / (PI * ax * ay * max(denom * denom, 1e-7));
   let k = pow(rough + 1.0, 2.0) / 8.0;
   let g = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
-  return d * g * vesselFresnel(f0, vh) / (4.0 * nv * max(nl, 0.001));
+  return d * g * neuralPbrFresnel(f0, vh) / (4.0 * nv * max(nl, 0.001));
 }
 `;
 }

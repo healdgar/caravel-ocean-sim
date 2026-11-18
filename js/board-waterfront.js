@@ -57,10 +57,26 @@ export function layBoardWaterfront({ place, seat = false, heightAt, inlandAt, in
     return [x, z];
   };
 
-  // The shore nearest the place: down the slope of the distance inland from its middle, as far as its reach.
-  const reach = Math.max(WATERFRONT_REACH_M, 1.2 * (place.radius || 0));
+  // The shore nearest the place: down the slope of the distance inland from its middle, as far as its reach (any
+  // distance for the seat). When a place's centre lies in the water (as Porto's sits on the Douro), rings out from it
+  // find the nearest dry bank first.
+  const reach = seat ? Infinity : Math.max(WATERFRONT_REACH_M, 1.2 * (place.radius || 0));
   let [ax, az] = [place.x, place.z];
-  for (let i = 0; i < 400; i++) {
+  if (inlandAt(ax, az) <= 0) {
+    let bank = null;
+    for (let r = 4; r <= 2000 && !bank; r += 4) {
+      const n = Math.max(8, Math.ceil((2 * Math.PI * r) / 8));
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * 2 * Math.PI, sx = place.x + Math.cos(a) * r, sz = place.z + Math.sin(a) * r;
+        if (!inside(sx, sz, 40) || inlandAt(sx, sz) <= 0 || heightAt(sx, sz) > WATERFRONT_LOW_M) continue;
+        bank = [sx, sz];
+        break;
+      }
+    }
+    if (!bank) return out;
+    [ax, az] = bank;
+  }
+  for (let i = 0; i < 800; i++) {
     const d = inlandAt(ax, az) - WATERFRONT_LINE_M;
     if (d < 0.5) break;
     const w = toWater(ax, az);
@@ -154,7 +170,7 @@ export function layBoardWaterfront({ place, seat = false, heightAt, inlandAt, in
   } else {
     // No shore to lay a quay on: a mole from the water's edge alone.
     const w = toWater(ax, az), [rx, rz] = onLine(ax, az, 0);
-    roots.push({ x: rx, z: rz, nx: -w[0], nz: -w[1], yaw: Math.atan2(-w[0], -w[1]) });
+    if (w) roots.push({ x: rx, z: rz, nx: -w[0], nz: -w[1], yaw: Math.atan2(-w[0], -w[1]) });
   }
   for (const root of roots) {
     let pick = null;

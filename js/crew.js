@@ -1865,9 +1865,44 @@ export function createFortGarrison(port) {
   // `units` is every building's men. `byBuilding` is by name, and two buildings of one plan may share a name.
   const byBuilding = new Map(), units = [];
   const muster = garrisonMuster(port?.watch);
+  const rawUnits = [];
+  let cursor = 0;
   for (const inst of instances) {
-    let unit = createFortificationSoldiersForInstance(inst, soldiers.length);
-    if (muster && !inst.indigenous) unit = unit.filter((s) => { const person = muster(s); return person ? garrisonEnlist(s, person) : false; });
+    const unit = createFortificationSoldiersForInstance(inst, cursor) ?? [];
+    cursor += unit.length;
+    rawUnits.push({ inst, unit });
+  }
+  if (muster) {
+    // Deal the place's roll across all its non-indigenous works in turn so a second castle across the channel (as the
+    // Morro opposite La Punta at Havana) is manned alongside the first instead of standing empty.
+    const managed = rawUnits.filter(({ inst, unit }) => !inst.indigenous && unit.length > 0).map((entry) => ({ ...entry, kept: [], next: 0 }));
+    if (port?.watch?.captain) {
+      for (const m of managed) {
+        const idx = m.unit.findIndex(isCaptainActor);
+        if (idx >= 0) {
+          const person = muster(m.unit[idx]);
+          if (person) { m.kept[idx] = garrisonEnlist(m.unit[idx], person); break; }
+        }
+      }
+    }
+    let progressed = true;
+    while (progressed) {
+      progressed = false;
+      for (const m of managed) {
+        while (m.next < m.unit.length && m.kept[m.next]) m.next++;
+        if (m.next >= m.unit.length) continue;
+        const person = muster(m.unit[m.next]);
+        if (!person) { progressed = false; break; }
+        m.kept[m.next] = garrisonEnlist(m.unit[m.next], person);
+        m.next++;
+        progressed = true;
+      }
+    }
+    for (const m of managed) m.entryUnit = m.kept.filter(Boolean);
+    const byInst = new Map(managed.map((m) => [m.inst, m.entryUnit]));
+    for (const r of rawUnits) if (!r.inst.indigenous) r.unit = byInst.get(r.inst) ?? [];
+  }
+  for (const { inst, unit } of rawUnits) {
     if (!unit?.length) continue;
     for (const s of unit) {
       const relPos = [s.position[0] - origin[0], s.position[1] - origin[1], s.position[2] - origin[2]];

@@ -1302,14 +1302,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // A save names the city's struck buildings; they are stood first, so that their records find them.
     if(targets&&damageStore)targets.revive(damageStore.recorded(port));
     damageStore?.restore(port);
-    return createPortFractures({device,port,geometry:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,continuum:fractureContinuum,grounded:fractureGrounded,
+    return createPortFractures({device,port,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,continuum:fractureContinuum,grounded:fractureGrounded,
       onStruck:portBuildingHit,onFractured:portBuildingStruck,onRebuilt:portBuildingRebuilt});
   };
   let portFractures=portFracturesFor(proceduralPack?.port,cityTargets);
   let transientBoulderPort=null;
   const ensureBoulderFracturePort=()=>{
     const targetPort=proceduralPack?(proceduralPack.port??=(transientBoulderPort={regionId:activeRegion.id??'coast',name:activeRegion.name??'Coast',instances:[],transient:true})):(transientBoulderPort??={regionId:activeRegion.id??'saba',name:activeRegion.name??'Saba',instances:[],transient:true});
-    portFractures??=createPortFractures({device,port:targetPort,geometry:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,continuum:fractureContinuum,grounded:fractureGrounded,
+    portFractures??=createPortFractures({device,port:targetPort,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,continuum:fractureContinuum,grounded:fractureGrounded,
       onStruck:portBuildingHit,onFractured:portBuildingStruck,onRebuilt:portBuildingRebuilt});
     return targetPort;
   };
