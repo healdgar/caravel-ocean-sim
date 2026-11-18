@@ -2,17 +2,15 @@
 // GPU pasture herds, 1550 mounted riders & road caravans manager: uploads static herd, caravan,
 // and street-mount seeds once per coast/update, dispatches closed-form GPU pasture, caravan hitch,
 // street-mount, stampede & casualty compute, and draws all 7 species (sheep, cattle, swine,
-// Lusitano horses + sela à gineta tack, covered wain, coach, cargo ox-cart) plus progressive
-// half-edge collapse continuum and Rule-3 1-triangle horizon splats via indirect instancing.
+// Lusitano horses + sela à gineta tack, covered wain, coach, cargo ox-cart) through the one animal
+// continuum (js/animal-continuum-draw.js): the step writes each one's place, the shared cut chooses its
+// clusters, far body or splat, and one pipeline poses and shades whatever it chose.
 import { requestOnce } from './gpu-program-cache.js';
-import { continuumCoarsening } from './continuum-core.js';
-import { getLivestockMeshes, getVehicleMeshes, LIVESTOCK_VERTEX_FLOATS, loadLivestockMeshes } from './models/livestock-meshes.js';
+import { createAnimalContinuumSet, requestAnimalContinuumAtlas, requestAnimalContinuumPipelines } from './animal-continuum-draw.js';
+import { ANIMAL_CONTINUUM_ENTRY_LAYOUT } from './wgsl/animal-continuum.js';
 import { ROUTE_STEP_M, WALKER_WORDS } from './town-streets.js';
 import {
-  HERD_BODY_FLOATS,
-  HERD_BUCKETS,
-  HERD_DRAW_WORDS,
-  HERD_FADE_BUCKET,
+  HERD_CONTINUUM_BINDING,
   HERD_FATE_FLOATS,
   HERD_ROUTE_HEADER,
   HERD_SEED_FLOATS,
@@ -20,10 +18,8 @@ import {
   HERD_SHOT_LIMIT,
   HERD_SHOTS_WORDS,
   HERD_SPECIES,
-  HERD_SPLAT_BUCKET,
   HERD_STAMPEDE_RADIUS_M,
   HERDS_RENDER_WGSL,
-  HERDS_RESET_WGSL,
   HERDS_SHADOW_WGSL,
   HERDS_STEP_WGSL,
 } from './wgsl/herds.js';
@@ -37,19 +33,6 @@ export function getLivestockHerdsForDevice(device) {
   return device ? ACTIVE_HERDS_BY_DEVICE.get(device) ?? null : null;
 }
 
-const HERDS_VERTEX_LAYOUT = [{
-  arrayStride: LIVESTOCK_VERTEX_FLOATS * 4,
-  attributes: [
-    { shaderLocation: 0, offset: 0, format: 'float32x3' },
-    { shaderLocation: 1, offset: 12, format: 'float32x3' },
-    { shaderLocation: 2, offset: 24, format: 'float32x2' },
-  ],
-}];
-
-const HERD_BODY_BYTES = HERD_BODY_FLOATS * 4;
-const HERD_ALIGN_BODIES = 16;
-// Max downward neck-and-head grazing rotation (radians) per species: sheep, cattle, swine, horse, wain, coach, ox-cart.
-const HERD_GRAZE_PITCH = [0.52, 0.44, 0.28, 0.40, 0, 0, 0];
 const CARAVAN_CART_GAP_M = 15, CARAVAN_YOKE_SPREAD_M = 0.62, CARAVAN_DROVE_MOST = 16;
 const CARAVAN_DROVE_SPECIES = Object.freeze({ sheep: 0, cattle: 1, swine: 2, horses: 3 });
 const CARAVAN_COACH_GOODS = new Set([
@@ -69,132 +52,6 @@ const caravanHash = (a, b) => {
   h ^= h >>> 12;
   return (h >>> 0) / 4294967296;
 };
-
-// Build per-vertex GPU progressive continuum & rigid-shard storage buffer (`2 * vec4f` = 8 floats/vertex):
-//   vec4f 0: (parentPos.x, parentPos.y, parentPos.z, parentIdx)
-//   vec4f 1: (collapseStart, collapseSpan, parentPart, bitcast((shardId << 24) | packedParentNormal24))
-export function buildLivestockMorphBuffer(sp, isVehicle = false) {
-  const verts = sp.vertices;
-  const words = sp.morphWords;
-  const vc = Math.floor(verts.length / 8);
-  const shardIds = new Uint8Array(Math.max(1, vc));
-
-  if (isVehicle && sp.indices?.length) {
-    const parent = new Int32Array(vc);
-    for (let i = 0; i < vc; i++) parent[i] = i;
-    const find = (x) => {
-      while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
-      return x;
-    };
-    const union = (a, b) => {
-      const ra = find(a), rb = find(b);
-      if (ra !== rb) parent[rb] = ra;
-    };
-    const posMap = new Map();
-    for (let i = 0; i < vc; i++) {
-      const o = i * 8;
-      const key = `${Math.round(verts[o] * 200)},${Math.round(verts[o + 1] * 200)},${Math.round(verts[o + 2] * 200)},${Math.round(verts[o + 6] * 10)}`;
-      const prev = posMap.get(key);
-      if (prev !== undefined) union(i, prev);
-      else posMap.set(key, i);
-    }
-    for (let t = 0; t + 2 < sp.indices.length; t += 3) {
-      union(sp.indices[t], sp.indices[t + 1]);
-      union(sp.indices[t], sp.indices[t + 2]);
-    }
-    const midAxleZ = 0.5 * ((sp.frontZ ?? 0) + (sp.backZ ?? 0));
-    const compStats = new Map();
-    for (let i = 0; i < vc; i++) {
-      const r = find(i), o = i * 8;
-      let st = compStats.get(r);
-      if (!st) { st = { sx: 0, sy: 0, sz: 0, n: 0, part: verts[o + 6] }; compStats.set(r, st); }
-      st.sx += verts[o]; st.sy += verts[o + 1]; st.sz += verts[o + 2]; st.n++;
-    }
-    let bodySerial = 0;
-    for (const st of compStats.values()) {
-      const cx = st.sx / st.n, cy = st.sy / st.n, cz = st.sz / st.n;
-      const pInt = Math.round(st.part);
-      if (pInt === 7) {
-        st.shard = (cx >= 0 ? 1 : 0) | (cz > midAxleZ ? 2 : 0);
-      } else if (pInt === 8) {
-        st.shard = 4;
-      } else {
-        const oct = (cx >= 0 ? 1 : 0) | (cz >= 0 ? 2 : 0) | (cy >= 1.25 ? 4 : 0);
-        st.shard = 8 + oct + ((bodySerial++ % 3) * 8);
-      }
-    }
-    for (let i = 0; i < vc; i++) shardIds[i] = compStats.get(find(i)).shard & 0xff;
-  }
-
-  const raw = new ArrayBuffer(Math.max(1, vc) * 32);
-  const f32 = new Float32Array(raw);
-  const u32 = new Uint32Array(raw);
-  for (let i = 0; i < vc; i++) {
-    const w0 = words?.[i * 2] ?? ((i & 0xffff) | (0xffff << 16));
-    const w1 = words?.[i * 2 + 1] ?? (0x1eb8 | ((i & 0xffff) << 16));
-    const pIdx = Math.min(Math.max(0, vc - 1), w0 & 0xffff);
-    const start = ((w0 >>> 16) & 0xffff) / 65535;
-    const span = Math.max(1e-4, (w1 & 0xffff) / 65535);
-    const po = pIdx * 8, mo = i * 8;
-    f32[mo] = verts[po] ?? 0;
-    f32[mo + 1] = verts[po + 1] ?? 0;
-    f32[mo + 2] = verts[po + 2] ?? 0;
-    f32[mo + 3] = pIdx;
-    f32[mo + 4] = start;
-    f32[mo + 5] = span;
-    f32[mo + 6] = verts[po + 6] ?? 0;
-    const nx = Math.max(-127, Math.min(127, Math.round((verts[po + 3] ?? 0) * 127))) & 0xff;
-    const ny = Math.max(-127, Math.min(127, Math.round((verts[po + 4] ?? 1) * 127))) & 0xff;
-    const nz = Math.max(-127, Math.min(127, Math.round((verts[po + 5] ?? 0) * 127))) & 0xff;
-    u32[mo + 7] = (nx | (ny << 8) | (nz << 16) | ((shardIds[i] & 0xff) << 24)) >>> 0;
-  }
-  return f32;
-}
-
-// Pure CPU mirror of `morphLivestockVertex` in WGSL for unit verification of progressive collapse.
-export function evaluateLivestockMorph(sp, morphLevel, morphBuf = null) {
-  const m = morphBuf ?? buildLivestockMorphBuffer(sp, false);
-  const verts = sp.vertices;
-  const vc = Math.floor(verts.length / 8);
-  const positions = new Float32Array(vc * 3);
-  const collapsedTo = new Uint32Array(vc);
-  for (let i = 0; i < vc; i++) {
-    let x = verts[i * 8], y = verts[i * 8 + 1], z = verts[i * 8 + 2];
-    let cur = i;
-    if (morphLevel > 0.001) {
-      for (let step = 0; step < 9; step++) {
-        const mo = cur * 8;
-        const pIdx = Math.round(m[mo + 3]);
-        const start = m[mo + 4];
-        const span = Math.max(1e-4, m[mo + 5]);
-        if (pIdx === cur || morphLevel <= start) break;
-        const t = Math.max(0, Math.min(1, (morphLevel - start) / span));
-        x += (m[mo] - x) * t;
-        y += (m[mo + 1] - y) * t;
-        z += (m[mo + 2] - z) * t;
-        if (t >= 0.999) cur = pIdx;
-        else break;
-      }
-    }
-    positions[i * 3] = x;
-    positions[i * 3 + 1] = y;
-    positions[i * 3 + 2] = z;
-    collapsedTo[i] = cur;
-  }
-  let activeTriangles = 0;
-  for (let t = 0; t + 2 < sp.indices.length; t += 3) {
-    const ia = sp.indices[t], ib = sp.indices[t + 1], ic = sp.indices[t + 2];
-    if (collapsedTo[ia] === collapsedTo[ib] || collapsedTo[ib] === collapsedTo[ic] || collapsedTo[ia] === collapsedTo[ic]) continue;
-    const ax = positions[ia * 3], ay = positions[ia * 3 + 1], az = positions[ia * 3 + 2];
-    const bx = positions[ib * 3], by = positions[ib * 3 + 1], bz = positions[ib * 3 + 2];
-    const cx = positions[ic * 3], cy = positions[ic * 3 + 1], cz = positions[ic * 3 + 2];
-    const ux = bx - ax, uy = by - ay, uz = bz - az;
-    const vx = cx - ax, vy = cy - ay, vz = cz - az;
-    const area2 = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
-    if (area2 > 1e-7) activeTriangles++;
-  }
-  return { positions, collapsedTo, activeTriangles };
-}
 
 export function bridgeDeckYAt(wx, wz, bridges) {
   if (!bridges || !bridges.length) return 0;
@@ -859,46 +716,29 @@ export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to,
   return best;
 }
 
+// The herds' programs: the step that places every beast, the view's one pipeline over the continuum's four lists,
+// and the land shadow map's over its fifth.
 export function requestHerdsPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
-  return requestOnce(device, `livestock herds v5 ${format} ${samples}`, async () => {
-    const [renderMod, shadowMod, stepMod, resetMod] = await Promise.all([
+  return requestOnce(device, `livestock herds continuum ${format} ${samples}`, async () => {
+    const [renderMod, shadowMod, stepMod] = await Promise.all([
       shader(HERDS_RENDER_WGSL, 'livestock herds'),
       shader(HERDS_SHADOW_WGSL, 'livestock herds shadow'),
       shader(HERDS_STEP_WGSL, 'livestock herds step'),
-      shader(HERDS_RESET_WGSL, 'livestock herds reset'),
     ]);
-    return Promise.all([
+    const [view, shadow, step] = await Promise.all([
       device.createRenderPipelineAsync({
-        label: 'livestock herds solid',
+        label: 'livestock herds',
         layout: 'auto',
-        vertex: { module: renderMod, entryPoint: 'herdsVS', buffers: HERDS_VERTEX_LAYOUT },
-        fragment: { module: renderMod, entryPoint: 'herdsSolidFS', targets: [{ format }] },
+        vertex: { module: renderMod, entryPoint: 'herdContinuumVS', buffers: ANIMAL_CONTINUUM_ENTRY_LAYOUT },
+        fragment: { module: renderMod, entryPoint: 'herdContinuumFS', targets: [{ format }] },
         primitive: { topology: 'triangle-list', cullMode: 'back' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-        multisample: { count: samples },
-      }),
-      device.createRenderPipelineAsync({
-        label: 'livestock herds fade',
-        layout: 'auto',
-        vertex: { module: renderMod, entryPoint: 'herdsVS', buffers: HERDS_VERTEX_LAYOUT },
-        fragment: { module: renderMod, entryPoint: 'herdsFadeFS', targets: [{ format }] },
-        primitive: { topology: 'triangle-list', cullMode: 'back' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-        multisample: { count: samples },
-      }),
-      device.createRenderPipelineAsync({
-        label: 'livestock herds splat',
-        layout: 'auto',
-        vertex: { module: renderMod, entryPoint: 'herdsSplatVS' },
-        fragment: { module: renderMod, entryPoint: 'herdsSplatFS', targets: [{ format }] },
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
         depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
         multisample: { count: samples },
       }),
       device.createRenderPipelineAsync({
         label: 'livestock herds shadow',
         layout: 'auto',
-        vertex: { module: shadowMod, entryPoint: 'herdsShadowVS', buffers: HERDS_VERTEX_LAYOUT },
+        vertex: { module: shadowMod, entryPoint: 'animalContinuumShadowVS', buffers: ANIMAL_CONTINUUM_ENTRY_LAYOUT },
         primitive: { topology: 'triangle-list', cullMode: 'none' },
         depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
       }),
@@ -907,12 +747,8 @@ export function requestHerdsPipelines({ device, shader, format = 'rgba16float', 
         layout: 'auto',
         compute: { module: stepMod, entryPoint: 'main' },
       }),
-      device.createComputePipelineAsync({
-        label: 'livestock herds reset',
-        layout: 'auto',
-        compute: { module: resetMod, entryPoint: 'main' },
-      }),
     ]);
+    return { view, shadow, step };
   });
 }
 
@@ -938,27 +774,12 @@ export async function createLivestockHerds({
     if (data.byteLength) device.queue.writeBuffer(buf, 0, data);
     return buf;
   };
-  const [solidPipeline, fadePipeline, splatPipeline, shadowPipeline, stepPipeline, resetPipeline] = await Promise.all([
+  const [pipelines, atlas, cut] = await Promise.all([
     requestHerdsPipelines({ device, shader, format, samples }),
-    loadLivestockMeshes(),
-  ]).then(([pipes]) => pipes);
-  const solidCloudGroup = clouds.bindVolume(solidPipeline);
-  const fadeCloudGroup = clouds.bindVolume(fadePipeline);
-  const splatCloudGroup = clouds.bindVolume(splatPipeline);
-  const speciesMeshes = [...getLivestockMeshes(), ...getVehicleMeshes()].map((sp, idx) => {
-    const rigData = new Float32Array([
-      sp.neckPivot[0], sp.neckPivot[1], sp.neckPivot[2], HERD_GRAZE_PITCH[idx] ?? 0.65,
-      sp.legY, sp.frontZ, sp.backZ, sp.height,
-    ]);
-    const morphData = buildLivestockMorphBuffer(sp, idx >= 4);
-    return {
-      indexCount: sp.indexCount,
-      vertex: mkBuf(`livestock ${sp.name} vertices`, sp.vertices, B.VERTEX),
-      index: mkBuf(`livestock ${sp.name} indices`, sp.indices, B.INDEX),
-      rig: mkBuf(`livestock ${sp.name} rig`, rigData, B.UNIFORM),
-      morph: mkBuf(`livestock ${sp.name} morph`, morphData, B.STORAGE),
-    };
-  });
+    requestAnimalContinuumAtlas(device),
+    requestAnimalContinuumPipelines({ device, shader }),
+  ]);
+  const cloudGroup = clouds.bindVolume(pipelines.view);
 
   const shotsBytes = new ArrayBuffer(HERD_SHOTS_WORDS * 4);
   const shotsU32 = new Uint32Array(shotsBytes);
@@ -970,7 +791,7 @@ export async function createLivestockHerds({
   let shotsSentLastFrame = 0;
   let simClockSec = 0;
 
-  const wantedBindings = new Set([0, 1, 2, 3, 4, 12, 19, 20, 21]);
+  const wantedBindings = new Set([0, 1, 2, 3, 4, 19, 20, 21]);
   let activeResources = resources;
   let state = null;
   let pastureHerds = initialHerds;
@@ -978,9 +799,8 @@ export async function createLivestockHerds({
   let lastCaravans = null;
   let travellers = { routes: new Float32Array([0, 1, 0, 0]), seeds: new Float32Array(0) };
   let streetMounts = { routes: new Float32Array(0), seeds: new Float32Array(0), count: 0 };
-  // HerdConfig: count, bucketSpan, boardDay, daysPerSecond, then the scene's coarsening (continuumCoarsening).
-  const clock = new ArrayBuffer(32), clockU = new Uint32Array(clock), clockF = new Float32Array(clock);
-  clockF[4] = continuumCoarsening();
+  // HerdConfig: count, a spare word, boardDay, daysPerSecond.
+  const clock = new ArrayBuffer(16), clockU = new Uint32Array(clock), clockF = new Float32Array(clock);
 
   function releaseState(immediate = false) {
     if (!state) return;
@@ -989,9 +809,8 @@ export async function createLivestockHerds({
     const drop = () => {
       old.seeds.destroy();
       old.routes.destroy();
-      old.bodies.destroy();
-      old.draws.destroy();
       old.cfg.destroy();
+      old.animals.destroy();
     };
     if (!immediate && typeof device.queue?.onSubmittedWorkDone === 'function') {
       device.queue.onSubmittedWorkDone().then(drop).catch(() => {});
@@ -1002,51 +821,16 @@ export async function createLivestockHerds({
 
   function rebuildGroups() {
     if (!state) return;
-    const baseEntries = activeResources.filter(([id]) => wantedBindings.has(id));
-    const slice = (bucket) => ({
-      buffer: state.bodies,
-      offset: bucket * state.bucketSpan * HERD_BODY_BYTES,
-      size: state.bucketSpan * HERD_BODY_BYTES,
+    const baseEntries = activeResources.filter(([id]) => wantedBindings.has(id)).map(([binding, resource]) => ({ binding, resource }));
+    state.viewGroup = device.createBindGroup({
+      label: 'livestock herds',
+      layout: pipelines.view.getBindGroupLayout(0),
+      entries: [...baseEntries, ...state.animals.entries(HERD_CONTINUUM_BINDING)],
     });
-    state.solidGroups = speciesMeshes.map((sp, m) => (state.activeSpeciesMask & (1 << m)) === 0 ? null : device.createBindGroup({
-      label: `livestock solid ${m}`,
-      layout: solidPipeline.getBindGroupLayout(0),
-      entries: [
-        ...baseEntries,
-        [16, slice(m)],
-        [17, { buffer: sp.rig }],
-        [18, { buffer: sp.morph }],
-      ].map(([binding, resource]) => ({ binding, resource })),
-    }));
-    state.fadeGroups = speciesMeshes.map((sp, m) => (state.activeSpeciesMask & (1 << m)) === 0 ? null : device.createBindGroup({
-      label: `livestock fade ${m}`,
-      layout: fadePipeline.getBindGroupLayout(0),
-      entries: [
-        ...baseEntries,
-        [16, slice(HERD_FADE_BUCKET + m)],
-        [17, { buffer: sp.rig }],
-        [18, { buffer: sp.morph }],
-      ].map(([binding, resource]) => ({ binding, resource })),
-    }));
-    state.splatGroup = device.createBindGroup({
-      label: 'livestock splat render',
-      layout: splatPipeline.getBindGroupLayout(0),
-      entries: [
-        ...baseEntries,
-        [16, slice(HERD_SPLAT_BUCKET)],
-      ].map(([binding, resource]) => ({ binding, resource })),
-    });
-    state.shadowGroups = speciesMeshes.map((sp, m) => (state.activeSpeciesMask & (1 << m)) === 0 ? null : device.createBindGroup({
-      label: `livestock shadow ${m}`,
-      layout: shadowPipeline.getBindGroupLayout(0),
-      entries: [
-        [0, { buffer: landShadowUniform }],
-        [1, { buffer: nearDomain }],
-        [2, slice(m + HERD_SPECIES)],
-        [3, { buffer: sp.rig }],
-        [4, { buffer: sp.morph }],
-      ].map(([binding, resource]) => ({ binding, resource })),
-    }));
+    state.shadowGroups = [
+      device.createBindGroup({ label: 'livestock shadow frame', layout: pipelines.shadow.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: landShadowUniform } }] }),
+      device.createBindGroup({ label: 'livestock shadow continuum', layout: pipelines.shadow.getBindGroupLayout(1), entries: state.animals.entries(0) }),
+    ];
   }
 
   function resetFatesRange(startIdx = 0, endIdx = MAX_HERDS) {
@@ -1131,43 +915,17 @@ export async function createLivestockHerds({
       }
     }
 
-    let activeSpeciesMask = 0;
-    for (let i = 0; i < count; i++) {
-      const sp = Math.min(HERD_SPECIES - 1, Math.max(0, Math.round(sliceData[i * HERD_SEED_FLOATS + 6] || 0)));
-      activeSpeciesMask |= (1 << sp);
-    }
-
-    const bucketSpan = Math.ceil(count / HERD_ALIGN_BODIES) * HERD_ALIGN_BODIES;
-
-    const drawTemplate = new Uint32Array(HERD_BUCKETS * HERD_DRAW_WORDS);
-    for (let m = 0; m < HERD_SPECIES; m++) {
-      drawTemplate[m * HERD_DRAW_WORDS] = speciesMeshes[m].indexCount;
-      drawTemplate[(m + HERD_SPECIES) * HERD_DRAW_WORDS] = speciesMeshes[m].indexCount;
-      drawTemplate[(m + HERD_FADE_BUCKET) * HERD_DRAW_WORDS] = speciesMeshes[m].indexCount;
-    }
-    // 1-triangle view-facing horizon splat (`drawIndirect`: 3 vertices per distant instance).
-    drawTemplate[HERD_SPLAT_BUCKET * HERD_DRAW_WORDS] = 3;
-
     const seeds = mkBuf('livestock seeds', sliceData, B.STORAGE);
     const routes = mkBuf('caravan routes', combinedRoutes, B.STORAGE);
-    const bodies = device.createBuffer({
-      label: 'livestock bodies',
-      size: HERD_BUCKETS * bucketSpan * HERD_BODY_BYTES,
-      usage: B.STORAGE,
-    });
-    const draws = mkBuf('livestock indirect draws', drawTemplate, B.STORAGE | B.INDIRECT | B.COPY_SRC);
-    clockU[0] = count; clockU[1] = bucketSpan;
+    clockU[0] = count;
     const cfg = mkBuf('livestock config', clock, B.UNIFORM);
-
-    const resetGroup = device.createBindGroup({
-      label: 'livestock reset',
-      layout: resetPipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: draws } }],
-    });
+    // Every beast's place, which the step writes and the continuum's cut reads.
+    const animals = createAnimalContinuumSet({ device, atlas, pipelines: cut, frame: frameUBO, shadowUniform: landShadowUniform, capacity: count, samples, label: 'livestock' });
+    animals.setCount(count);
 
     const stepGroup = device.createBindGroup({
       label: 'livestock step',
-      layout: stepPipeline.getBindGroupLayout(0),
+      layout: pipelines.step.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: frameUBO } },
         { binding: 1, resource: { buffer: landUniform } },
@@ -1175,9 +933,7 @@ export async function createLivestockHerds({
         { binding: 3, resource: elevation.createView() },
         { binding: 4, resource: { buffer: cfg } },
         { binding: 5, resource: { buffer: seeds } },
-        { binding: 6, resource: { buffer: bodies } },
-        { binding: 7, resource: { buffer: draws } },
-        { binding: 8, resource: { buffer: landShadowUniform } },
+        { binding: 6, resource: { buffer: animals.places } },
         { binding: 9, resource: { buffer: routes } },
         { binding: 10, resource: { buffer: shotsBuf } },
         { binding: 11, resource: { buffer: fatesBuf } },
@@ -1189,21 +945,14 @@ export async function createLivestockHerds({
       pastureCount,
       caravanCount,
       mountCount,
-      activeSpeciesMask,
-      bucketSpan,
       seeds,
       routes,
-      bodies,
-      draws,
       cfg,
-      drawTemplate,
+      animals,
       cpuSeeds: sliceData,
       cpuRoutes: combinedRoutes,
-      resetGroup,
       stepGroup,
-      solidGroups: [],
-      fadeGroups: [],
-      splatGroup: null,
+      viewGroup: null,
       shadowGroups: [],
     };
     rebuildGroups();
@@ -1267,7 +1016,6 @@ export async function createLivestockHerds({
     get streetMounts() { return streetMounts.count ?? 0; },
     get activeCaravans() { return lastCaravans?.list ?? []; },
     get caravanOrigin() { return lastCaravans?.origin ?? null; },
-    get activeSpeciesMask() { return state?.activeSpeciesMask ?? 0; },
     get fates() { return cpuFates; },
     setHerds,
     setCaravans,
@@ -1288,17 +1036,8 @@ export async function createLivestockHerds({
     encode(pass, timeSeconds = null) {
       if (Number.isFinite(timeSeconds)) simClockSec = timeSeconds;
       if (!state) return;
-      pass.setPipeline(resetPipeline);
-      pass.setBindGroup(0, state.resetGroup);
-      pass.dispatchWorkgroups(1);
       if (travellers.seeds.length || streetMounts.seeds.length) {
         device.queue.writeBuffer(state.cfg, 8, clock, 8, 8);
-      }
-      // The scene's one pixel-error scalar, read each frame as every family's cut reads it (AGENTS.md rule 3, item 5).
-      const coarsening = Math.fround(continuumCoarsening());
-      if (coarsening !== clockF[4]) {
-        clockF[4] = coarsening;
-        device.queue.writeBuffer(state.cfg, 16, clock, 16, 4);
       }
       const pendingCount = Math.min(HERD_SHOT_LIMIT, shotFlights.size);
       if (pendingCount > 0 || shotsSentLastFrame > 0) {
@@ -1322,71 +1061,37 @@ export async function createLivestockHerds({
         device.queue.writeBuffer(shotsBuf, 0, shotsU32, 0, 4 + pendingCount * HERD_SHOT_FLOATS);
         shotsSentLastFrame = pendingCount;
       }
-      pass.setPipeline(stepPipeline);
+      // Every beast placed, then every beast cut: the cut reads the places the step has just written.
+      pass.setPipeline(pipelines.step);
       pass.setBindGroup(0, state.stepGroup);
       pass.dispatchWorkgroups(Math.ceil(state.count / 64));
+      state.animals.encode(pass);
     },
+    // The continuum's four lists, one pipeline.
     draw(pass) {
-      if (!state || !state.activeSpeciesMask) return;
-      pass.setPipeline(solidPipeline);
-      pass.setBindGroup(1, solidCloudGroup);
-      for (let m = 0; m < HERD_SPECIES; m++) {
-        if ((state.activeSpeciesMask & (1 << m)) === 0) continue;
-        pass.setBindGroup(0, state.solidGroups[m]);
-        pass.setVertexBuffer(0, speciesMeshes[m].vertex);
-        pass.setIndexBuffer(speciesMeshes[m].index, 'uint32');
-        pass.drawIndexedIndirect(state.draws, m * HERD_DRAW_WORDS * 4);
-      }
-      pass.setPipeline(fadePipeline);
-      pass.setBindGroup(1, fadeCloudGroup);
-      for (let m = 0; m < HERD_SPECIES; m++) {
-        if ((state.activeSpeciesMask & (1 << m)) === 0) continue;
-        pass.setBindGroup(0, state.fadeGroups[m]);
-        pass.setVertexBuffer(0, speciesMeshes[m].vertex);
-        pass.setIndexBuffer(speciesMeshes[m].index, 'uint32');
-        pass.drawIndexedIndirect(state.draws, (HERD_FADE_BUCKET + m) * HERD_DRAW_WORDS * 4);
-      }
-      if (state.splatGroup) {
-        pass.setPipeline(splatPipeline);
-        pass.setBindGroup(1, splatCloudGroup);
-        pass.setBindGroup(0, state.splatGroup);
-        pass.drawIndirect(state.draws, HERD_SPLAT_BUCKET * HERD_DRAW_WORDS * 4);
-      }
+      if (!state) return;
+      pass.setPipeline(pipelines.view);
+      pass.setBindGroup(0, state.viewGroup);
+      pass.setBindGroup(1, cloudGroup);
+      state.animals.drawView(pass);
     },
-    // The main pass's indirect draws for the continuum census (js/continuum-census.js): the solid and fade
-    // meshes (drawIndexedIndirect, 5 words) and the horizon splats (drawIndirect, read as 4 words). The shadow
-    // buckets between them are not main-pass draws.
-    continuumDraws() {
-      if (!state || !state.activeSpeciesMask) return [];
-      const record = HERD_DRAW_WORDS * 4;
-      return [
-        { buffer: state.draws, offset: 0, records: HERD_SPECIES, stride: HERD_DRAW_WORDS },
-        { buffer: state.draws, offset: HERD_SPLAT_BUCKET * record, records: 1, stride: 4 },
-        { buffer: state.draws, offset: HERD_FADE_BUCKET * record, records: HERD_SPECIES, stride: HERD_DRAW_WORDS },
-      ];
-    },
+    // The main pass's indirect draws for the continuum census (js/continuum-census.js).
+    continuumDraws() { return state ? state.animals.continuumDraws() : []; },
+    // The beasts' continuum set (js/animal-continuum-draw.js): their places and the lists the cut fills.
+    get animals() { return state?.animals ?? null; },
+    // The beasts' far bodies at the steps the cut chose for the land's shadow map.
     drawShadow(pass) {
-      if (!state || !state.activeSpeciesMask) return;
-      pass.setPipeline(shadowPipeline);
-      for (let m = 0; m < HERD_SPECIES; m++) {
-        if ((state.activeSpeciesMask & (1 << m)) === 0) continue;
-        pass.setBindGroup(0, state.shadowGroups[m]);
-        pass.setVertexBuffer(0, speciesMeshes[m].vertex);
-        pass.setIndexBuffer(speciesMeshes[m].index, 'uint32');
-        pass.drawIndexedIndirect(state.draws, (m + HERD_SPECIES) * HERD_DRAW_WORDS * 4);
-      }
+      if (!state) return;
+      pass.setPipeline(pipelines.shadow);
+      pass.setBindGroup(0, state.shadowGroups[0]);
+      pass.setBindGroup(1, state.shadowGroups[1]);
+      state.animals.drawShadow(pass);
     },
     destroy() {
       ACTIVE_HERDS_BY_DEVICE.delete(device);
       releaseState(true);
       shotsBuf.destroy();
       fatesBuf.destroy();
-      for (const sp of speciesMeshes) {
-        sp.vertex.destroy();
-        sp.index.destroy();
-        sp.rig.destroy();
-        sp.morph.destroy();
-      }
     },
   };
   if (device && typeof device === 'object') {

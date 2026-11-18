@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Verification of Tripo H3.1 4K livestock progressive half-edge collapse continuum (`morphWords` + `RGB555` coats),
-// crack-free seam welding, 1550 Lusitano `sela à gineta` saddle & tack contour fit, 0.00 m horse-rider saddle contact
-// & sloped-street ground lock, TBDR Early-Z `herdsSolidFS`, active-species draw skipping, and GPU draw-reset passes.
+// Verification of the Tripo H3.1 4K livestock bodies baked into the one animal continuum (`RGB555` coats, crack-free
+// seam welding, the atlas's receipt), 1550 Lusitano `sela à gineta` saddle & tack contour fit, 0.00 m horse-rider
+// saddle contact & sloped-street ground lock, and the herds drawn only through the continuum's cut and indirect lists.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -12,25 +12,21 @@ import { townWalkerStride } from '../js/audio.js';
 import { getLivestockMeshes, getVehicleMeshes } from '../js/models/livestock-meshes.js';
 import {
   STREET_MOUNT_FLAG,
-  buildLivestockMorphBuffer,
   buildStreetMountSeeds,
   caravanHerdSeeds,
   caravanRiderWaySeeds,
   createLivestockHerds,
   evaluateHerdStateAt,
-  evaluateLivestockMorph,
   sweepHerdHit,
 } from '../js/herds.js';
 import {
-  HERD_BODY_FLOATS,
-  HERD_BUCKETS,
-  HERD_FADE_BUCKET,
+  HERD_CONTINUUM_BINDING,
   HERD_FATE_FLOATS,
   HERDS_RENDER_WGSL,
-  HERDS_RESET_WGSL,
   HERDS_SHADOW_WGSL,
   HERDS_STEP_WGSL,
 } from '../js/wgsl/herds.js';
+import { animalContinuumSelectWGSL } from '../js/wgsl/animal-continuum.js';
 import {
   CLIP_RIDE,
   HORSE_BARREL_MAX_RX,
@@ -97,29 +93,20 @@ function countBodyBoundaryEdges(sp, positions) {
   return { boundary, uniqueEdges: edgeCounts.size, totalEdges };
 }
 
-test('Tripo H3.1 4K livestock continuum packs RGB555 coats, crack-free manifolds, <= 8 storage buffers, and TBDR Early-Z herdsSolidFS', () => {
-  assert.equal(HERD_BODY_FLOATS, 16, 'HerdBody is 4x vec4f (64 bytes)');
-  assert.equal(HERD_FADE_BUCKET, 15);
-  assert.equal(HERD_BUCKETS, 22);
-  assert.doesNotMatch(HERDS_STEP_WGSL, /\bdiscard\b/);
-  assert.doesNotMatch(HERDS_RENDER_WGSL, /\bdiscard\b/);
-  assert.doesNotMatch(HERDS_SHADOW_WGSL, /\bdiscard\b/);
-  assert.doesNotMatch(HERDS_RESET_WGSL, /\bdiscard\b/);
-  assert.ok(countStorageBindings(HERDS_STEP_WGSL) <= 8, `step storage buffers <= 8 (${countStorageBindings(HERDS_STEP_WGSL)})`);
-  assert.ok(countStorageBindings(HERDS_RENDER_WGSL) <= 8, `render storage buffers <= 8 (${countStorageBindings(HERDS_RENDER_WGSL)})`);
-  assert.ok(countStorageBindings(HERDS_SHADOW_WGSL) <= 8, `shadow storage buffers <= 8 (${countStorageBindings(HERDS_SHADOW_WGSL)})`);
-  assert.ok(countStorageBindings(HERDS_RESET_WGSL) <= 8, `reset storage buffers <= 8 (${countStorageBindings(HERDS_RESET_WGSL)})`);
-  assert.ok(countStorageBindings(TOWNSFOLK_RESET) <= 8, `townsfolk reset storage buffers <= 8`);
-  assert.match(HERDS_RENDER_WGSL, /@group\(0\)\s*@binding\(18\)\s*var<storage,\s*read>\s*herdMorph/);
-  assert.match(HERDS_SHADOW_WGSL, /@group\(0\)\s*@binding\(4\)\s*var<storage,\s*read>\s*herdMorph/);
+const animalManifest = JSON.parse(readFileSync(new URL('../assets/animal-continuum/manifest.json', import.meta.url), 'utf8'));
 
-  // Verify herdsSolidFS has ZERO @builtin(sample_mask) so Apple Silicon TBDR Early-Z / HSR stays active on solid instances!
-  const solidMatch = /@fragment\s+fn\s+herdsSolidFS\s*\([^)]*\)\s*->\s*([^{]+)\{([^}]*)\}/.exec(HERDS_RENDER_WGSL);
-  assert.ok(solidMatch, 'herdsSolidFS entry point defined in HERDS_RENDER_WGSL');
-  assert.match(solidMatch[1], /@location\(0\)\s*vec4f/, 'herdsSolidFS returns plain @location(0) vec4f without HerdFragOut');
-  assert.doesNotMatch(solidMatch[0], /sample_mask/, 'herdsSolidFS has strictly zero sample_mask');
-  assert.match(HERDS_RENDER_WGSL, /@fragment\s+fn\s+herdsFadeFS\s*\([^)]*\)\s*->\s*HerdFragOut/, 'herdsFadeFS retains MSAA sample_mask crossfade');
-  assert.match(HERDS_STEP_WGSL, /pxSpan\s*>=\s*CONTINUUM_SPLAT_BAND_PIXELS/, 'HERDS_STEP_WGSL splits solid (above the core\'s splat band) vs fade (in it) buckets');
+test('Tripo H3.1 4K livestock bodies bake whole into the one continuum: RGB555 coats, crack-free manifolds, <= 8 storage buffers, no discard', () => {
+  const programs = [['step', HERDS_STEP_WGSL], ['view', HERDS_RENDER_WGSL], ['shadow', HERDS_SHADOW_WGSL], ['cut', animalContinuumSelectWGSL()]];
+  for (const [name, wgsl] of programs) {
+    assert.doesNotMatch(wgsl, /\bdiscard\b/, `herd ${name} program has no discard`);
+    assert.ok(countStorageBindings(wgsl) <= 8, `herd ${name} storage buffers <= 8 (${countStorageBindings(wgsl)})`);
+  }
+  assert.ok(countStorageBindings(TOWNSFOLK_RESET) <= 8, `townsfolk reset storage buffers <= 8`);
+  // The view reads the beasts' bodies from the animal atlas, the shadow map from the same, and the step writes only places.
+  assert.match(HERDS_RENDER_WGSL, new RegExp(`@group\\(0\\)\\s*@binding\\(${HERD_CONTINUUM_BINDING}\\)\\s*var<storage,\\s*read>\\s*animalAtlas`));
+  assert.match(HERDS_SHADOW_WGSL, /@group\(1\)\s*@binding\(0\)\s*var<storage,\s*read>\s*animalAtlas/);
+  assert.match(HERDS_STEP_WGSL, /@group\(0\)\s*@binding\(6\)\s*var<storage,\s*read_write>\s*places/);
+  assert.match(HERDS_RENDER_WGSL, /@fragment\s+fn\s+herdContinuumFS\s*\([^)]*\)\s*->\s*HerdFragOut/, 'one fragment entry, with the sample-mask handoff');
 
   const expectedHeights = [0.82, 1.52, 0.66, 1.84];
   const triRanges = [[3300, 3500], [3700, 3900], [2900, 3100], [5800, 6400]];
@@ -132,15 +119,16 @@ test('Tripo H3.1 4K livestock continuum packs RGB555 coats, crack-free manifolds
     const [loT, hiT] = triRanges[idx];
     assert.ok(tris >= loT && tris <= hiT, `${sp.name}: expected ${loT}..${hiT} triangles, got ${tris}`);
     assert.ok(Math.abs(sp.height - expectedHeights[idx]) < 0.02, `${sp.name}: height ${sp.height}`);
-    assert.equal(sp.morphWords.length, vc * 2, `${sp.name}: 2 morphWords per vertex`);
 
     // Verify single sheep extraction (no twin sheep!) & grounded hooves + RGB555 4K texture vertex colors
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     const distinctColors = new Set();
+    const positions = new Float32Array(vc * 3);
     let bodyVerts = 0, rgbVerts = 0;
     for (let i = 0; i < vc; i++) {
       const o = i * 8;
       const x = sp.vertices[o], y = sp.vertices[o + 1], part = sp.vertices[o + 6], coat = sp.vertices[o + 7];
+      positions.set(sp.vertices.subarray(o, o + 3), i * 3);
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
       minY = Math.min(minY, y); maxY = Math.max(maxY, y);
       if (part < 8.5) {
@@ -158,33 +146,25 @@ test('Tripo H3.1 4K livestock continuum packs RGB555 coats, crack-free manifolds
       assert.ok(maxX - minX < 0.48 && Math.abs(minX + maxX) < 0.05, `single centered Merino sheep (${minX.toFixed(3)}..${maxX.toFixed(3)})`);
     }
 
-    const morphBuf = buildLivestockMorphBuffer(sp, false);
-    assert.equal(morphBuf.length, vc * 8);
+    // Welded crack-free manifold (zero UV-seam cracks) at the full detail the continuum's finest cut draws.
+    const seam = countBodyBoundaryEdges(sp, positions);
+    assert.ok(seam.boundary <= 12, `${sp.name}: crack-free welded UV seams (${seam.boundary}/${seam.uniqueEdges} boundary edges)`);
 
-    const m0 = evaluateLivestockMorph(sp, 0.0, morphBuf);
-    const mMid = evaluateLivestockMorph(sp, 0.5, morphBuf);
-    const mFull = evaluateLivestockMorph(sp, 1.0, morphBuf);
-
-    // Verify welded crack-free manifold (zero UV-seam cracks!) at full detail and mid-continuum
-    const seam0 = countBodyBoundaryEdges(sp, m0.positions);
-    const seamMid = countBodyBoundaryEdges(sp, mMid.positions);
-    assert.ok(seam0.boundary <= 12, `${sp.name}: crack-free welded UV seams at morph=0 (${seam0.boundary}/${seam0.uniqueEdges} boundary edges)`);
-    assert.ok(seamMid.boundary <= 16, `${sp.name}: crack-free continuum under evaluateLivestockMorph (${seamMid.boundary} boundary edges)`);
-
-    assert.equal(m0.activeTriangles, tris, `${sp.name}: full triangles at morphLevel=0`);
-    assert.ok(mMid.activeTriangles < m0.activeTriangles * 0.72 && mMid.activeTriangles > 350, `${sp.name}: smooth mid-continuum (${mMid.activeTriangles} tris)`);
-    assert.equal(mFull.activeTriangles, 20, `${sp.name}: reaches exact 20-triangle core at morphLevel=1`);
-    assert.equal(sp.coreTris, 20);
+    // The continuum holds the whole body: its finest clusters are every source triangle, and its chain closes far below them.
+    const baked = animalManifest.types[idx];
+    assert.equal(baked.name, sp.name);
+    assert.equal(baked.sourceTriangles, tris, `${sp.name}: baked from this body`);
+    assert.equal(baked.clusters.finestTriangles, tris, `${sp.name}: finest cut is every source triangle`);
+    assert.ok(baked.chain.coreTriangles < baked.chain.farFirstTriangles, `${sp.name}: far body collapses (${baked.chain.farFirstTriangles} -> ${baked.chain.coreTriangles})`);
   });
 
+  // Wagons and coaches shatter by their baked pieces, each riding its own transform.
   for (const veh of getVehicleMeshes()) {
-    const vc = veh.vertices.length / 8;
-    assert.equal(veh.morphWords.length, vc * 2, `${veh.name}: vehicle morphWords present`);
-    const morphBuf = buildLivestockMorphBuffer(veh, true);
-    const u32 = new Uint32Array(morphBuf.buffer);
-    const shards = new Set();
-    for (let i = 0; i < vc; i++) shards.add((u32[i * 8 + 7] >>> 24) & 0xff);
-    assert.ok(shards.size >= 8, `${veh.name}: welded rigid shards assigned (${shards.size} distinct shard groups)`);
+    const baked = animalManifest.types.find((t) => t.family === 'vehicle' && t.sourceTriangles === veh.indexCount / 3);
+    assert.ok(baked, `${veh.name}: baked into the continuum`);
+    assert.equal(baked.clusters.finestTriangles, veh.indexCount / 3);
+    assert.ok(baked.pieces >= 8, `${veh.name}: welded rigid shards assigned (${baked.pieces} pieces)`);
+    assert.ok(baked.shatterReach > 0, `${veh.name}: shards fly a bounded reach (${baked.shatterReach} m)`);
   }
 });
 
@@ -336,7 +316,7 @@ test('sweepHerdHit fells struck livestock with knockback, triggers 38 m stampede
   assert.ok(boltedAfter.z > 28, `stampeding cow bolted radially away from z=20 to z=${boltedAfter.z.toFixed(2)}`);
 });
 
-test('mounted street riders lock < 1 mm on sloped banks, skip zero-population species & offshore >3km crowds, and spawn zero horses in Indigenous towns', async (t) => {
+test('mounted street riders lock < 1 mm on sloped banks, draw only through the continuum, skip offshore >3km crowds, and spawn zero horses in Indigenous towns', async (t) => {
   assert.equal(crowdFromBoard, boardFolkStreets);
   assert.equal(WALKER_MOUNTED_FLAG, STREET_MOUNT_FLAG);
   assert.match(TOWNSFOLK_WALK, /let isMounted=\(w\.flags&16u\)!=0u;/);
@@ -403,20 +383,28 @@ test('mounted street riders lock < 1 mm on sloped banks, skip zero-population sp
   assert.equal(clearedMounts.count, 0);
   assert.equal(buildStreetMountSeeds(colonialStreets, { indigenous: true }).count, 0);
 
-  // Device coupling + activeSpeciesMask draw skipping + GPU reset + offshore 3,000 m townsfolk culling
-  const prevUsage = globalThis.GPUBufferUsage;
-  globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, INDIRECT: 32 };
+  // Device coupling: the herds' step, the continuum's GPU reset and cut, its indirect lists, and offshore 3,000 m townsfolk culling
+  const prevUsage = globalThis.GPUBufferUsage, prevStage = globalThis.GPUShaderStage, prevFetch = globalThis.fetch;
+  globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, INDIRECT: 32, COPY_SRC: 64 };
+  globalThis.GPUShaderStage = { VERTEX: 1, FRAGMENT: 2, COMPUTE: 4 };
+  // The animal atlas, served from the checkout as the page serves it.
+  globalThis.fetch = async (path) => new Response(readFileSync(new URL(`../${path}`, import.meta.url)));
   t.after(() => {
     if (prevUsage === undefined) delete globalThis.GPUBufferUsage;
     else globalThis.GPUBufferUsage = prevUsage;
+    if (prevStage === undefined) delete globalThis.GPUShaderStage;
+    else globalThis.GPUShaderStage = prevStage;
+    globalThis.fetch = prevFetch;
   });
 
-  const writes = [], indexedDraws = [], dispatches = [];
+  const writes = [], indexedDraws = [], indirectDraws = [], dispatches = [];
   const device = {
     createBuffer(d) { return { ...d, destroyed: false, destroy() { this.destroyed = true; } }; },
     queue: { writeBuffer(b) { writes.push(b.label); }, onSubmittedWorkDone: () => Promise.resolve() },
     createRenderPipelineAsync: async (d) => ({ label: d.label, getBindGroupLayout: () => ({}) }),
     createComputePipelineAsync: async (d) => ({ label: d.label, getBindGroupLayout: () => ({}) }),
+    createBindGroupLayout: (d) => ({ ...d }),
+    createPipelineLayout: (d) => ({ ...d }),
     createBindGroup: (d) => ({ ...d }),
   };
   const makePass = () => {
@@ -428,7 +416,7 @@ test('mounted street riders lock < 1 mm on sloped banks, skip zero-population sp
       setIndexBuffer() {},
       dispatchWorkgroups(n) { dispatches.push({ pipe, n }); },
       drawIndexedIndirect(_b, off) { indexedDraws.push({ pipe, off }); },
-      drawIndirect() {},
+      drawIndirect(b, off) { indirectDraws.push({ pipe, buffer: b.label, off }); },
     };
   };
 
@@ -476,18 +464,21 @@ test('mounted street riders lock < 1 mm on sloped banks, skip zero-population sp
 
   for (let k = 0; k < 45; k++) townsfolk.follow([lisbonPort, tainoPort], { x: 200, z: 300 });
   assert.equal(herds.streetMounts, colonialStreets.mountSeeds.count);
-  assert.equal(herds.activeSpeciesMask, 1 << 3, 'only species 3 (horses) active when only street mounts are installed');
+  assert.equal(herds.animals.count, herds.count, 'every installed beast is a place in the continuum set');
 
-  // Verify herds skips all 6 unpopulated species in draw & drawShadow and uses GPU compute reset!
-  writes.length = 0; dispatches.length = 0; indexedDraws.length = 0;
+  // The step places every beast, the GPU empties and refills the continuum's lists, and one pipeline draws the view's
+  // four lists (clusters, small clusters, far body, splat) and one the shadow map's far bodies, all indirect.
+  writes.length = 0; dispatches.length = 0; indexedDraws.length = 0; indirectDraws.length = 0;
   herds.encode(makePass(), 7.25);
   herds.draw(makePass());
   herds.drawShadow(makePass());
-  assert.ok(!writes.includes('livestock indirect draws'), 'herds resets indirect draws on GPU without writeBuffer');
-  assert.equal(dispatches[0].pipe, 'livestock herds reset');
-  assert.equal(indexedDraws.filter((d) => d.pipe === 'livestock herds solid').length, 1, 'only 1 active species drawn in solid pass');
-  assert.equal(indexedDraws.filter((d) => d.pipe === 'livestock herds fade').length, 1, 'only 1 active species drawn in fade pass');
-  assert.equal(indexedDraws.filter((d) => d.pipe === 'livestock herds shadow').length, 1, 'only 1 active species drawn in shadow pass');
+  assert.ok(!writes.includes('livestock continuum draws') && !writes.includes('livestock continuum lists'), 'the GPU resets the lists and draws without writeBuffer');
+  assert.deepEqual(dispatches.map((d) => d.pipe), ['livestock herds step', 'animal continuum reset', 'animal continuum cut']);
+  assert.equal(indexedDraws.length, 0, 'herds draw no indexed meshes');
+  assert.deepEqual(indirectDraws.filter((d) => d.pipe === 'livestock herds').map((d) => d.off), [0, 16, 32, 48], 'the view draws the four continuum lists');
+  assert.deepEqual(indirectDraws.filter((d) => d.pipe === 'livestock herds shadow').map((d) => d.off), [64], 'the shadow map draws the fifth');
+  assert.ok(indirectDraws.every((d) => d.buffer === 'livestock continuum draws'));
+  assert.equal(indirectDraws.length, 5);
 
   // Verify townsfolk skips encode/draw/drawShadow when camera moves > 3,000 m offshore (e.g. 3,100 m away within 3,200 m reach)
   townsfolk.follow([lisbonPort], { x: 3310, z: 300 }); // 3,110 m > 3,000 m

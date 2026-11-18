@@ -2,6 +2,7 @@
 // Automated gate test ensuring every 3D model asset (.glb on disk, PROP_MODELS, PLAYABLE_SHIP_MODELS,
 // PORT_PREFABS, crew skeletons, and forest tree species) is wired into a destructible cannonfire pipeline.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -36,11 +37,11 @@ import { FOREST_TRUNK_SHAPES } from '../js/forest-trunk-shapes.js';
 import { buildForestTrunkGrid, forestTrunkShape, sweepForestTrunks } from '../js/forest-trunks.js';
 import { getLivestockMeshes, getVehicleMeshes } from '../js/models/livestock-meshes.js';
 import {
-  buildLivestockMorphBuffer,
   caravanHerdSeeds,
   evaluateHerdStateAt,
   sweepHerdHit,
 } from '../js/herds.js';
+import { ANIMAL_CONTINUUM_GRAZE_PITCH } from '../js/animal-continuum.js';
 import { HERD_FATE_FLOATS, HERDS_RENDER_WGSL, HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -345,9 +346,15 @@ test('every forest tree species has destructible trunk capsules that intercept c
 test('all 7 livestock & caravan vehicle species (0..6) are physically destructible with GPU fates, stampede, hitch halt, and vehicle shard flight', () => {
   const allMeshes = [...getLivestockMeshes(), ...getVehicleMeshes()];
   assert.equal(allMeshes.length, 7, '4 livestock + 3 1550 road vehicles');
+  // What is drawn is what is shot: the animal continuum every beast and vehicle is drawn from was baked from exactly
+  // these meshes and rigs (scripts/prepare-animal-continuum.mjs fingerprints its sources).
+  const animalManifest = JSON.parse(readFileSync(path.join(ROOT, 'assets/animal-continuum/manifest.json'), 'utf8'));
   for (let s = 0; s < allMeshes.length; s++) {
-    const morphBuf = buildLivestockMorphBuffer(allMeshes[s], s >= 4);
-    assert.equal(morphBuf.length, allMeshes[s].vertices.length, `${allMeshes[s].name}: GPU morph/shard buffer matches 8 floats/vertex`);
+    const mesh = allMeshes[s], fingerprint = createHash('sha256');
+    const rig = Float32Array.from([...mesh.neckPivot, ANIMAL_CONTINUUM_GRAZE_PITCH[s], mesh.legY, mesh.frontZ, mesh.backZ, mesh.height]);
+    for (const typed of [mesh.vertices, mesh.indices, rig]) fingerprint.update(new Uint8Array(typed.buffer, typed.byteOffset, typed.byteLength));
+    assert.equal(animalManifest.types[s].fingerprint, fingerprint.digest('hex'), `${mesh.name}: the continuum is baked from the physical mesh`);
+    assert.equal(animalManifest.types[s].sourceTriangles, mesh.indices.length / 3, `${mesh.name}: every source triangle is in the continuum`);
   }
 
   // 1. Direct hits & 38 m near-miss stampede across all 4 livestock species (0..3) wired through createGunnerySolidSweep.

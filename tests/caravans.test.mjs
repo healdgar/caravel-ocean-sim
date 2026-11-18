@@ -8,6 +8,7 @@ import { openBoard } from '../scripts/board-host.mjs';
 import { CARAVAN_YOKE_AHEAD_M, caravanHerdSeeds, caravanRiderWaySeeds } from '../js/herds.js';
 import { getCoachMesh, getOxCartMesh, getVehicleMeshes, getWagonMesh } from '../js/models/livestock-meshes.js';
 import { HERDS_RENDER_WGSL, HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
+import { animalContinuumSelectWGSL } from '../js/wgsl/animal-continuum.js';
 import { boardDayAt, boardDayOf } from '../js/board-life.js';
 
 const baked = JSON.parse(readFileSync(new URL('../assets/boards/lisbon-1550.json', import.meta.url), 'utf8'));
@@ -153,15 +154,18 @@ test('all three 1550 road vehicles are closed outward CCW manifolds on spoked wh
   }
   assert.ok(canvas > 0, 'covered wain tilt canvas present');
 
-  // Verify Rule-2 & Rule-3 GPU execution: atomic hitch culling, tongue articulation, MSAA sample_mask handoff,
-  // 1-triangle horizon splat, the core's sub-pixel stochastic thinning with area-preserving inflation, and zero discard.
+  // Verify Rule-2 & Rule-3 GPU execution: the step places each hitch with its tongue articulated and one thinning seed
+  // for the whole team, the shared animal cut thins its 1-triangle horizon splat by that seed (the core's sub-pixel
+  // stochastic thinning with area-preserving inflation), and the view's one pipeline hands clusters, far body and
+  // splat over by MSAA sample_mask, with zero discard.
   assert.doesNotMatch(HERDS_STEP_WGSL, /\bdiscard\b/);
   assert.doesNotMatch(HERDS_RENDER_WGSL, /\bdiscard\b/);
   assert.match(HERDS_STEP_WGSL, /isHitch/);
-  assert.match(HERDS_STEP_WGSL, /continuumThin\(screenPx, thinSeed\)/);
+  assert.match(HERDS_STEP_WGSL, /useHitchMid/);
+  assert.match(animalContinuumSelectWGSL(), /continuumThin\(span, ?animalSeedOf\(place\)/);
   assert.match(HERDS_RENDER_WGSL, /@builtin\(sample_mask\)/);
-  assert.match(HERDS_RENDER_WGSL, /fn\s+herdsSplatVS\b/);
-  assert.match(HERDS_RENDER_WGSL, /fn\s+herdsSplatFS\b/);
+  assert.match(HERDS_RENDER_WGSL, /fn\s+herdContinuumVS\b/);
+  assert.match(HERDS_RENDER_WGSL, /animalSplatCorner\(/);
   assert.match(HERDS_RENDER_WGSL, /part\s*>=\s*7\.5/);
 
   const at = Date.UTC(1550, 2, 14, 12);

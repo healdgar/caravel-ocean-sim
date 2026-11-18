@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Share moving-wave contact, atmosphere and the same wet skin lighting as the
-// dolphins. Impact water and exhalation have separate, finite parcel dynamics.
-import {DOLPHIN_RENDER} from './dolphins.js';
+// dolphins, and their continuum. Impact water and exhalation have separate, finite parcel dynamics.
+import {DOLPHIN_SEA_WGSL,seaContinuumBodyWGSL} from './dolphins.js';
+import {CONTINUUM_CORE_WGSL} from '../continuum-core.js';
 export const MARINE_MIST_COUNT=96;
 export const MARINE_BREATH_DROP_COUNT=64;
 export const MARINE_FALLOUT_COUNT=24;
@@ -87,57 +88,18 @@ fn marineSheetOpacity(p:MarineImpactSheet,hit:vec4f,key:f32)->f32 {
   return select(p.opacity,0.0,key>0.0&&hit.x==key&&hit.y>=0.0);
 }
 `;
-const marineBodyVertex=/* wgsl */ `
-@vertex fn dolphinVS(@location(0) p:vec3f,@location(1) normal:vec3f,@location(2) albedo:vec3f,@location(3) uv:vec2f,@location(4) joints:vec4u,@location(5) weights:vec4f,@builtin(instance_index) id:u32)->DolphinVertex {
-  let d=dolphins[id];let whale=d.pose.w>0.0;
-  let roll=d.pose.w-select(-2.0,2.0,whale);
-  let length=select(4.8,13.2,whale);
-  let tail=clamp((p.z-select(.15,1.6,whale))/select(2.4,5.4,whale),0.0,1.0);
-  let beat=sin(F.reserved.w*select(4.2,2.0,whale)+d.pose.z);
-  var local=p;var bentN=normal;
-  if(whale){let skin=marineBones[joints.x]*weights.x+marineBones[joints.y]*weights.y+marineBones[joints.z]*weights.z+marineBones[joints.w]*weights.w;local=(skin*vec4f(p,1)).xyz;bentN=normalize((skin*vec4f(normal,0)).xyz);}
-  else{local.x+=beat*.42*tail*tail;bentN=normalize(normal+vec3f(0,0,-normal.x*beat*.35*tail));}
-  let forward=dolphinYaw(vec3f(0,0,-length*.32),d.root.w).xz;
-  let seaPitch=clamp(atan2(dolphinHeight(d.root.xz+forward)-dolphinHeight(d.root.xz-forward),length*.64),-.28,.28);
-  // Whale pitch/roll come from the same CPU pose used by its forehead outlet.
-  // An extra wave pitch here would detach exhalation from the rendered head.
-  let pitchAngle=d.pose.x+seaPitch*(1.0-smoothstep(-.5,2.0,d.root.y))*select(1.0,0.0,whale);
-  let c=cos(pitchAngle);let s=sin(pitchAngle);
-  let pitch=mat3x3f(vec3f(1,0,0),vec3f(0,c,s),vec3f(0,-s,c));
-  let cr=cos(roll);let sr=sin(roll);let bank=mat3x3f(vec3f(cr,sr,0),vec3f(-sr,cr,0),vec3f(0,0,1));
-  let root=vec3f(d.root.x,dolphinHeight(d.root.xz)+d.root.y,d.root.z);
-  var o:DolphinVertex;o.world=root+dolphinYaw(pitch*bank*local*d.pose.y,d.root.w);
-  o.normal=dolphinYaw(pitch*bank*bentN,d.root.w);o.albedo=albedo;o.uv=uv;o.species=select(0.0,1.0,whale);
-  o.pos=F.viewProj*vec4f(o.world-F.camPos.xyz,1);return o;
-}
-`;
-const marineBodyBegin=DOLPHIN_RENDER.indexOf('@vertex fn dolphinVS(');
-const marineBodyEnd=DOLPHIN_RENDER.indexOf('fn dolphinSkinRadiance(');
-if(marineBodyBegin<0||marineBodyEnd<marineBodyBegin)throw new Error('Shared marine skin shader contract changed');
-const marineEffects=DOLPHIN_RENDER.slice(marineBodyEnd)
-  .replace('fn dolphinSkinRadiance(world:vec3f,normal:vec3f,albedo:vec3f)->vec3f',
-    'fn dolphinSkinRadiance(world:vec3f,normal:vec3f,albedo:vec3f,roughness:f32)->vec3f')
-  .replace('let rough=.32;','let rough=roughness;')
-  .replace('return vec4f(surfaceAir(dolphinSkinRadiance(v.world,v.normal,v.albedo),v.world),1);',/* wgsl */ `
-  let base=textureSample(marineColor,seaSampler,v.uv).rgb;
-  let map=textureSample(marineNormal,seaSampler,v.uv).xyz*2.0-1.0;
-  let rough=textureSample(marineRoughness,seaSampler,v.uv).g;
-  let dx=dpdx(v.world);let dy=dpdy(v.world);let du=dpdx(v.uv);let dv=dpdy(v.uv);
-  let determinant=du.x*dv.y-du.y*dv.x;var n=normalize(v.normal);
-  if(v.species>.5&&abs(determinant)>1e-9){
-    let t=normalize((dx*dv.y-dy*du.y)/determinant);let b=normalize((dy*du.x-dx*dv.x)/determinant);
-    n=normalize(t*map.x+b*map.y+n*map.z);
-  }
-  let albedo=v.albedo*select(vec3f(1),base,v.species>.5);
-  let r=select(.32,clamp(rough,.22,.9),v.species>.5);
-  return vec4f(surfaceAir(dolphinSkinRadiance(v.world,n,albedo,r),v.world),1);`)
-  .replace('dolphinHeight(q)+.035+rise*t*lobe','mix(dolphinHeight(q),marineBirthSea(s),t)+.035+rise*t*lobe')
-  .replace('dolphinHeight(s.root.xy)+.08','marineBirthSea(s)+.08')
-  .replace('let radius=dot(v.uv,v.uv);if(radius>.96){discard;}',
-    'let radius=dot(v.uv,v.uv);if(radius>.96||v.world.y<=dolphinHeight(v.world.xz)){discard;}');
-const marineBodyBindings=DOLPHIN_RENDER.slice(0,marineBodyBegin)
-  .replace(/@location\(2\)\s*albedo:vec3f};/,'@location(2) albedo:vec3f,@location(3) uv:vec2f,@location(4) species:f32};');
-export const MARINE_LIFE_RENDER=marineBodyBindings+marineBodyVertex+marineEffects+MARINE_BREATH_DYNAMICS+MARINE_IMPACT_DYNAMICS+/* wgsl */ `
+// The sea's water as the dolphins throw it, lifted where a marine animal's water left a sea that has since moved on.
+const marineContract=(source,from,to)=>{
+  if(source.indexOf(from)<0||source.indexOf(from)!==source.lastIndexOf(from))throw new Error('Shared marine water shader contract changed');
+  return source.replace(from,to);
+};
+let marineSea=DOLPHIN_SEA_WGSL;
+marineSea=marineContract(marineSea,'dolphinHeight(q)+.035+rise*t*lobe','mix(dolphinHeight(q),marineBirthSea(s),t)+.035+rise*t*lobe');
+marineSea=marineContract(marineSea,'dolphinHeight(s.root.xy)+.08','marineBirthSea(s)+.08');
+marineSea=marineContract(marineSea,'let radius=dot(v.uv,v.uv);if(radius>.96){discard;}',
+  'let radius=dot(v.uv,v.uv);if(radius>.96||v.world.y<=dolphinHeight(v.world.xz)){discard;}');
+// The sharks and the whale are drawn through the animal continuum (seaContinuumBodyWGSL), the whale with its own skin.
+export const MARINE_LIFE_RENDER=marineSea+CONTINUUM_CORE_WGSL+seaContinuumBodyWGSL(true)+MARINE_BREATH_DYNAMICS+MARINE_IMPACT_DYNAMICS+/* wgsl */ `
 @group(0) @binding(10) var<storage,read> marineOrigins:array<vec4f>;
 @group(0) @binding(11) var<storage,read> marineLandings:array<vec4f>;
 @group(0) @binding(12) var marineColor:texture_2d<f32>;
@@ -267,7 +229,7 @@ struct MarineImpactVertex {@builtin(position) pos:vec4f,@location(0) uv:vec2f,@l
 
 // Fixed-size birth-height cache, keyed by event serial rather than sorted draw
 // order. Only a new event samples the sea; detached spray cannot ride later waves.
-export const MARINE_EFFECT_INIT=DOLPHIN_RENDER+MARINE_BREATH_DYNAMICS+MARINE_IMPACT_DYNAMICS+/* wgsl */ `
+export const MARINE_EFFECT_INIT=DOLPHIN_SEA_WGSL+MARINE_BREATH_DYNAMICS+MARINE_IMPACT_DYNAMICS+/* wgsl */ `
 @group(0) @binding(10) var<storage,read_write> marineBirths:array<vec4f>;
 @group(0) @binding(11) var<storage,read_write> marineContacts:array<vec4f>;
 @group(0) @binding(16) var<storage,read_write> marineSheetContacts:array<vec4f>;

@@ -5,37 +5,36 @@
 //   species 4 = carreta (4-wheel covered wain),
 //   species 5 = coche (4-wheel passenger/merchant coach),
 //   species 6 = carro de bois (2-wheel heavy cargo ox-cart).
-// Includes progressive half-edge collapse continuum (`herdMorph`), atomic coupled hitch culling &
-// hitch destruction, ballistic vehicle shard flight, livestock felling & 38 m stampedes, and Rule-3
-// continuous MSAA sample-mask crossfade into a 1-triangle horizon splat + sub-pixel hash thinning.
+// Every beast and vehicle is drawn through the one continuum (js/animal-continuum.js): the step below writes each
+// one's place, the shared cut (js/wgsl/animal-continuum.js) chooses its clusters, far body or splat, and the passes
+// here pose what it chose by the herd rig and shade it. Also: atomic coupled hitch culling & hitch destruction,
+// ballistic vehicle shard flight, livestock felling & 38 m stampedes.
 import { FRAME_WGSL, ATMO_CORE_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 import { SHADOW_FRAME } from './shadows.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
+import { ANIMAL_CONTINUUM_TYPE, ANIMAL_PLACE_CODE, ANIMAL_PLACE_SEED, ANIMAL_PLACE_EXACT, ANIMAL_PLACE_SHATTERED } from '../animal-continuum.js';
+import { ANIMAL_CONTINUUM_ENTRY, animalContinuumRenderWGSL, animalContinuumShadowWGSL } from './animal-continuum.js';
 
 export const HERD_SEED_FLOATS = 8;
-export const HERD_BODY_FLOATS = 16;
 export const HERD_FATE_FLOATS = 8;
 export const HERD_SHOT_LIMIT = 8;
 export const HERD_SHOT_FLOATS = 8;
 export const HERD_SHOTS_WORDS = 4 + HERD_SHOT_LIMIT * HERD_SHOT_FLOATS;
-export const HERD_DRAW_WORDS = 5;
 export const HERD_SPECIES = 7;
-export const HERD_SPLAT_BUCKET = HERD_SPECIES * 2; // 14: 1-triangle far horizon splat bucket
-export const HERD_FADE_BUCKET = HERD_SPLAT_BUCKET + 1; // 15..21: MSAA sample_mask crossfade buckets (the core's splat band, 3.5..5.25 px at the base error)
-export const HERD_BUCKETS = HERD_FADE_BUCKET + HERD_SPECIES; // 22: 0..6 solid (TBDR HSR), 7..13 shadow, 14 splats, 15..21 fade
 export const HERD_ROUTE_HEADER = 1;
-export const HERD_MORPH_HI_PX = 26.0;
 export const HERD_STAMPEDE_RADIUS_M = 38.0;
+// Where a herd pass binds the animal continuum's data in its group 0.
+export const HERD_CONTINUUM_BINDING = 24;
 
 const HERD_RIG_FN = /* wgsl */ `
 struct HerdBody {
-  posYaw: vec4f,     // worldX (unshifted), groundY, worldZ (unshifted), yaw
+  posYaw: vec4f,     // the drawn (shifted) world x, ground y, world z, yaw
   animCoat: vec4f,   // walkPhase, walkAmp, grazeAmt_or_tongueYaw, coatSeed
-  slopeScale: vec4f, // slopePitch, scale, tailPhase_or_tonguePitch, speciesPlusFade
-  extra: vec4f,      // morphLevel (0..1), flags (1=tack, 2=felled, 4=shattered, 8=halted; herd index << 4 above), hitAge, hitDirAngle
+  slopeScale: vec4f, // slopePitch, scale, tailPhase_or_tonguePitch, species
+  extra: vec4f,      // unused, flags (1=tack, 2=felled, 4=shattered, 8=halted), hitAge, hitDirAngle
 };
 
 struct HerdSpeciesRig {
@@ -47,24 +46,6 @@ struct HerdPosed {
   localPos: vec3f,
   localNrm: vec3f,
 };
-
-struct HerdMorphed {
-  pos: vec3f,
-  nrm: vec3f,
-  part: f32,
-  shardId: u32,
-};
-
-// A mesh body carries its share of the splat handoff in the fraction of slopeScale.w (species + share * 0.95),
-// and its splat carries the same packed number, so both sides decode the identical share and split each pixel's
-// samples exactly between them (continuumSamples, inverted on the splat).
-fn herdMeshKeep(packed: f32) -> f32 {
-  let sp = floor(packed + 1e-4);
-  return clamp((packed - sp) / 0.95, 0.0, 1.0);
-}
-
-// The herd's own index rides above the four flag bits of extra.y, so both sides of a handoff seed alike.
-fn herdSeedOf(packedFlags: f32) -> u32 { return u32(packedFlags + 0.5) >> 4u; }
 
 fn rotX3(v: vec3f, a: f32) -> vec3f {
   let c = cos(a);
@@ -256,60 +237,35 @@ fn poseLivestockVertex(pos: vec3f, nrm: vec3f, part: f32, shardId: u32, body: He
   n = normalize(rotY3(n, body.posYaw.w));
   return HerdPosed(p + body.posYaw.xyz, n);
 }
-`;
 
-const HERD_MORPH_EVAL_FN = /* wgsl */ `
-fn morphLivestockVertex(vid: u32, pos: vec3f, nrm: vec3f, part: f32, morphLevel: f32) -> HerdMorphed {
-  let baseMeta = bitcast<u32>(herdMorph[vid * 2u + 1u].w);
-  let shardId = (baseMeta >> 24u) & 255u;
-  var mPos = pos;
-  var mNrm = nrm;
-  var mPart = part;
-  if (morphLevel > 0.001) {
-    var cur = vid;
-    for (var step = 0u; step < 9u; step = step + 1u) {
-      let m0 = herdMorph[cur * 2u];
-      let m1 = herdMorph[cur * 2u + 1u];
-      let pIdx = u32(m0.w + 0.5);
-      if (pIdx == cur || morphLevel <= m1.x) { break; }
-      let t = clamp((morphLevel - m1.x) / max(m1.y, 1e-4), 0.0, 1.0);
-      mPos = mix(mPos, m0.xyz, t);
-      let pk = bitcast<u32>(m1.w) & 0x00ffffffu;
-      let pNrm = unpack4x8snorm(pk).xyz;
-      if (dot(pNrm, pNrm) > 1e-4) {
-        mNrm = normalize(mix(mNrm, pNrm, t));
-      }
-      if (t >= 0.999) {
-        mPart = m1.z;
-        cur = pIdx;
-      } else {
-        break;
-      }
-    }
-  }
-  return HerdMorphed(mPos, mNrm, mPart, shardId);
+// A beast's place in the animal continuum as the rig reads it: the body its step wrote, and its type's rig.
+fn herdBodyOf(place: AnimalPlace) -> HerdBody {
+  return HerdBody(place.root, place.pose, vec4f(place.frame.x, place.frame.z, place.more.x, f32(animalTypeOf(place))), vec4f(0.0, place.more.y, place.more.z, place.more.w));
+}
+fn herdRigOf(archetype: u32) -> HerdSpeciesRig {
+  return HerdSpeciesRig(
+    vec4f(animalTypeV(archetype, ${ANIMAL_CONTINUUM_TYPE.neck}u), animalTypeF(archetype, ${ANIMAL_CONTINUUM_TYPE.neck + 3}u)),
+    vec4f(animalTypeV(archetype, ${ANIMAL_CONTINUUM_TYPE.legs}u), animalTypeF(archetype, ${ANIMAL_CONTINUUM_TYPE.legs + 3}u)),
+  );
+}
+// A point of the continuum posed by the rig: its skin holds its part (f32 bits), its coat and its shard.
+fn herdPosePoint(point: AnimalPoint, body: HerdBody, rig: HerdSpeciesRig) -> HerdPosed {
+  return poseLivestockVertex(point.position, point.normal, bitcast<f32>(point.skin.x), point.skin.z, body, rig);
 }
 `;
 
-export const HERDS_STEP_WGSL = FRAME_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + /* wgsl */ `
+export const HERDS_STEP_WGSL = FRAME_WGSL + /* wgsl */ `
 struct HerdLand { domain: vec4f };
 struct HerdNearDomain { domain: vec4f, grid: vec4f };
 struct HerdConfig {
   count: u32,
-  bucketSpan: u32,
+  spare: u32,
   boardDay: f32,
   daysPerSecond: f32,
-  coarsening: f32, // the scene's one pixel-error scalar over its base (continuumCoarsening); 1 at 3 px
 };
 struct HerdSeed {
   anchor: vec4f, // pasture: (anchorX, anchorZ, roamRadius, phase); caravan: (routeHeader, behindAnchor, roamSentinel, phase)
   traits: vec4f, // coatSeed (+10 when saddled), scale, species, flockHeading_or_lateralOffset
-};
-struct HerdBody {
-  posYaw: vec4f,
-  animCoat: vec4f,
-  slopeScale: vec4f,
-  extra: vec4f,
 };
 struct HerdShot {
   a: vec4f, // (ax, ay, az, radius) in shifted world space
@@ -325,10 +281,6 @@ struct HerdFate {
 };
 
 const CARAVAN_YOKE_AHEAD_M: f32 = 4.05;
-// Spans tuned at the core's base pixel error, read against a body's span over cfg.coarsening: the morph, the
-// mesh-to-splat band (the core's, CONTINUUM_SPLAT_BAND_PIXELS down to CONTINUUM_SPLAT_PIXELS) and the splat
-// itself follow the one scene scalar.
-const HERD_MORPH_HI_PX: f32 = ${HERD_MORPH_HI_PX.toFixed(1)};
 const HERD_STAMPEDE_M: f32 = ${HERD_STAMPEDE_RADIUS_M.toFixed(1)};
 const HERD_STAMPEDE_SPAN_S: f32 = 14.0;
 
@@ -338,12 +290,20 @@ const HERD_STAMPEDE_SPAN_S: f32 = 14.0;
 @group(0) @binding(3) var elevation: texture_2d<f32>;
 @group(0) @binding(4) var<uniform> cfg: HerdConfig;
 @group(0) @binding(5) var<storage, read> seeds: array<HerdSeed>;
-@group(0) @binding(6) var<storage, read_write> bodies: array<HerdBody>;
-@group(0) @binding(7) var<storage, read_write> draws: array<atomic<u32>>;
-@group(0) @binding(8) var<uniform> landSH: ShadowFrame;
+// Each beast's place in the animal continuum (js/animal-continuum.js ANIMAL_PLACE_FLOATS), which the cut reads next.
+@group(0) @binding(6) var<storage, read_write> places: array<vec4f>;
 @group(0) @binding(9) var<storage, read> routes: array<vec4f>;
 @group(0) @binding(10) var<uniform> shots: HerdShots;
 @group(0) @binding(11) var<storage, read_write> fates: array<HerdFate>;
+
+// root (drawn world x, y, z, yaw), frame (pitch, roll, scale, code), pose (walk phase, walk amount, graze or pole
+// yaw, coat seed), more (tail phase or pole pitch, flags, hit age, hit direction). Scale 0 is not drawn.
+fn herdPlace(idx: u32, root: vec4f, frame: vec4f, pose: vec4f, more: vec4f) {
+  places[idx * 4u] = root;
+  places[idx * 4u + 1u] = frame;
+  places[idx * 4u + 2u] = pose;
+  places[idx * 4u + 3u] = more;
+}
 
 struct HerdRouteSample { pos: vec2f, dir: vec2f, deckY: f32 };
 
@@ -425,6 +385,8 @@ fn pastureWalkTime(t: f32, phase: f32) -> vec2f {
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let idx = gid.x;
   if (idx >= cfg.count) { return; }
+  // Not drawn unless it is placed below.
+  herdPlace(idx, vec4f(0.0), vec4f(0.0), vec4f(0.0), vec4f(0.0));
   let seed = seeds[idx];
   let species = min(${HERD_SPECIES - 1}u, u32(round(seed.traits.z)));
   let isVehicle = species >= 4u;
@@ -453,7 +415,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var routeDeckY = 0.0;
   var routeHeader = 0u;
   var yokeSample = HerdRouteSample(vec2f(0.0), vec2f(0.0, 1.0), 0.0);
-  var hitchMidXZ = vec2f(0.0);
   var wayGroundY = -1000.0;
   var isPanicking = false;
 
@@ -533,7 +494,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     var at = atVeh;
     if (isDraftBeast) { at = yokeSample; }
     routeDeckY = at.deckY;
-    hitchMidXZ = 0.5 * (atVeh.pos + yokeSample.pos);
 
     let lateral = seed.traits.w + wander * 1.1 * sin(t * 0.13 + phase * 7.0);
     worldXZ = at.pos + vec2f(at.dir.y, -at.dir.x) * lateral;
@@ -562,7 +522,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
             anchorRolled = vf.motion.x;
             worldXZ = vec2f(vf.motion.z, vf.motion.y);
             walkYaw = vf.motion.w;
-            hitchMidXZ = worldXZ;
             moveAmt = 0.0;
           } else if (fate.status.x < 1.5) {
             // Vehicle shattered: surviving unhitched draft beast breaks free and gallops ahead!
@@ -573,7 +532,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
             routeDeckY = boltAt.deckY;
             let veer = seed.traits.w * (1.0 + 0.45 * smoothstep(0.0, 2.0, boltAge));
             worldXZ = boltAt.pos + vec2f(boltAt.dir.y, -boltAt.dir.x) * veer;
-            hitchMidXZ = worldXZ;
             walkYaw = atan2(boltAt.dir.x, boltAt.dir.y);
           }
         } else if (dlf.status.x >= 1.5 || drf.status.x >= 1.5) {
@@ -585,7 +543,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
           anchorRolled = hfMotion.x - CARAVAN_YOKE_AHEAD_M;
           let haltedVeh = herdRouteAt(routeHeader, anchorRolled);
           yokeSample = herdRouteAt(routeHeader, hfMotion.x);
-          hitchMidXZ = 0.5 * (haltedVeh.pos + yokeSample.pos);
           if (isVehicle) {
             flags = flags | 8u;
             hitAge = herdSecondsSince(hfStatus.y, t);
@@ -735,42 +692,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   if (wy < 0.32 && !onBridge && !isStreetMount) { return; }
 
-  var baseRadius = 0.75;
-  if (species == 1u) { baseRadius = 1.35; }
-  else if (species == 2u) { baseRadius = 0.68; }
-  else if (species == 3u) { baseRadius = 1.45; }
-  else if (species == 4u) { baseRadius = 2.15; }
-  else if (species == 5u) { baseRadius = 2.25; }
-  else if (species == 6u) { baseRadius = 1.95; }
-  let bodyRadius = baseRadius * scale;
-
-  let useHitchMid = isHitch && (flags & 14u) == 0u && !isPanicking;
-  let cullXZ = select(worldXZ, hitchMidXZ, useHitchMid);
-  let center = vec3f(worldXZ.x + shiftXZ.x, wy + bodyRadius * 0.62, worldXZ.y + shiftXZ.y);
-  let cullCenter = vec3f(cullXZ.x + shiftXZ.x, wy + bodyRadius * 0.62, cullXZ.y + shiftXZ.y);
-  let curved = earthCurve(center - F.camPos.xyz, F.camPos.y);
-  let cullCurved = earthCurve(cullCenter - F.camPos.xyz, F.camPos.y);
-  let dist = length(cullCurved);
-  if (dist > 4200.0) { return; }
-
-  let clip = F.viewProj * vec4f(cullCurved, 1.0);
-  let frustumPad = select(1.18, 1.32, isHitch || (flags & 4u) != 0u);
-  if (clip.w <= 0.05 || abs(clip.x) > clip.w * frustumPad || abs(clip.y) > clip.w * frustumPad) { return; }
-
-  // Rule-3 screen-space projected span in true pixels.
-  let focal = F.screen.y / max(2.0 * length(F.camUp.xyz), 1e-5);
-  let screenPx = continuumPixels(2.0 * bodyRadius, focal, dist);
-
-  // Sub-pixel stochastic hash thinning below CONTINUUM_MIN_PIXELS with area-preserving radius inflation (the
-  // core's). An intact hitch thins as one, keyed by its route and place in the train.
-  let thinSeed = select(idx, 0x80000000u | u32(max(floor(seed.anchor.x * 131.0 + seed.anchor.y * 17.0), 0.0)), useHitchMid);
-  let inflate = continuumThin(screenPx, thinSeed);
-  if (inflate <= 0.0) { return; }
-
-  // The span the cut reads (pxSpan): true pixels over the scene's coarsening, so the thresholds below, tuned at
-  // the base error, follow the one scene pixel-error scalar.
-  let pxSpan = screenPx / max(cfg.coarsening, 1e-3);
-
   // Axle-to-axle pitch and articulated draft tongue orientation.
   var slopePitch = 0.0;
   var tongueYaw = 0.0;
@@ -828,88 +749,32 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let roadPhase = select(rolled * 6.2831853 / select(1.6, 2.2, hasTack) + phase * 6.2831853, rolled, isVehicle);
   let walkPhase = select(tau * walkFreq + phase * 6.2831853, roadPhase, travelling || isStreetMount);
   let tailPhase = t * (1.2 + 0.35 * fract(phase * 7.13)) + phase * 9.1;
-
-  // Continuous Rule-3 half-edge collapse continuum level (0 above 26 px -> 1 at the core's splat band, at the base error).
-  let morphLevel = select(clamp((HERD_MORPH_HI_PX - pxSpan) / (HERD_MORPH_HI_PX - CONTINUUM_SPLAT_BAND_PIXELS), 0.0, 1.0), 0.0, (flags & 4u) != 0u);
-  let meshKeep = 1.0 - continuumSplatShare(pxSpan);
-  // Species plus the mesh's share of the handoff, and the flags with the herd index above them: written alike
-  // into both sides of the handoff so they split each pixel's samples between them exactly (herdMeshKeep, herdSeedOf).
-  let packedSpecies = f32(species) + clamp(meshKeep, 0.0, 1.0) * 0.95;
-  let packedFlags = f32(flags | (min(idx, 0xfffffu) << 4u));
-
-  // 1. Near/mid physical 3D mesh buckets: 0..6 solid (above the core's splat band, 100% TBDR Early-Z / HSR), 15..21 MSAA crossfade (in it).
-  if (pxSpan >= CONTINUUM_SPLAT_PIXELS) {
-    let body = HerdBody(
-      vec4f(worldXZ.x, wy, worldXZ.y, walkYaw),
-      vec4f(walkPhase, moveAmt, select(grazeAmt, tongueYaw, isVehicle), coatSeed),
-      vec4f(slopePitch, scale, select(tailPhase, tonguePitch, isVehicle), packedSpecies),
-      vec4f(morphLevel, packedFlags, hitAge, hitDirAngle),
-    );
-    let meshBucket = select(${HERD_FADE_BUCKET}u + species, species, pxSpan >= CONTINUUM_SPLAT_BAND_PIXELS);
-    let slot = atomicAdd(&draws[meshBucket * 5u + 1u], 1u);
-    if (slot < cfg.bucketSpan) {
-      bodies[meshBucket * cfg.bucketSpan + slot] = body;
-    }
-
-    if (landSH.origin.w > 0.5 && dist < 420.0 && meshKeep >= 0.45) {
-      let sp = landSH.lightView * vec4f(center - landSH.origin.xyz, 1.0);
-      if (abs(sp.x) <= 1.08 && abs(sp.y) <= 1.08 && sp.z >= -0.08 && sp.z <= 1.08) {
-        let shBucket = species + ${HERD_SPECIES}u;
-        let shSlot = atomicAdd(&draws[shBucket * 5u + 1u], 1u);
-        if (shSlot < cfg.bucketSpan) {
-          bodies[shBucket * cfg.bucketSpan + shSlot] = body;
-        }
-      }
-    }
-  }
-
-  // 2. Far continuum 1-triangle view-facing horizon splat bucket (crossfades in over the core's splat band, sole representation < 3.5 px).
-  if (pxSpan < CONTINUUM_SPLAT_BAND_PIXELS) {
-    let toCamXZ = F.camPos.xz - (worldXZ + shiftXZ);
-    let viewAz = select(0.0, atan2(toCamXZ.x, toCamXZ.y), dot(toCamXZ, toCamXZ) > 1e-8);
-    let broadside = abs(sin(viewAz - walkYaw));
-    var halfLen = bodyRadius * 0.85;
-    var halfWid = bodyRadius * 0.42;
-    var halfHgt = bodyRadius * 0.62;
-    if (isVehicle) {
-      halfLen = bodyRadius * 0.82;
-      halfWid = bodyRadius * 0.44;
-      halfHgt = bodyRadius * select(0.48, 0.54, species == 5u);
-    }
-    if ((flags & 6u) != 0u) {
-      halfHgt *= 0.48;
-      halfWid *= 1.35;
-    }
-    let rx = mix(halfWid, halfLen, broadside) * inflate;
-    let ry = halfHgt * inflate;
-    let centerY = halfHgt * 0.92;
-    let splatBody = HerdBody(
-      vec4f(worldXZ.x, wy, worldXZ.y, walkYaw),
-      vec4f(rx, ry, packedSpecies, coatSeed),
-      vec4f(centerY, scale, 0.0, f32(species)),
-      vec4f(0.0, packedFlags, 0.0, 0.0),
-    );
-    let splatBucket = ${HERD_SPLAT_BUCKET}u;
-    let splatSlot = atomicAdd(&draws[splatBucket * 5u + 1u], 1u);
-    if (splatSlot < cfg.bucketSpan) {
-      bodies[splatBucket * cfg.bucketSpan + splatSlot] = splatBody;
-    }
-  }
+  // Where it is drawn: its place in the animal continuum, which the cut reads next (js/wgsl/animal-continuum.js).
+  // A felled beast is exact (its rig's standing slack does not hold it); a shattered vehicle's pieces fly apart and
+  // are never handed to a far body.
+  var placeFlags = 0u;
+  if ((flags & 2u) != 0u) { placeFlags = ${ANIMAL_PLACE_EXACT}u; }
+  if ((flags & 4u) != 0u) { placeFlags = ${ANIMAL_PLACE_EXACT | ANIMAL_PLACE_SHATTERED}u; }
+  // An intact hitch thins at the horizon as one, keyed by its route and place in the train.
+  let useHitchMid = isHitch && (flags & 14u) == 0u && !isPanicking;
+  let thinSeed = select(idx, u32(max(floor(seed.anchor.x * 131.0 + seed.anchor.y * 17.0), 0.0)), useHitchMid) & 4095u;
+  let code = f32(species + ${ANIMAL_PLACE_CODE}u * placeFlags + ${ANIMAL_PLACE_SEED}u * thinSeed);
+  herdPlace(idx,
+    vec4f(worldXZ.x + shiftXZ.x, wy, worldXZ.y + shiftXZ.y, walkYaw),
+    vec4f(slopePitch, 0.0, scale, code),
+    vec4f(walkPhase, moveAmt, select(grazeAmt, tongueYaw, isVehicle), coatSeed),
+    vec4f(select(tailPhase, tonguePitch, isVehicle), f32(flags), hitAge, hitDirAngle),
+  );
 }
 `;
 
 export const HERDS_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + CONTINUUM_CORE_WGSL + /* wgsl */ `
-struct HerdNearDomain { domain: vec4f, grid: vec4f };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var envCube: texture_cube<f32>;
-@group(0) @binding(12) var<uniform> nearTerrain: HerdNearDomain;
-@group(0) @binding(16) var<storage, read> herdBodies: array<HerdBody>;
-@group(0) @binding(17) var<uniform> herdRig: HerdSpeciesRig;
-@group(0) @binding(18) var<storage, read> herdMorph: array<vec4f>;
-` + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + HERD_RIG_FN + HERD_MORPH_EVAL_FN + /* wgsl */ `
+` + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + HERD_RIG_FN + animalContinuumRenderWGSL(0, HERD_CONTINUUM_BINDING) + /* wgsl */ `
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
@@ -918,26 +783,18 @@ struct HerdVertexOut {
   @builtin(position) pos: vec4f,
   @location(0) world: vec3f,
   @location(1) normal: vec3f,
-  @location(2) coatInfo: vec4f, // coatCode (zone or 16+rgb15), aoShade, coatSeed, species
-  @location(3) localXZ: vec2f,
-  @location(4) @interpolate(flat) meshKeep: f32, // share of the splat handoff the mesh holds (0..1)
-  @location(5) texColor: vec3f, // smoothly interpolated linear RGB from 4K RGB555 (or -1 for zone path)
-  @location(6) @interpolate(flat) seed: u32,     // herd index, seeding the handoff's sample split
-};
-
-struct HerdSplatOut {
-  @builtin(position) pos: vec4f,
-  @location(0) world: vec3f,
-  @location(1) uv: vec2f,
-  @location(2) @interpolate(flat) coatInfo: vec4f, // meshKeep, coatSeed, species, 0
-  @location(3) basisUp: vec3f,
-  @location(4) @interpolate(flat) seed: u32,
+  @location(2) coatInfo: vec4f, // coat code (zone, or 16 + rgb15), ao, coat seed, species
+  @location(3) localXZ: vec2f,  // a body's rest z and y; a splat's corner
+  @location(4) texColor: vec3f, // linear RGB from the RGB555 coat (or -1 for the zone path)
+  @location(5) @interpolate(flat) coverage: vec4u, // what is drawn (1 clusters, 2 far body, 3 splat), handoff | splat << 8, the beast, samples
+  @location(6) @interpolate(flat) flags: u32,      // the herd's flags (1 tack)
 };
 
 struct HerdFragOut {
   @location(0) color: vec4f,
   @builtin(sample_mask) mask: u32,
 };
+
 
 fn herdShadowVis(world: vec3f, normal: vec3f) -> f32 {
   if (landSH.origin.w < 0.5) { return 1.0; }
@@ -1159,158 +1016,93 @@ fn shadeHerdSurface(world: vec3f, n: vec3f, albedo: vec3f, ao: f32, species: u32
   return surfaceAir(col, world);
 }
 
-@vertex fn herdsVS(
-  @location(0) position: vec3f,
-  @location(1) normal: vec3f,
-  @location(2) partZone: vec2f,
-  @builtin(vertex_index) vid: u32,
-  @builtin(instance_index) inst: u32,
-) -> HerdVertexOut {
-  let body = herdBodies[inst];
-  let spFloor = floor(body.slopeScale.w + 1e-4);
-  let morphed = morphLivestockVertex(vid, position, normal, partZone.x, body.extra.x);
-  let posed = poseLivestockVertex(morphed.pos, morphed.nrm, morphed.part, morphed.shardId, body, herdRig);
-  let shifted = posed.localPos + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-  var coatVal = floor(partZone.y + 0.001);
-  var ao = clamp(partZone.y - coatVal, 0.08, 0.98);
-  var vTex = vec3f(-1.0);
-  if (partZone.y >= 16.0) {
-    coatVal = partZone.y;
-    ao = clamp(
-      0.42
-      + 0.33 * clamp(morphed.pos.y / max(herdRig.legs.w, 0.4), 0.0, 1.0)
-      + 0.23 * (0.5 + 0.5 * posed.localNrm.y),
-      0.12,
-      0.96,
-    );
-    let rgb15 = u32(round(partZone.y - 16.0));
-    let baseTex = vec3f(f32((rgb15 >> 10u) & 31u), f32((rgb15 >> 5u) & 31u), f32(rgb15 & 31u)) / 31.0;
-    vTex = baseTex * baseTex;
-  }
+fn herdCoat(point: AnimalPoint) -> f32 { return bitcast<f32>(point.skin.y); }
+fn herdTexColor(coat: f32) -> vec3f {
+  if (coat < 16.0) { return vec3f(-1.0); }
+  let rgb15 = u32(round(coat - 16.0));
+  let base = vec3f(f32((rgb15 >> 10u) & 31u), f32((rgb15 >> 5u) & 31u), f32(rgb15 & 31u)) / 31.0;
+  return base * base;
+}
+
+// One vertex of whatever the cut chose for a beast: a cluster's corner or a far-body corner, each end posed by the
+// rig and the two mixed by the collapse's morph; or a corner of its splat, facing the eye.
+@vertex fn herdContinuumVS(@builtin(vertex_index) vertex: u32, listed: AnimalContinuumEntry) -> HerdVertexOut {
+  let touched = animalContinuumBindings();
+  let animal = listed.entry.x;
+  let kind = listed.entry.y >> 28u;
+  let item = listed.entry.y & 0x0fffffffu;
+  let place = animalPlaceOf(animal);
+  let archetype = animalTypeOf(place);
+  let state = animalState(animal);
   var o: HerdVertexOut;
-  o.world = shifted;
-  o.normal = posed.localNrm;
-  o.coatInfo = vec4f(coatVal, ao, body.animCoat.w, spFloor);
-  o.localXZ = vec2f(morphed.pos.z, morphed.pos.y);
-  o.meshKeep = herdMeshKeep(body.slopeScale.w);
-  o.seed = herdSeedOf(body.extra.y);
-  o.texColor = vTex;
-  o.pos = F.viewProj * vec4f(earthCurve(shifted - F.camPos.xyz, F.camPos.y), 1.0);
-  return o;
-}
-
-fn shadeHerdVertexOut(in: HerdVertexOut) -> vec3f {
-  let n = normalize(in.normal);
-  let species = min(${HERD_SPECIES - 1}u, u32(round(in.coatInfo.w)));
-  let coatCode = in.coatInfo.x;
-  let zone = select(u32(round(coatCode)), 0u, coatCode >= 16.0);
-  let ao = in.coatInfo.y;
-  let albedo = livestockCoatAlbedo(species, coatCode, in.texColor, in.coatInfo.z, in.localXZ);
-  return shadeHerdSurface(in.world, n, albedo, ao, species, zone);
-}
-
-@fragment fn herdsSolidFS(in: HerdVertexOut) -> @location(0) vec4f {
-  return vec4f(shadeHerdVertexOut(in), 1.0);
-}
-
-@fragment fn herdsFadeFS(in: HerdVertexOut) -> HerdFragOut {
-  let mask = continuumSamples(in.meshKeep, in.pos.xy, 4u, in.seed);
-  return HerdFragOut(vec4f(shadeHerdVertexOut(in), 1.0), mask);
-}
-
-// Rule-3 1-triangle view-facing horizon splat (3 vertices per instance, circumscribed around the integrated silhouette ellipse).
-@vertex fn herdsSplatVS(
-  @builtin(vertex_index) vid: u32,
-  @builtin(instance_index) inst: u32,
-) -> HerdSplatOut {
-  let b = herdBodies[inst];
-  let worldBase = vec3f(b.posYaw.x + nearTerrain.grid.y, b.posYaw.y + b.slopeScale.x, b.posYaw.z + nearTerrain.grid.z);
-  let curvedCenter = earthCurve(worldBase - F.camPos.xyz, F.camPos.y);
-  let toCamRaw = -curvedCenter;
-  let toCam = select(vec3f(0.0, 0.0, 1.0), normalize(toCamRaw), length(toCamRaw) > 1e-5);
-  let camR0 = select(vec3f(1.0, 0.0, 0.0), normalize(F.camRight.xyz), length(F.camRight.xyz) > 1e-5);
-  let zenithUp = select(vec3f(0.0, 1.0, 0.0), vec3f(0.0, 0.0, 1.0), abs(toCam.y) > 0.999);
-  let camR = select(camR0, normalize(cross(zenithUp, toCam)), abs(dot(camR0, toCam)) > 0.995 || abs(toCam.y) > 0.999);
-  let camU = normalize(cross(camR, toCam));
-
-  // Single equilateral triangle circumscribing unit circle r = 1: (0, 2), (-sqrt(3), -1), (+sqrt(3), -1).
-  var triUV = vec2f(0.0, 2.0);
-  if (vid == 1u) { triUV = vec2f(-1.7320508, -1.0); }
-  else if (vid == 2u) { triUV = vec2f(1.7320508, -1.0); }
-
-  let rx = b.animCoat.x;
-  let ry = b.animCoat.y;
-  let offset = camR * (triUV.x * rx) + camU * (triUV.y * ry);
-  var o: HerdSplatOut;
-  o.world = worldBase + offset;
-  o.uv = triUV;
-  let splatFlags = u32(b.extra.y + 0.5);
-  let packedSpecies = b.slopeScale.w + select(0.0, 10.0, (splatFlags & 1u) != 0u);
-  o.coatInfo = vec4f(herdMeshKeep(b.animCoat.z), b.animCoat.w, packedSpecies, 0.0);
-  o.seed = herdSeedOf(b.extra.y);
-  o.basisUp = camU;
-  o.pos = F.viewProj * vec4f(curvedCenter + offset, 1.0);
-  return o;
-}
-
-@fragment fn herdsSplatFS(in: HerdSplatOut) -> HerdFragOut {
-  let r2 = dot(in.uv, in.uv);
-  // The finer side's samples, inverted against the full mask: exactly the samples the mesh gave up.
-  let crossMask = 0xfu ^ continuumSamples(in.coatInfo.x, in.pos.xy, 4u, in.seed);
-  let insideEllipse = r2 <= 1.0;
-  let mask = select(0u, crossMask, insideEllipse);
-
-  let rawSp = in.coatInfo.z;
-  let hasTack = rawSp >= 9.5;
-  let species = min(${HERD_SPECIES - 1}u, u32(round(select(rawSp, rawSp - 10.0, hasTack))));
-  let seed = in.coatInfo.y;
-  // Upper half of vehicle splats carries tilt/coach-roof colour (zone = 2), saddled horse splat crest shows saddlecloth (zone = 6).
-  let isVeh = species >= 4u;
-  var zone = select(0u, 2u, isVeh && in.uv.y > -0.05);
-  if (hasTack && in.uv.y > 0.15 && abs(in.uv.x) < 0.45) { zone = 6u; }
-  let albedo = livestockCoatAlbedo(species, f32(zone), vec3f(-1.0), seed, in.uv * 0.5);
-
-  let toCam = normalize(F.camPos.xyz - in.world);
-  let camR = normalize(F.camRight.xyz);
-  let camU = normalize(in.basisUp);
-  let nz = sqrt(max(0.08, 1.0 - min(0.92, r2 * 0.85)));
-  let n = normalize(camR * (in.uv.x * 0.55) + camU * (in.uv.y * 0.65) + toCam * nz);
-  let ao = clamp(0.56 + 0.34 * in.uv.y, 0.25, 0.95);
-  let col = shadeHerdSurface(in.world, n, albedo, ao, species, zone);
-  return HerdFragOut(vec4f(col, 1.0), mask);
-}
-`;
-
-export const HERDS_SHADOW_WGSL = SHADOW_FRAME + HERD_RIG_FN + /* wgsl */ `
-struct HerdNearDomain { domain: vec4f, grid: vec4f };
-@group(0) @binding(0) var<uniform> landSH: ShadowFrame;
-@group(0) @binding(1) var<uniform> nearTerrain: HerdNearDomain;
-@group(0) @binding(2) var<storage, read> herdBodies: array<HerdBody>;
-@group(0) @binding(3) var<uniform> herdRig: HerdSpeciesRig;
-@group(0) @binding(4) var<storage, read> herdMorph: array<vec4f>;
-` + HERD_MORPH_EVAL_FN + /* wgsl */ `
-
-@vertex fn herdsShadowVS(
-  @location(0) position: vec3f,
-  @location(1) normal: vec3f,
-  @location(2) partZone: vec2f,
-  @builtin(vertex_index) vid: u32,
-  @builtin(instance_index) inst: u32,
-) -> @builtin(position) vec4f {
-  let body = herdBodies[inst];
-  let morphed = morphLivestockVertex(vid, position, normal, partZone.x, body.extra.x);
-  let posed = poseLivestockVertex(morphed.pos, morphed.nrm, morphed.part, morphed.shardId, body, herdRig);
-  let shifted = posed.localPos + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-  return landSH.lightView * vec4f(shifted - landSH.origin.xyz, 1.0);
-}
-`;
-
-export const HERDS_RESET_WGSL = /* wgsl */ `
-@group(0) @binding(0) var<storage, read_write> draws: array<u32>;
-@compute @workgroup_size(32)
-fn main(@builtin(global_invocation_id) gid: vec3u) {
-  if (gid.x < ${HERD_BUCKETS}u) {
-    draws[gid.x * 5u + 1u] = 0u;
+  o.coverage = vec4u(kind, state.x & 0xffffu, animal, animalView.counts.y);
+  o.flags = u32(place.more.y + 0.5);
+  if (kind == ${ANIMAL_CONTINUUM_ENTRY.splat}u) {
+    let s = animalSplatCorner(archetype, place, vertex, bitcast<f32>(state.w), F.camPos.xyz);
+    o.world = s.world + vec3f(touched);
+    // A dome over the outline: its corners lean out, its middle faces the eye.
+    o.normal = normalize(s.right * (s.corner.x * 0.55) + s.up * (s.corner.y * 0.65) + s.toward * 0.2828);
+    let colour = animalTypeV(archetype, ${ANIMAL_CONTINUUM_TYPE.splatColour}u);
+    o.coatInfo = vec4f(select(0.0, 16.0, colour.x >= 0.0), 0.5, place.pose.w, f32(archetype));
+    o.texColor = colour;
+    o.localXZ = s.corner;
+  } else {
+    var c: AnimalCorner;
+    if (kind == ${ANIMAL_CONTINUUM_ENTRY.cluster}u) { c = animalClusterCorner(archetype, item, vertex); }
+    else { c = animalFarCorner(archetype, item, vertex, state.y & 65535u, bitcast<f32>(state.z)); }
+    if (!c.shown) { o.pos = ANIMAL_CONTINUUM_HIDDEN; return o; }
+    let body = herdBodyOf(place);
+    let rig = herdRigOf(archetype);
+    let a = herdPosePoint(c.a, body, rig);
+    let b = herdPosePoint(c.b, body, rig);
+    o.world = mix(a.localPos, b.localPos, c.morph) + vec3f(touched);
+    o.normal = normalize(mix(a.localNrm, b.localNrm, c.morph));
+    let coatA = herdCoat(c.a);
+    let coatB = herdCoat(c.b);
+    let rest = mix(c.a.position, c.b.position, c.morph);
+    var coat = floor(coatA + 0.001);
+    var ao = clamp(coatA - coat, 0.08, 0.98);
+    var tex = vec3f(-1.0);
+    if (coatA >= 16.0) {
+      coat = coatA;
+      ao = clamp(0.42 + 0.33 * clamp(rest.y / max(rig.legs.w, 0.4), 0.0, 1.0) + 0.23 * (0.5 + 0.5 * o.normal.y), 0.12, 0.96);
+      tex = select(herdTexColor(coatA), mix(herdTexColor(coatA), herdTexColor(coatB), c.morph), coatB >= 16.0);
+    }
+    o.coatInfo = vec4f(coat, ao, place.pose.w, f32(archetype));
+    o.texColor = tex;
+    o.localXZ = vec2f(rest.z, rest.y);
   }
+  o.pos = F.viewProj * vec4f(earthCurve(o.world - F.camPos.xyz, F.camPos.y), 1.0);
+  return o;
+}
+
+// Every sample of a pixel is drawn by exactly one of a beast's clusters, far body and splat (animalContinuumMask).
+@fragment fn herdContinuumFS(in: HerdVertexOut) -> HerdFragOut {
+  let species = min(${HERD_SPECIES - 1}u, u32(round(in.coatInfo.w)));
+  var coatCode = in.coatInfo.x;
+  var ao = in.coatInfo.y;
+  var zone = select(u32(round(coatCode)), 0u, coatCode >= 16.0);
+  var localXZ = in.localXZ;
+  if (in.coverage.x == ${ANIMAL_CONTINUUM_ENTRY.splat}u) {
+    // A splat's upper half is a vehicle's tilt or roof (zone 2); a saddled horse's crest, its saddlecloth (zone 6).
+    let uv = in.localXZ;
+    if (coatCode < 16.0) {
+      zone = select(0u, 2u, species >= 4u && uv.y > -0.05);
+      if ((in.flags & 1u) != 0u && uv.y > 0.15 && abs(uv.x) < 0.45) { zone = 6u; }
+      coatCode = f32(zone);
+    }
+    ao = clamp(0.56 + 0.34 * uv.y, 0.25, 0.95);
+    localXZ = uv * 0.5;
+  }
+  let albedo = livestockCoatAlbedo(species, coatCode, in.texColor, in.coatInfo.z, localXZ);
+  let colour = shadeHerdSurface(in.world, normalize(in.normal), albedo, ao, species, zone);
+  return HerdFragOut(vec4f(colour, 1.0), animalContinuumMask(in.coverage, in.pos.xy));
 }
 `;
+
+// The land's shadow map takes each beast's far body at the step the cut chose for it, posed by the same rig.
+export const HERDS_SHADOW_WGSL = animalContinuumShadowWGSL(HERD_RIG_FN + /* wgsl */ `
+fn animalShadowPose(corner: AnimalPoint, place: AnimalPlace, archetype: u32) -> vec3f {
+  return herdPosePoint(corner, herdBodyOf(place), herdRigOf(archetype)).localPos;
+}
+`);

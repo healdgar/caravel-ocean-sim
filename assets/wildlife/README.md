@@ -17,6 +17,11 @@ images byte-for-byte. A sampled nearest-surface comparison at the authored
 14.1 m game scale found a maximum 2.7 mm source-to-reduced difference. This
 sampled geometric comparison does not prove identical pixels at every pose.
 
+The game draws the whale's body, like every animal's, through the animal
+continuum (`assets/animal-continuum/`, baked from this model by
+`scripts/prepare-animal-continuum.mjs`); the runtime loads `whale.glb` only for
+its textures and its rig. `livestock-1550.bin` is likewise only a bake source.
+
 `js/marine-asset.js` converts head +Z to actor -Z, retains Y up and centres the
 neutral envelope. The game length is authored, not an anatomical measurement.
 There are no supplied animation clips. `js/marine-rig.js` adds a bounded 5.2 s

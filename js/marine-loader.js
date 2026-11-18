@@ -40,6 +40,8 @@ export function createDeferredMarineLife(options,createRenderer=createMarineLife
     encode(pass){renderer?.encode(pass);},
     draw(pass){renderer?.draw(pass);},
     drawSubmerged(pass,above=false){renderer?.drawSubmerged(pass,above);},
+    // The census's view of the bodies' cut (js/continuum-census.js); none until the renderer has loaded.
+    continuumDraws(){return renderer?.continuumDraws()??[];},
     destroy(){destroyed=true;state.clear();renderer?.destroy();renderer=null;},
   };
 }

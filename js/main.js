@@ -4333,7 +4333,7 @@ async function main() {
     wakePool.commit();
     hullContactProbe.encode(cp);
     spindrift.encode(cp);
-    marineLife.encode(cp);
+    dolphins.encode(cp);marineLife.encode(cp);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter){
       v.wetness.encode(cp,v.boat.showProw);
       if(v.bakingWreck){v.bakingWreck=false;v.bakedWreck=true;}
@@ -5768,7 +5768,9 @@ async function main() {
     if(continuumCensus&&(censusEveryFrame||(frameIndex&7)===0)){
       // People are one family across every company, the garrison, the mate, the town and the decks of passing vessels.
       const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
-      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...props.continuumSources(),...(people.length?[{name:'people',draws:people}]:[])]);
+      // The sea's animals beside the land's (the herds, among terrain's sources).
+      const sea=[{name:'dolphins',draws:dolphins.continuumDraws()},{name:'marine life',draws:marineLife.continuumDraws()}].filter(s=>s.draws.length);
+      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...props.continuumSources(),...(people.length?[{name:'people',draws:people}]:[]),...sea]);
     }
     const doTs=profiler.resolve(enc);
     let readBuf = null;

@@ -89,7 +89,7 @@ test('dolphin bodies and surface effects follow ocean height, reverse depth, and
       const target=device.createTexture({size:[128,128],format:'rgba8unorm',usage:T.RENDER_ATTACHMENT|T.COPY_SRC}),depth=device.createTexture({size:[128,128],format:'depth32float',usage:T.RENDER_ATTACHMENT});
       const read=device.createBuffer({size:128*128*4,usage:B.COPY_DST|B.MAP_READ}),boat={x:0,z:0,length:20,beam:6,heading:0,surgeVelocity:2};
       async function readFrame(waterDepth=.5){
-        const enc=device.createCommandEncoder(),p=enc.beginRenderPass({colorAttachments:[{view:target.createView(),clearValue:[.02,.06,.08,1],loadOp:'clear',storeOp:'store'}],depthStencilAttachment:{view:depth.createView(),depthClearValue:waterDepth,depthLoadOp:'clear',depthStoreOp:'store'}});
+        const enc=device.createCommandEncoder(),cut=enc.beginComputePass();dolphins.encode(cut);cut.end();const p=enc.beginRenderPass({colorAttachments:[{view:target.createView(),clearValue:[.02,.06,.08,1],loadOp:'clear',storeOp:'store'}],depthStencilAttachment:{view:depth.createView(),depthClearValue:waterDepth,depthLoadOp:'clear',depthStoreOp:'store'}});
         dolphins.draw(p);p.end();enc.copyTextureToBuffer({texture:target},{buffer:read,bytesPerRow:128*4},[128,128]);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);const out=Array.from(new Uint8Array(read.getMappedRange()));read.unmap();return out;
       }
       async function render(phase,waterDepth=.5){
@@ -99,7 +99,15 @@ test('dolphin bodies and surface effects follow ocean height, reverse depth, and
         for(const a of dolphins.state.animals){a.phase=phase;a.previousDepth=phase>.2?3:-3;}
         dolphins.update(0,boat,{});return readFrame(waterDepth);
       }
-      const empty=await render(0);dolphins.state.trigger(boat);const visible=await render(.45),underwater=await render(0);
+      const empty=await render(0);dolphins.state.trigger(boat);
+      // The continuum cuts each body by its projected size (AGENTS.md rule 3), so the bodies are seen through a true
+      // camera: 28 m above the pod, looking straight down, its reverse depth putting the sea's level at the cleared 0.5
+      // (and 3 m above it at 0.56). The water effects below keep the flat top view.
+      const pod=dolphins.state.animals.slice(0,dolphins.state.count),lens=.3,high=28,above=new Float32Array(f);
+      above.fill(0,0,32);above[0]=above[9]=1/lens;above[7]=-1;above[14]=high*.5;
+      above.set([pod.reduce((s,a)=>s+a.x,0)/pod.length,high,pod.reduce((s,a)=>s+a.z,0)/pod.length,0],16);
+      above.set([lens,0,0,0],20);above.set([0,0,lens,0],24);above.set([0,-1,0,0],28);device.queue.writeBuffer(frame,0,above);
+      const visible=await render(.45),underwater=await render(0);
       const changed=(a,b)=>a.reduce((n,v,i)=>n+(v!==b[i]?1:0),0);
       const result={errors,count:dolphins.state.count,visible:changed(empty,visible),submerged:changed(empty,underwater)};
       // Raising both the real wave and its depth surface must carry the animals
@@ -164,7 +172,7 @@ test('wet dolphin skin produces directional sunlight glints while retaining shad
  if(i.x>=arrayLength(&probeNormals)){return;}
  let n=probeNormals[i.x].xyz;let eye=normalize(F.camPos.xyz);let sun=F.sunDir.xyz;
  let ordinarySpec=vesselSpecular(n,eye,sun,.32,vec3f(.035))*sunIlluminance()*sunVis[0]*step(0.0,sun.y)*max(dot(n,sun),0.0);
- probeColors[i.x]=vec4f(dolphinSkinRadiance(vec3f(0),n,vec3f(.16,.24,.30)),dot(ordinarySpec,vec3f(.2126,.7152,.0722)));
+ probeColors[i.x]=vec4f(dolphinSkinRadiance(vec3f(0),n,vec3f(.16,.24,.30),.32),dot(ordinarySpec,vec3f(.2126,.7152,.0722)));
 }`;
       const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:device.createShaderModule({code}),entryPoint:'wetProbe'}}),B=GPUBufferUsage,T=GPUTextureUsage;
       const make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};

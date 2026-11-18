@@ -1,45 +1,16 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// High-detail organic 16th-century livestock & horse tack meshes + Rule-3 progressive half-edge collapse continuum.
+// High-detail organic 16th-century livestock & horse tack meshes, and the road vehicles: the sources
+// scripts/prepare-animal-continuum.mjs bakes into the animal continuum, which is all the game draws them from.
 // Species order: 0 = sheep (Merino/Churra), 1 = cattle (Barrosã/Mertolenga), 2 = swine (Porco Preto), 3 = horse (Lusitano + sela à gineta tack).
 // Vertex layout (8 floats = 32 bytes): [px, py, pz, nx, ny, nz, part, coat].
 
 export const LIVESTOCK_SPECIES_COUNT = 4;
 export const LIVESTOCK_VERTEX_FLOATS = 8;
-export const LIVESTOCK_PACK_ASSET = "assets/wildlife/livestock-1550.bin";
 
 const LIVESTOCK_NAMES = ["sheep", "cattle", "swine", "horse"];
 
-export function buildVehicleMorphWords(vertices) {
-  const vc = vertices.length / 8;
-  const words = new Uint32Array(Math.max(1, vc) * 2);
-  const spanQ16 = Math.round(0.12 * 65535);
-  const anchorsByPart = new Map();
-  for (let i = 0; i < vc; i++) {
-    const o = i * 8;
-    const px = vertices[o], py = vertices[o + 1], pz = vertices[o + 2];
-    const part = Math.floor(vertices[o + 6] + 1e-4);
-    let list = anchorsByPart.get(part);
-    if (!list) { list = []; anchorsByPart.set(part, list); }
-    let bestIdx = -1, bestD2 = 0.085 * 0.085;
-    for (let k = 0; k < list.length; k++) {
-      const a = list[k] * 8;
-      const dx = px - vertices[a], dy = py - vertices[a + 1], dz = pz - vertices[a + 2];
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 < bestD2) { bestD2 = d2; bestIdx = list[k]; }
-    }
-    if (bestIdx < 0) {
-      list.push(i);
-      words[i * 2] = (i & 0xffff) | (0xffff << 16);
-      words[i * 2 + 1] = (spanQ16 & 0xffff) | ((i & 0xffff) << 16);
-    } else {
-      const startQ16 = Math.min(60000, Math.max(4000, Math.round((Math.sqrt(bestD2) / 0.10) * 48000)));
-      words[i * 2] = (bestIdx & 0xffff) | ((startQ16 & 0xffff) << 16);
-      words[i * 2 + 1] = (spanQ16 & 0xffff) | ((bestIdx & 0xffff) << 16);
-    }
-  }
-  return words;
-}
-
+// The pack (scripts/bake-livestock-meshes.py): a header, then each species' rig, vertices and indices. Each species
+// also carries an old per-vertex morph record, which is skipped: the continuum's bake supersedes it.
 export function decodeLivestockPack(arrayBuffer) {
   const dv = new DataView(arrayBuffer);
   if (dv.byteLength < 16 || dv.getUint32(0, true) !== 0x4b54534c) {
@@ -56,10 +27,8 @@ export function decodeLivestockPack(arrayBuffer) {
     const frontZ = dv.getFloat32(off + 16, true);
     const backZ = dv.getFloat32(off + 20, true);
     const height = dv.getFloat32(off + 24, true);
-    const coreTris = Math.round(dv.getFloat32(off + 28, true));
     const vc = dv.getUint32(off + 32, true);
     const ic = dv.getUint32(off + 36, true);
-    const collapseSteps = dv.getUint32(off + 40, true);
     off += 48;
 
     const verts = new Float32Array(vc * 8);
@@ -84,9 +53,6 @@ export function decodeLivestockPack(arrayBuffer) {
     const indices = new Uint32Array(ic);
     for (let k = 0; k < ic; k++) indices[k] = dv.getUint16(off + k * 2, true);
     off += ic * 2 + ((ic * 2) % 4);
-
-    const morphWords = new Uint32Array(vc * 2);
-    for (let k = 0; k < vc * 2; k++) morphWords[k] = dv.getUint32(off + k * 4, true);
     off += vc * 8;
 
     out.push(Object.freeze({
@@ -96,35 +62,17 @@ export function decodeLivestockPack(arrayBuffer) {
       frontZ,
       backZ,
       height,
-      coreTris,
-      collapseSteps,
       vertices: verts,
       indices,
       indexCount: ic,
-      morphWords,
     }));
   }
   return Object.freeze(out);
 }
 
 let cachedLivestockMeshes = null;
-let pendingLivestockPromise = null;
 
-export async function loadLivestockMeshes() {
-  if (cachedLivestockMeshes) return cachedLivestockMeshes;
-  if (pendingLivestockPromise) return pendingLivestockPromise;
-  pendingLivestockPromise = (async () => {
-    if (typeof process !== "undefined" && process.versions?.node && !LIVESTOCK_PACK_ASSET.startsWith("data:") && typeof process.getBuiltinModule === "function") {
-      return getLivestockMeshes();
-    }
-    const res = await fetch(LIVESTOCK_PACK_ASSET);
-    if (!res.ok) throw new Error("Failed to fetch livestock pack (" + res.status + ")");
-    cachedLivestockMeshes = decodeLivestockPack(await res.arrayBuffer());
-    return cachedLivestockMeshes;
-  })();
-  return pendingLivestockPromise;
-}
-
+// The pack, read from disk where it lies (the bake and the tests run under node).
 export function getLivestockMeshes() {
   if (cachedLivestockMeshes) return cachedLivestockMeshes;
   if (typeof process !== "undefined" && process.versions?.node && typeof process.getBuiltinModule === "function") {
@@ -136,7 +84,7 @@ export function getLivestockMeshes() {
     cachedLivestockMeshes = decodeLivestockPack(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
     return cachedLivestockMeshes;
   }
-  throw new Error("Call await loadLivestockMeshes() before getLivestockMeshes() in browser runtime");
+  throw new Error("The livestock pack is a bake source, read under node");
 }
 
 // Sixteenth-century Iberian road vehicles in the livestock vertex layout (8 floats = 32 bytes):
@@ -483,7 +431,6 @@ function buildWagonMesh() {
     vertices: new Float32Array(v),
     indices: new Uint32Array(idx),
     indexCount: idx.length,
-    morphWords: buildVehicleMorphWords(v, idx),
   });
 }
 
@@ -578,7 +525,6 @@ function buildCoachMesh() {
     vertices: new Float32Array(v),
     indices: new Uint32Array(idx),
     indexCount: idx.length,
-    morphWords: buildVehicleMorphWords(v, idx),
   });
 }
 
@@ -644,7 +590,6 @@ function buildOxCartMesh() {
     vertices: new Float32Array(v),
     indices: new Uint32Array(idx),
     indexCount: idx.length,
-    morphWords: buildVehicleMorphWords(v, idx),
   });
 }
 
