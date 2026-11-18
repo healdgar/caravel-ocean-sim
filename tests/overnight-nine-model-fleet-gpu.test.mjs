@@ -36,9 +36,9 @@ function instrumentNineFleet(){
   GPURenderPassEncoder.prototype.setPipeline=function(pipeline){r.passes.set(this,pipeline.label);return render.call(this,pipeline);};
   const draw=GPURenderPassEncoder.prototype.drawIndexed;
   GPURenderPassEncoder.prototype.drawIndexed=function(indices,instances=1,...args){const key=r.passes.get(this);r.draws[key]??={calls:0,indices:0,instances:0};r.draws[key].calls++;r.draws[key].indices+=indices*instances;r.draws[key].instances+=instances;return draw.call(this,indices,instances,...args);};
-  // A ship's scene draws are her cut's indirect draws, named for her model ('<model> vessel <id> continuum draws'): what
-  // each list holds is the GPU's (read back in tests/vessel-continuum-gpu.test.mjs), so here they are counted as calls.
-  const scene=new Set(['vessel clusters','vessel far bodies','vessel splats','damaged vessel']),indirect=GPURenderPassEncoder.prototype.drawIndirect;
+  // A ship's scene draws are her own scene's indirect draws of the one view, named for her model ('<model> vessel <id>
+  // continuum draws'): what each list holds is the GPU's, so here they are counted as calls.
+  const scene=new Set(['vesselContinuum view']),indirect=GPURenderPassEncoder.prototype.drawIndirect;
   GPURenderPassEncoder.prototype.drawIndirect=function(buffer,offset){const ship=/^(\S+) vessel \S+ continuum draws$/.exec(buffer.label??'');const key=ship&&scene.has(r.passes.get(this))?ship[1]+' vessel':r.passes.get(this);r.draws[key]??={calls:0,indices:0,instances:0};r.draws[key].calls++;return indirect.call(this,buffer,offset);};
   const compute=GPUComputePassEncoder.prototype.setPipeline;
   GPUComputePassEncoder.prototype.setPipeline=function(pipeline){r.compute[pipeline.label]=(r.compute[pipeline.label]||0)+1;return compute.call(this,pipeline);};

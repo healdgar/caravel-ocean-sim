@@ -8,7 +8,7 @@ import {createVesselPose} from '../js/vessel-pose.js';
 
 test('pose output is per vessel while pipeline sharing, enable gating and GPU-buffer ownership remain explicit',async t=>{
   const prior=Object.getOwnPropertyDescriptor(globalThis,'GPUBufferUsage');
-  Object.defineProperty(globalThis,'GPUBufferUsage',{configurable:true,value:{STORAGE:1,VERTEX:2,COPY_SRC:4}});
+  Object.defineProperty(globalThis,'GPUBufferUsage',{configurable:true,value:{STORAGE:1,VERTEX:2,COPY_SRC:4,COPY_DST:8}});
   t.after(()=>prior?Object.defineProperty(globalThis,'GPUBufferUsage',prior):delete globalThis.GPUBufferUsage);
   let compiled=0;const buffers=[],groups=[],device={
     createBuffer(desc){const b={...desc,destroyed:false,destroy(){this.destroyed=true;}};buffers.push(b);return b;},
@@ -29,7 +29,8 @@ test('pose output is per vessel while pipeline sharing, enable gating and GPU-bu
   await assert.rejects(createVesselPose({device:{},computePipe,sourceBuffer:sourceA,vertexCount:1,hullUBO:hullA,shared:a.assets}),/another graphics device/);
 });
 
-test('native shared ship poses match every direct Niña and Victory vertex and retain original rendering under recoil',{timeout:240000},async t=>{
+// The continuum's RIDER kind reads these poses (js/wgsl/ship-kinds.js); here they are held to the rig vertex by vertex.
+test('native shared ship poses match every direct Niña and Victory vertex under recoil',{timeout:240000},async t=>{
   const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
   try{
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
@@ -38,14 +39,14 @@ test('native shared ship poses match every direct Niña and Victory vertex and r
     const page=await browser.newPage();await page.route('**/__vessel-pose',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto('http://127.0.0.1:'+server.address().port+'/__vessel-pose');
     const result=await page.evaluate(async()=>{
-      const {createVesselPose,withPosedVesselVertices,POSED_VERTEX_LAYOUT}=await import('/js/vessel-pose.js');
-      const {VESSEL_RIG}=await import('/js/wgsl/vessel.js'),{CARAVEL}=await import('/js/wgsl/caravel.js');
+      const {createVesselPose}=await import('/js/vessel-pose.js');
+      const {VESSEL_RIG}=await import('/js/wgsl/vessel.js');
       const {createShipAssetCache}=await import('/js/ship-mesh.js');
       const {createLateenPoses,writeLateenUniform}=await import('/js/lateen.js');
       const {boatRotate}=await import('/js/boat.js'),{vesselVerticalScale}=await import('/js/hull.js');
       const {createGunRecoilMap,updateGunRecoilVertices}=await import('/js/gunnery-models.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
-      const B=GPUBufferUsage,T=GPUTextureUsage,W=256,H=256;
+      const B=GPUBufferUsage;
       const buffer=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
       const shader=async(code,label)=>{const module=device.createShaderModule({code,label});const bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message);if(bad.length)throw Error(label+': '+bad.join('\n'));return module;};
       const computePipe=async(code,label)=>device.createComputePipelineAsync({layout:'auto',compute:{module:await shader(code,label),entryPoint:'main'}});
@@ -58,25 +59,6 @@ test('native shared ship poses match every direct Niña and Victory vertex and r
  let direct=rigVertex(vec3f(raw[at],raw[at+1u],raw[at+2u]),vec3f(raw[at+3u],raw[at+4u],raw[at+5u]),raw[at+6u],vec2f(raw[at+7u],raw[at+8u]));
  answer[i.x*2u]=vec4f(direct.position,0);answer[i.x*2u+1u]=vec4f(direct.normal,0);
 }`,'independent direct ship deformation');
-      const fragment=`
-@fragment fn poseParityFS(in:BoatVertex)->@location(0)vec4f {
- let rawDetail=.5+.5*sin(in.local.x*.73+in.local.y*.17+in.local.z*.19+dot(in.normalLocal,vec3f(.7,.2,.4)));
- let clothDetail=fract(in.uv.x*.11+in.uv.y*.17);
- let material=f32(in.material%7u)/7.0;
- return vec4f(clamp(abs(in.normal)*.6+vec3f(rawDetail,clothDetail,material)*.25+in.wet.x*.01,vec3f(0),vec3f(1)),1);
-}`;
-      // Production vertex entry and all canonical rig code remain intact;
-      // an inspectable fragment exposes local/normal/UV/material preservation.
-      const vertexSource=CARAVEL+fragment;
-      const rawLayout={arrayStride:36,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'}]};
-      const renderPipelines=[];
-      for(const posed of [false,true]){
-        const module=await shader(posed?withPosedVesselVertices(vertexSource):vertexSource,'actual ship vertex rendering');
-        renderPipelines.push(await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[rawLayout,...(posed?[POSED_VERTEX_LAYOUT]:[])]},fragment:{module,entryPoint:'poseParityFS',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}}));
-      }
-      const color=device.createTexture({size:[W,H],format:'rgba8unorm',usage:T.RENDER_ATTACHMENT|T.COPY_SRC});
-      const depth=device.createTexture({size:[W,H],format:'depth32float',usage:T.RENDER_ATTACHMENT});
-      const pixelRead=device.createBuffer({size:W*H*4,usage:B.COPY_DST|B.MAP_READ});
       const cache=createShipAssetCache(),results=[];let shared=null;
       for(const modelId of ['nina','victory']){
         const asset=cache.get(modelId),rawData=new Float32Array(asset.vertices),vertexCount=rawData.length/9,size=vertexCount*32;
@@ -123,20 +105,9 @@ test('native shared ship poses match every direct Niña and Victory vertex and r
         const others=new Float32Array(read.getMappedRange());let independentDifference=0,retainedDifference=0;
         for(let i=0;i<size/4;i++){retainedDifference=Math.max(retainedDifference,Math.abs(lastValues[i]-others[i]));independentDifference=Math.max(independentDifference,Math.abs(others[i]-others[size/4+i]));}
         read.unmap();
-        const f=new Float32Array(96);f[0]=modelId==='victory'?.035:.10;f[5]=modelId==='victory'?.025:.075;f[8]=modelId==='victory'?.012:.035;f[10]=.002;f[13]=-.65;f[14]=.5;f[15]=1;
-        const frame=buffer(f,B.UNIFORM),wet=buffer(new Float32Array([.25,.1]),B.STORAGE),lookup=buffer(new Uint32Array(vertexCount),B.STORAGE),indices=buffer(asset.indices,B.INDEX);
-        const images=[];
-        for(const [posed,pipeline]of renderPipelines.entries()){
-          const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:frame}},{binding:6,resource:{buffer:hullA}},{binding:13,resource:{buffer:wet}},{binding:14,resource:{buffer:lookup}}]});
-          const encoder=device.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:[{view:color.createView(),clearValue:[0,0,0,0],loadOp:'clear',storeOp:'store'}],depthStencilAttachment:{view:depth.createView(),depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}});
-          pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setVertexBuffer(0,sourceA);if(posed)pass.setVertexBuffer(1,poseA.buffer);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(asset.indices.length);pass.end();
-          encoder.copyTextureToBuffer({texture:color},{buffer:pixelRead,bytesPerRow:W*4},[W,H]);device.queue.submit([encoder.finish()]);await pixelRead.mapAsync(GPUMapMode.READ);images.push(new Uint8Array(pixelRead.getMappedRange()).slice());pixelRead.unmap();
-        }
-        let different=0,maxPixelError=0,covered=0;
-        for(let i=0;i<W*H*4;i++){const delta=Math.abs(images[0][i]-images[1][i]);if(delta)different++;maxPixelError=Math.max(maxPixelError,delta);if(i%4===3&&images[0][i])covered++;}
         poseA.destroy();const companionSurvives=poseB.encode({setPipeline(){},setBindGroup(){},dispatchWorkgroups(){}});poseB.destroy();
-        for(const resource of [sourceA,sourceB,hullA,hullB,direct,read,frame,wet,lookup,indices])resource.destroy();
-        results.push({modelId,vertexCount,compared,maxPositionError,maxNormalError,recoilVertices,independentDifference,retainedDifference,companionSurvives,different,maxPixelError,covered});
+        for(const resource of [sourceA,sourceB,hullA,hullB,direct,read])resource.destroy();
+        results.push({modelId,vertexCount,compared,maxPositionError,maxNormalError,recoilVertices,independentDifference,retainedDifference,companionSurvives});
       }
       await device.queue.onSubmittedWorkDone();device.destroy();return {errors,results};
     });
@@ -146,11 +117,6 @@ test('native shared ship poses match every direct Niña and Victory vertex and r
       assert.ok(r.maxPositionError<2e-6,r.modelId+' all-vertex position parity');assert.ok(r.maxNormalError<2e-6,r.modelId+' all-vertex normal parity');
       assert.ok(r.recoilVertices>20,r.modelId+' must exercise mutable cannon geometry');
       assert.equal(r.retainedDifference,0,r.modelId+' companion writes cannot alter player pose');assert.ok(r.independentDifference>.01,r.modelId+' companion has its own sail/helm pose');assert.equal(r.companionSurvives,true);
-      assert.ok(r.covered>100,r.modelId+' parity rendering must draw the actual ship');
-      // Posed values match exactly above. Metal compiles the two vertex pipelines apart and
-      // then rounds a few rasterised channels differently (2-4 of them, by up to 2/255).
-      const metal=process.env.WEBGPU_BACKEND==='metal';
-      assert.ok(r.different<=(metal?Math.ceil(r.covered*.002):0)&&r.maxPixelError<=(metal?8:0),r.modelId+' actual production vertex output must render identical material coordinates and normals: '+JSON.stringify(r));
     }
     await page.close();
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

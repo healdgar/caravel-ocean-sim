@@ -14,13 +14,16 @@ import {
   sampleTradeVesselState,
   createVesselAutopilotState,
   stepTradeVesselAutopilot,
-  tradeVesselsSource,
-  tradeVesselsSubmergedSource,
-  TRADE_VESSELS_WGSL,
+  REST_TO_POSED_WGSL,
+  TRADE_VESSEL_CONTINUUM_MATERIAL,
   TRADE_VESSEL_WAVE_WGSL,
   DECK_CREW_PLACE_WGSL,
 } from '../js/trade-vessels.js';
-import { shipContinuumCutWGSL } from '../js/wgsl/ship-continuum.js';
+import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
+
+// The trade vessels as the one cut draws them: their material's view, the DRAPED kind posing a whole vessel's canvas,
+// oars and helm within it (js/wgsl/ship-kinds.js).
+const TRADE_VESSEL_VIEW = continuumModuleWGSL({ pass: 'view', material: TRADE_VESSEL_CONTINUUM_MATERIAL });
 
 function groupTriangleBounds(arch, group) {
   const min = [Infinity, Infinity, Infinity];
@@ -203,7 +206,7 @@ test('Archetypes 0..6 retain 3-mast Cog, moored furled sail bundles, 3D cambered
       assert.ok(mg && mg.vertexCount > 0, `Archetype ${idx} (${cog.label}) retains ${mastId}`);
     }
   }
-  assert.match(TRADE_VESSELS_WGSL, /isCastleWall[\s\S]{0,80}p\.y\s*>\s*1\.85/, 'castle framing restricted to elevated bulkheads p.y > 1.85');
+  assert.match(TRADE_VESSEL_VIEW, /isCastleWall[\s\S]{0,80}p\.y\s*>\s*1\.85/, 'castle framing restricted to elevated bulkheads p.y > 1.85');
 
   // 2. Archetypes 1 & 3 (Moored Cog & Carrack): non-empty `sail.furled.*` bundles following true yard slopes
   for (const [idx, expectedFurled] of [
@@ -271,9 +274,11 @@ test('Archetypes 0..6 retain 3-mast Cog, moored furled sail bundles, 3D cambered
   assert.ok(barque.groups.some((g) => g.id === 'rig.standing.barque' && g.vertexCount > 0), 'Harbor Barque has forestay & gunwale shrouds');
   assert.ok(barque.groups.some((g) => g.id === 'rig.running.barque' && g.vertexCount > 0), 'Harbor Barque has tack/halyard/sheet lines');
 
-  // 6. GPU Sail Brail WGSL handles m == 9u, 13u, and 19u bolt-ropes using exact yard tables
-  assert.match(TRADE_VESSELS_WGSL, /m\s*!=\s*9u\s*&&\s*m\s*!=\s*13u\s*&&\s*m\s*!=\s*19u/);
-  assert.match(TRADE_VESSELS_WGSL, /SAIL_BRAIL_A/);
+  // 6. GPU Sail Brail WGSL handles m == 9u, 13u, and 19u bolt-ropes using exact yard tables: the DRAPED kind's, read
+  // from each archetype's block of the pose buffer, and a damaged vessel's rest pose's own
+  assert.match(TRADE_VESSEL_VIEW, /m\s*!=\s*9u\s*&&\s*m\s*!=\s*13u\s*&&\s*m\s*!=\s*19u/);
+  assert.match(TRADE_VESSEL_VIEW, /fn\s+shipDrapedBrail\(/);
+  assert.match(REST_TO_POSED_WGSL, /SAIL_BRAIL_A/);
 });
 
 test('Zero-flicker traffic invariants: no duplicate crew.sweep, caravan turnaround, berth >=42m deduplication, MAX_TRADE_VESSELS cap, river starboard lanes, and zero-discard WGSL', () => {
@@ -370,10 +375,11 @@ test('Zero-flicker traffic invariants: no duplicate crew.sweep, caravan turnarou
 
   // 4. Verify TBDR & WGSL rules across all opaque/main shader modules (zero `discard`, <= 8 storage buffers, <= 16 sampled textures, balanced braces)
   const opaqueShaders = [
-    ['tradeVessels(intact)', tradeVesselsSource(false, 4)],
-    ['tradeVessels(damagedShade)', tradeVesselsSource(true, 4)],
-    ['tradeVessels(submerged)', tradeVesselsSubmergedSource()],
-    ['shipCut', shipContinuumCutWGSL()],
+    ['tradeVessels(view)', TRADE_VESSEL_VIEW],
+    ['tradeVessels(material)', TRADE_VESSEL_CONTINUUM_MATERIAL.wgsl()],
+    ['tradeVessels(restPose)', REST_TO_POSED_WGSL],
+    ['continuumCut', continuumModuleWGSL({ pass: 'select' })],
+    ['continuumShadow', continuumModuleWGSL({ pass: 'shadow' })],
     ['waveCompute', TRADE_VESSEL_WAVE_WGSL],
     ['crewPlace', DECK_CREW_PLACE_WGSL],
   ];
@@ -386,9 +392,8 @@ test('Zero-flicker traffic invariants: no duplicate crew.sweep, caravan turnarou
     }
     assert.equal(depth, 0, `${name} has balanced WGSL braces`);
 
-    // Strip `surviving` (damaged depth-only prepass; `tvFS` shades at `depthCompare: 'equal'` with zero `discard`)
-    const withoutPrepass = code.replace(/@fragment\s+fn\s+surviving\b[\s\S]*?\n\}/g, '');
-    assert.doesNotMatch(withoutPrepass, /\bdiscard\b/, `${name} has zero discard in opaque/main passes`);
+    // A damaged vessel is masked out of her samples by her material (rule 2): no pass drops a fragment.
+    assert.doesNotMatch(code, /\bdiscard\b/, `${name} has zero discard in opaque/main passes`);
 
     const storageMatches = code.match(/var<storage\b/g) || [];
     assert.ok(storageMatches.length <= 8, `${name} uses <= 8 storage buffers (${storageMatches.length})`);
@@ -493,8 +498,9 @@ test('Harbor stern z-separation, 0.000 mm collinear river-barge oars, over-gunwa
     }
   }
   assert.ok(maxCenterlineErrMm < 0.01, `all 8 river-barge oar rings & blades lie on exact 3D straight line (err=${maxCenterlineErrMm.toFixed(5)} mm < 0.01 mm)`);
-  assert.match(TRADE_VESSELS_WGSL, /let\s+uShaft\s*=\s*normalize\(/, 'animateTradeOar feathers via rigid Rodrigues rotation around uShaft');
-  assert.doesNotMatch(TRADE_VESSELS_WGSL, /\baxisY\b/, 'legacy dog-leg axisY feathering removed');
+  assert.match(TRADE_VESSEL_VIEW, /let\s+shaft\s*=\s*normalize\(/, 'the DRAPED oar feathers by a rigid Rodrigues rotation about its shaft');
+  assert.match(REST_TO_POSED_WGSL, /let\s+uShaft\s*=\s*normalize\(/, 'a damaged vessel\'s rest pose feathers its oars the same way');
+  for (const code of [TRADE_VESSEL_VIEW, REST_TO_POSED_WGSL]) assert.doesNotMatch(code, /\baxisY\b/, 'legacy dog-leg axisY feathering removed');
 
   // Verify over-gunwale stern steering sweep (`helm.steering-oar`) stays strictly above gunwale `railY` where it crosses the quarter
   const steerGrp = barge.groups.find((g) => g.id === 'helm.steering-oar');
@@ -513,12 +519,10 @@ test('Harbor stern z-separation, 0.000 mm collinear river-barge oars, over-gunwa
   assert.ok(barge.groups.some((g) => g.id === 'hull.sole.ceiling' && g.vertexCount > 0), 'bilge ceiling seals sub-sole hold');
 
   // 3. The clusters, the far body and the splat each keep only their own samples of a pixel across a handoff, through
-  // the shared split (shipContinuumMask), never by discard or blending.
-  for (const fnName of ['tvFS', 'tvFarFS']) {
-    const start = TRADE_VESSELS_WGSL.indexOf(`@fragment fn ${fnName}`);
-    assert.ok(start >= 0, `the vessels' program defines @fragment fn ${fnName}`);
-    const snippet = TRADE_VESSELS_WGSL.slice(start, TRADE_VESSELS_WGSL.indexOf('\n}', start) + 2);
-    assert.match(snippet, /shipContinuumMask\(in\.coverage/, `${fnName} keeps its samples through shipContinuumMask`);
-    assert.doesNotMatch(snippet, /\bdiscard\b/);
-  }
+  // the one shared split (continuumMask), a damaged vessel's holes ANDed out by her material, never by discard or blending.
+  const start = TRADE_VESSEL_VIEW.indexOf('@fragment fn continuumFS');
+  assert.ok(start >= 0, 'the vessels\' view defines @fragment fn continuumFS');
+  const snippet = TRADE_VESSEL_VIEW.slice(start, TRADE_VESSEL_VIEW.indexOf('\n}', start) + 2);
+  assert.match(snippet, /continuumMask\(v\.coverage[^;]*&\s*tradeVesselContinuumMask\(/, 'continuumFS keeps its samples through the shared split and the material\'s mask');
+  assert.doesNotMatch(snippet, /\bdiscard\b/);
 });

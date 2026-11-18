@@ -28,7 +28,7 @@ import { createCareerStore } from '../js/career-save.js';
 import { createVesselDamageState } from '../js/gunnery-control.js';
 import {
   TRADE_VESSEL_ARCHETYPES,
-  TRADE_VESSELS_WGSL,
+  TRADE_VESSEL_CONTINUUM_MATERIAL,
   buildTradeVesselRoutes,
   sampleTradeVesselState,
 } from '../js/trade-vessels.js';
@@ -259,11 +259,14 @@ test('live Castle & Commons economy couples to career-port and drives sea mercha
 test('herd, vessel and city WGSL: zero discard and the city continuum\'s sample-mask split', () => {
   assert.match(HERDS_STEP_WGSL, /0\.92/);
   assert.match(HERDS_STEP_WGSL, /if\s*\(!onRoad\)\s*\{\s*return;\s*\}/);
-  // Trade vessels: clusters, far bodies and splats of the ship continuum, and the far body's shadow.
-  for (const entry of [/@vertex\s+fn\s+tvClusterVS\b/, /@vertex\s+fn\s+tvFarVS\b/, /@vertex\s+fn\s+tvSplatVS\b/, /@vertex\s+fn\s+tvFarShadowVS\b/, /@fragment\s+fn\s+tvFS\b/, /@fragment\s+fn\s+tvFarFS\b/]) {
-    assert.match(TRADE_VESSELS_WGSL, entry);
+  // Trade vessels: a material of the one cut, clusters, far bodies and splats by its one view, the barge's oars swept
+  // by the DRAPED kind; their shadow is the one cut's own.
+  const TRADE_VESSEL_VIEW = continuumModuleWGSL({ pass: 'view', material: TRADE_VESSEL_CONTINUUM_MATERIAL });
+  for (const entry of [/@vertex\s+fn\s+continuumVS\b/, /@fragment\s+fn\s+continuumFS\b/, /fn\s+tradeVesselContinuumShade\b/, /fn\s+continuumDrapedPose\b/]) {
+    assert.match(TRADE_VESSEL_VIEW, entry);
   }
-  assert.match(TRADE_VESSELS_WGSL, /matTone\.x\s*>\s*5\.5/);
+  assert.match(TRADE_VESSEL_VIEW, /m==16u&&code>=1\.0/);
+  assert.doesNotMatch(TRADE_VESSEL_VIEW, /\bdiscard\b/);
   // The one cut stands every instance in the world's own frame, shifted by its scene's offset.
   assert.match(wgslBody('continuumShift', continuumModuleWGSL({ pass: 'select' })), /continuumView\.scene\.y\s*,\s*0\.0\s*,\s*continuumView\.scene\.z/);
 

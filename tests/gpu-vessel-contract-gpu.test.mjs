@@ -94,10 +94,12 @@ async function contractFrame(page,mutation=null){
     const rows=ships.map(v=>{
       const posed=v.pose?.buffer,has=(d,b)=>d.groups.some(g=>groupBuffers(g).includes(b));
       // Her draws are her own cut's, binding that exact computed buffer.
-      const consumes=d=>d.indirect===v.continuum?.cut?.draws&&has(d,posed);
-      const programs=v.render.programs,damaged=v.render.damaged;
-      const scene=new Set([programs?.clusters,programs?.far,programs?.splat,damaged?.surviving,damaged?.shade].filter(Boolean));
-      const captures=new Set([programs?.farCapture?.pipeline,programs?.clusterCapture?.pipeline].filter(Boolean));
+      // Her draws are her own scene's of the one cut (js/vessel-continuum.js), its data binding her posed buffer: the
+      // view's one pipeline, damaged or whole; the one shadow program; the water's capture of her material.
+      const consumes=d=>d.indirect===v.continuum?.scene?.draws&&has(d,posed);
+      const programs=v.render.programs;
+      const scene=new Set([programs?.view?.pipeline].filter(Boolean));
+      const captures=new Set([programs?.capture?.pipeline].filter(Boolean));
       const canonical=posed?r.dispatches.filter(d=>d.pipeline===v.pose.assets.pipeline&&has(d,posed)):[];
       const complete=d=>d.size[0]>=Math.ceil(v.pose.vertexCount/64)&&(d.size[1]??1)>0&&(d.size[2]??1)>0;
       const writesTo=buffer=>[
@@ -110,7 +112,7 @@ async function contractFrame(page,mutation=null){
         recoilDispatches:posed?r.dispatches.filter(d=>d.pipeline===v.pose.assets.recoilAssets?.pipeline&&has(d,posed)).length:0,
         main:r.draws.filter(d=>scene.has(d.pipeline)&&consumes(d)).length,
         submerged:r.draws.filter(d=>captures.has(d.pipeline)&&consumes(d)).length,
-        shadow:r.draws.filter(d=>/shadows/.test(d.pipeline?.label??'')&&consumes(d)).length,shadowExpected:true,
+        shadow:r.draws.filter(d=>d.pipeline===programs?.programs?.shadow&&consumes(d)).length,shadowExpected:true,
         wetness:posed?r.dispatches.filter(d=>has(d,posed)&&has(d,v.wetness.state)).length:0,
         geometryWrites:writesTo(v.vertexBuffer),poseWrites:writesTo(posed),cpuMeshChanged:changed};
     });

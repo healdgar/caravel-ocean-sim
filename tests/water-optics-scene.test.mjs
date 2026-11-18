@@ -53,21 +53,22 @@ function instrumentScene(){
   GPURenderPassEncoder.prototype.setVertexBuffer=function(index,buffer,...args){passes.get(this).vertices[index]=buffer;return setVertex.call(this,index,buffer,...args);};
   const setIndex=GPURenderPassEncoder.prototype.setIndexBuffer;
   GPURenderPassEncoder.prototype.setIndexBuffer=function(buffer,...args){passes.get(this).indices=buffer;return setIndex.call(this,buffer,...args);};
-  // A ship is drawn and captured through her own continuum cut (js/vessel-continuum.js): indirect draws from her cut's
-  // lists, with her own resources and lighting at groups 0 and 1 (made for each program, or each water capture). The land
-  // is cut on the GPU too and drawn from its own indexed records (js/land-continuum.js).
+  // A ship is drawn and captured through her own scene of the one continuum (js/vessel-continuum.js): indirect draws from
+  // her scene's lists, with her own resources (her hull's uniform among them) at group 0 and her own shadow's lighting at
+  // group 1, for her view or the water's capture of it. The land is cut on the GPU too and drawn from its own indexed
+  // records (js/land-continuum.js).
   for(const method of ['draw','drawIndexed','drawIndirect','drawIndexedIndirect']){
     const draw=GPURenderPassEncoder.prototype[method];
     GPURenderPassEncoder.prototype[method]=function(...args){
       const pass=passes.get(this),pipeline=pass.pipeline,vessels=window.oceanFleet?.vessels||[];
-      const cut=method==='drawIndirect'?vessels.find(v=>v.continuum?.cut?.draws===args[0]):null;
+      const cut=method==='drawIndirect'?vessels.find(v=>v.continuum?.scene?.draws===args[0]):null;
       const resources=groups.get(pass.groups[0])||[],hull=vessels.find(v=>resources.some(entry=>entry.resource?.buffer===v.hullUBO));
-      const programs=cut?.render.programs,capture=programs&&[programs.farCapture,programs.clusterCapture].find(c=>c?.pipeline===pipeline);
-      const own=cut?.ownGroups.get(capture??pipeline);
+      const lit=groups.get(pass.groups[1])||[];
       state.draws.push({pass:pass.label,label:pipeline.label,family:families.get(pipeline)||null,indirect:method.endsWith('Indirect'),
         count:method.endsWith('Indirect')?null:args[0],instances:method.endsWith('Indirect')?null:args[1]??1,
         vessel:cut?.id||hull?.id||null,cut:cut?.id||null,hull:hull?.id||null,
-        material:cut?pass.groups[0]===own?.[0]:null,lighting:cut?pass.groups[1]===own?.[1]:null});
+        material:cut?resources.some(entry=>entry.resource?.buffer===cut.hullUBO):null,
+        lighting:cut?lit.some(entry=>entry.resource?.buffer===cut.shadows?.uniform):null});
       return draw.apply(this,args);
     };
   }
@@ -139,24 +140,24 @@ test('the actual Niña fleet captures independent hulls and renders submerged wh
     const fleet=await render(page);assertValid(fleet);
     const roster=await page.evaluate(()=>{
       const vessels=window.oceanFleet.vessels,[player,escort]=vessels;
-      const captured=v=>v.ownGroups.get(v.render.programs.farCapture)??[];
       return {rows:vessels.map(v=>({id:v.id,model:v.asset.model.id})),
         sharedAsset:player.asset===escort.asset,sharedRender:player.render===escort.render,
         sharedPrograms:player.render.programs===escort.render.programs&&player.render.body===escort.render.body,
         uniqueGeometry:new Set(vessels.map(v=>v.vertexBuffer)).size,uniqueUniforms:new Set(vessels.map(v=>v.hullUBO)).size,
-        uniqueCuts:new Set(vessels.map(v=>v.continuum.cut.draws)).size,
-        uniqueCaptureGroups:new Set(vessels.map(v=>captured(v)[0])).size,uniqueLighting:new Set(vessels.map(v=>captured(v)[1])).size};
+        uniqueCuts:new Set(vessels.map(v=>v.continuum.scene.draws)).size,
+        uniquePoses:new Set(vessels.map(v=>v.pose.buffer)).size,uniqueLighting:new Set(vessels.map(v=>v.shadows.uniform)).size};
     });
     assert.equal(roster.rows.length,2,'legacy follower=1 allocates two actual fleet vessels');
     assert.deepEqual(roster.rows.map(v=>v.model),['nina','nina']);
     assert.ok(roster.sharedAsset&&roster.sharedRender&&roster.sharedPrograms,'the model factory shares immutable Niña assets, her continuum body and its programs');
-    for(const property of ['uniqueGeometry','uniqueUniforms','uniqueCuts','uniqueCaptureGroups','uniqueLighting'])assert.equal(roster[property],2,'each captured vessel owns '+property);
+    for(const property of ['uniqueGeometry','uniqueUniforms','uniqueCuts','uniquePoses','uniqueLighting'])assert.equal(roster[property],2,'each captured vessel owns '+property);
     for(const family of ['hull','crew','anchor'])assert.ok(fleet.draws.filter(draw=>draw.pass==='Submerged geometry'&&draw.family===family).length>=2,`both vessels submit ${family} geometry`);
     for(const vessel of roster.rows){
+      // Under water, her coarse cut: the shadow map's two lists. Seen, the view's four lists by its one pipeline.
       const captures=fleet.draws.filter(draw=>draw.pass==='Submerged geometry'&&draw.family==='hull'&&draw.vessel===vessel.id);
-      const visible=fleet.draws.filter(draw=>draw.pass!=='Submerged geometry'&&draw.label==='vessel clusters'&&draw.vessel===vessel.id);
-      assert.equal(captures.length,1,vessel.id+' submits exactly one independent underwater hull');
-      assert.equal(visible.length,1,vessel.id+' draws her clusters through her own cut');
+      const visible=fleet.draws.filter(draw=>draw.pass!=='Submerged geometry'&&draw.label==='vesselContinuum view'&&draw.vessel===vessel.id);
+      assert.equal(captures.length,2,vessel.id+' submits her own coarse cut under water, its two lists');
+      assert.equal(visible.length,4,vessel.id+' draws her four view lists through her own scene');
       for(const draw of [...captures,...visible]){
         assert.ok(draw.indirect,'she is drawn from her cut\'s lists');
         assert.equal(draw.cut,vessel.id);assert.equal(draw.hull,vessel.id,'her cut and her hull transform belong to the same ship');

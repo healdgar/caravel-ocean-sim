@@ -44,7 +44,7 @@ function instrumentFleetRuntime(){
   const render=GPURenderPassEncoder.prototype.setPipeline,current=new WeakMap();
   GPURenderPassEncoder.prototype.setPipeline=function(pipeline){current.set(this,pipeline.label);r.render[pipeline.label]=(r.render[pipeline.label]||0)+1;return render.call(this,pipeline);};
   // Each ship's scene draws, by model: her cut's indirect draws are named for her ('<model> vessel <id> continuum draws').
-  const scene=new Set(['vessel clusters','vessel far bodies','vessel splats','damaged vessel']),indirect=GPURenderPassEncoder.prototype.drawIndirect;
+  const scene=new Set(['vesselContinuum view']),indirect=GPURenderPassEncoder.prototype.drawIndirect;
   GPURenderPassEncoder.prototype.drawIndirect=function(buffer,offset){const ship=/^(\S+) vessel \S+ continuum draws$/.exec(buffer.label??'');if(ship&&scene.has(current.get(this)))r.vessels[ship[1]]=(r.vessels[ship[1]]||0)+1;return indirect.call(this,buffer,offset);};
   const compute=GPUComputePassEncoder.prototype.setPipeline;
   GPUComputePassEncoder.prototype.setPipeline=function(pipeline){r.compute[pipeline.label]=(r.compute[pipeline.label]||0)+1;return compute.call(this,pipeline);};
@@ -78,8 +78,8 @@ async function fleetRuntimeSnapshot(page){
     const ids=objects=>new Set(objects).size;
     const sources=await Promise.all([...f.renderAssets.values()].map(async asset=>({model:asset.asset.model.id,vertices:await r.hash(asset.asset.vertices),indices:await r.hash(asset.asset.indices),assetFrozen:Object.isFrozen(asset.asset),groupsFrozen:Object.isFrozen(asset.asset.groups)})));
     const rows=await Promise.all(vessels.map(async(v,index)=>{
-      // Her lighting: the shadow group her continuum's cluster program is drawn with (js/main.js vesselOwnGroups).
-      const views=(r.groups.get(v.ownGroups.get(v.render.programs.clusters)?.[1])||[]).filter(entry=>[1,3,4].includes(entry.binding)).map(entry=>{const d=r.views.get(entry.resource);return {layer:d?.baseArrayLayer,count:d?.arrayLayerCount,total:d?.texture.depthOrArrayLayers,label:d?.texture.label};});
+      // Her lighting: the shadow group her continuum's view is drawn with (js/main.js vesselOwnGroups).
+      const views=(r.groups.get(v.ownGroups.get(v.render.programs.view.pipeline)?.[1])||[]).filter(entry=>[1,3,4].includes(entry.binding)).map(entry=>{const d=r.views.get(entry.resource);return {layer:d?.baseArrayLayer,count:d?.arrayLayerCount,total:d?.texture.depthOrArrayLayers,label:d?.texture.label};});
       let dynamic=-1;for(let i=0;i<v.mesh.length;i+=9){const material=Math.floor(v.mesh[i+6]);if((material===9||material===13)&&(v.mesh[i]!==v.asset.vertices[i]||v.mesh[i+1]!==v.asset.vertices[i+1]||v.mesh[i+2]!==v.asset.vertices[i+2])){dynamic=i;break;}}
       const sample=dynamic<0?0:dynamic,upload=await r.read(v.vertexBuffer,sample*4,Math.min(36,v.vertexBuffer.size-sample*4));
       return {id:v.id,model:v.asset.model.id,vertices:v.mesh.length/9,indices:v.asset.indices.length,cpuPose:typeof v.asset.pose==='function',gpuPose:!!v.pose,mesh:await r.hash(v.mesh),dynamic,sampleMatches:upload.every((value,i)=>Object.is(value,v.mesh[sample+i])),uploads:r.writes.get(v.vertexBuffer)||0,crew:v.crew?.state.crew.length||0,crewFinite:!!v.crew&&v.crew.state.crew.every(s=>s.transform.every(Number.isFinite)),probeTime:v.probe.state.time,probeFinite:[v.boat.heave,v.boat.pitch,v.boat.roll,v.boat.x,v.boat.z,v.boat.heading].every(Number.isFinite),shadowViews:views};

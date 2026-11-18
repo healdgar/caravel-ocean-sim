@@ -173,9 +173,15 @@ function instrumentRenderer({fleet=false}={}) {
     (check.compute[labels.get(this)] ||= []).push([x, y, z]);
     return dispatch.call(this, x, y, z);
   };
+  // Each pipeline set, by its label and by its pass's ('solid shadows: continuum shadow'): programs the one continuum
+  // shares between families are told apart by the pass they cast or draw into.
+  const passLabels = new WeakMap(), beginPass = GPUCommandEncoder.prototype.beginRenderPass;
+  GPUCommandEncoder.prototype.beginRenderPass = function (desc) { const pass = beginPass.call(this, desc); passLabels.set(pass, desc?.label || ''); return pass; };
   const setRender = GPURenderPassEncoder.prototype.setPipeline;
   GPURenderPassEncoder.prototype.setPipeline = function (pipe) {
     check.render[pipe.label] = (check.render[pipe.label] || 0) + 1;
+    const inPass = `${passLabels.get(this) ?? ''}: ${pipe.label}`;
+    check.render[inPass] = (check.render[inPass] || 0) + 1;
     return setRender.call(this, pipe);
   };
 }
@@ -254,7 +260,7 @@ test('profiled rendering preserves the ship\'s pixels', {timeout:180000}, async(
       catch(e){throw new Error(`${mode} initialization: ${initErrors.join('\n')||e.message}`);}
       const frame=await step(page,1000);
       assert.ok(parseFloat(await page.locator('#fps').textContent())<2,'FPS must reflect a one-second frame, not the 100 ms simulation clamp');
-      assert.ok(frame.render['vessel clusters']>0,'the ship is drawn through her continuum cut');
+      assert.ok(frame.render['vesselContinuum view']>0,'the ship is drawn through her scene of the one continuum');
       const pixels=await page.evaluate(async()=>{
         const texture=check.target,bytesPerRow=Math.ceil(texture.width*4/256)*256;
         const buffer=check.device.createBuffer({size:bytesPerRow*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
@@ -1111,8 +1117,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['cloud resolve'].length, 1);
     assert.equal(frame.render['bloom down'], 6); // 32 x 24 supports six mip levels.
     assert.equal(frame.render['bloom up'], 5);
-    assert.equal(frame.render['solid shadows of far bodies'],undefined);
-    assert.equal(frame.render['canvas shadows of far bodies'],undefined);
+    assert.equal(frame.render['solid shadows: continuum shadow'],undefined);
 
     frame = await step(page);
     assert.equal(frame.compute.skyview, undefined);
@@ -1176,7 +1181,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     frame = await step(page);
     for (const key of ['hull contact', 'impact sheets', 'local wake', 'spray update', 'height probe']) assert.equal(frame.compute[key].length, 1);
     assert.equal(frame.render['bow waterline'],undefined,'the ocean mesh replaces the detached waterline ribbon');assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
-    assert.equal(frame.render['solid shadows of far bodies'],1);assert.equal(frame.render['canvas shadows of far bodies'],1);
+    assert.equal(frame.render['solid shadows: continuum shadow'],1,'her coarse cut casts into her own solid map');
     await page.getByLabel('Wakes & spray', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     await step(page); // One dispatch clears active particles and the local field.
     frame = await step(page);
@@ -1185,15 +1190,15 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['crest spray update'].length, 1);
     assert.equal(frame.render['crest spray'], 1, 'crest spray survives disabling boat effects');
     assert.equal(frame.render['bow waterline'],undefined);assert.equal(frame.render['bow sheets'], undefined); assert.equal(frame.render.spray, undefined);
-    assert.equal(frame.render['solid shadows of far bodies'],1);assert.equal(frame.render['canvas shadows of far bodies'],1);
+    assert.equal(frame.render['solid shadows: continuum shadow'],1,'her coarse cut casts into her own solid map');
     await page.setViewportSize({width:32,height:24});
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
-    assert.equal(frame.render['vessel clusters'],undefined);assert.equal(frame.render.composite,1);
-    assert.equal(frame.render['solid shadows of far bodies'],undefined);
+    assert.equal(frame.render['vesselContinuum view'],undefined);assert.equal(frame.render.composite,1);
+    assert.equal(frame.render['solid shadows: continuum shadow'],undefined);
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
-    assert.equal(frame.render['vessel clusters'],1);assert.equal(frame.render['solid shadows of far bodies'],1);
+    assert.equal(frame.render['vesselContinuum view'],1);assert.equal(frame.render['solid shadows: continuum shadow'],1);
     await slider(page, 'Crest spray', 0);
     await step(page);
     frame = await step(page);
@@ -2604,9 +2609,9 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await page.goto(`${origin}/?view=ship&landfall=approach&sunElev=35&clouds=0&w=96&h=72`);
     await ready();
     let frame=await step(page,100);
-    assert.equal(frame.render['vessel clusters'],2);assert.equal(frame.render.crew,undefined,'the continuum alone draws the people');assert.equal(await companiesDrawn(page),2);
+    assert.equal(frame.render['vesselContinuum view'],2);assert.equal(frame.render.crew,undefined,'the continuum alone draws the people');assert.equal(await companiesDrawn(page),2);
     assert.equal(frame.compute['height probe'].length,2);assert.equal(frame.compute['local wake'].length,2);
-    assert.equal(frame.render['solid shadows of far bodies'],2);assert.equal(frame.render['canvas shadows of far bodies'],2);
+    assert.equal(frame.render['solid shadows: continuum shadow'],2,'each vessel\'s coarse cut casts into her own solid map');
     assert.equal(frame.render.ocean,1,'the water is drawn once for both vessels');
     assert.equal(frame.compute['fft rows'].length,1,'both hulls share the same ocean FFT');
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
@@ -2629,7 +2634,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await Promise.all([page.waitForNavigation({waitUntil:'load',timeout:90000}),page.locator('#follower-toggle').uncheck()]);
     await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'0');
     frame=await step(page,100);
-    assert.equal(frame.render['vessel clusters'],1);assert.equal(await companiesDrawn(page),1);assert.equal(frame.render['solid shadows of far bodies'],1);
+    assert.equal(frame.render['vesselContinuum view'],1);assert.equal(await companiesDrawn(page),1);assert.equal(frame.render['solid shadows: continuum shadow'],1);
     assert.equal(frame.compute['height probe'].length,1);await disabledAllocation();
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
     frame=await step(page,100);
@@ -2641,10 +2646,10 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'1');
     assert.equal(await page.evaluate(()=>fleetFixture.vessels.length),2);
     frame=await step(page,100);
-    assert.equal(frame.render['vessel clusters'],2);assert.equal(await companiesDrawn(page),2);assert.equal(frame.compute['height probe'].length,2);assert.deepEqual(frame.errors,[]);
+    assert.equal(frame.render['vesselContinuum view'],2);assert.equal(await companiesDrawn(page),2);assert.equal(frame.compute['height probe'].length,2);assert.deepEqual(frame.errors,[]);
     await page.goto(`${origin}/?follower=0&view=ship&sunElev=35&clouds=0&w=96&h=72`);
     await ready();
-    frame=await step(page,100);assert.equal(frame.render['vessel clusters'],1);assert.equal(frame.compute['height probe'].length,1);
+    frame=await step(page,100);assert.equal(frame.render['vesselContinuum view'],1);assert.equal(frame.compute['height probe'].length,1);
     assert.equal(await page.locator('#follower-toggle').isChecked(),false);
     assert.equal(await page.evaluate(()=>fleetFixture.vessels.length),1);await disabledAllocation();
   }finally{await page.close();}
@@ -2718,7 +2723,7 @@ test('captain anchor orders connect voices, depth, retrieval and debug dolphin r
     assert.ok(await page.evaluate(()=>encounterFixture.dolphins.state.count>=5&&encounterFixture.dolphins.state.count<=7));
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show ship',{exact:true}).uncheck();
-    const withoutShip=await advance(1);assert.equal(withoutShip.render['vessel clusters'],undefined);assert.equal(withoutShip.render.dolphins,1,'wildlife renders with the ship hidden');
+    const withoutShip=await advance(1);assert.equal(withoutShip.render['vesselContinuum view'],undefined);assert.equal(withoutShip.render.dolphins,1,'wildlife renders with the ship hidden');
     await page.getByRole('button',{name:'Sea settings',exact:true}).click();
     await page.getByRole('button',{name:'End encounter',exact:true}).click();
     assert.equal((await advance(1)).render.dolphins,undefined);

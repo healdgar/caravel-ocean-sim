@@ -21,10 +21,11 @@ import { GROUND_DETAIL_RENDER } from '../js/wgsl/ground-detail.js';
 import { MEADOW_CUT_WGSL, MEADOW_RENDER_WGSL, buildMeadowCoverMap } from '../js/meadow-grass.js';
 import { MEADOW_CONTINUUM_HEADER, PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS, loadMeadowGrass, validateMeadowGrass } from '../js/meadow-continuum.js';
 import {
-  TRADE_VESSELS_WGSL,
+  TRADE_VESSEL_CONTINUUM_MATERIAL,
   inspectTradeVesselArchetypes,
 } from '../js/trade-vessels.js';
 import { SHIP_CONTINUUM_BODIES } from '../js/ship-continuum.js';
+import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
 
 function upsampleSurvey(survey, targetN = 257) {
   const sN = Math.round(Math.sqrt(survey.length));
@@ -51,10 +52,12 @@ test('every trade vessel is a ship continuum body and rowed boats carry 3D pilot
     assert.equal(SHIP_CONTINUUM_BODIES.filter((b) => b.family === 'trade' && b.archetype === arch.index).length, 1, `archetype ${arch.index} (${arch.label}) has one body`);
     assert.equal(arch.continuum, undefined, `archetype ${arch.index} carries no far stand-in of its own`);
   }
-  // Its handoffs split each pixel's samples (sample_mask), with no discard in the opaque program.
-  assert.match(TRADE_VESSELS_WGSL, /@builtin\(sample_mask\)/);
-  assert.match(TRADE_VESSELS_WGSL, /shipContinuumMask\(/);
-  assert.doesNotMatch(TRADE_VESSELS_WGSL, /\bdiscard\b/);
+  // Its handoffs split each pixel's samples (sample_mask) in the one cut's view of its material, a damaged vessel's
+  // holes masked out of them too, with no discard in the opaque program.
+  const tradeVesselView = continuumModuleWGSL({ pass: 'view', material: TRADE_VESSEL_CONTINUUM_MATERIAL });
+  assert.match(tradeVesselView, /@builtin\(sample_mask\)/);
+  assert.match(tradeVesselView, /tradeVesselContinuumMask\(/);
+  assert.doesNotMatch(tradeVesselView, /\bdiscard\b/);
 
   // Arch 4 (river barge) & Arch 6 (harbor skiff) must carry zero peg-man hull geometry (mat 27 / >=29 banned),
   // real 3D wooden sweep/tiller (mat 28), and real 65-joint rigged human deckStations (stern pilot + oarsmen)

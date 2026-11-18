@@ -139,7 +139,7 @@ export function createVesselContinuum({ device, programs, body, asset, pose, fra
   const { room } = continuumRoom(types, [1]);
   const scene = createContinuumScene({
     device, atlas: body, programs: programs.programs, capacity: 1, room, view: programs.view, poses: pose.buffer,
-    frame, shadowUniform: shadows.uniform, samples, label: `${label} continuum`,
+    frame, shadowUniform: shadows.uniform, samples, label,
   });
   // Her RIDER header (js/wgsl/ship-kinds.js): her posed vertices from vec4f 0, two a vertex; her lines after them; and
   // design units to her type's metres, as her hull program scales her (js/wgsl/caravel.js rigVertex), over her record's scale.

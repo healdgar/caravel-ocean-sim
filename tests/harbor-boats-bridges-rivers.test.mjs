@@ -31,8 +31,8 @@ import {
   sweepTerrainSegment,
 } from '../js/gunnery-control.js';
 import {
-  TRADE_VESSELS_WGSL,
   TRADE_VESSEL_ARCHETYPES,
+  TRADE_VESSEL_CONTINUUM_MATERIAL,
   TRADE_VESSEL_WAVE_WGSL,
   computeSailingPolar,
   createTradeVessels,
@@ -41,10 +41,17 @@ import {
   inspectTradeVesselArchetypes,
   sampleTradeVesselState,
   stepTradeVesselAutopilot,
-  tradeVesselsSource,
-  tradeVesselsSubmergedSource,
 } from '../js/trade-vessels.js';
-import { shipContinuumCutWGSL, SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_SHADOW_LIST } from '../js/wgsl/ship-continuum.js';
+import { CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS } from '../js/continuum-format.js';
+import { CONTINUUM_DRAW_WORDS, continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
+import { WATER_CAPTURE_DIRECTIVE, waterCaptureWGSL } from '../js/water-optics.js';
+
+// The trade vessels' material as the one cut composes it: its view, and its capture under water.
+const tradeVesselView = () => continuumModuleWGSL({ pass: 'view', material: TRADE_VESSEL_CONTINUUM_MATERIAL });
+const tradeVesselCapture = () => continuumModuleWGSL({
+  pass: 'capture', material: TRADE_VESSEL_CONTINUUM_MATERIAL,
+  capture: { directive: WATER_CAPTURE_DIRECTIVE, tail: (options) => waterCaptureWGSL({ ...options, surfaceWaves: false }) },
+});
 import { openBoard } from '../scripts/board-host.mjs';
 
 function upsampleSurvey(survey, targetN = 257) {
@@ -153,7 +160,8 @@ test('real part-built boat archetypes, furled sails, low air-draft cargo barges,
   for (const cargoId of ['cargo.casks', 'cargo.bales', 'cargo.sacks']) {
     assert.ok(groupIds.has(cargoId), `river barge includes ${cargoId}`);
   }
-  assert.match(TRADE_VESSELS_WGSL, /matTone\.x\s*>\s*5\.5/);
+  // Her oars swing through their stroke in the DRAPED kind (js/wgsl/ship-kinds.js), on the GPU.
+  assert.match(tradeVesselView(), /m==16u&&code>=1\.0/);
 
   // -Z bow alignment across all 4 horizontal quadrants
   for (const [dx, dz] of [[1, 1], [-1, 1], [-1, -1], [1, -1]]) {
@@ -459,9 +467,12 @@ function createMockTradeEnv(t) {
   const prevTex = globalThis.GPUTextureUsage;
   globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, COPY_SRC: 32, INDIRECT: 256 };
   globalThis.GPUTextureUsage = { TEXTURE_BINDING: 1, COPY_DST: 2 };
+  const prevStage = globalThis.GPUShaderStage;
+  globalThis.GPUShaderStage = { VERTEX: 1, FRAGMENT: 2, COMPUTE: 4 };
   t.after(() => {
     if (prevBuf === undefined) delete globalThis.GPUBufferUsage; else globalThis.GPUBufferUsage = prevBuf;
     if (prevTex === undefined) delete globalThis.GPUTextureUsage; else globalThis.GPUTextureUsage = prevTex;
+    if (prevStage === undefined) delete globalThis.GPUShaderStage; else globalThis.GPUShaderStage = prevStage;
   });
 
   let destroyedDamagedBuffers = 0;
@@ -482,6 +493,8 @@ function createMockTradeEnv(t) {
     createComputePipelineAsync: async ({ label } = {}) => ({ label, getBindGroupLayout: () => ({}) }),
     createShaderModule: () => ({}),
     createBindGroup: () => ({}),
+    createBindGroupLayout: () => ({}),
+    createPipelineLayout: () => ({}),
     queue: { writeBuffer() {}, writeTexture() {} },
   };
   const mockResources = [0, 1, 2, 3, 4, 12, 19, 20, 21].map((b) => [b, {}]);
@@ -822,28 +835,21 @@ test('two-way simTick coupling delays headwind arrivals, docks physically, holds
   assert.equal(s.stores.silk || 0, silkBefore, 'sunk ship cargo is never credited to harbor stores');
 });
 
-test('every trade vessel draws through the ship continuum: clusters, far body and splat, zero-discard sample_mask shaders', () => {
-  // The bodies and their guarantees are held by tests/ship-continuum-bake.test.mjs; here, the shaders that draw them.
+test('every trade vessel draws through the one continuum: clusters, far body and splat, zero-discard sample_mask shaders', () => {
+  // The bodies and their guarantees are held by tests/ship-continuum-bake.test.mjs; here, the material that draws them.
   const archs = inspectTradeVesselArchetypes();
   assert.equal(archs.length, TRADE_VESSEL_ARCHETYPES);
   for (const arch of archs) assert.equal(arch.continuum, undefined, `${arch.label} carries no stand-in of its own`);
-  const seen = tradeVesselsSource(false, 4);
-  for (const entry of ['tvClusterVS', 'tvFarVS', 'tvSplatVS', 'tvFarShadowVS', 'tvFarSubmergedVS', 'tvFS', 'tvFarFS']) assert.match(seen, new RegExp(`fn ${entry}\\(`), entry);
-  // A wrecked ship's cut surfaces lay depth first (its depth-only `surviving` pass is the one place a fragment is
-  // dropped) and shade at depth-equal; nothing else drops a fragment.
-  const wrecked = tradeVesselsSource(true, 4);
-  const bodyOf = (src, fn) => {
-    const at = src.indexOf(`fn ${fn}(`), open = src.indexOf('{', at);
-    let depth = 0, i = open;
-    do { depth += src[i] === '{' ? 1 : src[i] === '}' ? -1 : 0; i++; } while (depth > 0);
-    return src.slice(at, i);
-  };
-  const surviving = bodyOf(wrecked, 'surviving');
-  assert.ok(!/\bdiscard\b/.test(wrecked.replace(surviving, '')), 'a wrecked ship shades with zero discard statements beyond its depth lay');
-  assert.ok(!/\bdiscard\b/.test(seen), 'tradeVesselsSource(false, 4) contains zero discard statements (TBDR clean)');
-  assert.match(seen, /@builtin\(sample_mask\)/, 'tradeVesselsSource(false, 4) outputs @builtin(sample_mask)');
-  for (const fs of ['tvFS', 'tvFarFS']) assert.match(bodyOf(seen, fs), /shipContinuumMask\(in\.coverage/, `${fs} hands off through the shared continuum mask`);
-  assert.ok(!/\bdiscard\b/.test(shipContinuumCutWGSL()), 'the ship cut contains zero discard statements');
+  const seen = tradeVesselView();
+  for (const entry of [/@vertex\s+fn\s+continuumVS\(/, /@fragment\s+fn\s+continuumFS\(/]) assert.match(seen, entry);
+  // A damaged ship is the same record with the DAMAGED flag: what shot has holed, parted or torn leaves her samples
+  // through her material's mask, ANDed into the handoff's; nothing drops a fragment.
+  assert.equal(TRADE_VESSEL_CONTINUUM_MATERIAL.mask, true);
+  assert.match(seen, /tradeVesselContinuumMask\(/, 'the material masks a damaged vessel\'s samples');
+  assert.match(seen, /@builtin\(sample_mask\)/, 'the view outputs @builtin(sample_mask)');
+  assert.ok(!/\bdiscard\b/.test(seen), 'the trade vessels\' view contains zero discard statements (TBDR clean)');
+  assert.ok(!/\bdiscard\b/.test(TRADE_VESSEL_CONTINUUM_MATERIAL.wgsl()), 'the trade vessels\' material contains zero discard statements');
+  for (const pass of ['select', 'shadow']) assert.ok(!/\bdiscard\b/.test(continuumModuleWGSL({ pass })), `the one cut's ${pass} contains zero discard statements`);
 });
 
 test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact water elevation, with loaded draft, proportional Y scale, GPU wave compute, drawSubmerged & wake sources', async (t) => {
@@ -854,21 +860,31 @@ test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact
   // Verify WGSL TBDR & storage-buffer discipline
   const waveStorageCount = (TRADE_VESSEL_WAVE_WGSL.match(/var<storage\b/g) || []).length;
   assert.ok(waveStorageCount <= 8, `TRADE_VESSEL_WAVE_WGSL storage buffers (${waveStorageCount}) must stay <= 8`);
-  const submergedSrc = tradeVesselsSubmergedSource();
-  assert.ok(!/\bdiscard\b/.test(submergedSrc), 'tradeVesselsSubmergedSource contains zero discard statements');
-  assert.match(TRADE_VESSELS_WGSL, /scaleMetres\s*=\s*sc4\.xyz\s*\*\s*att\.z/, 'hull shader scales X/Y/Z proportionally by scaleMul');
+  // Under water a vessel is her own material composed through the water's capture (js/water-optics.js), whose cut by the
+  // sea is the only thing that drops a fragment there.
+  assert.match(tradeVesselCapture(), /fn\s+continuumCaptureVS\(/, 'the capture composes the trade vessels\' material');
+  assert.ok(!/\bdiscard\b/.test(TRADE_VESSEL_CONTINUUM_MATERIAL.wgsl()), 'the trade vessels\' material contains zero discard statements');
+  // The hull is scaled proportionally on X/Y/Z: her record's one scale, her type's design scale (js/ship-continuum.js).
+  assert.match(tradeVesselView(), /continuumTypeF\(s\.model,\s*\d+u\)/, 'the material reads her type\'s design scale');
 
   const env = createMockTradeEnv(t);
   const { mockDevice, mockResources } = env;
   const computeOrder = [];
   let capturedSubmergedBound = 0;
   let submergedDraws = 0;
+  // The water's optics as js/water-optics.js gives them: a capture composed whole from the material's view.
   const mockWaterOptics = {
-    async capture(spec) {
-      assert.equal(spec.entry, 'tvSubmergedFS');
-      assert.ok(spec.source.includes('fn tvSubmergedFS'));
+    capture() { throw Error('the trade vessels compose their capture whole'); },
+    captureDirective: WATER_CAPTURE_DIRECTIVE,
+    captureTail: (options) => waterCaptureWGSL({ ...options, surfaceWaves: false }),
+    async captureComposed(spec) {
+      assert.equal(spec.vertex.entryPoint, 'continuumCaptureVS');
+      assert.ok(spec.source.includes('fn continuumCaptureVS'));
+      assert.ok(spec.source.includes('fn tradeVesselContinuumShade'), 'the capture is composed from the trade vessels\' material');
       return {
         pipeline: { getBindGroupLayout: () => ({}) },
+        entry: 'submergedFS',
+        bindGroup: () => ({}),
         bind(pass, above) {
           assert.equal(typeof above, 'boolean');
           capturedSubmergedBound++;
@@ -984,17 +1000,18 @@ test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact
   };
   tv.encode(computePass);
   const waveIdx = computeOrder.indexOf('trade vessel wave hydro');
-  const cutIdx = computeOrder.indexOf('ship continuum cut');
+  const cutIdx = computeOrder.indexOf('continuum cut');
   assert.ok(waveIdx === 0, `GPU wave buoyancy pass runs first in encode() (order=${computeOrder.join(' -> ')})`);
-  assert.ok(cutIdx > waveIdx, 'GPU wave buoyancy writes pose before the ship continuum cut runs');
+  assert.ok(cutIdx > waveIdx, 'GPU wave buoyancy writes pose before the one continuum cut runs');
 
-  // The continuum census reads every indirect draw draw() submits in the main pass from its own arguments.
+  // The continuum census reads every indirect draw draw() submits in the main pass from its own arguments: the one
+  // scene's view lists, damaged vessels among them.
   const census = tv.continuumDraws();
   const vesselDraws = census.filter((d) => d.buffer.label === 'trade vessel continuum draws');
   assert.deepEqual(
     vesselDraws.map((d) => [d.offset, d.records, d.stride]),
-    [[0, 3, 4], [64, SHIP_CONTINUUM_DAMAGED_SLOTS, 4], [64, SHIP_CONTINUUM_DAMAGED_SLOTS, 4]],
-    'census lists the clusters, far bodies and splats, then the damaged ships\' surviving and scarred cuts',
+    [[CONTINUUM_DRAW_WORDS * 4, CONTINUUM_VIEW_LISTS, 1]],
+    'census lists the scene\'s view lists: clusters, small clusters, far bodies and splats',
   );
   assert.equal(vesselDraws.length, census.length, 'every vessel draw is the continuum\'s');
   for (const d of census) {
@@ -1011,8 +1028,9 @@ test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact
   const submergedArgs = [];
   tv.drawSubmerged(subPass, false);
   assert.equal(capturedSubmergedBound, 1, 'drawSubmerged binds waterOptics submerged capture pipeline');
-  assert.equal(submergedDraws, 1, 'drawSubmerged draws the continuum\'s coarse capture list once');
-  assert.deepEqual(submergedArgs, [['trade vessel continuum draws', SHIP_CONTINUUM_SHADOW_LIST * 16]], 'the capture draws the far bodies\' shadow list');
+  const coarse = CONTINUUM_LISTS.slice(CONTINUUM_VIEW_LISTS).map((_, k) => ['trade vessel continuum draws', (CONTINUUM_VIEW_LISTS + k) * 16]);
+  assert.equal(submergedDraws, coarse.length, 'drawSubmerged draws the scene\'s coarse lists once each');
+  assert.deepEqual(submergedArgs, coarse, 'the capture draws the shadow map\'s lists: the coarse cut');
 
   // Verify getWakeSources() returns compact moving-vessel descriptors sorted by distance
   const wakes = tv.getWakeSources({ x: region.x, z: region.z }, 24);
