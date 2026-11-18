@@ -154,6 +154,54 @@ export function packCityContinuumBody({ triangles, slight = false }, { welded, c
   words.set([T, slight ? CITY_CONTINUUM_SLIGHT : 0, triangles, far.farFirst], typeAt + F.chainTriangleCount);
   return { words, low, span, centre, radius };
 }
+// A broken body (js/building-fracture.js): a struck building's pieces, each piece a part. It is drawn as clusters alone,
+// every cluster riding its piece's flight, so it carries no far body, no chain and no splat.
+export function cityContinuumPiecesFar() {
+  return {
+    position: new Float32Array(0), normal: new Float32Array(0), index: new Uint32Array(0), kinds: new Float32Array(0), order: [],
+    chain: { steps: [], dieStep: new Int32Array(0), target: new Int32Array(0) }, steps: new Uint32Array(0), stats: { inflateMax: 0 },
+    baseError: 0, farFirst: 0, splat: { rx: 0, ry: 0, centre: [0, 0, 0], roofShare: 0, wallKind: [0, 0], roofKind: [0, 0] },
+  };
+}
+export function packCityContinuumPieces({ triangles }, { welded, clusters }) {
+  return packCityContinuumBody({ triangles }, { welded, clusters, far: cityContinuumPiecesFar() });
+}
+// A broken body's finest level, made in the page the moment the pieces are cut: each piece's triangles in clusters
+// of at most CITY_CONTINUUM_CLUSTER_TRIANGLES, ordered along the piece's longest side, every one a root of error 0.
+// The worker's bake of its coarser levels (js/prefab-continuum.js bakeFracturePieces) replaces it when it lands.
+export function cityContinuumFinestClusters(welded) {
+  const { position: P, index, part } = welded, T = index.length / 3, byPart = new Map();
+  for (let t = 0; t < T; t++) {
+    const p = part[index[t * 3]];
+    if (!byPart.has(p)) byPart.set(p, []);
+    byPart.get(p).push(t);
+  }
+  const records = [], order = [], indices = [], local = new Int32Array(welded.count).fill(-1);
+  const centroid = (t, k) => (P[index[t * 3] * 3 + k] + P[index[t * 3 + 1] * 3 + k] + P[index[t * 3 + 2] * 3 + k]) / 3;
+  for (const [p, list] of [...byPart].sort((a, b) => a[0] - b[0])) {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const t of list) for (let k = 0; k < 3; k++) { const c = centroid(t, k); lo[k] = Math.min(lo[k], c); hi[k] = Math.max(hi[k], c); }
+    const axis = [0, 1, 2].reduce((best, k) => (hi[k] - lo[k] > hi[best] - lo[best] ? k : best), 0);
+    list.sort((a, b) => centroid(a, axis) - centroid(b, axis));
+    for (let first = 0; first < list.length; first += CITY_CONTINUUM_CLUSTER_TRIANGLES) {
+      const chunk = list.slice(first, first + CITY_CONTINUUM_CLUSTER_TRIANGLES), low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+      const at = indices.length;
+      for (const t of chunk) for (let c = 0; c < 3; c++) {
+        const v = index[t * 3 + c];
+        for (let k = 0; k < 3; k++) { low[k] = Math.min(low[k], P[v * 3 + k]); high[k] = Math.max(high[k], P[v * 3 + k]); }
+        if (local[v] < 0) { local[v] = order.length; order.push(v); }
+        indices.push(local[v]);
+      }
+      const centre = low.map((v, k) => (v + high[k]) / 2);
+      let radius = 0;
+      for (let i = at; i < indices.length; i++) { const v = order[indices[i]]; radius = Math.max(radius, Math.hypot(P[v * 3] - centre[0], P[v * 3 + 1] - centre[1], P[v * 3 + 2] - centre[2])); }
+      const sphere = [...centre, radius + 1e-3];
+      records.push({ lod: sphere, parentLod: sphere, cull: sphere, error: 0, parentError: Infinity, first: at, triangles: chunk.length, level: 0, part: p });
+    }
+  }
+  return { records, order, indices, count: records.length, levels: 1, roots: records.length, finestTriangles: T, rootError: 0 };
+}
+
 // The parts of a packed body, checked.
 export function cityContinuumBodyParts(words) {
   if (words[0] !== CITY_CONTINUUM_BODY_MAGIC || words[1] !== CITY_CONTINUUM_VERSION) throw Error('A continuum body of another format');

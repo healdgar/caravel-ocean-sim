@@ -753,22 +753,6 @@ struct LandVertex {
 // A roof's shade and its age, the same for a building's continuum (js/wgsl/city-continuum.js) and its pieces.
 fn cityRoofShade(root:vec4f,tone:f32)->f32{return 0.62+0.38*fract(tone*7.31+root.x*0.137+root.z*0.071);}
 fn cityRoofAge(root:vec4f,tone:f32)->f32{return fract(tone*3.17+root.x*0.071+root.z*0.113);}
-// The same building once shot has struck it: its pieces, already stood in the world and posed by
-// js/building-fracture.js, with its own record of where it stands for its limewash and its tiles.
-// A piece's normal is left as long as it was written: its length says how raw the stone is.
-@vertex fn cityStruckVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
-  @location(3) root:vec4f,@location(4) shape:vec4f)->LandVertex{
-  var o:LandVertex;
-  o.world=position;o.normal=normal;o.kind=kind;
-  let material=floor(kind.x+0.01);
-  let tone=fract(shape.w);
-  if(abs(material-12.0)<0.5){o.kind=vec2f(kind.x+7.0,floor(shape.w)+clamp(tone*kind.y,0.02,0.98));}
-  else if(abs(material-13.0)<0.5||abs(material-15.0)<0.5){o.kind=vec2f(kind.x,kind.y*cityRoofShade(root,tone));}
-  o.leafUV=vec2f(cityRoofAge(root,tone),-1.0-max(position.y-root.y,0.0));
-  let shifted=o.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
-  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
-  return o;
-}
 // The opaque call graph contains neither discard nor a leaf texture fetch.
 // Keep that property for Apple's hidden-surface removal; a runtime branch in
 // one shared cutout fragment would still make solid ground a feedback shader.
@@ -1486,8 +1470,4 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 @fragment fn fs(in:LandVertex)->@location(0) vec4f{return landOpaque(in);}
-`+LAND_CRATER_PIT+/* wgsl */ `
-@vertex fn portShadowVS(@location(0) position:vec3f)->@builtin(position) vec4f{
-  return landSH.lightView*vec4f(position-landSH.origin.xyz,1.0);
-}
-`;
+`+LAND_CRATER_PIT;

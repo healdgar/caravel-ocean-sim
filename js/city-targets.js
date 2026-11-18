@@ -123,7 +123,8 @@ export function createCityTargets({ city, types, port, onStruck = null }) {
       x: typed[o], y: typed[o + 1], baseY: typed[o + 1], z: typed[o + 2], yaw: typed[o + 3],
       width: T.width * across, depth: T.length * along, length: T.length * along, height: T.height * up,
       roofHeight: Math.max(0, source.max[1] - T.height) * up, foundationDepth: Math.max(0, -source.min[1]) * up,
-      city: { index, type },
+      // Its tint, which its pieces wear as the city's continuum wears it whole.
+      city: { index, type, tint: typed[o + 7] },
     };
     record = { index, instance, world: null, enrolled: false, port: { instances: [instance], center: { x: instance.x, z: instance.z } } };
     // What js/building-fracture.js cuts it from, made again if the town has rebuilt it since.

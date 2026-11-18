@@ -11,19 +11,23 @@
 //  - Small fittings are one shard. Guns are one shard. Everything else breaks up by cell.
 //  - Touching shards are linked, and a link knows which shard rests on which. See supportScan.
 //
-// At runtime JavaScript runs only when a building is hit. It writes one flight record per released shard,
-// and BUILDING_FRACTURE_POSE_UPDATE evaluates the flights on the GPU only while something is in the air.
-// The last pose stays in the vertex buffer, so a ruin costs what its triangles cost and nothing more.
+// At runtime JavaScript runs only when a building is hit. It writes one flight record per released shard.
+// The pieces are drawn through the one continuum as a broken instance (createFracturedContinuum): the cut and
+// the view pose every cluster from its piece's record on the GPU, so a ruin costs what its cut costs.
 
 import { depthInOutline } from './fort-plan.js';
 import { sampleVoronoiBlockCell } from './part-assembly.js';
 import { FRACTURE_GRAVITY, FRACTURE_RECORD_FLOATS, createShipFractureState, settleFinishedFlights, writeFlight } from './ship-fracture.js';
-import { BUILDING_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
+import { SIM_CLOCK_LOOP_S } from './wgsl/common.js';
+import { CITY_CONTINUUM_AS_BUILT, CITY_CONTINUUM_BROKEN } from './wgsl/city-continuum.js';
+import { assembleCityContinuumAtlas, cityContinuumBodyParts, cityContinuumFinestClusters, packCityContinuumPieces } from './city-continuum.js';
+import { createContinuumScene } from './city-continuum-draw.js';
+import { bakeFracturePieces } from './prefab-continuum.js';
 
 export const BUILDING_SHARD_KINDS = Object.freeze({ block: 1, whole: 2, cell: 3, gun: 4 });
 const STRIDE = 8;
 // A longer normal reads as damaged in the land shader: raw stone, raw wood.
-const RAW_SURFACE = 1.6, RAW_LENGTH_SQUARED = 2;
+const RAW_SURFACE = 1.6;
 // A masonry kind carries its building's yaw in its fraction, so the land shader lays the stone along the wall.
 // This is the encoding coastal-world.js writes for kinds 10 to 18; what a breach shows must be written the same.
 export function buildingKindWithYaw(kind, yaw) {
@@ -745,18 +749,6 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   yield 'anchors';
 
   const rest = out.slice(0, vertexCount * STRIDE);
-  // What was inside the wall is not drawn while the wall stands: its triangles begin as points, and open
-  // when the pose pass first reaches a shard that a break has exposed. So the tiler pays for none of them.
-  const initial = rest.slice();
-  for (let v = 0; v < vertexCount; v++) {
-    const s = vertexShards[v];
-    // The earth touches no stone to tell it the facing in front has gone, so it is always there.
-    if (!s || shards[s].earth) continue;
-    const at = v * STRIDE;
-    if (rest[at + 3] * rest[at + 3] + rest[at + 4] * rest[at + 4] + rest[at + 5] * rest[at + 5] < RAW_LENGTH_SQUARED) continue;
-    const c = shards[s].centroid;
-    initial[at] = c[0]; initial[at + 1] = c[1]; initial[at + 2] = c[2];
-  }
   const finalIndices = outIndices.slice(0, indexCount);
   const fracture = Object.freeze({
     instanceIndex, prefabId: instance.prefabId ?? null,
@@ -771,7 +763,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     guns: Object.freeze(shards.filter((s) => s?.kind === BUILDING_SHARD_KINDS.gun).map((s) => s.index)),
     toLocal, toWorld, groundAt, waterAt, floorAt, originX, originZ,
   });
-  return { vertices: rest, initial, indices: finalIndices, fracture };
+  return { vertices: rest, indices: finalIndices, fracture };
 }
 
 function reachOfSurface(vertices, indices, toLocal) {
@@ -1407,90 +1399,121 @@ export function replayBuildingFracture(fracture, damage, log, now = 0) {
   return state.brokenCount;
 }
 
-const fracturePipelines = new WeakMap();
-export function buildingFracturePipeline(device) {
-  let pipeline = fracturePipelines.get(device);
-  if (!pipeline) {
-    pipeline = device.createComputePipelineAsync({
-      label: 'building fracture', layout: 'auto',
-      compute: { module: device.createShaderModule({ label: 'building fracture', code: BUILDING_FRACTURE_POSE_UPDATE }), entryPoint: 'main' },
-    });
-    fracturePipelines.set(device, pipeline);
-  }
-  return pipeline;
-}
-
-// One building's own buffers, made when it is first struck. It replaces its range of the port's mesh.
-export function createBuildingFractureGPU({ device, pipeline, prepared, state }) {
-  const { fracture } = prepared, U = GPUBufferUsage;
-  const upload = (data, usage, label) => {
-    const buffer = device.createBuffer({ label, size: data.byteLength, usage: usage | U.COPY_DST });
-    device.queue.writeBuffer(buffer, 0, data);
-    return buffer;
+// The struck buildings of a port in the one continuum (AGENTS.md rule 3). Each building's pieces are a type of an
+// atlas of their own: the very triangles the shot, the footing and the fall read (rule 1), in a frame stood at the
+// building's root, every piece a part. Its finest clusters are packed the moment it is cut, and its coarser levels are
+// baked in the page's worker (js/prefab-continuum.js bakeFracturePieces) and take their place when they land. It is
+// then a broken instance of the city's cut (js/city-continuum-draw.js), each cluster riding its piece's flight from
+// the instance's block of shard records, which are written only when a piece moves. `continuum()` gives the cut's
+// programs, the view pipeline, the frame and the land's shadow uniform, or nothing until they are made.
+const FRACTURE_PIECES_REACH = 24;
+function createFracturedContinuum({ device, continuum }) {
+  const entries = new Map(), R = FRACTURE_RECORD_FLOATS;
+  let scene = null, atlas = null, shards = null, stale = false, pixelError = 1, offsetX = 0, offsetZ = 0, destroyed = false;
+  const release = () => { scene?.destroy(); atlas?.destroy(); shards?.destroy(); scene = atlas = shards = null; };
+  // Pieces first..end as they now fly, each pivot moved into the instance's frame.
+  const copyRecords = (entry, first, end) => {
+    const d = entry.data, [x, y, z] = entry.root;
+    d.set(entry.state.records.subarray(first * R, end * R), 4 + first * R);
+    for (let s = first; s < end; s++) { const at = 4 + s * R; d[at] -= x; d[at + 1] -= y; d[at + 2] -= z; }
+    // The frame time at which the block's flight clock read 0 (main.js's looping simTime).
+    d[0] = ((entry.state.epoch % SIM_CLOCK_LOOP_S) + SIM_CLOCK_LOOP_S) % SIM_CLOCK_LOOP_S;
   };
-  const name = `${fracture.prefabId ?? 'building'} ${fracture.instanceIndex}`;
-  const vertices = upload(prepared.initial, U.VERTEX | U.STORAGE, `${name} fracture vertices`);
-  const rest = upload(prepared.vertices, U.STORAGE, `${name} rest vertices`);
-  const indices = upload(prepared.indices, U.INDEX, `${name} fracture indices`);
-  const vertexShards = upload(fracture.vertexShards, U.STORAGE, `${name} vertex shards`);
-  const records = upload(state.records, U.STORAGE, `${name} shard flights`);
-  const scorch = upload(state.scorch, U.STORAGE, `${name} shard scorch`);
-  const clockData = new Float32Array([0, FRACTURE_GRAVITY, 0, 0, 1, 1, 1, 0]);
-  const clock = upload(clockData, U.UNIFORM, `${name} fracture clock`);
-  const group = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [vertices, rest, vertexShards, records, clock, scorch].map((buffer, binding) => ({ binding, resource: { buffer } })),
-  });
-  const workgroups = Math.ceil(fracture.vertexShards.length / 64), indexCount = prepared.indices.length;
-  let pose = false, destroyed = false;
+  // Every struck building's body in one atlas, every block of flights in one buffer, and one scene that cuts them.
+  const lay = (ready) => {
+    const U = GPUBufferUsage;
+    release();
+    stale = false;
+    const list = [...entries.values()];
+    for (const entry of list) entry.state.dirty.clear();
+    if (!list.length) return;
+    const words = assembleCityContinuumAtlas(list.map((entry) => entry.body));
+    atlas = device.createBuffer({ label: 'struck buildings continuum atlas', size: words.byteLength, usage: U.STORAGE | U.COPY_DST });
+    device.queue.writeBuffer(atlas, 0, words);
+    let floats = 0, clusters = 0;
+    for (const entry of list) { entry.block = floats / 4; floats += entry.data.length; clusters += cityContinuumBodyParts(entry.body).clusters; }
+    shards = device.createBuffer({ label: 'struck buildings shard flights', size: floats * 4, usage: U.STORAGE | U.COPY_DST });
+    scene = createContinuumScene({
+      device, atlas: { buffer: atlas }, pipelines: ready.programs, capacity: list.length, room: [clusters, clusters, 1, list.length, 1, clusters],
+      view: ready.view, dataAt: 40, shards, frame: ready.frame, shadowUniform: ready.shadowUniform, samples: ready.samples, label: 'struck buildings',
+    });
+    list.forEach((entry, i) => {
+      copyRecords(entry, 0, entry.shardCount);
+      device.queue.writeBuffer(shards, entry.block * 16, entry.data);
+      scene.place(i, { x: entry.root[0], y: entry.root[1], z: entry.root[2], word: entry.word, type: i, flags: CITY_CONTINUUM_BROKEN, records: entry.block, reach: FRACTURE_PIECES_REACH, seed: i });
+    });
+    scene.send(0, list.length);
+    scene.setCount(list.length);
+    scene.setPixelError(pixelError);
+    scene.setWorldOffset(offsetX, offsetZ);
+  };
   return {
-    state, fracture, indexCount,
-    get posing() { return pose; },
-    // Once a frame. Nothing is written unless something changed, and only flights in the air need the clock.
+    // A building cut into its pieces, drawn from the next frame on.
+    add(instance, prepared, state) {
+      const { fracture, vertices: rest, indices } = prepared, V = rest.length / STRIDE, T = indices.length / 3;
+      const root = [fracture.originX ?? instance.x ?? 0, instance.baseY ?? instance.y ?? 0, fracture.originZ ?? instance.z ?? 0];
+      const position = new Float32Array(V * 3), normal = new Float32Array(V * 3), kind = new Float32Array(V * 2);
+      for (let v = 0; v < V; v++) {
+        const at = v * STRIDE;
+        for (let k = 0; k < 3; k++) { position[v * 3 + k] = rest[at + k] - root[k]; normal[v * 3 + k] = rest[at + 3 + k]; }
+        kind[v * 2] = rest[at + 6]; kind[v * 2 + 1] = rest[at + 7];
+      }
+      const welded = { position, normal, kind, part: Uint32Array.from(fracture.vertexShards), index: indices, count: V };
+      const entry = {
+        instance, state, fracture, root, shardCount: fracture.shardCount, block: 0,
+        // A city's house wears its own limewash and tiles; a prefab and a boulder are drawn as they were built.
+        word: instance.city?.tint ?? CITY_CONTINUUM_AS_BUILT,
+        body: packCityContinuumPieces({ triangles: T }, { welded, clusters: cityContinuumFinestClusters(welded) }).words,
+        data: new Float32Array(4 + fracture.shardCount * R),
+      };
+      entries.set(instance, entry);
+      stale = true;
+      const corners = new Float32Array(T * 24), parts = new Uint32Array(T);
+      for (let t = 0; t < T; t++) {
+        parts[t] = welded.part[indices[t * 3]];
+        for (let c = 0; c < 3; c++) {
+          const v = indices[t * 3 + c], at = (t * 3 + c) * 8;
+          corners.set(position.subarray(v * 3, v * 3 + 3), at); corners.set(normal.subarray(v * 3, v * 3 + 3), at + 3); corners.set(kind.subarray(v * 2, v * 2 + 2), at + 6);
+        }
+      }
+      bakeFracturePieces({ name: `${fracture.prefabId ?? 'building'} ${fracture.instanceIndex} pieces`, vertices: corners, parts, triangles: T }).then(
+        (words) => { if (!destroyed && entries.get(instance) === entry) { entry.body = words; stale = true; } },
+        (error) => console.warn('A struck building\'s coarser pieces were not baked', error),
+      );
+      return entry;
+    },
+    remove(instance) { if (entries.delete(instance)) stale = true; },
+    // Once a frame, before the compute pass: flights that have landed held where they lie, and whatever moved sent.
     tick(now) {
       if (destroyed) return;
-      const flying = state.flying.size > 0;
-      if (flying) settleFinishedFlights(state, now);
-      pose = flying;
-      if (state.dirty.size) {
-        const list = [...state.dirty].sort((a, b) => a - b);
+      for (const entry of entries.values()) if (entry.state.flying.size) settleFinishedFlights(entry.state, now);
+      if (stale) {
+        const ready = continuum?.();
+        if (ready) lay(ready);
+        return;
+      }
+      if (!shards) return;
+      for (const entry of entries.values()) {
+        const dirty = entry.state.dirty;
+        if (!dirty.size) continue;
+        const list = [...dirty].sort((a, b) => a - b);
+        dirty.clear();
         for (let i = 0; i < list.length;) {
           let j = i + 1;
           while (j < list.length && list[j] === list[j - 1] + 1) j++;
-          device.queue.writeBuffer(records, list[i] * FRACTURE_RECORD_FLOATS * 4, state.records, list[i] * FRACTURE_RECORD_FLOATS, (j - i) * FRACTURE_RECORD_FLOATS);
+          copyRecords(entry, list[i], list[j - 1] + 1);
+          device.queue.writeBuffer(shards, (entry.block * 4 + 4 + list[i] * R) * 4, entry.data, 4 + list[i] * R, (j - i) * R);
           i = j;
         }
-        state.dirty.clear();
-        pose = true;
-      }
-      if (state.scorchDirty) {
-        device.queue.writeBuffer(scorch, 0, state.scorch);
-        state.scorchDirty = false;
-        pose = true;
-      }
-      if (pose) {
-        clockData[0] = now - state.epoch;
-        device.queue.writeBuffer(clock, 0, clockData, 0, 1);
+        device.queue.writeBuffer(shards, entry.block * 16, entry.data, 0, 4);
       }
     },
-    encode(pass) {
-      if (destroyed || !pose) return false;
-      pass.setPipeline(pipeline);
-      pass.setBindGroup(0, group);
-      pass.dispatchWorkgroups(workgroups);
-      return true;
-    },
-    draw(pass) {
-      if (destroyed) return;
-      pass.setVertexBuffer(0, vertices);
-      pass.setIndexBuffer(indices, 'uint32');
-      pass.drawIndexed(indexCount);
-    },
-    destroy() {
-      if (destroyed) return;
-      destroyed = true;
-      for (const buffer of [vertices, rest, indices, vertexShards, records, scorch, clock]) buffer.destroy();
-    },
+    encode(pass) { if (scene) { scene.setPixelError(pixelError); scene.encode(pass); } },
+    draw(pass, group, clouds) { scene?.draw(pass, group, clouds); },
+    drawShadow(pass) { scene?.drawShadow(pass); },
+    setPixelError(pixels) { pixelError = pixels; },
+    setWorldOffset(x, z) { offsetX = x; offsetZ = z; scene?.setWorldOffset(x, z); },
+    destroy() { destroyed = true; release(); entries.clear(); },
   };
 }
 
@@ -1499,13 +1522,14 @@ export function createBuildingFractureGPU({ device, pipeline, prepared, state })
  * cut once from the full assembly, `onFractured` is told so that whoever drew it whole (its continuum) leaves it out,
  * and from then on a hit only writes flight records. `onRebuilt` hears when the town stands it again.
  *
- * A prefab is cut from the port's assembly (`geometry`, the CPU's physical truth, drawn by nothing). A building with
- * a `fractureSource` brings its own (a city's house, or a cleaved boulder), and `drawSourced` draws its pieces, since
- * they want their own pipeline.
+ * A prefab is cut from the port's assembly (`geometry`, the CPU's physical truth); a building with a `fractureSource`
+ * brings its own (a city's house, or a cleaved boulder). Every one, once cut, is drawn through the one continuum as its
+ * pieces (createFracturedContinuum, given `continuum`): `encode` cuts them in the frame's compute pass, and `draw` (with
+ * the city view's groups 0 and 1) and `drawShadow` draw them.
  */
-export function createPortFractures({ device, port, geometry, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, onStruck = null, onFractured = null, onRebuilt = null }) {
-  const live = new Map(), building = new Map();
-  let pipeline = null, starting = null, frame = 0, lastNow = 0;
+export function createPortFractures({ device, port, geometry, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, continuum = null, onStruck = null, onFractured = null, onRebuilt = null }) {
+  const live = new Map(), building = new Map(), drawn = createFracturedContinuum({ device, continuum });
+  let frame = 0, lastNow = 0;
   noteBuildingMeshes(port, geometry);
   const finish = (instance, prepared) => {
     if (!prepared) { live.set(instance, null); return; }
@@ -1515,10 +1539,8 @@ export function createPortFractures({ device, port, geometry, groundAt, waterAt 
       replayBuildingFracture(prepared.fracture, damage, damage.replayLog, lastNow);
       damage.replayLog = null;
     }
-    const gpu = createBuildingFractureGPU({ device, pipeline, prepared, state });
-    live.set(instance, gpu);
     // From this frame the building stands as its pieces, and whoever drew it whole (its continuum) leaves it out.
-    if (instance.fractureSource) gpu.sourced = true;
+    live.set(instance, drawn.add(instance, prepared, state));
     onFractured?.(instance);
   };
   const stepsFor = (instance, instanceIndex) => {
@@ -1543,19 +1565,17 @@ export function createPortFractures({ device, port, geometry, groundAt, waterAt 
   };
   // A rebuilt building is drawn whole again by its continuum, as it was before it was struck.
   const rebuild = (instance) => {
-    const gpu = live.get(instance);
-    gpu?.destroy();
+    const entry = live.get(instance);
+    drawn.remove(instance);
     live.delete(instance);
     building.delete(instance);
     damageStore?.rebuilt(port, instance);
-    if (gpu) onRebuilt?.(instance);
+    if (entry) onRebuilt?.(instance);
   };
   return {
     // Before a port is first seen: anything saved as ruined is a ruin already, with no fall to watch.
     async restoreNow() {
       const instances = port?.instances ?? [];
-      if (!instances.some((instance) => instance?.damageState?.replayLog)) return 0;
-      pipeline ??= await buildingFracturePipeline(device);
       let restored = 0;
       for (let i = 0; i < instances.length; i++) {
         if (!instances[i]?.damageState?.replayLog || live.has(instances[i])) continue;
@@ -1575,34 +1595,29 @@ export function createPortFractures({ device, port, geometry, groundAt, waterAt 
       if (Array.isArray(instances)) for (let i = 0; i < instances.length; i++) {
         const instance = instances[i], damage = instance?.damageState, pending = damage?.pendingBakes;
         if (!pending?.length && !damage?.replayLog) continue;
-        if (!pipeline) {
-          starting ??= buildingFracturePipeline(device).then((ready) => { pipeline = ready; }, (error) => console.error('Building fracture pipeline failed', error));
-          continue;
-        }
         if (!live.has(instance)) {
           if (!building.has(instance)) { building.set(instance, stepsFor(instance, i)); onStruck?.(instance); }
           continue;
         }
-        const gpu = live.get(instance);
+        const entry = live.get(instance);
         if (!pending?.length) continue;
         const events = pending.splice(0, pending.length);
-        if (gpu) applyBuildingFractureEvents(gpu.fracture, damage, events, now);
+        if (entry) applyBuildingFractureEvents(entry.fracture, damage, events, now);
         damageStore?.noteHit(damage);
       }
       if (building.size) continueBuilding();
-      for (const gpu of live.values()) gpu?.tick(now);
+      drawn.tick(now);
       // Now and then, whether a town has finished rebuilding what was shot down.
       if (damageStore && Array.isArray(instances) && ++frame % 240 === 0) {
         for (const instance of instances) if (instance?.damageState?.hits && damageStore.rebuildDue(instance)) rebuild(instance);
       }
     },
-    encode(pass) { for (const gpu of live.values()) gpu?.encode(pass); },
-    draw(pass) { for (const gpu of live.values()) if (gpu && !gpu.sourced) gpu.draw(pass); },
-    // The buildings that brought their own mesh. `before(instance)` binds whatever each one's pipeline wants.
-    get sourced() { for (const gpu of live.values()) if (gpu?.sourced) return true; return false; },
-    drawSourced(pass, before = null) {
-      for (const [instance, gpu] of live) if (gpu?.sourced) { if (before && before(instance) === false) continue; gpu.draw(pass); }
-    },
-    destroy() { for (const gpu of live.values()) gpu?.destroy(); live.clear(); building.clear(); },
+    // In the frame's compute pass: every struck building's pieces cut at the scene's one pixel error.
+    encode(pass) { drawn.encode(pass); },
+    draw(pass, group, clouds) { drawn.draw(pass, group, clouds); },
+    drawShadow(pass) { drawn.drawShadow(pass); },
+    setPixelError(pixels) { drawn.setPixelError(pixels); },
+    setWorldOffset(x, z) { drawn.setWorldOffset(x, z); },
+    destroy() { drawn.destroy(); live.clear(); building.clear(); },
   };
 }

@@ -181,39 +181,3 @@ fn shardFlightWorld(position:vec3f,restNormal:vec3f,origin:vec4f,flight:vec4f,sp
   fracturePosed[vertex].normal=vec4f(pose.normal,current.normal.w);
 }
 `;
-
-// A land vertex is eight floats: position, normal, kind, shade. A shard's scorch lengthens its normal,
-// which is how the land shader reads structural damage.
-export const BUILDING_FRACTURE_POSE_UPDATE = /* wgsl */ `${SHARD_FLIGHT}
-struct LandFractureVertex {a:vec4f,b:vec4f};
-@group(0)@binding(0)var<storage,read_write>fracturePosed:array<LandFractureVertex>;
-@group(0)@binding(1)var<storage,read>fractureRest:array<LandFractureVertex>;
-@group(0)@binding(2)var<storage,read>fractureVertexShards:array<u32>;
-@group(0)@binding(3)var<storage,read>fractureRecords:array<vec4f>;
-@group(0)@binding(4)var<uniform>fractureClock:FractureClock;
-@group(0)@binding(5)var<storage,read>fractureScorch:array<f32>;
-@compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
-  let vertex=id.x;
-  if(vertex>=arrayLength(&fracturePosed)){return;}
-  let shard=fractureVertexShards[vertex];
-  if(shard==0u){return;}
-  let at=shard*4u;
-  let motion=fractureRecords[at+3u];
-  let scorch=fractureScorch[shard];
-  if(motion.w<-1.5&&scorch<=0.0){return;}
-  let rest=fractureRest[vertex];
-  let position=rest.a.xyz;
-  // Faces that were inside the wall already read as raw stone, and a burn only adds to it.
-  let baseNormal=vec3f(rest.a.w,rest.b.xy);
-  let baseLength=length(baseNormal);
-  let normal=baseNormal*(max(baseLength,1.0+scorch)/max(baseLength,1e-5));
-  if(motion.w<-1.5){
-    fracturePosed[vertex].a=vec4f(position,normal.x);
-    fracturePosed[vertex].b=vec4f(normal.yz,rest.b.zw);
-    return;
-  }
-  let pose=shardFlight(position,normal,fractureRecords[at],fractureRecords[at+1u],fractureRecords[at+2u],motion,fractureClock);
-  fracturePosed[vertex].a=vec4f(pose.position,pose.normal.x);
-  fracturePosed[vertex].b=vec4f(pose.normal.yz,rest.b.zw);
-}
-`;

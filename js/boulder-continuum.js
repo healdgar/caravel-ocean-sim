@@ -18,7 +18,6 @@ export const BOULDER_BAND_END_PX = 10.5;
 // continuumSplatShare and continuumThin in js/continuum-core.js).
 
 const BOULDER_RAW_SURFACE = 1.6;
-const BOULDER_RAW_LENGTH_SQUARED = 2.0;
 const FRACTURE_STRIDE = 8;
 const CONTINUUM_INSTANCE_FLOATS = 12;
 const CONTINUUM_INSTANCE_BYTES = CONTINUUM_INSTANCE_FLOATS * 4;
@@ -795,11 +794,10 @@ export function getAllBoulderCleavageTemplates() {
   return list;
 }
 
-// Builds a `building-fracture.js` `prepared` package ({ vertices, initial, indices, fracture })
+// Builds a `building-fracture.js` `prepared` package ({ vertices, indices, fracture })
 // for a specific struck ground-cover boulder in world coordinates.
 // - shard 0: anchored basal stump (stays rooted in ground with RAW_SURFACE cleavage scar top faces)
 // - shards 1..K: convex cleavage wedges & corner/brow spall chips with RAW_SURFACE = 1.6 interior faces
-//   collapsed in `initial` until a neighboring shard breaks away!
 export function prepareBoulderFracture(boulder, {
   groundAt = () => 0,
   waterAt = null,
@@ -958,23 +956,8 @@ export function prepareBoulderFracture(boulder, {
   }
 
   const rest = new Float32Array(restList);
-  const initial = rest.slice();
   const vertexShards = new Uint32Array(shardTagList);
   const finalIndices = new Uint32Array(indexList);
-
-  // Collapse RAW_SURFACE interior cleavage faces of strikable shards 1..K to shard centroids while unexposed.
-  // Shard 0's RAW_SURFACE scar faces stay open inside shards 1..K so they appear immediately as a raw cleavage scar!
-  for (let v = 0; v < vertexShards.length; v++) {
-    const s = vertexShards[v];
-    if (!s) continue;
-    const at = v * FRACTURE_STRIDE;
-    const n2 = rest[at + 3] * rest[at + 3] + rest[at + 4] * rest[at + 4] + rest[at + 5] * rest[at + 5];
-    if (n2 < BOULDER_RAW_LENGTH_SQUARED) continue;
-    const c = shards[s].centroid;
-    initial[at] = c[0];
-    initial[at + 1] = c[1];
-    initial[at + 2] = c[2];
-  }
 
   let rMin = [Infinity, Infinity, Infinity], rMax = [-Infinity, -Infinity, -Infinity];
   for (let v = 0; v < vertexShards.length; v++) {
@@ -1013,7 +996,7 @@ export function prepareBoulderFracture(boulder, {
     originZ,
   });
 
-  return { vertices: rest, initial, indices: finalIndices, fracture };
+  return { vertices: rest, indices: finalIndices, fracture };
 }
 
 function rayTriangleHit(ox, oy, oz, dx, dy, dz, a, b, c) {

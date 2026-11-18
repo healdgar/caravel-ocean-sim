@@ -1007,4 +1007,12 @@ export async function bakeContinuumBody(body) {
   return { welded, clusters, far };
 }
 
+// A struck building's pieces (js/building-fracture.js), each piece a part: welded and clustered like any body, never
+// simplified across a piece, and given no far body, for a broken instance is drawn as clusters alone.
+export async function bakeContinuumPiecesBody(body) {
+  await MeshoptSimplifier.ready;
+  const welded = weldDrawn(body);
+  return { welded, clusters: await bakeClusters(welded) };
+}
+
 export { weldDrawn, bakeClusters, wrap, simplifyWrap, bakeFar };

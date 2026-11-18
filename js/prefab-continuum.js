@@ -106,7 +106,7 @@ function prefabBakers(text, size) {
     while (idle.length && queue.length) {
       const worker = idle.pop(), job = queue.shift(), id = next++;
       waiting.set(id, { ...job, worker });
-      worker.postMessage({ id, fingerprint: job.fingerprint, version: job.version, body: job.body });
+      worker.postMessage({ id, fingerprint: job.fingerprint, version: job.version, body: job.body, pieces: job.pieces });
     }
   };
   for (let i = 0; i < size; i++) {
@@ -124,9 +124,9 @@ function prefabBakers(text, size) {
     workers.push(worker);
   }
   return {
-    bake(fingerprint, version, body) {
+    bake(fingerprint, version, body, pieces = false) {
       const send = { name: body.name, vertices: body.vertices, parts: body.parts, triangles: body.triangles };
-      return new Promise((resolve, reject) => { queue.push({ fingerprint, version, body: send, resolve, reject }); pump(); });
+      return new Promise((resolve, reject) => { queue.push({ fingerprint, version, body: send, pieces, resolve, reject }); pump(); });
     },
     close() { for (const worker of workers) worker.terminate(); URL.revokeObjectURL(url); },
   };
@@ -158,6 +158,18 @@ export async function resolvePrefabContinuum(plan, { portId = null, fetchAsset =
     } finally { bakers.close(); }
   }
   return out;
+}
+
+// A struck building's pieces (js/building-fracture.js) with their coarser levels, baked by one worker kept for the
+// page: { name, vertices (8 floats a corner), parts (a piece a triangle), triangles } in, the packed body's words out.
+let fracturePiecesBaker = null;
+export function bakeFracturePieces(body, fetchAsset = fetch) {
+  fracturePiecesBaker ??= prefabContinuumBakeVersion(fetchAsset).then(({ text }) => prefabBakers(text, 1)).catch((error) => { fracturePiecesBaker = null; throw error; });
+  return fracturePiecesBaker.then(async (bakers) => {
+    const { words } = await bakers.bake(null, null, body, true);
+    cityContinuumBodyParts(words);
+    return words;
+  });
 }
 
 // The atlas of a plan's bodies, type i being its i-th body.
