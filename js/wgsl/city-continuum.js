@@ -37,6 +37,9 @@ export const CITY_CONTINUUM_SHADOW_TEXELS = 1.5;
 // CONTINUUM_IMPORTANT share of the error.
 export const CITY_CONTINUUM_FELLED = 1 << 16;
 export const CITY_CONTINUUM_STRUCK = 1 << 17;
+// A body's tint word (shape.w) when it is worn as its builder made it, not tinted and aged as a city's house: a
+// coast's prefab (js/prefab-continuum.js), never stretched.
+export const CITY_CONTINUUM_AS_BUILT = -1000;
 // What an entry is, in the top four bits of its second word.
 const CITY_CONTINUUM_CLUSTER_ENTRY = 1, CITY_CONTINUUM_FAR_ENTRY = 2, CITY_CONTINUUM_SPLAT_ENTRY = 3;
 
@@ -49,7 +52,8 @@ struct CityContinuumView {
   aim:vec4f,                // where the player's guns would fall, in the scene's frame, and how far about it (0: none)
 };
 // Where a building stands (its type's mesh turned by root.w and stood at root.xyz) and how it is stretched
-// (shape.xyz); shape.w its tint, or, below -50, a fence's slope along its length (plus 100).
+// (shape.xyz); shape.w its tint, or, from -150 to -50, a fence's slope along its length (plus 100), or, below that,
+// CITY_CONTINUUM_AS_BUILT.
 struct CityContinuumPlace { root:vec4f, shape:vec4f };
 struct CityContinuumPoint { position:vec3f, normal:vec3f, kind:vec2f };
 struct CityContinuumFar { position:vec3f, normal:vec3f, kind:vec2f, shown:bool };
@@ -61,7 +65,7 @@ fn cityContinuumPlaceOf(building:u32)->CityContinuumPlace {
 fn cityContinuumTypeOf(building:u32)->u32 { return cityFlags[building]&65535u; }
 fn cityContinuumType(archetype:u32,field:u32)->u32 { return cityAtlas[cityAtlas[${CITY_CONTINUUM_HEADER.typesAt}u]+archetype*${CITY_CONTINUUM_TYPE_WORDS}u+field]; }
 fn cityContinuumTypeF(archetype:u32,field:u32)->f32 { return bitcast<f32>(cityContinuumType(archetype,field)); }
-fn cityContinuumSlope(shape:vec4f)->f32 { return select(0.0,clamp(shape.w+100.0,-0.95,0.95),shape.w< -50.0); }
+fn cityContinuumSlope(shape:vec4f)->f32 { return select(0.0,clamp(shape.w+100.0,-0.95,0.95),shape.w< -50.0&&shape.w> -150.0); }
 // A point of the type, in the type's own metres, stood where the building stands (without the world's offset).
 fn cityContinuumPlace(p:vec3f,place:CityContinuumPlace)->vec3f {
   let q=p*place.shape.xyz;
@@ -308,18 +312,20 @@ fn cityContinuumClip(world:vec3f)->vec4f {
 fn cityContinuumWorn(kind:vec2f,place:CityContinuumPlace,height:f32)->CityContinuumWorn {
   let root=place.root;let shape=place.shape;
   let tone=select(fract(shape.w),0.5,shape.w< -50.0);
+  let built=shape.w< -150.0;
   let material=floor(kind.x+0.01);
   var out:CityContinuumWorn;
   out.kind=kind;
   if(abs(material-14.0)>0.5){
     let turn=0.02+0.46*fract((fract(kind.x)-0.02)/0.46+root.w/PI);
-    if(abs(material-12.0)<0.5){out.kind=vec2f(19.0+turn,floor(shape.w)+clamp(tone*kind.y,0.02,0.98));}
+    if(built){out.kind=vec2f(material+turn,kind.y);}
+    else if(abs(material-12.0)<0.5){out.kind=vec2f(19.0+turn,floor(shape.w)+clamp(tone*kind.y,0.02,0.98));}
     else if(abs(material-13.0)<0.5||abs(material-15.0)<0.5){out.kind=vec2f(material+turn,kind.y*cityRoofShade(root,tone));}
     else{out.kind=vec2f(material+turn,kind.y);}
   }
   var grain=0.0;
   if(abs(material-10.0)<0.5){grain=floor(kind.y*0.5);out.kind=vec2f(out.kind.x,kind.y-2.0*grain);}
-  out.leafUV=vec2f(select(cityRoofAge(root,tone),grain,grain>0.5),-1.0-max(height,0.0));
+  out.leafUV=vec2f(select(select(cityRoofAge(root,tone),0.0,built),grain,grain>0.5),select(-1.0-max(height,0.0),-1.0,built));
   return out;
 }
 fn cityContinuumClusterVertex(building:u32,cluster:u32,vertex:u32)->CityContinuumVertex {

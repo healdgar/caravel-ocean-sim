@@ -23,6 +23,9 @@ import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
 import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
 import { SHIP_CONTINUUM_ASSETS } from './js/ship-continuum.js';
 import { ANIMAL_CONTINUUM_ASSETS } from './js/animal-continuum.js';
+import { PREFAB_CONTINUUM_ASSETS } from './js/prefab-continuum.js';
+import { PREFAB_CONTINUUM_PORT_BODIES } from './js/prefab-continuum-ports.js';
+import { bundleContinuumBakeWorker } from './scripts/continuum-bake-worker-bundle.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/neural-post.js', 'js/wgsl/neural-pbr.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js', 'js/wgsl/crew-solve.js'];
@@ -95,7 +98,7 @@ order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js','js/w
 // The fleet's own ships on the same continuum (js/vessel-continuum.js), drawn by main.js.
 order.splice(order.indexOf('js/main.js'),0,'js/vessel-continuum.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
-order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/city-continuum-draw.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/city-continuum-draw.js','js/prefab-continuum-ports.js','js/prefab-continuum.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js','js/debug-world.js');
 order.splice(order.indexOf('js/main.js'),0,'js/webgpu-adapter.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
@@ -191,6 +194,19 @@ for(const file of Object.values(CITY_CONTINUUM_ASSETS))runtimeAssetTypes.set(fil
 for(const file of Object.values(PROP_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The animal continuum's atlas (scripts/prepare-animal-continuum.mjs), kept in git: every animal is drawn from nothing else.
 for(const file of Object.values(ANIMAL_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
+// The one simplifier (js/continuum-bake.js) bundled for the page's bake workers (js/continuum-bake-worker.js), written
+// only when it changes: its digest is the bake's version, under which every body is shipped and kept. Then the bodies
+// baked for the historical ports (scripts/prepare-prefab-continuum.mjs), baked by that same version.
+{
+  const bakeWorker=PREFAB_CONTINUUM_ASSETS['bake-worker.js'],out=path.join(root,bakeWorker);
+  const {text}=await bundleContinuumBakeWorker(root);
+  if(!fs.existsSync(out)||!text.equals(fs.readFileSync(out))){fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,text);}
+  runtimeAssetTypes.set(bakeWorker,'text/javascript');
+  const bodies=[PREFAB_CONTINUUM_ASSETS['manifest.json'],...Object.values(PREFAB_CONTINUUM_PORT_BODIES)];
+  const missing=bodies.filter(file=>!fs.existsSync(path.join(root,file)));
+  if(missing.length||bodies.length<2)throw Error(`The prefab continuum is not baked (${missing.join(', ')||'no ports'}): run node scripts/prepare-prefab-continuum.mjs`);
+  for(const file of bodies)runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
+}
 // The people continuum's bodies (scripts/prepare-crew-continuum.mjs). Their streams are not committed, and people are
 // drawn through nothing else: a checkout without every one of them does not build.
 const missingCrewContinuum=Object.values(CREW_CONTINUUM_ASSETS).flatMap(files=>Object.values(files)).filter(file=>!fs.existsSync(path.join(root,file)));
@@ -213,6 +229,8 @@ const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','asset
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 // The people continuum's bodies (hundreds of MB) stay out of the downloads, which fetch the published copies.
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))externalDownloadGeometry.add(file);
+// So do the prefab bodies baked for the historical ports.
+for(const file of Object.values(PREFAB_CONTINUUM_PORT_BODIES))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){
   if(!runtimeAssetBytes.has(file))runtimeAssetBytes.set(file,fs.readFileSync(path.join(root,file)));
   const bytes=runtimeAssetBytes.get(file);

@@ -37,3 +37,6 @@ assets/crew/continuum/*/*
 docs/assets/crew/continuum/
 # The ships' continuum is committed whole (no ship draws without it); the build's published copies are not.
 docs/assets/ships/
+# The historical ports' baked prefab bodies: npm run deploy publishes them, scripts/prepare-prefab-continuum.mjs bakes them.
+assets/prefab-continuum/*.bin.gz
+docs/assets/prefab-continuum/

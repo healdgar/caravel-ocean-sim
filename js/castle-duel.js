@@ -167,6 +167,49 @@ export function chooseCastleDuelArena(terrain, vessels = []) {
  *  getSunElevation(): degrees; setSunElevation(degrees) sets the sun by hand, whatever the sky mode.
  *  onNotice(text): a line for the player when the duel cannot be played here.
  */
+// The duel's port, by the name its castles' continuum bodies are shipped under (scripts/prepare-prefab-continuum.mjs),
+// and its two castles about `arena`: the same stone wherever the strait lies, so their bodies are baked once.
+export const CASTLE_DUEL_PORT_ID = 'castle-duel';
+export function castleDuelCastles(arena) {
+  const halfSpan = CASTLE_DUEL_DISTANCE_M * 0.5;
+  return [
+    {
+      id: 'castle_duel_player',
+      prefabId: 'bastion_trace_fortress',
+      label: 'Castillo de San Felipe (Player)',
+      x: arena.x,
+      y: 1.6,
+      baseY: 1.6,
+      foundationDepth: 12.0,
+      z: arena.z + halfSpan,
+      yaw: 0, // -Z faces North toward enemyCastle
+      width: 36,
+      depth: 34,
+      length: 34,
+      height: 7.6,
+      armed: true,
+      friendlyToPlayer: true,
+    },
+    {
+      id: 'castle_duel_enemy',
+      prefabId: 'bastion_trace_fortress',
+      label: 'Fuerte del Moro (Enemy)',
+      x: arena.x,
+      y: 15.6,
+      baseY: 15.6,
+      foundationDepth: 26.0,
+      z: arena.z - halfSpan,
+      yaw: Math.PI, // -Z faces South (+Z) toward playerCastle
+      width: 36,
+      depth: 34,
+      length: 34,
+      height: 7.6,
+      armed: true,
+      friendlyToPlayer: false,
+    },
+  ];
+}
+
 export function createCastleDuelController({
   getTerrain,
   ensureTerrain,
@@ -514,42 +557,9 @@ export function createCastleDuelController({
   // coast cannot take them.
   function buildArena(terrain) {
     const arena = chooseCastleDuelArena(terrain, getVessels?.() ?? []);
-    const halfSpan = CASTLE_DUEL_DISTANCE_M * 0.5;
-    playerCastle = {
-      id: 'castle_duel_player',
-      prefabId: 'bastion_trace_fortress',
-      label: 'Castillo de San Felipe (Player)',
-      x: arena.x,
-      y: 1.6,
-      baseY: 1.6,
-      foundationDepth: 12.0,
-      z: arena.z + halfSpan,
-      yaw: 0, // -Z faces North toward enemyCastle
-      width: 36,
-      depth: 34,
-      length: 34,
-      height: 7.6,
-      armed: true,
-      friendlyToPlayer: true,
-    };
-    enemyCastle = {
-      id: 'castle_duel_enemy',
-      prefabId: 'bastion_trace_fortress',
-      label: 'Fuerte del Moro (Enemy)',
-      x: arena.x,
-      y: 15.6,
-      baseY: 15.6,
-      foundationDepth: 26.0,
-      z: arena.z - halfSpan,
-      yaw: Math.PI, // -Z faces South (+Z) toward playerCastle
-      width: 36,
-      depth: 34,
-      length: 34,
-      height: 7.6,
-      armed: true,
-      friendlyToPlayer: false,
-    };
+    [playerCastle, enemyCastle] = castleDuelCastles(arena);
     duelPort = {
+      regionId: CASTLE_DUEL_PORT_ID,
       name: 'Strait of the Two Castles',
       // No part of the career: its damage is neither restored from the save nor written to it.
       transient: true,
