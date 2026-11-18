@@ -226,7 +226,7 @@ export function townComponentMaskForLook(modelIndex, lookIndex, random, elite = 
 }
 
 // Appends quantized 3D component vertices and their full-detail triangles onto a loaded crew GLB model. The pack's
-// low slices served the retired ladder and are not read: an old body stands in only where the continuum is absent.
+// low slices served the retired ladder and are not read: people are drawn through the continuum alone.
 export function attachCrewComponents(model, sex = 'male') {
   if (!model || model.componentsAttached) return model;
   const packs = getCrewComponentPacks();

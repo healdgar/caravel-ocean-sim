@@ -514,8 +514,8 @@ struct CrewContinuumCoverage { @location(0) colour:vec4f, @builtin(sample_mask) 
 @fragment fn crewContinuumSubmergedFarFS(c:CrewContinuumVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
   return crewShade(crewContinuumAsCrew(c,vec4f(c.color,c.skin)),front,c.color);
 }
-// Depth first for anyone the camera stands among or who is torn, as the crew's 'surviving' pass: screen-door
-// transparency by the helm, and frayed cuffs and hems. The equal-depth pass then shades what is left.
+// Depth first for anyone the camera stands among or who is torn: screen-door transparency by the helm, and frayed
+// cuffs and hems. The equal-depth pass then shades what is left.
 @fragment fn crewContinuumSurviving(c:CrewContinuumVertex)->CrewContinuumCoverage {
   let opacity=select(1.0,smoothstep(1.4,4.8,distance(c.world,F.camPos.xyz)),c.helm>.5);
   let pixel=vec2u(c.position.xy)%4u;

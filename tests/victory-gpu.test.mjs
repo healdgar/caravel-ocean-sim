@@ -33,6 +33,9 @@ function instrumentVictory(){
   GPUComputePassEncoder.prototype.setPipeline=function(pipeline){labels.set(this,pipeline.label);return setCompute.call(this,pipeline);};
   GPUComputePassEncoder.prototype.dispatchWorkgroups=function(...args){const label=labels.get(this);victoryCheck.compute[label]=(victoryCheck.compute[label]||0)+1;return dispatch.apply(this,args);};
 }
+// How many companies the continuum cut and drew this frame: people have no other draw, so this is what a count of
+// the crew's own pipeline once was.
+const companiesDrawn=page=>page.evaluate(()=>window.oceanFleet.vessels.filter(v=>v.crew?.continuumDraws().length).length);
 async function step(page){
   const result=await page.evaluate(async()=>{
     const callback=victoryCheck.callback;victoryCheck.callback=null;victoryCheck.render={};victoryCheck.compute={};callback(performance.now()+100);
@@ -54,7 +57,7 @@ test('a selectable Victory fleet renders with independent ship state, correct ca
     await page.waitForFunction(()=>victoryCheck.callback||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
     assert.equal(await page.locator('#err').textContent(),'',errors.join('\n'));
     const frame=await step(page);
-    assert.equal(frame.render['vessel clusters'],2);assert.equal(frame.render.crew,2);
+    assert.equal(frame.render['vessel clusters'],2);assert.equal(await companiesDrawn(page),2);
     assert.equal(frame.render.ocean,1);assert.equal(frame.compute['fft rows'],1);
     assert.equal(frame.compute['height probe'],2);assert.equal(frame.render['solid shadows of far bodies'],2);assert.equal(frame.render['canvas shadows of far bodies'],2);
     await page.waitForFunction(()=>victoryFixture.vessels.every(v=>!v.probe.pending));
@@ -94,7 +97,7 @@ for(const entry of ['ocean.html','ocean.min.html','docs/index.html'])test(`Victo
     await page.waitForFunction(()=>victoryCheck.callback||victoryCheck.startupFailure||document.querySelector('#err')?.textContent,undefined,{polling:100,timeout:90000});
     assert.equal(await page.locator('#err').textContent(),'');assert.deepEqual(errors,[]);
     assert.equal(await page.evaluate(()=>typeof victoryCheck.callback),'function');
-    const frame=await step(page);assert.equal(frame.render['vessel clusters'],1);assert.equal(frame.render.crew,1);assert.equal(frame.render.ocean,1);
+    const frame=await step(page);assert.equal(frame.render['vessel clusters'],1);assert.equal(await companiesDrawn(page),1);assert.equal(frame.render.ocean,1);
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();assert.equal(await page.locator('#ship-model').inputValue(),'victory');
     assert.deepEqual(errors,[]);
   }finally{await page.close();}

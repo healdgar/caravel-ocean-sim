@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
 import { CREW_CONTINUUM_LISTS } from '../js/wgsl/crew-continuum.js';
 
-// The bodies' streams are published, not committed: a checkout without them draws the old bodies.
+// The bodies' streams are published, not committed: a checkout without them cannot draw people at all.
 const baked = ['sailor-male', 'villager-female', 'captain'].every((id) => fs.existsSync(new URL(`../assets/crew/continuum/${id}/vertices.bin.gz`, import.meta.url)));
 let server, browser, origin;
 before(async () => {
@@ -37,7 +37,7 @@ test('the company on deck is cut and drawn through the continuum: clusters near,
     const result = await page.evaluate(async (lists) => {
       const crew = window.oceanFleet.vessels[0].crew, device = window.crewContinuumTestDevice ?? null;
       const draws = crew.continuumDraws();
-      if (!device || !draws.length) return { continuum: crew.continuum, people: crew.state.crew.filter((s) => s.visible).length, draws: draws.length, read: null };
+      if (!device || !draws.length) return { people: crew.state.crew.filter((s) => s.visible).length, draws: draws.length, read: null };
       const read = [];
       for (const { buffer, records } of draws) {
         const copy = device.createBuffer({ size: records * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), encoder = device.createCommandEncoder();
@@ -48,10 +48,9 @@ test('the company on deck is cut and drawn through the continuum: clusters near,
         read.push(Object.fromEntries(lists.map((name, i) => [name, words[i * 4 + 1]])));
         copy.destroy();
       }
-      return { continuum: crew.continuum, people: crew.state.crew.filter((s) => s.visible).length, draws: draws.length, read };
+      return { people: crew.state.crew.filter((s) => s.visible).length, draws: draws.length, read };
     }, CREW_CONTINUUM_LISTS);
     assert.deepEqual(errors, []);
-    assert.equal(result.continuum, true, 'the company wears the continuum bodies');
     assert.ok(result.draws >= 2, `${result.draws} batches drawn`);
     if (result.read) {
       const total = (name) => result.read.reduce((n, r) => n + r[name], 0);

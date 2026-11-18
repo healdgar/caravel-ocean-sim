@@ -786,7 +786,8 @@ async function main() {
     ]);
     let crew=null;
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}
-    catch(error){if(index===0)crewError='Crew unavailable';console.warn(spec.id+' crew initialization:',error);}
+    // People are drawn through the continuum alone, so a body not baked leaves the company unseen, and says so.
+    catch(error){if(index===0)crewError=error?.missing?'Crew bodies not baked':'Crew unavailable';console.error(spec.id+' crew initialization:',error);}
     interaction.setShadows(shadows);
     // She is drawn, shadowed and seen from under the water through her own cut of her body (js/vessel-continuum.js),
     // which reads her posed vertices and her own copy of the assembly. Its buffers are named for her model and row
@@ -821,14 +822,14 @@ async function main() {
   }
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
   let fortSoldiers=null;
-  try{if(sharedCrew)fortSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew});}catch(error){console.warn('Fort garrison initialization:',error);}
+  try{if(sharedCrew)fortSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew});}catch(error){console.error('Fort garrison initialization:',error);}
   // The first mate ashore is one more such body, in a renderer with room for no one else.
   let mateSoldiers=null;
-  try{if(sharedCrew)mateSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,most:1});}catch(error){console.warn('The first mate\'s figure:',error);}
+  try{if(sharedCrew)mateSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,most:1});}catch(error){console.error('The first mate\'s figure:',error);}
   const props=createProps({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA});
   window.oceanProps=props;
   let townsfolk=null;
-  try{if(sharedCrew)townsfolk=await createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)});}catch(error){console.warn('Townsfolk initialization:',error);}
+  try{if(sharedCrew)townsfolk=await createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)});}catch(error){console.error('Townsfolk initialization:',error);}
   window.oceanTownsfolk=townsfolk;
   const spindriftPromise=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
   const weatherRendererPromise=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});

@@ -90,7 +90,7 @@ test('all nine Indigenous culture regions map onto four dedicated regional M/F b
     const [maleModel,femaleModel]=createIndigenousCrewModels([sailor,sailorFemale],id);
     assert.ok(maleModel.vertexCount>archetypes[arch][0].vertexCount,`${id} male attaches 3D groom & cultural regalia`);
     assert.ok(femaleModel.vertexCount>archetypes[arch][1].vertexCount,`${id} female attaches 3D groom & cultural regalia`);
-    // No ladder of decimated levels: where the continuum is absent an old body stands in whole.
+    // No ladder of decimated levels: the continuum is the only simplification.
     assert.equal(maleModel.lods,undefined,`${id} male carries no tier ladder`);
     assert.equal(femaleModel.lods,undefined,`${id} female carries no tier ladder`);
     assert.equal(maleModel.indices.length/3,archetypes[arch][0].indices.length/3+maleModel.accessoryTriangleCount,`${id} male draws every triangle`);

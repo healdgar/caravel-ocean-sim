@@ -13,7 +13,7 @@ import { crewClearsRail, crewOpenEdgeInset, crewFeetAwash, sendCrewOverboard, st
 import { crewLoseHandsAloft, stepCrewAloftFall } from './crew-aloft.js';
 import { createGunneryTools, requestGunneryToolPipelines } from './gunnery-tools.js';
 import { requestOnce } from './gpu-program-cache.js';
-import { CREW_RENDER, CREW_CUT_RENDER, CREW_SHADOW, CREW_POSE_BLEND } from './wgsl/crew.js';
+import { CREW_RENDER, CREW_SHADOW, CREW_POSE_BLEND } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
 import { VICTORY_DESIGN } from './models/victory.js';
 import { requirePlayableShipModel } from './ship-models.js';
@@ -24,12 +24,12 @@ import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } fr
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
 import { crewTrafficStep, crewTrafficAfterStep } from './crew-traffic.js';
 import { crewDeckField, crewDeckRoom } from './crew-deck.js';
-import { crewCompanyDistance, crewPoseInterval, fortPoseStride, crewApparentDistance, crewLensZoom, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-pose-cadence.js';
+import { crewCompanyDistance, crewPoseInterval, fortPoseStride, crewApparentDistance, crewLensZoom, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-pose-cadence.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 import { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
 import { attachCrewComponents, crewComponentMaskForActor, ensureCrewComponentPacks, packCrewFaceW } from './crew-components.js';
 import { CREW_JOINT_COUNT, CREW_SLOT } from './crew-skeleton.js';
-import { CREW_CONTINUUM_ORDER_CUT, CREW_CONTINUUM_ORDER_IMPORTANT, createCrewContinuumBatch, loadCrewContinuumBody, requestCrewContinuumPipelines } from './crew-continuum-draw.js';
+import { CREW_CONTINUUM_ORDER_CUT, CREW_CONTINUUM_ORDER_IMPORTANT, createCrewContinuumBatch, loadCrewContinuumBodies, requestCrewContinuumPipelines } from './crew-continuum-draw.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -630,27 +630,26 @@ export function preloadCrewModels(){
   return preloadedCrewModels;
 }
 
+// How an old body's vertices are read, for the two programs below.
 const CREW_BODY_VERTICES=[{arrayStride:60,attributes:[
   {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
   {shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'uint16x4'},
   {shaderLocation:4,offset:44,format:'float32x4'},
 ]}];
-// Every program a company is drawn and posed with, asked for once a device. Startup asks before it waits on
-// anything, so they compile beside the ocean's; the first company to be made finds them compiling or done.
+// Every program a company is posed with, asked for once a device. Startup asks before it waits on anything, so they
+// compile beside the ocean's; the first company to be made finds them compiling or done. People are drawn through the
+// one continuum (js/crew-continuum-draw.js), whose programs are its own.
+// `pipeline` and `shadowPipeline` draw an old body whole. Nothing of the crew, the garrison or the townsfolk draws with
+// them: they are compiled, and handed on in the crew's shared assets, only because js/trade-vessels.js still stands old
+// bodies in for deck hands whose continuum body has not come. They go when that does.
 export function requestCrewPipelines({device,shader,format='rgba16float',samples=4,waterOptics=null}){
   return requestOnce(device,`crew ${format} ${samples}`,async()=>{
-    const modules=Promise.all([shader(CREW_RENDER,'crew'),shader(CREW_CUT_RENDER,'crew surviving'),shader(CREW_SHADOW,'crew shadow')]);
-    const drawn=(label,entryPoint,target,depthStencil,useCutModule=false)=>modules.then(([module,cutModule])=>device.createRenderPipelineAsync({label,layout:'auto',vertex:{module:useCutModule?cutModule:module,entryPoint:'vs',buffers:CREW_BODY_VERTICES},
-      fragment:{module:useCutModule?cutModule:module,entryPoint,targets:[target]},primitive:{topology:'triangle-list',cullMode:'none'},
-      depthStencil:{format:'depth32float',...depthStencil},multisample:{count:samples}}));
-    const layingDepth={depthWriteEnabled:true,depthCompare:'greater'};
     const tools=requestGunneryToolPipelines({device,shader,format,samples,waterOptics});tools.catch(()=>{});
-    Promise.resolve(waterOptics).then(optics=>optics?.capture({source:CREW_RENDER,entry:'crewFS',vertex:{buffers:CREW_BODY_VERTICES},groups:2})).catch(()=>{});
-    const [pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline]=await Promise.all([
-      drawn('crew','crewFS',{format},layingDepth),
-      drawn('crew surviving','surviving',{format,writeMask:0},layingDepth,true),
-      drawn('crew cut','crewFS',{format},{depthWriteEnabled:false,depthCompare:'equal'}),
-      modules.then(([,,shadowModule])=>device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:CREW_BODY_VERTICES},primitive:{topology:'triangle-list',cullMode:'none'},
+    const [pipeline,shadowPipeline,poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline]=await Promise.all([
+      shader(CREW_RENDER,'crew').then(module=>device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:CREW_BODY_VERTICES},
+        fragment:{module,entryPoint:'crewFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
+        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}})),
+      shader(CREW_SHADOW,'crew shadow').then(module=>device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module,entryPoint:'vs',buffers:CREW_BODY_VERTICES},primitive:{topology:'triangle-list',cullMode:'none'},
         depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})),
       shader(CREW_POSE_BLEND,'crew pose blend').then(module=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module,entryPoint:'main'}})),
       createCrewClipPipeline(device,shader),
@@ -659,23 +658,24 @@ export function requestCrewPipelines({device,shader,format='rgba16float',samples
       createCrewArrowPipeline(device,shader),
       createCrewTurnPipeline(device,shader),
     ]);
-    return {pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline};
+    return {pipeline,shadowPipeline,poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline};
   });
 }
 
 // How far off, allowing for the lens, a company is still drawn. By then a person is a fifth of a pixel and thinned
-// nearly to nothing; the GPU culls and thins everyone nearer. The old bodies, where the continuum is absent, are
-// drawn whole to the same sight.
+// nearly to nothing; the GPU culls and thins everyone nearer.
 export const CREW_CONTINUUM_SIGHT=6000;
 // What the cut is told of a person: drawn depth first while being cut away, and cut finer while hurt or falling.
 const crewContinuumOrder=s=>(s.cutShader?CREW_CONTINUUM_ORDER_CUT:0)
   |(s.casualtyState==='wounded'||s.casualtyState==='fallen'||s.pendingWounds?.length||s.stuckArrows?.length||(s.knockdownTimer??0)>0?CREW_CONTINUUM_ORDER_IMPORTANT:0);
-// The bodies a company or garrison wears through the continuum, and the programs that cut and draw them. Null
-// where the bodies are not on this server (their streams are published, not committed), and the old bodies stand in.
+// The bodies a company or garrison wears, and the programs that cut and draw them. People are drawn through nothing
+// else: a body that is not baked fails the load, naming its missing files and how to bake them.
 function loadCrewContinuum({device,shader,format,samples,waterOptics},ids){
-  return Promise.all([Promise.all(ids.map(id=>loadCrewContinuumBody(device,id))),requestCrewContinuumPipelines({device,shader,format,samples,waterOptics})])
-    .then(([bodies,pipelines])=>({bodies,pipelines}))
-    .catch(error=>{console.warn('Crew continuum unavailable; the old bodies stand in:',error);return null;});
+  return Promise.all([loadCrewContinuumBodies(device,ids),requestCrewContinuumPipelines({device,shader,format,samples,waterOptics})])
+    .then(([bodies,pipelines])=>{
+      if(bodies.some(body=>body.standIn.animator.joints.length!==CREW_JOINT_COUNT))throw Error(`Crew expects the prepared ${CREW_JOINT_COUNT}-joint rigs`);
+      return {bodies,pipelines};
+    });
 }
 
 export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina',waterOptics=null}) {
@@ -685,37 +685,26 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   // Built now, at loading, rather than the first time anyone has to step aside.
   crewDeckField({modelId,...requirePlayableShipModel(modelId).runtime});
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
-  const layout=CREW_BODY_VERTICES;
   // Hands by sex and the captain; an indigenous company its own culture's pair.
   const continuumIds=[...(state.indigenousAttire?['caribbean-male','caribbean-female']:['sailor-male','villager-female']),'captain'];
-  const [models,requested,continuum]=await Promise.all([modelsPromise,requestCrewPipelines({device,shader,format,samples,waterOptics}),loadCrewContinuum({device,shader,format,samples,waterOptics},continuumIds)]);
+  const [models,requested,{bodies,pipelines}]=await Promise.all([modelsPromise,requestCrewPipelines({device,shader,format,samples,waterOptics}),loadCrewContinuum({device,shader,format,samples,waterOptics},continuumIds)]);
+  // The old bodies are drawn by none of the crew. They are loaded, and their painted captain and programs handed on in
+  // the shared assets, only for js/trade-vessels.js's deck hands (requestCrewPipelines).
   if(models.some(m=>m.animator.joints.length!==CREW_JOINT_COUNT))throw Error(`Crew expects the prepared ${CREW_JOINT_COUNT}-joint rigs`);
-  // Each continuum body is posed on its own rig, with its own bind pose; the old bodies' would misplace its skin.
-  const bodies=continuum?.bodies??null;
-  const [pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,captainTexture]=await Promise.all([shared?.pipeline??requested.pipeline,
-    shared?.cutDepthPipeline??requested.cutDepthPipeline,
-    shared?.cutPipeline??requested.cutPipeline,
+  const [pipeline,shadowPipeline,captainTexture]=await Promise.all([shared?.pipeline??requested.pipeline,
     shared?.shadowPipeline??requested.shadowPipeline,
     shared?.captainTexture?Promise.resolve(shared.captainTexture):uploadCaptainTexture(device,models[2])]);
+  // The crew's group 0 names the captain's picture (bindings 13 and 14); the continuum binds it and never reads it.
   const captainTexView=shared?.captainTexView??captainTexture.createView();
   const captainSampler=shared?.captainSampler??device.createSampler({label:'captain pigment',magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',addressModeU:'repeat',addressModeV:'repeat',maxAnisotropy:8});
-  const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource})});
   const poseBlendPipeline=shared?.poseBlendPipeline??requested.poseBlendPipeline;
   const clipPipeline=shared?.clipPipeline??requested.clipPipeline;
   const solver=requested.solver;
   const arrowPipeline=shared?.arrowPipeline??requested.arrowPipeline;
   const turnPipeline=shared?.turnPipeline??requested.turnPipeline;
-  const pairModels=bodies?[bodies[0].standIn,bodies[1].standIn]:state.indigenousAttire?createIndigenousCrewModels(models,'taino-greater-antilles'):models.slice(0,2);
-  const activeModels=[pairModels[0],pairModels[1],bodies?bodies[2].standIn:models[2]];
-  // Each body's mesh is uploaded once and shared by the fleet: the men's, the women's and the captain's, whole. The
-  // continuum's bodies are their own, held once a device.
-  const geometry=bodies?null:activeModels.map((model,i)=>{
-    const sharedGeo=(state.indigenousAttire&&i<2)?null:shared?.geometry?.[i];
-    if(sharedGeo)return {...sharedGeo,owned:false};
-    const vertex=buffer('crew vertices',model.vertices,B.VERTEX),index=buffer('crew indices',model.indices,B.INDEX);
-    return {vertex,index,indexCount:model.indices.length,owned:true};
-  });
-  const captainModel=activeModels[2],captainGeometry=geometry?.[2];
+  // Each body is posed on its own rig, with its own bind pose, and cut and drawn from its own streams, held once a
+  // device and shared by the fleet.
+  const pairModels=[bodies[0].standIn,bodies[1].standIn],captainModel=bodies[2].standIn;
   const moistureProbeAlignOffset=Math.max(0,Math.min(wetness.crewOffset,Math.max(0,(wetness.probeCount??1)-1))&~31);
   const moistureByteOffset=moistureProbeAlignOffset*8;
   // A vessel has two batches of bodies, by sex. Her captain is one more body in his or her own, last in it, and
@@ -728,7 +717,6 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     // A one-person company legitimately has no actors in one sex batch.
     // Bind valid storage buffers, but submit no phantom instance for that batch.
     const poses=new Float32Array(Math.max(1,people.length)*CREW_JOINT_COUNT*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS),actorsU32=new Uint32Array(actors.buffer);
-    const {vertex,index,indexCount}=geometry?.[i]??{};
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     // Two solved poses per sailor, and how far along the way from one to the other each is.
     const blends=new Float32Array(Math.max(1,people.length)*2);
@@ -740,28 +728,14 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     const turn=createCrewTurnBatch(device,turnPipeline,model,bones,people.length);
     // Anyone near enough to see what their hands are at is solved on the GPU, into the two poses they are shown between.
     const solve=createCrewSolveBatch(device,solver,model,solved,people.length),captainSolve=captains.length?createCrewSolveBatch(device,solver,captainModel,solved,people.length):null;
-    const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
-    const mainResources=[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state,offset:moistureByteOffset},skyView,{binding:13,resource:captainTexView},{binding:14,resource:captainSampler}];
-    const main=bodies?null:group(pipeline,mainResources),mainCut=bodies?null:group(cutPipeline,mainResources);
-    // The depth entry reads only what the vertex stage does, and the frame.
-    const cutDepth=bodies?null:device.createBindGroup({layout:cutDepthPipeline.getBindGroupLayout(0),entries:[0,1,2,3,8].map(binding=>({binding,resource:mainResources[binding]}))});
-    const shadow=bodies?null:group(shadowPipeline,[{buffer:shadows.uniform},...common]);
-    // What is drawn from this batch's storage: its own bodies, then the captain's, each a run of its slots. Through
-    // the continuum each part is one batch of the cut, reading the same joints and actors.
-    const parts=[{model,vertex,index,indexCount,first:0,people:hands,body:bodies?.[i]},...(captains.length?[{model:captainModel,...captainGeometry,first:hands.length,people:captains,body:bodies?.[2]}]:[])];
-    if(bodies)for(const part of parts)if(part.people.length)part.continuum=createCrewContinuumBatch({device,pipelines:continuum.pipelines,body:part.body,capacity:part.people.length,first:part.first,samples,frame:frameUBO,hull:hullUBO,bones,actor,main:mainResources,shadows});
-    return {model,people,hands:hands.length,parts,poses,actors,actorsU32,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip,captainClip,turn,solve,captainSolve};
+    const mainResources=[{buffer:frameUBO},{buffer:hullUBO},{buffer:bones},{buffer:actor},transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state,offset:moistureByteOffset},skyView,{binding:13,resource:captainTexView},{binding:14,resource:captainSampler}];
+    // What is drawn from this batch's storage: its own people, then the captain, each a run of its slots and one
+    // batch of the cut, reading the same joints and actors.
+    const parts=[{model,first:0,people:hands,body:bodies[i]},...(captains.length?[{model:captainModel,first:hands.length,people:captains,body:bodies[2]}]:[])];
+    for(const part of parts)if(part.people.length)part.continuum=createCrewContinuumBatch({device,pipelines,body:part.body,capacity:part.people.length,first:part.first,samples,frame:frameUBO,hull:hullUBO,bones,actor,main:mainResources,shadows});
+    return {model,people,hands:hands.length,parts,poses,actors,actorsU32,bones,actor,mainResources,solved,blend,blends,poseBlendGroup,clip,captainClip,turn,solve,captainSolve};
   });
-  // The old bodies' runs: who of a part each pass draws, opaque, cut away or into the shadow map, all whole.
-  const partRuns=(part,drawn)=>{const runs=crewDrawRuns(part.people,drawn);if(part.first)for(const run of runs)run.first+=part.first;return runs;};
-  const shownOpaque=s=>s.visible!==false&&!s.cutShader,shownCut=s=>s.visible!==false&&Boolean(s.cutShader),castsShadow=s=>s.visible!==false;
-  // The finest cut is the whole body. Through the continuum what is drawn of it is the GPU's to choose.
-  const partTriangles=part=>(part.body?part.body.triangles:part.model.indices.length/3)*part.people.length;
   const everyPart=batches.flatMap(b=>b.parts);
-  const lighting=bodies?null:shadows.bind(pipeline),cutLighting=bodies?null:shadows.bind(cutPipeline);
-  const submerged=!bodies&&waterOptics?await waterOptics.capture({source:CREW_RENDER,entry:'crewFS',pipeline,vertex:{buffers:layout},groups:2}):null;
-  const submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
-  if(submerged)for(const b of batches)b.submerged=submerged.bindGroup(b.mainResources);
   const gunTools=await createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared:shared?.gunTools});
   // An arrow in a body is placed on the GPU from the joints that body is drawn with.
   const placeOf=new Map();
@@ -777,18 +751,9 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     anyCut=false;
     for(const part of everyPart){if(!part.continuum)continue;part.continuum.update(part.people,crewContinuumOrder,true);anyCut||=part.people.some(s=>s.visible!==false&&s.cutShader);}
   };
-  const drawBatch=(pass,b,shadow,cutGroup=null)=>{
-    let grouped=false;
-    for(const part of b.parts){
-      const runs=shadow?part.shadowRuns:cutGroup?part.cutRuns:part.runs;
-      if(!part.people.length||runs?.length===0||(cutGroup&&!runs))continue;
-      if(!grouped){pass.setBindGroup(0,shadow?b.shadow:cutGroup??b.main);grouped=true;}
-      pass.setVertexBuffer(0,part.vertex);pass.setIndexBuffer(part.index,'uint32');
-      for(const run of runs??[{first:part.first,count:part.people.length}])pass.drawIndexed(part.indexCount,run.count,0,0,run.first);
-    }
-  };
-  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets,geometry:state.indigenousAttire||bodies?(shared?.geometry??null):geometry},triangles:everyPart.reduce((n,part)=>n+partTriangles(part),0),
-    continuum:Boolean(bodies),
+  return {state,assets:{models,pipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets},
+    // The finest cut is each body whole; what is drawn of it is the GPU's to choose.
+    triangles:everyPart.reduce((n,part)=>n+part.body.triangles*part.people.length,0),
     get posed(){return posed;},
     joints:CREW_JOINT_COUNT,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
@@ -871,7 +836,6 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           const localMoistureBase=(wetness.crewOffset-moistureProbeAlignOffset)+(s.crewIndex??state.crew.indexOf(s))*4;
           b.actorsU32[offset+31]=packCrewMoistureAndDressU32(localMoistureBase,s.dress??0);
         }
-        if(!bodies)for(const part of b.parts){part.runs=partRuns(part,shownOpaque);part.cutRuns=partRuns(part,shownCut);part.shadowRuns=partRuns(part,castsShadow);}
         device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();b.captainClip?.upload();b.solve.upload();b.captainSolve?.upload();b.turn.update(b.people);
       }
       orderCut();
@@ -893,37 +857,24 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       for(const b of batches)b.arrows.encode(pass);
       for(const part of everyPart)part.continuum?.encodeSelect(pass);
     },
+    // Under water, through the water's own capture: the far bodies the shadow list already holds.
     drawSubmerged(pass,above=false){
-      if(bodies){if(!drawEnabled)return;for(const part of everyPart)part.continuum?.drawSubmerged(pass,above);gunTools.drawSubmerged(pass,above);return;}
-      if(!submerged||!drawEnabled)return;
-      submerged.bind(pass,above);pass.setBindGroup(1,submergedLighting);
-      for(const b of batches){
-        if(!b.people.length)continue;
-        pass.setBindGroup(0,b.submerged);
-        for(const part of b.parts){
-          if(!part.people.length)continue;
-          pass.setVertexBuffer(0,part.vertex);pass.setIndexBuffer(part.index,'uint32');pass.drawIndexed(part.indexCount,part.people.length,0,0,part.first);
-        }
-      }
+      if(!drawEnabled)return;
+      for(const part of everyPart)part.continuum?.drawSubmerged(pass,above);
       gunTools.drawSubmerged(pass,above);
     },
     // Opaque sailors belong with the opaque scene. Anyone being cut follows it.
     drawOpaque(pass){
       if(!drawEnabled)return;
-      if(bodies)for(const part of everyPart)part.continuum?.drawOpaque(pass);
-      else{pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);}
+      for(const part of everyPart)part.continuum?.drawOpaque(pass);
       gunTools.draw(pass);
     },
     drawCut(pass){
-      if(bodies){if(drawEnabled&&anyCut)for(const part of everyPart)part.continuum?.drawCut(pass);return;}
-      if(!drawEnabled||!everyPart.some(part=>part.cutRuns?.length))return;
-      pass.setPipeline(cutDepthPipeline);for(const b of batches)drawBatch(pass,b,false,b.cutDepth);
-      pass.setPipeline(cutPipeline);pass.setBindGroup(1,cutLighting);for(const b of batches)drawBatch(pass,b,false,b.mainCut);
+      if(drawEnabled&&anyCut)for(const part of everyPart)part.continuum?.drawCut(pass);
     },
     drawShadow(pass){
       if(!drawEnabled)return;
-      if(bodies)for(const part of everyPart)part.continuum?.drawShadow(pass);
-      else{pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);}
+      for(const part of everyPart)part.continuum?.drawShadow(pass);
       gunTools.drawShadow(pass);
     },
     // For the continuum census: each part's indirect draws.
@@ -932,7 +883,6 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     destroy(){
       gunTools.destroy();
       if(!shared)captainTexture?.destroy?.();
-      for(const g of geometry??[])if(g.owned){g.vertex.destroy();g.index.destroy();}
       for(const part of everyPart)part.continuum?.destroy();
       for(const b of batches){for(const resource of [b.bones,b.actor,b.solved,b.blend])resource.destroy();b.clip.destroy();b.captainClip?.destroy();b.turn.destroy();b.solve.destroy();b.captainSolve?.destroy();b.arrows.destroy();}
     },
@@ -2711,52 +2661,18 @@ export async function createFortSoldiers({
   // How many bodies each of its batches has room for: a fort's many by default, or one for a lone figure.
   most = MAX_FORT_SOLDIERS_PER_BATCH,
 }) {
-  const modelsPromise = shared?.models
-    ? Promise.resolve(shared.models)
-    : (preloadedCrewModels ?? fetchCrewModels());
-  modelsPromise.catch(() => {});
   const B = GPUBufferUsage;
   const buffer = (label, data, usage) => {
     const b = device.createBuffer({ label, size: data.byteLength, usage: usage | B.COPY_DST });
     device.queue.writeBuffer(b, 0, data);
     return b;
   };
-  const layout = [{
-    arrayStride: 60,
-    attributes: [
-      { shaderLocation: 0, offset: 0, format: 'float32x3' },
-      { shaderLocation: 1, offset: 12, format: 'float32x3' },
-      { shaderLocation: 2, offset: 24, format: 'float32x3' },
-      { shaderLocation: 3, offset: 36, format: 'uint16x4' },
-      { shaderLocation: 4, offset: 44, format: 'float32x4' },
-    ],
-  }];
-  const [models, [module, shadowModule], continuum] = await Promise.all([
-    modelsPromise,
-    shared ? Promise.resolve([null, null]) : Promise.all([shader(CREW_RENDER, 'fort crew'), shader(CREW_SHADOW, 'fort crew shadow')]),
-    // Soldiers, the women of the post and its captains; a port's indigenous pair is fetched when the port is.
-    loadCrewContinuum({ device, shader, format, samples }, ['soldier', 'villager-female', 'captain']),
-  ]);
-  const bodies = continuum?.bodies ?? null;
-  const [pipeline, shadowPipeline, captainTexture] = await Promise.all([
-    shared?.pipeline ?? device.createRenderPipelineAsync({
-      label: 'fort crew',
-      layout: 'auto',
-      vertex: { module, entryPoint: 'vs', buffers: layout },
-      fragment: { module, entryPoint: 'crewFS', targets: [{ format }] },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-      multisample: { count: samples },
-    }),
-    shared?.shadowPipeline ?? device.createRenderPipelineAsync({
-      label: 'fort crew shadow',
-      layout: 'auto',
-      vertex: { module: shadowModule, entryPoint: 'vs', buffers: layout },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
-    }),
-    shared?.captainTexture ? Promise.resolve(shared.captainTexture) : uploadCaptainTexture(device, models[2]),
-  ]);
+  // Soldiers, the women of the post and its captains; a port's indigenous pair is fetched when the port is. A body
+  // that is not baked fails the garrison's load, naming its missing files.
+  const { bodies, pipelines } = await loadCrewContinuum({ device, shader, format, samples }, ['soldier', 'villager-female', 'captain']);
+  // The crew's group 0 names the captain's picture (bindings 13 and 14). The continuum binds it and never reads it, so
+  // a garrison of its own holds a single texel.
+  const captainTexture = shared?.captainTexture ?? await uploadCaptainTexture(device, null);
   const captainTexView = shared?.captainTexView ?? captainTexture.createView();
   const captainSampler = shared?.captainSampler ?? device.createSampler({ label: 'captain pigment', magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   const hullData = new Float32Array(52);
@@ -2766,100 +2682,51 @@ export async function createFortSoldiers({
   hullData.set([3.6, 12, 1, 1], 12);
   const fortHullUBO = buffer('fort garrison hull ubo', hullData, B.UNIFORM);
   const dryMoistureBuf = buffer('fort garrison dry moisture', new Float32Array(16), B.STORAGE);
-  const group = (pipe, resources) => device.createBindGroup({
-    layout: pipe.getBindGroupLayout(0),
-    entries: resources.map((resource, binding) => resource?.resource !== undefined ? resource : ({ binding, resource })),
-  });
-  // Through the continuum each body is posed on its own rig. The indigenous pair waits for its port.
-  const indigenousModels = bodies ? [null, null] : createIndigenousCrewModels(models);
-  const soldierMaleModel = bodies ? bodies[0].standIn : (models[0].soldierMale ?? models[0]);
-  const allModels = [soldierMaleModel, bodies ? bodies[1].standIn : models[1], indigenousModels[0], indigenousModels[1]];
+  // Each body is posed on its own rig. The indigenous pair waits for its port.
+  const allModels = [bodies[0].standIn, bodies[1].standIn, null, null];
   const clipPipeline = shared?.clipPipeline ?? await createCrewClipPipeline(device, shader);
   const solver = await createCrewSolver(device, shader);
-  const fortGeometry = (model, given) => {
-    if (given) return { ...given, model, owned: false };
-    const vertex = buffer('fort crew vertices', model.vertices, B.VERTEX);
-    const index = buffer('fort crew indices', model.indices, B.INDEX);
-    return { vertex, index, indexCount: model.indices.length, model, owned: true };
-  };
   // One run of a batch's slots cut and drawn through the continuum: its soldiers, or its captains after them.
-  const fortCut = (b, body, capacity) => createCrewContinuumBatch({ device, pipelines: continuum.pipelines, body, capacity, samples, frame: frameUBO, hull: fortHullUBO, bones: b.bones, actor: b.actor, main: b.mainResources, shadows });
+  const fortCut = (b, body, capacity) => createCrewContinuumBatch({ device, pipelines, body, capacity, samples, frame: frameUBO, hull: fortHullUBO, bones: b.bones, actor: b.actor, main: b.mainResources, shadows });
   const indigenousBatchCache = new Map();
   // An indigenous batch wearing one culture's continuum body, kept for the next port of that culture.
   const continuumVariant = (b, body) => {
     if (indigenousBatchCache.has(body)) return indigenousBatchCache.get(body);
     const model = body.standIn;
-    const entry = { model, body, geometry: null, clip: createCrewClipBatch(device, clipPipeline, model, b.bones, most, false), solve: createCrewSolveBatch(device, solver, model, b.bones, most), soldierCut: fortCut(b, body, most) };
+    const entry = { model, body, clip: createCrewClipBatch(device, clipPipeline, model, b.bones, most, false), solve: createCrewSolveBatch(device, solver, model, b.bones, most), soldierCut: fortCut(b, body, most) };
     indigenousBatchCache.set(body, entry);
     return entry;
   };
-  // Each culture's pair, fetched once; `cultureReady` holds those that have come.
+  // Each culture's pair, fetched once; `cultureReady` holds those that have come. A pair that is not baked is an error
+  // that names its files, and its people are not drawn.
   const cultureFetches = new Map(), cultureReady = new Map();
   const fetchCulture = (archetype) => {
     if (!cultureFetches.has(archetype)) {
-      cultureFetches.set(archetype, Promise.all(['male', 'female'].map(sex => loadCrewContinuumBody(device, `${archetype}-${sex}`)))
+      cultureFetches.set(archetype, loadCrewContinuumBodies(device, ['male', 'female'].map(sex => `${archetype}-${sex}`))
         .then(pair => { cultureReady.set(archetype, pair); return pair; })
-        .catch(error => { console.warn(`Crew continuum: the ${archetype} garrison is not drawn`, error); return null; }));
+        .catch(error => { console.error(`Crew continuum: the ${archetype} garrison cannot be drawn.`, error); return null; }));
     }
     return cultureFetches.get(archetype);
   };
-  const getIndigenousBatchVariant = (model, bones, givenGeo = null) => {
-    if (indigenousBatchCache.has(model)) return indigenousBatchCache.get(model);
-    const geometry = fortGeometry(model, givenGeo);
-    const clip = createCrewClipBatch(device, clipPipeline, model, bones, most, false);
-    const solve = createCrewSolveBatch(device, solver, model, bones, most);
-    const entry = { model, geometry, clip, solve };
-    indigenousBatchCache.set(model, entry);
-    return entry;
-  };
-  // A fort's captains are few. Each is one more body in the batch of his or her own sex, after its soldiers, drawn
-  // from that batch's storage with the captain's mesh.
-  const captainModel = bodies ? bodies[2].standIn : (models[2] ?? null);
-  const captainGeometry = !bodies && captainModel ? fortGeometry(captainModel, shared?.geometry?.[2]) : null;
+  // A fort's captains are few. Each is one more body in the batch of his or her own sex, after its soldiers, cut from
+  // that batch's storage as the captain's own body.
+  const captainModel = bodies[2].standIn;
   const batches = allModels.map((model, i) => {
     const isIndigenousBatch = i === 2 || i === 3;
-    const givenGeo = i === 0
-      ? (models[0].soldierMale ? null : shared?.geometry?.[0])
-      : i === 1
-        ? shared?.geometry?.[1]
-        : shared?.indigenousGeometry?.[i - 2];
     const poses = new Float32Array(most * CREW_JOINT_COUNT * 16);
     const actors = new Float32Array(most * CREW_ACTOR_FLOATS);
     const bones = buffer('fort crew joints', poses, B.STORAGE);
     const actor = buffer('fort crew transforms', actors, B.STORAGE);
-    const common = [{ buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }];
-    const mainResources = [{ buffer: frameUBO }, ...common, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoistureBuf }, skyView, { binding: 13, resource: captainTexView }, { binding: 14, resource: captainSampler }];
-    const main = bodies ? null : group(pipeline, mainResources);
-    const shadow = bodies ? null : group(shadowPipeline, [{ buffer: shadows.uniform }, ...common]);
-    if (isIndigenousBatch) {
-      if (bodies) return { model: null, body: null, isIndigenousBatch, geometry: null, people: [], soldiers: 0, actors, bones, actor, mainResources, clip: null, solve: null, soldierCut: null, captainClip: null, captainSolve: null };
-      const variant = getIndigenousBatchVariant(model, bones, givenGeo);
-      return { ...variant, isIndigenousBatch, people: [], soldiers: 0, actors, bones, actor, main, shadow, captainClip: null, captainSolve: null };
-    }
-    const geometry = bodies ? null : fortGeometry(model, givenGeo);
+    const mainResources = [{ buffer: frameUBO }, { buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoistureBuf }, skyView, { binding: 13, resource: captainTexView }, { binding: 14, resource: captainSampler }];
+    if (isIndigenousBatch) return { model: null, body: null, isIndigenousBatch, people: [], soldiers: 0, actors, bones, actor, mainResources, clip: null, solve: null, soldierCut: null, captainClip: null, captainSolve: null };
     const clip = createCrewClipBatch(device, clipPipeline, model, bones, most, true);
-    const captainClip = captainModel ? createCrewClipBatch(device, clipPipeline, captainModel, bones, most) : null;
+    const captainClip = createCrewClipBatch(device, clipPipeline, captainModel, bones, most);
     // A soldier near enough to see his hands is solved on the GPU, straight into the joints he is drawn from.
     const solve = createCrewSolveBatch(device, solver, model, bones, most);
-    const captainSolve = captainClip ? createCrewSolveBatch(device, solver, captainModel, bones, most) : null;
-    const b = { model, isIndigenousBatch, geometry, people: [], soldiers: 0, actors, bones, actor, main, shadow, mainResources, clip, captainClip, solve, captainSolve };
-    if (bodies) Object.assign(b, { body: bodies[i], soldierCut: fortCut(b, bodies[i], most), captainCut: fortCut(b, bodies[2], Math.min(MAX_FORT_CAPTAINS_PER_BATCH, most)) });
-    return b;
+    const captainSolve = createCrewSolveBatch(device, solver, captainModel, bones, most);
+    const b = { model, isIndigenousBatch, people: [], soldiers: 0, actors, bones, actor, mainResources, clip, captainClip, solve, captainSolve, body: bodies[i] };
+    return Object.assign(b, { soldierCut: fortCut(b, bodies[i], most), captainCut: fortCut(b, bodies[2], Math.min(MAX_FORT_CAPTAINS_PER_BATCH, most)) });
   });
-  const lighting = bodies ? null : shadows.bind(pipeline);
-  // One batch's old bodies, whole: its soldiers, then any captains after them.
-  const drawFortRun = (pass, geometry, first, count) => {
-    if (!count || !geometry) return;
-    pass.setVertexBuffer(0, geometry.vertex);
-    pass.setIndexBuffer(geometry.index, 'uint32');
-    pass.drawIndexed(geometry.indexCount ?? geometry.model.indices.length, count, 0, 0, first);
-  };
-  const drawFortBatch = (pass, b, group) => {
-    if (!b.people.length) return;
-    pass.setBindGroup(0, group);
-    drawFortRun(pass, b.geometry, 0, b.soldiers);
-    drawFortRun(pass, captainGeometry, b.soldiers, b.people.length - b.soldiers);
-  };
 
   let activePort = null;
   let garrison = null;
@@ -2880,18 +2747,12 @@ export async function createFortSoldiers({
     const portCultureId = nextPort?.indigenousSettlement?.cultureId
       ?? garrison.soldiers.find(s => s.indigenous && s.cultureId)?.cultureId
       ?? null;
-    if (bodies) {
-      // The culture's pair, if it has come. Until it does that batch stands empty, and is filled when it comes.
-      const archetype = indigenousArchetypeForCulture(portCultureId), pair = cultureReady.get(archetype);
-      if (pair) pair.forEach((body, k) => { if (batches[2 + k].body !== body) Object.assign(batches[2 + k], continuumVariant(batches[2 + k], body)); });
-      else {
-        for (const b of batches.slice(2)) Object.assign(b, { model: null, body: null, clip: null, solve: null, soldierCut: null });
-        fetchCulture(archetype).then(came => { if (came && activePort === nextPort && garrison) { came.forEach((body, k) => Object.assign(batches[2 + k], continuumVariant(batches[2 + k], body))); posesDirty = true; assignSlots(); } });
-      }
-    } else {
-      const [indigMale, indigFemale] = createIndigenousCrewModels(models, portCultureId);
-      if (batches[2].model !== indigMale) Object.assign(batches[2], getIndigenousBatchVariant(indigMale, batches[2].bones));
-      if (batches[3].model !== indigFemale) Object.assign(batches[3], getIndigenousBatchVariant(indigFemale, batches[3].bones));
+    // The culture's pair, if it has come. Until it does that batch stands empty, and is filled when it comes.
+    const archetype = indigenousArchetypeForCulture(portCultureId), pair = cultureReady.get(archetype);
+    if (pair) pair.forEach((body, k) => { if (batches[2 + k].body !== body) Object.assign(batches[2 + k], continuumVariant(batches[2 + k], body)); });
+    else {
+      for (const b of batches.slice(2)) Object.assign(b, { model: null, body: null, clip: null, solve: null, soldierCut: null });
+      fetchCulture(archetype).then(came => { if (came && activePort === nextPort && garrison) { came.forEach((body, k) => Object.assign(batches[2 + k], continuumVariant(batches[2 + k], body))); posesDirty = true; assignSlots(); } });
     }
     reach = garrisonReach(garrison);
     hullData[16] = garrison.origin[0];
@@ -2906,8 +2767,8 @@ export async function createFortSoldiers({
       const sex = index % 2 ? 'female' : 'male';
       // A batch whose body has not come draws nobody yet.
       const ofSex = b.model ? garrison.soldiers.filter(s => Boolean(s.indigenous) === b.isIndigenousBatch && s.sex === sex) : [];
-      // Without the captain's mesh a captain is drawn as any other soldier.
-      const captains = (bodies ? b.captainCut : captainGeometry) ? ofSex.filter(isCaptainActor) : [];
+      // An indigenous batch has no captain's run: a captain there is drawn as any other of its people.
+      const captains = b.captainCut ? ofSex.filter(isCaptainActor) : [];
       const soldiers = ofSex.filter(s => !captains.includes(s)).slice(0, most - Math.min(captains.length, MAX_FORT_CAPTAINS_PER_BATCH, most));
       b.people = [...soldiers, ...captains.slice(0, Math.min(MAX_FORT_CAPTAINS_PER_BATCH, most))];
       b.soldiers = soldiers.length;
@@ -3044,16 +2905,11 @@ export async function createFortSoldiers({
     },
     draw(pass) {
       if (!drawEnabled) return;
-      if (bodies) { for (const b of batches) { b.soldierCut?.drawOpaque(pass); b.captainCut?.drawOpaque(pass); } return; }
-      pass.setPipeline(pipeline);
-      pass.setBindGroup(1, lighting);
-      for (const b of batches) drawFortBatch(pass, b, b.main);
+      for (const b of batches) { b.soldierCut?.drawOpaque(pass); b.captainCut?.drawOpaque(pass); }
     },
     drawShadow(pass) {
-      if (bodies) { if (drawEnabled) for (const b of batches) { b.soldierCut?.drawShadow(pass); b.captainCut?.drawShadow(pass); } return; }
       if (!drawEnabled) return;
-      pass.setPipeline(shadowPipeline);
-      for (const b of batches) drawFortBatch(pass, b, b.shadow);
+      for (const b of batches) { b.soldierCut?.drawShadow(pass); b.captainCut?.drawShadow(pass); }
     },
     // For the continuum census: each run's indirect draws.
     continuumDraws() { return drawEnabled ? batches.flatMap(b => [...(b.soldierCut?.continuumDraws() ?? []), ...(b.captainCut?.continuumDraws() ?? [])]) : []; },
@@ -3062,15 +2918,12 @@ export async function createFortSoldiers({
       dryMoistureBuf.destroy();
       if (!shared?.captainTexture) captainTexture?.destroy?.();
       for (const entry of indigenousBatchCache.values()) {
-        if (entry.geometry?.owned) { entry.geometry.vertex.destroy(); entry.geometry.index.destroy(); }
         entry.clip.destroy();
         entry.solve.destroy();
-        entry.soldierCut?.destroy();
+        entry.soldierCut.destroy();
       }
-      if (captainGeometry?.owned) { captainGeometry.vertex.destroy(); captainGeometry.index.destroy(); }
       for (const b of batches) {
         if (!b.isIndigenousBatch) {
-          if (b.geometry?.owned) { b.geometry.vertex.destroy(); b.geometry.index.destroy(); }
           b.clip.destroy();
           b.captainClip?.destroy();
           b.solve.destroy();

@@ -230,7 +230,7 @@ export function loadCrewGLB(bytes) {
       const idx=gltfAccessor(asset,p.indices);if(idx.length%3)throw Error('Invalid triangle count');
       for(const n of idx){if(!Number.isInteger(n)||n<0||n>=num)throw Error('Crew index out of range');indices.push(n+count);}
       // A body's file may still carry the decimated levels of the retired ladder (extras.crewLevels). They are not
-      // read: an old body stands in only where the continuum is absent, and then at its full detail.
+      // read: people are drawn through the continuum alone.
       chunks.push(new Uint8Array(data));count+=num;
     }
   }

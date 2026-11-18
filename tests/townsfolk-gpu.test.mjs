@@ -11,7 +11,7 @@ import {CREW_CONTINUUM_LISTS} from '../js/wgsl/crew-continuum.js';
 import {TOWNSFOLK_DISPATCH_WORDS,TOWNSFOLK_MODELS} from '../js/wgsl/townsfolk.js';
 import {townsfolkBodiesFor} from '../js/townsfolk.js';
 
-// The bodies' streams are published, not committed: a checkout without them draws the old bodies.
+// The bodies' streams are published, not committed: a checkout without them cannot draw people at all.
 const baked=townsfolkBodiesFor().every(id=>fs.existsSync(new URL(`../assets/crew/continuum/${id}/vertices.bin.gz`,import.meta.url)));
 let browser,server,base;
 before(async()=>{
@@ -51,7 +51,7 @@ const shown=(page,lists,dispatchWords,models)=>page.evaluate(async({lists,dispat
     lists.forEach((name,i)=>{drawn[name]+=words[i*4+1];});
   }
   const census=window.oceanContinuumCensus?.latest?.families??null;
-  return {continuum:folk?.continuum??null,kept,bodies:kept.reduce((a,v)=>a+v,0),drawn,census,uploads:[...townUploads]};
+  return {error:folk?(folk.error?.message??null):'no town',kept,bodies:kept.reduce((a,v)=>a+v,0),drawn,census,uploads:[...townUploads]};
 },{lists,dispatchWords,models});
 async function open(query){
   const url=coastalRegionStageURL(base,'lisbon','dock','clear',1650);
@@ -72,7 +72,7 @@ test('people walk the town by compute alone and are cut and drawn through the co
   try{
     const day=await look(page);
     console.log('townsfolk',JSON.stringify(day));
-    assert.equal(day.continuum,true,'the town wears the continuum bodies');
+    assert.equal(day.error,null,'the town wears the continuum bodies');
     assert.ok(day.bodies>40,`only ${day.bodies} people kept: ${JSON.stringify(day)}`);
     const seen=day.drawn.clusters+day.drawn.chain+day.drawn.splat;
     assert.ok(seen>0,`drawn: ${JSON.stringify(day.drawn)}`);

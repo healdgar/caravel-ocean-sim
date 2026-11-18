@@ -180,6 +180,9 @@ function instrumentRenderer({fleet=false}={}) {
   };
 }
 
+// How many companies the continuum cut and drew this frame: people have no other draw, so this is what a count of
+// the crew's own pipeline once was.
+const companiesDrawn=page=>page.evaluate(()=>window.oceanFleet.vessels.filter(v=>v.crew?.continuumDraws().length).length);
 async function step(page,extraMs=0) {
   const result = await page.evaluate(async extraMs => {
     const callback = check.callback;
@@ -1957,14 +1960,8 @@ test('crew renders the full Niña watch as independent sailors in two batches, o
   try{
     await page.addInitScript(instrumentRenderer);
     await page.addInitScript(()=>{
-      const pipeline=GPURenderPassEncoder.prototype.setPipeline,draw=GPURenderPassEncoder.prototype.drawIndexed;
       const createCrewBuffer=GPUDevice.prototype.createBuffer;window.crewJointBuffers=[];
       GPUDevice.prototype.createBuffer=function(desc){const inspect=desc.label==='crew joints',made=createCrewBuffer.call(this,inspect?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);if(inspect)window.crewJointBuffers.push(made);return made;};
-      GPURenderPassEncoder.prototype.setPipeline=function(p){this.crewLabel=p.label;return pipeline.call(this,p);};
-      GPURenderPassEncoder.prototype.drawIndexed=function(n,instances,...rest){
-        if(this.crewLabel==='crew'||this.crewLabel==='crew cut')check.crewInstances=(check.crewInstances||[]).concat(instances);
-        return draw.call(this,n,instances,...rest);
-      };
       const write=GPUQueue.prototype.writeBuffer;
       GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
         if(buffer.label==='crew transforms')check.crewActors=(check.crewActors||[]).concat(Array.from(data));
@@ -1975,9 +1972,10 @@ test('crew renders the full Niña watch as independent sailors in two batches, o
     try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
     catch(error){throw Error(error.message+'; '+warnings.join('\n'));}
     assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true);
-    const first=await step(page,100);assert.equal(first.render.crew,1);assert.equal(first.render['crew shadow'],1);
-    // Runs of sailors at one level of detail: every slot of both batches is drawn exactly once.
-    assert.equal((await page.evaluate(()=>check.crewInstances)).reduce((sum,n)=>sum+n,0),batches.reduce((sum,n)=>sum+n,0));
+    const first=await step(page,100);assert.equal(first.render.crew,undefined,'the continuum alone draws the people');
+    assert.ok(first.render['crew continuum clusters']>0);assert.ok(first.render['crew continuum shadow']>0);
+    // Every slot of both batches is handed to the continuum's cut exactly once.
+    assert.equal(await page.evaluate(()=>window.oceanFleet.vessels[0].crew.continuumDraws().reduce((sum,d)=>sum+d.people,0)),batches.reduce((sum,n)=>sum+n,0));
     assert.equal(await page.locator('#boat-length').inputValue(), '20');
     assert.equal(await page.locator('#boat-beam').inputValue(), '6');
     assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===19&&v===1).length),0,'the helmsman below the quarterdeck remains visible');
@@ -2006,9 +2004,9 @@ test('crew renders the full Niña watch as independent sailors in two batches, o
     await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show crew',{exact:true}).uncheck();
-    const hidden=await step(page,100);assert.equal(hidden.render.crew,undefined);assert.equal(hidden.render['crew shadow'],undefined);
+    const hidden=await step(page,100);assert.equal(hidden.render['crew continuum clusters'],undefined);assert.equal(hidden.render['crew continuum shadow'],undefined);
     await page.getByLabel('Show crew',{exact:true}).check();await page.getByLabel('Show ship',{exact:true}).uncheck();
-    const shipHidden=await step(page,100);assert.equal(shipHidden.render.crew,undefined);assert.equal(shipHidden.render['crew shadow'],undefined);
+    const shipHidden=await step(page,100);assert.equal(shipHidden.render['crew continuum clusters'],undefined);assert.equal(shipHidden.render['crew continuum shadow'],undefined);
     assert.deepEqual(warnings,[]);
   }finally{await page.close();}
 });
@@ -2606,7 +2604,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await page.goto(`${origin}/?view=ship&landfall=approach&sunElev=35&clouds=0&w=96&h=72`);
     await ready();
     let frame=await step(page,100);
-    assert.equal(frame.render['vessel clusters'],2);assert.equal(frame.render.crew,2);
+    assert.equal(frame.render['vessel clusters'],2);assert.equal(frame.render.crew,undefined,'the continuum alone draws the people');assert.equal(await companiesDrawn(page),2);
     assert.equal(frame.compute['height probe'].length,2);assert.equal(frame.compute['local wake'].length,2);
     assert.equal(frame.render['solid shadows of far bodies'],2);assert.equal(frame.render['canvas shadows of far bodies'],2);
     assert.equal(frame.render.ocean,1,'the water is drawn once for both vessels');
@@ -2620,7 +2618,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
         sameAsset:player.asset===following.asset,cachedAsset:shipAssets.get(boat.modelId)===shipAsset,groups:shipAsset.groups.length,
         companyModels:vessels.map(v=>v.crew.state.modelId),
         sameHull:vessels[0].hullUBO===vessels[1].hullUBO,sameWetness:vessels[0].wetness.state===vessels[1].wetness.state,
-        sameCrewMesh:vessels[0].crew.assets.geometry[0].vertex===vessels[1].crew.assets.geometry[0].vertex,
+        sameCrewMesh:(bodies=>bodies.length>=3&&new Set(bodies).size===bodies.length)(fleetAllocations.buffers.map(b=>b.label).filter(label=>/^crew continuum .+ cut and far body$/.test(label))),
         probes:vessels.map(v=>v.probe.state.time),positions:vessels.map(v=>Array.from(v.hullData.subarray(16,19)))};
     });
     assert.ok(state.separation>50);assert.equal(state.sameRig,false);assert.equal(state.sameHull,false);assert.equal(state.sameWetness,false);assert.equal(state.sameCrewMesh,true);
@@ -2631,7 +2629,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await Promise.all([page.waitForNavigation({waitUntil:'load',timeout:90000}),page.locator('#follower-toggle').uncheck()]);
     await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'0');
     frame=await step(page,100);
-    assert.equal(frame.render['vessel clusters'],1);assert.equal(frame.render.crew,1);assert.equal(frame.render['solid shadows of far bodies'],1);
+    assert.equal(frame.render['vessel clusters'],1);assert.equal(await companiesDrawn(page),1);assert.equal(frame.render['solid shadows of far bodies'],1);
     assert.equal(frame.compute['height probe'].length,1);await disabledAllocation();
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
     frame=await step(page,100);
@@ -2643,7 +2641,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'1');
     assert.equal(await page.evaluate(()=>fleetFixture.vessels.length),2);
     frame=await step(page,100);
-    assert.equal(frame.render['vessel clusters'],2);assert.equal(frame.render.crew,2);assert.equal(frame.compute['height probe'].length,2);assert.deepEqual(frame.errors,[]);
+    assert.equal(frame.render['vessel clusters'],2);assert.equal(await companiesDrawn(page),2);assert.equal(frame.compute['height probe'].length,2);assert.deepEqual(frame.errors,[]);
     await page.goto(`${origin}/?follower=0&view=ship&sunElev=35&clouds=0&w=96&h=72`);
     await ready();
     frame=await step(page,100);assert.equal(frame.render['vessel clusters'],1);assert.equal(frame.compute['height probe'].length,1);

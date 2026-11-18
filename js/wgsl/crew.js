@@ -235,9 +235,9 @@ fn captainOwnColours(paint:vec3f,p:vec3f,flagged:f32,skin:vec4f,hair:vec3f,shirt
   return mix(worn,skin.rgb*skinShade,skinMask);
 }
 `;
-// Shading never discards, so the GPU shades only what shows. Anyone with something to cut away,
-// someone fading out of a first-person sightline or in torn clothes, lays depth with `surviving`
-// after the opaque scene, then shades what is left.
+// Shading never discards, so the GPU shades only what shows. Anyone with something to cut away, someone fading out of
+// a first-person sightline or in torn clothes, lays depth first through the continuum (crewContinuumSurviving in
+// js/wgsl/crew-continuum.js) after the opaque scene, then is shaded at equal depth.
 // How much of the light on dry cloth it throws back toward a grazing eye. Skin has none of it, and nor has a hull.
 export const CREW_CLOTH_SHEEN = 0.045;
 // The crew's shading. The sheen is a parameter so that a test can take the cloth's own lobe away and hold everything
@@ -434,28 +434,6 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
 `;
 export const CREW_RENDER = crewRenderWGSL();
 export const CREW_WGSL = CREW_RENDER;
-export const CREW_CUT_RENDER = CREW_RENDER + /* wgsl */ `
-@fragment fn surviving(v:CrewVertex)->@location(0) vec4f {
-  // Screen-door transparency preserves correct depth and the two instanced draws.
-  // Every nearby sailor clears the first-person sightline, including moving crew.
-  let opacity=select(1.0,smoothstep(1.4,4.8,distance(v.world,F.camPos.xyz)),v.helm>.5);
-  let pixel=vec2u(v.position.xy)%4u;
-  let bayer=array<f32,16>(0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
-  if(opacity<(bayer[pixel.y*4u+pixel.x]+.5)/16.0){discard;}
-  let woundAmt=v.damage.x;let scorchAmt=v.damage.y;
-  // Tattered cloth edges at cuffs and hems when heavily wounded or scorched
-  if(v.skin<0.5 && (woundAmt+scorchAmt)>0.45){
-    let bp=v.bodyPos;let bSeed=v.damage.z;
-    let isCuffOrHem=(bp.y>0.16 && bp.y<0.28) || (bp.y>0.64 && bp.y<0.78) || (abs(bp.x)>0.20 && bp.y>0.82 && bp.y<1.06);
-    if(isCuffOrHem){
-      let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
-      let fray=sin(bp.x*95.0+bp.z*85.0+bSeed*50.0)*0.5+0.5;
-      if(fray*0.65+nHash*0.35 > 1.12-(woundAmt*0.32+scorchAmt*0.25)){discard;}
-    }
-  }
-  return vec4f(0);
-}
-`;
 export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
 @group(0) @binding(0) var<uniform> SH:ShadowFrame;
 @vertex fn vs(v:CrewInput)->@builtin(position) vec4f {

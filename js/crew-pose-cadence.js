@@ -57,18 +57,6 @@ export function crewApparentDistance(position,boat,camera,zoom=crewLensZoom(came
   return Math.hypot(x-camera.x,y-(camera.y??0),z-camera.z)/zoom;
 }
 
-// For the old bodies only, where a company's continuum is not to be had: one instanced draw per unbroken run of
-// the people `drawn` says are drawn by a pass. Instance order is their slot in the pose buffers.
-export function crewDrawRuns(people,drawn){
-  const runs=[];let run=null;
-  for(let i=0;i<people.length;i++){
-    if(!drawn(people[i])){run=null;continue;}
-    if(run)run.count++;
-    else{run={first:i,count:1};runs.push(run);}
-  }
-  return runs;
-}
-
 // Who needs the shader that can cut fragments. Everyone within this distance of a first-person eye
 // fades from the sightline, and enough wounds leave torn cloth. Everyone else stays opaque.
 const CREW_FADE_REACH_M=6.5;

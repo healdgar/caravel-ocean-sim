@@ -3,56 +3,61 @@
 // GPU makes of it is in townsfolk-shots-gpu (the pass alone) and townsfolk-gpu, townsfolk-under-fire-gpu (the game).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { loadCrewGLB } from '../js/gltf.js';
-import { createTownsfolk } from '../js/townsfolk.js';
-import { TOWN_FATE_WORDS, TOWNSFOLK_COUNT_WORDS, TOWNSFOLK_DISPATCH_WORDS, TOWNSFOLK_FALLBACK_AT, TOWNSFOLK_FALLBACK_WORDS, TOWNSFOLK_MODELS, TOWNSFOLK_WALK } from '../js/wgsl/townsfolk.js';
+import { createTownsfolk, townsfolkBodiesFor } from '../js/townsfolk.js';
+import { TOWN_FATE_WORDS, TOWNSFOLK_COUNT_WORDS, TOWNSFOLK_DISPATCH_WORDS, TOWNSFOLK_MODELS, TOWNSFOLK_WALK } from '../js/wgsl/townsfolk.js';
+import { CREW_CONTINUUM_ASSETS } from '../js/crew-continuum.js';
+import { CREW_CONTINUUM_LISTS } from '../js/wgsl/crew-continuum.js';
 import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 import { WALKER_WORDS } from '../js/town-streets.js';
+import { crewContinuumBaked, crewContinuumDevice, crewContinuumGlobals, fetchCrewContinuumAsset } from './helpers/crew-continuum-fixture.mjs';
 
-const load = (name) => { const bytes = readFileSync(new URL(`../assets/crew/${name}.glb`, import.meta.url)); return loadCrewGLB(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)); };
-const models = ['sailor', 'sailor-female'].map(load);
+// A town's people are drawn through the continuum alone, from its baked bodies; where they are not baked here, only
+// the load's failure can be tested.
+const baked = crewContinuumBaked(townsfolkBodiesFor());
+const unbaked = !baked && 'continuum bodies not baked here';
 
 // A device that makes nothing and remembers everything.
 function recorder() {
   const buffers = [], writes = [], draws = [], dispatches = [];
-  const device = {
+  const device = crewContinuumDevice({
     createBuffer(d) { const b = { ...d, destroyed: false, destroy() { this.destroyed = true; } }; buffers.push(b); return b; },
-    queue: { writeBuffer(b, offset, data) { writes.push({ label: b.label, words: new Uint32Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)) }); } },
+    queue: {
+      writeBuffer(b, offset, data) {
+        const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
+        writes.push({ label: b.label, words: new Uint32Array(bytes.slice(0, bytes.byteLength & ~3).buffer) });
+      },
+    },
     createRenderPipelineAsync: async (d) => ({ label: d.label, getBindGroupLayout: () => ({}) }),
     createComputePipelineAsync: async (d) => ({ label: d.label, getBindGroupLayout: () => ({}) }),
     createBindGroup: (d) => ({ ...d }),
-  };
+  });
   const pass = () => {
     const state = {};
     return {
-      setPipeline(p) { state.pipeline = p.label; }, setBindGroup(i, g) { if (i === 0) state.group = g; }, setVertexBuffer() {},
+      setPipeline(p) { state.pipeline = p.label; }, setBindGroup(i, g) { if (i === 0) state.group = g; }, setVertexBuffer(slot, b) { state.list = b; },
       setIndexBuffer(b) { state.index = b; }, dispatchWorkgroups(x) { dispatches.push({ pipeline: state.pipeline, workgroups: x }); },
       dispatchWorkgroupsIndirect(b, offset) { dispatches.push({ pipeline: state.pipeline, counted: b.label, offset }); },
-      drawIndexedIndirect(b, offset) { draws.push({ pipeline: state.pipeline, group: state.group, index: state.index, buffer: b, offset }); },
+      drawIndirect(b, offset) { draws.push({ pipeline: state.pipeline, group: state.group, list: state.list, buffer: b, offset }); },
+      drawIndexed(...args) { draws.push({ pipeline: state.pipeline, indexed: args }); },
+      drawIndexedIndirect(b, offset) { draws.push({ pipeline: state.pipeline, indexed: true, buffer: b, offset }); },
     };
   };
   return { device, buffers, writes, draws, dispatches, pass, live: (label) => buffers.filter((b) => b.label === label && !b.destroyed) };
 }
-const town = (name, people, x) => ({
-  name, center: { x, z: 0 },
+const town = (name, people, x, more = {}) => ({
+  name, center: { x, z: 0 }, ...more,
   streets: { people, walkers: new Uint32Array(people * WALKER_WORDS), samples: new Float32Array(64), window: { x, z: 0, span: 400 } },
 });
-async function crowdOf(t) {
-  const usage = globalThis.GPUBufferUsage;
-  globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, INDIRECT: 32 };
-  t.after(() => { if (usage === undefined) delete globalThis.GPUBufferUsage; else globalThis.GPUBufferUsage = usage; });
+const made = (gpu, fetchAsset) => createTownsfolk({
+  device: gpu.device, frameUBO: {}, shader: async (code, label) => ({ code, label }),
+  shared: { captainTexView: {}, captainSampler: {} },
+  shadows: { bind: () => ({}), uniform: {} },
+  fetchAsset,
+});
+async function crowdOf(t, fetchAsset = fetchCrewContinuumAsset) {
+  crewContinuumGlobals(t);
   const gpu = recorder();
-  // No continuum's programs on a device that makes nothing, so the old bodies stand in: the sailors' own pipelines.
-  const old = (label) => ({ label, getBindGroupLayout: () => ({}) });
-  const warn = console.warn;
-  console.warn = () => {};
-  t.after(() => { console.warn = warn; });
-  const folk = await createTownsfolk({
-    device: gpu.device, frameUBO: {}, shader: async (code, label) => ({ code, label }),
-    shared: { models, pipeline: old('crew'), shadowPipeline: old('crew shadow'), captainTexView: {}, captainSampler: {} },
-    shadows: { bind: () => ({}), uniform: {} },
-  });
+  const folk = await made(gpu, fetchAsset);
   // The nearest town is looked for once in a while, so a visit is as many calls as that takes.
   const visit = (ports, x) => { for (let i = 0; i < 45; i++) folk.follow(ports, { x, z: 0 }); };
   return { ...gpu, folk, visit };
@@ -60,7 +65,21 @@ async function crowdOf(t) {
 const HOUR = 3600000;
 const hoursSent = (writes) => writes.filter((w) => w.label === 'townsfolk crowd').map((w) => new Float32Array(w.words.buffer)[26]);
 
-test('the fallen are remembered for the last few towns visited, and every record is let go in the end', async (t) => {
+test('a town whose bodies are not baked fails to load, naming every missing file and how to bake it', async (t) => {
+  crewContinuumGlobals(t);
+  const gpu = recorder();
+  const absent = await made(gpu, async () => new Response(null, { status: 404 })).then(() => null, (error) => error);
+  assert.ok(absent instanceof Error, 'no town without its bodies: nothing stands in for them');
+  // A device without a texture codec fetches only the far body and its cut tables: those are what it names.
+  const wanted = townsfolkBodiesFor().flatMap((id) => ['manifest.json', 'body.glb', 'clusters.bin.gz', 'chain.bin.gz'].map((name) => CREW_CONTINUUM_ASSETS[id][name]));
+  assert.deepEqual(absent.missing, wanted);
+  for (const file of wanted) assert.ok(absent.message.includes(file), `the message names ${file}`);
+  assert.match(absent.message, /node scripts\/prepare-crew-continuum\.mjs --only=<body>/, 'and says how to bake them');
+  assert.deepEqual(gpu.draws, []);
+  assert.equal(gpu.buffers.filter((b) => /old/.test(b.label ?? '')).length, 0, 'and no old body is uploaded');
+});
+
+test('the fallen are remembered for the last few towns visited, and every record is let go in the end', { skip: unbaked }, async (t) => {
   const { folk, visit, live, buffers } = await crowdOf(t);
   const towns = Array.from({ length: 12 }, (_, i) => town('town ' + i, 40 + i, i * 10000));
   for (const [i, place] of towns.entries()) {
@@ -90,7 +109,7 @@ test('the fallen are remembered for the last few towns visited, and every record
   assert.deepEqual(buffers.filter((b) => !b.destroyed && /^townsfolk/.test(b.label ?? '')).map((b) => b.label), [], 'nothing of the townsfolk is left on the GPU');
 });
 
-test('the pass is told the date in hours from when the record began, and only when the hour has moved on', async (t) => {
+test('the pass is told the date in hours from when the record began, and only when the hour has moved on', { skip: unbaked }, async (t) => {
   const { folk, visit, writes, dispatches, pass } = await crowdOf(t);
   const towns = [town('lisbon', 60, 0), town('porto', 50, 9000)];
   const start = Date.UTC(1492, 7, 3);
@@ -116,51 +135,76 @@ test('the pass is told the date in hours from when the record began, and only wh
   writes.length = 0;
   folk.encode(pass(), start + 78 * HOUR);
   assert.equal(hoursSent(writes).at(-1), 78, 'so someone who fell at hour 30 has lain two days');
-  // Every frame resets the counts via a 1-workgroup GPU compute pass, with zero CPU writeBuffer uploads; the walk then
-  // keeps whom it keeps, and each body's people are posed as many as it counted.
+  // Every frame resets the counts via a 1-workgroup GPU compute pass, with zero CPU writeBuffer uploads of the town's
+  // own; the walk then keeps whom it keeps, each body's people are posed as many as it counted, and each body's cut
+  // runs as many workgroups. Only the cut's own batch record is written, as for every continuum batch.
   writes.length = 0;
   dispatches.length = 0;
   folk.encode(pass(), start + 78 * HOUR + 1000);
-  assert.deepEqual(writes.map((w) => w.label), []);
-  assert.deepEqual(dispatches, [
+  assert.deepEqual(writes.map((w) => w.label).filter((label) => /^townsfolk/.test(label)), []);
+  assert.deepEqual(dispatches.slice(0, 2 + TOWNSFOLK_MODELS), [
     { pipeline: 'townsfolk reset', workgroups: 1 }, { pipeline: 'townsfolk walk', workgroups: 1 },
     ...Array.from({ length: TOWNSFOLK_MODELS }, (_, m) => ({ pipeline: 'crew continuum pose', counted: 'townsfolk counts', offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 })),
   ]);
+  // Every walker here wears the man's body, so the woman's cut has no one to run for.
+  assert.deepEqual(dispatches.slice(2 + TOWNSFOLK_MODELS), [{ pipeline: 'crew continuum cut', counted: 'townsfolk counts', offset: 0 }]);
   folk.destroy();
 });
 
-test('where the continuum\'s bodies are absent, the old ones are drawn and shadowed in one draw a body, of everyone the walk kept', async (t) => {
+test('a town\'s people are cut and drawn through the continuum, one batch a body, from the slots the walk kept for it', { skip: unbaked }, async (t) => {
   const { folk, visit, writes, draws, pass, live } = await crowdOf(t);
   // Walker flags bit 0 is the body: 25 men and 35 women.
   const lisbon = town('lisbon', 60, 0), words = lisbon.streets.walkers;
   for (let i = 25; i < 60; i++) words[i * WALKER_WORDS + 11] = 1;
   visit([lisbon], 0);
-  assert.equal(folk.continuum, false);
+  assert.equal(folk.error, null);
   const counted = writes.find((w) => w.label === 'townsfolk counts').words;
-  assert.equal(counted.length, TOWNSFOLK_COUNT_WORDS);
+  assert.equal(counted.length, TOWNSFOLK_COUNT_WORDS, 'an indirect dispatch a body, and nothing for an old body');
   for (let m = 0; m < TOWNSFOLK_MODELS; m++) {
     assert.deepEqual([...counted.subarray(m * TOWNSFOLK_DISPATCH_WORDS, m * TOWNSFOLK_DISPATCH_WORDS + 3)], [0, 1, 1], 'an empty dispatch the walk fills');
-    assert.ok(counted[TOWNSFOLK_FALLBACK_AT + m * TOWNSFOLK_FALLBACK_WORDS] > 0, 'and an old body\'s draw');
   }
   // Each body's people have a run of slots of their own, the second's at a slot a bind group may begin at.
-  const joints = live('townsfolk joints')[0], actors = live('townsfolk actors')[0];
+  const joints = live('townsfolk joints')[0];
   assert.equal(joints.size, (32 + 35) * CREW_JOINT_COUNT * 64);
+  writes.length = 0;
+  folk.encode(pass(), Date.UTC(1492, 7, 3));
+  const [man, woman] = townsfolkBodiesFor();
+  for (const [id, first, count] of [[man, 0, 25], [woman, 32, 35]]) {
+    const part = writes.filter((w) => w.label === `crew continuum ${id} batch`).at(-1).words;
+    assert.deepEqual([part[0], part[1]], [first, count], `${id}: the batch cuts its own run of slots`);
+  }
   folk.draw(pass());
   folk.drawShadow(pass());
-  const main = draws.filter((d) => d.pipeline === 'crew'), shade = draws.filter((d) => d.pipeline === 'crew shadow');
-  assert.equal(main.length, TOWNSFOLK_MODELS);
-  assert.equal(shade.length, TOWNSFOLK_MODELS);
-  for (const [m, draw] of [...main.entries(), ...shade.entries()]) {
-    assert.equal(draw.buffer.label, 'townsfolk counts');
-    assert.equal(draw.offset, (TOWNSFOLK_FALLBACK_AT + m * TOWNSFOLK_FALLBACK_WORDS) * 4, 'the count the walk kept for that body');
-    const slices = draw.group.entries.filter((e) => e.resource?.buffer === joints || e.resource?.buffer === actors).map((e) => e.resource);
-    assert.equal(slices.length, 2);
-    for (const slice of slices) {
-      assert.equal(slice.offset % 256, 0, 'at an offset a bind group may take');
-      assert.equal(slice.offset / (slice.buffer === joints ? CREW_JOINT_COUNT * 64 : 144), m ? 32 : 0, 'from that body\'s first slot');
-      assert.equal(slice.size / (slice.buffer === joints ? CREW_JOINT_COUNT * 64 : 144), m ? 35 : 25);
-    }
+  assert.deepEqual(draws.filter((d) => d.indexed), [], 'no old body is drawn');
+  for (const id of [man, woman]) {
+    const own = draws.filter((d) => d.buffer.label === `crew continuum ${id} draws`);
+    assert.deepEqual(own.map((d) => d.offset / 16), [0, 1, 2, 5], `${id}: the clusters, the far body and the splat, then the shadow`);
+    assert.deepEqual(own.map((d) => d.pipeline), ['crew continuum clusters', 'crew continuum far body', 'crew continuum splat', 'crew continuum shadow']);
+    for (const d of own) assert.equal(d.list.label, `crew continuum ${id} lists`, 'each from its own list');
   }
+  assert.equal(draws.length, TOWNSFOLK_MODELS * 4);
+  assert.equal(CREW_CONTINUUM_LISTS[5], 'shadow');
+  folk.destroy();
+});
+
+test('a town of a culture whose bodies are not baked is not drawn, and says why', { skip: unbaked }, async (t) => {
+  const errors = [], error = console.error;
+  console.error = (...args) => errors.push(args);
+  t.after(() => { console.error = error; });
+  // The colonial pair is here; the Taíno pair is not.
+  const { folk, visit, draws, dispatches, pass } = await crowdOf(t, (path, init) => (/\/caribbean-/.test(path) ? Promise.resolve(new Response(null, { status: 404 })) : fetchCrewContinuumAsset(path, init)));
+  const maguana = town('Maguana', 40, 0, { hasIndigenousSettlement: true, hasColonialPort: false, indigenousSettlement: { cultureId: 'taino-greater-antilles' } });
+  visit([maguana], 0);
+  for (let i = 0; i < 20 && !folk.error; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(folk.error, 'the town knows its people cannot be drawn');
+  assert.match(folk.error.message, /assets\/crew\/continuum\/caribbean-male\/manifest\.json/);
+  assert.match(folk.error.message, /prepare-crew-continuum\.mjs/);
+  assert.ok(errors.some((args) => args.includes(folk.error)), 'and says so aloud');
+  assert.equal(folk.people, 0);
+  folk.encode(pass(), Date.UTC(1492, 7, 3));
+  folk.draw(pass());
+  folk.drawShadow(pass());
+  assert.deepEqual([draws, dispatches], [[], []], 'nobody is drawn in their stead');
   folk.destroy();
 });
 

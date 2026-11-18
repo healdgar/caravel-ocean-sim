@@ -231,8 +231,8 @@ test('helmsman follows the direct tiller below the quarterdeck at full port and 
     }
   }
 });
-test('an old body is drawn whole, and a company is seen as far as its nearest person',()=>{
-  // No ladder of decimated levels: the continuum is the only simplification, and an old body stands in whole.
+test('a crew file carries no ladder of levels, and a company is seen as far as its nearest person',()=>{
+  // No ladder of decimated levels: the continuum is the only simplification, and the only way people are drawn.
   assert.equal(model.lods,undefined);
   for(const idx of model.indices)assert.ok(idx>=0&&idx<model.vertexCount);
   assert.equal(crewCompanyDistance({x:0,z:0,enabled:true},{x:200,y:10,z:200}),0,'aboard, the company is here');
@@ -359,14 +359,12 @@ test('crew and soldiers working at mast halyard falls and hatches always face th
 
 
 
-test('sailors far from the eye keep a pose longer, and old bodies draw in as few runs as neighbours allow',async()=>{
-  const {crewPoseInterval,fortPoseStride,crewDrawRuns,crewApparentDistance}=await import('../js/crew-pose-cadence.js');
+test('sailors far from the eye keep a pose longer',async()=>{
+  const {crewPoseInterval,fortPoseStride,crewApparentDistance}=await import('../js/crew-pose-cadence.js');
   assert.equal(crewPoseInterval(5),1,'anyone close is posed every frame');
   assert.ok(crewPoseInterval(60)>crewPoseInterval(20));
   assert.equal(fortPoseStride(10),1,'a garrison close by is sampled every frame');
   assert.ok(fortPoseStride(200)>fortPoseStride(50)&&fortPoseStride(50)>1);
-  const runs=crewDrawRuns([1,1,0,1,1,1].map(drawn=>({drawn})),s=>s.drawn===1);
-  assert.deepEqual(runs,[{first:0,count:2},{first:3,count:3}],'one not drawn by a pass splits a run and draws nothing');
   assert.equal(crewApparentDistance([1,1,1],{x:0,z:0},null),0,'without a camera everyone counts as close');
   const boat={x:100,z:0,heading:0,heave:0};
   assert.ok(Math.abs(crewApparentDistance([0,0,0],boat,{x:100,y:0,z:30})-30)<1e-9);

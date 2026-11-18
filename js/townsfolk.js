@@ -7,21 +7,21 @@
 // befallen people lives on the GPU, for the last few towns visited, and the fallen lie a day by the game's calendar.
 // It is not saved: after a reload the ruins are still there, and the people are all back on their feet.
 import { requestOnce } from './gpu-program-cache.js';
-import { createIndigenousCrewModels, colonialGroomMask, reconcileColonialGroomAndComp, indigenousArchetypeForCulture, CREW_ACTOR_FLOATS } from './crew.js';
+import { colonialGroomMask, reconcileColonialGroomAndComp, indigenousArchetypeForCulture, CREW_ACTOR_FLOATS } from './crew.js';
 import { packCrewFaceW, townComponentMaskForLook } from './crew-components.js';
 import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
 import { bakeTownClips } from './town-clips.js';
 import { buildStreetMountSeeds, getLivestockHerdsForDevice, STREET_MOUNT_FLAG } from './herds.js';
 import { TOWN_SHOTS_WORDS, createTownShots } from './town-shots.js';
 import {
-  TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_COUNT_WORDS, TOWNSFOLK_DISPATCH_WORDS, TOWNSFOLK_FALLBACK_AT, TOWNSFOLK_FALLBACK_WORDS,
+  TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_COUNT_WORDS, TOWNSFOLK_DISPATCH_WORDS,
   TOWNSFOLK_LOOKS, TOWNSFOLK_MODELS, TOWNSFOLK_MOISTURE_SLOTS, TOWNSFOLK_RESET, TOWNSFOLK_WALK,
 } from './wgsl/townsfolk.js';
 import { WALKER_WORDS } from './town-streets.js';
 import { CREW_CONTINUUM_PLACED_WORDS } from './wgsl/crew-continuum.js';
 import {
   createCrewContinuumBatch, createCrewContinuumPoser, createCrewContinuumWorldHull, crewContinuumBodyFor, crewContinuumRestPlaces,
-  loadCrewContinuumBody, requestCrewContinuumPipelines, requestCrewContinuumPose,
+  loadCrewContinuumBodies, requestCrewContinuumPipelines, requestCrewContinuumPose,
 } from './crew-continuum-draw.js';
 import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 
@@ -150,26 +150,28 @@ export function townsfolkBodiesFor(culture = null) {
   return ['male', 'female'].map((sex) => crewContinuumBodyFor({ sex, role: 'townsfolk', culture }));
 }
 
-export async function createTownsfolk({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, shared = null, herds = null, isMobile = false }) {
+// `shared` is the crew's shared assets: the captain's picture its group 0 names. `fetchAsset` fetches the bodies' files.
+export async function createTownsfolk({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, shared = null, herds = null, isMobile = false, fetchAsset }) {
   const B = GPUBufferUsage;
   const buffer = (label, data, usage) => {
     const b = device.createBuffer({ label, size: Math.max(16, data.byteLength), usage: usage | B.COPY_DST });
     device.queue.writeBuffer(b, 0, data);
     return b;
   };
-  const models = shared.models;
-  // Through the continuum if its programs can be had; otherwise, and for any town whose bodies cannot be fetched,
-  // the old bodies stand in, posed by the same pass.
-  const [{ walk: walkPipeline, reset: resetPipeline, pose: posePipeline }, continuum] = await Promise.all([
+  // People are drawn through the continuum alone. A colonial town's pair is had now, so that a body that is not baked
+  // fails the load, naming its missing files; each culture's is fetched when a town of it first comes into reach.
+  const bodyLoad = { fetchAsset };
+  const [{ walk: walkPipeline, reset: resetPipeline, pose: posePipeline }, continuum, colonial] = await Promise.all([
     requestTownsfolkPipelines({ device, shader }),
-    requestCrewContinuumPipelines({ device, shader, format, samples }).catch((error) => { console.warn('Townsfolk: the continuum is unavailable; the old bodies stand in', error); return null; }),
+    requestCrewContinuumPipelines({ device, shader, format, samples }),
+    loadCrewContinuumBodies(device, townsfolkBodiesFor(), bodyLoad),
   ]);
   // Ashore the frame people are drawn in is the world's own.
   const hull = createCrewContinuumWorldHull(device, 'townsfolk ship stand-in');
   // Dry but for the rain, and in the sea: the walk pass writes both each frame.
   const moisture = device.createBuffer({ label: 'townsfolk moisture', size: TOWNSFOLK_MOISTURE_SLOTS * 8, usage: B.STORAGE });
 
-  // Each rig's clips and rest places, baked when a town first wants them: a continuum body's own rig, or an old body's.
+  // Each body's clips and rest places, baked from its own rig when a town first wants them.
   const rigs = new Map();
   const rigOf = (animator) => {
     if (rigs.has(animator)) return rigs.get(animator);
@@ -178,41 +180,20 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     rigs.set(animator, rig);
     return rig;
   };
-  // Each culture's pair of continuum bodies, fetched once. A town waits on nothing: it is drawn with the old bodies
-  // until its pair has come, and laid again then.
-  const pairs = new Map();
+  // Each culture's pair of continuum bodies, fetched once. A town of it is not drawn until its pair has come, and is
+  // laid then. A pair that is not baked is an error that names its files, and that town's people are not drawn.
+  const pairs = new Map([['', { bodies: colonial, error: null }]]);
   const cultureOf = (port) => (port?.hasIndigenousSettlement && !port.hasColonialPort ? indigenousArchetypeForCulture(port.indigenousSettlement?.cultureId) : null);
   const pairFor = (culture) => {
-    if (!continuum) return null;
     const key = culture ?? '';
     if (!pairs.has(key)) {
-      const entry = { bodies: null };
+      const entry = { bodies: null, error: null };
       pairs.set(key, entry);
-      Promise.all(townsfolkBodiesFor(culture).map((id) => loadCrewContinuumBody(device, id)))
-        .then((bodies) => { entry.bodies = bodies; if (activePort && cultureOf(activePort) === culture && crowd && !crowd.batches) buildCrowd(activePort); })
-        .catch((error) => console.warn(`Townsfolk: the ${culture ?? 'colonial'} bodies cannot be had; the old bodies stand in`, error));
+      loadCrewContinuumBodies(device, townsfolkBodiesFor(culture), bodyLoad)
+        .then((bodies) => { entry.bodies = bodies; if (activePort && cultureOf(activePort) === culture && !crowd) buildCrowd(activePort); })
+        .catch((error) => { entry.error = error; console.error(`Townsfolk: the ${culture} town's people cannot be drawn.`, error); });
     }
     return pairs.get(key).bodies;
-  };
-  // The old bodies, for the fallback: their meshes whole, uploaded when a town first wants them. The sailors'
-  // own, where they are shared, are not let go here.
-  const oldSets = new Map(), oldGeometry = new Map(), ownGeometry = [];
-  const own = (made) => { ownGeometry.push(made); return made; };
-  const oldModelsFor = (port) => {
-    const cultureId = port.indigenousSettlement?.cultureId;
-    if (!(port.hasIndigenousSettlement && !port.hasColonialPort)) return models.slice(0, MODELS);
-    if (!oldSets.has(cultureId)) oldSets.set(cultureId, createIndigenousCrewModels(models, cultureId).slice(0, MODELS));
-    return oldSets.get(cultureId);
-  };
-  const oldGeometryOf = (model, index) => {
-    if (oldGeometry.has(model)) return oldGeometry.get(model);
-    const given = models[index] === model ? shared?.geometry?.[index] : null;
-    const entry = {
-      vertex: given?.vertex ?? own(buffer('townsfolk old vertices', model.vertices, B.VERTEX)),
-      index: given?.index ?? own(buffer('townsfolk old indices', model.indices, B.INDEX)), indexCount: model.indices.length,
-    };
-    oldGeometry.set(model, entry);
-    return entry;
   };
 
   let activePort = null, crowd = null, frameCount = 0, lastCameraX = NaN, lastCameraZ = NaN;
@@ -244,8 +225,8 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   }
   function dispose() {
     if (!crowd) return;
-    for (const b of [crowd.walkers, crowd.route, crowd.looks, crowd.placed, crowd.counts, crowd.joints, crowd.actors, crowd.uniform, crowd.shots, ...crowd.orders]) b.destroy();
-    for (const made of [...crowd.posers, ...(crowd.batches ?? [])]) made.destroy();
+    for (const b of [crowd.walkers, crowd.route, crowd.looks, crowd.placed, crowd.counts, crowd.joints, crowd.actors, crowd.uniform, crowd.shots]) b.destroy();
+    for (const made of [...crowd.posers, ...crowd.batches]) made.destroy();
     delete crowd.port.townsfolkWatch;
     linkedHerds()?.setStreetMounts?.(null);
     crowd = null;
@@ -255,9 +236,10 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const streets = port?.streets;
     if (!streets?.people) return;
     const indigenous = Boolean(port.hasIndigenousSettlement && !port.hasColonialPort);
+    // Laid when its pair comes.
     const bodies = pairFor(cultureOf(port));
-    const old = bodies ? null : oldModelsFor(port);
-    const rigsOfTown = bodies ? bodies.map((body) => rigOf(body.standIn.animator)) : old.map((model) => rigOf(model.animator));
+    if (!bodies) return;
+    const rigsOfTown = bodies.map((body) => rigOf(body.standIn.animator));
     const people = Math.max(1, Math.round(streets.people * (isMobile ? MOBILE_SHARE : 1)));
     const mountSeeds = assignStreetMountsToWalkers(streets, { indigenous, maxPeople: people });
     port.streetMounts = mountSeeds;
@@ -277,12 +259,9 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const placed = device.createBuffer({ label: 'townsfolk placed', size: slots * TOWN_PLACED_BYTES, usage: B.STORAGE });
     const joints = device.createBuffer({ label: 'townsfolk joints', size: slots * TOWN_JOINT_BYTES, usage: B.STORAGE });
     const actors = device.createBuffer({ label: 'townsfolk actors', size: slots * TOWN_ACTOR_BYTES, usage: B.STORAGE });
-    // Each body's indirect dispatch and its old bodies' draw. The walk pass counts into both; the reset pass empties them.
+    // Each body's indirect dispatch, sizing its pose pass and its cut. The walk pass counts into it; the reset empties it.
     const countWords = new Uint32Array(TOWNSFOLK_COUNT_WORDS);
-    for (let m = 0; m < MODELS; m++) {
-      countWords.set([0, 1, 1, 0], m * TOWNSFOLK_DISPATCH_WORDS);
-      countWords[TOWNSFOLK_FALLBACK_AT + m * TOWNSFOLK_FALLBACK_WORDS] = old ? oldGeometryOf(old[m], m).indexCount : 0;
-    }
+    for (let m = 0; m < MODELS; m++) countWords.set([0, 1, 1, 0], m * TOWNSFOLK_DISPATCH_WORDS);
     const counts = buffer('townsfolk counts', countWords, B.STORAGE | B.INDIRECT);
     const crowdWords = new Uint32Array(CROWD_UNIFORM_WORDS);
     for (let m = 0; m < MODELS; m++) crowdWords.set(rigsOfTown[m].clips.subarray(0, 12), m * 12);
@@ -300,43 +279,19 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     });
     const countedOf = (m) => ({ buffer: counts, offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 });
     const main = [{ buffer: frameUBO }, { buffer: hull }, { buffer: joints }, { buffer: actors }, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: moisture }, skyView, { binding: 13, resource: shared.captainTexView }, { binding: 14, resource: shared.captainSampler }];
-    // One batch for each body, cut and drawn through the continuum; or, without its bodies, the old ones at one level.
-    const batches = bodies ? bodies.map((body, m) => createCrewContinuumBatch({ device, pipelines: continuum, body, capacity: Math.max(1, capacity[m]), first: firsts[m], samples, frame: frameUBO, hull, bones: joints, actor: actors, main, shadows, counted: countedOf(m) })) : null;
-    const orders = batches ? [] : rigsOfTown.map((_, m) => device.createBuffer({ label: 'townsfolk old orders', size: Math.max(16, capacity[m] * 4), usage: B.STORAGE }));
-    const posers = rigsOfTown.map((rig, m) => createCrewContinuumPoser({ device, pipeline: posePipeline, placed, palettes: rig.palette, looks, rest: rig.rest, joints, actors, orders: batches ? batches[m].orders : orders[m], first: firsts[m], counted: countedOf(m) }));
-    let fallback = null;
-    if (!batches) {
-      const slice = (b, bytes, m) => ({ buffer: b, offset: firsts[m] * bytes, size: Math.max(1, capacity[m]) * bytes });
-      const groupOf = (pipeline, resources) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: resources.map((resource, binding) => (resource?.resource !== undefined ? resource : { binding, resource })) });
-      fallback = {
-        lighting: shadows.bind(shared.pipeline),
-        geometry: old.map((model, m) => oldGeometryOf(model, m)),
-        groups: rigsOfTown.map((_, m) => groupOf(shared.pipeline, [main[0], main[1], slice(joints, TOWN_JOINT_BYTES, m), slice(actors, TOWN_ACTOR_BYTES, m), ...main.slice(4)])),
-        shadowGroups: rigsOfTown.map((_, m) => groupOf(shared.shadowPipeline, [{ buffer: shadows.uniform }, main[1], slice(joints, TOWN_JOINT_BYTES, m), slice(actors, TOWN_ACTOR_BYTES, m)])),
-      };
-    }
+    // One batch for each body, cut and drawn through the continuum from the slots its people were posed into.
+    const batches = bodies.map((body, m) => createCrewContinuumBatch({ device, pipelines: continuum, body, capacity: Math.max(1, capacity[m]), first: firsts[m], samples, frame: frameUBO, hull, bones: joints, actor: actors, main, shadows, counted: countedOf(m) }));
+    const posers = rigsOfTown.map((rig, m) => createCrewContinuumPoser({ device, pipeline: posePipeline, placed, palettes: rig.palette, looks, rest: rig.rest, joints, actors, orders: batches[m].orders, first: firsts[m], counted: countedOf(m) }));
     crowd = {
       port, people, capacity, walkers, route, looks, placed, counts, joints, actors, uniform, crowdWords, crowdHours: new Float32Array(crowdWords.buffer), hours: NaN,
-      shots, fates, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, resetGroup, walkGroup, batches, posers, orders, fallback,
+      shots, fates, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, resetGroup, walkGroup, batches, posers,
     };
   }
-  // The old bodies' draws, one for each body, of everyone the walk pass kept for it.
-  const drawFallback = (pass, pipeline, groups, lighting) => {
-    pass.setPipeline(pipeline);
-    if (lighting) pass.setBindGroup(1, lighting);
-    for (let m = 0; m < MODELS; m++) {
-      const geometry = crowd.fallback.geometry[m];
-      pass.setBindGroup(0, groups[m]);
-      pass.setVertexBuffer(0, geometry.vertex);
-      pass.setIndexBuffer(geometry.index, 'uint32');
-      pass.drawIndexedIndirect(crowd.counts, (TOWNSFOLK_FALLBACK_AT + m * TOWNSFOLK_FALLBACK_WORDS) * 4);
-    }
-  };
 
   return {
     get people() { return crowd?.people ?? 0; },
-    // Whether the town's people are drawn through the continuum, or the old bodies stand in.
-    get continuum() { return Boolean(crowd?.batches); },
+    // Why a town's people are not drawn: the error that its pair of bodies is not baked, naming the missing files.
+    get error() { return pairs.get(activePort ? cultureOf(activePort) ?? '' : '')?.error ?? null; },
     // The town whose people are drawn, and its people laid again when its streets are given new walkers (a board's
     // people as its model plans their day, js/board-folk.js).
     get port() { return activePort; },
@@ -363,7 +318,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     // 32-bit float holds it, and only when the hour has moved on.
     encode(pass, dateMs = Date.now()) {
       if (!withinPortReach()) return;
-      crowd.batches?.forEach((batch, m) => batch.update(crowd.capacity[m]));
+      crowd.batches.forEach((batch, m) => batch.update(crowd.capacity[m]));
       pass.setPipeline(resetPipeline);
       pass.setBindGroup(0, crowd.resetGroup);
       pass.dispatchWorkgroups(1);
@@ -385,28 +340,25 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
       pass.dispatchWorkgroups(Math.ceil(crowd.people / 64));
       // Everyone kept, posed; then each body's cut, as many workgroups as the walk kept people.
       for (const poser of crowd.posers) poser.encode(pass);
-      crowd.batches?.forEach((batch) => batch.encodeSelect(pass));
+      for (const batch of crowd.batches) batch.encodeSelect(pass);
     },
     // With the other opaque bodies: no discard, so the GPU shades only what shows.
     draw(pass) {
       if (!withinPortReach()) return;
-      if (crowd.batches) { for (const batch of crowd.batches) batch.drawOpaque(pass); return; }
-      drawFallback(pass, shared.pipeline, crowd.fallback.groups, crowd.fallback.lighting);
+      for (const batch of crowd.batches) batch.drawOpaque(pass);
     },
     drawShadow(pass) {
       if (!withinPortReach()) return;
-      if (crowd.batches) { for (const batch of crowd.batches) batch.drawShadow(pass); return; }
-      drawFallback(pass, shared.shadowPipeline, crowd.fallback.shadowGroups, null);
+      for (const batch of crowd.batches) batch.drawShadow(pass);
     },
     // For the continuum census: each body's indirect draws.
-    continuumDraws() { return withinPortReach() && crowd.batches ? crowd.batches.flatMap((batch) => batch.continuumDraws()) : []; },
+    continuumDraws() { return withinPortReach() ? crowd.batches.flatMap((batch) => batch.continuumDraws()) : []; },
     destroy() {
       dispose();
+      // A pair that comes after this lays no town.
+      activePort = null;
       for (const record of fatesOfTowns.values()) record.buffer.destroy();
       fatesOfTowns.clear();
-      for (const made of ownGeometry) made.destroy();
-      ownGeometry.length = 0;
-      oldGeometry.clear();
       for (const rig of rigs.values()) { rig.palette.destroy(); rig.rest.destroy(); }
       rigs.clear();
       hull.destroy();

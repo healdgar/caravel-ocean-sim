@@ -39,7 +39,9 @@ import {
   bakeRideClip,
   bakeTownClips,
 } from '../js/town-clips.js';
-import { assignStreetMountsToWalkers, createTownsfolk } from '../js/townsfolk.js';
+import { assignStreetMountsToWalkers, createTownsfolk, townsfolkBodiesFor } from '../js/townsfolk.js';
+import { crewContinuumBaked, crewContinuumDevice, crewContinuumGlobals, fetchCrewContinuumAsset } from './helpers/crew-continuum-fixture.mjs';
+import { loadCrewContinuumBodies } from '../js/crew-continuum-draw.js';
 import { TOWNSFOLK_RESET, TOWNSFOLK_WALK } from '../js/wgsl/townsfolk.js';
 import { WALKER_MOUNTED_FLAG, boardFolkStreets, crowdFromBoard, folkDoing } from '../js/board-folk.js';
 import { ROUTE_STEP_M, WALKER_WORDS } from '../js/town-streets.js';
@@ -316,7 +318,8 @@ test('sweepHerdHit fells struck livestock with knockback, triggers 38 m stampede
   assert.ok(boltedAfter.z > 28, `stampeding cow bolted radially away from z=20 to z=${boltedAfter.z.toFixed(2)}`);
 });
 
-test('mounted street riders lock < 1 mm on sloped banks, draw only through the continuum, skip offshore >3km crowds, and spawn zero horses in Indigenous towns', async (t) => {
+// Townsfolk are drawn through the continuum alone, from bodies baked here (their streams are not committed).
+test('mounted street riders lock < 1 mm on sloped banks, draw only through the continuum, skip offshore >3km crowds, and spawn zero horses in Indigenous towns', { skip: !crewContinuumBaked(townsfolkBodiesFor()) && 'continuum bodies not baked here' }, async (t) => {
   assert.equal(crowdFromBoard, boardFolkStreets);
   assert.equal(WALKER_MOUNTED_FLAG, STREET_MOUNT_FLAG);
   assert.match(TOWNSFOLK_WALK, /let isMounted=\(w\.flags&16u\)!=0u;/);
@@ -384,21 +387,19 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
   assert.equal(buildStreetMountSeeds(colonialStreets, { indigenous: true }).count, 0);
 
   // Device coupling: the herds' step, the continuum's GPU reset and cut, its indirect lists, and offshore 3,000 m townsfolk culling
-  const prevUsage = globalThis.GPUBufferUsage, prevStage = globalThis.GPUShaderStage, prevFetch = globalThis.fetch;
-  globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, INDIRECT: 32, COPY_SRC: 64 };
+  crewContinuumGlobals(t);
+  const prevStage = globalThis.GPUShaderStage, prevFetch = globalThis.fetch;
   globalThis.GPUShaderStage = { VERTEX: 1, FRAGMENT: 2, COMPUTE: 4 };
   // The animal atlas, served from the checkout as the page serves it.
   globalThis.fetch = async (path) => new Response(readFileSync(new URL(`../${path}`, import.meta.url)));
   t.after(() => {
-    if (prevUsage === undefined) delete globalThis.GPUBufferUsage;
-    else globalThis.GPUBufferUsage = prevUsage;
     if (prevStage === undefined) delete globalThis.GPUShaderStage;
     else globalThis.GPUShaderStage = prevStage;
     globalThis.fetch = prevFetch;
   });
 
   const writes = [], indexedDraws = [], indirectDraws = [], dispatches = [];
-  const device = {
+  const device = crewContinuumDevice({
     createBuffer(d) { return { ...d, destroyed: false, destroy() { this.destroyed = true; } }; },
     queue: { writeBuffer(b) { writes.push(b.label); }, onSubmittedWorkDone: () => Promise.resolve() },
     createRenderPipelineAsync: async (d) => ({ label: d.label, getBindGroupLayout: () => ({}) }),
@@ -406,7 +407,7 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
     createBindGroupLayout: (d) => ({ ...d }),
     createPipelineLayout: (d) => ({ ...d }),
     createBindGroup: (d) => ({ ...d }),
-  };
+  });
   const makePass = () => {
     let pipe = '';
     return {
@@ -415,6 +416,7 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
       setVertexBuffer() {},
       setIndexBuffer() {},
       dispatchWorkgroups(n) { dispatches.push({ pipe, n }); },
+      dispatchWorkgroupsIndirect() { dispatches.push({ pipe }); },
       drawIndexedIndirect(_b, off) { indexedDraws.push({ pipe, off }); },
       drawIndirect(b, off) { indirectDraws.push({ pipe, buffer: b.label, off }); },
     };
@@ -431,14 +433,13 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
     resources: [[0, {}], [1, {}], [2, {}], [3, {}], [4, {}], [12, {}], [19, {}], [20, {}], [21, {}]],
     clouds: { bindVolume: () => ({}) },
   });
-  const sailorModels = ['sailor', 'sailor-female'].map(loadCrew);
   const townsfolk = await createTownsfolk({
     device,
     frameUBO: {},
     shader: async (code, label) => ({ code, label }),
-    // Without the continuum's programs, the old bodies stand in with the sailors' own pipelines.
-    shared: { models: sailorModels, pipeline: { label: 'crew', getBindGroupLayout: () => ({}) }, shadowPipeline: { label: 'crew shadow', getBindGroupLayout: () => ({}) }, captainTexView: {}, captainSampler: {} },
+    shared: { captainTexView: {}, captainSampler: {} },
     shadows: { bind: () => ({}), uniform: {} },
+    fetchAsset: fetchCrewContinuumAsset,
   });
 
   const lisbonPort = {
@@ -482,12 +483,12 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
 
   // Verify townsfolk skips encode/draw/drawShadow when camera moves > 3,000 m offshore (e.g. 3,100 m away within 3,200 m reach)
   townsfolk.follow([lisbonPort], { x: 3310, z: 300 }); // 3,110 m > 3,000 m
-  dispatches.length = 0; indexedDraws.length = 0;
+  dispatches.length = 0; indexedDraws.length = 0; indirectDraws.length = 0;
   townsfolk.encode(makePass(), Date.now());
   townsfolk.draw(makePass());
   townsfolk.drawShadow(makePass());
   assert.equal(dispatches.length, 0, 'townsfolk skips compute when > 3,000 m offshore');
-  assert.equal(indexedDraws.length, 0, 'townsfolk skips draw/drawShadow when > 3,000 m offshore');
+  assert.equal(indexedDraws.length + indirectDraws.length, 0, 'townsfolk skips draw/drawShadow when > 3,000 m offshore');
   townsfolk.follow([lisbonPort], { x: 200, z: 300 });
 
   // Fire a cannonball across a mounted courier on Rua Nova
@@ -517,6 +518,8 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
   assert.equal(herds.count, 0);
   assert.match(HERDS_RENDER_WGSL, /let\s+isVehicle\s*=\s*body\.slopeScale\.w\s*>=\s*3\.99\s*;/);
 
+  // Maguana's own pair of bodies was asked for on the way in: it comes before the town is let go.
+  await loadCrewContinuumBodies(device, townsfolkBodiesFor('caribbean'), { fetchAsset: fetchCrewContinuumAsset });
   townsfolk.destroy();
   herds.destroy();
 });

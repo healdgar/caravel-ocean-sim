@@ -12,12 +12,9 @@ import { CREW_CONTINUUM_ORDER_IMPORTANT, CREW_CONTINUUM_PLACED_WGSL } from './cr
 // The two bodies of a town: walker flags bit 0 says which a person wears, a man's or a woman's.
 export const TOWNSFOLK_MODELS = 2;
 export const TOWNSFOLK_LOOKS = 48;
-// What the pass counts, for each body: an indirect dispatch (kept, 1, 1, unused) that sizes the pose and the cut, and
-// then, where the continuum's bodies are absent, an indexed draw of the old bodies (index count, kept, 0, 0, 0).
+// What the pass counts, for each body: an indirect dispatch (kept, 1, 1, unused) that sizes the pose and the cut.
 export const TOWNSFOLK_DISPATCH_WORDS = 4;
-export const TOWNSFOLK_FALLBACK_AT = TOWNSFOLK_MODELS * TOWNSFOLK_DISPATCH_WORDS;
-export const TOWNSFOLK_FALLBACK_WORDS = 5;
-export const TOWNSFOLK_COUNT_WORDS = TOWNSFOLK_FALLBACK_AT + TOWNSFOLK_MODELS * TOWNSFOLK_FALLBACK_WORDS;
+export const TOWNSFOLK_COUNT_WORDS = TOWNSFOLK_MODELS * TOWNSFOLK_DISPATCH_WORDS;
 // The moisture slots their drawing reads (four each): dry but for the rain, and in the sea.
 export const TOWNSFOLK_MOISTURE_SLOTS = 8;
 export const TOWNSFOLK_SEA_MOISTURE = 4;
@@ -359,7 +356,6 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let blend=select(fract(frame),0.0,fate.mode==DOWN);
   // Kept, in the run of their body's people: everyone kept is posed, and the cut decides who is drawn and how.
   let kept=atomicAdd(&counts[model*${TOWNSFOLK_DISPATCH_WORDS}u],1u);
-  atomicAdd(&counts[${TOWNSFOLK_FALLBACK_AT}u+model*${TOWNSFOLK_FALLBACK_WORDS}u+1u],1u);
   let c=cos(heading);let s=sin(heading);
   // Turned by their heading about the vertical: +z, the way they face, comes round toward +x.
   let transform=mat4x4f(vec4f(c,0.0,-s,0.0),vec4f(0.0,1.0,0.0,0.0),vec4f(s,0.0,c,0.0),vec4f(position,1.0));
@@ -372,6 +368,6 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
 export const TOWNSFOLK_RESET = /* wgsl */ `
 @group(0) @binding(0) var<storage,read_write> counts:array<u32>;
 @compute @workgroup_size(32) fn main(@builtin(global_invocation_id) id:vec3u){
-  if(id.x<${TOWNSFOLK_MODELS}u){counts[id.x*${TOWNSFOLK_DISPATCH_WORDS}u]=0u;counts[${TOWNSFOLK_FALLBACK_AT}u+id.x*${TOWNSFOLK_FALLBACK_WORDS}u+1u]=0u;}
+  if(id.x<${TOWNSFOLK_MODELS}u){counts[id.x*${TOWNSFOLK_DISPATCH_WORDS}u]=0u;}
 }
 `;
