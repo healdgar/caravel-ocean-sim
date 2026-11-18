@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { collapseChain, ancestor, closestOnTriangle, closest, outline, edgeCensus } from './continuum-bake.mjs';
+import { collapseChain, ancestor, closestOnTriangle, closest, outline, edgeCensus } from '../js/continuum-bake.js';
 import {
   MEADOW_CONTINUUM_FORMAT, MEADOW_CONTINUUM_VERSION, MEADOW_CONTINUUM_MAGIC, MEADOW_PATCH_METRES, MEADOW_CONTINUUM_LEVELS,
   MEADOW_CONTINUUM_CELLS, MEADOW_CONTINUUM_HEADER_WORDS, MEADOW_CONTINUUM_HEADER, MEADOW_CONTINUUM_VARIANT_WORDS,

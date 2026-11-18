@@ -12,7 +12,7 @@
 //              matched at rest to its nearest kept point of the same piece, and the error is the farthest the two
 //              come apart in any pose the rig takes (felled too). Every sphere is grown to hold its points in every
 //              pose standing (its pose slack); a felled or shattered animal is cut whole at its nearest point.
-//   far body   the type's outside wrapped (scripts/prepare-city-continuum.mjs wrap), simplified within a cell and
+//   far body   the type's outside wrapped (js/continuum-bake.js wrap), simplified within a cell and
 //              collapsed one half-edge at a time to a few triangles. Each of its points wears the skin of the source
 //              corner nearest it, so it is posed as the source is; each step's error is measured posed, against the
 //              wrap and the wrap's against the source; what a collapse takes off the outline is given back along the
@@ -38,8 +38,7 @@ import {
   ANIMAL_CONTINUUM_ASSETS, ANIMAL_CONTINUUM_SKIN_WORDS, packAnimalContinuumVertex, packAnimalContinuumCluster, animalContinuumFloatBits,
   animalContinuumBitsFloat, animalContinuumUnorm2, validateAnimalContinuumManifest,
 } from '../js/animal-continuum.js';
-import { closest, triangleSpheres, nearestTriangle, triangleGrid, collapseChain, ancestor, outline, surfaceArea } from './continuum-bake.mjs';
-import { wrap, simplifyWrap } from './prepare-city-continuum.mjs';
+import { closest, triangleSpheres, nearestTriangle, triangleGrid, collapseChain, ancestor, outline, surfaceArea, wrap, simplifyWrap } from '../js/continuum-bake.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
