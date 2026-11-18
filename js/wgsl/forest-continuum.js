@@ -138,24 +138,46 @@ fn forestStandShadowed(world:vec3f,reach:f32)->bool{
 `;
 }
 
+// ---------------------------------------------------------------------------------------------- the leaves' maps
+// The pack's maps and their optics, in `group` (the view's 3, its shadow's 2), and what a leaf card's cut reads of them.
+const forestLeafMapsWGSL = (group) => /* wgsl */`
+struct ForestLeafMaterial {optics:vec4f,underside:vec4f,coordinates:vec4f};
+@group(${group})@binding(0)var forestNativeAlbedo0:texture_2d_array<f32>;
+@group(${group})@binding(1)var forestNativeNormal0:texture_2d_array<f32>;
+@group(${group})@binding(2)var forestNativeAlbedo1:texture_2d_array<f32>;
+@group(${group})@binding(3)var forestNativeNormal1:texture_2d_array<f32>;
+@group(${group})@binding(4)var forestNativeAlbedo2:texture_2d_array<f32>;
+@group(${group})@binding(5)var forestNativeNormal2:texture_2d_array<f32>;
+@group(${group})@binding(6)var forestNativeAlbedo3:texture_2d_array<f32>;
+@group(${group})@binding(7)var forestNativeNormal3:texture_2d_array<f32>;
+@group(${group})@binding(8)var forestNativeSampler:sampler;
+@group(${group})@binding(9)var forestNativeRepeatSampler:sampler;
+@group(${group})@binding(10)var<storage,read>forestNativeMaterials:array<ForestLeafMaterial>;
+const FOREST_UNTEXTURED:u32=0xffffu;
+fn forestNativeAlbedoOnly(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->vec4f{
+ let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);
+ if(family==0u){return textureSampleGrad(forestNativeAlbedo0,forestNativeSampler,uv,layer,ux,uy);}
+ if(family==1u){return textureSampleGrad(forestNativeAlbedo1,forestNativeSampler,uv,layer,ux,uy);}
+ if(family==2u){return textureSampleGrad(forestNativeAlbedo2,forestNativeSampler,uv,layer,ux,uy);}
+ return textureSampleGrad(forestNativeAlbedo3,forestNativeSampler,uv,layer,ux,uy);
+}
+// The samples of a pixel a leaf card covers: its coverage times the samples, rounded by a hash of the card and the
+// pixel and rotated by it, so cards seen through one another keep independent footprints.
+fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f,samples:u32)->u32{
+ let n=clamp(samples,1u,8u);let p=vec2u(pixel);
+ let random=continuumHash(seed^continuumHash(p.x)^continuumHash(p.y*0x9e3779b9u));
+ let coverage=clamp(alpha,0.,1.)*f32(n);let whole=u32(floor(coverage));
+ let count=min(n,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
+ let bits=(1u<<count)-1u;let rotation=(random>>16u)%n;
+ return ((bits<<rotation)|(bits>>(n-rotation)))&((1u<<n)-1u);
+}
+`;
+
 // ---------------------------------------------------------------------------------------------- the material
 const forestContinuumMaterialWGSL = () => {
   const M = FOREST_CONTINUUM_MATERIAL, F = CONTINUUM_WIND_FORM;
   return /* wgsl */`
-struct ForestLeafMaterial {optics:vec4f,underside:vec4f,coordinates:vec4f};
-@group(3)@binding(0)var forestNativeAlbedo0:texture_2d_array<f32>;
-@group(3)@binding(1)var forestNativeNormal0:texture_2d_array<f32>;
-@group(3)@binding(2)var forestNativeAlbedo1:texture_2d_array<f32>;
-@group(3)@binding(3)var forestNativeNormal1:texture_2d_array<f32>;
-@group(3)@binding(4)var forestNativeAlbedo2:texture_2d_array<f32>;
-@group(3)@binding(5)var forestNativeNormal2:texture_2d_array<f32>;
-@group(3)@binding(6)var forestNativeAlbedo3:texture_2d_array<f32>;
-@group(3)@binding(7)var forestNativeNormal3:texture_2d_array<f32>;
-@group(3)@binding(8)var forestNativeSampler:sampler;
-@group(3)@binding(9)var forestNativeRepeatSampler:sampler;
-@group(3)@binding(10)var<storage,read>forestNativeMaterials:array<ForestLeafMaterial>;
-const FOREST_UNTEXTURED:u32=0xffffu;
-fn forestNativeLinear(c:vec3f)->vec3f{return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));}
+${forestLeafMapsWGSL(3)}fn forestNativeLinear(c:vec3f)->vec3f{return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));}
 struct ForestSurface {pigment:vec4f,detail:vec4f};
 // A leaf's own colour from what the maps keep, which is that colour times coverage. Where coverage nears nothing the
 // two are noise over noise (block compression and rounding leave a little colour over a coverage of zero), so below
@@ -176,13 +198,6 @@ fn forestReadNative(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->For
  if(family==1u){return forestNativePair(forestNativeAlbedo1,forestNativeNormal1,uv,ux,uy,layer,repeating);}
  if(family==2u){return forestNativePair(forestNativeAlbedo2,forestNativeNormal2,uv,ux,uy,layer,repeating);}
  return forestNativePair(forestNativeAlbedo3,forestNativeNormal3,uv,ux,uy,layer,repeating);
-}
-fn forestNativeAlbedoOnly(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->vec4f{
- let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);
- if(family==0u){return textureSampleGrad(forestNativeAlbedo0,forestNativeSampler,uv,layer,ux,uy);}
- if(family==1u){return textureSampleGrad(forestNativeAlbedo1,forestNativeSampler,uv,layer,ux,uy);}
- if(family==2u){return textureSampleGrad(forestNativeAlbedo2,forestNativeSampler,uv,layer,ux,uy);}
- return textureSampleGrad(forestNativeAlbedo3,forestNativeSampler,uv,layer,ux,uy);
 }
 // A layer's own colour over all of it: the last level of its coverage-weighted mips.
 fn forestNativeMean(material:ForestLeafMaterial)->vec3f{
@@ -220,16 +235,6 @@ fn forestBotanicalDetail(uv:vec2f,viewDist:f32,rawAlpha:f32)->vec4f{
  let veinY=(cos(chevronU)*sideSign*.14+fineNet*.045)*interior;
  let dapple=(sin(uv.x*11.3+uv.y*7.9)*.55+cos(uv.x*19.7-uv.y*15.1)*.45)*interior;
  return vec4f(crispAlpha,veinX,veinY,dapple);
-}
-// The samples of a pixel a leaf card covers: its coverage times the samples, rounded by a hash of the card and the
-// pixel and rotated by it, so cards seen through one another keep independent footprints.
-fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f,samples:u32)->u32{
- let n=clamp(samples,1u,8u);let p=vec2u(pixel);
- let random=continuumHash(seed^continuumHash(p.x)^continuumHash(p.y*0x9e3779b9u));
- let coverage=clamp(alpha,0.,1.)*f32(n);let whole=u32(floor(coverage));
- let count=min(n,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
- let bits=(1u<<count)-1u;let rotation=(random>>16u)%n;
- return ((bits<<rotation)|(bits>>(n-rotation)))&((1u<<n)-1u);
 }
 // A crown is lit as the leaves it stands for, not as the surface it is. Each leaf is lit by its own normal, turned
 // to face the viewer, and shows its underside from below; the leaves of a bough face much the same way (leaves) and
@@ -445,6 +450,39 @@ fn forestContinuumCoverage(v:ContinuumVarying,front:bool)->u32{
 `;
 };
 
+// Its shadow: a leaf card's shadow is cut by its coverage as its view is (one sample a texel), so the sun comes through
+// the gaps between leaves; bark, the far body and the splat cast whole. Its maps are the shadow program's group 2, the
+// same entries as the view's group 3 (js/forest-scenery.js).
+const FOREST_CONTINUUM_SHADOW = Object.freeze({
+  prelude: () => forestLeafMapsWGSL(2), own: true, coverage: true,
+  varyings: [['uv', 'vec2f'], ['layer', 'u32', true], ['seed', 'u32', true]],
+  wgsl: () => {
+    const M = FOREST_CONTINUUM_MATERIAL;
+    return /* wgsl */`
+fn forestContinuumShadowVarying(s:ContinuumSurface,v:ptr<function,ContinuumShadowVarying>){
+ (*v).seed=continuumHash(s.vertex^(s.record.tag.z*0x9e3779b9u));(*v).uv=vec2f(0.0);(*v).layer=FOREST_UNTEXTURED;
+ let layer=s.high&15u;
+ if(s.what!=CONTINUUM_CLUSTER_ENTRY||((s.high>>4u)&1u)==0u||layer==${FOREST_CONTINUUM_UNTEXTURED}u){return;}
+ let uvLow=vec2f(continuumTypeF(s.model,${M.uvLow}u),continuumTypeF(s.model,${M.uvLow + 1}u));
+ let uvScale=vec2f(continuumTypeF(s.model,${M.uvScale}u),continuumTypeF(s.model,${M.uvScale + 1}u));
+ (*v).uv=uvLow+continuumUV(s.vertex)*uvScale;
+ (*v).layer=continuumType(s.model,${M.firstLayer}u)+layer;
+}
+fn forestContinuumShadowCoverage(v:ContinuumShadowVarying)->u32{
+ let ux=dpdx(v.uv);let uy=dpdy(v.uv);
+ // Every map is named, on a path never taken, so the program's group holds all the view's entries.
+ if(v.coverage.w==0u){
+  let m=vec2f(0.0);
+  return u32(textureSampleLevel(forestNativeNormal0,forestNativeRepeatSampler,m,0,0.).x+textureSampleLevel(forestNativeNormal1,forestNativeRepeatSampler,m,0,0.).x
+   +textureSampleLevel(forestNativeNormal2,forestNativeRepeatSampler,m,0,0.).x+textureSampleLevel(forestNativeNormal3,forestNativeRepeatSampler,m,0,0.).x);
+ }
+ if(v.layer==FOREST_UNTEXTURED){return 0xffffffffu;}
+ return forestLeafSampleMask(forestNativeAlbedoOnly(forestNativeMaterials[v.layer],v.uv,ux,uy).a,v.seed,v.position.xy,1u);
+}
+`;
+  },
+});
+
 // The forest's material (js/wgsl/continuum-cut.js), shaded with the land's module source (js/wgsl/terrain.js TERRAIN as
 // the terrain draws it), which holds the shared core, the frame and the land's finish (groups 0 and 1).
 export function forestContinuumMaterial(landSource) {
@@ -453,6 +491,6 @@ export function forestContinuumMaterial(landSource) {
     varyings: [['uv', 'vec2f'], ['colour', 'vec3f'], ['surface', 'vec4f'], ['crown', 'vec4f'], ['layer', 'u32', true], ['seed', 'u32', true]],
     wgsl: forestContinuumMaterialWGSL, salt: 3,
     // Leaf cards are seen from both sides; the far body's back faces are its far side's leaves.
-    cullMode: 'none', air: false, capture: false, coverage: true,
+    cullMode: 'none', air: false, capture: false, coverage: true, shadow: FOREST_CONTINUUM_SHADOW,
   });
 }

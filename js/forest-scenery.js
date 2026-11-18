@@ -520,12 +520,14 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
-    // The pack's atlas, its programs, its view and its stand pass, asked for at once while the roots are laid.
+    // The pack's atlas, its programs, its view and its stand pass, asked for at once while the roots are laid, the
+    // programs binding as many pages as the atlas takes.
     const assets=forestContinuumAssetsFor(m);
+    const atlasReady=requestContinuumAtlas(device,`forest ${assets['manifest.json']}`,()=>loadForestContinuum({assets})),pages=atlasReady.then(a=>a.pages.length);
     const ready=Promise.all([
-      requestContinuumAtlas(device,`forest ${assets['manifest.json']}`,()=>loadForestContinuum({assets})),
-      requestContinuumPrograms({device,shader,shadowFormat}),
-      requestContinuumView({device,shader,material:forestContinuumMaterial(terrainSource),format,samples}),
+      atlasReady,
+      requestContinuumPrograms({device,shader,shadowFormat,pages}),
+      requestContinuumView({device,shader,material:forestContinuumMaterial(terrainSource),format,samples,pages}),
       shader(forestContinuumStandWGSL(),'forest stand'),
     ]);
     ready.catch(()=>{});
@@ -699,7 +701,6 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     // A pack's atlas is its own: one type a prototype, in its order, named for it.
     const names=m.prototypes.map(p=>`${p.species}${p.cohort?`-${p.cohort}`:''}`),types=atlas.manifest.types;
     if(types.length!==P||types.some((type,id)=>type.name!==names[id]))throw Error(`The forest continuum atlas is not this pack's (${types.map(t=>t.name)} for ${names}): rebake it with scripts/prepare-forest-continuum.mjs`);
-    if(atlas.words.byteLength>device.limits.maxStorageBufferBindingSize)throw Error(`The forest continuum atlas (${atlas.words.byteLength} bytes) is larger than this device can bind (${device.limits.maxStorageBufferBindingSize})`);
     const firstLayers=[];let layer=0;for(const p of m.prototypes){firstLayers.push(layer);layer+=p.nativeMaterials.length;}
     const C=GPUShaderStage.COMPUTE,entry=(binding,type)=>({binding,visibility:C,buffer:{type}});
     standLayout=device.createBindGroupLayout({label:'forest stand',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),
@@ -718,7 +719,9 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       const texture=surfaces.families[family]??surfaces.families[0];
       surfaceEntries.push({binding:family*2,resource:texture.albedo.createView({dimension:'2d-array'})},{binding:family*2+1,resource:texture.normal.createView({dimension:'2d-array'})});
     }
-    const surfaceGroup=device.createBindGroup({label:'forest surfaces',layout:view.pipeline.getBindGroupLayout(3),entries:[...surfaceEntries,{binding:8,resource:nativeSampler},{binding:9,resource:nativeRepeatSampler},{binding:10,resource:{buffer:materials}}]});
+    // The same surfaces cut its leaves' shadows (the forest material's shadow, its group 2).
+    const surfaceOwn=[...surfaceEntries,{binding:8,resource:nativeSampler},{binding:9,resource:nativeRepeatSampler},{binding:10,resource:{buffer:materials}}];
+    const surfaceGroup=device.createBindGroup({label:'forest surfaces',layout:view.pipeline.getBindGroupLayout(3),entries:surfaceOwn});
     const continuumStats=atlas.manifest.totals;
     stats.continuum={types:continuumStats.types,clusters:continuumStats.clusters,vertices:continuumStats.vertices,atlasBytes:atlas.words.byteLength,firstLayers};
     // A ball finds its trees through these: one grid an array, built off the frame one after another, nearest
@@ -830,7 +833,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
         scene.encode(pass,{buffer:stood});
       },
       draw(pass){if(destroyed)return;pass.setBindGroup(3,surfaceGroup);scene.draw(pass,sceneGroup,cloudGroup);},
-      drawShadow(pass){if(!destroyed)scene.drawShadow(pass);},
+      drawShadow(pass){if(!destroyed)scene.drawShadow(pass,{own:surfaceOwn});},
       // The indirect draws the view submits, for the continuum census (js/continuum-census.js).
       continuumDraws(){return destroyed?[]:scene.continuumDraws();},
       destroy:release};

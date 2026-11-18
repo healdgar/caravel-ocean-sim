@@ -1442,7 +1442,7 @@ function createFracturedContinuum({ device, continuum, grounded = null }) {
     shards = device.createBuffer({ label: 'struck buildings shard flights', size: floats * 4, usage: U.STORAGE | U.COPY_DST });
     const { room } = continuumRoom(continuumAtlasTypes(words), list.map(() => 1));
     scene = createContinuumScene({
-      device, atlas: { buffer: atlas }, programs: ready.programs, capacity: list.length, room, view: ready.view, poses: shards,
+      device, atlas, programs: ready.programs, capacity: list.length, room, view: ready.view, poses: shards,
       frame: ready.frame, shadowUniform: ready.shadowUniform, samples: ready.samples, label: 'struck buildings',
     });
     list.forEach((entry, i) => {

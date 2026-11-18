@@ -22,8 +22,13 @@ export const CONTINUUM_TRIANGLE_BUDGET = 3_000_000;
 // The pixel error the scene's cut is drawn at before any governor moves it.
 export const CONTINUUM_BASE_PIXEL_ERROR = 3;
 // What the player is looking at, speaking to or firing upon, and whatever is wounded or struck, is cut at this share
-// of the scene's pixel error (rule 3, item 5): every family's importance is this one factor.
+// of the base pixel error (rule 3, item 5), and yields to the budget only as the square root of the scene's coarsening:
+// when a governor doubles the scene's error, an important instance's grows by √2, so it keeps four times the share of
+// the budget it had. Every family's importance is this one weight.
 export const CONTINUUM_IMPORTANT = 0.5;
+// The nearest an eye is taken to be to any surface, in metres (the camera's near plane): a cluster or body whose
+// bound holds the eye is judged at this distance, so the eye inside a body sees it at its finest, never culled.
+export const CONTINUUM_NEAREST = 0.05;
 // A far body's collapse step, as the one bake writes it and the one cut reads it: the triangles alive (a prefix of
 // the far body's triangles in order of death), the error in metres, how far along its normals the surface is grown to
 // keep the outline its collapses take in, and a spare word.
@@ -51,8 +56,14 @@ const CONTINUUM_MIN_PIXELS: f32 = ${CONTINUUM_MIN_PIXELS.toFixed(4)};
 const CONTINUUM_SPLAT_AREA: f32 = ${CONTINUUM_SPLAT_AREA.toFixed(6)};
 const CONTINUUM_HANDOFF_BAND: f32 = ${CONTINUUM_HANDOFF_BAND.toFixed(4)};
 const CONTINUUM_IMPORTANT: f32 = ${CONTINUUM_IMPORTANT.toFixed(4)};
-// The pixel error an instance is cut at: the scene's, or CONTINUUM_IMPORTANT of it for one that matters.
-fn continuumImportance(pixels: f32, important: bool) -> f32 { return pixels * select(1.0, CONTINUUM_IMPORTANT, important); }
+const CONTINUUM_BASE_PIXEL_ERROR: f32 = ${CONTINUUM_BASE_PIXEL_ERROR.toFixed(4)};
+const CONTINUUM_NEAREST: f32 = ${CONTINUUM_NEAREST.toFixed(4)};
+// The pixel error an instance is cut at: the scene's, or for one that matters CONTINUUM_IMPORTANT of the geometric
+// mean of the scene's and the base error, so it stays sharp as the budget coarsens the scene and yields only slowly.
+fn continuumImportance(pixels: f32, important: bool) -> f32 {
+  if (!important) { return pixels; }
+  return min(pixels, CONTINUUM_IMPORTANT * sqrt(pixels * CONTINUUM_BASE_PIXEL_ERROR));
+}
 fn continuumHash(value: u32) -> u32 {
   var x = value;
   x = (x ^ (x >> 16u)) * 0x7feb352du;
@@ -96,10 +107,11 @@ fn continuumThin(pixels: f32, seed: u32) -> f32 {
 // The cluster cut's own test: a cluster is drawn where its projected error is within 'allowed' pixels and its
 // parent's is not, so exactly one level of every part of the hierarchy is drawn. Errors are in metres at the
 // instance's scale, and each sphere's centre is already placed relative to the camera, however the family places
-// it (a joint matrix, a yaw and scale, a hull frame).
+// it (a joint matrix, a yaw and scale, a hull frame). A sphere that holds the eye is judged at CONTINUUM_NEAREST, as
+// the cut's candidate prefix is, so the clusters an eye inside a body needs are always among those tried.
 fn continuumClusterDrawn(ownError: f32, ownCentre: vec3f, ownRadius: f32, parentError: f32, parentCentre: vec3f, parentRadius: f32, focal: f32, allowed: f32) -> bool {
-  if (continuumPixels(parentError, focal, max(length(parentCentre) - parentRadius, 0.001)) <= allowed) { return false; }
-  return continuumPixels(ownError, focal, max(length(ownCentre) - ownRadius, 0.001)) <= allowed;
+  if (continuumPixels(parentError, focal, max(length(parentCentre) - parentRadius, CONTINUUM_NEAREST)) <= allowed) { return false; }
+  return continuumPixels(ownError, focal, max(length(ownCentre) - ownRadius, CONTINUUM_NEAREST)) <= allowed;
 }
 `;
 

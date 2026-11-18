@@ -2,8 +2,9 @@
 // How many triangles the scene submits, family by family, against the one budget (AGENTS.md rule 3, item 5).
 // Counted on the GPU from the draws' own indirect arguments: after the frame's selections, each family's argument
 // records are copied into one buffer and summed by one small compute pass. A read arrives a few frames late and
-// never stalls a frame. The game counts every eighth frame to hold the scene to its budget (js/resolution.js
-// observeTriangles), and every frame when profiled.
+// never stalls a frame. The game counts whenever the last read has arrived (`idle`) to hold the scene to its budget
+// (js/resolution.js observeTriangles). The one cut counts what it would submit at the finest cut it tried (its demand),
+// so a scene its lists hold to them still reads as over budget, and the scalar coarsens it.
 //
 // A family offers its draws as `continuumDraws()`: a list of { buffer, offset, records, stride }, where `buffer`
 // holds indirect records (made with COPY_SRC), `offset` is in bytes, and `stride` is the record's length in u32s:
@@ -73,6 +74,8 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
 
   return {
     get budget() { return CONTINUUM_TRIANGLE_BUDGET; },
+    // No read is in flight: a count encoded now is read back.
+    get idle() { return !reading; },
     // The last count read: { families: { name: triangles }, total, budget }, or null before the first arrives.
     get latest() { return latest; },
     // After the frame's selections: copy each family's records and sum them. sources: [{ name, draws }].

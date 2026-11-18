@@ -215,7 +215,7 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
   const B = GPUBufferUsage;
   const room = continuumRoom(body.types, [capacity]).room;
   const scene = createContinuumScene({
-    device, atlas: { buffer: body.atlas }, programs: P.programs, capacity, room, view: P.view, poseRoom: capacity * CREW_CONTINUUM_POSE_VEC4S,
+    device, atlas: body.atlas, programs: P.programs, capacity, room, view: P.view, poseRoom: capacity * CREW_CONTINUUM_POSE_VEC4S,
     frame, shadowUniform: shadows.uniform, samples, label: `crew ${body.id}`,
   });
   const orders = device.createBuffer({ label: `crew continuum ${body.id} orders`, size: Math.max(16, capacity * 4), usage: B.STORAGE | B.COPY_DST });

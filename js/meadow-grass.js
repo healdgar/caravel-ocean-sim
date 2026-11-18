@@ -12,7 +12,7 @@ import { requestOnce } from './gpu-program-cache.js';
 import { continuumPixelError } from './continuum-core.js';
 import { CONTINUUM_HEADER, CONTINUUM_TYPE_WORDS, continuumRoom } from './continuum-format.js';
 import { CONTINUUM_ROW } from './wgsl/continuum-cut.js';
-import { createContinuumScene, requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw } from './continuum-scene.js';
+import { createContinuumScene, requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, continuumAtlasPages } from './continuum-scene.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { terrainSurfaceSample } from './terrain-model.js';
@@ -637,18 +637,19 @@ export async function createMeadowGrass({
   worldOffset = null,
 }) {
   if (!(pack?.words?.length > 0) || !pack.manifest) return null;
-  if (pack.words.byteLength > device.limits.maxStorageBufferBindingSize) throw Error(`The meadow continuum atlas (${pack.words.byteLength} bytes) is larger than this device can bind (${device.limits.maxStorageBufferBindingSize})`);
   const B = GPUBufferUsage;
   const land0 = new Map(resources);
   const frame = land0.get(0)?.buffer, shadowUniform = land0.get(19)?.buffer;
   if (!frame || !shadowUniform) throw Error('The meadow is cut and lit by the land\'s frame and shadow map, and there are none');
-  // The atlas, the one cut's programs, the meadow's view, its stand pass and its capture under water, asked for at once.
+  // The atlas, the one cut's programs, the meadow's view, its stand pass and its capture under water, asked for at once,
+  // the programs binding as many pages as the atlas takes.
+  const pages = continuumAtlasPages(device, pack.words.length);
   const [atlas, programs, view, stand, submerged] = await Promise.all([
     requestContinuumAtlas(device, `meadow ${pack.manifest.pack}`, async () => pack),
-    requestContinuumPrograms({ device, shader, shadowFormat }),
-    requestContinuumView({ device, shader, material: MEADOW_CONTINUUM_SPEC, format, samples }),
+    requestContinuumPrograms({ device, shader, shadowFormat, pages }),
+    requestContinuumView({ device, shader, material: MEADOW_CONTINUUM_SPEC, format, samples, pages }),
     requestMeadowStand(device, shader),
-    requestContinuumCapture(waterOptics, MEADOW_CONTINUUM_SPEC),
+    requestContinuumCapture(waterOptics, MEADOW_CONTINUUM_SPEC, pages),
   ]);
   if (atlas.types.length !== pack.manifest.types.length) throw Error(`The meadow continuum atlas holds ${atlas.types.length} types, its manifest ${pack.manifest.types.length}: rebake it`);
   // The pack's mixes in their roles: a strand for a margin sows it behind the beaches.

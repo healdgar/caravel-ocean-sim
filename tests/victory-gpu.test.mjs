@@ -66,7 +66,7 @@ test('a selectable Victory fleet renders with independent ship state, correct ca
     const frame=await step(page);
     assert.equal(frame.render['vesselContinuum view'],2);assert.equal(await companiesDrawn(page),2);
     assert.equal(frame.render.ocean,1);assert.equal(frame.compute['fft rows'],1);
-    assert.equal(frame.compute['height probe'],2);assert.equal(frame.render['solid shadows: continuum shadow'],2,'each vessel\'s coarse cut casts into her own solid map');
+    assert.equal(frame.compute['height probe'],2);assert.equal(frame.render['solid shadows: vesselContinuum shadow solid'],2,'each vessel\'s coarse cut casts into her own solid map');assert.equal(frame.render['canvas shadows: vesselContinuum shadow canvas'],2,'and her canvas into her canvas map');
     await page.waitForFunction(()=>victoryFixture.vessels.every(v=>!v.probe.pending));
     const state=await page.evaluate(async()=>{
       const {vessels,shipAssets}=victoryFixture,[player,following]=vessels,boat=player.boat,companion=following.boat,shipAsset=player.asset;

@@ -173,7 +173,7 @@ function instrumentRenderer({fleet=false}={}) {
     (check.compute[labels.get(this)] ||= []).push([x, y, z]);
     return dispatch.call(this, x, y, z);
   };
-  // Each pipeline set, by its label and by its pass's ('solid shadows: continuum shadow'): programs the one continuum
+  // Each pipeline set, by its label and by its pass's ('solid shadows: vesselContinuum shadow solid'): programs the one continuum
   // shares between families are told apart by the pass they cast or draw into.
   const passLabels = new WeakMap(), beginPass = GPUCommandEncoder.prototype.beginRenderPass;
   GPUCommandEncoder.prototype.beginRenderPass = function (desc) { const pass = beginPass.call(this, desc); passLabels.set(pass, desc?.label || ''); return pass; };
@@ -1117,7 +1117,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['cloud resolve'].length, 1);
     assert.equal(frame.render['bloom down'], 6); // 32 x 24 supports six mip levels.
     assert.equal(frame.render['bloom up'], 5);
-    assert.equal(frame.render['solid shadows: continuum shadow'],undefined);
+    assert.equal(frame.render['solid shadows: vesselContinuum shadow solid'],undefined);
 
     frame = await step(page);
     assert.equal(frame.compute.skyview, undefined);
@@ -1181,7 +1181,8 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     frame = await step(page);
     for (const key of ['hull contact', 'impact sheets', 'local wake', 'spray update', 'height probe']) assert.equal(frame.compute[key].length, 1);
     assert.equal(frame.render['bow waterline'],undefined,'the ocean mesh replaces the detached waterline ribbon');assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
-    assert.equal(frame.render['solid shadows: continuum shadow'],1,'her coarse cut casts into her own solid map');
+    assert.equal(frame.render['solid shadows: vesselContinuum shadow solid'],1,'her coarse cut casts into her own solid map');
+    assert.equal(frame.render['canvas shadows: vesselContinuum shadow canvas'],1,'and her canvas, with what it lets through, into her canvas map');
     await page.getByLabel('Wakes & spray', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     await step(page); // One dispatch clears active particles and the local field.
     frame = await step(page);
@@ -1190,15 +1191,15 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['crest spray update'].length, 1);
     assert.equal(frame.render['crest spray'], 1, 'crest spray survives disabling boat effects');
     assert.equal(frame.render['bow waterline'],undefined);assert.equal(frame.render['bow sheets'], undefined); assert.equal(frame.render.spray, undefined);
-    assert.equal(frame.render['solid shadows: continuum shadow'],1,'her coarse cut casts into her own solid map');
+    assert.equal(frame.render['solid shadows: vesselContinuum shadow solid'],1,'her coarse cut casts into her own solid map');
     await page.setViewportSize({width:32,height:24});
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
     assert.equal(frame.render['vesselContinuum view'],undefined);assert.equal(frame.render.composite,1);
-    assert.equal(frame.render['solid shadows: continuum shadow'],undefined);
+    assert.equal(frame.render['solid shadows: vesselContinuum shadow solid'],undefined);
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
-    assert.equal(frame.render['vesselContinuum view'],1);assert.equal(frame.render['solid shadows: continuum shadow'],1);
+    assert.equal(frame.render['vesselContinuum view'],1);assert.equal(frame.render['solid shadows: vesselContinuum shadow solid'],1);
     await slider(page, 'Crest spray', 0);
     await step(page);
     frame = await step(page);
@@ -2612,7 +2613,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     let frame=await step(page,100);
     assert.equal(frame.render['vesselContinuum view'],2);assert.equal(frame.render.crew,undefined,'the continuum alone draws the people');assert.equal(await companiesDrawn(page),2);
     assert.equal(frame.compute['height probe'].length,2);assert.equal(frame.compute['local wake'].length,2);
-    assert.equal(frame.render['solid shadows: continuum shadow'],2,'each vessel\'s coarse cut casts into her own solid map');
+    assert.equal(frame.render['solid shadows: vesselContinuum shadow solid'],2,'each vessel\'s coarse cut casts into her own solid map');
     assert.equal(frame.render.ocean,1,'the water is drawn once for both vessels');
     assert.equal(frame.compute['fft rows'].length,1,'both hulls share the same ocean FFT');
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
@@ -2635,7 +2636,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await Promise.all([page.waitForNavigation({waitUntil:'load',timeout:90000}),page.locator('#follower-toggle').uncheck()]);
     await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'0');
     frame=await step(page,100);
-    assert.equal(frame.render['vesselContinuum view'],1);assert.equal(await companiesDrawn(page),1);assert.equal(frame.render['solid shadows: continuum shadow'],1);
+    assert.equal(frame.render['vesselContinuum view'],1);assert.equal(await companiesDrawn(page),1);assert.equal(frame.render['solid shadows: vesselContinuum shadow solid'],1);
     assert.equal(frame.compute['height probe'].length,1);await disabledAllocation();
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
     frame=await step(page,100);

@@ -381,15 +381,20 @@ export function continuumAtlasTypes(words) {
     return { clusters: words[at + T.clusterCount], farChunks: Math.ceil(heaviest / CONTINUUM_CHUNK_TRIANGLES) };
   });
 }
+// How full an entry of a list is taken to be at least, on the mean, when its lists are sized: a cut of real bodies
+// fills its clusters and chunks far better than this, so a scene within the budget never fills a list.
+export const CONTINUUM_ENTRY_FILL = 0.25;
 // The one room scheme every scene's lists are sized by, so that every family draws from one budget: each list holds
 // what its instances could enter at once (every cluster of each one's type, its far body at its heaviest step, one
-// splat), but never more than the one scene budget could draw in it, CONTINUUM_TRIANGLE_BUDGET over the triangles a
-// full entry submits. `types` as continuumAtlasTypes gives them, `counts` how many instances of each type a scene
-// may hold. Returns the scene's capacity and each list's room.
+// splat), but never more than the whole scene's budget could need of it: CONTINUUM_TRIANGLE_BUDGET over the triangles
+// an entry submits at CONTINUUM_ENTRY_FILL. Within the budget nothing is refused; past it the cut yields each instance
+// to a coarser cut that fits, the census counts what was asked, and the budget's governor coarsens the one scalar
+// (js/wgsl/continuum-cut.js). `types` as continuumAtlasTypes gives them, `counts` how many instances of each type a
+// scene may hold. Returns the scene's capacity and each list's room.
 export function continuumRoom(types, counts) {
   let clusters = 0, far = 0, capacity = 0;
   counts.forEach((n, t) => { if (!n) return; capacity += n; clusters += n * types[t].clusters; far += n * types[t].farChunks; });
-  const room = [clusters, clusters, far, capacity, far, clusters].map((n, list) => Math.max(1, Math.min(n, Math.ceil(CONTINUUM_TRIANGLE_BUDGET / CONTINUUM_ENTRY_TRIANGLES[list]))));
+  const room = [clusters, clusters, far, capacity, far, clusters].map((n, list) => Math.max(1, Math.min(n, Math.ceil(CONTINUUM_TRIANGLE_BUDGET / (CONTINUUM_ENTRY_TRIANGLES[list] * CONTINUUM_ENTRY_FILL)))));
   return { capacity, room };
 }
 

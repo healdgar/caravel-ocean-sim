@@ -168,7 +168,7 @@ const instrument=()=>{
     const scene=oceanProps.continuum[name];if(!scene)return null;
     const draws=new Uint32Array(await copy(scene.draws)),list=new Uint32Array(await copy(scene.list));
     const lists=scene.lists.map(([at],i)=>{const out=[];for(let k=0;k<draws[i*4+1];k++)out.push({instance:list[(at+k)*2],what:list[(at+k)*2+1]>>>28,item:list[(at+k)*2+1]&0x0fffffff});return out;});
-    return {count:scene.count,lists,shares:Array.from({length:scene.count},(_,i)=>list[i*4]&255)};
+    return {count:scene.count,lists,shares:Array.from({length:scene.count},(_,i)=>list[i*6]&255)};
   };
   window.propFrames=async count=>{for(let i=0;i<count;i++)await new Promise(requestAnimationFrame);};
 };

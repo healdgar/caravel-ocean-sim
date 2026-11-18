@@ -36,7 +36,7 @@ import { poseCrewFingers } from './crew-physics.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { withNeuralPbrTradeVessels } from './wgsl/neural-pbr.js';
 import { SHIP_CONTINUUM_BODIES, SHIP_CONTINUUM_MATERIAL, SHIP_CONTINUUM_TURN_WGSL, loadShipContinuum, shipContinuumTurn } from './ship-continuum.js';
-import { CONTINUUM_KIND, CONTINUUM_DAMAGED, CONTINUUM_IMPORTANT_FLAG, CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, continuumAtlasTypes, continuumRoom } from './continuum-format.js';
+import { CONTINUUM_KIND, CONTINUUM_DAMAGED, CONTINUUM_IMPORTANT_FLAG, CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, continuumRoom } from './continuum-format.js';
 import { CONTINUUM_RECORD_WGSL } from './wgsl/continuum-cut.js';
 import { SHIP_RIDER_HEADER, SHIP_DRAPED_SAILS, SHIP_DRAPED_OARS, SHIP_DRAPED_BLOCK, SHIP_DRAPED_CANVAS, SHIP_DRAPED_OARED, SHIP_DRAPED_HELM } from './wgsl/ship-kinds.js';
 import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, uploadContinuumAtlas, createContinuumScene } from './continuum-scene.js';
@@ -5362,7 +5362,7 @@ export async function createTradeVessels({
   // The trade bodies' atlas, type a being archetype a; and each body's bounding radius (metres at scale 1), which a
   // damaged vessel's flying shards reach beyond.
   const atlasWords = shipData.words;
-  const atlas = { buffer: uploadContinuumAtlas(device, atlasWords, 'trade vessel'), types: continuumAtlasTypes(atlasWords) };
+  const atlas = uploadContinuumAtlas(device, atlasWords, 'trade vessel');
   const atlasFloats = new Float32Array(atlasWords.buffer, atlasWords.byteOffset, atlasWords.length);
   const typeRadius = atlas.types.map((_, t) => atlasFloats[atlasWords[CONTINUUM_HEADER.typesAt] + t * CONTINUUM_TYPE_WORDS + CONTINUUM_TYPE.sphere + 3]);
 
@@ -7514,7 +7514,7 @@ export async function createTradeVessels({
       deckHull?.destroy?.();
       scene.destroy();
       for (const b of [
-        atlas.buffer, poses, hullDamageBuffer, waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,
+        atlas, poses, hullDamageBuffer, waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,
         crewConfigBuffer, crewSrcInstancesBuffer, crewStationsBuffer, crewLooksBuffer,
         crewCountsBuffer, crewMoistureBuffer,
       ]) b?.destroy?.();

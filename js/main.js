@@ -1095,11 +1095,10 @@ async function main() {
   // GPU timing
   // --------------------------------------------------------------------------------------
   const profiler=createGPUProfiler(device,qs.get('profile')==='1');
-  // Submitted triangles against the one scene budget (AGENTS.md rule 3, item 5), counted on the GPU every eighth frame
-  // and fed to the polygon governor, which holds the scene to it through the one pixel-error scalar. ?census=1 or the
-  // profile panel counts every frame; ?census=0 turns the count, and with it the budget, off.
+  // Submitted triangles against the one scene budget (AGENTS.md rule 3, item 5), counted on the GPU whenever the last
+  // count has been read and fed to the polygon governor, which holds the scene to it through the one pixel-error scalar.
+  // ?census=0 turns the count, and with it the budget, off.
   const continuumCensus=qs.get('census')==='0'?null:createContinuumCensus(device);
-  const censusEveryFrame=qs.get('census')==='1'||qs.get('profile')==='1';
   let censusSeen=null;
   window.oceanContinuumCensus=continuumCensus;
   let profileSummary='Waiting for frame timing…';
@@ -5741,7 +5740,7 @@ async function main() {
     const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
     const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
     if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
-    if(continuumCensus&&(censusEveryFrame||(frameIndex&7)===0)){
+    if(continuumCensus?.idle){
       // People are one family across every company, the garrison, the mate, the town and the decks of passing vessels.
       const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
       // The sea's animals beside the land's (the herds, among terrain's sources).

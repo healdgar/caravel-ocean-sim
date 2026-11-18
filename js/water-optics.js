@@ -152,6 +152,8 @@ export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba
     return pending;
   }
   return {
+    // The device the captures are made on (js/continuum-scene.js reads how it binds an atlas).
+    device,
     // A material's capture, made from its view's source (createSubmergedShader).
     capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1,land=false}){
       return build({key:['rewritten',source,entry,world,land],vertex,groups,needsWaves:!!surfaceWaves&&!/\bfn\s+surfaceWaveAt\s*\(/.test(source),

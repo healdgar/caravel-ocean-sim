@@ -9,10 +9,11 @@
 // clusters alone at the finest her error bound allows, and her material's mask keeps no sample of what shot and tearing
 // have taken away (her own damage record, group 0 binding 15).
 import { requestOnce } from './gpu-program-cache.js';
-import { CONTINUUM_KIND, CONTINUUM_IMPORTANT_FLAG, CONTINUUM_DAMAGED, continuumAtlasTypes, continuumRoom } from './continuum-format.js';
+import { CONTINUUM_KIND, CONTINUUM_IMPORTANT_FLAG, CONTINUUM_DAMAGED, continuumRoom } from './continuum-format.js';
 import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, uploadContinuumAtlas, createContinuumScene } from './continuum-scene.js';
 import { SHIP_CONTINUUM_MATERIAL, loadShipContinuum, shipContinuumTurn } from './ship-continuum.js';
 import { SHIP_RIDER_HEADER } from './wgsl/ship-kinds.js';
+import { CANVAS_OPTICS } from './wgsl/vessel.js';
 import { vesselShadingWGSL } from './wgsl/caravel.js';
 import { withNeuralPbrVessel } from './wgsl/neural-pbr.js';
 import { VESSEL_COLOURS_MATERIAL } from './wgsl/ship-colours.js';
@@ -95,13 +96,41 @@ fn vesselContinuumMask(v:ContinuumVarying,front:bool)->u32 {
 }
 `;
 
+// Her shadow (js/wgsl/continuum-cut.js, a material's shadow): her canvas apart from the rest, its depth into her canvas
+// map with what it lets through of the sun, by its weave, seams and hems and how wet it is (js/wgsl/vessel.js
+// CANVAS_OPTICS), and all else into her solid map. Her canvas is told by her assembly's material, which her atlas
+// vertex's word is (js/wgsl/ship-kinds.js); her lines and her far body cast solid. Her surface moisture and its lookup
+// are its group 2 (js/shadows.js createVesselShadows wetness).
+const VESSEL_CONTINUUM_SHADOW = Object.freeze({
+  prelude: () => CANVAS_OPTICS + `@group(2) @binding(0) var<storage,read> vesselShadowMoisture:array<vec2f>;
+@group(2) @binding(1) var<storage,read> vesselShadowWet:array<u32>;
+`,
+  own: true, canvas: true,
+  varyings: [['uv', 'vec2f'], ['wet', 'f32'], ['material', 'u32', true]],
+  wgsl: () => /* wgsl */`
+fn vesselContinuumShadowVarying(s:ContinuumSurface,v:ptr<function,ContinuumShadowVarying>) {
+  (*v).uv=vec2f(0.5);(*v).wet=0.0;(*v).material=0u;
+  if(s.what!=CONTINUUM_CLUSTER_ENTRY){return;}
+  let word=shipRiderWord(s.vertex);
+  if((word&SHIP_RIDER_LINE)!=0u){return;}
+  (*v).material=u32(max(bitcast<f32>(s.word),0.0));
+  (*v).uv=continuumUV(s.vertex);
+  (*v).wet=vesselShadowMoisture[vesselShadowWet[word]].x;
+}
+fn vesselContinuumShadowCanvas(v:ContinuumShadowVarying)->bool { return v.material==9u||v.material==13u; }
+fn vesselContinuumShadowTransmit(v:ContinuumShadowVarying)->vec3f {
+  return canvasTransmission(canvasThickness(v.uv,v.material)*canvasWetDepth(v.wet),abs(dot(normalize(v.normal),SH.sun.xyz)));
+}
+`,
+});
+
 const vesselContinuumMaterial = (capture) => Object.freeze({
   name: 'vesselContinuum', prelude: vesselContinuumPrelude(capture), core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['wet', 'vec2f'], ['damage', 'f32'], ['colour', 'vec3f'], ['material', 'u32', true]],
   wgsl: () => VESSEL_CONTINUUM_WGSL(capture),
   salt: 7,
   // Sails, planking and her lines are open shells, lit from whichever side is seen.
-  cullMode: 'none', air: true, capture: true, mask: true,
+  cullMode: 'none', air: true, capture: true, mask: true, shadow: capture ? null : VESSEL_CONTINUUM_SHADOW,
 });
 // Her material in the scene, and as the water captures it (its medium water, js/wgsl/caravel.js).
 export const VESSEL_CONTINUUM_MATERIAL = vesselContinuumMaterial(false);
@@ -127,7 +156,7 @@ export function requestVesselContinuumPrograms({ device, shader, format, samples
 export function loadVesselContinuumBody(device, asset, { fetchAsset = fetch } = {}) {
   return requestOnce(device, `vessel continuum body ${asset.model.id}`, async () => {
     const { manifest, words } = await loadShipContinuum({ ids: [`player-${asset.model.id}`], sources: [asset], label: `${asset.model.id} continuum`, fetchAsset });
-    return { manifest: manifest[0], words, types: continuumAtlasTypes(words), buffer: uploadContinuumAtlas(device, words, `${asset.model.id} vessel`) };
+    return { manifest: manifest[0], words, ...uploadContinuumAtlas(device, words, `${asset.model.id} vessel`) };
   });
 }
 
@@ -150,6 +179,7 @@ export function createVesselContinuum({ device, programs, body, asset, pose, fra
   header.set([0, 2, pose.vertexCount * 2, pose.lineVertexCount], 0);
   let sent = '';
   let shown = false;
+  const shadowOwn = [{ binding: 0, resource: { buffer: shadows.wetness.moisture } }, { binding: 1, resource: { buffer: shadows.wetness.lookup } }];
   const capture = { draw: null, key: null };
   return {
     scene,
@@ -184,9 +214,9 @@ export function createVesselContinuum({ device, programs, body, asset, pose, fra
       const [own, lighting] = groups(programs.view.pipeline);
       scene.draw(pass, own, lighting);
     },
-    // Her shadow (js/shadows.js castWith): her coarse cut into her solid map. The kernel's shadow program casts depth
-    // alone, so her canvas map takes nothing of her.
-    cast(pass, cloth) { if (shown && !cloth) scene.drawShadow(pass); },
+    // Her shadow (js/shadows.js castWith): her coarse cut, all but her canvas into her solid map and her canvas, with
+    // what it lets through, into her canvas map.
+    cast(pass, cloth) { if (shown) scene.drawShadow(pass, { part: cloth ? 'canvas' : 'solid', own: shadowOwn }); },
     // Seen from under (or just over) the water: her coarse cut. `entries` her group 0's entries for the capture, made
     // anew when `key` changes (a resize).
     drawCapture(pass, above, entries, key) {

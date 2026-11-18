@@ -72,10 +72,12 @@ test('one house through the city continuum: clusters, handoff, far body, splat, 
         near: await run({ away: 40 }), band: await run({ away: start * 1.15 }), coarser: await run({ away: start * 1.15, pixels: 6 }),
         far: await run({ away: start * 3 }), farther: await run({ away: start * 9 }), splat: await run({ away: splatAt }),
         felled: await run({ away: 40, felled: true }),
-        // At twice the scene's error, a house struck or under the guns' fall is cut as at the scene's own.
-        struck: await run({ away: start * 1.15, pixels: 6, struck: true }),
-        aimed: await run({ away: start * 1.15, pixels: 6, aim: { x: 0, y: 0, z: start * 1.15, radius: 2 } }),
-        aimedAside: await run({ away: start * 1.15, pixels: 6, aim: { x: 400, y: 0, z: start * 1.15, radius: 2 } }),
+        // At four times the scene's error, a house struck or under the guns' fall is cut as at the scene's own: an
+        // instance that matters yields as the square root of the coarsening, at CONTINUUM_IMPORTANT of it.
+        coarsest: await run({ away: start * 1.15, pixels: 12 }),
+        struck: await run({ away: start * 1.15, pixels: 12, struck: true }),
+        aimed: await run({ away: start * 1.15, pixels: 12, aim: { x: 0, y: 0, z: start * 1.15, radius: 2 } }),
+        aimedAside: await run({ away: start * 1.15, pixels: 12, aim: { x: 400, y: 0, z: start * 1.15, radius: 2 } }),
         felledStruck: await run({ away: 40, felled: true, struck: true }),
       };
       await device.queue.onSubmittedWorkDone();
@@ -109,13 +111,13 @@ test('one house through the city continuum: clusters, handoff, far body, splat, 
     assert.equal(cases.splat.state.splatShare, 255);
     // Shot down, it is drawn as its pieces (js/building-fracture.js), and not here.
     assert.deepEqual([cases.felled.clusters.length, cases.felled.far.length, cases.felled.splat.length], [0, 0, 0]);
-    // Struck or aimed at, it is cut at the core's CONTINUUM_IMPORTANT share of the error: at twice the scene's 3 px it
-    // stands in the band, as at 3 px; aimed at elsewhere, it does not.
+    // Struck or aimed at, it is cut at the core's CONTINUUM_IMPORTANT of the geometric mean of the scene's error and its
+    // base: at 12 px, 0.5 × √(12 × 3) = 3 px, it stands in the band, as at 3 px; aimed at elsewhere, it does not.
     for (const name of ['struck', 'aimed']) {
-      assert.deepEqual(cases[name].state, cases.band.state, `${name}: cut as at half the error`);
+      assert.deepEqual(cases[name].state, cases.band.state, `${name}: cut as at the base error`);
       assert.deepEqual([cases[name].clusters.length, cases[name].far.length], [cases.band.clusters.length, cases.band.far.length]);
     }
-    assert.deepEqual(cases.aimedAside.state, cases.coarser.state, 'a fall elsewhere leaves it at the scene\'s error');
+    assert.deepEqual(cases.aimedAside.state, cases.coarsest.state, 'a fall elsewhere leaves it at the scene\'s error');
     assert.deepEqual([cases.felledStruck.clusters.length, cases.felledStruck.far.length, cases.felledStruck.splat.length], [0, 0, 0], 'struck and in pieces, still not here');
   } finally { await browser?.close(); server.closeAllConnections?.(); await new Promise((resolve) => server.close(resolve)); }
 });
@@ -178,7 +180,7 @@ test('Lisbon\'s buildings are cut on the GPU: the game\'s own lists, read back',
           const b = list[(at + k) * 2], word = list[(at + k) * 2 + 1], what = word >>> 28, item = word & 0x0fffffff;
           if (b >= count) { flaw(`list ${index} names building ${b} of ${count}`); continue; }
           if (flags[b] & CONTINUUM_GONE) flaw(`list ${index} draws felled building ${b}`);
-          const type = flags[b] & 0xffff, share = list[b * 4] & 255, splatShare = (list[b * 4] >> 8) & 255, step = list[b * 4 + 1] & 0xffff, shadowStep = list[b * 4 + 1] >>> 16;
+          const type = flags[b] & 0xffff, share = list[b * 6] & 255, splatShare = (list[b * 6] >> 8) & 255, step = list[b * 6 + 1] & 0xffff, shadowStep = list[b * 6 + 1] >>> 16;
           const chunks = (s) => Math.ceil(words[field(type, T.steps) + s * CONTINUUM_STEP_WORDS] / CONTINUUM_CHUNK_TRIANGLES);
           buildings[index].add(b);
           if (index < 2) {

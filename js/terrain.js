@@ -24,8 +24,7 @@ import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_TYPED_FLOATS,CITY_TYPES_WATERSIDE,compileCityBuildingType} from './old-world-buildings.js';
 import {cityContinuumMaterial} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,createCityContinuum} from './city-continuum-draw.js';
-import {requestContinuumPrograms,requestContinuumView,requestContinuumCapture} from './continuum-scene.js';
-import {continuumAtlasTypes} from './continuum-format.js';
+import {requestContinuumPrograms,requestContinuumView,requestContinuumCapture,uploadContinuumAtlas} from './continuum-scene.js';
 import {createCityTargets} from './city-targets.js';
 import {isPrefabContinuumInstance,prefabContinuumAtlas,prefabContinuumPlan,resolvePrefabContinuum} from './prefab-continuum.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize,landCraterMark} from './land-craters.js';
@@ -1528,9 +1527,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(port!==prefabsPort){prefabFelled.clear();prefabHit.clear();prefabsPort=port;}
     const landing=await landPrefabs(port);
     if(!landing||made!==prefabsMade||terrainDisposed)return;
-    const atlas=buffer(landing.atlas,GPUBufferUsage.STORAGE,'prefab continuum atlas');
+    const atlas=uploadContinuumAtlas(device,landing.atlas,'prefab');
     const grounded=landing.plan.instances.map(instance=>standsOnGround(instance.x,instance.y??0,instance.z));
-    const continuum=createCityContinuum({device,atlas:{buffer:atlas,types:continuumAtlasTypes(landing.atlas)},programs:landing.programs,view:cityView,typed:landing.plan.typed,types:landing.plan.types,grounded,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'prefabs'});
+    const continuum=createCityContinuum({device,atlas,programs:landing.programs,view:cityView,typed:landing.plan.typed,types:landing.plan.types,grounded,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'prefabs'});
     const release=continuum.destroy;
     prefabs=Object.assign(continuum,{plan:landing.plan,destroy(){release();atlas.destroy();}});
     prefabs.setWorldOffset(worldOffset.x,worldOffset.z);prefabs.setAim(cityAim);

@@ -68,8 +68,9 @@ export function createSceneShadows(device,count=2,resolution=2048){
 
 // A vessel's shadow: its frame, fitted to her each frame, and its two maps (solid depth; canvas depth and what the
 // canvas lets through). What casts into them is her caster's (castWith): the ship continuum's coarse cut of her
-// (js/vessel-continuum.js), called once a map with `cloth` and `own(pipeline)`, this shadow's group 0 for a program
-// that reads her hull, this frame, her surface moisture and its lookup (js/wgsl/shadows.js SHADOW_CAST).
+// (js/vessel-continuum.js, her canvas by its material's shadow, reading `wetness`), called once a map with `cloth` and
+// `own(pipeline)`, this shadow's group 0 for a program that reads her hull, this frame, her surface moisture and its
+// lookup (js/wgsl/shadows.js SHADOW_CAST, which the receivers' test casts with).
 export function createVesselShadows({device,hullUBO,mesh,meshIndices=null,resolution=2048,wetness=null,targets=null}) {
   const B=GPUBufferUsage,T=GPUTextureUsage;
   const data=new Float32Array(28),parts=shadowMeshData(mesh,meshIndices);
@@ -98,6 +99,8 @@ export function createVesselShadows({device,hullUBO,mesh,meshIndices=null,resolu
   let caster=null;
   return {
     uniform,data,
+    // What wets her canvas, for a caster that lets light through it (js/vessel-continuum.js).
+    wetness:{moisture,lookup},
     castWith(cast){caster=cast;},
     update(hull,sun,enabled){fitVesselShadow(data,hull,sun,parts.bounds,resolution,enabled);device.queue.writeBuffer(uniform,0,data);},
     encode(encoder,profiler,extraSolid,timingPrefix=''){
