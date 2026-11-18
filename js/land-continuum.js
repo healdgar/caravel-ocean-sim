@@ -7,13 +7,17 @@
 // The finest cut is the lattice itself, which the height queries read (terrainSurfaceSample in js/terrain-model.js),
 // and below it, where shot has dug or a river runs, the pits to the crater tiles' own cell and the banks to theirs
 // (landContinuumDig).
+//
+// After the cut, the land writes the ground it has chosen to draw into the field every family that stands on the
+// ground reads (js/continuum-ground.js), on the GPU, from the patches each cut kept.
 import { requestOnce } from './gpu-program-cache.js';
 import {
   LAND_CONTINUUM_PATCH, LAND_CONTINUUM_TESSELLATIONS, LAND_CONTINUUM_LISTS, LAND_CONTINUUM_SLOTS, LAND_CONTINUUM_DRAW_WORDS,
   LAND_CONTINUUM_RECORDS, LAND_CONTINUUM_CAPTURE_COARSENING, LAND_CONTINUUM_NODE_WORDS, LAND_CONTINUUM_POINT_FLOATS,
   LAND_CONTINUUM_PIECE_BYTES, LAND_CONTINUUM_VIEW_BYTES, LAND_CONTINUUM_ENTRY_LAYOUT, landContinuumIndices, landContinuumCutWGSL,
-  landContinuumFinest,
+  landContinuumFinest, landGroundWriteWGSL, LAND_GROUND_ROOM, LAND_GROUND_WORK_WORDS,
 } from './wgsl/land-continuum.js';
+import { continuumGroundField, continuumGroundForget, CONTINUUM_GROUND_TEXELS, CONTINUUM_GROUND_CUTS, CONTINUUM_GROUND_LEVELS } from './continuum-ground.js';
 
 // How much a parent's error stands above its children's, so that a parent and its child are never both drawn.
 const LAND_CONTINUUM_RISE = 1.01;
@@ -374,12 +378,14 @@ export function landContinuumSeams(pieces, key) {
 // --------------------------------------------------------------------------------------------- the GPU
 export function requestLandContinuumPipelines({ device, shader }) {
   return requestOnce(device, 'land continuum cut', async () => {
-    const module = await shader(landContinuumCutWGSL(), 'land continuum cut');
-    const [reset, cut] = await Promise.all([
+    const [module, ground] = await Promise.all([shader(landContinuumCutWGSL(), 'land continuum cut'), shader(landGroundWriteWGSL(), 'land drawn ground')]);
+    const [reset, cut, clear, write] = await Promise.all([
       device.createComputePipelineAsync({ label: 'land continuum reset', layout: 'auto', compute: { module, entryPoint: 'landContinuumReset' } }),
       device.createComputePipelineAsync({ label: 'land continuum cut', layout: 'auto', compute: { module, entryPoint: 'landContinuumCut' } }),
+      device.createComputePipelineAsync({ label: 'land drawn ground clear', layout: 'auto', compute: { module: ground, entryPoint: 'landGroundClear' } }),
+      device.createComputePipelineAsync({ label: 'land drawn ground', layout: 'auto', compute: { module: ground, entryPoint: 'landGroundWrite' } }),
     ]);
-    return { reset, cut };
+    return { reset, cut, clear, write };
   });
 }
 
@@ -409,18 +415,27 @@ export function createLandContinuum({ device, pipelines: P, view: viewPipeline, 
   const viewFloats = new Float32Array(4);
   let viewChanged = true;
   const setView = (at, value) => { if (viewFloats[at] !== Math.fround(value)) { viewFloats[at] = value; viewChanged = true; } };
-  const resetGroup = device.createBindGroup({ layout: P.reset.getBindGroupLayout(0), entries: [{ binding: 6, resource: { buffer: draws } }] });
+  // The drawn ground's field: every slot's workgroups to write it, emptied with the lists.
+  const work = device.createBuffer({ label: 'land drawn ground work', size: LAND_CONTINUUM_SLOTS * LAND_GROUND_WORK_WORDS * 4, usage: B.STORAGE | B.INDIRECT });
+  const resetGroup = device.createBindGroup({ layout: P.reset.getBindGroupLayout(0), entries: [{ binding: 6, resource: { buffer: draws } }, { binding: 8, resource: { buffer: work } }] });
+  const field = continuumGroundField(device);
+  const clearGroup = device.createBindGroup({ layout: P.clear.getBindGroupLayout(0), entries: [{ binding: 1, resource: field.view }] });
+  const writeGroup = device.createBindGroup({ layout: P.write.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: frame } }, { binding: 1, resource: field.view }] });
+  const writeEmpty = device.createBindGroup({ layout: P.write.getBindGroupLayout(1), entries: [] });
   const pieces = new Map(), freeSlots = Array.from({ length: LAND_CONTINUUM_SLOTS }, (_, i) => LAND_CONTINUUM_SLOTS - 1 - i);
   const group = (layout, entries) => device.createBindGroup({ layout, entries: entries.map(([binding, resource]) => ({ binding, resource: resource instanceof GPUBuffer ? { buffer: resource } : resource })) });
-  // The view's and the captures' group 2: the piece's own data and what every piece shares (the craters' textures).
+  // The view's, the captures' and the drawn ground's group 2: the piece's own data and what every piece shares (the
+  // craters' textures, the banks').
   const dataGroups = (piece) => {
     const data = [[50, viewBuffer], [51, piece.uniform], [52, piece.lattice], [53, piece.nodes], ...shared];
     piece.drawn = viewPipeline ? group(viewPipeline.getBindGroupLayout(2), data) : null;
     piece.captured = capture ? group(capture.pipeline.getBindGroupLayout(2), data) : null;
+    piece.written = group(P.write.getBindGroupLayout(2), [...data, [62, piece.tiles]]);
   };
   let destroyed = false;
 
-  function release(piece) { for (const b of [piece.lattice, piece.nodes, piece.uniform, piece.lists]) b.destroy(); freeSlots.push(piece.slot); }
+  const pieceBuffers = (piece) => [piece.lattice, piece.nodes, piece.uniform, piece.lists, piece.tiles];
+  function release(piece) { for (const b of pieceBuffers(piece)) b.destroy(); freeSlots.push(piece.slot); }
   /**
    * A piece, new or changed. `baked` from bakeLandContinuumPiece; `land` the land's group 0 for the view's pipeline
    * and `captureLand` the same for the capture's; `near` the world bounds drawn as surveyed ground (kind 1).
@@ -434,13 +449,13 @@ export function createLandContinuum({ device, pipelines: P, view: viewPipeline, 
     const piece = { key, slot, baked, gx, gz, lattice, land, captureLand, near };
     fit(piece);
     pieces.set(key, piece);
-    if (old) { old.slot = -1; for (const b of [old.lattice, old.nodes, old.uniform, old.lists]) b.destroy(); }
+    if (old) { old.slot = -1; for (const b of pieceBuffers(old)) b.destroy(); }
     return piece;
   }
   // A piece's nodes, lists and numbers on the GPU, made again whenever its nodes are more.
   function fit(piece) {
     const { key, baked, slot, gx, gz, near } = piece, W = LAND_CONTINUUM_NODE_WORDS;
-    for (const b of [piece.nodes, piece.uniform, piece.lists]) b?.destroy();
+    for (const b of [piece.nodes, piece.uniform, piece.lists, piece.tiles]) b?.destroy();
     const nodes = device.createBuffer({ label: `land ${key} nodes`, size: Math.max(16, baked.count * W * 4), usage: B.STORAGE | B.COPY_DST });
     device.queue.writeBuffer(nodes, 0, baked.nodes.buffer, baked.nodes.byteOffset, baked.count * W * 4);
     const lists = device.createBuffer({ label: `land ${key} lists`, size: (2 * baked.room + 2 * (LAND_CONTINUUM_LISTS - 1)) * 4, usage: B.STORAGE | B.VERTEX | B.COPY_SRC });
@@ -453,10 +468,12 @@ export function createLandContinuum({ device, pipelines: P, view: viewPipeline, 
     fl.set(near ?? [1, 0, 1, 0], 20);
     const uniform = device.createBuffer({ label: `land ${key} piece`, size: LAND_CONTINUUM_PIECE_BYTES, usage: B.UNIFORM | B.COPY_DST });
     device.queue.writeBuffer(uniform, 0, words);
+    // The tiles of the drawn ground's field the cut names: a patch each, with its cut, level and place.
+    const tiles = device.createBuffer({ label: `land ${key} drawn ground tiles`, size: LAND_GROUND_ROOM * 8, usage: B.STORAGE });
     Object.assign(piece, {
-      nodes, uniform, lists,
+      nodes, uniform, lists, tiles,
       // The cut reads the nodes, not the lattice.
-      cut: group(P.cut.getBindGroupLayout(0), [[0, frame], [1, viewBuffer], [2, uniform], [4, nodes], [5, lists], [6, draws]]),
+      cut: group(P.cut.getBindGroupLayout(0), [[0, frame], [1, viewBuffer], [2, uniform], [4, nodes], [5, lists], [6, draws], [7, tiles], [8, work]]),
       groups: Math.ceil(baked.count / 64),
     });
     dataGroups(piece);
@@ -496,17 +513,27 @@ export function createLandContinuum({ device, pipelines: P, view: viewPipeline, 
     // The scene's one pixel error, which every family's cut reads (js/continuum-core.js); the captures' is coarser.
     setPixelError(pixels) { setView(0, pixels); setView(1, pixels * LAND_CONTINUUM_CAPTURE_COARSENING); },
     setWorldOffset(x, z) { setView(2, x); setView(3, z); },
-    // In the frame's compute pass: every list emptied, then every piece cut.
+    // In the frame's compute pass, before any family that stands on the ground: every list emptied, then every piece
+    // cut, then the drawn ground's field emptied and written from what each cut kept.
     encode(pass) {
       if (destroyed) return;
       if (viewChanged) { device.queue.writeBuffer(viewBuffer, 0, viewFloats); viewChanged = false; }
       pass.setPipeline(P.reset); pass.setBindGroup(0, resetGroup);
-      pass.dispatchWorkgroups(Math.ceil(LAND_CONTINUUM_RECORDS / 64));
+      pass.dispatchWorkgroups(Math.ceil(Math.max(LAND_CONTINUUM_RECORDS, LAND_CONTINUUM_SLOTS * LAND_GROUND_WORK_WORDS) / 64));
       pass.setPipeline(P.cut);
       for (const piece of pieces.values()) {
         if (!piece.groups) continue;
         pass.setBindGroup(0, piece.cut);
         pass.dispatchWorkgroups(Math.min(piece.groups, 65535), Math.ceil(piece.groups / 65535));
+      }
+      const side = CONTINUUM_GROUND_TEXELS / 8;
+      pass.setPipeline(P.clear); pass.setBindGroup(0, clearGroup);
+      pass.dispatchWorkgroups(side, side, CONTINUUM_GROUND_CUTS * CONTINUUM_GROUND_LEVELS);
+      pass.setPipeline(P.write); pass.setBindGroup(0, writeGroup); pass.setBindGroup(1, writeEmpty);
+      for (const piece of pieces.values()) {
+        if (!piece.groups) continue;
+        pass.setBindGroup(2, piece.written);
+        pass.dispatchWorkgroupsIndirect(work, piece.slot * LAND_GROUND_WORK_WORDS * 4);
       }
     },
     // Every piece's view lists. `clouds` is the land's group 1 for the view's pipeline.
@@ -551,6 +578,7 @@ export function createLandContinuum({ device, pipelines: P, view: viewPipeline, 
       }
       return out;
     },
-    destroy() { destroyed = true; for (const piece of pieces.values()) release(piece); pieces.clear(); for (const b of [indexBuffer, draws, viewBuffer]) b.destroy(); },
+    // No land: the drawn ground's field emptied, so every family stands on the true ground.
+    destroy() { destroyed = true; for (const piece of pieces.values()) release(piece); pieces.clear(); for (const b of [indexBuffer, draws, viewBuffer, work]) b.destroy(); continuumGroundForget(device); },
   };
 }

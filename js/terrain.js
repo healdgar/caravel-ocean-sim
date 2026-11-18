@@ -2974,6 +2974,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     encode(pass,changed=false,frame=null){
       if(frame)coastalField.encode(pass,frame);
+      // The land first: its cut writes the ground it draws (js/continuum-ground.js), which everything after stands on.
+      landFlush();landContinuum?.setPixelError(currentPixelError);landContinuum?.encode(pass);
       // Every building shot down, cut as its pieces at the scene's one pixel error.
       portFractures?.setPixelError(currentPixelError);portFractures?.setWorldOffset(worldOffset.x,worldOffset.z);portFractures?.encode(pass);
       for(const sec of loadedSections.values()){
@@ -2983,7 +2985,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       boulderContinuum?.prepare(pass);
       cityContinuum?.setPixelError(currentPixelError);cityContinuum?.encode(pass);
       prefabs?.setPixelError(currentPixelError);prefabs?.encode(pass);
-      landFlush();landContinuum?.setPixelError(currentPixelError);landContinuum?.encode(pass);
       forest?.encode(pass);
       herds?.encode(pass);
       meadowGrass?.encode(pass);

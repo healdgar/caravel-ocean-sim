@@ -109,11 +109,10 @@ fn landCraterStamp(c:LandCraterRecord,p:vec2f,rock:f32)->LandCraterStamp{
 }
 `;
 
-// Added to the land shader (js/wgsl/terrain.js). The ground the land's continuum walks is the lattice with the pits
-// in it (landCraterDepth, through landContinuumRelief in js/wgsl/land-continuum.js), and its fragments lit as the dug ground they are, the
-// same fragment shading the ground round them: only the land as it was decides what material a point is; the pit
-// decides its lighting and what lies on top.
-export const LAND_CRATER_PIT = LAND_CRATER_SAMPLE_WGSL + /* wgsl */ `
+// The pits as ground, bound with the land's own (group 2): what the land's continuum walks (landCraterDepth, through
+// landContinuumRelief in js/wgsl/land-continuum.js) and waits for (landCraterWaits), wherever the land's ground is
+// worked out, drawn or not (landGroundWrite there).
+export const LAND_CRATER_GROUND = LAND_CRATER_SAMPLE_WGSL + /* wgsl */ `
 @group(2)@binding(54) var landCraterLookup:texture_2d<i32>;
 @group(2)@binding(55) var landCraterField:texture_2d_array<f32>;
 @group(2)@binding(56) var landCraterSampler:sampler;
@@ -147,6 +146,13 @@ fn landCraterDepth(xz:vec2f)->f32{
   if(spot.layer<0){return 0.0;}
   return landCraterHeight(spot.uv,spot.layer);
 }
+`;
+
+// Added to the land shader (js/wgsl/terrain.js). The ground the land's continuum walks is the lattice with the pits
+// in it (LAND_CRATER_GROUND), and its fragments lit as the dug ground they are, the same fragment shading the ground
+// round them: only the land as it was decides what material a point is; the pit decides its lighting and what lies on
+// top.
+export const LAND_CRATER_PIT = LAND_CRATER_GROUND + /* wgsl */ `
 // The pit at a fragment of ground whose own normal is 'ground', or plain ground (cover below zero) where none reaches.
 // dx and dy are the fragment's world derivatives, taken before any branch.
 fn landCraterPit(world:vec3f,ground:vec3f,dx:vec3f,dy:vec3f)->LandPit{

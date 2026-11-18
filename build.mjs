@@ -104,6 +104,8 @@ order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-c
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
 wgslModules.push('js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/land-continuum.js','js/land-banks.js');
+// The ground the land draws, which every family standing on it reads: beside the shared core, ahead of them all.
+order.splice(order.indexOf('js/continuum-core.js')+1,0,'js/continuum-ground.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js','js/debug-world.js');
 order.splice(order.indexOf('js/main.js'),0,'js/webgpu-adapter.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
