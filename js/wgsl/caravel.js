@@ -231,7 +231,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   return CanvasTear(warpTear*0.48+shotTear*0.34+threadFray*0.18+seamWeakness-keepRim,clamp(0.96-damage*0.56,0.24,0.92),threadFray);
 }
 // What of a damaged ship survives: false where a hole, parted rope or torn canvas has taken her surface away, which
-// is then never drawn (the continuum's sample mask, no discard).
+// is then never drawn: masked out of the view's samples, and left out of the water's single-sampled capture.
 fn vesselSurvives(in:BoatVertex)->bool {
   if(vesselWoodMaterial(in.material,vesselPainted(in.material)) && hullHoleRim(in.local)<0.0){return false;}
   if((in.material==2u || in.material==12u || in.material==19u) && ropeParted(in.local,in.damage)){return false;}

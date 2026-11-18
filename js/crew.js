@@ -734,11 +734,10 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
               :s.shirt;
           b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
           b.actors.set(s.face,offset+32);b.actors[offset+35]=packCrewFaceW(s.face[3],own?(s.compMask??0):0,Boolean(s.indigenous));b.actors[offset+27]=crewBodyKind(s,own)+bandageSeed;
-          // The tiller station is below the camera; all crew remain visible.
           // Fractional part of shirt.w (< 0.5) carries wound severity to the crew shader.
           b.actors[offset+19]=!s.visible?1.0:(woundAmt*0.45);
-          // Integer part of trousers.w is boat.enabled; fractional part (< 0.45) carries soot/scorch.
-          b.actors[offset+23]=Number(boat.enabled===true)+scorchAmt*0.42;
+          // trousers.w carries soot/scorch (< 0.45).
+          b.actors[offset+23]=scorchAmt*0.42;
           const localMoistureBase=(wetness.crewOffset-moistureProbeAlignOffset)+(s.crewIndex??state.crew.indexOf(s))*4;
           b.actorsU32[offset+31]=packCrewMoistureAndDressU32(localMoistureBase,s.dress??0);
         }

@@ -1239,18 +1239,38 @@ export function blastFloatingWreckageAt(worldPos, blastRadius, targetBoat, { vel
 
 const fractureGPUOwners = new WeakMap();
 
+// The fracture pass's pipeline, compiled by `computePipe(source, label)`.
+export function requestShipFracturePipeline(computePipe) {
+  return computePipe(SHIP_FRACTURE_POSE_UPDATE, 'ship fracture');
+}
+// One fracture's assets over that pipeline: its vertices' shards, shared by every vessel's GPU made from them. Whoever
+// makes them holds them, as each GPU made from them does; the last to let go (releaseShipFractureAssets, or a GPU's
+// destroy) frees the shards.
+export function shipFractureAssets(device, pipeline, fracture) {
+  const vertexShards = device.createBuffer({ label: `${fracture.modelId} vertex shards`, size: fracture.vertexShards.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(vertexShards, 0, fracture.vertexShards);
+  const assets = Object.freeze({ device, pipeline, vertexShards, fracture });
+  fractureGPUOwners.set(assets, { references: 1 });
+  return assets;
+}
+export function releaseShipFractureAssets(assets) {
+  const owner = fractureGPUOwners.get(assets);
+  if (owner && --owner.references === 0) assets.vertexShards.destroy();
+}
+
 // One per vessel. The compute pass exists only once something has broken, and runs after every other pose stage.
 // `posedOffset` and `posedSize` (bytes; the offset 256-aligned) name the vessel's run of a buffer shared by several,
 // such as her slot of a continuum scene's pose buffer; by default the whole of `posedBuffer` is hers.
 export async function createShipFractureGPU({ device, computePipe, posedBuffer, posedOffset = 0, posedSize = undefined, fracture, shared = null }) {
-  let assets = shared;
-  if (!assets) {
-    const pipeline = await computePipe(SHIP_FRACTURE_POSE_UPDATE, 'ship fracture');
-    const vertexShards = device.createBuffer({ label: `${fracture.modelId} vertex shards`, size: fracture.vertexShards.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(vertexShards, 0, fracture.vertexShards);
-    assets = Object.freeze({ device, pipeline, vertexShards, fracture });
-    fractureGPUOwners.set(assets, { references: 0 });
-  }
+  const assets = shared ?? shipFractureAssets(device, await requestShipFracturePipeline(computePipe), fracture);
+  const gpu = shipFractureGPU(assets, { posedBuffer, posedOffset, posedSize, fracture });
+  if (!shared) releaseShipFractureAssets(assets);
+  return gpu;
+}
+// A vessel's fracture GPU from assets already made, at once. `rebind(posedBuffer)` moves it to a buffer that has
+// taken over her run at the same offset (a pose buffer grown).
+export function shipFractureGPU(assets, { posedBuffer, posedOffset = 0, posedSize = undefined, fracture = assets.fracture }) {
+  const { device } = assets;
   const owner = fractureGPUOwners.get(assets);
   owner.references++;
   const spawnBaseFloats = fracture.shardCount * FRACTURE_RECORD_FLOATS;
@@ -1264,13 +1284,14 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
   for (let s = 0; s < fracture.shardCount; s++) intact[s * FRACTURE_RECORD_FLOATS + 15] = INTACT;
   device.queue.writeBuffer(records, 0, intact);
   device.queue.writeBuffer(clockBuffer, 0, clockData);
-  const group = device.createBindGroup({
+  const bind = (buffer) => device.createBindGroup({
     layout: assets.pipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: { buffer: posedBuffer, offset: posedOffset, ...(posedSize ? { size: posedSize } : {}) } },
-      ...[assets.vertexShards, records, clockBuffer].map((buffer, i) => ({ binding: i + 1, resource: { buffer } })),
+      { binding: 0, resource: { buffer, offset: posedOffset, ...(posedSize ? { size: posedSize } : {}) } },
+      ...[assets.vertexShards, records, clockBuffer].map((b, i) => ({ binding: i + 1, resource: { buffer: b } })),
     ],
   });
+  let group = bind(posedBuffer);
   const workgroups = Math.ceil(fracture.vertexShards.length / 64);
   let current = null, active = false, destroyed = false, seenRevision = -1;
   // Pieces adrift in the world, which alone need her frame each frame; counted afresh when records change.
@@ -1311,6 +1332,7 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
     assets,
     // Each shard's flight (record 3's w below -1.5 while it is aboard), read by her detail's lines (js/vessel-detail.js).
     records,
+    rebind(buffer) { if (!destroyed) group = bind(buffer); },
     get active() { return active; },
     apply(damage, events, now, boat = null) {
       const count = applyFractureEvents(fracture, damage, events, now);

@@ -25,7 +25,7 @@ const vesselContinuumShading = [null, null];
 const vesselContinuumPrelude = (capture) => () => (vesselContinuumShading[capture ? 1 : 0] ??= withNeuralPbrVessel(vesselShadingWGSL(capture))
   + `@group(0) @binding(${VESSEL_CONTINUUM_ASSEMBLY}) var<storage,read> vesselAssembly:array<f32>;\n`);
 
-const VESSEL_CONTINUUM_WGSL = () => /* wgsl */`
+const VESSEL_CONTINUUM_WGSL = (capture) => /* wgsl */`
 fn vesselAir(colour:vec3f,world:vec3f)->vec3f { return continuumAir(colour,world); }
 // What a corner hands her fragments. A cluster corner is a vertex of her assembly as she now is (her rest place, normal,
 // material, UV and wetness) or a line vertex of her detail layer as her pose pass laid it; her colours' cloth wears the
@@ -79,8 +79,11 @@ fn vesselContinuumFarShade(v:ContinuumVarying,front:bool)->vec4f {
   col+=lunarSurface(n,eye,v.colour,0.86,f0,sunVis[1]*lunarShadowVisibility(shadowed));
   return vec4f(continuumAir(col,v.world),1.0);
 }
-// Both shades in uniform control flow (her timber's takes derivatives), the one drawn chosen.
-fn vesselContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
+// Both shades in uniform control flow (her timber's takes derivatives), the one drawn chosen. ${capture ? `The water's
+// capture is single-sampled and leaves out what lies past its surface with discard; it leaves out what shot has
+// taken away with it, so her holes read from below as from above.` : ''}
+fn vesselContinuumShade(v:ContinuumVarying,front:bool)->vec4f {${capture ? `
+  if(vesselContinuumMask(v,front)==0u){discard;}` : ''}
   let near=vesselShade(vesselContinuumBoat(v),front);
   let far=vesselContinuumFarShade(v,front);
   return select(far,near,v.coverage.x==CONTINUUM_CLUSTER_ENTRY);
@@ -95,7 +98,7 @@ fn vesselContinuumMask(v:ContinuumVarying,front:bool)->u32 {
 const vesselContinuumMaterial = (capture) => Object.freeze({
   name: 'vesselContinuum', prelude: vesselContinuumPrelude(capture), core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['wet', 'vec2f'], ['damage', 'f32'], ['colour', 'vec3f'], ['material', 'u32', true]],
-  wgsl: VESSEL_CONTINUUM_WGSL,
+  wgsl: () => VESSEL_CONTINUUM_WGSL(capture),
   salt: 7,
   // Sails, planking and her lines are open shells, lit from whichever side is seen.
   cullMode: 'none', air: true, capture: true, mask: true,

@@ -24,9 +24,6 @@ export const CREW_CONTINUUM_POSE_VEC4S = skinnedPoseVec4s(CREW_JOINT_COUNT);
 // How far a severed person's points may stray from their joints' bounds: a forearm, shin or head drawn in to its stump
 // is carried by the stump's joint and the one it hung from at once.
 const CREW_CONTINUUM_SEVERED_SLACK = 0.6;
-// How near the eye may come to a person's head or chest before they are not drawn: the eye stands in their body (the
-// helmsman the player steers as).
-const CREW_CONTINUUM_EYE_INSIDE = 0.7;
 
 // --------------------------------------------------------------------------------------------- posing people placed on the GPU
 // People whose place and pose a compute pass works out (the townsfolk, a vessel's deck hands) are written as one record
@@ -133,8 +130,8 @@ fn crewPoseBroken(injury:u32)->vec2u {
 // written: a workgroup a person. The record stands where the actor's transform puts the body, in the world (through
 // the hull's frame, the world's own ashore), at the actor's scale, unturned: each joint's rows carry the body's turn
 // and pose, in the type's own metres, so a joint's matrix is the hull's turn of actor and joint together, less the
-// body's place, over its scale. A person who is not drawn (hidden, past the batch's count, or one the eye stands in) is
-// GONE; one with a limb parted (a joint drawn in to nothing) is DAMAGED, cut whole as clusters at the finest their error
+// body's place, over its scale. A person who is not drawn (hidden, or past the batch's count) is GONE, however near
+// the eye stands; one with a limb parted (a joint drawn in to nothing) is DAMAGED, cut whole as clusters at the finest their error
 // allows. `ground`: they stand on the land, drawn on the ground the land draws (js/continuum-ground.js).
 //   run  first slot of the batch, how many it holds, the word of the counted dispatch that says how many when the GPU
 //        counts them, flags: 1 counted on the GPU, 2 afloat
@@ -144,7 +141,7 @@ export function crewContinuumStandWGSL(ground) {
 struct CrewStandHull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f };
 struct CrewStandActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
 struct CrewStandRun { first:u32, count:u32, counted:u32, flags:u32 };
-@group(0) @binding(0) var<uniform> F:Frame;
+${ground ? '@group(0) @binding(0) var<uniform> F:Frame;' : ''}
 @group(0) @binding(1) var<uniform> crewStandHull:CrewStandHull;
 @group(0) @binding(2) var<storage,read> crewStandJoints:array<mat4x4f>;
 @group(0) @binding(3) var<storage,read> crewStandActors:array<CrewStandActor>;
@@ -164,11 +161,7 @@ fn crewStandTurn(p:vec3f)->vec3f { return crewStandHull.right.xyz*p.x+crewStandH
   let T=actor.transform;
   let scale=max(length(T[0].xyz),1e-3);
   let place=crewStandTurn(T[3].xyz)+crewStandHull.origin.xyz;
-  let head=crewStandTurn((T*vec4f(0.0,1.6,0.0,1.0)).xyz)+crewStandHull.origin.xyz;
-  let chest=crewStandTurn((T*vec4f(0.0,1.15,0.0,1.0)).xyz)+crewStandHull.origin.xyz;
-  let helm=floor(actor.trousers.w+0.01)>0.5;
-  let inside=min(distance(head,F.camPos.xyz),distance(chest,F.camPos.xyz))<${CREW_CONTINUUM_EYE_INSIDE.toFixed(2)};
-  let gone=person>=held||slot>=arrayLength(&crewStandActors)||actor.shirt.w>0.5||(helm&&inside);
+  let gone=person>=held||slot>=arrayLength(&crewStandActors)||actor.shirt.w>0.5;
   // A joint drawn in to nothing: a parted limb, which its stump carries.
   if(!gone){
     for(var j=lane;j<${N}u;j+=64u){
@@ -278,7 +271,7 @@ fn crewContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   var surface=v.tone;
   if(v.look.x==CONTINUUM_CLUSTER_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actors[v.look.z]);}
   var c:CrewVertex;
-  c.position=v.position;c.world=v.world;c.normal=v.normal;c.color=surface.rgb;c.helm=0.0;c.wet=v.wet;c.skin=clamp(surface.w,0.0,1.0);
+  c.position=v.position;c.world=v.world;c.normal=v.normal;c.color=surface.rgb;c.wet=v.wet;c.skin=clamp(surface.w,0.0,1.0);
   c.bodyPos=v.bodyPos;c.damage=v.hurt.xyz;c.paint=v.look.w;c.actor=v.look.z;
   return vec4f(continuumAir(crewShadeLit(c,front,surface.rgb),v.world),1.0);
 }

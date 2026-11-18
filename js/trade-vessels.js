@@ -17,7 +17,7 @@ import { boatHydrodynamics } from './boat.js';
 import { createWaterOptics } from './water-optics.js';
 import { computeArchetypeScaleSpec } from './ship-part-taxonomy.js';
 import { createPartAssemblyCatalog, bakeVesselImpactMarks } from './part-assembly.js';
-import { prepareShipFracture, createShipFractureGPU } from './ship-fracture.js';
+import { prepareShipFracture, requestShipFracturePipeline, shipFractureAssets, shipFractureGPU, releaseShipFractureAssets } from './ship-fracture.js';
 import { createShipCollider } from './ship-collider.js';
 import { createVesselDamageState, stepVesselDamage } from './gunnery-control.js';
 import { HULL_DAMAGE_UNIFORM_BYTES, writeHullFloodUniform, writeHullCraters } from './hull-flood.js';
@@ -4067,8 +4067,7 @@ fn restPoseRowed(pos: vec3f, norm: vec3f, material: f32, archIdx: u32) -> array<
 // her rest pose pass and her fracture pass write, and the cut draws her clusters alone. This is only how her surface is
 // worn and lit: oak, pitch, iron, hemp and canvas where her clusters are drawn, her far body's and her splat's own
 // colour beyond them, her scars from her slot's hull damage, and what shot has holed, parted or torn taken out of her
-// samples by the material's mask (rule 2: no discard).
-export const TRADE_VESSEL_DAMAGED_SLOTS = 16;
+// samples by the material's mask (rule 2: no discard). Every vessel of the fleet has a slot to take when she is damaged.
 
 // Group 0: the frame, the sky's light and the land's shadow set, as the near terrain binds them. Group 1 (in the
 // material's own text): the oak, the damaged slots' hull damage and the neural material bank. Group 2: the scene.
@@ -4083,7 +4082,7 @@ const tradeVesselContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + SKY_
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
 `;
 
-const tradeVesselContinuumRawWGSL = () => /* wgsl */ `
+const tradeVesselContinuumRawWGSL = (capture) => /* wgsl */ `
 @group(1) @binding(0) var oakAlbedo: texture_2d<f32>;
 @group(1) @binding(1) var oakSampler: sampler;
 struct HullCrater { at: vec3f, packed: u32 };
@@ -4094,8 +4093,8 @@ struct HullDamage {
   flows: array<vec4f, ${HULL_HOLE_LIMIT}>,
   craters: array<HullCrater, ${HULL_CRATER_LIMIT}>,
 };
-// Each damaged slot's hull damage (js/hull-flood.js), one HULL_DAMAGE_UNIFORM_BYTES apart.
-@group(1) @binding(2) var<storage, read> hullDamage: array<HullDamage, ${TRADE_VESSEL_DAMAGED_SLOTS}>;
+// Each damaged slot's hull damage (js/hull-flood.js), one HULL_DAMAGE_UNIFORM_BYTES apart, a slot for every vessel.
+@group(1) @binding(2) var<storage, read> hullDamage: array<HullDamage>;
 
 ${buildArchetypeScaleWGSL()}
 
@@ -4437,7 +4436,7 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
 
   let tvSlot = in.ids.z;
   if (tvSlot > 0u) {
-    let slot = min(tvSlot - 1u, ${TRADE_VESSEL_DAMAGED_SLOTS - 1}u);
+    let slot = min(tvSlot - 1u, arrayLength(&hullDamage) - 1u);
     let holeRim = select(0.0, max(hullHoleRim(slot, p), 0.0), isWoodMat(m) && u32(hullDamage[slot].scale.w) > 0u);
     if (holeRim > 0.0) {
       let splinter = 0.58 + 0.85 * gnoise(vec2f(p.z * 90.0, p.y * 140.0));
@@ -4508,8 +4507,11 @@ fn tvFarShade(in: ContinuumVarying, front: bool) -> vec4f {
   return vec4f(continuumAir(in.colour * amb * 0.82 + direct + spec + envSpec, in.world), 1.0);
 }
 
-// Both shades in uniform control flow (the clusters' samples the oak and takes derivatives), the one drawn chosen.
-fn tradeVesselContinuumShade(in: ContinuumVarying, front: bool) -> vec4f {
+// Both shades in uniform control flow (the clusters' samples the oak and takes derivatives), the one drawn chosen.${capture ? `
+// The water's capture is single-sampled and leaves out what lies past its surface with discard; it leaves out what
+// shot has taken away with it, so her holes read from below as from above.` : ''}
+fn tradeVesselContinuumShade(in: ContinuumVarying, front: bool) -> vec4f {${capture ? `
+  if (tradeVesselContinuumMask(in, front) == 0u) { discard; }` : ''}
   let near = tvShadeFragment(in, front);
   let far = tvFarShade(in, front);
   return select(near, far, in.coverage.x != CONTINUUM_CLUSTER_ENTRY);
@@ -4519,7 +4521,7 @@ fn tradeVesselContinuumShade(in: ContinuumVarying, front: bool) -> vec4f {
 fn tradeVesselContinuumMask(in: ContinuumVarying, front: bool) -> u32 {
   let tvSlot = in.ids.z;
   if (tvSlot == 0u || in.coverage.x != CONTINUUM_CLUSTER_ENTRY) { return 0xffffffffu; }
-  let slot = min(tvSlot - 1u, ${TRADE_VESSEL_DAMAGED_SLOTS - 1}u);
+  let slot = min(tvSlot - 1u, arrayLength(&hullDamage) - 1u);
   let m = in.ids.x;
   let dmg = in.state.x;
   if (isWoodMat(m) && hullHoleRim(slot, in.local) < 0.0) { return 0u; }
@@ -4530,17 +4532,19 @@ fn tradeVesselContinuumMask(in: ContinuumVarying, front: bool) -> u32 {
 `;
 
 // The trade vessels' material (js/wgsl/continuum-cut.js), its view drawn by requestContinuumView and, under water, its
-// capture by requestContinuumCapture. Its shading is composed once, the neural material bank's evaluation laid into it
-// (js/wgsl/neural-pbr.js withNeuralPbrTradeVessels).
-let tradeVesselContinuumShading = null;
-export const TRADE_VESSEL_CONTINUUM_MATERIAL = Object.freeze({
+// capture by requestContinuumCapture. Each variant's shading is composed once, the neural material bank's evaluation
+// laid into it (js/wgsl/neural-pbr.js withNeuralPbrTradeVessels).
+const tradeVesselContinuumShading = [null, null];
+const tradeVesselContinuumMaterial = (capture) => Object.freeze({
   name: 'tradeVesselContinuum', prelude: tradeVesselContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['state', 'vec2f'], ['colour', 'vec3f'], ['ids', 'vec4u', true], ['turn', 'vec4f', true]],
-  wgsl: () => (tradeVesselContinuumShading ??= withNeuralPbrTradeVessels(tradeVesselContinuumRawWGSL())),
+  wgsl: () => (tradeVesselContinuumShading[capture ? 1 : 0] ??= withNeuralPbrTradeVessels(tradeVesselContinuumRawWGSL(capture))),
   salt: 5,
   // Sails, awnings and planking are open shells, lit from whichever side is seen.
   cullMode: 'none', air: true, capture: true, mask: true,
 });
+export const TRADE_VESSEL_CONTINUUM_MATERIAL = tradeVesselContinuumMaterial(false);
+export const TRADE_VESSEL_CONTINUUM_CAPTURE_MATERIAL = tradeVesselContinuumMaterial(true);
 
 // Each archetype's DRAPED block (js/wgsl/ship-kinds.js), SHIP_DRAPED_BLOCK + 1 vec4f an archetype in archetype order:
 // her design scale and what moves on her; a row unread; her sixteen sails' yard rows (-1: none; 0: square, its yard's
@@ -5304,6 +5308,14 @@ export async function createTradeVessels({
   const wavePromise = canCompute
     ? getPipelineEntry(device, `wave:${Boolean(computePipe)}`, () => Promise.resolve(makeCompute(TRADE_VESSEL_WAVE_WGSL, 'trade vessel wave hydro')))
     : Promise.resolve(null);
+  // A damaged vessel's passes, her rest pose and her shards' flight, compiled with the fleet: a vessel struck is posed
+  // and drawn struck in the frame the blow lands, never whole while they compile.
+  const damagedPipesPromise = canCompute
+    ? Promise.all([
+        getPipelineEntry(device, `damagedRest:${Boolean(computePipe)}`, () => Promise.resolve(makeCompute(REST_TO_POSED_WGSL, 'trade vessel rest pose'))),
+        getPipelineEntry(device, `damagedFracture:${Boolean(computePipe)}`, () => Promise.resolve(requestShipFracturePipeline(makeCompute))),
+      ]).then(([restPosePipe, fracturePipe]) => ({ restPosePipe, fracturePipe }))
+    : Promise.resolve(null);
 
   const surfaceWavesPromise = oceanBridge?.surfaceWaves
     ? Promise.resolve(oceanBridge.surfaceWaves).catch(() => null)
@@ -5325,15 +5337,16 @@ export async function createTradeVessels({
             })).catch(() => null)
           : Promise.resolve(null);
 
-  const [pipes, wavePipe, shipData, resolvedSurfaceWaves, resolvedWaterOptics] = await Promise.all([
+  const [pipes, wavePipe, shipData, resolvedSurfaceWaves, resolvedWaterOptics, damagedPipes] = await Promise.all([
     requestTradeVesselsPipelines({ device, shader, format, samples, shadowFormat }),
     wavePromise,
     shipDataPromise,
     surfaceWavesPromise,
     waterOpticsPromise,
+    damagedPipesPromise,
   ]);
   // Seen from under the water, a vessel is her coarse cut (the shadow map's lists) through the water's own capture.
-  const capture = await requestContinuumCapture(resolvedWaterOptics?.capture ? resolvedWaterOptics : null, TRADE_VESSEL_CONTINUUM_MATERIAL).catch((err) => {
+  const capture = await requestContinuumCapture(resolvedWaterOptics?.capture ? resolvedWaterOptics : null, TRADE_VESSEL_CONTINUUM_CAPTURE_MATERIAL).catch((err) => {
     console.warn('[trade-vessels submerged]', err);
     return null;
   });
@@ -5353,21 +5366,30 @@ export async function createTradeVessels({
   const atlasFloats = new Float32Array(atlasWords.buffer, atlasWords.byteOffset, atlasWords.length);
   const typeRadius = atlas.types.map((_, t) => atlasFloats[atlasWords[CONTINUUM_HEADER.typesAt] + t * CONTINUUM_TYPE_WORDS + CONTINUUM_TYPE.sphere + 3]);
 
-  // The scene's pose buffer (js/wgsl/ship-kinds.js): each archetype's DRAPED block, then each damaged slot's RIDER header
+  // The scene's pose buffer (js/wgsl/ship-kinds.js): each archetype's DRAPED block, then a RIDER header for each slot
   // (where her posed assembly begins and its stride; her design scale), then each slot's posed assembly, each run
-  // 256-aligned so her rest pose and fracture passes bind it alone.
+  // 256-aligned so her rest pose and fracture passes bind it alone. Any vessel may be damaged, every one at once, so
+  // there is a slot for each: the fleet is no larger than the slots this device's largest storage binding holds, and
+  // the buffer grows by whole slots as vessels are struck (growPoses), never short of one.
   const drapedRows = SHIP_DRAPED_BLOCK + 1;
   const headersAt = TRADE_VESSEL_ARCHETYPES * drapedRows;
   const align256 = (bytes) => Math.ceil(bytes / 256) * 256;
-  const slotsAt = align256((headersAt + TRADE_VESSEL_DAMAGED_SLOTS * SHIP_RIDER_HEADER) * 16);
+  const slotsAt = align256((headersAt + MAX_TRADE_VESSELS * SHIP_RIDER_HEADER) * 16);
   const slotBytes = align256(Math.max(1, ...shipData.assemblies.map((a) => a?.vertexCount ?? 0)) * 32);
-  const poses = device.createBuffer({ label: 'trade vessel poses', size: slotsAt + TRADE_VESSEL_DAMAGED_SLOTS * slotBytes, usage: U_STORAGE | U_COPY_DST });
+  const poseLimit = Math.min(device.limits?.maxBufferSize ?? Infinity, device.limits?.maxStorageBufferBindingSize ?? Infinity);
+  const fleetCapacity = Math.max(0, Math.min(MAX_TRADE_VESSELS, Math.floor((poseLimit - slotsAt) / slotBytes)));
+  const posesOf = (slots) => device.createBuffer({ label: 'trade vessel poses', size: slotsAt + slots * slotBytes, usage: U_STORAGE | U_COPY_DST | U_COPY_SRC });
+  // The slots the buffer holds now: a few at first, so the fleet's first blows lay nothing again.
+  let slotRoom = Math.min(fleetCapacity, 4);
+  let poses = posesOf(slotRoom);
   device.queue.writeBuffer(poses, 0, tradeVesselDrapedBlocks());
-  const riderHeaders = new Float32Array(TRADE_VESSEL_DAMAGED_SLOTS * SHIP_RIDER_HEADER * 4);
-  for (let k = 0; k < TRADE_VESSEL_DAMAGED_SLOTS; k++) riderHeaders.set([(slotsAt + k * slotBytes) / 16, 2, 0, 0, 1, 1, 1, 0], k * SHIP_RIDER_HEADER * 4);
-  device.queue.writeBuffer(poses, headersAt * 16, riderHeaders);
-  // Each damaged slot's hull damage (js/hull-flood.js), which her material scars and holes her by.
-  const hullDamageBuffer = device.createBuffer({ label: 'trade vessel hull damage', size: TRADE_VESSEL_DAMAGED_SLOTS * HULL_DAMAGE_UNIFORM_BYTES, usage: U_STORAGE | U_COPY_DST });
+  if (fleetCapacity > 0) {
+    const riderHeaders = new Float32Array(fleetCapacity * SHIP_RIDER_HEADER * 4);
+    for (let k = 0; k < fleetCapacity; k++) riderHeaders.set([(slotsAt + k * slotBytes) / 16, 2, 0, 0, 1, 1, 1, 0], k * SHIP_RIDER_HEADER * 4);
+    device.queue.writeBuffer(poses, headersAt * 16, riderHeaders);
+  }
+  // Each slot's hull damage (js/hull-flood.js), which her material scars and holes her by: one for every vessel.
+  const hullDamageBuffer = device.createBuffer({ label: 'trade vessel hull damage', size: Math.max(1, fleetCapacity) * HULL_DAMAGE_UNIFORM_BYTES, usage: U_STORAGE | U_COPY_DST });
 
   // One scene of the one cut holds every vessel, each list's room as any mix of the archetypes may fill it.
   const { room } = continuumRoom(atlas.types, atlas.types.map(() => MAX_TRADE_VESSELS));
@@ -5816,41 +5838,62 @@ export async function createTradeVessels({
     return deckProgramsAsked;
   }
 
-  // A damaged vessel's rest pose pass, compiled on the first breach (cannon hit or grounding). She takes a slot of the
-  // scene's pose buffer when she is promoted; with every slot held she waits for one, and is promoted when it comes free.
-  let damagedAssetPromise = null;
-  let damagedAssets = null;
-  // The vessel posed in each damaged slot, or null.
-  const damagedSlots = new Array(TRADE_VESSEL_DAMAGED_SLOTS).fill(null);
-  const ensureDamagedAssets = () => {
-    if (damagedAssetPromise) return damagedAssetPromise;
-    damagedAssetPromise = getPipelineEntry(device, `damagedRest:${Boolean(computePipe)}`, async () => {
-      const restPosePipe = await (computePipe
-        ? computePipe(REST_TO_POSED_WGSL, 'trade vessel rest pose')
-        : device.createComputePipelineAsync({
-            label: 'trade vessel rest pose',
-            layout: 'auto',
-            compute: { module: device.createShaderModule({ code: REST_TO_POSED_WGSL }), entryPoint: 'main' },
-          }));
-      return { restPosePipe };
-    }).then((assets) => {
-      if (destroyed) return null;
-      damagedAssets = assets;
-      return assets;
-    }).catch((err) => {
-      console.error('[trade-vessels damaged]', err);
-      return null;
-    });
-    return damagedAssetPromise;
+  // A damaged vessel (cannon hit, grounding, a bridge struck) takes a slot of the scene's pose buffer at once, and is
+  // posed there by her rest pose and fracture passes from the frame she is struck.
+  // The vessel posed in each slot, or null.
+  const damagedSlots = [];
+  // Each archetype's fracture assets (her shards' table), made the first time one of hers is struck.
+  const fractureAssetsByArch = new Map();
+  const fractureAssetsOf = (archIndex) => {
+    if (!fractureAssetsByArch.has(archIndex)) fractureAssetsByArch.set(archIndex, shipFractureAssets(device, damagedPipes.fracturePipe, drawnFractureOf(archIndex)));
+    return fractureAssetsByArch.get(archIndex);
   };
+  // The scene laid again over its frame, shadow set and pose buffer as they now are, its records carried across, and
+  // every group that reads it made again. The old scene is retired once the queue has done with it.
+  function relayScene() {
+    const old = scene;
+    scene = makeScene(resources);
+    sceneFrame = bufferOf(resources, 0);
+    sceneShadow = bufferOf(resources, 19);
+    scene.words.set(old.words);
+    scene.send(0, sentIntact);
+    scene.setCount(sentIntact);
+    retire(() => old.destroy());
+    regroup();
+    waveBindGroups = makeWaveBindGroups(resources);
+  }
+  function retire(release) {
+    const done = device.queue.onSubmittedWorkDone?.();
+    if (done) done.then(release, release);
+    else release();
+  }
+  // The pose buffer grown to hold at least `need` slots (doubling, to the fleet's capacity): every run copied across
+  // in order behind whatever the queue already holds for it, the scene laid again over it, and each damaged vessel's
+  // passes bound to her run in it.
+  function growPoses(need) {
+    const room = Math.min(fleetCapacity, Math.max(need, slotRoom * 2));
+    const old = poses;
+    poses = posesOf(room);
+    const encoder = device.createCommandEncoder({ label: 'trade vessel poses grown' });
+    encoder.copyBufferToBuffer(old, 0, poses, 0, old.size);
+    device.queue.submit([encoder.finish()]);
+    slotRoom = room;
+    relayScene();
+    for (const v of vessels) {
+      if (!v.damaged) continue;
+      bindDamagedPose(v);
+      v.damaged.fractureGPU.rebind(poses);
+    }
+    retire(() => old.destroy());
+  }
 
   // Her rest pose pass's group: her own scarred copy of the assembly posed into her slot's run of the pose buffer, on
   // the frame's clock.
   function bindDamagedPose(v) {
     const d = v.damaged;
-    if (!damagedAssets || !d) return;
+    if (!d) return;
     d.poseBindGroup = device.createBindGroup({
-      layout: damagedAssets.restPosePipe.getBindGroupLayout(0),
+      layout: damagedPipes.restPosePipe.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: d.sourceBuffer } },
         { binding: 1, resource: { buffer: poses, offset: d.posedOffset, size: d.posedSize } },
@@ -5861,14 +5904,12 @@ export async function createTradeVessels({
   }
 
   function promoteDamagedBoat(v) {
-    if (v.damaged || v.promoting || destroyed) return;
-    const slot = damagedSlots.indexOf(null);
-    if (slot < 0) {
-      v.awaitingDamagedSlot = true;
-      return;
-    }
-    v.awaitingDamagedSlot = false;
-    v.promoting = true;
+    if (v.damaged || destroyed || !damagedPipes) return;
+    let slot = damagedSlots.indexOf(null);
+    if (slot < 0) slot = damagedSlots.length;
+    // The fleet is no larger than its slots, and each vessel holds at most one.
+    if (slot >= fleetCapacity) throw Error(`trade vessel damaged slot ${slot} past the fleet's ${fleetCapacity}`);
+    if (slot >= slotRoom) growPoses(slot + 1);
     damagedSlots[slot] = v;
     // Her own copy of the assembly her body was baked with (the riders name its vertices), to take her scars; and her
     // RIDER header's design scale.
@@ -5887,52 +5928,29 @@ export async function createTradeVessels({
       size: 16,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
+    const posedOffset = slotsAt + slot * slotBytes, posedSize = drawn.vertexCount * 32;
     const dmgState = {
+      // This frame's update has written her uniforms: her run is posed by this frame's encode, before any cut reads it.
       ready: false,
       meshCopy,
       sourceBuffer,
       // Her slot, and her run of the pose buffer (bytes).
       slot,
-      posedOffset: slotsAt + slot * slotBytes,
-      posedSize: drawn.vertexCount * 32,
+      posedOffset,
+      posedSize,
       hullData: new Float32Array(TV_HULL_FLOOD_WORDS),
       craterData: new Float32Array(HULL_CRATER_LIMIT * 4),
       craterRevision: -1,
       poseUniform,
       poseData: new Float32Array(4),
       poseBindGroup: null,
-      fractureGPU: null,
-      // Her run has been posed at least once: until then her record stays whole (DRAPED).
-      posedOnce: false,
+      fractureGPU: shipFractureGPU(fractureAssetsOf(v.archIndex), { posedBuffer: poses, posedOffset, posedSize }),
       needsRestCopy: true,
       // Her oars or helm moved last frame, so she is posed once more as they come to rest.
       moving: false,
     };
     v.damaged = dmgState;
-
-    const fractureCompute = computePipe || ((src, lbl) => device.createComputePipelineAsync({
-      label: lbl,
-      layout: 'auto',
-      compute: { module: device.createShaderModule({ code: src }), entryPoint: 'main' },
-    }));
-
-    Promise.all([
-      ensureDamagedAssets(),
-      createShipFractureGPU({
-        device, computePipe: fractureCompute, posedBuffer: poses, posedOffset: dmgState.posedOffset, posedSize: dmgState.posedSize,
-        fracture: drawnFractureOf(v.archIndex),
-      }),
-    ]).then(([assets, fractureGPU]) => {
-      if (destroyed || !assets || !fractureGPU || v.damaged !== dmgState) {
-        fractureGPU?.destroy?.();
-        return;
-      }
-      dmgState.fractureGPU = fractureGPU;
-      bindDamagedPose(v);
-      dmgState.gpuCompiled = true;
-    }).catch((err) => {
-      console.error('[trade-vessels promote]', err);
-    });
+    bindDamagedPose(v);
   }
   const ensureDamagedSlot = promoteDamagedBoat;
   // An archetype's fracture as its body's vertices fly: its shards, with each baked vertex's.
@@ -6073,7 +6091,6 @@ export async function createTradeVessels({
   }
 
   function destroyVesselDamaged(v) {
-    v.awaitingDamagedSlot = false;
     const d = v.damaged;
     if (!d) return;
     if (d.slot >= 0 && damagedSlots[d.slot] === v) damagedSlots[d.slot] = null;
@@ -6162,7 +6179,6 @@ export async function createTradeVessels({
       crewSlot: -1,
       lastState: s0,
       lastPoseFurl: -1,
-      promoting: false,
       damaged: null,
     };
   }
@@ -6181,7 +6197,7 @@ export async function createTradeVessels({
   );
 
   function rebuildVesselsFromRoutes() {
-    const cappedRoutes = routes.slice(0, MAX_TRADE_VESSELS);
+    const cappedRoutes = routes.slice(0, fleetCapacity);
     const prevById = new Map(vessels.map((v) => [v.route.id, v]));
     const orphanReachBarges = vessels.filter((v) => String(v.route.id || '').startsWith('reach:') && !cappedRoutes.some((r) => r.id === v.route.id));
     const kept = new Set();
@@ -6214,7 +6230,7 @@ export async function createTradeVessels({
 
     const extraDamaged = [];
     for (const oldV of vessels) {
-      if (!kept.has(oldV) && isVesselDamaged(oldV) && !isDeepSettledWreck(oldV) && cappedRoutes.length + extraDamaged.length < MAX_TRADE_VESSELS) {
+      if (!kept.has(oldV) && isVesselDamaged(oldV) && !isDeepSettledWreck(oldV) && cappedRoutes.length + extraDamaged.length < fleetCapacity) {
         kept.add(oldV);
         extraDamaged.push(oldV);
       }
@@ -6919,9 +6935,7 @@ export async function createTradeVessels({
       ls.speed = ai.speed;
       ls.sailSet = effSailSet;
 
-      // One waiting for a damaged slot is promoted when one comes free.
-      if (v.awaitingDamagedSlot && !v.damaged) promoteDamagedBoat(v);
-      if ((v.damaged?.ready || v.damaged?.gpuCompiled) && v.damaged.fractureGPU) {
+      if (v.damaged) {
         const d = v.damaged;
         const pending = dmg.pendingBakes;
         if (pending.length > 0) {
@@ -6966,14 +6980,15 @@ export async function createTradeVessels({
       }
 
       // Every vessel is one record of the scene. Whole, the DRAPED kind poses her from her record (her phase, motion and
-      // furl); once her slot's run is posed, the RIDER kind carries her clusters on it (her shards in flight, her canvas
-      // brailed) and the cut draws her clusters alone, her slot in her identity's high bits for her material. A vessel
-      // hit, flooding or aground is cut finer.
+      // furl); damaged, the RIDER kind carries her clusters on her slot's run, which this frame's encode poses before
+      // the cut (her shards in flight, her canvas brailed), and the cut draws her clusters alone, her slot in her
+      // identity's high bits for her material. A vessel hit or flooding is cut finer; lying at anchor or resting on a
+      // shoal is no reason to (rule 3, item 5).
       const wreck = v.damaged;
-      const drawnDamaged = Boolean(wreck?.ready && wreck.posedOnce);
-      const important = (dmg.hits ?? 0) > 0 || floodSinkage > 0 || Boolean(v.boat.aground);
+      const drawnDamaged = Boolean(wreck?.ready);
+      const important = (dmg.hits ?? 0) > 0 || floodSinkage > 0;
       v.identity ??= deckCrewStringHash(v.route.id) & 32767;
-      if (totalIntact < MAX_TRADE_VESSELS) {
+      if (totalIntact < fleetCapacity) {
         if (!wreck?.ready) v.intactSlot = totalIntact >>> 0;
         scene.place(totalIntact, {
           position: [ai.x, effY, ai.z], scale: v.scaleMul, turn: shipContinuumTurn(ai.yaw, effPitch, effRoll), type: v.archIndex,
@@ -7386,40 +7401,28 @@ export async function createTradeVessels({
     rebind(nextResources) {
       resources = nextResources;
       // A new frame or land shadow uniform: the scene is laid again over them, its records carried across.
-      if (bufferOf(resources, 0) !== sceneFrame || bufferOf(resources, 19) !== sceneShadow) {
-        const old = scene;
-        scene = makeScene(resources);
-        sceneFrame = bufferOf(resources, 0);
-        sceneShadow = bufferOf(resources, 19);
-        scene.words.set(old.words);
-        scene.send(0, sentIntact);
-        scene.setCount(sentIntact);
-        const retire = device.queue.onSubmittedWorkDone?.();
-        if (retire) retire.then(() => old.destroy(), () => old.destroy());
-        else old.destroy();
+      if (bufferOf(resources, 0) !== sceneFrame || bufferOf(resources, 19) !== sceneShadow) relayScene();
+      else {
+        regroup();
+        waveBindGroups = makeWaveBindGroups(resources);
       }
-      regroup();
-      waveBindGroups = makeWaveBindGroups(resources);
       rebuildDeckCrewPlaceGroup(resources);
       for (const v of vessels) {
-        if (v.damaged && damagedAssets) bindDamagedPose(v);
+        if (v.damaged) bindDamagedPose(v);
       }
     },
     encode(pass) {
       // Each damaged vessel's run of the pose buffer: her scarred assembly posed (oars, helm, canvas), then her shards
       // flown from it. The fracture pass moves the posed vertices in place, so the rest pose comes first whenever it runs.
-      if (damagedAssets) {
-        for (const v of vessels) {
-          const d = v.damaged;
-          if (!d?.ready || !d.fractureGPU || !d.poseBindGroup) continue;
-          if (!d.needsRestCopy && !d.fractureGPU.active) continue;
-          d.needsRestCopy = false;
-          pass.setPipeline(damagedAssets.restPosePipe);
-          pass.setBindGroup(0, d.poseBindGroup);
-          pass.dispatchWorkgroups(Math.ceil(shipData.assemblies[v.archIndex].vertexCount / 64));
-          d.fractureGPU.encode(pass);
-          d.posedOnce = true;
-        }
+      for (const v of vessels) {
+        const d = v.damaged;
+        if (!d?.ready) continue;
+        if (!d.needsRestCopy && !d.fractureGPU.active) continue;
+        d.needsRestCopy = false;
+        pass.setPipeline(damagedPipes.restPosePipe);
+        pass.setBindGroup(0, d.poseBindGroup);
+        pass.dispatchWorkgroups(Math.ceil(shipData.assemblies[v.archIndex].vertexCount / 64));
+        d.fractureGPU.encode(pass);
       }
       if (wavePipe && waveBindGroups && activeWaveVesselCount > 0) {
         const swIdx = resolvedSurfaceWaves?.views?.length >= 2 ? (resolvedSurfaceWaves.current & 1) : 0;
@@ -7503,6 +7506,8 @@ export async function createTradeVessels({
       if (destroyed) return;
       destroyed = true;
       for (const v of vessels) destroyVesselDamaged(v);
+      for (const assets of fractureAssetsByArch.values()) releaseShipFractureAssets(assets);
+      fractureAssetsByArch.clear();
       disposeDeckCompany();
       for (const b of deckOwned) b?.destroy?.();
       deckOwned.length = 0;

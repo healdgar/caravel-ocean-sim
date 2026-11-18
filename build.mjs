@@ -40,7 +40,7 @@ order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-clip-pose.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-solve.js');
 // People through the one continuum: the baked format, its GPU cut and draws, and the batches crew.js keeps.
-order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/wgsl/crew-continuum.js','js/crew-continuum-draw.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/wgsl/crew-continuum.js','js/bc7-transcode.js','js/crew-continuum-draw.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-groves.js');

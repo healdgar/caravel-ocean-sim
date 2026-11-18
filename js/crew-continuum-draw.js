@@ -12,6 +12,7 @@ import { requestOnce } from './gpu-program-cache.js';
 import { continuumAtlasTypes, continuumRoom, loadContinuumAtlas } from './continuum-format.js';
 import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, uploadContinuumAtlas, createContinuumScene } from './continuum-scene.js';
 import { continuumGroundView } from './continuum-ground.js';
+import { transcodeBC7Texture } from './bc7-transcode.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import {
   CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, crewContinuumMissingMessage, crewContinuumRig, crewContinuumWear,
@@ -35,9 +36,12 @@ export function crewContinuumBodyFor({ sex = 'male', role = 'hand', culture = nu
 // The baked cultures, by the archetypes js/crew.js names (INDIGENOUS_ARCHETYPE_IDS).
 export const CREW_CONTINUUM_CULTURES = Object.freeze(['algonquian', 'caribbean', 'maya', 'andean']);
 
+// The picture in the first codec the device reads; a device that reads neither has the BC7 picture decoded on the GPU
+// at load into rgba8 (js/bc7-transcode.js), the same texels, so every device draws a person's own picture.
 const crewContinuumCodecs = Object.freeze([
   Object.freeze({ feature: 'texture-compression-bc', format: 'bc7-rgba-unorm-srgb', stream: 'albedo.bc7.bin' }),
   Object.freeze({ feature: 'texture-compression-astc', format: 'astc-4x4-unorm-srgb', stream: 'albedo.astc.bin' }),
+  Object.freeze({ feature: null, format: 'rgba8unorm-srgb', stream: 'albedo.bc7.bin', transcode: true }),
 ]);
 
 async function crewContinuumFetch(path, fetchAsset) {
@@ -69,12 +73,10 @@ function crewContinuumAbsent(id, codec, fetchAsset) {
 async function openCrewContinuumBody(device, id, fetchAsset) {
   if (!CREW_CONTINUUM_BODIES.some((b) => b.id === id)) throw Error(`Unknown crew continuum body: ${id}`);
   const paths = CREW_CONTINUUM_ASSETS[id];
-  const codec = crewContinuumCodecs.find((c) => device.features.has(c.feature));
+  const codec = crewContinuumCodecs.find((c) => !c.feature || device.features.has(c.feature));
   const absent = crewContinuumAbsent(id, codec, fetchAsset);
   let atlas, picture, standIn;
   try {
-    // A device that reads neither codec cannot draw a person's picture, and nothing stands in for it.
-    if (!codec) throw Error(`Crew continuum ${id}: this device reads neither BC7 nor ASTC textures, which people's pictures are baked in`);
     atlas = await loadContinuumAtlas({ assets: paths, validate: validateCrewContinuumManifest, label: `crew ${id}`, fetchAsset });
     [picture, standIn] = await Promise.all([
       crewContinuumStream(atlas.manifest, codec.stream, fetchAsset),
@@ -93,11 +95,16 @@ async function openCrewContinuumBody(device, id, fetchAsset) {
     return buffer;
   };
   const { width, height, levels } = manifest.texture;
-  const texture = device.createTexture({ label: `crew continuum ${id} picture`, size: [width, height], mipLevelCount: levels.length, format: codec.format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-  levels.forEach((level, mipLevel) => {
-    const across = Math.ceil(level.width / 4), down = Math.ceil(level.height / 4);
-    device.queue.writeTexture({ texture, mipLevel }, picture, { offset: level.offset, bytesPerRow: across * 16, rowsPerImage: down }, [across * 4, down * 4]);
-  });
+  const label = `crew continuum ${id} picture`;
+  const texture = codec.transcode
+    ? await transcodeBC7Texture(device, { bytes: picture, width, height, levels, format: codec.format, label })
+    : device.createTexture({ label, size: [width, height], mipLevelCount: levels.length, format: codec.format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  if (!codec.transcode) {
+    levels.forEach((level, mipLevel) => {
+      const across = Math.ceil(level.width / 4), down = Math.ceil(level.height / 4);
+      device.queue.writeTexture({ texture, mipLevel }, picture, { offset: level.offset, bytesPerRow: across * 16, rowsPerImage: down }, [across * 4, down * 4]);
+    });
+  }
   return {
     id, manifest, standIn, words, types: continuumAtlasTypes(words), atlas: uploadContinuumAtlas(device, words, `crew ${id}`),
     rig: uniform(`crew continuum ${id} rig`, crewContinuumRig(manifest)), wear: uniform(`crew continuum ${id} wear`, crewContinuumWear(manifest)),
@@ -219,7 +226,9 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
   const standGroup = device.createBindGroup({
     label: `crew continuum ${body.id} stand`, layout: stand.getBindGroupLayout(0),
     entries: [
-      ...[frame, hull, bones, actor, orders, run, scene.records, scene.poses, body.rig, counted?.buffer ?? orders].map((buffer, binding) => ({ binding, resource: { buffer } })),
+      // Afloat, the stand reads nothing of the frame: the eye's place never decides who is drawn.
+      ...[frame, hull, bones, actor, orders, run, scene.records, scene.poses, body.rig, counted?.buffer ?? orders].map((buffer, binding) => ({ binding, resource: { buffer } }))
+        .filter(({ binding }) => ground || binding > 0),
       ...(ground ? [{ binding: 10, resource: continuumGroundView(device) }] : []),
     ],
   });

@@ -236,7 +236,7 @@ fn captainOwnColours(paint:vec3f,p:vec3f,flagged:f32,skin:vec4f,hair:vec3f,shirt
 }
 `;
 // Shading never discards, so the GPU shades only what shows: people are drawn opaque through the one continuum
-// (js/wgsl/crew-continuum.js), and one whose body the eye stands in is not drawn at all.
+// (js/wgsl/crew-continuum.js), however near the eye stands.
 // How much of the light on dry cloth it throws back toward a grazing eye. Skin has none of it, and nor has a hull.
 export const CREW_CLOTH_SHEEN = 0.045;
 // The crew's shading. The sheen is a parameter so that a test can take the cloth's own lobe away and hold everything
@@ -256,7 +256,7 @@ export const crewRenderWGSL = (clothSheen = CREW_CLOTH_SHEEN) => FRAME_WGSL + AT
 // in the wrap below: one sample of a distant figure then blazes at the top of the half-float range.
 struct CrewVertex {
   @invariant @builtin(position) position:vec4f, @location(0) @interpolate(perspective,centroid) world:vec3f,
-  @location(1) @interpolate(perspective,centroid) normal:vec3f, @location(2) @interpolate(perspective,centroid) color:vec3f, @location(3) @interpolate(flat) helm:f32,
+  @location(1) @interpolate(perspective,centroid) normal:vec3f, @location(2) @interpolate(perspective,centroid) color:vec3f,
   @location(4) @interpolate(perspective,centroid) wet:vec2f, @location(5) @interpolate(perspective,centroid) skin:f32,
   @location(6) @interpolate(perspective,centroid) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f,
   @location(8) @interpolate(flat) paint:u32, @location(9) @interpolate(flat) actor:u32
@@ -314,7 +314,7 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   let skin=crewSkin(v);let surface=crewSurface(v);let p=rotateHull((skin*vec4f(surface.position,1)).xyz)+hull.origin.xyz;
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
   out.world=p;out.normal=normalize(rotateHull(crewOrthonormal3x3(skin)*surface.normal));
-  let actor=actors[v.instance];out.helm=floor(actor.trousers.w+0.01);
+  let actor=actors[v.instance];
   out.bodyPos=v.position;
   let woundAmt=select(clamp(actor.shirt.w/0.45,0.0,1.0),0.0,actor.shirt.w>0.5);
   let scorchAmt=clamp(fract(actor.trousers.w)/0.42,0.0,1.0);
