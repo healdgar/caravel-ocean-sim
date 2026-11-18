@@ -171,7 +171,9 @@ export function layBoardWaterfront({ place, seat = false, heightAt, inlandAt, in
     if (!pick || pick.head > -1) continue;
     const { type, T } = pick, x = root.x - root.nx * T.length / 2, z = root.z - root.nz * T.length / 2;
     const f = footprint(x, z, T.width, T.length, root.yaw);
-    if (!inside(x, z, 20) || taken(f, 3)) continue;
+    // Clear of all but the quay it runs out from: what it meets beyond the first metres off the quay's face.
+    const clear = footprint(x - root.nx * 2, z - root.nz * 2, T.width, T.length - 4, root.yaw);
+    if (!inside(x, z, 20) || taken(clear, 1)) continue;
     keep(f);
     const tone = 0.7 + 0.2 * rr();
     pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, 10, tone, { floor: 0, plinth: 0.3, range: 0 });
