@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // A pack's leaves as a field: every leaf card as points, the points as leaf area in a grid, and the
 // surface where that field crosses a level. scripts/prepare-forest-crowns.mjs builds one tree's far crown
-// from it, and scripts/prepare-forest-groves.mjs a whole grove's canopy.
+// from it, and scripts/prepare-forest-stands.mjs spaces a grove's trees by the crowns their leaves make.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

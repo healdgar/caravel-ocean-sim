@@ -1,5 +1,5 @@
 import { ISLAND, decodeIsland, decodeBiome, islandGeometry, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
-import { TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR,
+import { TREE_PIXEL_ERROR,
   GROUND_COVER, createGroundCoverPatches, groundCoverInstances } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT, COASTAL_FIELD_BAKE } from './wgsl/terrain.js';
 import { GROUND_DETAIL_BAKE } from './wgsl/ground-detail.js';
@@ -7,9 +7,9 @@ import { createCoastalField } from './coastal-field.js';
 import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
-import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_SHADOW_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
+import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_VERTEX_WGSL,FOREST_SHADOW_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
 import {FOREST_CROWN_WGSL} from './forest-crowns.js';
-import {FOREST_GROVE_WGSL,loadForestGroves,createForestGroves,requestForestGrovePipelines,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
+import {loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
@@ -104,7 +104,7 @@ export function retargetForestPackToProcedural(
   forestPack,
   proceduralPack,
   groundSample = (x, z) => terrainSurfaceSample(proceduralPack.heights, x, z, proceduralPack.region),
-  { isMobile = false, extraSections = [], maxRootCapacity = null, climateProfile = null } = {}
+  { isMobile = false, extraSections = [], maxRootCapacity = null, climateProfile = null, stand = null, rootCapacity = Infinity } = {}
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
   const hasCohorts = forestPack.manifest.prototypes.some((p) => Boolean(p.cohort));
@@ -222,19 +222,15 @@ export function retargetForestPackToProcedural(
     return idxs.map((idx) => Math.round((hArr[Math.min(len - 1, idx)] || 0) * 100)).join(',');
   };
 
-  const seedSectionCanopy = (secPack, secMaxRoots) => {
+  // The trees a section plants one by one, as one list of records for each of the pack's trees: the town's
+  // and the farmer's, then the wood's giants and the canopy round them, as many as the budget allows.
+  const plantSection = (secPack, secMaxRoots) => {
     const region = secPack.region;
     const span = region.span ?? 8192;
     const areaScale = span < 4096 ? Math.max(0.45, Math.min(1, Math.pow(span / 4096, 1.15))) : 1;
     const effectiveSecMaxRoots = Math.max(64, Math.round(secMaxRoots * areaScale));
     const cacheKey = `${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${effectiveSecMaxRoots}:${span}:${heightFingerprint(secPack.heights)}:${secPack.port?.instances?.length ?? 0}:${secPack.city?.count ?? 0}`;
-    if (secPack._cachedForestBuckets?.key === cacheKey) {
-      const cached = secPack._cachedForestBuckets.buckets;
-      for (let i = 0; i < protoCount; i++) {
-        if (cached[i].length) appendFloats(buckets[i], cached[i]);
-      }
-      return;
-    }
+    if (secPack._cachedForestBuckets?.key === cacheKey) return secPack._cachedForestBuckets.buckets;
 
     const x0 = region.x - span * 0.5;
     const z0 = region.z - span * 0.5;
@@ -243,7 +239,7 @@ export function retargetForestPackToProcedural(
     const beaches = secPack.beaches;
     const port = secPack.port;
     const seed = (region.vegetationSeed ?? 47231) >>> 0;
-    if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return;
+    if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return null;
 
     const portCx = port ? port.center.x : proceduralPack.region.x;
     const portCz = port ? port.center.z : proceduralPack.region.z;
@@ -757,8 +753,86 @@ export function retargetForestPackToProcedural(
       }
     }
     secPack._cachedForestBuckets = { key: cacheKey, buckets: secBuckets };
+    return secBuckets;
+  };
+
+  // A planted tree keeps the ground under its crown; a grove's trees stand everywhere else that is wood.
+  const groveReach = (kind, scale) => {
+    const p = forestPack.manifest.prototypes[kind];
+    return Math.max(2.5, Math.min(16, (p?.crownRadius ?? p?.crownRadiusMetres ?? 6) * scale * 0.9));
+  };
+  // The trees of the pack's grove that stand on a section (js/forest-groves.js), as records in the order they
+  // were planted: on every square of its wood that no planted tree has, by the same rules a planted tree keeps.
+  // Planted again only when the section's ground, marking, town or planted trees change.
+  const groveSection = (secPack, planted) => {
+    const region = secPack.region, heights = secPack.heights, port = secPack.port;
+    const plantedFlat = new Float32Array(planted.reduce((sum, b) => sum + b.length, 0));
+    let at = 0;
+    for (const b of planted) { plantedFlat.set(b, at); at += b.length; }
+    const key = `${forestGroveStamp(secPack, plantedFlat)}:${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${isMobile ? 1 : 0}`;
+    if (secPack._cachedForestGrove?.key === key) return secPack._cachedForestGrove.roots;
+    const span = region.span ?? 8192, x0 = region.x - span * 0.5, z0 = region.z - span * 0.5, borderMargin = 0.05;
+    const size = secPack === proceduralPack ? (isMobile ? 512 : 1024) : (isMobile ? 256 : 512);
+    const cover = forestGroveCover({ region: { ...region, span }, heights, biome: secPack.biome, beaches: secPack.beaches, port, mangrove: hasMangrove, size });
+    forestGroveOccupy(cover, size, { ...region, span }, plantedFlat, groveReach);
+    const country = oldWorldCountry(region, heights, port);
+    const waterAt = createInlandWaterSampler(port?.country ?? country, { margin: 3.8 });
+    const cityBlocked = buildCityBlockTester(secPack.city ?? country?.plan ?? port?.colonialCity, 2.6);
+    const half = span * 0.5 - 0.01;
+    const ground = (wx, wz) => heights && region?.size
+      ? terrainSurfaceSample(heights, Math.max(region.x - half, Math.min(region.x + half, wx)), Math.max(region.z - half, Math.min(region.z + half, wz)), region)
+      : groundSample(wx, wz);
+    const isTrop = ['tropical', 'subtropical'].includes(activeClimate.climate) || ['tropical', 'subtropical'].includes(region.climate);
+    const climateTint = activeClimate.foliageTint ?? (isTrop ? [0.78, 1.12, 0.68] : [1.0, 1.0, 1.0]);
+    const harbour = port?.center ?? proceduralPack.port?.center ?? proceduralPack.region;
+    const out = [];
+    forestGroveTrees({ stand, cover, size, region: { ...region, span }, harbour, visit(x, z, kind, scale, yaw, seed) {
+      const proto = forestPack.manifest.prototypes[kind];
+      if (!proto) return;
+      if (x <= x0 + borderMargin || x >= x0 + span - borderMargin || z <= z0 + borderMargin || z >= z0 + span - borderMargin) return;
+      // A grove is wild wood: none stands on a farmer's ground, in a town or by a road.
+      if (country && country.treesAt(x, z) !== null) return;
+      if (port && (port.clearRadius > 0 || port.instances?.length > 0)) {
+        const envPad = port.hasOrthophotoFootprints ? 8 : port.hasIndigenousSettlement ? 8.5 : 10;
+        if (!portClearanceEnvelope(port, x, z, envPad)) return;
+        if (!port.hasOrthophotoFootprints && !port.hasIndigenousSettlement && port.clearRadius > 0 && Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38) return;
+        if (streetEdgeAt(port.streets, x, z) < PLANT_STREET_GAP_M) return;
+      }
+      if (waterAt?.(x, z) || cityBlocked?.(x, z)) return;
+      const gy = ground(x, z);
+      if (!Number.isFinite(gy) || gy < (hasMangrove ? 0.35 : 0.75) || gy > 845) return;
+      const slope = Math.hypot(ground(x + 2, z) - ground(x - 2, z), ground(x, z + 2) - ground(x, z - 2)) * 0.25;
+      if (!Number.isFinite(slope) || slope > 0.84 || (gy < 6 && slope > 0.48)) return;
+      const rim = Math.min(4.5, (proto.crownRadius ?? proto.crownRadiusMetres ?? 8.5) * scale * 0.2), rimMinGy = proto.species === 'mangrove' ? 0.08 : 0.45;
+      if (ground(x + rim, z) < rimMinGy || ground(x - rim, z) < rimMinGy || ground(x, z + rim) < rimMinGy || ground(x, z - rim) < rimMinGy) return;
+      const sink = Math.min(1.6, 0.22 + 0.68 * (proto.basalRadius ?? 1.2) * scale * slope);
+      const tint = 0.92 + ((seed >>> 8) & 0xffff) / 65536 * 0.16;
+      out.push(x, gy - sink, z, scale, yaw, tint * climateTint[0], tint * climateTint[1], tint * climateTint[2], kind, sink, rootIdentityZ, 0);
+    } });
+    const roots = new Float32Array(out);
+    secPack._cachedForestGrove = { key, roots };
+    return roots;
+  };
+
+  // Planted trees first, every section's, within their budget; then each section's grove. The roots are as
+  // many as the device can hold (rootCapacity, js/forest-scenery.js forestRootCapacity), less the planted
+  // budget and the foreshore's palms; a grove that would pass that is planted only so far, and the trees
+  // refused are counted.
+  let plantedTotal = 0, groveTotal = 0, rootsRefused = 0;
+  const groveCapacity = Math.max(0, rootCapacity - effectiveMaxCapacity - FORESHORE_PALMS_MAX - 1);
+  const seedSectionCanopy = (secPack, secMaxRoots, plant = true) => {
+    const planted = plant ? plantSection(secPack, secMaxRoots) : Array.from({ length: protoCount }, () => []);
+    if (!planted) return;
     for (let i = 0; i < protoCount; i++) {
-      if (secBuckets[i].length) appendFloats(buckets[i], secBuckets[i]);
+      if (planted[i].length) { appendFloats(buckets[i], planted[i]); plantedTotal += planted[i].length / 12; }
+    }
+    if (!stand) return;
+    const grove = groveSection(secPack, planted);
+    for (let k = 0; k < grove.length; k += 12) {
+      if (groveTotal >= groveCapacity) { rootsRefused += (grove.length - k) / 12; break; }
+      const bucket = buckets[grove[k + 8]];
+      for (let f = 0; f < 12; f++) bucket.push(grove[k + f]);
+      groveTotal++;
     }
   };
 
@@ -766,9 +840,9 @@ export function retargetForestPackToProcedural(
   if (Array.isArray(extraSections) && extraSections.length > 0) {
     const perSecBudget = isMobile ? 2600 : 15000;
     for (const sec of extraSections) {
-      const currentTotal = buckets.reduce((acc, b) => acc + b.length / 12, 0);
-      const remaining = effectiveMaxCapacity - currentTotal;
-      if (remaining < 64) break;
+      const remaining = effectiveMaxCapacity - plantedTotal;
+      // Once the planted budget is spent a section plants none of its own, but its wood is still a grove.
+      if (remaining < 64) { if (!stand) break; seedSectionCanopy(sec, 0, false); continue; }
       seedSectionCanopy(sec, Math.min(perSecBudget, remaining));
     }
   }
@@ -854,6 +928,9 @@ export function retargetForestPackToProcedural(
     ...forestPack,
     roots,
     maxRootCapacity: effectiveMaxCapacity,
+    rootCapacity,
+    groveRoots: groveTotal,
+    rootsRefused,
     climateProfile: activeClimate,
     manifest: {
       ...forestPack.manifest,
@@ -926,10 +1003,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
   const neuralPbr=sharedNeuralPbrBank(device);
   const terrainSource=withNeuralPbrTerrain(TERRAIN);
-  const modulePromise=shader(terrainSource+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_GROVE_WGSL+FOREST_SHADOW_WGSL+cityContinuumRenderWGSL(),'island terrain');
+  const modulePromise=shader(terrainSource+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+cityContinuumRenderWGSL(),'island terrain');
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
-  const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
-  const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
+  // A struck building's root and shape, one record an instance.
+  const struckInstanceLayout={arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]};
   const makePipe=(module,entryPoint,buffers,fragmentEntry='fs',cullMode='none')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':'city ruins',layout:'auto',
     vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
     primitive:{topology:'triangle-list',cullMode},
@@ -949,7 +1026,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // A city's buildings, through the one continuum (js/city-continuum-draw.js).
     cityContinuumViewPipeline({device,module,format,samples}),
     // One that shot has struck: its pieces, seen from within through the breach, so nothing is left out.
-    makePipe(module,'cityStruckVS',[meshLayout,treeBuffers[1]],'fs','none'),
+    makePipe(module,'cityStruckVS',[meshLayout,struckInstanceLayout],'fs','none'),
   ]));
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
@@ -960,7 +1037,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // until each is first needed, they compile one after another once it is.
   for(const pending of [computePipe(COASTAL_FIELD_BAKE,'coastal field'),computePipe(GROUND_DETAIL_BAKE,'ground detail bake'),
     useProcedural?requestCityContinuumPipelines({device,shader,shadowFormat:activeLandShadows.format}):null,
-    canopyMode==='off'||!useProcedural||search.get('forestGroves')==='0'?null:requestForestGrovePipelines({device,shader,module:modulePromise,format,samples}),
     requestLandCraterPipelines({device,shader,computePipe,module:modulePromise,format,samples}),
     useProcedural?requestInlandWaterPipeline({device,shader,format,samples}):null,
     useProcedural?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
@@ -973,15 +1049,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const bakedBoardPromise=bakedBoardPath?Promise.all([fetch(bakedBoardPath).then(response=>response.ok?response.json():null).catch(()=>null),
     boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionParam,resolvedYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs)):null;
   if(bakedBoardPath)requestBoardStampPipelines({device,shader}).catch(()=>{});
-  const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
   let forestFailure=null;
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
     assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
     skipRoots:useProcedural,
     deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
   }).catch(error=>{forestFailure=error.message;return null;});
-  // Groves stand for the woods of a generated coast beyond its planted trees (js/forest-groves.js). A coast
-  // that cannot load them keeps its planted trees alone.
+  // A grove is the wood of a generated coast beyond its planted trees, planted as roots of the forest pack
+  // (js/forest-groves.js). A coast that cannot load its grove keeps its planted trees alone, and says why.
   let groveFailure=null;
   const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
   const grovePromise=canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
@@ -1255,15 +1330,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     pass.end();device.queue.submit([encoder.finish()]);
   }
-  const leafImage=await leafBitmapPromise;
-  // The source foliage's integrated linear colour, which ground cover's green is mixed from. One authoring
-  // image readback at load time; no fragment fetches a leaf texture.
-  const leafCanvas=typeof OffscreenCanvas==='function'?new OffscreenCanvas(leafImage.width,leafImage.height):Object.assign(document.createElement('canvas'),{width:leafImage.width,height:leafImage.height});
-  const leafContext=leafCanvas.getContext('2d',{willReadFrequently:true});leafContext.drawImage(leafImage,0,0);
-  const leafPixels=leafContext.getImageData(0,0,leafImage.width,leafImage.height).data,leafRGB=[0,0,0];let leafWeight=0;
-  for(let i=0;i<leafPixels.length;i+=4){const alpha=leafPixels[i+3]/255;leafWeight+=alpha;for(let c=0;c<3;c++)leafRGB[c]+=Math.pow(leafPixels[i+c]/255,2.2)*alpha;}
-  const leafMean=buffer(new Float32Array([...leafRGB.map(v=>v/Math.max(leafWeight,1)),leafWeight/(leafPixels.length/4)]),GPUBufferUsage.UNIFORM,'source foliage mean colour');
-  leafImage.close();
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
@@ -1326,7 +1392,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   }
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
-  const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[11,{buffer:leafMean}],...activeLandShadows.terrainResources];
+  const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],...activeLandShadows.terrainResources];
   const portShadowGroup=bind(portShadowPipe,[[19,{buffer:activeLandShadows.uniform}]]);
   // Every building of a city, cut and drawn through the one continuum from the atlas baked for every type
   // (js/city-continuum-draw.js). The atlas and the cut's programs are asked for once a coast has a city. Those
@@ -1349,33 +1415,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // has no trees, never a stand-in.
   const forestPack=await forestPromise;
   const streamMaxRoots=isMobile?22000:112000;
-  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
+  // Planted trees keep their budget; a grove's are as many as the device can hold (forestRootCapacity).
+  const grovePack=forestPack&&proceduralPack?await grovePromise:null,rootCapacity=forestRootCapacity(device);
+  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity}):forestPack;
   // What has been shot down on this coast comes back with it, and is kept with the port damage.
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
   const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}).catch(error=>{forestFailure=error.message;return null;}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
-  // The cast a climate gives its leaves, as planted trees carry it in their roots.
-  const groveTint=()=>activeClimate?.foliageTint??(['tropical','subtropical'].includes(activeClimate?.climate)||['tropical','subtropical'].includes(activeRegion.climate)?[0.78,1.12,0.68]:[1,1,1]);
-  let groves=null;
-  const grovePack=await grovePromise;
-  if(grovePack&&proceduralPack&&forest&&forestPack)try{
-    const sceneIds=[0,1,2,3,4,5,6,19,20,21];
-    groves=await createForestGroves({device,shader,module,frameUBO,pack:grovePack,format,samples,
-      bind:pipe=>bind(pipe,resources.filter(([id])=>sceneIds.includes(id))),cloudEntries:pipe=>clouds.bindVolume(pipe),
-      tint:groveTint(),pixelsPerSquare:isMobile?10:6,baseCoverSize:isMobile?512:1024,sectionCoverSize:isMobile?256:512});
-  }catch(error){groveFailure=error.message;}
-  forestStats.groves=groves?.stats??{loaded:false,error:groveFailure};
-  // A planted tree keeps the ground under its crown; a grove's trees stand everywhere else that is wood.
-  const groveReach=(kind,scale)=>{const p=forestPack.manifest.prototypes[kind];return Math.max(2.5,Math.min(16,(p?.crownRadius??p?.crownRadiusMetres??6)*scale*.9));};
-  function syncGroves(roots){
-    if(!groves||terrainDisposed)return;
-    const sources=[{key:'0,0',region:activeRegion,heights,biome,beaches:proceduralPack.beaches,port:proceduralPack.port,ground:elevation}];
-    for(const sec of loadedSections.values())sources.push({key:sec.key,region:sec.region,heights:sec.heights,biome:sec.biome,beaches:sec.beaches,port:sec.port});
-    groves.setTint(groveTint());
-    // A planted tree is drawn as itself at every distance: the canopy parts round it, never stands in for it.
-    groves.sync(sources,roots,groveReach,forestPack.manifest.prototypes.some(p=>p.species==='mangrove'));
-  }
-  syncGroves(activeForestPack?.roots);
+  forestStats.groves=grovePack?{loaded:true,roots:activeForestPack?.groveRoots??0,refused:activeForestPack?.rootsRefused??0,rootCapacity}:{loaded:false,error:groveFailure};
   forestStats.coverage=forestPack?.manifest.coverage??null;
   // The town's ways as a distance field. A coast without a town binds an empty one.
   const townField=streets=>{
@@ -1566,7 +1613,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const secOpaqueResources=[
       [0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],
       [5,lighting.createView()],[6,{buffer:sUniform}],[7,sAlbedo.createView()],
-      [8,landSampler],[9,sBiome.createView()],[11,{buffer:leafMean}],
+      [8,landSampler],[9,sBiome.createView()],
       [12,{buffer:nearDomain}],[13,nearAlbedo.createView()],
       ...sTownField.resources,...groundDetail.resources,...activeLandShadows.terrainResources,...neuralPbr.terrainResources,
     ];
@@ -1661,10 +1708,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         forestPack,
         proceduralPack,
         baseGroundSample,
-        {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}
+        {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity}
       );
       forest.updatePack(nextForestPack,regionalElevationData??heights,getRegionalOcclusionRegion());
-      syncGroves(nextForestPack.roots);
+      if(grovePack)Object.assign(forestStats.groves,{roots:nextForestPack.groveRoots,refused:nextForestPack.rootsRefused});
       lastCamera=null;
     }
   }
@@ -2696,7 +2743,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();groundDetail.dispose();boardStamp?.dispose();
       activeTownField?.texture.destroy();activeTownField?.window.destroy();
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
-      biomeTexture?.destroy?.();leafMean?.destroy?.();
+      biomeTexture?.destroy?.();
       boulderContinuum?.destroy();
       cityContinuumMade++;cityContinuum?.destroy();cityContinuum=null;cityStruck?.destroy();
       inlandWater?.destroy?.();
@@ -2704,7 +2751,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       meadowGrass?.destroy?.();
       tradeVessels?.destroy?.();
       forest?.destroy?.();
-      groves?.destroy();
       if(ownsLandShadows)activeLandShadows.destroy();
     },
     updatePortDamage(now=0){
@@ -2808,7 +2854,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       boulderContinuum?.prepare(pass);
       cityContinuum?.setPixelError(currentPixelError);cityContinuum?.encode(pass);
       forest?.encode(pass);
-      groves?.encode(pass,frame);
       herds?.encode(pass);
       meadowGrass?.encode(pass);
       tradeVessels?.encode?.(pass);
@@ -2879,7 +2924,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       meadowGrass?.draw(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
       // Solid wood and crowns before cutout leaves, for Apple's hidden-surface removal.
-      forest?.drawOpaque(pass);groves?.drawOpaque(pass,viewProjection);
+      forest?.drawOpaque(pass);
       forest?.drawCutout(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.drawDamaged?.(pass);
     },

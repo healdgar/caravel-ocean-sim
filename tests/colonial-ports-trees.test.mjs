@@ -244,7 +244,7 @@ test('Deliverable 3 & Terrain Interface Hooks: Forest Modeler visual parity, Por
   assert.ok(rawOakGreen < 0.05 && unattenuatedOakGreen > 0.095, `Portugal oak splat green un-attenuated from ${rawOakGreen.toFixed(4)} to ${unattenuatedOakGreen.toFixed(4)}`);
 
   const loadedGroves = await loadForestGroves({ assets: PORTUGAL_FOREST_GROVE_ASSETS, fetchAsset: localFetch });
-  assert.ok(loadedGroves.maps.length > 0 && loadedGroves.trees.length > 0, 'Portugal groves pass SHA-256 verification and un-attenuate cleanly');
+  assert.ok(loadedGroves.trees.length > 0 && loadedGroves.manifest.maxTrees > 1, 'Portugal grove trees pass SHA-256 verification');
 
   // 5. Verify terrain.js exposes herdsWatch, setStreetMounts, and refreshBoardFabric, and refreshOldWorldBoardCountry updates board fabric
   const terrainSrc = fs.readFileSync('js/terrain.js', 'utf8');

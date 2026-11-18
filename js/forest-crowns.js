@@ -184,7 +184,6 @@ const FOREST_CROWN_RING_CS=array<vec2f,8>(
 struct ForestCrownLight {colour:vec3f,kind:vec2f,leafUV:vec2f,normal:vec3f};
 // The light and colour of a patch of crown at world: leaves is the way its leaves face in the mean,
 // outward the way the body they make up faces there, and optics and underside are a ForestCrownLook's.
-// A grove's canopy (js/forest-groves.js) is lit by it too, since it stands for the same leaves.
 fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,colour:vec3f,exposure:f32,escape:f32,optics:vec4f,underside:vec3f)->ForestCrownLight{
  let view=normalize(F.camPos.xyz-world);let middle=normalize(leaves);
  let side=normalize(cross(middle,select(vec3f(1.,0.,0.),vec3f(0.,0.,1.),abs(middle.x)>.9)));let other=cross(middle,side);

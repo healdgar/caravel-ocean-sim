@@ -388,8 +388,10 @@ export async function createForestClusters({ device, shader, module, frame, sour
     if (!info) throw Error(`Forest crowns lack species ${p.species}`);
     return info;
   }) : null;
-  const maxRoots = Math.floor(roots.size / ROOT_BYTES), crownListBase = count * 2 * CLUSTERS_PER_DRAW;
-  const crownTotalSlots = crownInfo ? count * CROWN_CONT_TRIS_PER_SPECIES + 2 * maxRoots : 0;
+  // What is sized by how many roots the forest holds: the roots and visible lists it is given, and the list
+  // here whose crowns' splat and fade stretches hold one place a root. reroot gives it larger ones.
+  let maxRoots = 0, list = null, windPoses = null, windWeights = null;
+  const crownListBase = count * 2 * CLUSTERS_PER_DRAW;
   const make = (data, usage, label) => {
     const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: usage | B.COPY_DST });
     owned.push(buffer);
@@ -397,8 +399,6 @@ export async function createForestClusters({ device, shader, module, frame, sour
     return buffer;
   };
   const vertices = make(source.vertices, B.STORAGE, 'forest cluster vertices'), indices = make(source.indices, B.STORAGE, 'forest cluster indices'), clusters = make(source.clusters, B.STORAGE, 'forest clusters');
-  const list = device.createBuffer({ label: 'forest clusters to draw', size: (crownListBase + crownTotalSlots) * 8, usage: B.STORAGE });
-  owned.push(list);
   // Each species has four draws: wood and leaves for the camera, then wood and leaves for the shadow map.
   // After every species' four come CROWN_LISTS draws: progressive continuum triangles, 1-triangle splat, and crossfade.
   const crownDraw = (id, region) => {
@@ -414,8 +414,8 @@ export async function createForestClusters({ device, shader, module, frame, sour
   const crownVertices = crownInfo ? make(crowns.vertices, B.STORAGE, 'forest crown vertices') : null;
   const crownIndices = crownInfo ? make(crowns.indices, B.INDEX | B.STORAGE, 'forest crown indices') : null;
   const crownMorph = make(crownInfo ? crowns.morph : new Uint32Array(4), B.STORAGE, 'forest crown morph');
-  const windPoses = wind?.posesBuffer ?? make(new Uint32Array([1, 0, FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES]), B.STORAGE, 'forest wind fallback poses');
-  const windWeights = wind?.weightsBuffer ?? make(new Uint32Array(4), B.STORAGE, 'forest wind fallback weights');
+  const fallbackPoses = make(new Uint32Array([1, 0, FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES]), B.STORAGE, 'forest wind fallback poses');
+  const fallbackWeights = make(new Uint32Array(4), B.STORAGE, 'forest wind fallback weights');
   const shadowList = hasLandShadow ? device.createBuffer({ label: 'forest clusters casting shadows', size: count * 2 * SHADOW_CLUSTERS_PER_DRAW * 8, usage: B.STORAGE }) : null;
   if (shadowList) owned.push(shadowList);
   const leafIndices = make(Uint32Array.from({ length: CLUSTER_LEAVES * LEAF_PATTERN.length }, (_, i) => Math.floor(i / LEAF_PATTERN.length) * FOREST_LEAF_VERTICES + LEAF_PATTERN[i % LEAF_PATTERN.length]), B.INDEX, 'forest cluster leaf pattern');
@@ -474,36 +474,55 @@ export async function createForestClusters({ device, shader, module, frame, sour
     const uniform = (listBase, extraFlags = 0) => make(new Uint32Array([listBase, firstMaterials[id], extraFlags | closedCrown | subRoot | p.nativeMaterials.length, samples]), B.UNIFORM, 'forest cluster bin');
     const wood = uniform(id * 2 * CLUSTERS_PER_DRAW), leaf = uniform((id * 2 + 1) * CLUSTERS_PER_DRAW);
     const woodShadow = uniform(id * 2 * SHADOW_CLUSTERS_PER_DRAW), leafShadow = uniform((id * 2 + 1) * SHADOW_CLUSTERS_PER_DRAW);
-    const clusterGroup = (pipeline, hasIndices, from = list) => device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(3),
-      entries: [{ binding: 0, resource: { buffer: from } }, { binding: 1, resource: { buffer: clusters } }, { binding: 2, resource: { buffer: vertices } }, ...(hasIndices ? [{ binding: 3, resource: { buffer: indices } }] : []), { binding: 4, resource: { buffer: bounds } }, { binding: 8, resource: { buffer: windPoses } }, { binding: 9, resource: { buffer: windWeights } }],
-    });
-    const shadowSurface = (pipeline, offset) => device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(2),
-      entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: offset } }],
-    });
     // Progressive continuum triangles, 1-triangle splat (bit 1024), and crossfade list (bit 2048).
-    const crown = crownInfo ? (() => {
-      const look = make(forestCrownLook(crownInfo[id]), B.UNIFORM, 'forest crown look');
-      const splat = make(forestCrownSplatLook(crownInfo[id]), B.UNIFORM, 'forest crown splat');
-      const bins = [uniform(0, 0), uniform(0, 1024), uniform(0, 2048)];
-      const groups = (pipeline) => ({
-        cluster: device.createBindGroup({ layout: pipeline.getBindGroupLayout(3), entries: [{ binding: 0, resource: { buffer: list } }, { binding: 2, resource: { buffer: crownVertices } }, { binding: 3, resource: { buffer: crownIndices } }, { binding: 5, resource: { buffer: look } }, { binding: 6, resource: { buffer: crownMorph } }, { binding: 7, resource: { buffer: splat } }, { binding: 8, resource: { buffer: windPoses } }] }),
-        surface: bins.map((bin) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(2), entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: bin } }] })),
-      });
-      return { info: crownInfo[id], bins, solid: groups(crownPipeline), fade: groups(crownFadePipeline) };
-    })() : null;
-    return {
-      info, bucket, crown, rootCount: p.rootCount,
-      select: device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, visibleCounts, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } })), { binding: 10, resource: { buffer: crownMorph } }] }),
-      wood: { surface: surfaceEntries(woodPipeline, p.id, wood, true), cluster: clusterGroup(woodPipeline, true) },
-      leafDepth: { surface: surfaceEntries(leafDepthPipeline, p.id, leaf, false), cluster: clusterGroup(leafDepthPipeline, false) },
-      leaf: { surface: surfaceEntries(leafPipeline, p.id, leaf, true), cluster: clusterGroup(leafPipeline, false) },
-      shadowSelect: shadowSelect ? device.createBindGroup({ layout: shadowSelect.getBindGroupLayout(0), entries: [frameEntry(0), ...[[1, roots], [4, clusters], [5, shadowList], [6, draws], [7, parameters], [8, bucket], [9, shadowUniform]].map(([binding, buffer]) => ({ binding, resource: { buffer } }))] }) : null,
-      woodShadow: woodShadowPipeline ? { surface: shadowSurface(woodShadowPipeline, woodShadow), cluster: clusterGroup(woodShadowPipeline, true, shadowList) } : null,
-      leafShadow: leafShadowPipeline ? { surface: surfaceEntries(leafShadowPipeline, p.id, leafShadow, false), cluster: clusterGroup(leafShadowPipeline, false, shadowList) } : null,
-    };
+    const crown = crownInfo ? {
+      info: crownInfo[id], look: make(forestCrownLook(crownInfo[id]), B.UNIFORM, 'forest crown look'),
+      splat: make(forestCrownSplatLook(crownInfo[id]), B.UNIFORM, 'forest crown splat'), bins: [uniform(0, 0), uniform(0, 1024), uniform(0, 2048)],
+    } : null;
+    return { p, info, bucket, bounds, crown, rootCount: p.rootCount, uniforms: { wood, leaf, woodShadow, leafShadow } };
   });
+  // Every bind group that names the roots, the visible lists, the list here or the wind's poses, made again
+  // whenever reroot is given larger ones.
+  function bindSpecies(roots, visible) {
+    for (const s of species) {
+      const { p, bucket, bounds, crown, uniforms: { wood, leaf, woodShadow, leafShadow } } = s;
+      const clusterGroup = (pipeline, hasIndices, from = list) => device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(3),
+        entries: [{ binding: 0, resource: { buffer: from } }, { binding: 1, resource: { buffer: clusters } }, { binding: 2, resource: { buffer: vertices } }, ...(hasIndices ? [{ binding: 3, resource: { buffer: indices } }] : []), { binding: 4, resource: { buffer: bounds } }, { binding: 8, resource: { buffer: windPoses } }, { binding: 9, resource: { buffer: windWeights } }],
+      });
+      const shadowSurface = (pipeline, offset) => device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(2),
+        entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: offset } }],
+      });
+      if (crown) {
+        const groups = (pipeline) => ({
+          cluster: device.createBindGroup({ layout: pipeline.getBindGroupLayout(3), entries: [{ binding: 0, resource: { buffer: list } }, { binding: 2, resource: { buffer: crownVertices } }, { binding: 3, resource: { buffer: crownIndices } }, { binding: 5, resource: { buffer: crown.look } }, { binding: 6, resource: { buffer: crownMorph } }, { binding: 7, resource: { buffer: crown.splat } }, { binding: 8, resource: { buffer: windPoses } }] }),
+          surface: crown.bins.map((bin) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(2), entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: bin } }] })),
+        });
+        crown.solid = groups(crownPipeline); crown.fade = groups(crownFadePipeline);
+      }
+      s.select = device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, visibleCounts, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } })), { binding: 10, resource: { buffer: crownMorph } }] });
+      s.wood = { surface: surfaceEntries(woodPipeline, p.id, wood, true), cluster: clusterGroup(woodPipeline, true) };
+      s.leafDepth = { surface: surfaceEntries(leafDepthPipeline, p.id, leaf, false), cluster: clusterGroup(leafDepthPipeline, false) };
+      s.leaf = { surface: surfaceEntries(leafPipeline, p.id, leaf, true), cluster: clusterGroup(leafPipeline, false) };
+      s.shadowSelect = shadowSelect ? device.createBindGroup({ layout: shadowSelect.getBindGroupLayout(0), entries: [frameEntry(0), ...[[1, roots], [4, clusters], [5, shadowList], [6, draws], [7, parameters], [8, bucket], [9, shadowUniform]].map(([binding, buffer]) => ({ binding, resource: { buffer } }))] }) : null;
+      s.woodShadow = woodShadowPipeline ? { surface: shadowSurface(woodShadowPipeline, woodShadow), cluster: clusterGroup(woodShadowPipeline, true, shadowList) } : null;
+      s.leafShadow = leafShadowPipeline ? { surface: surfaceEntries(leafShadowPipeline, p.id, leafShadow, false), cluster: clusterGroup(leafShadowPipeline, false, shadowList) } : null;
+    }
+  }
+  // The roots and visible lists of a forest that holds more trees than before, and the wind that sways them.
+  // The surfaces' bind groups (surfaceEntries) read the caller's roots, which it has swapped before this.
+  function rebind(nextRoots, nextVisible, nextWind) {
+    const nextMax = Math.floor(nextRoots.size / ROOT_BYTES);
+    const crownTotalSlots = crownInfo ? count * CROWN_CONT_TRIS_PER_SPECIES + 2 * nextMax : 0;
+    const nextList = device.createBuffer({ label: 'forest clusters to draw', size: (crownListBase + crownTotalSlots) * 8, usage: B.STORAGE });
+    const previous = list;
+    maxRoots = nextMax; list = nextList;
+    windPoses = nextWind?.posesBuffer ?? fallbackPoses; windWeights = nextWind?.weightsBuffer ?? fallbackWeights;
+    bindSpecies(nextRoots, nextVisible);
+    return previous;
+  }
+  rebind(roots, visible, wind);
   const activeSpecies = [];
   let hadActiveSpecies = false;
   function frameEntry(binding) { return { binding, resource: { buffer: bind.frameUBO } }; }
@@ -577,6 +596,13 @@ export async function createForestClusters({ device, shader, module, frame, sour
   return {
     placeTrees,
     updatePack: placeTrees,
+    // Larger roots and visible lists, and their wind: the old list is let go once the GPU is done with it.
+    reroot(nextRoots, nextVisible, nextWind) {
+      const previous = rebind(nextRoots, nextVisible, nextWind);
+      placeTrees();
+      const drop = () => previous?.destroy();
+      if (typeof device.queue?.onSubmittedWorkDone === 'function') device.queue.onSubmittedWorkDone().then(drop, drop); else drop();
+    },
     crowns: Boolean(crownInfo),
     draws, // the indirect records, for the continuum census (js/forest-scenery.js continuumDraws)
     encode(pass) {
@@ -631,6 +657,6 @@ export async function createForestClusters({ device, shader, module, frame, sour
         drawWith(pass, leafShadowPipeline, groups.leafShadow.zero, groups.leafShadow.empty1, 'leafShadow', true, count * 2);
       }
     },
-    destroy() { for (const buffer of owned) buffer.destroy(); },
+    destroy() { for (const buffer of owned) buffer.destroy(); list?.destroy(); },
   };
 }

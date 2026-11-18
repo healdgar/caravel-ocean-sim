@@ -580,7 +580,6 @@ struct Land {domain:vec4f};
 @group(0) @binding(7) var landAlbedo:texture_2d<f32>;
 @group(0) @binding(8) var landSampler:sampler;
 @group(0) @binding(9) var vegetationMask:texture_2d<f32>;
-@group(0) @binding(11) var<uniform> leafMean:vec4f;
 struct NearLand {domain:vec4f,grid:vec4f};
 @group(0) @binding(12) var<uniform> nearTerrain:NearLand;
 @group(0) @binding(13) var nearAlbedo:texture_2d<f32>;
@@ -903,7 +902,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   }
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
-  let crown=in.kind.x>3.5;
   var surfaceWet=0.0;var mirrorSpread=0.0;
   var canopyBackscatter=0.0;
   var gd=GroundDetail(0.0,0.0,vec4f(0.0),vec4f(0.0),vec4f(0.0));
@@ -1332,22 +1330,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       }
     }
     n=normalize(n+archNormalOffset);
-  }else if(crown){
-    let exposure=clamp(in.kind.y,0.0,1.0);
-    let canopyGrain=gnoise(world.xz*0.32+vec2f(world.y*0.17));
-    let clumpBillow=gnoise(world.xz*0.85+vec2f(world.y*0.55,-world.y*0.35))*detailFade;
-    let regionalTint=clamp(source/vec3f(0.10,0.14,0.06),vec3f(0.7),vec3f(1.3));
-    albedo=leafMean.rgb*mix(vec3f(1),regionalTint,0.2)*(0.76+exposure*0.32+canopyGrain*0.055+clumpBillow*0.045);
-    ambientVisibility=0.14+exposure*0.47+max(n.y,0.0)*0.09;
-    relief=(canopyGrain*0.035+clumpBillow*0.028)*detailFade;
-    roughness=0.88;
-    canopyBackscatter=0.22*exposure;
-  }else{
-    let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
-    let ridges=pow(clamp(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),0.0,1.0),5.0);
-    let fissure=smoothstep(0.15,0.75,ridges);
-    albedo=vec3f(0.095,0.068,0.038)*(0.76+fissure*0.12+barkNoise*0.18+in.kind.y*0.16);
-    relief=(ridges-0.5)*0.014*(1.2-in.kind.y)*detailFade;roughness=0.91;
   }
   // A town's ways, from a distance field baked when it was laid out. Its red channel is how far
   // this point lies outside a way, its green how the way is surfaced: earth, a rutted road, cobbles.

@@ -31,7 +31,6 @@ const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astron
 order.splice(order.indexOf('js/vegetation.js')+1,0,'js/indigenous-sovereignty.js','js/cairn-primitives.js','js/coastal-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/coastal-field.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/sea-colour.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/scenery-cull.js');
 order.splice(order.indexOf('js/gltf.js'),0,'js/crew-lod.js');
 order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js','js/models/crew-deck-masks.js','js/crew-deck.js','js/crew-traffic.js');
 order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
@@ -145,9 +144,7 @@ const runtimeAssetTypes = new Map([
   ['assets/props/cleat.glb','model/gltf-binary'],
   ['assets/props/jetty-weathered.glb','model/gltf-binary'],
   ['assets/props/jetty-planked.glb','model/gltf-binary'],
-  ['assets/tree-foliage.png','image/png'],
   ['assets/world/saba/albedo.png','image/png'],
-  ['assets/world/saba/canopy.png','image/png'],
   ['assets/world/saba/biome.bin','application/octet-stream'],
   ['assets/world/saba/height.bin','application/octet-stream'],
   ['assets/world/saba/manifest.json','application/json'],
@@ -271,7 +268,7 @@ const TIGHT_WGSL_RELS = new Set([
   'js/wgsl/surface-coupling.js', 'js/wgsl/underwater.js', 'js/wgsl/gunnery-probe.js',
   'js/wgsl/hull-contact.js', 'js/wgsl/rig-surfaces.js', 'js/wgsl/vessel-pose.js',
   'js/wgsl/vessel-recoil.js', 'js/wgsl/deck.js', 'js/wgsl/wetness.js',
-  'js/forest-clusters.js', 'js/forest-crowns.js', 'js/forest-groves.js',
+  'js/forest-clusters.js', 'js/forest-crowns.js',
   'js/forest-surfaces.js',
   'js/forest-wind.js', 'js/forest-trunks.js', 'js/ship-colors.js',
   'js/building-fracture.js', 'js/ship-fracture.js',

@@ -792,6 +792,15 @@ struct ForestPrototype {bound:vec4f,roots:vec4u};
 }
 `;
 
+// As many roots as the device lets one buffer hold, one storage binding see and one dispatch reach. The roots are
+// the largest of the buffers sized by them, at 48 bytes a root; the visible list, the clusters' list and the wind's
+// slots take less. The cull, the wind and each species' cut run one root to a thread in workgroups of 64 along x.
+export function forestRootCapacity(device){
+  const limits=device?.limits??{};
+  const bytes=Math.min(limits.maxStorageBufferBindingSize??134217728,limits.maxBufferSize??268435456);
+  return Math.max(1,Math.min(Math.floor(bytes/48),(limits.maxComputeWorkgroupsPerDimension??65535)*64));
+}
+
 export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,pixelError=3,
   terrainOcclusion=null,savedStrikes=null,strikeOrigin={x:0,z:0},onStrikesChanged=null}){
   if(!(pixelError>0))throw Error('Invalid forest pixel error');
@@ -799,7 +808,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
   const m=pack.manifest,allocated=[],B=GPUBufferUsage;
   const make=(data,usage,label)=>{if(data.byteLength>device.limits.maxBufferSize)throw Error(label+' exceeds GPU maxBufferSize');const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST,label});allocated.push(b);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
   const abort=new AbortController();
-  let destroyed=false,terrainVisibility=null,surfaces=null,clusters=null,wind=null,fallCapsuleCursor=4;
+  let destroyed=false,terrainVisibility=null,surfaces=null,clusters=null,wind=null,fallCapsuleCursor=4,roots=null,visible=null;
   // Far crowns (js/forest-crowns.js). forestCrowns=0 draws every tree's leaves as far as they go; the
   // others move the change for inspection: the nearest it may fall, in metres, the pixel share, and how
   // broad a tree may stand on screen as a crown, in leaf errors. forestWind=0 leaves the trees to the
@@ -827,10 +836,14 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       const maxSink=rooted[i+10]<0?0.65:Infinity;
       rooted[i+9]=Math.min(maxSink,Math.max(rooted[i+9],basal*rooted[i+3]*slope+.08));rooted[i+1]=y-rooted[i+9];
     }
-    let activeRootCount=m.rootCount;
+    // The roots and the list of those in view are as large as the coast's trees, and grow with them (grow, below).
+    // Only the device's limits bound them (forestRootCapacity).
+    const deviceCapacity=forestRootCapacity(device);
+    let rootCapacity=Math.min(deviceCapacity,Math.max(m.rootCount,pack.maxRootCapacity||m.rootCount));
+    let activeRootCount=Math.min(rootCapacity,m.rootCount);
     // Trees shot down in an earlier sitting are down before the coast is first seen.
     reapplyForestStrikes(rooted,activeRootCount,strikes);
-    const stats={loaded:true,backend:'continuum',roots:m.rootCount-excludedRoots,excludedRoots,prototypes:m.prototypes.length,gpuCulling:true,terrainOcclusion:false,pixelError,
+    const stats={loaded:true,backend:'continuum',roots:activeRootCount-excludedRoots,excludedRoots,rootCapacity,deviceRootCapacity:deviceCapacity,prototypes:m.prototypes.length,gpuCulling:true,terrainOcclusion:false,pixelError,
       materialContract:m.materialContract,materialLayers:0,textureFamilies:[],coverageFiltering:'Stable independent leaf footprint sample masks',
       species:[...new Set(m.prototypes.map(p=>p.species))],sourceClaim:m.sourceClaim};
     // Clusters are each tree near and middling, crowns beyond (js/forest-clusters.js, js/forest-crowns.js): fetched
@@ -843,14 +856,16 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const windPromise=windWanted?loadForestWind({assets:isSubtropicalPack?SUBTROPICAL_FOREST_WIND_ASSETS:isCohortPack?PORTUGAL_FOREST_WIND_ASSETS:FOREST_WIND_ASSETS,signal:abort.signal})
       .catch(error=>{if(abort.signal.aborted)throw error;stats.wind={enabled:false,error:error.message};return null;}):Promise.resolve(null);
     for(const promise of [clusterPromise,crownPromise,windPromise])promise.catch(()=>{});
-    const maxRootCapacity=Math.max(m.rootCount,pack.maxRootCapacity||m.rootCount);
-    const roots=device.createBuffer({size:Math.max(4,maxRootCapacity*12*4),usage:B.STORAGE|B.COPY_DST,label:'forest immutable root transforms'});
-    allocated.push(roots);if(rooted.byteLength)device.queue.writeBuffer(roots,0,rooted);
+    const rootBuffers=capacity=>{
+      roots=device.createBuffer({size:Math.max(48,capacity*48),usage:B.STORAGE|B.COPY_DST,label:'forest immutable root transforms'});
+      visible=device.createBuffer({size:Math.max(4,capacity*4),usage:B.STORAGE|B.COPY_DST,label:'forest GPU visible root IDs'});
+    };
+    rootBuffers(rootCapacity);
+    if(activeRootCount)device.queue.writeBuffer(roots,0,rooted.subarray(0,activeRootCount*12));
     // Each species' bound and the stretch of the roots it holds, which its visible list shares.
     const meta=new ArrayBuffer(m.prototypes.length*32),floats=new Float32Array(meta),words=new Uint32Array(meta);
     for(const p of m.prototypes){floats.set([...p.centre,p.radius],p.id*8);words.set([p.firstRoot,p.rootCount,0,0],p.id*8+4);}
     const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest species bounds and root ranges');
-    const visible=make(new Uint32Array(maxRootCapacity),B.STORAGE,'forest GPU visible root IDs');
     const visibleCounts=make(new Uint32Array(m.prototypes.length),B.STORAGE,'forest GPU visible root counts');
     let currentPixelError=pixelError;
     const parameters=make(new Float32Array([activeRootCount,m.prototypes.length,pixelError,0]),B.UNIFORM,'forest roots and pixel error');
@@ -863,7 +878,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       device.createComputePipelineAsync({label:'forest cull',layout:'auto',compute:{module:cullModule,entryPoint:'forestCull'}}),
     ]);
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:visibleCounts}},{binding:5,resource:{buffer:parameters}}]});
-    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...[frameUBO,roots,prototypes,visible,visibleCounts,parameters].map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
+    const groupCull=()=>device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...[frameUBO,roots,prototypes,visible,visibleCounts,parameters].map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
+    let cullGroup=groupCull();
     async function loadCompressedSurfaces(){
       const materials=m.prototypes.flatMap(p=>p.nativeMaterials);
       const codec=chooseForestSurfaceCodec(device,query.get('forestSurfaces')||'auto');
@@ -890,7 +906,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const materials=make(surfaces.optics,B.STORAGE,'forest material optics');
     stats.materialLayers=surfaces.layers;stats.textureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
     const [clusterSource,crownSource,windSource]=await Promise.all([clusterPromise,crownPromise,windPromise]);forestLoadAbort(abort.signal);
-    wind=await createForestWind({device,shader,frameWGSL:FRAME_WGSL,frameUBO,windSource,roots,maxRoots:maxRootCapacity,prototypes:m.prototypes});
+    wind=await createForestWind({device,shader,frameWGSL:FRAME_WGSL,frameUBO,windSource,roots,maxRoots:rootCapacity,prototypes:m.prototypes});
     wind.updateRoots(activeRootCount);
     stats.wind=wind.stats;
     if(typeof window!=='undefined')window.oceanForestWind=wind;
@@ -943,12 +959,27 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       return -1;
     };
     const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes,strikeOrigin));};
+    // A coast with more trees than the roots hold takes larger buffers, half again what it needs so the next
+    // coast seldom asks again, and never more than the device allows. Everything bound to the old ones is
+    // bound anew; the old are let go once the GPU has done with them.
+    const grow=need=>{
+      const previous=[roots,visible];
+      rootCapacity=Math.min(deviceCapacity,Math.ceil(need*1.5));
+      rootBuffers(rootCapacity);
+      cullGroup=groupCull();
+      wind.reroot(roots,rootCapacity);
+      clusters.reroot(roots,visible,wind);
+      stats.rootCapacity=rootCapacity;
+      const drop=()=>{for(const b of previous)b.destroy();};
+      if(typeof device.queue?.onSubmittedWorkDone==='function')device.queue.onSubmittedWorkDone().then(drop,drop);else drop();
+    };
     return {stats,trunksReady,
       get wind(){return wind;},
       get trunks(){return trunkGrid;},
       updatePack(nextPack,nextHeights=null,nextRegion=null){
         if(destroyed||!nextPack?.roots||!nextPack?.manifest)return;
-        const nextCount=Math.min(maxRootCapacity,nextPack.manifest.rootCount);
+        const nextCount=Math.min(deviceCapacity,nextPack.manifest.rootCount);
+        if(nextCount>rootCapacity)grow(nextCount);
         activeRootCount=nextCount;
         stats.roots=nextCount;
         if(nextPack.roots.byteLength){
@@ -1019,6 +1050,6 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       },
       drawCutout(pass){clusters.drawLeafDepth(pass);clusters.drawLeaves(pass);},
       drawShadow(pass){clusters.drawShadow(pass);},
-      destroy(){destroyed=true;abort.abort();for(const b of allocated)b.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();}};
-  }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();throw error;}
+      destroy(){destroyed=true;abort.abort();for(const b of allocated)b.destroy();roots?.destroy();visible?.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();}};
+  }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();roots?.destroy();visible?.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();throw error;}
 }

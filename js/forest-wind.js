@@ -678,7 +678,7 @@ fn stepSkeletonBones(skelIdx:u32,protoId:u32,windProtoDir:vec3f,windSpeed:f32,gu
 }
 `;
 
-export async function createForestWind({ device, shader, frameWGSL, frameUBO, windSource = null, roots, maxRoots, prototypes }) {
+export async function createForestWind({ device, shader, frameWGSL, frameUBO, windSource = null, roots: initialRoots, maxRoots, prototypes }) {
   const B = GPUBufferUsage, owned = [];
   const make = (size, usage, label, initData = null) => {
     const buffer = device.createBuffer({ label, size: Math.max(16, size), usage: usage | B.COPY_DST });
@@ -687,14 +687,13 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
     return buffer;
   };
   const protoCount = windSource ? prototypes.length : 0;
-  const rootVecCount = Math.ceil(Math.max(1, maxRoots) / 4);
-  const poseVec4Base = 1 + rootVecCount;
   const totalSkeletons = protoCount * FOREST_WIND_SHARED_LANES + FOREST_WIND_MAX_PROMOTED;
-  const totalPoseVec4s = poseVec4Base + Math.max(1, totalSkeletons) * FOREST_WIND_BONES * 2;
-  const posesBuffer = make(totalPoseVec4s * 16, B.STORAGE | B.COPY_SRC, 'forest dynamic wind poses');
 
   if (!windSource) {
-    // Clean zero-prototype header so vertex shaders gracefully fall back when wind stream is absent.
+    // Clean zero-prototype header so vertex shaders gracefully fall back when wind stream is absent. With no
+    // prototypes no root's slot is read, so the poses need not grow with the roots.
+    const poseVec4Base = 1 + Math.ceil(Math.max(1, maxRoots) / 4);
+    const posesBuffer = make((poseVec4Base + Math.max(1, totalSkeletons) * FOREST_WIND_BONES * 2) * 16, B.STORAGE | B.COPY_SRC, 'forest dynamic wind poses');
     device.queue.writeBuffer(posesBuffer, 0, new Uint32Array([poseVec4Base, 0, FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES]));
     const weightsBuffer = make(16, B.STORAGE, 'forest dynamic wind empty weights', new Uint32Array(4));
     return {
@@ -708,6 +707,7 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
       clearPushCapsule() {},
       setWindOverride() {},
       updateRoots() {},
+      reroot() {},
       destroy() { for (const b of owned) b.destroy(); },
     };
   }
@@ -721,8 +721,23 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
 
   const simVec4Count = 2 + FOREST_WIND_MAX_PROMOTED + totalSkeletons * FOREST_WIND_BONES * 2;
   const simStateBuffer = make(simVec4Count * 16, B.STORAGE, 'forest dynamic wind sim state');
-  const promoWordsCount = 1 + FOREST_WIND_MAX_PROMOTED + Math.max(4, maxRoots);
-  const promoTableBuffer = make(promoWordsCount * 4, B.STORAGE, 'forest dynamic wind promotion table');
+  // What grows with the roots: each root's slot at the head of the poses, and its word in the promotion table.
+  // A forest given more roots (reroot) takes new ones; a zeroed table promotes none, as at the start.
+  let roots = null, rootVecCount = 0, poseVec4Base = 0, totalPoseVec4s = 0, posesBuffer = null, promoTableBuffer = null, simGroup = null;
+  const sizeForRoots = (nextRoots, nextMax) => {
+    roots = nextRoots; maxRoots = nextMax;
+    rootVecCount = Math.ceil(Math.max(1, maxRoots) / 4);
+    poseVec4Base = 1 + rootVecCount;
+    totalPoseVec4s = poseVec4Base + Math.max(1, totalSkeletons) * FOREST_WIND_BONES * 2;
+    posesBuffer = device.createBuffer({ label: 'forest dynamic wind poses', size: totalPoseVec4s * 16, usage: B.STORAGE | B.COPY_SRC | B.COPY_DST });
+    promoTableBuffer = device.createBuffer({ label: 'forest dynamic wind promotion table', size: (1 + FOREST_WIND_MAX_PROMOTED + Math.max(4, maxRoots)) * 4, usage: B.STORAGE | B.COPY_DST });
+    // Identity quaternions, so a frame drawn before the first step holds the bind pose.
+    const initPoses = new Float32Array(totalPoseVec4s * 4);
+    new Uint32Array(initPoses.buffer, 0, 4).set([poseVec4Base, protoCount, FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES]);
+    for (let i = poseVec4Base; i < totalPoseVec4s; i += 2) initPoses[i * 4 + 3] = 1.0;
+    device.queue.writeBuffer(posesBuffer, 0, initPoses);
+  };
+  sizeForRoots(initialRoots, maxRoots);
 
   let activeRootCount = Math.min(maxRoots, prototypes.reduce((s, p) => Math.max(s, (p.firstRoot ?? 0) + (p.rootCount ?? 0)), 0) || maxRoots);
   let windAmplitude = 1.0, overrideSpeed = -1.0, overrideAmplitude = -1.0;
@@ -749,12 +764,6 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
   const configBuffer = make(48, B.UNIFORM, 'forest dynamic wind config');
   writeConfig(0.016);
 
-  // Initialize identity quaternions in posesBuffer so frame 0 before first compute is valid bind pose.
-  const initPoses = new Float32Array(totalPoseVec4s * 4);
-  new Uint32Array(initPoses.buffer, 0, 4).set([poseVec4Base, protoCount, FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES]);
-  for (let i = poseVec4Base; i < totalPoseVec4s; i += 2) initPoses[i * 4 + 3] = 1.0;
-  device.queue.writeBuffer(posesBuffer, 0, initPoses);
-
   let bindGroupLayout = device.createBindGroupLayout({
     label: 'forest dynamic wind sim layout',
     entries: [
@@ -780,7 +789,7 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
     device.createComputePipelineAsync({ label: 'forest wind promoted step', layout: pipeLayout, compute: { module: simModule, entryPoint: 'forestWindStepPromoted' } }),
   ]);
 
-  const simGroup = device.createBindGroup({
+  const groupSim = () => device.createBindGroup({
     label: 'forest dynamic wind sim group',
     layout: bindGroupLayout,
     entries: [
@@ -795,6 +804,7 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
       { binding: 8, resource: { buffer: promoTableBuffer } },
     ],
   });
+  simGroup = groupSim();
 
   const stats = {
     enabled: true,
@@ -808,7 +818,7 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
 
   return {
     enabled: true,
-    posesBuffer,
+    get posesBuffer() { return posesBuffer; },
     weightsBuffer,
     stats,
     encode(pass) {
@@ -889,8 +899,19 @@ export async function createForestWind({ device, shader, frameWGSL, frameUBO, wi
       activeRootCount = Math.max(0, Math.min(maxRoots, nextCount | 0));
       writeConfig(0.016);
     },
+    // Larger roots: new slots and table, and the old let go once the GPU is done with them.
+    reroot(nextRoots, nextMax) {
+      const previous = [posesBuffer, promoTableBuffer];
+      sizeForRoots(nextRoots, nextMax);
+      simGroup = groupSim();
+      activeRootCount = Math.min(maxRoots, activeRootCount);
+      writeConfig(0.016);
+      const drop = () => { for (const b of previous) b.destroy(); };
+      if (typeof device.queue?.onSubmittedWorkDone === 'function') device.queue.onSubmittedWorkDone().then(drop, drop); else drop();
+    },
     destroy() {
       for (const b of owned) b.destroy();
+      posesBuffer?.destroy(); promoTableBuffer?.destroy();
     },
   };
 }

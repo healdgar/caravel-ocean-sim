@@ -223,7 +223,7 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp appr
     brGeom.groups.some((g) => g.partKey === 'bridge_approach_ramp'),
     'stone_arch_bridge must emit bridge_approach_ramp groups at both ends'
   );
-  assert.ok(fs.readFileSync('js/forest-groves.js', 'utf8').includes('section.groundSize'), 'forest-groves must check groundSize on section resize');
+  assert.match(fs.readFileSync('js/forest-groves.js', 'utf8'), /export function forestGroveStamp[\s\S]*?region\.size/, 'a grove is planted again when its section is resized');
 });
 
 test('meadow grass is one continuum atlas cut on the GPU: clusters, a 4..6 triangle core, ballistic wakes and terrain bindings', () => {
@@ -272,7 +272,7 @@ test('ungrown frontier parcels & neighbor sections stay mocked until player entr
   assert.ok(target.mockCity && target.mockCity.typedTypes.length > 0, 'mocked parcel must carry physical Cairn marker geometry');
   assertAllFinite(pack.city.blocks, 'mocked pack.city.blocks');
   assertAllFinite(pack.city.typed, 'mocked pack.city.typed');
-  assert.ok(pack.city.typedTypes instanceof Uint32Array, 'mocked pack.city.typedTypes must be Uint32Array for GPU scenery-cull groups');
+  assert.ok(pack.city.typedTypes instanceof Uint32Array, 'mocked pack.city.typedTypes must be Uint32Array for the city continuum cut groups');
   const prevTypedCount = pack.city.typedCount;
 
   // First entry triggers generation ('mocked' -> 'grown', generationCount === 1)
