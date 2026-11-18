@@ -1,10 +1,10 @@
 {
  "format": "waterworld.forest-continuum",
- "version": 2,
+ "version": 3,
  "generator": "scripts/prepare-forest-continuum.mjs",
  "pack": "saba",
  "layout": {
-  "atlasVersion": 2,
+  "atlasVersion": 3,
   "header": {
    "magic": 0,
    "version": 1,
@@ -645,7 +645,7 @@
     "frequencyHz": 0.337,
     "barkLockedCards": 0.9482
    },
-   "bakeMs": 275663
+   "bakeMs": 285666
   },
   {
    "id": 1,
@@ -1247,7 +1247,7 @@
     "frequencyHz": 0.349,
     "barkLockedCards": 0.9754
    },
-   "bakeMs": 148699
+   "bakeMs": 173858
   },
   {
    "id": 2,
@@ -1849,7 +1849,7 @@
     "frequencyHz": 0.423,
     "barkLockedCards": 0.9871
    },
-   "bakeMs": 71475
+   "bakeMs": 77988
   },
   {
    "id": 3,
@@ -2451,7 +2451,7 @@
     "frequencyHz": 0.349,
     "barkLockedCards": 0.9649
    },
-   "bakeMs": 271506
+   "bakeMs": 382423
   },
   {
    "id": 4,
@@ -3053,18 +3053,18 @@
     "frequencyHz": 0.292,
     "barkLockedCards": 0.9589
    },
-   "bakeMs": 319572
+   "bakeMs": 400420
   }
  ],
  "atlas": {
-  "words": 64289915,
-  "bytes": 257159660,
-  "sha256": "5a29a459868aa96e021f66cdef421b2890af5492d52091e11d44aa6ab2551350",
+  "words": 64325375,
+  "bytes": 257301500,
+  "sha256": "fa33eace5dd8cf22e9cf78a5802d1d949cd146b3864392d57deaf0d212dac285",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 103918809,
-   "sha256": "59e52ec0ba42218a81f42e8fee9f82e20854d506b92d006f8aa9b227abb87e38"
+   "bytes": 103996208,
+   "sha256": "7f29f3504c1ee0bf939f99f1e5351864f10eff492a8cf85f9b8e44ce898f2aa0"
   }
  },
- "bakeSeconds": 1110.2
+ "bakeSeconds": 1344.1
 }

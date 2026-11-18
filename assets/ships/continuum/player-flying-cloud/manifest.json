@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-flying-cloud",
  "family": "player",
  "model": "flying-cloud",
@@ -133,12 +133,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 5370996,
-   "sha256": "085f740cd8400b268bde62d82f0b5b4540c5f18dedb3f77c7a7d4eaf4aef04b5",
+   "bytes": 5451016,
+   "sha256": "fc154010727bb9522e8604d2c22da23d40251763c30978851c2812cd1fcc7dc4",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1677044,
-    "sha256": "0ddc6f5ab07e3e74ce9ce23f176fffd1ead085ac75070f9457f5d245eaa678a8"
+    "bytes": 1718134,
+    "sha256": "9aa579aa6ff64e6819efdef934898c71f0daefae57d7232a704d7e3551b03c6d"
    }
   },
   "corners.bin": {

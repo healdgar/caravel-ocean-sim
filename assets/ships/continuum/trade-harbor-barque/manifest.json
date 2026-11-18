@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "trade-harbor-barque",
  "family": "trade",
  "archetype": 6,
@@ -136,12 +136,12 @@
  "poses": 5,
  "files": {
   "body.bin": {
-   "bytes": 3150296,
-   "sha256": "abfd8ce9a2bd7d990a7fb6d15904107d9a742b12c03547be6e2fde2dfdf97226",
+   "bytes": 3230476,
+   "sha256": "85619a8bf0a2b19fe45b2fab204249d8645792d4373d652d4b0d40ce8ba7d8d3",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 988469,
-    "sha256": "278aea124f1b460e9ad7db8bdb04985346a523e4d75d2512ce1beeeff5d881e2"
+    "bytes": 1025462,
+    "sha256": "4fb4fdcdfb3f2a33856c42c0d4015e7efdb7672925fb9944c44d775d2a0c3854"
    }
   },
   "vertices.bin": {

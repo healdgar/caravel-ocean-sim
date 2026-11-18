@@ -1,6 +1,6 @@
 {
  "format": "waterworld.crew-continuum",
- "version": 2,
+ "version": 3,
  "id": "algonquian-male",
  "sex": "male",
  "role": "algonquian",
@@ -12,14 +12,14 @@
   "triangles": 1978397
  },
  "atlas": {
-  "words": 19648733,
+  "words": 19657963,
   "headerWords": 32,
-  "bytes": 78594932,
-  "sha256": "29e51404d37c8ada88086fadb61e839210ac8ccd0786f0d8e77f95b79b93d7b7",
+  "bytes": 78631852,
+  "sha256": "3f891ee209f2b1605e5f41cc99eb011a003abcd0b2c9d92d9744cf90950587bb",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 36126900,
-   "sha256": "598f50c201769cb75218b1a418414ce17febece50781ab588934ea762d692bc5"
+   "bytes": 36140333,
+   "sha256": "c1133829d5e940dac2691af961c3505a2f6d93ad4a5a938ef6a9420842e78158"
   }
  },
  "pieces": [
@@ -147,8 +147,8 @@
    [
     -0.0007,
     1.19392,
-    -0.01675,
-    0.44189
+    -0.03494,
+    0.45256
    ],
    [
     -0.0007,
@@ -518,9 +518,9 @@
    ],
    [
     -0.7355,
-    1.44605,
+    1.44418,
     -0.04968,
-    0.28327
+    0.28405
    ],
    [
     -0.79843,
@@ -697,27 +697,27 @@
   ],
   "wellComposedCells": 4,
   "wrapTriangles": 4956,
-  "baseTriangles": 2046,
-  "baseVertices": 1025,
+  "baseTriangles": 2374,
+  "baseVertices": 1189,
   "baseError": 0.1211,
   "outward": 0.0859,
   "inward": 0.1211,
-  "simplifyError": 0.0105,
-  "steps": 1020,
+  "simplifyError": 0.0067,
+  "steps": 1184,
   "coreTriangles": 6,
   "depth": 7,
   "errorRange": [
    0.1211,
-   0.8694
+   0.8859
   ],
   "inflateMax": 0.1799,
   "rootTriangles": 2368,
-  "farFirst": 0,
-  "farFirstTriangles": 2046,
-  "handoffError": 0.1211,
+  "farFirst": 3,
+  "farFirstTriangles": 2368,
+  "handoffError": 0.1243,
   "farSourceTriangles": 50000,
   "farSourceError": 0.0392,
-  "posedDelta": 0.0584
+  "posedDelta": 0.0416
  },
  "splat": {
   "centre": [
@@ -730,7 +730,7 @@
   "regions": [
    {
     "name": "paint",
-    "share": 0.0803,
+    "share": 0.0989,
     "mean": [
      0.20008,
      0.08706,
@@ -739,7 +739,7 @@
    },
    {
     "name": "shirt",
-    "share": 0.0745,
+    "share": 0.0652,
     "mean": [
      0.23208,
      0.1096,
@@ -748,7 +748,7 @@
    },
    {
     "name": "trousers",
-    "share": 0.4306,
+    "share": 0.4126,
     "mean": [
      0.20801,
      0.11017,
@@ -757,7 +757,7 @@
    },
    {
     "name": "skin",
-    "share": 0.345,
+    "share": 0.3686,
     "mean": [
      0.3538,
      0.14165,
@@ -766,7 +766,7 @@
    },
    {
     "name": "hair",
-    "share": 0.0695,
+    "share": 0.0547,
     "mean": [
      0.56637,
      0.32245,
@@ -875,12 +875,12 @@
  "poses": 27,
  "files": {
   "atlas.bin": {
-   "bytes": 78594932,
-   "sha256": "29e51404d37c8ada88086fadb61e839210ac8ccd0786f0d8e77f95b79b93d7b7",
+   "bytes": 78631852,
+   "sha256": "3f891ee209f2b1605e5f41cc99eb011a003abcd0b2c9d92d9744cf90950587bb",
    "gzip": {
     "file": "atlas.bin.gz",
-    "bytes": 36126900,
-    "sha256": "598f50c201769cb75218b1a418414ce17febece50781ab588934ea762d692bc5"
+    "bytes": 36140333,
+    "sha256": "c1133829d5e940dac2691af961c3505a2f6d93ad4a5a938ef6a9420842e78158"
    }
   },
   "albedo.bc7.bin": {
@@ -902,5 +902,5 @@
    }
   }
  },
- "bakeSeconds": 61.7
+ "bakeSeconds": 56
 }

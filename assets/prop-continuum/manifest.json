@@ -1,9 +1,9 @@
 {
  "format": "waterworld.prop-continuum",
- "version": 2,
+ "version": 3,
  "generator": "scripts/prepare-prop-continuum.mjs",
  "layout": {
-  "atlasVersion": 2,
+  "atlasVersion": 3,
   "header": {
    "magic": 0,
    "version": 1,
@@ -37,10 +37,10 @@
  "totals": {
   "types": 15,
   "clusters": 233,
-  "vertices": 17005,
+  "vertices": 16081,
   "indices": 45324,
   "sourceTriangles": 9310,
-  "farTriangles": 12522
+  "farTriangles": 10636
  },
  "types": [
   {
@@ -62,7 +62,7 @@
     0.0188,
     0.42,
     -0.0084,
-    0.6825
+    0.8355
    ],
    "clusters": {
     "count": 11,
@@ -80,24 +80,24 @@
     ],
     "wellComposedCells": 0,
     "wrapTriangles": 2388,
-    "baseTriangles": 946,
-    "baseVertices": 475,
+    "baseTriangles": 1306,
+    "baseVertices": 655,
     "baseError": 0.0983,
     "outward": 0.0983,
-    "inward": 0.0557,
+    "inward": 0.0556,
     "simplifyError": 0.0084,
-    "steps": 470,
+    "steps": 650,
     "coreTriangles": 6,
-    "depth": 6,
+    "depth": 7,
     "errorRange": [
      0.0983,
-     0.4057
+     0.5579
     ],
     "inflateMax": 0.088,
     "rootTriangles": 370,
-    "farFirst": 288,
+    "farFirst": 468,
     "farFirstTriangles": 370,
-    "handoffError": 0.1473
+    "handoffError": 0.1777
    },
    "splat": {
     "centre": [
@@ -105,11 +105,11 @@
      0.42,
      -0.0084
     ],
-    "rx": 0.2013,
+    "rx": 0.2017,
     "ry": 0.42,
-    "area": 0.265609
+    "area": 0.266137
    },
-   "bakeMs": 1071
+   "bakeMs": 2415
   },
   {
    "id": 1,
@@ -120,17 +120,17 @@
    "layer": 1,
    "quantization": {
     "low": [
-     -3.19628,
-     -0.3,
-     -8.3
+     -2.89628,
+     -0.45,
+     -8
     ],
-    "span": 16.5
+    "span": 16.2
    },
    "sphere": [
-    -0.0463,
-    3,
-    -0.05,
-    10.7115
+    0.0287,
+    2.925,
+    0.1,
+    13.633
    ],
    "clusters": {
     "count": 64,
@@ -140,44 +140,44 @@
     "rootError": 0.94169
    },
    "chain": {
-    "cell": 0.3,
+    "cell": 0.45,
     "cells": [
-     31,
-     32,
-     65
+     24,
+     25,
+     47
     ],
-    "wellComposedCells": 11,
-    "wrapTriangles": 12308,
-    "baseTriangles": 3708,
-    "baseVertices": 1832,
-    "baseError": 0.7427,
-    "outward": 0.7427,
-    "inward": 0.6732,
-    "simplifyError": 0.0786,
-    "steps": 1826,
-    "coreTriangles": 4,
+    "wellComposedCells": 3,
+    "wrapTriangles": 5952,
+    "baseTriangles": 2868,
+    "baseVertices": 1418,
+    "baseError": 1.0885,
+    "outward": 1.0885,
+    "inward": 0.9431,
+    "simplifyError": 0.0944,
+    "steps": 1412,
+    "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
-     0.7427,
-     9.8868
+     1.0885,
+     6.1107
     ],
-    "inflateMax": 1.6492,
+    "inflateMax": 1.6192,
     "rootTriangles": 1065,
-    "farFirst": 1322,
+    "farFirst": 902,
     "farFirstTriangles": 1064,
-    "handoffError": 1.2809
+    "handoffError": 1.8537
    },
    "splat": {
     "centre": [
-     -0.0463,
+     0.0287,
      3.15,
-     -0.05
+     0.1
     ],
-    "rx": 4.0112,
+    "rx": 4.5997,
     "ry": 3.15,
-    "area": 39.694903
+    "area": 45.518709
    },
-   "bakeMs": 5203
+   "bakeMs": 11132
   },
   {
    "id": 2,
@@ -196,9 +196,9 @@
    },
    "sphere": [
     0.0584,
-    2.1937,
+    2.2781,
     0.1125,
-    11.9425
+    15.2898
    ],
    "clusters": {
     "count": 66,
@@ -208,44 +208,44 @@
     "rootError": 0.37182
    },
    "chain": {
-    "cell": 0.3375,
+    "cell": 0.5062,
     "cells": [
-     38,
-     24,
-     65
+     29,
+     20,
+     47
     ],
-    "wellComposedCells": 17,
-    "wrapTriangles": 12628,
-    "baseTriangles": 3864,
-    "baseVertices": 1919,
-    "baseError": 0.8654,
-    "outward": 0.8654,
-    "inward": 0.7414,
-    "simplifyError": 0.1106,
-    "steps": 1910,
-    "coreTriangles": 6,
-    "depth": 8,
+    "wellComposedCells": 13,
+    "wrapTriangles": 5344,
+    "baseTriangles": 3140,
+    "baseVertices": 1570,
+    "baseError": 1.1281,
+    "outward": 1.1281,
+    "inward": 1.0992,
+    "simplifyError": 0.0435,
+    "steps": 1565,
+    "coreTriangles": 4,
+    "depth": 9,
     "errorRange": [
-     0.8654,
-     5.7867
+     1.1281,
+     9.4331
     ],
     "inflateMax": 1.8216,
     "rootTriangles": 1901,
-    "farFirst": 982,
+    "farFirst": 620,
     "farFirstTriangles": 1900,
-    "handoffError": 1.2797
+    "handoffError": 1.6351
    },
    "splat": {
     "centre": [
      0.0584,
-     2.1937,
+     2.2781,
      0.1125
     ],
-    "rx": 5.6672,
-    "ry": 2.1937,
-    "area": 39.056709
+    "rx": 5.9815,
+    "ry": 2.2781,
+    "area": 42.808771
    },
-   "bakeMs": 5541
+   "bakeMs": 7303
   },
   {
    "id": 3,
@@ -260,13 +260,13 @@
      -1,
      -1
     ],
-    "span": 2.04
+    "span": 2.07
    },
    "sphere": [
-    0.02,
-    0.02,
-    0.02,
-    1.3428
+    0.035,
+    0.035,
+    0.035,
+    2.8869
    ],
    "clusters": {
     "count": 81,
@@ -276,32 +276,32 @@
     "rootError": 0.10232
    },
    "chain": {
-    "cell": 0.06,
+    "cell": 0.09,
     "cells": [
-     45,
-     45,
-     45
+     34,
+     34,
+     34
     ],
     "wellComposedCells": 0,
-    "wrapTriangles": 11196,
-    "baseTriangles": 3300,
-    "baseVertices": 1652,
-    "baseError": 0.0978,
-    "outward": 0.0978,
-    "inward": 0.064,
-    "simplifyError": 0.0307,
-    "steps": 1647,
+    "wrapTriangles": 5136,
+    "baseTriangles": 2618,
+    "baseVertices": 1311,
+    "baseError": 0.1434,
+    "outward": 0.1434,
+    "inward": 0.0688,
+    "simplifyError": 0.0295,
+    "steps": 1306,
     "coreTriangles": 6,
-    "depth": 8,
+    "depth": 9,
     "errorRange": [
-     0.0978,
-     1.1258
+     0.1434,
+     1.1168
     ],
-    "inflateMax": 0.2039,
+    "inflateMax": 0.2069,
     "rootTriangles": 80,
-    "farFirst": 1610,
+    "farFirst": 1269,
     "farFirstTriangles": 80,
-    "handoffError": 0.3268
+    "handoffError": 0.3876
    },
    "splat": {
     "centre": [
@@ -313,7 +313,7 @@
     "ry": 1,
     "area": 3.141593
    },
-   "bakeMs": 6917
+   "bakeMs": 9578
   },
   {
    "id": 4,
@@ -381,7 +381,7 @@
     "ry": 0.66,
     "area": 0.05544
    },
-   "bakeMs": 23
+   "bakeMs": 40
   },
   {
    "id": 5,
@@ -449,7 +449,7 @@
     "ry": 0.06,
     "area": 0.010559999999999998
    },
-   "bakeMs": 181
+   "bakeMs": 227
   },
   {
    "id": 6,
@@ -517,7 +517,7 @@
     "ry": 0.06,
     "area": 0.0156
    },
-   "bakeMs": 281
+   "bakeMs": 439
   },
   {
    "id": 7,
@@ -585,7 +585,7 @@
     "ry": 0.19,
     "area": 0.01064
    },
-   "bakeMs": 67
+   "bakeMs": 91
   },
   {
    "id": 8,
@@ -653,7 +653,7 @@
     "ry": 0.07,
     "area": 0.0061600000000000005
    },
-   "bakeMs": 97
+   "bakeMs": 147
   },
   {
    "id": 9,
@@ -721,7 +721,7 @@
     "ry": 0.12,
     "area": 0.0264
    },
-   "bakeMs": 117
+   "bakeMs": 164
   },
   {
    "id": 10,
@@ -789,7 +789,7 @@
     "ry": 0.36,
     "area": 0.01728
    },
-   "bakeMs": 81
+   "bakeMs": 119
   },
   {
    "id": 11,
@@ -857,7 +857,7 @@
     "ry": 0.33,
     "area": 0.0396
    },
-   "bakeMs": 73
+   "bakeMs": 128
   },
   {
    "id": 12,
@@ -925,7 +925,7 @@
     "ry": 0.5,
     "area": 0.038
    },
-   "bakeMs": 95
+   "bakeMs": 155
   },
   {
    "id": 13,
@@ -993,7 +993,7 @@
     "ry": 0.33,
     "area": 0.01452
    },
-   "bakeMs": 21
+   "bakeMs": 22
   },
   {
    "id": 14,
@@ -1061,18 +1061,18 @@
     "ry": 0.05,
     "area": 0.004
    },
-   "bakeMs": 139
+   "bakeMs": 223
   }
  ],
  "atlas": {
-  "words": 215677,
-  "bytes": 862708,
-  "sha256": "f9c2784ee9209975c8392839a8d14ff0f921a9c7e6cd1cdc5bca824ff95734e8",
+  "words": 225624,
+  "bytes": 902496,
+  "sha256": "8972a62f9d7e403c2d1990bc6de73288f49c48b97a752ac7b589d2e58123e930",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 339532,
-   "sha256": "4286ee04688007f98b29379ba2204dfd69611005307d0bd4abc553439543ee12"
+   "bytes": 368292,
+   "sha256": "25ec9bd8a1098f00eca9f78ad08276e38bc241274ec6cabf1c73197c7844d936"
   }
  },
- "bakeSeconds": 20.1
+ "bakeSeconds": 32.5
 }

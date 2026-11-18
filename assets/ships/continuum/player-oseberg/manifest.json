@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-oseberg",
  "family": "player",
  "model": "oseberg",
@@ -127,12 +127,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 3581804,
-   "sha256": "137574eb07637941ff1e0a7b49f72f982ed437dd5ffa0a332e505fb374cf1d72",
+   "bytes": 3658784,
+   "sha256": "c0075c51553ae5cb12f02b4e0936aa07e95c2358260bb23256909904ef592e66",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1291660,
-    "sha256": "134712a4aac5d5be66b5c101b7acbb59ae680d2102975a0ea180d3752631ff44"
+    "bytes": 1326993,
+    "sha256": "5acd214008a430ff498e15fe618acc2c679b5c95fa5735977294561917c75d19"
    }
   },
   "corners.bin": {

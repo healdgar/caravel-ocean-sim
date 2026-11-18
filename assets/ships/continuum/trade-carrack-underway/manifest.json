@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "trade-carrack-underway",
  "family": "trade",
  "archetype": 2,
@@ -135,12 +135,12 @@
  "poses": 3,
  "files": {
   "body.bin": {
-   "bytes": 3492184,
-   "sha256": "ad16d7d314bcb6fcc0649e3644ddd6fa228ddde642811a729d897cf9b92445f1",
+   "bytes": 3572444,
+   "sha256": "2e6ca9235247ae89932633d590100ee25389e98ccc04d1da5e8e49e3b5aa1427",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1163279,
-    "sha256": "1402c37110867f566bf442b4be4480aa44d6248d9ed6376f32893fae44a293bd"
+    "bytes": 1202850,
+    "sha256": "51234fa0b7e3f0b6ac2c5fed6741007e77a2eb22791adb4a9c27be7a93411377"
    }
   },
   "vertices.bin": {

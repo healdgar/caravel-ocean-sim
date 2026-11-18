@@ -1,10 +1,10 @@
 {
  "format": "waterworld.forest-continuum",
- "version": 2,
+ "version": 3,
  "generator": "scripts/prepare-forest-continuum.mjs",
  "pack": "portugal",
  "layout": {
-  "atlasVersion": 2,
+  "atlasVersion": 3,
   "header": {
    "magic": 0,
    "version": 1,
@@ -645,7 +645,7 @@
     "frequencyHz": 0.224,
     "barkLockedCards": 1
    },
-   "bakeMs": 91863
+   "bakeMs": 101375
   },
   {
    "id": 1,
@@ -1247,7 +1247,7 @@
     "frequencyHz": 0.228,
     "barkLockedCards": 1
    },
-   "bakeMs": 73798
+   "bakeMs": 50254
   },
   {
    "id": 2,
@@ -1849,7 +1849,7 @@
     "frequencyHz": 0.214,
     "barkLockedCards": 0.9909
    },
-   "bakeMs": 52911
+   "bakeMs": 36808
   },
   {
    "id": 3,
@@ -2451,7 +2451,7 @@
     "frequencyHz": 0.216,
     "barkLockedCards": 1
    },
-   "bakeMs": 109093
+   "bakeMs": 74076
   },
   {
    "id": 4,
@@ -3053,7 +3053,7 @@
     "frequencyHz": 0.34,
     "barkLockedCards": 1
    },
-   "bakeMs": 52838
+   "bakeMs": 30771
   },
   {
    "id": 5,
@@ -3655,7 +3655,7 @@
     "frequencyHz": 0.726,
     "barkLockedCards": 1
    },
-   "bakeMs": 40144
+   "bakeMs": 20346
   },
   {
    "id": 6,
@@ -4257,7 +4257,7 @@
     "frequencyHz": 0.243,
     "barkLockedCards": 1
    },
-   "bakeMs": 53930
+   "bakeMs": 34697
   },
   {
    "id": 7,
@@ -4859,7 +4859,7 @@
     "frequencyHz": 0.252,
     "barkLockedCards": 1
    },
-   "bakeMs": 59867
+   "bakeMs": 45807
   },
   {
    "id": 8,
@@ -5461,7 +5461,7 @@
     "frequencyHz": 0.259,
     "barkLockedCards": 0.9993
    },
-   "bakeMs": 87001
+   "bakeMs": 53109
   },
   {
    "id": 9,
@@ -6063,7 +6063,7 @@
     "frequencyHz": 0.231,
     "barkLockedCards": 1
    },
-   "bakeMs": 71842
+   "bakeMs": 52640
   },
   {
    "id": 10,
@@ -6136,11 +6136,11 @@
     "roofShare": 0,
     "wallKind": [
      1,
-     1686986
+     1678148
     ],
     "roofKind": [
      1,
-     1686986
+     1678148
     ]
    },
    "wind": {
@@ -6665,7 +6665,7 @@
     "frequencyHz": 0.376,
     "barkLockedCards": 1
    },
-   "bakeMs": 14961
+   "bakeMs": 16313
   },
   {
    "id": 11,
@@ -7267,18 +7267,18 @@
     "frequencyHz": 0.907,
     "barkLockedCards": 1
    },
-   "bakeMs": 12969
+   "bakeMs": 11328
   }
  ],
  "atlas": {
-  "words": 32763684,
-  "bytes": 131054736,
-  "sha256": "e506a82a247bdf2317a60ec3604cbabf6648f1eb7913f7c207f2a2ad41d0d470",
+  "words": 32842914,
+  "bytes": 131371656,
+  "sha256": "919fe2babad328dac29cd1e465c5a5ae18f9c7ddf7ceebdec420a02b52aff86e",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 54345048,
-   "sha256": "7c1efb2247b8776996eb77ced8db8caec39898125fa396f6ace5c325e271048f"
+   "bytes": 54540523,
+   "sha256": "33d3f4a848dcb82cb5b092d7e2eb6481da4a33cc14bb73ea3e83fa037456c14c"
   }
  },
- "bakeSeconds": 732.8
+ "bakeSeconds": 539.1
 }

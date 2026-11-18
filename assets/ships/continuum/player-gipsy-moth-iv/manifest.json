@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-gipsy-moth-iv",
  "family": "player",
  "model": "gipsy-moth-iv",
@@ -130,12 +130,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 1693124,
-   "sha256": "37fa4a3694de22cc9b16a851090be1e7a19de70c3ec9f6e42afefdb3982e9b8a",
+   "bytes": 1773264,
+   "sha256": "ca65532fca553b4d9837da87c8435314d8ef84b3e97c4182ed3cfdb492be7910",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 579765,
-    "sha256": "ea2e4a01f2646f46aabd85f5d74d68668d93b556b1e48d21ca7e3dbf79569424"
+    "bytes": 617066,
+    "sha256": "9d9c9f6bf78818f6b1e71a14e1616980f7f9b9f103179aebf16583d7015c408d"
    }
   },
   "corners.bin": {

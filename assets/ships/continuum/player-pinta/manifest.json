@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-pinta",
  "family": "player",
  "model": "pinta",
@@ -134,12 +134,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 3082736,
-   "sha256": "a9e84575a08893fe33e3b797d03ffc250a7d16ca6fa76d9b8c90fb99e02aff19",
+   "bytes": 3163036,
+   "sha256": "905bb9977500d5fadd99df8f4f55f8479fbce48de1a36e408c20b56af29075a1",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 990210,
-    "sha256": "e7b11cbf5392e3b8edebdda48935974c54774bb24234b0bf40b4bab50534e33a"
+    "bytes": 1028437,
+    "sha256": "29b474277cd7d1fe4faf7460fb021e441cc9c3f028d87b7eb5b8a7c98e962784"
    }
   },
   "corners.bin": {

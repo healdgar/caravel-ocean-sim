@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "trade-cog-underway",
  "family": "trade",
  "archetype": 0,
@@ -135,12 +135,12 @@
  "poses": 3,
  "files": {
   "body.bin": {
-   "bytes": 3087912,
-   "sha256": "9311e7a9203485b156b7d6db562fd298699140c91ad61eac4d2a0b063ecafaa4",
+   "bytes": 3168212,
+   "sha256": "6540f2c32aeb986fb259028c150f9d04757936f16dbf069d55ededdfd23299bf",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1034115,
-    "sha256": "138b3395269f488383f1588c95e3e83a0edba6dbc86c11054ec693db1ee1a9a5"
+    "bytes": 1072990,
+    "sha256": "2baed46165efd9448b0cfe6c4637056228d023685e812a96314006093584dd19"
    }
   },
   "vertices.bin": {

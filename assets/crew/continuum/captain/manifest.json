@@ -1,6 +1,6 @@
 {
  "format": "waterworld.crew-continuum",
- "version": 2,
+ "version": 3,
  "id": "captain",
  "sex": "male",
  "role": "captain",
@@ -12,14 +12,14 @@
   "triangles": 1927790
  },
  "atlas": {
-  "words": 19138254,
+  "words": 19147584,
   "headerWords": 32,
-  "bytes": 76553016,
-  "sha256": "734780197979d5b1d551dc09cb5cdec2f5fb8b92d15c276743a40dfbb1323c73",
+  "bytes": 76590336,
+  "sha256": "2902dc6c20a7fb10e0aa8c9442c047919c8dfb0bf6f15fdd229b42c3d6a37838",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 34866793,
-   "sha256": "fa843662073cf8b48c4f6542f0013250286cd05dea92fc2a8b6d1be0c7277982"
+   "bytes": 34884870,
+   "sha256": "4b7a95f33a561e26e63d841c0ed7a324055f27b8499df6857bff0d54bce6ccae"
   }
  },
  "pieces": [
@@ -166,7 +166,7 @@
     0.00001,
     1.50952,
     -0.01952,
-    0.38153
+    0.38527
    ],
    [
     -0.02191,
@@ -399,8 +399,8 @@
    [
     0.84974,
     1.31604,
-    0.08218,
-    0.23638
+    0.08048,
+    0.23707
    ],
    [
     0.70508,
@@ -427,16 +427,16 @@
     0.50295
    ],
    [
-    -0.2692,
+    -0.27066,
     1.36757,
     0.00048,
-    0.44394
+    0.44503
    ],
    [
-    -0.30373,
+    -0.30681,
     1.40408,
     -0.01952,
-    0.41594
+    0.41407
    ],
    [
     -0.45369,
@@ -537,8 +537,8 @@
    [
     -0.85287,
     1.32408,
-    0.04007,
-    0.24307
+    0.04048,
+    0.24322
    ],
    [
     -0.75001,
@@ -553,16 +553,16 @@
     0.24734
    ],
    [
-    -0.83991,
+    -0.84663,
     1.35956,
     0.07466,
-    0.23933
+    0.24191
    ],
    [
     -0.86021,
     1.31481,
-    0.08297,
-    0.23139
+    0.08048,
+    0.2325
    ],
    [
     -0.70702,
@@ -697,27 +697,27 @@
   ],
   "wellComposedCells": 9,
   "wrapTriangles": 5468,
-  "baseTriangles": 2436,
-  "baseVertices": 1220,
+  "baseTriangles": 2694,
+  "baseVertices": 1349,
   "baseError": 0.0819,
   "outward": 0.0819,
   "inward": 0.081,
-  "simplifyError": 0.0105,
-  "steps": 1215,
+  "simplifyError": 0.0084,
+  "steps": 1344,
   "coreTriangles": 6,
   "depth": 7,
   "errorRange": [
    0.0819,
-   0.841
+   0.827
   ],
   "inflateMax": 0.1799,
   "rootTriangles": 1914,
-  "farFirst": 261,
+  "farFirst": 390,
   "farFirstTriangles": 1914,
-  "handoffError": 0.1146,
+  "handoffError": 0.122,
   "farSourceTriangles": 49996,
   "farSourceError": 0.0611,
-  "posedDelta": 0.0794
+  "posedDelta": 0.0667
  },
  "splat": {
   "centre": [
@@ -730,7 +730,7 @@
   "regions": [
    {
     "name": "paint",
-    "share": 0.0907,
+    "share": 0.0563,
     "mean": [
      0.07347,
      0.059,
@@ -739,7 +739,7 @@
    },
    {
     "name": "shirt",
-    "share": 0.3851,
+    "share": 0.3989,
     "mean": [
      0.01902,
      0.01658,
@@ -748,7 +748,7 @@
    },
    {
     "name": "trousers",
-    "share": 0.4166,
+    "share": 0.4373,
     "mean": [
      0.04971,
      0.04534,
@@ -757,7 +757,7 @@
    },
    {
     "name": "skin",
-    "share": 0.0446,
+    "share": 0.0402,
     "mean": [
      0.36577,
      0.1383,
@@ -766,7 +766,7 @@
    },
    {
     "name": "hair",
-    "share": 0.0629,
+    "share": 0.0673,
     "mean": [
      0.54766,
      0.28196,
@@ -875,12 +875,12 @@
  "poses": 27,
  "files": {
   "atlas.bin": {
-   "bytes": 76553016,
-   "sha256": "734780197979d5b1d551dc09cb5cdec2f5fb8b92d15c276743a40dfbb1323c73",
+   "bytes": 76590336,
+   "sha256": "2902dc6c20a7fb10e0aa8c9442c047919c8dfb0bf6f15fdd229b42c3d6a37838",
    "gzip": {
     "file": "atlas.bin.gz",
-    "bytes": 34866793,
-    "sha256": "fa843662073cf8b48c4f6542f0013250286cd05dea92fc2a8b6d1be0c7277982"
+    "bytes": 34884870,
+    "sha256": "4b7a95f33a561e26e63d841c0ed7a324055f27b8499df6857bff0d54bce6ccae"
    }
   },
   "albedo.bc7.bin": {
@@ -902,5 +902,5 @@
    }
   }
  },
- "bakeSeconds": 56.9
+ "bakeSeconds": 53
 }

@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-lusoria",
  "family": "player",
  "model": "lusoria",
@@ -127,12 +127,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 2052228,
-   "sha256": "318ce8b60c31e9f36b09355e1ef3c401f5653c14cc6f7175f264e92c1c8afb9d",
+   "bytes": 2129968,
+   "sha256": "a80cdb7d1be5c26412af92a73432b380a41a62d6d598e04b9025bfef6a5ea473",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 728786,
-    "sha256": "5b98ac7ad5a3b69dc3dc4f69aa185774d6e9674d8deb41c4b67c1cfe1ebe67f1"
+    "bytes": 764455,
+    "sha256": "2499c55574a87616522ec47ba0a67a96573eb90e5f88a5d6813e39a1ca98bc28"
    }
   },
   "corners.bin": {

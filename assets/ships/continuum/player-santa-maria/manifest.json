@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-santa-maria",
  "family": "player",
  "model": "santa-maria",
@@ -134,12 +134,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 3535084,
-   "sha256": "d6d75486d67931a6614d3b2d4f75021bd1302133e74bf22bbed2a0a27511d254",
+   "bytes": 3615464,
+   "sha256": "4f207b6f153330544c58c3a538bd290ca34cadaa510cce8057bce223ea0ac221",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1120555,
-    "sha256": "128e16f689b15da509de5eb564e7a6de9c755de74e0010e0a62af5addd0a34fe"
+    "bytes": 1159078,
+    "sha256": "341578a9842668a0070614b81c4d332e542eed516a7155a8d094d873975bf11e"
    }
   },
   "corners.bin": {

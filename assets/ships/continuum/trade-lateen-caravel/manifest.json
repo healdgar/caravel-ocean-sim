@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "trade-lateen-caravel",
  "family": "trade",
  "archetype": 5,
@@ -136,12 +136,12 @@
  "poses": 3,
  "files": {
   "body.bin": {
-   "bytes": 4377548,
-   "sha256": "9e17f95a44c68708d1b098340d72804bacf0b4020addf53053d9cfbf091323d4",
+   "bytes": 4457488,
+   "sha256": "a39b189cb949a6f8df5ec3aec39199a254b6d9e84c6e16af958093b59f9f657f",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1407294,
-    "sha256": "afb80539128e8aaaee8d363f7f51e2acff72591433ebeaed33bb7be3bfac59bd"
+    "bytes": 1444844,
+    "sha256": "96f68bbe70bb4fac3f5963bfb95e4efb3821fa0c2e71e18fa0262986fd5d0499"
    }
   },
   "vertices.bin": {

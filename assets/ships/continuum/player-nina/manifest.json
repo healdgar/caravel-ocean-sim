@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-nina",
  "family": "player",
  "model": "nina",
@@ -135,12 +135,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 4280204,
-   "sha256": "98f343d5785036a69f64f3c442ac367654b9f95fc63189f92bc1e4088b91232c",
+   "bytes": 4360224,
+   "sha256": "70136bc3f3c546f86316b1638806ac68ed3f69f4868e2a8de39a8f162252993d",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1333821,
-    "sha256": "a9e8c38f2269a90e4fbe7207378cf3deee17a6adc53788c3aee02e5ad2e63f1e"
+    "bytes": 1371855,
+    "sha256": "4a99c6688da7076afc2d0103cd8e91fc033320e1789b04c7148224168cc4a500"
    }
   },
   "corners.bin": {

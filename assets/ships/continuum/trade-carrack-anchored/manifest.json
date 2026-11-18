@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "trade-carrack-anchored",
  "family": "trade",
  "archetype": 3,
@@ -133,12 +133,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 3194228,
-   "sha256": "1ae63f4e8af71f662ffed676d0a0511ccc425bc6a147f4f65df1eb98109f20d2",
+   "bytes": 3274448,
+   "sha256": "24d2f778098cd67f92aa59a31b1c1499aeeffbb819d2e4b739a078557bd14f2e",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1050388,
-    "sha256": "8d063e46e08be632489c3de884b32c186abbc45ad59fb408f798564071579bd8"
+    "bytes": 1088063,
+    "sha256": "10ce1aa659543aa4ed5d548abc7856b814b266240dd43f44abded995ea6bd0bf"
    }
   },
   "vertices.bin": {

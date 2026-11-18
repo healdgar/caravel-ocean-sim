@@ -1,9 +1,9 @@
 {
  "format": "waterworld.boulder-continuum",
- "version": 2,
+ "version": 3,
  "generator": "scripts/prepare-boulder-continuum.mjs",
  "layout": {
-  "atlasVersion": 2,
+  "atlasVersion": 3,
   "header": {
    "magic": 0,
    "version": 1,
@@ -58,7 +58,7 @@
     -0.0246,
     0.3,
     0.0001,
-    1.1073
+    1.2591
    ],
    "clusters": {
     "count": 1,
@@ -105,7 +105,7 @@
     "ry": 0.4,
     "area": 0.928906
    },
-   "bakeMs": 173
+   "bakeMs": 273
   },
   {
    "id": 1,
@@ -124,7 +124,7 @@
     -0.0058,
     0.3,
     -0.033,
-    1.1061
+    1.2062
    ],
    "clusters": {
     "count": 1,
@@ -171,7 +171,7 @@
     "ry": 0.4,
     "area": 0.921743
    },
-   "bakeMs": 339
+   "bakeMs": 505
   },
   {
    "id": 2,
@@ -190,7 +190,7 @@
     0.0211,
     0.3,
     -0.0261,
-    1.1159
+    1.2272
    ],
    "clusters": {
     "count": 1,
@@ -237,7 +237,7 @@
     "ry": 0.4,
     "area": 0.898872
    },
-   "bakeMs": 286
+   "bakeMs": 478
   },
   {
    "id": 3,
@@ -256,7 +256,7 @@
     0.0194,
     0.3,
     -0.016,
-    1.1351
+    1.2761
    ],
    "clusters": {
     "count": 1,
@@ -303,7 +303,7 @@
     "ry": 0.4,
     "area": 0.969998
    },
-   "bakeMs": 241
+   "bakeMs": 456
   },
   {
    "id": 4,
@@ -322,7 +322,7 @@
     0.0101,
     0.3,
     0.0495,
-    1.1353
+    1.2756
    ],
    "clusters": {
     "count": 1,
@@ -369,7 +369,7 @@
     "ry": 0.4,
     "area": 0.98357
    },
-   "bakeMs": 258
+   "bakeMs": 645
   },
   {
    "id": 5,
@@ -388,7 +388,7 @@
     -0.0302,
     0.3,
     0.0305,
-    1.1187
+    1.2063
    ],
    "clusters": {
     "count": 1,
@@ -435,18 +435,18 @@
     "ry": 0.4,
     "area": 0.988094
    },
-   "bakeMs": 233
+   "bakeMs": 527
   }
  ],
  "atlas": {
-  "words": 7546,
-  "bytes": 30184,
-  "sha256": "41fcf9ab573bab7e4c7acd20af3bbd2d0e54a8b20b18241ac1cddcc286840776",
+  "words": 8646,
+  "bytes": 34584,
+  "sha256": "558c9ae39e972db9094c8a0eef176ef1a981a02cc668f5473198dec1f3e83fd7",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 13764,
-   "sha256": "861276eb8be54030e7b87c513a1d673cb91ea55f7dbd75dfaeb3845044972eb0"
+   "bytes": 15826,
+   "sha256": "c3429e381f83244c37629d0d16086d68e918158f095937412eb4ccd5ac90fe86"
   }
  },
- "bakeSeconds": 1.6
+ "bakeSeconds": 2.9
 }

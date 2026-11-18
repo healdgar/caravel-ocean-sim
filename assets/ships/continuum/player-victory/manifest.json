@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-victory",
  "family": "player",
  "model": "victory",
@@ -135,12 +135,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 6179132,
-   "sha256": "90863af1189eefdeb00b1c6d38b0104f3d0a2fca2ed66739a180769fea921a11",
+   "bytes": 6255432,
+   "sha256": "085548ffba69bd8da6e2299a3d68581c63a09e3e608b4742686b7b47c172af3c",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1813574,
-    "sha256": "5ec6de8dab6231cb2aad51d4c34db2ee89305d96593e0a25a841062b546dbef1"
+    "bytes": 1852423,
+    "sha256": "d20a105bd99a120891c700185b4eaeeec2670942e8ec23948cd914cc6be3134e"
    }
   },
   "corners.bin": {

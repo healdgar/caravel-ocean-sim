@@ -1,6 +1,6 @@
 {
  "format": "waterworld.meadow-continuum",
- "version": 2,
+ "version": 3,
  "generator": "scripts/prepare-meadow-grass.mjs",
  "pack": "portugal",
  "source": {
@@ -115,14 +115,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.30621,
     "firstError": 0.496,
-    "lastError": 3.1692,
-    "hops": 7,
-    "knots": 7
+    "lastError": 0.82397,
+    "hops": 6,
+    "knots": 16
    },
    "splat": {
     "canopy": 0.072,
@@ -142,7 +142,7 @@
      1.9895,
      0.6966,
      2.1148,
-     3.6931
+     3.7214
     ]
    }
   },
@@ -212,14 +212,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.29769,
     "firstError": 0.496,
-    "lastError": 1.413,
-    "hops": 6,
-    "knots": 6
+    "lastError": 0.85786,
+    "hops": 7,
+    "knots": 16
    },
    "splat": {
     "canopy": 0.0801,
@@ -239,7 +239,7 @@
      1.9885,
      0.6963,
      2.1146,
-     3.8309
+     3.7782
     ]
    }
   },
@@ -309,14 +309,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.2897,
     "firstError": 0.496,
-    "lastError": 1.9861,
-    "hops": 7,
-    "knots": 6
+    "lastError": 0.83161,
+    "hops": 9,
+    "knots": 13
    },
    "splat": {
     "canopy": 0.091,
@@ -336,7 +336,7 @@
      1.9841,
      0.6909,
      2.111,
-     3.8883
+     3.7535
     ]
    }
   },
@@ -406,14 +406,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.29628,
     "firstError": 0.496,
-    "lastError": 3.82176,
-    "hops": 8,
-    "knots": 8
+    "lastError": 0.88644,
+    "hops": 7,
+    "knots": 17
    },
    "splat": {
     "canopy": 0.0932,
@@ -433,7 +433,7 @@
      1.9876,
      0.6971,
      2.1151,
-     4.3985
+     3.7442
     ]
    }
   },
@@ -503,14 +503,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.496,
     "firstError": 0.496,
-    "lastError": 1.3635,
-    "hops": 6,
-    "knots": 7
+    "lastError": 0.78673,
+    "hops": 9,
+    "knots": 12
    },
    "splat": {
     "canopy": 0.102,
@@ -530,7 +530,7 @@
      2.0853,
      0.6885,
      1.9946,
-     3.7667
+     3.714
     ]
    }
   },
@@ -600,14 +600,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.48122,
     "firstError": 0.496,
-    "lastError": 1.28174,
-    "hops": 9,
-    "knots": 9
+    "lastError": 0.78673,
+    "hops": 7,
+    "knots": 12
    },
    "splat": {
     "canopy": 0.1137,
@@ -627,7 +627,7 @@
      2.0854,
      0.6443,
      1.9953,
-     3.6811
+     3.6684
     ]
    }
   },
@@ -697,14 +697,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.48755,
     "firstError": 0.496,
-    "lastError": 1.949,
-    "hops": 8,
-    "knots": 6
+    "lastError": 0.78673,
+    "hops": 11,
+    "knots": 16
    },
    "splat": {
     "canopy": 0.1099,
@@ -724,7 +724,7 @@
      2.0855,
      0.6412,
      1.9965,
-     4.0048
+     3.667
     ]
    }
   },
@@ -794,14 +794,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.48119,
     "firstError": 0.496,
-    "lastError": 1.49613,
-    "hops": 7,
-    "knots": 6
+    "lastError": 0.78673,
+    "hops": 6,
+    "knots": 11
    },
    "splat": {
     "canopy": 0.1186,
@@ -821,7 +821,7 @@
      2.0868,
      0.6472,
      1.9932,
-     3.7235
+     3.6708
     ]
    }
   },
@@ -891,14 +891,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.36488,
     "firstError": 0.496,
-    "lastError": 1.61022,
-    "hops": 6,
-    "knots": 4
+    "lastError": 0.78673,
+    "hops": 8,
+    "knots": 13
    },
    "splat": {
     "canopy": 0.105,
@@ -918,7 +918,7 @@
      2.0147,
      0.6735,
      2.0052,
-     3.8369
+     3.8242
     ]
    }
   },
@@ -988,14 +988,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.36553,
     "firstError": 0.496,
-    "lastError": 1.78248,
-    "hops": 8,
-    "knots": 4
+    "lastError": 0.78673,
+    "hops": 6,
+    "knots": 16
    },
    "splat": {
     "canopy": 0.1022,
@@ -1015,7 +1015,7 @@
      2.0151,
      0.6786,
      1.997,
-     3.8608
+     3.8081
     ]
    }
   },
@@ -1085,14 +1085,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.37183,
     "firstError": 0.496,
-    "lastError": 1.37518,
+    "lastError": 0.78673,
     "hops": 7,
-    "knots": 6
+    "knots": 12
    },
    "splat": {
     "canopy": 0.0987,
@@ -1112,7 +1112,7 @@
      2.015,
      0.6707,
      2.0019,
-     3.8428
+     3.8301
     ]
    }
   },
@@ -1182,14 +1182,14 @@
    ],
    "chain": {
     "baseTriangles": 320,
-    "steps": 157,
-    "coreTriangles": 6,
+    "steps": 154,
+    "coreTriangles": 12,
     "farFirst": 0,
     "baseError": 0.35876,
     "firstError": 0.496,
-    "lastError": 1.40091,
+    "lastError": 0.80183,
     "hops": 7,
-    "knots": 7
+    "knots": 15
    },
    "splat": {
     "canopy": 0.1045,
@@ -1209,23 +1209,23 @@
      2.0149,
      0.6716,
      2.0061,
-     3.9004
+     3.8477
     ]
    }
   }
  ],
  "atlas": {
-  "words": 99058485,
-  "bytes": 396233940,
-  "sha256": "386fe84495d0a7f2996f749c08418277bf56f53d83a2558e5ca6fbc5c45148fb",
+  "words": 99068121,
+  "bytes": 396272484,
+  "sha256": "bec443e924b9a7bb805ef31e35056abb7755c3726dc742bea457a9a93d706f7f",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 194992650,
-   "sha256": "ef32370e66dc5aac20795ef064828845f2fd7a6276d520ef130767074c0cee2d"
+   "bytes": 194990083,
+   "sha256": "4039a083eb8a24cd31ed5e8f8ac931d6117568af13029dc9fe8753f26e809548"
   },
   "clusters": 95138,
   "vertices": 12721249,
   "indices": 33904728
  },
- "bakeSeconds": 60
+ "bakeSeconds": 62
 }

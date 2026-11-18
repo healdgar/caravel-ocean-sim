@@ -1,6 +1,6 @@
 {
  "format": "waterworld.animal-continuum",
- "version": 2,
+ "version": 3,
  "generator": "scripts/prepare-animal-continuum.mjs",
  "totals": {
   "types": 10,
@@ -127,24 +127,24 @@
     ],
     "wellComposedCells": 0,
     "wrapTriangles": 3168,
-    "baseTriangles": 1384,
-    "baseVertices": 690,
+    "baseTriangles": 1506,
+    "baseVertices": 751,
     "baseError": 0.0735,
     "outward": 0.0735,
     "inward": 0.0659,
     "simplifyError": 0.0105,
-    "steps": 685,
+    "steps": 746,
     "coreTriangles": 6,
     "depth": 7,
     "errorRange": [
      0.0735,
-     0.4855
+     0.5079
     ],
     "inflateMax": 0.1039,
     "rootTriangles": 82,
-    "farFirst": 651,
+    "farFirst": 712,
     "farFirstTriangles": 82,
-    "handoffError": 0.2342,
+    "handoffError": 0.2156,
     "posedDelta": 0.0135
    },
    "splat": {
@@ -153,7 +153,7 @@
      0.42,
      0.043
     ],
-    "rx": 0.2892,
+    "rx": 0.2888,
     "ry": 0.42,
     "colour": [
      0.48388,
@@ -162,7 +162,7 @@
     ]
    },
    "poses": 26,
-   "bakeMs": 2998
+   "bakeMs": 3181
   },
   {
    "id": 1,
@@ -283,25 +283,25 @@
     ],
     "wellComposedCells": 2,
     "wrapTriangles": 4540,
-    "baseTriangles": 1950,
-    "baseVertices": 973,
-    "baseError": 0.129,
+    "baseTriangles": 2366,
+    "baseVertices": 1181,
+    "baseError": 0.1235,
     "outward": 0.1235,
-    "inward": 0.129,
-    "simplifyError": 0.0197,
-    "steps": 968,
+    "inward": 0.1029,
+    "simplifyError": 0.0157,
+    "steps": 1176,
     "coreTriangles": 6,
     "depth": 7,
     "errorRange": [
-     0.129,
-     0.9473
+     0.1235,
+     0.7993
     ],
     "inflateMax": 0.1979,
     "rootTriangles": 121,
-    "farFirst": 915,
+    "farFirst": 1123,
     "farFirstTriangles": 120,
-    "handoffError": 0.3835,
-    "posedDelta": 0.0396
+    "handoffError": 0.3478,
+    "posedDelta": 0.0249
    },
    "splat": {
     "centre": [
@@ -309,7 +309,7 @@
      0.78,
      0.095
     ],
-    "rx": 0.4918,
+    "rx": 0.4867,
     "ry": 0.78,
     "colour": [
      0.28091,
@@ -318,7 +318,7 @@
     ]
    },
    "poses": 26,
-   "bakeMs": 4380
+   "bakeMs": 5566
   },
   {
    "id": 2,
@@ -343,70 +343,70 @@
     "slack": 0.12579,
     "spheres": [
      [
-      -0.013,
-      0.4,
-      0.057,
-      0.56274
+      -0.031,
+      0.42,
+      0.077,
+      0.54265
      ],
      [
       -0.033,
-      0.46,
+      0.48,
       0.339,
-      0.40127
+      0.38694
      ],
      [
       -0.093,
-      0.08,
-      0.157,
-      0.24242
+      0.0785,
+      0.1425,
+      0.22159
      ],
      [
-      0.087,
+      0.107,
       0.08,
-      0.197,
-      0.23516
-     ],
-     [
-      -0.073,
-      0.0755,
-      -0.243,
-      0.2263
-     ],
-     [
-      0.127,
-      0.08,
-      -0.203,
-      0.252
+      0.178,
+      0.22844
      ],
      [
       -0.093,
-      0.08,
-      0.157,
-      0.24242
-     ],
-     [
-      0.087,
-      0.08,
-      0.197,
-      0.23516
-     ],
-     [
-      -0.073,
       0.0755,
       -0.243,
-      0.2263
+      0.21458
      ],
      [
-      0.127,
+      0.11,
       0.08,
-      -0.203,
-      0.252
+      -0.2155,
+      0.23526
      ],
      [
-      0.007,
+      -0.093,
+      0.0785,
+      0.1425,
+      0.22258
+     ],
+     [
+      0.107,
+      0.08,
+      0.178,
+      0.22844
+     ],
+     [
+      -0.093,
+      0.0755,
+      -0.243,
+      0.21458
+     ],
+     [
+      0.11,
+      0.08,
+      -0.2155,
+      0.23526
+     ],
+     [
+      -0.001,
       0.28,
       -0.3935,
-      0.34264
+      0.34011
      ],
      [
       0,
@@ -439,33 +439,33 @@
     ],
     "wellComposedCells": 5,
     "wrapTriangles": 2504,
-    "baseTriangles": 1184,
-    "baseVertices": 594,
-    "baseError": 0.0882,
-    "outward": 0.0882,
-    "inward": 0.0666,
-    "simplifyError": 0.0105,
-    "steps": 589,
+    "baseTriangles": 198,
+    "baseVertices": 101,
+    "baseError": 0.084,
+    "outward": 0.0836,
+    "inward": 0.084,
+    "simplifyError": 0.04,
+    "steps": 96,
     "coreTriangles": 6,
-    "depth": 7,
+    "depth": 5,
     "errorRange": [
-     0.0882,
-     0.4279
+     0.084,
+     0.3626
     ],
     "inflateMax": 0.096,
     "rootTriangles": 435,
-    "farFirst": 375,
-    "farFirstTriangles": 434,
-    "handoffError": 0.1302,
-    "posedDelta": 0.0264
+    "farFirst": 0,
+    "farFirstTriangles": 198,
+    "handoffError": 0.084,
+    "posedDelta": 0.0331
    },
    "splat": {
     "centre": [
-     -0.013,
+     -0.033,
      0.34,
      -0.023
     ],
-    "rx": 0.2802,
+    "rx": 0.2749,
     "ry": 0.34,
     "colour": [
      0.02652,
@@ -474,7 +474,7 @@
     ]
    },
    "poses": 26,
-   "bakeMs": 2680
+   "bakeMs": 927
   },
   {
    "id": 3,
@@ -595,25 +595,25 @@
     ],
     "wellComposedCells": 13,
     "wrapTriangles": 4544,
-    "baseTriangles": 1834,
-    "baseVertices": 917,
+    "baseTriangles": 1856,
+    "baseVertices": 928,
     "baseError": 0.1569,
     "outward": 0.1191,
     "inward": 0.1569,
-    "simplifyError": 0.0126,
-    "steps": 912,
+    "simplifyError": 0.0197,
+    "steps": 923,
     "coreTriangles": 6,
-    "depth": 8,
+    "depth": 7,
     "errorRange": [
      0.1569,
-     0.999
+     0.7386
     ],
     "inflateMax": 0.2099,
     "rootTriangles": 224,
-    "farFirst": 805,
+    "farFirst": 816,
     "farFirstTriangles": 224,
-    "handoffError": 0.3143,
-    "posedDelta": 0.0304
+    "handoffError": 0.291,
+    "posedDelta": 0.0293
    },
    "splat": {
     "centre": [
@@ -621,7 +621,7 @@
      0.93,
      0.143
     ],
-    "rx": 0.4187,
+    "rx": 0.4204,
     "ry": 0.93,
     "colour": [
      0.10928,
@@ -630,7 +630,7 @@
     ]
    },
    "poses": 26,
-   "bakeMs": 6349
+   "bakeMs": 3985
   },
   {
    "id": 4,
@@ -751,10 +751,10 @@
       -1
      ],
      [
-      -0.74281,
-      1.03,
-      -1.38794,
-      0.95414
+      -0.74183,
+      1.02512,
+      -1.38816,
+      0.95906
      ],
      [
       0.01506,
@@ -769,10 +769,10 @@
       1.34378
      ],
      [
-      0.39133,
+      0.36774,
       0.89939,
       0.16313,
-      2.03624
+      2.03597
      ],
      [
       0,
@@ -807,8 +807,8 @@
      [
       0.0921,
       0.89939,
-      -0.10248,
-      2.40382
+      -0.0994,
+      2.40105
      ],
      [
       0,
@@ -865,25 +865,25 @@
     ],
     "wellComposedCells": 6,
     "wrapTriangles": 7484,
-    "baseTriangles": 2280,
-    "baseVertices": 1138,
+    "baseTriangles": 3664,
+    "baseVertices": 1830,
     "baseError": 0.3011,
     "outward": 0.3011,
-    "inward": 0.2763,
-    "simplifyError": 0.0314,
-    "steps": 1133,
+    "inward": 0.2722,
+    "simplifyError": 0.0129,
+    "steps": 1825,
     "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
      0.3011,
-     3.7139
+     1.7519
     ],
     "inflateMax": 0.646,
     "rootTriangles": 1848,
-    "farFirst": 216,
+    "farFirst": 908,
     "farFirstTriangles": 1848,
-    "handoffError": 0.4104,
-    "posedDelta": 0.1197
+    "handoffError": 0.4685,
+    "posedDelta": 0.1639
    },
    "splat": {
     "centre": [
@@ -891,7 +891,7 @@
      0.9576,
      1.5468
     ],
-    "rx": 1.5335,
+    "rx": 1.4848,
     "ry": 0.9576,
     "colour": [
      -1,
@@ -900,7 +900,7 @@
     ]
    },
    "poses": 41,
-   "bakeMs": 11217
+   "bakeMs": 11389
   },
   {
    "id": 5,
@@ -980,9 +980,9 @@
      ],
      [
       0.07667,
-      0.91905,
+      0.91614,
       -0.77267,
-      1.73073
+      1.72967
      ],
      [
       0,
@@ -998,15 +998,15 @@
      ],
      [
       -0.68194,
-      1.28,
+      1.25168,
       -0.03634,
-      1.81749
+      1.8175
      ],
      [
-      0.1606,
+      0.10032,
       1.26,
       -0.03634,
-      1.95111
+      1.98023
      ],
      [
       -0.62304,
@@ -1021,10 +1021,10 @@
       1.51808
      ],
      [
-      -0.41888,
+      -0.41489,
       0.80612,
       -1.27034,
-      1.10306
+      1.10435
      ],
      [
       0,
@@ -1082,15 +1082,15 @@
      ],
      [
       -0.49638,
-      0.78364,
+      0.80509,
       1.51,
-      0.86476
+      0.87148
      ],
      [
       0,
       0.72084,
-      0.14512,
-      2.03839
+      0.1445,
+      2.03898
      ],
      [
       -0.62166,
@@ -1135,25 +1135,25 @@
     ],
     "wellComposedCells": 11,
     "wrapTriangles": 6972,
-    "baseTriangles": 2158,
-    "baseVertices": 1073,
+    "baseTriangles": 3736,
+    "baseVertices": 1862,
     "baseError": 0.3053,
     "outward": 0.2529,
     "inward": 0.3053,
-    "simplifyError": 0.0316,
-    "steps": 1068,
-    "coreTriangles": 6,
-    "depth": 8,
+    "simplifyError": 0.0104,
+    "steps": 1857,
+    "coreTriangles": 4,
+    "depth": 9,
     "errorRange": [
      0.3053,
-     2.0138
+     1.9188
     ],
     "inflateMax": 0.6507,
     "rootTriangles": 2388,
-    "farFirst": 0,
-    "farFirstTriangles": 2158,
-    "handoffError": 0.3053,
-    "posedDelta": 0.1447
+    "farFirst": 674,
+    "farFirstTriangles": 2388,
+    "handoffError": 0.4943,
+    "posedDelta": 0.1416
    },
    "splat": {
     "centre": [
@@ -1161,7 +1161,7 @@
      1.0248,
      1.4707
     ],
-    "rx": 1.5345,
+    "rx": 1.489,
     "ry": 1.0248,
     "colour": [
      -1,
@@ -1170,7 +1170,7 @@
     ]
    },
    "poses": 41,
-   "bakeMs": 6330
+   "bakeMs": 11933
   },
   {
    "id": 6,
@@ -1198,31 +1198,31 @@
       -0.8975,
       0.62,
       0,
-      1.25496
+      1.19926
      ],
      [
       0.8975,
       0.62,
       0,
-      1.25496
+      1.19926
      ],
      [
       -0.86585,
       0.62,
       0.26124,
-      1.05527
+      0.99957
      ],
      [
       0.86585,
       0.64413,
       0.24864,
-      1.15267
+      1.09697
      ],
      [
       0.03754,
       0.91161,
       2.89318,
-      2.6746
+      2.6189
      ],
      [
       0,
@@ -1246,25 +1246,25 @@
       0.03754,
       0.68371,
       -0.06956,
-      2.1959
+      2.1402
      ],
      [
       0.14911,
-      1.11006,
+      1.10773,
       -0.07,
-      1.997
+      1.94109
      ],
      [
       -0.3793,
       1.02556,
       0.77953,
-      1.68469
+      1.62899
      ],
      [
       0,
       0.91161,
       0.55104,
-      1.76686
+      1.71116
      ],
      [
       0,
@@ -1294,25 +1294,25 @@
       -0.52397,
       1.11006,
       -0.845,
-      1.26779
+      1.21209
      ],
      [
       0.03754,
       1.15568,
       -0.12653,
-      2.20557
+      2.14987
      ],
      [
       -0.24734,
       1.05308,
       0.4698,
-      1.41424
+      1.35854
      ],
      [
       0.09452,
       0.96859,
       0.78508,
-      1.83869
+      1.78299
      ],
      [
       0,
@@ -1336,31 +1336,31 @@
       -0.07603,
       1.48464,
       0.04439,
-      1.19517
+      1.13947
      ],
      [
       -0.46575,
-      1.11006,
+      1.10777,
       -0.07,
-      1.91856
+      1.86265
      ],
      [
       -0.01944,
       0.96859,
       -0.12698,
-      2.18615
+      2.13045
      ],
      [
       -0.26657,
-      1.05308,
+      1.02556,
       0.86544,
-      1.28742
+      1.24534
      ],
      [
       0.09452,
       1.11006,
       0.59492,
-      1.6727
+      1.617
      ],
      [
       0,
@@ -1405,25 +1405,25 @@
     ],
     "wellComposedCells": 6,
     "wrapTriangles": 5244,
-    "baseTriangles": 1770,
-    "baseVertices": 881,
-    "baseError": 0.3744,
+    "baseTriangles": 2728,
+    "baseVertices": 1360,
+    "baseError": 0.374,
     "outward": 0.2311,
-    "inward": 0.3744,
-    "simplifyError": 0.0299,
-    "steps": 875,
+    "inward": 0.374,
+    "simplifyError": 0.0153,
+    "steps": 1352,
     "coreTriangles": 6,
-    "depth": 9,
+    "depth": 8,
     "errorRange": [
-     0.3744,
-     1.5739
+     0.374,
+     1.799
     ],
-    "inflateMax": 0.6264,
+    "inflateMax": 0.5707,
     "rootTriangles": 1524,
-    "farFirst": 123,
+    "farFirst": 602,
     "farFirstTriangles": 1524,
-    "handoffError": 0.4675,
-    "posedDelta": 0.126
+    "handoffError": 0.5539,
+    "posedDelta": 0.1573
    },
    "splat": {
     "centre": [
@@ -1431,7 +1431,7 @@
      0.8546,
      1.6397
     ],
-    "rx": 1.1356,
+    "rx": 1.0993,
     "ry": 0.8546,
     "colour": [
      -1,
@@ -1440,7 +1440,7 @@
     ]
    },
    "poses": 41,
-   "bakeMs": 4438
+   "bakeMs": 8934
   },
   {
    "id": 7,
@@ -1466,40 +1466,40 @@
     "slack": 0.04806,
     "spheres": [
      [
-      -0.02,
-      0.23201,
+      0,
+      0.27201,
       -0.56,
-      1.69281
+      1.65968
      ],
      [
       0,
-      0.13201,
-      0.48,
-      0.8196
+      0.14666,
+      0.49,
+      0.84952
      ],
      [
       0,
-      0.05201,
-      0.6,
-      0.8212
+      0.05743,
+      0.61,
+      0.79788
+     ],
+     [
+      0,
+      -0.05799,
+      1.03,
+      0.68909
      ],
      [
       0,
       -0.08799,
-      1.04,
-      0.67913
+      1.3,
+      0.80424
      ],
      [
       0,
-      -0.10799,
-      1.28,
-      0.77775
-     ],
-     [
-      0,
-      -0.10799,
-      1.4,
-      0.7336
+      -0.08799,
+      1.42,
+      0.75771
      ]
     ]
    },
@@ -1512,33 +1512,33 @@
     "pieces": 6
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0.06,
     "cells": [
-     59,
-     40,
-     89
+     43,
+     31,
+     63
     ],
-    "wellComposedCells": 4,
-    "wrapTriangles": 10964,
-    "baseTriangles": 3956,
-    "baseVertices": 1981,
-    "baseError": 0.0892,
-    "outward": 0.0828,
-    "inward": 0.0892,
-    "simplifyError": 0.0105,
-    "steps": 1975,
-    "coreTriangles": 4,
-    "depth": 8,
+    "wellComposedCells": 2,
+    "wrapTriangles": 5212,
+    "baseTriangles": 3338,
+    "baseVertices": 1671,
+    "baseError": 0.1192,
+    "outward": 0.1192,
+    "inward": 0.1032,
+    "simplifyError": 0.0081,
+    "steps": 1666,
+    "coreTriangles": 6,
+    "depth": 7,
     "errorRange": [
-     0.0892,
-     1.2094
+     0.1192,
+     0.9106
     ],
-    "inflateMax": 0.3158,
+    "inflateMax": 0.3118,
     "rootTriangles": 253,
-    "farFirst": 1852,
+    "farFirst": 1543,
     "farFirstTriangles": 252,
-    "handoffError": 0.2093,
-    "posedDelta": 0.0138
+    "handoffError": 0.3184,
+    "posedDelta": 0.0121
    },
    "splat": {
     "centre": [
@@ -1555,7 +1555,7 @@
     ]
    },
    "poses": 5,
-   "bakeMs": 6112
+   "bakeMs": 10037
   },
   {
    "id": 8,
@@ -1581,40 +1581,40 @@
     "slack": 0.12097,
     "spheres": [
      [
-      0,
+      0.04484,
       0.47459,
-      -0.91156,
-      3.02389
+      -0.87009,
+      3.09264
      ],
      [
       0.04484,
       0.47459,
       0.53345,
-      2.56356
+      2.62446
      ],
      [
       0.04484,
       0.01306,
-      1.13969,
-      2.44489
+      1.12025,
+      2.46764
      ],
      [
       -0.00644,
       0.06434,
-      1.58736,
-      1.53468
+      1.60439,
+      1.54273
      ],
      [
       -0.00644,
-      -0.01825,
-      2.05208,
-      1.41533
+      -0.03822,
+      2.06275,
+      1.52943
      ],
      [
       -0.00644,
       0.21819,
-      2.57556,
-      1.79787
+      2.52428,
+      1.82601
      ]
     ]
    },
@@ -1635,25 +1635,25 @@
     ],
     "wellComposedCells": 4,
     "wrapTriangles": 6000,
-    "baseTriangles": 414,
-    "baseVertices": 209,
-    "baseError": 0.3016,
+    "baseTriangles": 3332,
+    "baseVertices": 1668,
+    "baseError": 0.2216,
     "outward": 0.2216,
-    "inward": 0.3016,
-    "simplifyError": 0.1026,
-    "steps": 204,
+    "inward": 0.1842,
+    "simplifyError": 0.0215,
+    "steps": 1663,
     "coreTriangles": 6,
-    "depth": 6,
+    "depth": 9,
     "errorRange": [
-     0.3016,
-     2.119
+     0.2216,
+     2.3876
     ],
-    "inflateMax": 0.5536,
+    "inflateMax": 0.5555,
     "rootTriangles": 73,
-    "farFirst": 171,
+    "farFirst": 1630,
     "farFirstTriangles": 72,
-    "handoffError": 0.7564,
-    "posedDelta": 0.0172
+    "handoffError": 0.7667,
+    "posedDelta": 0.0205
    },
    "splat": {
     "centre": [
@@ -1670,7 +1670,7 @@
     ]
    },
    "poses": 5,
-   "bakeMs": 1145
+   "bakeMs": 8576
   },
   {
    "id": 9,
@@ -1696,111 +1696,111 @@
     "spheres": [
      [
       0.02455,
-      0.19833,
-      0.79301,
-      4.63682
+      0.2424,
+      0.74285,
+      4.57361
      ],
      [
       0.03472,
-      0.19833,
+      0.2424,
       -1.18006,
-      4.36857
+      4.33938
      ],
      [
       0.05812,
       0.11021,
-      -1.10048,
-      4.47554
+      -1.16272,
+      4.37658
      ],
      [
       -0.20623,
       0.11021,
-      -1.50273,
-      5.52371
+      -1.5169,
+      5.47879
      ],
      [
       -1.63978,
       -0.90467,
-      -2.07327,
-      2.90201
+      -1.98514,
+      2.97433
      ],
      [
-      -1.90403,
-      -1.12354,
-      -1.67437,
-      2.65934
+      -1.93154,
+      -1.07948,
+      -1.63031,
+      2.75554
      ],
      [
-      -1.99215,
-      -1.21167,
+      -2.08028,
+      -1.07948,
       -1.49813,
-      2.45202
+      2.59184
      ],
      [
-      0.67669,
-      -0.1104,
+      0.69566,
+      -0.10075,
       -2.72082,
-      4.24781
+      4.15439
      ],
      [
       1.88535,
-      -1.12354,
-      -1.67437,
-      2.71199
+      -1.07948,
+      -1.63031,
+      2.68594
      ],
      [
-      2.0616,
-      -1.12354,
+      2.01753,
+      -1.07948,
       -1.49813,
-      2.50036
+      2.53786
      ],
      [
       0.03472,
       0.11021,
       -3.85567,
-      4.46483
+      4.47081
      ],
      [
       0.03472,
       0.11021,
-      -4.64511,
-      4.21116
+      -4.53844,
+      4.28237
      ],
      [
-      -0.0534,
+      -0.09747,
       0.11021,
       -5.30432,
-      3.6278
+      3.76935
      ],
      [
-      0.03472,
-      0.28646,
-      2.11594,
-      4.72485
-     ],
-     [
-      -0.0534,
-      0.19833,
-      3.56008,
-      3.6936
+      -0.09747,
+      0.37083,
+      2.14168,
+      4.78696
      ],
      [
       0.03472,
       0.11021,
+      3.62255,
+      3.801
+     ],
+     [
+      0.03472,
+      0.2424,
       5.34293,
-      4.32293
+      4.49222
      ],
      [
       0.03472,
-      0.19833,
+      0.2424,
       5.79714,
-      4.067
+      4.23566
      ],
      [
       0.03472,
-      0.37458,
+      0.50677,
       6.13989,
-      3.90358
+      4.07744
      ]
     ]
    },
@@ -1813,33 +1813,33 @@
     "pieces": 17
    },
    "chain": {
-    "cell": 0.1763,
+    "cell": 0.2644,
     "cells": [
-     41,
      31,
-     91
+     25,
+     65
     ],
-    "wellComposedCells": 2,
-    "wrapTriangles": 10140,
-    "baseTriangles": 3188,
-    "baseVertices": 1596,
-    "baseError": 0.915,
-    "outward": 0.3283,
-    "inward": 0.915,
-    "simplifyError": 0.0462,
-    "steps": 1591,
+    "wellComposedCells": 0,
+    "wrapTriangles": 4836,
+    "baseTriangles": 2358,
+    "baseVertices": 1181,
+    "baseError": 0.4585,
+    "outward": 0.4585,
+    "inward": 0.4175,
+    "simplifyError": 0.0693,
+    "steps": 1176,
     "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
-     0.915,
-     4.4091
+     0.4585,
+     4.6444
     ],
     "inflateMax": 1.4269,
     "rootTriangles": 3478,
     "farFirst": 0,
-    "farFirstTriangles": 3188,
-    "handoffError": 0.915,
-    "posedDelta": 0.0248
+    "farFirstTriangles": 2358,
+    "handoffError": 0.4585,
+    "posedDelta": 0.0258
    },
    "splat": {
     "centre": [
@@ -1856,19 +1856,19 @@
     ]
    },
    "poses": 9,
-   "bakeMs": 7710
+   "bakeMs": 9869
   }
  ],
  "atlas": {
-  "words": 1028710,
+  "words": 1141049,
   "headerWords": 32,
-  "bytes": 4114840,
-  "sha256": "82ec6b40c98b44ea13dcb852aea0fab8c6b20baff8090f6e673fbb00a3b4c1c0",
+  "bytes": 4564196,
+  "sha256": "6de8a1690fb09ec85449953f07ae1ca416ef8222edcd4ebb9fc032037062eb37",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 1544270,
-   "sha256": "e095e6ebb72426dc6868f50ebf5f8fd3c9ba12eda3581b1b957761b263c06ea0"
+   "bytes": 1751609,
+   "sha256": "f201e916f4e4575478b7310e6efd05b03052f2b5bf982d7f8e2ec373a4117b34"
   }
  },
- "bakeSeconds": 54.3
+ "bakeSeconds": 75.7
 }

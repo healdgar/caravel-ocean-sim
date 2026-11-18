@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "player-taino-canoe",
  "family": "player",
  "model": "taino-canoe",
@@ -107,12 +107,12 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 1707364,
-   "sha256": "d8111d745464261e8cf0cac9bad13e2ab7a0403e4f5d57d4db0e1c124f821b41",
+   "bytes": 1787424,
+   "sha256": "d6f859c78b69201c8e76d35506e7ae566ab0e7a4a15312869ef82d6ce13b9a40",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 635983,
-    "sha256": "d83c3eb4b7f3204b7710bf4954b67612ee05c21f575c7aa9315131573028c61e"
+    "bytes": 670789,
+    "sha256": "76f0ce67979d48121564bd009ff6d6b755678b3829bdb29ced86046c40072285"
    }
   },
   "corners.bin": {

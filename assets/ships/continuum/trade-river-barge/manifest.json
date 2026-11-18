@@ -1,6 +1,6 @@
 {
  "format": "waterworld.ship-continuum",
- "version": 2,
+ "version": 3,
  "id": "trade-river-barge",
  "family": "trade",
  "archetype": 4,
@@ -126,12 +126,12 @@
  "poses": 11,
  "files": {
   "body.bin": {
-   "bytes": 1812644,
-   "sha256": "60673f0fa676c0007d653b51b749f362f9dcd5c2ec9bc87f1fdebacd1a13fa79",
+   "bytes": 1892784,
+   "sha256": "8d846d3e1539a4e1e38a9c483e70d70c2a89b6fb0fd38aa7f01e5183406e4c52",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 674323,
-    "sha256": "49c936123358ead71ff2e949f8c2ea53016898db843500abefcffd9559d965d5"
+    "bytes": 711038,
+    "sha256": "372a785ef8033014063a0685304e33d820ad926d4f32fa5130910cd4abebd097"
    }
   },
   "vertices.bin": {

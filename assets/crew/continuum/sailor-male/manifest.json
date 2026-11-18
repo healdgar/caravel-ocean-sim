@@ -1,6 +1,6 @@
 {
  "format": "waterworld.crew-continuum",
- "version": 2,
+ "version": 3,
  "id": "sailor-male",
  "sex": "male",
  "role": "hand",
@@ -12,14 +12,14 @@
   "triangles": 1980852
  },
  "atlas": {
-  "words": 19593942,
+  "words": 19602947,
   "headerWords": 32,
-  "bytes": 78375768,
-  "sha256": "7140a645c35c59eb9524b0abece20ef8738e34a2b13bcef23c96ed8d035cf31e",
+  "bytes": 78411788,
+  "sha256": "6b592ec1328ccf154980e70004620975e8ad0855f1b437b5cc207664fc8e2adc",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 36118349,
-   "sha256": "c542c36a06761dd2833f0874f362ad87071e6e37fc9f5bfe0a39fcd233251c5f"
+   "bytes": 36133218,
+   "sha256": "e93e737a209eb8caf597fe99172880030a2e91cbb454478d9dc632b75823cfb4"
   }
  },
  "pieces": [
@@ -142,7 +142,7 @@
     0.00247,
     1.13311,
     0.03225,
-    0.49156
+    0.50251
    ],
    [
     -0.01753,
@@ -160,7 +160,7 @@
     0.00006,
     1.39153,
     0.01225,
-    0.45557
+    0.44823
    ],
    [
     0.0064,
@@ -171,8 +171,8 @@
    [
     0.00245,
     1.62436,
-    0.04704,
-    0.41195
+    0.03225,
+    0.40749
    ],
    [
     0.00247,
@@ -184,7 +184,7 @@
     -0.01753,
     1.5278,
     0.09521,
-    0.29648
+    0.2987
    ],
    [
     -0.00739,
@@ -262,7 +262,7 @@
     0.12301,
     1.38619,
     0.01225,
-    0.45066
+    0.45537
    ],
    [
     0.28192,
@@ -320,9 +320,9 @@
    ],
    [
     0.8248,
-    1.44239,
+    1.42424,
     0.03368,
-    0.24744
+    0.25396
    ],
    [
     0.86196,
@@ -415,10 +415,10 @@
     0.27037
    ],
    [
-    0.76247,
+    0.74247,
     1.36424,
     0.03225,
-    0.26601
+    0.26318
    ],
    [
     -0.12377,
@@ -598,7 +598,7 @@
     0.16193,
     0.46337,
     -0.00775,
-    0.50019
+    0.50585
    ],
    [
     0.16247,
@@ -697,27 +697,27 @@
   ],
   "wellComposedCells": 5,
   "wrapTriangles": 5552,
-  "baseTriangles": 2396,
-  "baseVertices": 1200,
+  "baseTriangles": 2636,
+  "baseVertices": 1320,
   "baseError": 0.0877,
   "outward": 0.0877,
-  "inward": 0.0797,
+  "inward": 0.0794,
   "simplifyError": 0.0105,
-  "steps": 1195,
+  "steps": 1315,
   "coreTriangles": 6,
   "depth": 8,
   "errorRange": [
    0.0877,
-   0.8582
+   0.8578
   ],
   "inflateMax": 0.1839,
   "rootTriangles": 1022,
-  "farFirst": 687,
+  "farFirst": 807,
   "farFirstTriangles": 1022,
-  "handoffError": 0.1427,
+  "handoffError": 0.134,
   "farSourceTriangles": 50000,
   "farSourceError": 0.0511,
-  "posedDelta": 0.0527
+  "posedDelta": 0.0501
  },
  "splat": {
   "centre": [
@@ -725,12 +725,12 @@
    0.9042,
    0.0323
   ],
-  "rx": 0.2559,
+  "rx": 0.2562,
   "ry": 0.9,
   "regions": [
    {
     "name": "paint",
-    "share": 0.0618,
+    "share": 0.1118,
     "mean": [
      0.19328,
      0.07007,
@@ -739,7 +739,7 @@
    },
    {
     "name": "shirt",
-    "share": 0.244,
+    "share": 0.2409,
     "mean": [
      0.17775,
      0.12366,
@@ -748,7 +748,7 @@
    },
    {
     "name": "trousers",
-    "share": 0.4035,
+    "share": 0.3752,
     "mean": [
      0.08927,
      0.05267,
@@ -757,7 +757,7 @@
    },
    {
     "name": "skin",
-    "share": 0.1568,
+    "share": 0.1515,
     "mean": [
      0.22796,
      0.0875,
@@ -766,7 +766,7 @@
    },
    {
     "name": "hair",
-    "share": 0.1339,
+    "share": 0.1206,
     "mean": [
      0.38296,
      0.24088,
@@ -875,12 +875,12 @@
  "poses": 27,
  "files": {
   "atlas.bin": {
-   "bytes": 78375768,
-   "sha256": "7140a645c35c59eb9524b0abece20ef8738e34a2b13bcef23c96ed8d035cf31e",
+   "bytes": 78411788,
+   "sha256": "6b592ec1328ccf154980e70004620975e8ad0855f1b437b5cc207664fc8e2adc",
    "gzip": {
     "file": "atlas.bin.gz",
-    "bytes": 36118349,
-    "sha256": "c542c36a06761dd2833f0874f362ad87071e6e37fc9f5bfe0a39fcd233251c5f"
+    "bytes": 36133218,
+    "sha256": "e93e737a209eb8caf597fe99172880030a2e91cbb454478d9dc632b75823cfb4"
    }
   },
   "albedo.bc7.bin": {
@@ -902,5 +902,5 @@
    }
   }
  },
- "bakeSeconds": 57.6
+ "bakeSeconds": 68
 }
