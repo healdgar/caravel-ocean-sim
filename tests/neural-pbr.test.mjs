@@ -211,7 +211,6 @@ test('GPU decoder probe verifies exact f(0)=identity, distance/mip fade, 12-mate
       const { createNeuralPbrBank } = await import('/js/neural-pbr.js');
       const { createNeuralPbrWGSL } = await import('/js/wgsl/neural-pbr.js');
       const { VESSEL_LIGHTING } = await import('/js/wgsl/vessel.js');
-      const { PI_WGSL } = await import('/js/wgsl/common.js').catch(() => ({ PI_WGSL: 'const PI: f32 = 3.141592653589793;\n' }));
 
       const adapter = await navigator.gpu.requestAdapter();
       const device = await adapter.requestDevice();
