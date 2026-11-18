@@ -1890,14 +1890,9 @@
     "sha256": "99144cfe8e28e64f98390a7fa321f51456931e9bea0e6b134a82cd16a20fadbd"
   },
   "assets/forest-scenery/portugal/groves/manifest.json": {
-    "url": "assets/forest-scenery/portugal/groves/manifest.312222c4a61a5219.json",
-    "bytes": 1484,
-    "sha256": "312222c4a61a52199e95cdaebadbc9246abb59332ef8177e3f62db74aeecf7cd"
-  },
-  "assets/forest-scenery/portugal/groves/maps.bin.gz": {
-    "url": "assets/forest-scenery/portugal/groves/maps.bin.0d05e494c8b01c43.gz",
-    "bytes": 781500,
-    "sha256": "0d05e494c8b01c43ec14356ea34828dea2c440e9f45668e98af4798f66634cb8"
+    "url": "assets/forest-scenery/portugal/groves/manifest.fbfc9c801674466f.json",
+    "bytes": 674,
+    "sha256": "fbfc9c801674466fc040c935bff213cbe2b377967a570e6b8a24d7d56dcaee2c"
   },
   "assets/forest-scenery/portugal/groves/trees.bin.gz": {
     "url": "assets/forest-scenery/portugal/groves/trees.bin.9c2f4c55a86fb0e6.gz",
@@ -1905,14 +1900,9 @@
     "sha256": "9c2f4c55a86fb0e62e94b33fc507da6b40658e0e4577b67db7d89e9c4326cc6f"
   },
   "assets/forest-scenery/subtropical/groves/manifest.json": {
-    "url": "assets/forest-scenery/subtropical/groves/manifest.57a1bc12bde044ef.json",
-    "bytes": 1462,
-    "sha256": "57a1bc12bde044ef97c32bd028847aef6c61d7654cf9e08b64cf8191ff25619d"
-  },
-  "assets/forest-scenery/subtropical/groves/maps.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/groves/maps.bin.a19bf28ee42c6560.gz",
-    "bytes": 827113,
-    "sha256": "a19bf28ee42c6560cf687c0256fc754999b89fc1f4b5414b74c7cb9ee4bef92f"
+    "url": "assets/forest-scenery/subtropical/groves/manifest.85615c46ef0d8e34.json",
+    "bytes": 661,
+    "sha256": "85615c46ef0d8e3493365dad9c1698737ce9f26507723b29c094b2a4f92a048e"
   },
   "assets/forest-scenery/subtropical/groves/trees.bin.gz": {
     "url": "assets/forest-scenery/subtropical/groves/trees.bin.40250fb88f9c43af.gz",
@@ -2173,11 +2163,6 @@
     "url": "assets/ships/continuum/trade-harbor-barque/shards.bin.4adb8679f83e9f9a.gz",
     "bytes": 7041,
     "sha256": "4adb8679f83e9f9a533b32ed9ce6f2e809fadb80093d4b8ca9046f281a71e03c"
-  },
-  "assets/tree-foliage.png": {
-    "url": "assets/tree-foliage.ad40fb471213f1f4.png",
-    "bytes": 444839,
-    "sha256": "ad40fb471213f1f45acef13d9e51c4a26ae1e60a6e066fa165e1d5b5ea76b24b"
   },
   "assets/world/saba/manifest.json": {
     "url": "assets/world/saba/manifest.2697c31e9c5d8c95.json",
