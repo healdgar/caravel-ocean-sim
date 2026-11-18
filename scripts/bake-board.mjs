@@ -82,7 +82,7 @@ const livedIndex = args.indexOf('--lived');
 const livedArg = livedIndex >= 0 ? (args[livedIndex + 1] && !args[livedIndex + 1].startsWith('--') && Number.isFinite(Number(args[livedIndex + 1])) ? Number(args[livedIndex + 1]) : true) : false;
 const request = boardRequest({
   heights: land.heights, span: region.span, seed: number('seed', keptRecord?.seed ?? region.seed ?? 1550), era: year, seat,
-  site: { name: city.name, culture: 'iberian', x: land.centre.x - region.x, z: land.centre.z - region.z },
+  site: { name: city.name, culture: city.culture, x: land.centre.x - region.x, z: land.centre.z - region.z },
   places: (OLD_WORLD_PLACES[city.id] || []).map(([name, latitude, longitude, weight]) => ({ name, x: east(longitude), z: south(latitude), weight })),
   lived: livedArg,
   rivers: { catchment: number('catchment', BOARD_RIVERS.catchment), width: number('width', BOARD_RIVERS.width), least: number('least', BOARD_RIVERS.least), carve: number('carve', BOARD_RIVERS.carve) },

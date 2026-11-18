@@ -105,6 +105,9 @@ export const BAKED_BOARDS = Object.freeze({
   'huelva:1550': 'assets/boards/huelva-1550.json',
   'la-coruna:1550': 'assets/boards/la-coruna-1550.json',
   'setubal:1550': 'assets/boards/setubal-1550.json',
+  'seville:1550': 'assets/boards/seville-1550.json',
+  'porto:1550': 'assets/boards/porto-1550.json',
+  'cadiz-sanlucar:1550': 'assets/boards/cadiz-sanlucar-1550.json',
 });
 export function bakedBoardAsset(port, year) { return BAKED_BOARDS[`${port}:${year}`] ?? null; }
 // And the whole world each was founded as: the model's own save of everything it holds, frozen on its first day.
@@ -117,6 +120,9 @@ export const BAKED_WORLDS = Object.freeze({
   'huelva:1550': 'assets/boards/huelva-1550.world',
   'la-coruna:1550': 'assets/boards/la-coruna-1550.world',
   'setubal:1550': 'assets/boards/setubal-1550.world',
+  'seville:1550': 'assets/boards/seville-1550.world',
+  'porto:1550': 'assets/boards/porto-1550.world',
+  'cadiz-sanlucar:1550': 'assets/boards/cadiz-sanlucar-1550.world',
 });
 export function bakedWorldAsset(port, year) { return BAKED_WORLDS[`${port}:${year}`] ?? null; }
 

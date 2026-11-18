@@ -40,7 +40,7 @@ export const PARTNER_PORT_SPECS = Object.freeze([
     index: 1,
     id: 'porto',
     name: 'Porto',
-    culture: 'iberian',
+    culture: 'portuguese',
     seed: 1494,
     seat: 1.05,
     bayYaw: -0.42,

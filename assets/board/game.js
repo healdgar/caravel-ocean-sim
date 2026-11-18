@@ -695,10 +695,39 @@ const CULT={
     saints:['Pedro','Pablo','Miguel','Esteban','Nicolás','Juan','Jorge','Martín','Lorenzo','Santiago','Isidoro','Millán'],
     church:(S,p,cath)=>cath?(S.length%2?'Catedral de Santa María':`Catedral de San ${S}`):`Iglesia de San ${S}`,
     inns:['Mesón del Toro','Posada del Sol','Venta de la Luna','Mesón de la Cruz','Posada del León','Venta del Gallo','Mesón de los Arrieros','Posada de la Estrella'],
-    trade:{shop:['Tienda de {N}','La Balanza de Oro'],bakery:['Horno de {N}','El Pan de Oro'],smithy:['Herrería de {N}','El Yunque'],tannery:['Tenería de {N}'],warehouse:['Almacén {N} e Hijos','La Alhóndiga']}}
+    trade:{shop:['Tienda de {N}','La Balanza de Oro'],bakery:['Horno de {N}','El Pan de Oro'],smithy:['Herrería de {N}','El Yunque'],tannery:['Tenería de {N}'],warehouse:['Almacén {N} e Hijos','La Alhóndiga']}},
+  portuguese:{name:'Portuguese',adj:'Portuguese',
+    m:['Afonso','Sancho','Dinis','Pedro','Fernão','João','Duarte','Henrique','Nuno','Gonçalo','Egas','Vasco','Álvaro','Martim','Lourenço','Rodrigo','Estêvão','Soeiro'],
+    f:['Urraca','Mafalda','Teresa','Beatriz','Isabel','Leonor','Constança','Inês','Filipa','Brites','Guiomar','Branca','Sancha','Violante','Mécia'],
+    roots:['Rosa','Alva','Branca','Ouro','Sol','Lua','Real','Touro','Águia','Lobo','Azinha','Olmo','Penha','Ruiva','Verde','Cruz','Moura','Ferro','Pinho','Sobro'],
+    site:{ford:['Vau de *','Vau*'],bridge:['Ponte *','Ponte de *'],hill:['Monte*','Outeiro *'],castle:['Castelo de *','Torre de *','Alcáçova de *'],harbor:['Porto *'],mouth:['Foz de *'],
+      wood:['Mata *','Souto *'],clearing:['Rossio *'],field:['Campo*','Chã de *'],farm:['Vila*','Quinta de *','Casal de *'],marsh:['Paul de *'],mine:['Minas de *'],fish:['Praia de *','Póvoa de *'],dam:['Açude de *'],
+      valley:['Val*','Vale de *'],river:['Rio *'],realm:['*ia','*al']},
+    neu:['Vila Nova de *','*nova','* de Cima'],
+    house:(p,r)=>r()<0.5?'House de '+p:'House '+r1(r,['de Meneses','da Cunha','de Sousa','de Castro','Pereira','Coutinho','de Melo','de Almeida','da Silva','de Noronha']),
+    castle:(p,r)=>r1(r,['Castelo de ','Paço de '])+p,
+    saints:['Pedro','Paulo','Miguel','Estêvão','Nicolau','João','Jorge','Martinho','Lourenço','Tiago','Vicente','Bartolomeu','Antão'],
+    church:(S,p,cath)=>{const T=(/^[AEIOUÁÉÍÓÚ]/.test(S)?'Santo ':'São ')+S;return cath?(S.length%2?'Sé de Santa Maria':'Sé de '+T):'Igreja de '+T;},
+    inns:['Estalagem do Galo','Taberna do Sol','Venda da Lua','Estalagem da Cruz','Albergaria do Leão','Venda do Touro','Taberna dos Almocreves','Estalagem da Estrela'],
+    trade:{shop:['Loja de {N}','A Balança de Ouro'],bakery:['Forno de {N}','O Pão de Ouro'],smithy:['Ferraria de {N}','A Bigorna'],tannery:['Pelames de {N}'],warehouse:['Armazém de {N} e Filhos','O Celeiro']}},
+  dutch:{name:'Dutch',adj:'Netherlandish',
+    m:['Willem','Floris','Dirk','Jan','Pieter','Gerrit','Arnoud','Hendrik','Jacob','Claes','Adriaen','Cornelis','Gijsbrecht','Reinoud','Wouter','Frans','Joost','Lodewijk'],
+    f:['Aleid','Ada','Machteld','Geertruid','Margriet','Beatrijs','Katharina','Jacoba','Maria','Aleydis','Hadewych','Neeltje','Grietje','Agniet','Sophia'],
+    roots:['Eik','Linde','Wilg','Berk','Els','Hazel','Ram','Haas','Vos','Zand','Riet','Mol','Ooster','Wester','Noord','Zuid','Lange','Hoog','Diep','Swart'],
+    site:{ford:['*drecht','*voorde'],bridge:['*brugge','*brug'],hill:['*berg','*heuvel'],castle:['*burg','Slot *','Huis te *'],harbor:['*haven'],mouth:['*muiden','*mude'],
+      wood:['*wold','*hout','*bos'],clearing:['*rode','*lo'],field:['*veld','*akker'],farm:['*hoeve','*heim','*wijk'],marsh:['*veen','*broek'],mine:['*steen','*groeve'],fish:['*wijk','*zijl'],dam:['*dam'],
+      valley:['*dal'],river:['*a','*beek'],realm:['*land','*mark']},
+    neu:['Nieuw-*','Nieuw*','* Buiten'],
+    house:(p,r)=>r()<0.5?'House van '+p:'House '+r1(r,['van Egmond','van Brederode','van Wassenaer','van Arkel','van Borselen','van Heemskerk','van der Does','van Duivenvoorde','van Polanen']),
+    castle:(p,r)=>r1(r,['Slot ','Huis te ','Kasteel '])+p,
+    saints:['Pieter','Jan','Nicolaas','Maarten','Joris','Laurens','Bavo','Servaas','Willibrord','Jacob','Stephanus','Lebuinus'],
+    church:(S,p,cath)=>{const T='Sint-'+S+(/[aeiosu]$/.test(S)?'':'s');return cath?(S.length%2?'Onze-Lieve-Vrouwekerk':T+'kathedraal'):T+'kerk';},
+    inns:['Het Wapen van Holland','De Gouden Leeuw','Het Witte Paard','De Drie Haringen','Het Hert','De Zwaan','De Roskam','Het Schip'],
+    trade:{shop:['Winkel van {N}','De Gulden Schaal'],bakery:['Bakkerij van {N}','De Gouden Krakeling'],smithy:['Smidse van {N}','Het Aambeeld'],tannery:['Looierij van {N}'],warehouse:['Pakhuis {N} en Zonen','De Waag']}}
 };
-const CULT_NEAR={anglo:['anglo','celtic','norse','french'],german:['german','slavic','french','norse','italian'],french:['french','italian','iberian','german','celtic'],
-  italian:['italian','french','german','iberian'],norse:['norse','german','anglo','slavic'],slavic:['slavic','german','norse'],celtic:['celtic','anglo','norse','french'],iberian:['iberian','french','italian']};
+const CULT_NEAR={anglo:['anglo','celtic','norse','french'],german:['german','slavic','french','norse','italian','dutch'],french:['french','italian','iberian','german','celtic','dutch'],
+  italian:['italian','french','german','iberian'],norse:['norse','german','anglo','slavic'],slavic:['slavic','german','norse'],celtic:['celtic','anglo','norse','french'],iberian:['iberian','portuguese','french','italian'],
+  portuguese:['portuguese','iberian','french','italian'],dutch:['dutch','german','french','anglo','norse']};
 /* more names for every tongue: given names, place roots, and the stuff of surnames (trade, dwelling, looks, father, home town) */
 const NAMEX={
 anglo:{
@@ -780,6 +809,26 @@ iberian:{
  nick:{tall:'Alto',short:'Bajo',strong:'Fuerte',bold:'Osado',kind:'Bueno',wise:'Sabio',dark:'Moreno',fair:'Rubio',red:'Bermejo',brown:'Pardo',young:'Mozo',old:'Viejo',quick:'Ligero',stout:'Gordo'},
  patr:f=>{const T={Rodrigo:'Rodríguez',Fernando:'Fernández',Hernando:'Hernández',Ferrán:'Fernández',Martín:'Martínez',Sancho:'Sánchez',Gonzalo:'González',Álvaro:'Álvarez',Alvar:'Álvarez',Pedro:'Pérez',Diego:'Díaz',Ramiro:'Ramírez',Domingo:'Domínguez',Jimeno:'Giménez',Ximeno:'Jiménez',Enrique:'Enríquez',Lope:'López',Muño:'Muñoz',Nuño:'Núñez',Ordoño:'Ordóñez',Bermudo:'Bermúdez',Íñigo:'Íñiguez',Velasco:'Velázquez',Vela:'Velázquez',Suero:'Suárez',Menendo:'Menéndez',Gutierre:'Gutiérrez',Benito:'Benítez',Pelayo:'Peláez',Gómez:'Gómez',García:'García',Juan:'Yáñez',Alfonso:'Alfonsez',Antolín:'Antolínez',Blasco:'Blázquez',Tello:'Téllez',Vasco:'Vázquez',Illán:'Illánez',Egas:'Égez',Payo:'Páez',Lorenzo:'Lorenzo',Mateo:'Mateos',Marcos:'Marcos',Vicente:'Vicente',Tomé:'Tomás'};return T[f]||f.replace(/[aeiouáéíóú]$/i,'')+'ez';},
  origin:t=>/^El /.test(t)?'del '+t.slice(3):/^La /.test(t)?'de la '+t.slice(3):/^Los /.test(t)?'de los '+t.slice(4):'de '+t
+},
+portuguese:{
+ m:['Afonso','Aires','Álvaro','Antão','Baltasar','Bartolomeu','Belchior','Bento','Brás','Cristóvão','Diogo','Domingos','Duarte','Egas','Estêvão','Fernão','Fradique','Francisco','Garcia','Gaspar','Gil','Gomes','Gonçalo','Guterre','Heitor','Henrique','Jorge','Lançarote','Lopo','Lourenço','Luís','Manuel','Martim','Mem','Mendo','Nuno','Paio','Pêro','Ramiro','Rui','Sancho','Sebastião','Simão','Soeiro','Telo','Tomé','Tristão','Vasco','Vicente'],
+ f:['Aldonça','Ana','Antónia','Beatriz','Branca','Briolanja','Brites','Catarina','Clara','Constança','Estefânia','Filipa','Francisca','Genebra','Grácia','Guiomar','Helena','Inês','Isabel','Joana','Leonor','Lianor','Luísa','Madalena','Mafalda','Maior','Margarida','Maria','Marinha','Mécia','Mor','Sancha','Senhorinha','Teresa','Úrsula','Urraca','Violante'],
+ roots:['Alto','Bravo','Cabra','Corvo','Fonte','Galo','Covas','Lara','Novo','Urso','Pinho','Prata','Rei','Carvalho','Serra','Trigo','Veiga','Vide','Raposo','Sal','Pereira','Nogueira','Cedro','Mel','Pardo','Faia','Freixo','Sobral'],
+ occ:{smith:'Ferreiro',miller:'Moleiro',baker:'Padeiro',tanner:'Surrador',weaver:'Tecelão',dyer:'Tintureiro',carpenter:'Carpinteiro',mason:'Pedreiro',fisher:'Pescador',shepherd:'Pastor',cooper:'Tanoeiro',thatcher:'Colmeiro',potter:'Oleiro',brewer:'Cervejeiro',butcher:'Carniceiro',carter:'Carreteiro',reeve:'Mordomo',tailor:'Alfaiate',cook:'Cozinheiro',hunter:'Caçador',forester:'Monteiro',wheelwright:'Carreiro',fletcher:'Frecheiro',salter:'Salineiro',merchant:'Mercador',miner:'Mineiro',boatman:'Barqueiro',ploughman:'Lavrador',herdsman:'Vaqueiro',bowyer:'Besteiro',glover:'Luveiro',chandler:'Cerieiro',shoemaker:'Sapateiro',roper:'Cordoeiro',spicer:'Especieiro'},
+ loc:{wood:['do Mato','Matos','da Mata'],brook:['Ribeiro','do Ribeiro','Ribeiros'],river:['do Rio','Rios','Ribas'],hill:['Outeiro','do Monte','Montes','Cabeço'],ford:['Vau','do Vau','Vaus'],bridge:['Ponte','da Ponte','Pontes'],marsh:['Paul','do Paul','Lagoa'],field:['Campos','do Campo','Chão'],green:['Prado','do Prado','Lameiras'],well:['Poço','do Poço','Fontes'],stone:['Pedra','Penha','Pedrosa'],heath:['Charneca','da Charneca','Gândara'],lane:['Quelha','da Rua','Canada'],church:['Igreja','da Igreja','Ermida'],mill:['Moinhos','do Moinho','Azenha'],moor:['Brejo','do Ermo','Ermo'],shore:['Ribeira','Costa','da Praia'],orchard:['Pomar','do Pomar','Hortas'],grove:['Souto','do Souto','Soutelo']},
+ nick:{tall:'Comprido',short:'Baixo',strong:'Forte',bold:'Ousado',kind:'Bom',wise:'Sábio',dark:'Moreno',fair:'Louro',red:'Ruivo',brown:'Pardo',young:'Moço',old:'Velho',quick:'Ligeiro',stout:'Gordo'},
+ patr:f=>{const T={Rodrigo:'Rodrigues',Rui:'Rodrigues',Fernão:'Fernandes',Fernando:'Fernandes',Martim:'Martins',Gonçalo:'Gonçalves',Álvaro:'Álvares',Pedro:'Pires',Pêro:'Pires',Diogo:'Dias',Henrique:'Henriques',Lopo:'Lopes',Nuno:'Nunes',Mendo:'Mendes',Mem:'Mendes',Soeiro:'Soares',Vasco:'Vaz',Estêvão:'Esteves',João:'Eanes',Paio:'Pais',Egas:'Viegas',Sancho:'Sanches',Ramiro:'Ramires',Telo:'Teles',Domingos:'Domingues',Simão:'Simões',Antão:'Antunes',Guterre:'Guterres'};return T[f]||f;},
+ origin:t=>/^O /.test(t)?'do '+t.slice(2):/^A /.test(t)?'da '+t.slice(2):/^Os /.test(t)?'dos '+t.slice(3):/^As /.test(t)?'das '+t.slice(3):'de '+t
+},
+dutch:{
+ m:['Aert','Adriaen','Albrecht','Arent','Barend','Bartholomeus','Boudewijn','Claes','Coenraad','Cornelis','Diederik','Dirck','Egbert','Evert','Floris','Frans','Frederik','Gerrit','Gijsbert','Govert','Harmen','Hendrick','Herman','Hugo','Huibert','Jacob','Jan','Jeroen','Joost','Joris','Lambert','Laurens','Lucas','Maarten','Meindert','Melchior','Michiel','Otto','Paulus','Pieter','Reinier','Roelof','Rutger','Sander','Simon','Steven','Symen','Teunis','Thijs','Volkert','Willem','Wouter','Ysbrand'],
+ f:['Aechte','Aefje','Agniet','Aleid','Alijt','Anna','Baertje','Beatrijs','Brechtje','Catharina','Christina','Cornelia','Dieuwertje','Duifje','Elisabeth','Fijtje','Geertruyd','Grietje','Hadewych','Haesje','Hillegond','Ida','Jacoba','Jannetje','Josina','Kunera','Liedewij','Lijsbeth','Machteld','Margriet','Maritje','Neeltje','Petronella','Sara','Sophia','Trijntje','Weyntje','Wendelmoet'],
+ roots:['Alk','Ams','Bre','Del','Dor','Gou','Haar','Hoorn','Kam','Lei','Mep','Naar','Rot','Scho','Vlaar','Zaan','Zwol','Mid','Purm','Wor','Beem','Mon','Ouder','Bun'],
+ occ:{smith:'Smit',miller:'Molenaar',baker:'Bakker',tanner:'Looijer',weaver:'Wever',dyer:'Verver',carpenter:'Timmerman',mason:'Metselaar',fisher:'Visser',shepherd:'Schaper',cooper:'Kuiper',thatcher:'Dekker',potter:'Pottebakker',brewer:'Brouwer',butcher:'Vleeshouwer',carter:'Voerman',reeve:'Schout',tailor:'Snijder',cook:'Kok',hunter:'Jager',forester:'Houtvester',wheelwright:'Wagenaar',fletcher:'Pijlmaker',salter:'Zouter',merchant:'Koopman',miner:'Delver',boatman:'Schipper',ploughman:'Bouwman',herdsman:'Herder',bowyer:'Boogmaker',glover:'Handschoenmaker',chandler:'Keersmaker',shoemaker:'Schoenmaker',roper:'Touwslager',spicer:'Kruidenier'},
+ loc:{wood:['van den Bosch','Verbosch','Bosman'],brook:['van der Beek','Verbeek','Beekman'],river:['van der Aa','Waterman','van de Stroom'],hill:['van den Berg','Verberg','Heuvelman'],ford:['van der Voort','Vervoort','Voorman'],bridge:['van der Brugge','Verbrugge','Bruggeman'],marsh:['van den Broek','Verbroek','Broekman'],field:['van der Velde','Verveld','Veldman'],green:['van de Weide','Verweij','Weideman'],well:['van der Putte','Verput','Putman'],stone:['van den Steen','Versteeg','Steenman'],heath:['van der Heide','Verheijde','Heideman'],lane:['van der Laan','Verlaan','Laanman'],church:['van der Kerk','Verkerk','Kerkhof'],mill:['van der Molen','Vermolen','Molenkamp'],moor:['van het Veen','Verveen','Veenman'],shore:['van het Strand','Zeeman','Strandman'],orchard:['van den Boomgaard','Bogaert','Boomgaard'],grove:['van den Hout','Verhout','Houtman']},
+ nick:{tall:'de Lange',short:'de Korte',strong:'Sterk',bold:'de Stoute',kind:'Goedhart',wise:'de Wijs',dark:'de Zwart',fair:'de Wit',red:'de Roo',brown:'de Bruijn',young:'de Jong',old:'de Oude',quick:'Snel',stout:'de Groot'},
+ patr:f=>f+'sen',
+ origin:t=>'van '+(/^(?:De|Den|Het) /.test(t)?t[0].toLowerCase()+t.slice(1):t)
 }
 };
 for(const c in NAMEX)if(CULT[c])CULT[c].roots=[...new Set([...CULT[c].roots,...NAMEX[c].roots])];
@@ -848,7 +897,11 @@ const KIN={
   celtic:{pre:/^Tre(?=.{3,}newydd$)/,suf:/(?:(?<=\p{L}{3})newydd|[ -](?:Uchaf|Isaf|Fawr|Fach|Newydd))$/u,
     man:(g,r)=>{const l=g.toLowerCase();return r1(r,['Tre'+l,'Bally'+l,'Caer'+l]);}},
   iberian:{pre:/^(?:Villanueva de |(?:Nuevo|Nueva|Alto|Alta|Bajo|Baja|Viejo|Vieja|Grande|Pequeño|Pequeña) )/,suf:/(?:(?<=\p{L}{4})nueva| de (?:Arriba|Abajo))$/u,
-    man:(g,r)=>r1(r,['Villa'+g.toLowerCase().replace(/^a/,''),'Torre de '+g,'Casas de '+g])}
+    man:(g,r)=>r1(r,['Villa'+g.toLowerCase().replace(/^a/,''),'Torre de '+g,'Casas de '+g])},
+  portuguese:{pre:/^(?:Vila Nova de |(?:Novo|Nova|Alto|Alta|Baixo|Baixa|Velho|Velha|Grande|Pequeno|Pequena) )/,suf:/(?:(?<=\p{L}{4})nova| de (?:Cima|Baixo))$/u,
+    man:(g,r)=>r1(r,['Vilar de '+g,'Casal de '+g,'Quinta de '+g,'Torre de '+g])},
+  dutch:{pre:/^(?:Nieuw(?=\p{L}{4})|(?:Nieuw|Oud|Groot|Klein|Hoog|Neder|Over|Oost|West|Noord|Zuid)-|(?:Nieuwe|Oude) )/u,suf:/(?:(?<=\p{L}{4})nieuw| (?:Binnen|Buiten))$/u,
+    man:(g,r)=>{const s=/s$/.test(g)?g:g+'s';return r1(r,[s+'dorp',s+'woude',s+'kerke',s+'hoeve']);}}
 };
 function rootOf(cultId,name){ // a place's name less the new/upper/nether-type words it wears, as its own tongue wears them
   const K=KIN[cultId]||KIN.anglo;let n=name;
@@ -914,6 +967,10 @@ const SIGNS={
     make:(c,e,g)=>`${g==='n'?'Det':'Den'} ${c} ${e}`,tw:{shop:'Kramhus',bakery:'Bakeri',smithy:'Smie',tannery:'Garveri',warehouse:'Pakkhus',tavern:'Kro',inn:'Gjestgiveri',dyer:'Fargeri'}},
   slavic:{col:[['Zlatého','Zlaté'],['Černého','Černé'],['Bílého','Bílé'],['Červeného','Červené'],['Zeleného','Zelené'],['Modrého','Modré']],emb:[['Jelena','m'],['Lva','m'],['Orla','m'],['Medvěda','m'],['Kohouta','m'],['Beránka','m'],['Hroznu','m'],['Hvězdy','f'],['Koruny','f'],['Růže','f'],['Studny','f'],['Lilie','f'],['Labutě','f'],['Kotvy','f']],
     make:(c,e,g)=>`U ${c[g==='f'?1:0]} ${e}`,tw:{shop:'Krám',bakery:'Pekárna',smithy:'Kovárna',tannery:'Koželužna',warehouse:'Sklad',tavern:'Hospoda',inn:'Zájezdní hostinec',dyer:'Barvírna'}},
+  portuguese:{col:['de Ouro','de Prata','de Bronze'],emb:[['Leão','m'],['Touro','m'],['Cervo','m'],['Sol','m'],['Galo','m'],['Cisne','m'],['Navio','m'],['Estrela','f'],['Coroa','f'],['Rosa','f'],['Sereia','f'],['Chave','f'],['Lua','f'],['Cruz','f'],['Âncora','f']],
+    make:(c,e,g)=>(g==='f'?'da ':'do ')+e+' '+c,tw:{shop:'Loja',bakery:'Forno',smithy:'Ferraria',tannery:'Pelames',warehouse:'Armazém',tavern:'Taberna',inn:'Estalagem',dyer:'Tinturaria'},prefixOnly:true},
+  dutch:{col:['Gouden','Rode','Witte','Zwarte','Groene','Blauwe','Zilveren','Vergulde'],emb:[['Leeuw','c'],['Hert','n'],['Zwaan','c'],['Haan','c'],['Ster','c'],['Kroon','c'],['Arend','c'],['Beer','c'],['Schip','n'],['Anker','n'],['Paard','n'],['Lam','n'],['Hoorn','c'],['Klok','c'],['Sleutel','c'],['Haring','c'],['Molen','c'],['Hand','c']],
+    make:(c,e,g)=>'In '+(g==='n'?"'t":'de')+' '+c+' '+e,tw:{shop:'Winkel',bakery:'Bakkerij',smithy:'Smidse',tannery:'Looierij',warehouse:'Pakhuis',tavern:'Herberg',inn:'Logement',dyer:'Ververij'}},
 };
 SIGNS.celtic={...SIGNS.anglo,col:['Red','Black','White','Green','Golden','Silver','Wild']};
 function bizName(b,s,C,r){ // a trade's name is meant to bring in custom: a sign that can be seen from the street, its master's name, a promise
@@ -937,16 +994,18 @@ const INST_NAMES={ // the town's own institutions, in its tongue
   bath:{anglo:'the Stews',german:'Badstube',french:'Les Étuves',italian:'Bagno pubblico',iberian:'Baño público',norse:'Badstuen',slavic:'Lázně',celtic:'the Bathhouse'},
   toll:{anglo:'Toll House',german:'Zollhaus',french:'Péage',italian:'Dogana',iberian:'Portazgo',norse:'Tollboden',slavic:'Mýtnice',celtic:'Toll House'},
   guildhall:{anglo:'the Guildhall',german:'Gildehaus',french:'Maison des Marchands',italian:'Loggia dei Mercanti',iberian:'Lonja de Mercaderes',norse:'Gildeskålen',slavic:'Kupecký dům',celtic:'the Guildhall'}};
+for(const[k,o]of Object.entries({windmill:{portuguese:p=>'Moinho de '+p,dutch:p=>'Molen van '+p},hospital:{portuguese:()=>'Hospital do Espírito Santo',dutch:()=>'Heilige Geestgasthuis'},
+  bath:{portuguese:'Banhos',dutch:'Badstoof'},toll:{portuguese:'Portagem',dutch:'Tolhuis'},guildhall:{portuguese:'Casa dos Vinte e Quatro',dutch:'Gildehuis'}}))Object.assign(INST_NAMES[k],o);
 function buildingName(b){ // castles, churches and trades have names; houses have households
   if(b.nm!==undefined)return b.nm;
   const s=b.s,C=cultOf(s),r=nameRng(Math.round(b.x*7+b.z*13)),a=b.arch;let n=null;
   if(a==='keep')n=C.castle(s.name,r);
   else if(a==='temple')n=C.church(r1(r,C.saints),s.name,!!b.cathedral);
   else if(a==='tavern'||a==='inn'||C.trade[a]||a==='burgher'&&b.district==='market')n=bizName(b,s,C,r);
-  else if(a==='hall')n=s.kind==='village'?null:(C===CULT.german?'Rathaus':C===CULT.french?'Hôtel de Ville':C===CULT.italian?'Palazzo Comunale':C===CULT.iberian?'Casa Consistorial':C===CULT.slavic?'Radnice':C===CULT.norse?'Rådhus':'the Guildhall');
-  else if(a==='quarry')n=C===CULT.german?'Steinbruch '+s.name:C===CULT.french?'Carrière de '+s.name:C===CULT.italian?'Cava di '+s.name:C===CULT.iberian?'Cantera de '+s.name:C===CULT.norse?s.name+' Steinbrudd':s.name+' Quarry';
-  else if(a==='wharf')n=C===CULT.german?r1(r,['Kaje','Anleger','Schiffbrücke'])+' '+s.name:C===CULT.french?r1(r,['Quai','Débarcadère'])+' de '+s.name:C===CULT.italian?r1(r,['Molo','Pontile'])+' di '+s.name:C===CULT.iberian?r1(r,['Muelle','Embarcadero'])+' de '+s.name:C===CULT.norse?s.name+' '+r1(r,['Brygge','Kai']):r1(r,['Wool','Custom','Long','Fish','Salt','New','King’s','Old'])+' Wharf';
-  else if(a==='mill')n=C===CULT.german?'Mühle '+s.name:C===CULT.french?'Moulin de '+s.name:C===CULT.italian?'Mulino di '+s.name:s.name+' Mill';
+  else if(a==='hall')n=s.kind==='village'?null:(C===CULT.german?'Rathaus':C===CULT.french?'Hôtel de Ville':C===CULT.italian?'Palazzo Comunale':C===CULT.iberian?'Casa Consistorial':C===CULT.slavic?'Radnice':C===CULT.norse?'Rådhus':C===CULT.portuguese?'Paços do Concelho':C===CULT.dutch?'Stadhuis':'the Guildhall');
+  else if(a==='quarry')n=C===CULT.german?'Steinbruch '+s.name:C===CULT.french?'Carrière de '+s.name:C===CULT.italian?'Cava di '+s.name:C===CULT.iberian?'Cantera de '+s.name:C===CULT.norse?s.name+' Steinbrudd':C===CULT.portuguese?'Pedreira de '+s.name:C===CULT.dutch?'Steengroeve van '+s.name:s.name+' Quarry';
+  else if(a==='wharf')n=C===CULT.german?r1(r,['Kaje','Anleger','Schiffbrücke'])+' '+s.name:C===CULT.french?r1(r,['Quai','Débarcadère'])+' de '+s.name:C===CULT.italian?r1(r,['Molo','Pontile'])+' di '+s.name:C===CULT.iberian?r1(r,['Muelle','Embarcadero'])+' de '+s.name:C===CULT.norse?s.name+' '+r1(r,['Brygge','Kai']):C===CULT.portuguese?r1(r,['Cais','Ribeira'])+' de '+s.name:C===CULT.dutch?r1(r,['Kade','Steiger','Hoofd'])+' van '+s.name:r1(r,['Wool','Custom','Long','Fish','Salt','New','King’s','Old'])+' Wharf';
+  else if(a==='mill')n=C===CULT.german?'Mühle '+s.name:C===CULT.french?'Moulin de '+s.name:C===CULT.italian?'Mulino di '+s.name:C===CULT.portuguese?'Azenha de '+s.name:C===CULT.dutch?'Watermolen van '+s.name:s.name+' Mill';
   else if(INST_NAMES[a]){const T=INST_NAMES[a],f=T[s.cult]||T.anglo;n=typeof f==='function'?f(s.name,r1(r,C.saints),r):f;}
   else if(a==='dyer')n=bizName(b,s,C,r);
   return b.nm=n;
@@ -1574,7 +1633,7 @@ function settlementOrigin(s,idx,era,newFoundation=false){
   // #102 opening customs, not historical population shares: culture is a proxy for former Roman territory in invented realms.
   // This separate seed records the predecessor before medieval layout dice; changing the opening year cannot create a Roman past.
   const r=seedStreams((SEED^Math.imul(idx+1,0x85EBCA6B)^0x524F4D45)>>>0).gen;
-  const legacy={italian:0.65,french:0.45,iberian:0.55,anglo:0.25,celtic:0.15,german:0.15},roll=r();
+  const legacy={italian:0.65,french:0.45,iberian:0.55,anglo:0.25,celtic:0.15,german:0.15,portuguese:0.55,dutch:0.15},roll=r();
   if(s.kind!=='village'&&roll<(legacy[s.cult]||0)){
     const foundedAD=50+Math.floor(r()*300),planned=r()<0.8;
     const hl=90+r()*25,hw=65+r()*20,spacing=36+r()*6;
@@ -3370,7 +3429,7 @@ const frand=()=>rand('folk');
 function fgauss(){let u=0;while(u===0)u=frand();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*frand());}
 function genome(ma,pa){const N=GENES.length,g=new Float32Array(N),e=new Float32Array(N);
   for(let k=0;k<N;k++){g[k]=ma&&pa?(ma[k]+pa[k])/2+fgauss()*Math.SQRT1_2:fgauss();e[k]=fgauss();}return {g,e};}
-function hairDraw(c){const w={norse:[1,3,5,1],celtic:[2,3,2,2],anglo:[2,4,3,1],german:[2,4,3,1],slavic:[3,4,2,1],french:[3,4,2,1],italian:[6,3,1,0.4],iberian:[6,3,1,0.4]}[c]||[3,4,2,1];
+function hairDraw(c){const w={norse:[1,3,5,1],celtic:[2,3,2,2],anglo:[2,4,3,1],german:[2,4,3,1],slavic:[3,4,2,1],french:[3,4,2,1],italian:[6,3,1,0.4],iberian:[6,3,1,0.4],portuguese:[6,3,1,0.4],dutch:[2,4,4,1]}[c]||[3,4,2,1];
   let t=w.reduce((a,b)=>a+b,0)*frand();for(let i=0;i<4;i++){t-=w[i];if(t<=0)return i;}return 1;}
 function ageYrs(p){return (day()-(p.b!=null?p.b:p.birthDay))/360;}
 function trait(p,k){ // what shows: genotype and fortune weighed by heritability, plus a rich or a hungry childhood; age saps vigour
@@ -5808,7 +5867,7 @@ function tickTongues(){ // yearly: the court's speech seeps into a town its lord
       if(!W.prehistory)emit('fates',3,s.pos,vary('tongue_shift',[()=>`In ${s.name} the ${CULT[top].name} tongue is now heard more than the ${CULT[was].name}; the priest preaches in it.`,
         ()=>`${s.name} speaks ${CULT[top].name} now; only the old wives keep the ${CULT[was].name} of their mothers.`,
         ()=>`The market of ${s.name} haggles in ${CULT[top].name} these days, where it once spoke ${CULT[was].name}.`]));}}}
-const TONGUE_IDS=Object.keys(CULT),TONGUE_PAL={anglo:0xc0392b,french:0x2e5aac,german:0xe0a526,norse:0x3a9a8c,italian:0x5aa02c,slavic:0x8e44ad,celtic:0x2f7d32,iberian:0xd35400};
+const TONGUE_IDS=Object.keys(CULT),TONGUE_PAL={anglo:0xc0392b,french:0x2e5aac,german:0xe0a526,norse:0x3a9a8c,italian:0x5aa02c,slavic:0x8e44ad,celtic:0x2f7d32,iberian:0xd35400,portuguese:0x922b5e,dutch:0x5dade2};
 function refreshTongues(){if(!W.land||!W.land.F)return;for(const f of W.land.F)writeLord(f);G.houseTintsDirty=true;}
 function awayNow(p){return p.away&&day()<p.away.until?p.away:null;}
 function crewFor(c){ // the carter from the town the goods leave, or the master of the boat
@@ -8185,7 +8244,7 @@ function courtPlan(s,b){
   if(a1-a0<13||take.length<2)return null;
   return{take,tx,tz,nx,nz,a0,a1,e0,e1,rot:Math.atan2(nx,nz)};}
 function courtName(s,fam){const C=cultOf(s);
-  return C===CULT.french?`Hôtel ${fam}`:C===CULT.italian?`Palazzo ${fam}`:C===CULT.iberian?`Casa ${fam}`:C===CULT.german?`${fam}hof`:C===CULT.norse?`${fam}gården`:C===CULT.slavic?`Dům ${fam}`:`${fam} House`;}
+  return C===CULT.french?`Hôtel ${fam}`:C===CULT.italian?`Palazzo ${fam}`:C===CULT.iberian?`Casa ${fam}`:C===CULT.german?`${fam}hof`:C===CULT.norse?`${fam}gården`:C===CULT.slavic?`Dům ${fam}`:C===CULT.portuguese?`Solar ${fam}`:C===CULT.dutch?`Huis ${fam}`:`${fam} House`;}
 
 function drawCourt(b,put){
   const y=b.y,y0=b.y0??b.y-0.5,fh=y-y0,h=b.h,w=b.w,d=b.d,R=Math.PI/2,fr=Math.min(6,d*0.36),br=Math.min(5,d*0.3),sw=Math.min(4.5,w*0.24),Ls=Math.max(1,d-fr-br),zc=(-d/2+br+d/2-fr)/2;
