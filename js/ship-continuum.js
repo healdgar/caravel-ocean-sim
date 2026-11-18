@@ -19,6 +19,22 @@ export const SHIP_CONTINUUM_VERSION = CONTINUUM_ATLAS_VERSION;
 // A ship type's material block (CONTINUUM_TYPE.material): design units to the type's metres (x, y, z, f32), and the
 // colour her far body's outline shows side on (sqrt-encoded rgb8).
 export const SHIP_CONTINUUM_MATERIAL = Object.freeze({ designScale: CONTINUUM_TYPE.material, splat: CONTINUUM_TYPE.material + 3 });
+// How a ship lies, as her record's turn (a unit quaternion, x y z w): rolled about her keel, pitched about her beam,
+// then turned to her heading (radians, clockwise from above), as js/boat.js boatRotate lays her hull uniform.
+export function shipContinuumTurn(heading, pitch = 0, roll = 0) {
+  const sy = -Math.sin(heading / 2), cy = Math.cos(heading / 2), sp = Math.sin(pitch / 2), cp = Math.cos(pitch / 2), sr = Math.sin(roll / 2), cr = Math.cos(roll / 2);
+  // (0, sy, 0, cy) · (sp, 0, 0, cp) · (0, 0, sr, cr)
+  const x = cy * sp, y = sy * cp, z = -sy * sp, w = cy * cp;
+  return [x * cr + y * sr, y * cr - x * sr, w * sr + z * cr, w * cr - z * sr];
+}
+// The same in WGSL, for a pass that stands a ship's record on the GPU.
+export const SHIP_CONTINUUM_TURN_WGSL = /* wgsl */`
+fn shipContinuumTurn(heading:f32,pitch:f32,roll:f32)->vec4f {
+  let sy=-sin(heading*0.5);let cy=cos(heading*0.5);let sp=sin(pitch*0.5);let cp=cos(pitch*0.5);let sr=sin(roll*0.5);let cr=cos(roll*0.5);
+  let x=cy*sp;let y=sy*cp;let z=-sy*sp;let w=cy*cp;
+  return vec4f(x*cr+y*sr,y*cr-x*sr,w*sr+z*cr,w*cr-z*sr);
+}
+`;
 
 // The bodies, by id: each trade vessel archetype (js/trade-vessels.js ARCHETYPE_SPECS) and each ship the player can
 // sail (js/ship-models.js SHIP_MODELS), each baked from the assembly the game builds of it.

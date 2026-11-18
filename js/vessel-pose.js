@@ -1,5 +1,4 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-import {HULL_VERTICAL_SCALE} from './hull.js';
 import {VESSEL_POSE_UPDATE,VESSEL_SURFACE_POSE_UPDATE} from './wgsl/vessel-pose.js';
 import {createRigGPUFrame,writeRigGPUFrame} from './rig-gpu-data.js';
 import {createVesselRecoil} from './vessel-recoil.js';
@@ -14,22 +13,6 @@ async function vesselPosePipeline(device,computePipe,generic){
   try{return await modes.get(generic);}catch(error){modes.delete(generic);throw error;}
 }
 
-export const POSED_VERTEX_LAYOUT=Object.freeze({arrayStride:32,attributes:Object.freeze([
-  Object.freeze({shaderLocation:4,offset:0,format:'float32x3'}),
-  Object.freeze({shaderLocation:5,offset:16,format:'float32x3'}),
-])});
-
-// Alter only the posed position/normal input. Material coordinates, original
-// normals, UVs, vertex indices and moisture lookup retain their exact contract.
-export function withPosedVesselVertices(source){
-  const signature=/(@vertex\s+fn\s+vs\s*\()([\s\S]*?)(\)\s*->)/;
-  const call='rigVertex(position,normal,material,uv)';
-  if(!signature.test(source)||source.split(call).length!==2)throw new Error('Unrecognized vessel vertex shader');
-  if(/@location\([45]\)\s+(?:posedPosition|posedNormal)/.test(source))throw new Error('Vessel vertices are already posed');
-  return source.replace(signature,(_match,start,args,end)=>start+args+',@location(4) posedPosition:vec3f,@location(5) posedNormal:vec3f'+end)
-    .replace(call,`RigVertex(posedPosition,posedNormal,vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0))`);
-}
-
 export async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,pristineMesh=null,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null,fracture=null,detail=null}){
   if(!Number.isSafeInteger(vertexCount)||vertexCount<1)throw new RangeError('Vessel pose needs a positive vertex count');
   if(shared&&shared.device!==device)throw new Error('Vessel pose assets belong to another graphics device');
@@ -39,8 +22,11 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
   // Her detail layer's line vertices follow her assembly's posed vertices, three rows each (js/vessel-detail.js),
   // rounded up to whole posed records so every pass that reads her posed vertices as records still may.
   const lineBytes=detail?.lineVertexCount?Math.ceil(detail.lineVertexCount*3/2)*32:0;
-  const buffer=device.createBuffer({label:'posed vessel vertices',size:vertexCount*32+lineBytes,
-    usage:GPUBufferUsage.STORAGE|GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_SRC});
+  // Then one posed record more: the header by which the continuum's RIDER kind reads all of it (js/wgsl/ship-kinds.js),
+  // written once by her continuum (js/vessel-continuum.js) at vec4f `headerAt`.
+  const headerAt=(vertexCount*32+lineBytes)/16;
+  const buffer=device.createBuffer({label:'posed vessel vertices',size:vertexCount*32+lineBytes+32,
+    usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC|GPUBufferUsage.COPY_DST});
   const resources=[hullUBO,sourceBuffer,buffer],state=rigData?createRigGPUFrame(rigData):null;
   let modelBuffer=shared?.modelBuffer??null,metadataBuffer=shared?.metadataBuffer??null,stateBuffer=null;
   if(rigData){
@@ -59,7 +45,7 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
   const assets=shared??Object.freeze({device,pipeline,rigData,modelBuffer,metadataBuffer,recoilAssets:recoil?.assets??null,partAssemblyAssets:assembly?.assets??null,fractureAssets:shards?.assets??null,detailAssets:details?.assets??null});let destroyed=false,initialized=!rigData;
   // True once her vertices carry damage, which the hull shader's whole variant would not draw.
   let baked=false,clock=0;
-  return {buffer,assets,vertexCount,partAssembly:assembly,
+  return {buffer,assets,vertexCount,headerAt,lineVertexCount:detail?.lineVertexCount??0,partAssembly:assembly,
     get scarred(){return baked||assembly?.active===true||shards?.active===true;},
     update(boat,time,wind){
       clock=time;shards?.tick(boat?.damage,time,boat);

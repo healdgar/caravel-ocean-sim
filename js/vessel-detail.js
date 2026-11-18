@@ -10,8 +10,8 @@
 // trusses, lifts, the stern outlicker's guys and sheet), her mooring lines and gangplanks, and her anchor's rode. It
 // is static records: anchors, each a fixed place in the frame of one triangle of her assembly (so it rides the posed
 // part it is made fast to, keyed by that part's vertices); tubes between anchors; and line vertices. Her pose pass
-// (js/vessel-pose.js) lays the lines into the tail of her posed vertices, and her cut draws them with her clusters
-// (js/wgsl/ship-continuum.js SHIP_CONTINUUM_LINE_LIST).
+// (js/vessel-pose.js) lays the lines into the tail of her posed vertices, and the one cut draws them as her body's
+// leading clusters, posed by the RIDER kind (js/wgsl/ship-kinds.js).
 //
 // Each frame the CPU uploads only her compact state (writeVesselDetailState): the colours she wears, the wind, her
 // anchor's place, heading and rode, and her mooring's progress and far ends. Her colours' cloth is flown, and her
@@ -506,6 +506,24 @@ export function writeVesselDetailState(target, { boat, code = 1, surrendered = f
     }
   }
   return target;
+}
+
+/**
+ * How far past her hull (m) her detail reaches, by her compact state (writeVesselDetailState): her let-go iron where it
+ * lies, and her mooring lines to their bollards or the other vessel. Her continuum record's reach, so that what her
+ * lines hold is cut and drawn wherever it is seen, even with her hull out of sight.
+ */
+export function vesselDetailReach(state, boat) {
+  if (!(state instanceof Float32Array)) return 0;
+  const bx = boat.x ?? 0, by = boat.heave ?? 0, bz = boat.z ?? 0, half = (boat.length ?? 0) * 0.5;
+  let reach = 0;
+  const past = (at, margin) => { reach = Math.max(reach, Math.hypot(state[at] - bx, state[at + 1] - by, state[at + 2] - bz) + margin - half); };
+  // The iron hangs its eye's height below its origin, and is about three times that across.
+  if (state[11] > 0.5) past(8, state[15] * 3);
+  const lines = Math.min(4, state[20]);
+  if (lines > 0 && state[21] > 0.5) past(52, boat.length ?? 0);
+  else for (let i = 0; i < lines; i++) past(24 + i * 4, 1);
+  return Math.max(0, reach);
 }
 
 // ------------------------------------------------------------------------------------------------ the GPU passes

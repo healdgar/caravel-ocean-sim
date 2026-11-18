@@ -1,421 +1,198 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// The ships the player and her fleet sail, drawn through the ship continuum (AGENTS.md rule 3): the same bake as the
-// trade vessels (scripts/prepare-ship-continuum.mjs), the same cut (js/wgsl/ship-continuum.js), one per vessel. Each
-// list entry reads that vessel's own posed vertices (js/vessel-pose.js: rig, recoil, parts and shard flight) and her
-// own copy of the assembly (her scars baked in), so what is drawn is what her physics strikes. Her clusters, her far
-// body and her splat share each pixel's samples across the handoff; a damaged vessel draws her clusters only, the
-// finest her error bound allows, depth first and then shaded where it is equal. Her shadows and what is seen of her
-// from under the water are the cut's coarse lists: her far body at the shadow map's step (or, for a shadow near the
-// eye, her clusters cut to the map's texel), or her damaged clusters.
-import { CONTINUUM_CORE_WGSL } from './continuum-core.js';
+// The ships the player and her fleet sail, in the one continuum (AGENTS.md rule 3): each body baked by
+// scripts/prepare-ship-continuum.mjs, each vessel one scene of one instance cut by the one select and cast by the one
+// shadow program (js/continuum-scene.js). Her record is of the RIDER kind (js/wgsl/ship-kinds.js), whose pose data is
+// her own posed vertices (js/vessel-pose.js: rig, recoil, parts, shard flight, colours and anchor) with her detail
+// layer's lines after them and a header her continuum writes, so what is drawn is what her physics strikes. Her
+// material wears her hull's own shading (js/wgsl/caravel.js vesselShade) on her clusters and lines, and lights her far
+// body and splat by their own colour; once she is holed, her record carries the DAMAGED flag, the cut draws her
+// clusters alone at the finest her error bound allows, and her material's mask keeps no sample of what shot and tearing
+// have taken away (her own damage record, group 0 binding 15).
 import { requestOnce } from './gpu-program-cache.js';
-import { withPosedVesselVertices } from './vessel-pose.js';
-import { CARAVEL, CARAVEL_DAMAGED } from './wgsl/caravel.js';
-import { SHADOW_CAST } from './wgsl/shadows.js';
+import { CONTINUUM_KIND, CONTINUUM_IMPORTANT_FLAG, CONTINUUM_DAMAGED, continuumAtlasTypes, continuumRoom } from './continuum-format.js';
+import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, uploadContinuumAtlas, createContinuumScene } from './continuum-scene.js';
+import { SHIP_CONTINUUM_MATERIAL, loadShipContinuum, shipContinuumTurn } from './ship-continuum.js';
+import { SHIP_RIDER_HEADER } from './wgsl/ship-kinds.js';
+import { vesselShadingWGSL } from './wgsl/caravel.js';
 import { withNeuralPbrVessel } from './wgsl/neural-pbr.js';
-import { SHIP_CONTINUUM_ENTRY_LAYOUT, SHIP_CONTINUUM_SHADOW_LIST, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST, SHIP_CONTINUUM_LINE_LIST, SHIP_CONTINUUM_LINE_PIECE, SHIP_CONTINUUM_BODY_LIMIT, SHIP_CONTINUUM_INSTANCE_FLOATS, shipContinuumDataWGSL, shipContinuumOrders } from './wgsl/ship-continuum.js';
-import { VESSEL_COLOURS_MATERIAL, VESSEL_ENSIGN_MATERIAL, VESSEL_PENNANT_MATERIAL } from './wgsl/ship-colours.js';
-import { loadShipContinuum, requestShipContinuumCut, createShipContinuumCut } from './ship-continuum-draw.js';
+import { VESSEL_COLOURS_MATERIAL } from './wgsl/ship-colours.js';
+import { vesselVerticalScale } from './hull.js';
 
-// The continuum's data and the vessel's posed vertices sit at this group of a hull program (after its own resources
-// and its lighting) and of a shadow program (after its own).
-const VESSEL_CONTINUUM_GROUP = 2, VESSEL_SHADOW_CONTINUUM_GROUP = 1;
-// The binding of the posed vertices in that group, after the continuum's seven.
-const VESSEL_CONTINUUM_POSED = 7;
+// Group 0: her own resources as her hull program had them (0-14), her damage record (15), the neural material bank
+// (16, 17) and her assembly as she now is (18), her scars baked in. Group 1: her shadow's lighting. Group 2: the scene.
+const VESSEL_CONTINUUM_ASSEMBLY = 18;
+const vesselContinuumShading = [null, null];
+const vesselContinuumPrelude = (capture) => () => (vesselContinuumShading[capture ? 1 : 0] ??= withNeuralPbrVessel(vesselShadingWGSL(capture))
+  + `@group(0) @binding(${VESSEL_CONTINUUM_ASSEMBLY}) var<storage,read> vesselAssembly:array<f32>;\n`);
 
-// The vertex stage of a hull or shadow program, taken from its storage: `vs` becomes vesselVertex(...), fed one
-// vertex of the vessel's own assembly and its posed place, and list-reading entry points are added.
-function vesselContinuumVertex(source) {
-  const posed = withPosedVesselVertices(source);
-  const signature = /@vertex\s+fn\s+vs\s*\(([\s\S]*?)\)\s*->\s*(\w+)\s*\{/;
-  const found = signature.exec(posed);
-  if (!found) throw Error('Unrecognized vessel vertex shader');
-  const args = found[1].replace(/@(?:location\(\d+\)|builtin\(\w+\))\s*/g, '');
-  const names = args.split(',').map((arg) => arg.split(':')[0].trim());
-  if (names.join() !== 'position,normal,material,uv,index,posedPosition,posedNormal') throw Error(`Unrecognized vessel vertex inputs: ${names.join()}`);
-  const out = found[2];
-  const struct = new RegExp(`struct\\s+${out}\\s*\\{[^}]*@builtin\\(position\\)\\s*(\\w+)`).exec(posed);
-  if (!struct) throw Error(`Unrecognized vessel vertex output ${out}`);
-  return { source: posed.replace(signature, `fn vesselVertex(${args}) -> ${out} {`), out, position: struct[1] };
-}
-
-// What every vessel program reads of the continuum: its bodies, her lists and instance, and her posed vertices.
-// `shipVertices` is bound to her own copy of the assembly (js/ship-continuum-draw.js dataGroup), the vertices her
-// pose pass reads, so a cluster corner, her pose and her wetness all name one vertex. Her cut holds her one body.
-function vesselContinuumReaders(group, out, position) {
-  return /* wgsl */`
-@group(${group}) @binding(${VESSEL_CONTINUUM_POSED}) var<storage,read> vesselPosed:array<vec4f>;
-fn vesselBodyOf(ship:u32)->ShipContinuumBody { return shipBodies[min(u32(max(round(shipInstances[ship].attitude.w),0.0)),${SHIP_CONTINUUM_BODY_LIMIT - 1}u)]; }
-fn vesselHidden()->${out} { var o:${out}; o.${position}=vec4f(2.0,2.0,0.0,1.0); return o; }
-// Vertex v of her assembly, posed as her pose pass left it.
-fn vesselListedVertex(v:u32)->${out} {
-  let o=v*9u;
-  return vesselVertex(vec3f(shipVertices[o],shipVertices[o+1u],shipVertices[o+2u]),vec3f(shipVertices[o+3u],shipVertices[o+4u],shipVertices[o+5u]),
-    shipVertices[o+6u],vec2f(shipVertices[o+7u],shipVertices[o+8u]),v,vesselPosed[v*2u].xyz,vesselPosed[v*2u+1u].xyz);
-}
-// A far-body point, grown 'grow' metres along its normal, carried as the vertex of her assembly it rides is posed
-// (canvas, yards, oars and helm move it with them).
-fn vesselFarPoint(p:ShipContinuumPoint,grow:f32,body:ShipContinuumBody)->${out} {
-  let s=p.source;let o=s*9u;
-  let rest=vec3f(shipVertices[o],shipVertices[o+1u],shipVertices[o+2u]);
-  let point=p.position+normalize(p.normal/body.scale.xyz)*grow/body.scale.xyz;
-  return vesselVertex(p.position,p.normal,shipVertices[o+6u],vec2f(shipVertices[o+7u],shipVertices[o+8u]),s,vesselPosed[s*2u].xyz+point-rest,p.normal);
-}
-// Line vertex j of her detail layer, as her pose pass laid it after her assembly's posed vertices (js/vessel-detail.js):
-// position and u, normal and v, then material, the vertex of her assembly it rides (her wetness there), and 1 when shown.
-fn vesselLineVertex(ship:u32,piece:u32,vertex:u32)->${out} {
-  let body=vesselBodyOf(ship);
-  let j=piece*384u+vertex;
-  if(j>=body.lines.x){return vesselHidden();}
-  let at=u32(body.scale.w)*2u+j*3u;
-  if(at+2u>=arrayLength(&vesselPosed)){return vesselHidden();}
-  let r0=vesselPosed[at];let r1=vesselPosed[at+1u];let r2=vesselPosed[at+2u];
-  if(r2.z<0.5){return vesselHidden();}
-  return vesselVertex(r0.xyz,r1.xyz,r2.x,vec2f(r0.w,r1.w),u32(r2.y),r0.xyz,r1.xyz);
-}
-// Every program reads every binding of the group (shipContinuumBindings, and her pose and wetness here), on a path
-// never taken, so each pipeline's layout holds all of them and one set of resources binds them all.
-fn vesselTouched()->f32 {
-  var touched=shipContinuumBindings();
-  if(shipCut.counts.w==0xffffffffu){touched+=vesselListedVertex(0u).${position}.x;}
-  return touched;
-}
-`;
-}
-
-// The hull program (js/wgsl/caravel.js) drawn from the ship continuum's lists. The whole program's clusters keep the
-// samples that are their own across the handoff (shipContinuumMask); its far body and splat are lit by their own
-// colour. The damaged program draws a damaged vessel's clusters, its surviving surface laid first.
-export function vesselContinuumSource({ damaged = false, samples = 4 } = {}) {
-  const { source: vertexSource, out, position } = vesselContinuumVertex(withNeuralPbrVessel(damaged ? CARAVEL_DAMAGED : CARAVEL));
-  // Read without regard to whitespace: the minified bundle (build.mjs) strips it from WGSL, this text's too.
-  let source = vertexSource.replace(/(struct\s+BoatVertex\s*\{[\s\S]*?),?(\s*\};)/, `$1,
-  @location(8) @interpolate(flat) coverage: vec2u,
-  @location(9) colour: vec3f,$2`);
-  if (!/@location\(8\)\s*@interpolate\(flat\)\s*coverage/.test(source)) throw Error('Unrecognized vessel vertex output');
-  if (!damaged) {
-    const fragment = /@fragment\s+fn\s+fs\s*\(\s*in\s*:\s*BoatVertex\s*,\s*@builtin\(front_facing\)\s*front\s*:\s*bool\s*\)\s*->\s*@location\(0\)\s*vec4f\s*\{/;
-    if (!fragment.test(source)) throw Error('Unrecognized vessel fragment shader');
-    source = source.replace(fragment, 'fn vesselShade(in: BoatVertex, front: bool) -> vec4f {');
+const VESSEL_CONTINUUM_WGSL = () => /* wgsl */`
+fn vesselAir(colour:vec3f,world:vec3f)->vec3f { return continuumAir(colour,world); }
+// What a corner hands her fragments. A cluster corner is a vertex of her assembly as she now is (her rest place, normal,
+// material, UV and wetness) or a line vertex of her detail layer as her pose pass laid it; her colours' cloth wears the
+// colours her pose pass flies. A far-body corner or her splat carries its own colour (sqrt-encoded rgb8).
+fn vesselContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
+  let data=continuumKindData(s.record);
+  let head=continuumPoses[data];
+  let scale=max(continuumPoses[data+1u].xyz,vec3f(1e-4));
+  var local=s.local/scale;var normalLocal=vec3f(0.0,1.0,0.0);var uv=vec2f(0.5);var wet=vec2f(0.0);var damage=s.wear;var material=0u;
+  let word=select(0u,shipRiderWord(s.vertex),s.vertex!=CONTINUUM_NO_VERTEX);
+  if(s.what==CONTINUUM_CLUSTER_ENTRY&&(word&SHIP_RIDER_LINE)!=0u){
+    let at=u32(head.z)+(word&0x3fffffffu)*3u;
+    let r0=continuumPoses[at];let r1=continuumPoses[at+1u];let r2=continuumPoses[at+2u];
+    local=r0.xyz;normalLocal=normalize(r1.xyz+vec3f(0.0,1e-6,0.0));uv=vec2f(r0.w,r1.w);
+    wet=moisture[wetLookup[u32(max(r2.y,0.0))]];material=u32(max(r2.x,0.0));damage=0.0;
+  }else if(s.what==CONTINUUM_CLUSTER_ENTRY){
+    let o=word*9u;
+    local=vec3f(vesselAssembly[o],vesselAssembly[o+1u],vesselAssembly[o+2u]);
+    let n=vec3f(vesselAssembly[o+3u],vesselAssembly[o+4u],vesselAssembly[o+5u]);
+    normalLocal=normalize(n+vec3f(0.0,1e-6,0.0));
+    uv=vec2f(vesselAssembly[o+7u],vesselAssembly[o+8u]);
+    wet=moisture[wetLookup[word]];
+    material=u32(max(vesselAssembly[o+6u],0.0));
+    damage=max(damage,shipDamageOf(n));
+    let colours=continuumPoses[u32(head.x)+word*u32(head.y)].w;
+    if(colours>0.5){material=${VESSEL_COLOURS_MATERIAL}u+u32(round(colours));}
   }
-  return CONTINUUM_CORE_WGSL + source + shipContinuumDataWGSL(VESSEL_CONTINUUM_GROUP) + vesselContinuumReaders(VESSEL_CONTINUUM_GROUP, out, position) + /* wgsl */`
-// Her clusters: whole ones from the clusters list, a damaged one's from her own list; and her lines, which ride them.
-@vertex fn vesselClusterVS(@builtin(vertex_index) vertex:u32,listed:ShipContinuumEntry)->BoatVertex {
-  let touched=vesselTouched();
-  let entry=listed.entry;
-  var o:BoatVertex;
-  if((entry.y&${SHIP_CONTINUUM_LINE_PIECE}u)!=0u){
-    o=vesselLineVertex(entry.x,entry.y&${SHIP_CONTINUUM_LINE_PIECE - 1}u,vertex);
-  }else{
-    let v=shipContinuumClusterVertex(vesselBodyOf(entry.x),entry.y,vertex);
-    if(v==0xffffffffu){return vesselHidden();}
-    o=vesselListedVertex(v);
-    // Her colours' cloth carries the code of the colours her pose pass flies (js/wgsl/ship-colours.js).
-    let colours=vesselPosed[v*2u].w;
-    if(colours>0.5){o.material=${VESSEL_COLOURS_MATERIAL}u+u32(round(colours));}
-  }
-  o.world+=vec3f(touched);
-  // The clusters give up the samples the far body takes across the handoff.
-  o.coverage=shipContinuumCoverage(1u,shipContinuumState(entry.x).x);
-  return o;
+  (*v).local=local;(*v).normalLocal=normalLocal;(*v).uv=uv;(*v).wet=wet;(*v).damage=damage;(*v).material=material;
+  let colourWord=select(continuumType(s.model,${SHIP_CONTINUUM_MATERIAL.splat}u),s.word,s.what==CONTINUUM_FAR_ENTRY);
+  let colour=unpack4x8unorm(colourWord).rgb;
+  (*v).colour=colour*colour;
 }
-` + (damaged ? '' : /* wgsl */`
-const VESSEL_CONTINUUM_SAMPLES:u32=${samples}u;
-// One far-body vertex at 'step', on its way to where the next collapse takes it.
-fn vesselFarVertex(ship:u32,chunk:u32,vertex:u32,step:u32,morph:f32)->BoatVertex {
-  let body=vesselBodyOf(ship);
-  let triangle=chunk*128u+vertex/3u;
-  if(triangle>=shipContinuumStepWord(body,step,0u)){return vesselHidden();}
-  let corner=shipShape[body.chain.x+body.chain.z+triangle*3u+vertex%3u];
-  let next=min(step+1u,u32(body.far.y));
-  let a=shipContinuumAncestor(body,corner,step);
-  let b=shipContinuumAncestor(body,a,next);
-  let grow=mix(bitcast<f32>(shipContinuumStepWord(body,step,2u)),bitcast<f32>(shipContinuumStepWord(body,next,2u)),morph);
-  let pa=shipContinuumFarPoint(body.chain.x,a);
-  var o=vesselFarPoint(pa,grow,body);
-  o.colour=pa.colour;
-  if(morph>0.0&&b!=a){
-    let pb=shipContinuumFarPoint(body.chain.x,b);
-    let ob=vesselFarPoint(pb,grow,body);
-    o.pos=mix(o.pos,ob.pos,morph);
-    o.world=mix(o.world,ob.world,morph);
-    o.normal=normalize(mix(o.normal,ob.normal,morph));
-    o.local=mix(o.local,ob.local,morph);
-    o.colour=mix(o.colour,pb.colour,morph);
-  }
-  return o;
+fn vesselContinuumBoat(v:ContinuumVarying)->BoatVertex {
+  var b:BoatVertex;
+  b.pos=v.position;b.world=v.world;b.normal=v.normal;b.local=v.local;b.material=v.material;
+  b.normalLocal=v.normalLocal;b.uv=v.uv;b.wet=v.wet;b.damage=v.damage;
+  return b;
 }
-@vertex fn vesselFarVS(@builtin(vertex_index) vertex:u32,listed:ShipContinuumEntry)->BoatVertex {
-  let touched=vesselTouched();
-  let entry=listed.entry;
-  let state=shipContinuumState(entry.x);
-  var o=vesselFarVertex(entry.x,entry.y,vertex,state.y&65535u,bitcast<f32>(state.z));
-  o.world+=vec3f(touched);
-  // The far body takes the handoff's share from the clusters and gives the splat its own.
-  o.coverage=shipContinuumCoverage(2u,state.x);
-  return o;
-}
-// The far body at the shadow map's step, unmorphed: her coarse cut, seen from under the water.
-@vertex fn vesselFarCaptureVS(@builtin(vertex_index) vertex:u32,listed:ShipContinuumEntry)->BoatVertex {
-  let touched=vesselTouched();
-  let entry=listed.entry;
-  var o=vesselFarVertex(entry.x,entry.y,vertex,shipContinuumState(entry.x).y>>16u,0.0);
-  o.world+=vec3f(touched);
-  o.coverage=vec2u(2u,0u);
-  return o;
-}
-// The splat: the triangle that circumscribes her outline's ellipse, shrunk to the ellipse's own area, facing the eye,
-// as wide as she shows from where she is seen (side on or end on).
-@vertex fn vesselSplatVS(@builtin(vertex_index) vertex:u32,listed:ShipContinuumEntry)->BoatVertex {
-  let touched=vesselTouched();
-  let entry=listed.entry;
-  let state=shipContinuumState(entry.x);
-  let body=vesselBodyOf(entry.x);
-  let scale=max(shipInstances[entry.x].attitude.z,1e-3);
-  let centre=hull.origin.xyz+rotateHull(body.splat.xyz*scale);
-  let toward=normalize(F.camPos.xyz-centre);
-  var up=rotateHull(vec3f(0.0,1.0,0.0));
-  up=normalize(up-toward*dot(up,toward)+vec3f(0.0,1e-4,0.0));
-  let right=normalize(cross(up,toward));
-  let beam=rotateHull(vec3f(1.0,0.0,0.0));
-  let level=toward-up*dot(toward,up);
-  let sideOn=abs(dot(level/max(length(level),1e-4),beam));
-  let rx=mix(body.splat.w,body.far.w,sideOn);
-  let k=0.7776*scale*bitcast<f32>(state.w);
-  let corner=array<vec2f,3>(vec2f(0.0,2.0),vec2f(-1.7320508,-1.0),vec2f(1.7320508,-1.0))[min(vertex,2u)];
-  let world=centre+right*(corner.x*rx*k)+up*(corner.y*body.far.z*k);
-  var o:BoatVertex;
-  o.pos=F.viewProj*vec4f(world-F.camPos.xyz,1.0);
-  o.world=world+vec3f(touched);
-  o.normal=toward;
-  o.normalLocal=vec3f(0.0,1.0,0.0);
-  o.colour=body.colour.xyz;
-  o.coverage=shipContinuumCoverage(3u,state.x);
-  return o;
-}
-// Her far body and splat, lit by their own colour as her timber is lit.
-fn vesselFarShade(in:BoatVertex,front:bool)->vec4f {
-  // Never taken: it holds every resource her whole shade binds in this program's layout too.
-  if(F.screen.x<0.0){return vesselShade(in,front);}
-  let n=normalize(in.normal)*select(-1.0,1.0,front);
+// Her far body and splat, lit by their own colour as her timber is lit. A splat faces the eye however it is wound.
+fn vesselContinuumFarShade(v:ContinuumVarying,front:bool)->vec4f {
+  let n=normalize(v.normal)*select(select(-1.0,1.0,front),1.0,v.coverage.x==CONTINUUM_SPLAT_ENTRY);
   let toSun=normalize(F.sunDir.xyz);
-  let eye=normalize(F.camPos.xyz-in.world);
-  let shadowed=vesselShadow(in.world,n);
+  let eye=normalize(continuumEye()-v.world);
+  let shadowed=vesselShadow(v.world,n);
   let sunLight=sunIlluminance()*sunVis[0]*step(0.0,toSun.y)*solarShadowVisibility(shadowed);
   let lit=max(dot(n,toSun),0.0);
   let skyLight=skyAtmo(normalize(vec3f(n.x*0.35,max(n.y,0.14),n.z*0.35)));
   let seaLight=skyAtmo(vec3f(0.0,0.25,0.0))*0.45+F.waterCol.rgb*0.65;
   let f0=vec3f(0.04);
-  var col=in.colour*vesselAmbient(n,skyLight,seaLight)*0.82+(in.colour/PI)*sunLight*lit+vesselSpecular(n,eye,toSun,0.86,f0)*sunLight*lit;
-  col+=lunarSurface(n,eye,in.colour,0.86,f0,sunVis[1]*lunarShadowVisibility(shadowed));
-  return vec4f(surfaceAir(col,in.world),1.0);
+  var col=v.colour*vesselAmbient(n,skyLight,seaLight)*0.82+(v.colour/PI)*sunLight*lit+vesselSpecular(n,eye,toSun,0.86,f0)*sunLight*lit;
+  col+=lunarSurface(n,eye,v.colour,0.86,f0,sunVis[1]*lunarShadowVisibility(shadowed));
+  return vec4f(continuumAir(col,v.world),1.0);
 }
-// Each continuum draw keeps only the samples of the pixel that are its own (shipContinuumMask).
-struct VesselContinuumFragment { @location(0) color:vec4f, @builtin(sample_mask) mask:u32 };
-@fragment fn fs(in:BoatVertex,@builtin(front_facing) front:bool)->VesselContinuumFragment {
-  var o:VesselContinuumFragment;
-  o.color=vesselShade(in,front);
-  o.mask=shipContinuumMask(in.coverage,in.pos.xy,VESSEL_CONTINUUM_SAMPLES);
-  return o;
+// Both shades in uniform control flow (her timber's takes derivatives), the one drawn chosen.
+fn vesselContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
+  let near=vesselShade(vesselContinuumBoat(v),front);
+  let far=vesselContinuumFarShade(v,front);
+  return select(far,near,v.coverage.x==CONTINUUM_CLUSTER_ENTRY);
 }
-@fragment fn vesselFarFS(in:BoatVertex,@builtin(front_facing) front:bool)->VesselContinuumFragment {
-  var o:VesselContinuumFragment;
-  o.color=vesselFarShade(in,front);
-  o.mask=shipContinuumMask(in.coverage,in.pos.xy,VESSEL_CONTINUUM_SAMPLES);
-  return o;
+// The samples a holed vessel's clusters keep: none where shot has holed her timber, parted her rope or torn her canvas.
+fn vesselContinuumMask(v:ContinuumVarying,front:bool)->u32 {
+  let holed=v.coverage.x==CONTINUUM_CLUSTER_ENTRY&&continuumFlagged(continuumRecords[v.coverage.z],CONTINUUM_DAMAGED);
+  return select(0xffffffffu,select(0u,0xffffffffu,vesselSurvives(vesselContinuumBoat(v))),holed);
 }
-// What the water captures (js/water-optics.js): her far body by its colour, a damaged vessel's clusters whole.
-@fragment fn vesselFarCaptureFS(in:BoatVertex,@builtin(front_facing) front:bool)->@location(0) vec4f { return vesselFarShade(in,front); }
-@fragment fn vesselCaptureFS(in:BoatVertex,@builtin(front_facing) front:bool)->@location(0) vec4f { return vesselShade(in,front); }
-`);
-}
-
-// The shadow program (js/wgsl/shadows.js) cast from the same lists: her far body at the shadow map's step, her clusters
-// cut to the map's texel, or a damaged vessel's clusters. Solid and canvas are cast into separate maps, each triangle
-// by what its first corner is.
-export function vesselContinuumShadowSource() {
-  const { source, out, position } = vesselContinuumVertex(SHADOW_CAST);
-  return CONTINUUM_CORE_WGSL + source + shipContinuumDataWGSL(VESSEL_SHADOW_CONTINUUM_GROUP) + vesselContinuumReaders(VESSEL_SHADOW_CONTINUUM_GROUP, out, position) + /* wgsl */`
-fn vesselCastsCanvas(material:f32)->bool { let m=u32(max(floor(material),0.0)); return m==9u||m==13u||m==${VESSEL_ENSIGN_MATERIAL}u||m==${VESSEL_PENNANT_MATERIAL}u; }
-fn vesselShadowCluster(vertex:u32,listed:ShipContinuumEntry,cloth:bool)->ShadowVertex {
-  let touched=vesselTouched();
-  let entry=listed.entry;
-  let body=vesselBodyOf(entry.x);
-  let first=shipContinuumClusterVertex(body,entry.y,vertex-vertex%3u);
-  if(first==0xffffffffu||vesselCastsCanvas(shipVertices[first*9u+6u])!=cloth){return vesselHidden();}
-  var o=vesselListedVertex(shipContinuumClusterVertex(body,entry.y,vertex));
-  o.position.x+=touched;
-  return o;
-}
-fn vesselShadowFar(vertex:u32,listed:ShipContinuumEntry,cloth:bool)->ShadowVertex {
-  let touched=vesselTouched();
-  let entry=listed.entry;
-  let body=vesselBodyOf(entry.x);
-  let state=shipContinuumState(entry.x);
-  // Near the eye her clusters cast her shadow (SHIP_CONTINUUM_SHADOW_CLUSTER_LIST), and her far body none.
-  if(shipContinuumClustersCast(state)){return vesselHidden();}
-  let step=state.y>>16u;
-  let triangle=entry.y*128u+vertex/3u;
-  if(triangle>=shipContinuumStepWord(body,step,0u)){return vesselHidden();}
-  let at=body.chain.x+body.chain.z+triangle*3u;
-  if((shipContinuumFarPoint(body.chain.x,shipContinuumAncestor(body,shipShape[at],step)).kind==1u)!=cloth){return vesselHidden();}
-  var o=vesselFarPoint(shipContinuumFarPoint(body.chain.x,shipContinuumAncestor(body,shipShape[at+vertex%3u],step)),bitcast<f32>(shipContinuumStepWord(body,step,2u)),body);
-  o.position.x+=touched;
-  return o;
-}
-@vertex fn vesselSolidClusterVS(@builtin(vertex_index) vertex:u32,listed:ShipContinuumEntry)->ShadowVertex { return vesselShadowCluster(vertex,listed,false); }
-@vertex fn vesselCanvasClusterVS(@builtin(vertex_index) vertex:u32,listed:ShipContinuumEntry)->ShadowVertex { return vesselShadowCluster(vertex,listed,true); }
-@vertex fn vesselSolidFarVS(@builtin(vertex_index) vertex:u32,listed:ShipContinuumEntry)->ShadowVertex { return vesselShadowFar(vertex,listed,false); }
-@vertex fn vesselCanvasFarVS(@builtin(vertex_index) vertex:u32,listed:ShipContinuumEntry)->ShadowVertex { return vesselShadowFar(vertex,listed,true); }
 `;
-}
 
-// Every program a vessel is drawn with, asked for once a device and shared by the fleet: her cut, her clusters, far
-// body and splat in the scene, her two shadow casts each from her far body and from her clusters, and what the water
-// captures of her. The damaged programs are asked for apart (requestDamaged), once the game is running.
+const vesselContinuumMaterial = (capture) => Object.freeze({
+  name: 'vesselContinuum', prelude: vesselContinuumPrelude(capture), core: false, data: Object.freeze({ group: 2, binding: 0 }),
+  varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['wet', 'vec2f'], ['damage', 'f32'], ['colour', 'vec3f'], ['material', 'u32', true]],
+  wgsl: VESSEL_CONTINUUM_WGSL,
+  salt: 7,
+  // Sails, planking and her lines are open shells, lit from whichever side is seen.
+  cullMode: 'none', air: true, capture: true, mask: true,
+});
+// Her material in the scene, and as the water captures it (its medium water, js/wgsl/caravel.js).
+export const VESSEL_CONTINUUM_MATERIAL = vesselContinuumMaterial(false);
+export const VESSEL_CONTINUUM_CAPTURE_MATERIAL = vesselContinuumMaterial(true);
+
+// The one select and shadow program, her material's view and, under water, its capture; once a device.
 export function requestVesselContinuumPrograms({ device, shader, format, samples, waterOptics = null }) {
   return requestOnce(device, `vessel continuum ${format} ${samples}`, async () => {
-    const source = vesselContinuumSource({ samples });
-    const [module, shadowModule] = await Promise.all([shader(source, 'vessel continuum'), shader(vesselContinuumShadowSource(), 'vessel continuum shadows')]);
-    const seen = (label, entryPoint, fragment) => device.createRenderPipelineAsync({
-      label, layout: 'auto',
-      vertex: { module, entryPoint, buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
-      fragment: { module, entryPoint: fragment, targets: [{ format }] },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-      multisample: { count: samples },
-    });
-    const cast = (label, entryPoint, cloth) => device.createRenderPipelineAsync({
-      label, layout: 'auto',
-      vertex: { module: shadowModule, entryPoint, buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
-      fragment: { module: shadowModule, entryPoint: cloth ? 'canvasFS' : 'solidFS', targets: cloth ? [{ format: 'rgba16float' }] : [] },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
-    });
-    const optics = await waterOptics;
-    const capture = (entry, entryPoint) => optics?.capture({ source, entry, world: 'in.world', vertex: { entryPoint, buffers: SHIP_CONTINUUM_ENTRY_LAYOUT }, groups: 3 }) ?? null;
-    const [cut, clusters, far, splat, solidFar, canvasFar, solidClusters, canvasClusters, farCapture, clusterCapture] = await Promise.all([
-      requestShipContinuumCut({ device, shader }),
-      seen('vessel clusters', 'vesselClusterVS', 'fs'),
-      seen('vessel far bodies', 'vesselFarVS', 'vesselFarFS'),
-      seen('vessel splats', 'vesselSplatVS', 'vesselFarFS'),
-      cast('solid shadows of far bodies', 'vesselSolidFarVS', false),
-      cast('canvas shadows of far bodies', 'vesselCanvasFarVS', true),
-      cast('solid shadows of clusters', 'vesselSolidClusterVS', false),
-      cast('canvas shadows of clusters', 'vesselCanvasClusterVS', true),
-      capture('vesselFarCaptureFS', 'vesselFarCaptureVS'),
-      capture('vesselCaptureFS', 'vesselClusterVS'),
+    const [programs, view] = await Promise.all([
+      requestContinuumPrograms({ device, shader, shadowFormat: 'depth32float' }),
+      requestContinuumView({ device, shader, material: VESSEL_CONTINUUM_MATERIAL, format, samples }),
     ]);
-    let damaged = null;
-    return {
-      cut, clusters, far, splat, shadows: { far: [solidFar, canvasFar], clusters: [solidClusters, canvasClusters] }, farCapture, clusterCapture,
-      // The damaged vessel's programs: her surviving surface's depth (holed timber, parted rope and ripped canvas cut
-      // away), then her shade where that depth is equal.
-      requestDamaged() {
-        damaged ??= shader(vesselContinuumSource({ damaged: true, samples }), 'damaged vessel continuum').then((damagedModule) => {
-          const base = { layout: 'auto', vertex: { module: damagedModule, entryPoint: 'vesselClusterVS', buffers: SHIP_CONTINUUM_ENTRY_LAYOUT }, primitive: { topology: 'triangle-list', cullMode: 'none' }, multisample: { count: samples } };
-          return Promise.all([
-            device.createRenderPipelineAsync({ ...base, label: 'damaged vessel surviving surface', fragment: { module: damagedModule, entryPoint: 'surviving', targets: [{ format, writeMask: 0 }] },
-              depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' } }),
-            device.createRenderPipelineAsync({ ...base, label: 'damaged vessel', fragment: { module: damagedModule, entryPoint: 'fs', targets: [{ format }] },
-              depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'equal' } }),
-          ]).then(([surviving, shade]) => ({ surviving, shade }));
-        });
-        damaged.catch(() => { damaged = null; });
-        return damaged;
-      },
-    };
+    const capture = await requestContinuumCapture(waterOptics, VESSEL_CONTINUUM_CAPTURE_MATERIAL).catch((error) => {
+      console.error('Vessel continuum capture:', error);
+      return null;
+    });
+    return { programs, view, capture };
   });
 }
 
-// Each model's body, loaded once a device: the bake checked against the ship as built here (js/ship-mesh.js).
+// Each model's body, once a device: the bake checked against the ship as built here (js/ship-mesh.js), her riders
+// renumbered onto her assembly as built.
 export function loadVesselContinuumBody(device, asset, { fetchAsset = fetch } = {}) {
-  return requestOnce(device, `vessel continuum body ${asset.model.id}`, () => loadShipContinuum(device, [`player-${asset.model.id}`], [asset], { label: `${asset.model.id} continuum`, fetchAsset }));
+  return requestOnce(device, `vessel continuum body ${asset.model.id}`, async () => {
+    const { manifest, words } = await loadShipContinuum({ ids: [`player-${asset.model.id}`], sources: [asset], label: `${asset.model.id} continuum`, fetchAsset });
+    return { manifest: manifest[0], words, types: continuumAtlasTypes(words), buffer: uploadContinuumAtlas(device, words, `${asset.model.id} vessel`) };
+  });
 }
 
-// One vessel on the continuum: her cut, her instance record and the bind groups of every program she is drawn with.
-// `vertices` is her own copy of the assembly and `pose` her pose pass (js/vessel-pose.js); `frame` the scene's Frame,
-// `shadowFrame` her own shadow map's frame (whose texel her shadow's step is cut to).
-export function createVesselContinuum({ device, programs, data, asset, vertices, pose, frame, offset, shadowFrame, identity, samples = 4, label = 'vessel' }) {
-  if (data.manifests.length !== 1 || data.assemblies[0].vertexCount !== asset.vertices.length / 9) throw Error(`${label} continuum holds another assembly`);
-  const B = GPUBufferUsage;
-  const instances = device.createBuffer({ label: `${label} continuum instance`, size: SHIP_CONTINUUM_INSTANCE_FLOATS * 4, usage: B.STORAGE | B.COPY_DST | B.COPY_SRC });
-  const record = new Float32Array(SHIP_CONTINUUM_INSTANCE_FLOATS);
-  const cut = createShipContinuumCut({ device, pipeline: programs.cut, data, instances, capacity: 1, frame, offset, shadowFrame, samples, label: `${label} continuum` });
-  const posed = [{ binding: VESSEL_CONTINUUM_POSED, resource: { buffer: pose.buffer } }];
-  const dataGroup = (pipeline, group) => cut.dataGroup(pipeline, group, posed, { vertices });
-  const length = asset.model.runtime.length;
-  let damagedSlot = -1, drawn = false;
-  const shadowGroups = new Map(), captureData = {
-    far: programs.farCapture ? dataGroup(programs.farCapture.pipeline, VESSEL_CONTINUUM_GROUP) : null,
-    clusters: programs.clusterCapture ? dataGroup(programs.clusterCapture.pipeline, VESSEL_CONTINUUM_GROUP) : null,
-  };
-  const scene = { clusters: dataGroup(programs.clusters, VESSEL_CONTINUUM_GROUP), far: dataGroup(programs.far, VESSEL_CONTINUUM_GROUP), splat: dataGroup(programs.splat, VESSEL_CONTINUUM_GROUP) };
-  let damagedData = null;
+/**
+ * One vessel in the continuum: a scene of her one record over her own posed vertices. `pose` is her pose pass
+ * (js/vessel-pose.js), `frame` the frame's uniform buffer, `shadows` her own shadow (js/shadows.js createVesselShadows),
+ * whose frame her coarse cut is cut to and cast by.
+ */
+export function createVesselContinuum({ device, programs, body, asset, pose, frame, shadows, identity, samples = 4, label = 'vessel' }) {
+  const { runtime } = asset.model, types = body.types;
+  if (types.length !== 1 || body.manifest.source.indices !== asset.indices.length) throw Error(`${label} continuum holds another assembly`);
+  const { room } = continuumRoom(types, [1]);
+  const scene = createContinuumScene({
+    device, atlas: body, programs: programs.programs, capacity: 1, room, view: programs.view, poses: pose.buffer,
+    frame, shadowUniform: shadows.uniform, samples, label: `${label} continuum`,
+  });
+  // Her RIDER header (js/wgsl/ship-kinds.js): her posed vertices from vec4f 0, two a vertex; her lines after them; and
+  // design units to her type's metres, as her hull program scales her (js/wgsl/caravel.js rigVertex), over her record's scale.
+  const header = new Float32Array(SHIP_RIDER_HEADER * 4);
+  header.set([0, 2, pose.vertexCount * 2, pose.lineVertexCount], 0);
+  let sent = '';
+  let shown = false;
+  const capture = { draw: null, key: null };
   return {
-    cut, instances, programs,
-    // Her place this frame, from her boat state: where she floats and how she lies (as her hull uniform has it), at her
-    // scale over the model's; cut finer when she is the player's own or aimed at; her damaged list when she is holed.
-    place(boat, { important = false, damaged = false } = {}) {
-      damagedSlot = damaged ? 0 : -1;
-      record.set([boat.x, boat.heave ?? 0, boat.z, (boat.heading * Math.PI) / 180, boat.pitch ?? 0, boat.roll ?? 0, (boat.length ?? length) / length, 0, 0, 0,
-        shipContinuumOrders({ important, damagedSlot, identity }), 0]);
-      device.queue.writeBuffer(instances, 0, record);
+    scene,
+    // Her place this frame, from her boat state: where she floats and how she lies, at her scale over the model's; cut
+    // finer when she is the player's own or aimed at; her clusters alone, masked by her damage, once she is holed;
+    // `reach` how far past her hull her detail reaches (her let-go iron, her mooring lines).
+    place(boat, { important = false, damaged = false, reach = 0 } = {}) {
+      const scale = (boat.length ?? runtime.length) / runtime.length;
+      header.set([(boat.beam ?? runtime.beam) / 3.6 / scale, vesselVerticalScale(boat) / scale, (boat.length ?? runtime.length) / 12 / scale], 4);
+      const key = `${header[4]},${header[5]},${header[6]}`;
+      if (key !== sent) { sent = key; device.queue.writeBuffer(pose.buffer, pose.headerAt * 16, header); }
+      scene.place(0, {
+        position: [boat.x ?? 0, boat.heave ?? 0, boat.z ?? 0], scale, turn: shipContinuumTurn(((boat.heading ?? 0) * Math.PI) / 180, boat.pitch ?? 0, boat.roll ?? 0),
+        type: 0, kind: CONTINUUM_KIND.RIDER, flags: (important ? CONTINUUM_IMPORTANT_FLAG : 0) | (damaged ? CONTINUUM_DAMAGED : 0),
+        pose: pose.headerAt, seed: identity, reach, identity,
+      });
+      scene.send(0, 1);
     },
-    // Her cut, in the frame's compute pass; when she is not shown her lists stay empty.
-    encode(pass, shown) { drawn = Boolean(shown); cut.encode(pass, drawn ? 1 : 0); },
-    get damaged() { return damagedSlot >= 0; },
-    // The scene pass: a whole vessel's clusters, far body and splat, opaque, each keeping its own samples, and her
-    // lines with her clusters. `groups(pipeline)` gives her own resources and lighting at groups 0 and 1 for a program.
+    // Her cut, in the frame's compute pass; when she is not shown, nothing of her is listed. Her shadow frame is fitted
+    // every frame, so her coarse cut is always made: the water captures it whether or not she casts.
+    encode(pass, visible) {
+      shown = Boolean(visible);
+      scene.setCount(shown ? 1 : 0);
+      scene.setShadows(true);
+      scene.encode(pass);
+    },
+    get damaged() { return scene.flagged(0, CONTINUUM_DAMAGED); },
+    // The scene pass: her clusters, lines, far body and splat, each keeping its own samples. `groups(pipeline)` gives
+    // her own resources and lighting, groups 0 and 1.
     draw(pass, groups) {
-      if (!drawn || damagedSlot >= 0) return;
-      for (const [index, pipeline, data] of [[0, programs.clusters, scene.clusters], [SHIP_CONTINUUM_LINE_LIST, programs.clusters, scene.clusters], [1, programs.far, scene.far], [2, programs.splat, scene.splat]]) {
-        pass.setPipeline(pipeline);
-        const [own, lighting] = groups(pipeline);
-        pass.setBindGroup(0, own); pass.setBindGroup(1, lighting); pass.setBindGroup(VESSEL_CONTINUUM_GROUP, data);
-        cut.draw(pass, index);
-      }
+      if (!shown) return;
+      const [own, lighting] = groups(programs.view.pipeline);
+      scene.draw(pass, own, lighting);
     },
-    // A damaged vessel: her surviving depth, then her shade where it is equal, both from her damaged list and her lines. `groups()`
-    // gives her own resources for each ({ surviving, shade }), the shade's lighting and the depth's empty group 1.
-    drawDamaged(pass, damagedPrograms, groups) {
-      if (!drawn || damagedSlot < 0 || !damagedPrograms) return;
-      damagedData ??= { surviving: dataGroup(damagedPrograms.surviving, VESSEL_CONTINUUM_GROUP), shade: dataGroup(damagedPrograms.shade, VESSEL_CONTINUUM_GROUP) };
-      const own = groups();
-      pass.setPipeline(damagedPrograms.surviving); pass.setBindGroup(0, own.surviving); pass.setBindGroup(1, own.empty); pass.setBindGroup(VESSEL_CONTINUUM_GROUP, damagedData.surviving);
-      cut.draw(pass, cut.damagedList(damagedSlot));
-      cut.draw(pass, SHIP_CONTINUUM_LINE_LIST);
-      pass.setPipeline(damagedPrograms.shade); pass.setBindGroup(0, own.shade); pass.setBindGroup(1, own.lighting); pass.setBindGroup(VESSEL_CONTINUUM_GROUP, damagedData.shade);
-      cut.draw(pass, cut.damagedList(damagedSlot));
-      cut.draw(pass, SHIP_CONTINUUM_LINE_LIST);
-    },
-    // Seen from under (or just over) the water: her far body at the shadow map's step, or a damaged vessel's clusters.
-    // `groups(capture)` gives her own resources and lighting at groups 0 and 1 for a capture program.
-    drawCapture(pass, above, groups) {
-      if (!drawn) return;
-      const holed = damagedSlot >= 0, capture = holed ? programs.clusterCapture : programs.farCapture, data = holed ? captureData.clusters : captureData.far;
-      if (!capture || !data) return;
-      capture.bind(pass, above);
-      const [own, lighting] = groups(capture);
-      pass.setBindGroup(0, own); pass.setBindGroup(1, lighting); pass.setBindGroup(VESSEL_CONTINUUM_GROUP, data);
-      cut.draw(pass, holed ? cut.damagedList(damagedSlot) : SHIP_CONTINUUM_SHADOW_LIST);
-    },
-    // Her shadow (js/shadows.js createVesselShadows casts through this), into the solid or the canvas map: her far body
-    // at the shadow map's step, or near the eye her clusters cut to its texel; a damaged vessel's own clusters.
-    // `own(pipeline)` is the shadow's own group 0.
-    cast(pass, cloth, own) {
-      if (!drawn) return;
-      const lists = damagedSlot >= 0 ? [[programs.shadows.clusters, cut.damagedList(damagedSlot)]]
-        : [[programs.shadows.far, SHIP_CONTINUUM_SHADOW_LIST], [programs.shadows.clusters, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST]];
-      for (const [pipelines, list] of lists) {
-        const pipeline = pipelines[cloth ? 1 : 0];
-        if (!shadowGroups.has(pipeline)) shadowGroups.set(pipeline, dataGroup(pipeline, VESSEL_SHADOW_CONTINUUM_GROUP));
-        pass.setPipeline(pipeline); pass.setBindGroup(0, own(pipeline)); pass.setBindGroup(VESSEL_SHADOW_CONTINUUM_GROUP, shadowGroups.get(pipeline));
-        cut.draw(pass, list);
-      }
+    // Her shadow (js/shadows.js castWith): her coarse cut into her solid map. The kernel's shadow program casts depth
+    // alone, so her canvas map takes nothing of her.
+    cast(pass, cloth) { if (shown && !cloth) scene.drawShadow(pass); },
+    // Seen from under (or just over) the water: her coarse cut. `entries` her group 0's entries for the capture, made
+    // anew when `key` changes (a resize).
+    drawCapture(pass, above, entries, key) {
+      if (!shown || !programs.capture) return;
+      if (capture.key !== key || !capture.draw) { capture.key = key; capture.draw = continuumCaptureDraw(programs.capture, entries(), shadows); }
+      capture.draw.draw(pass, [scene], above);
     },
     // What the census reads of the scene pass (js/continuum-census.js).
-    continuumDraws: () => cut.continuumDraws(),
-    destroy() { cut.destroy(); instances.destroy(); },
+    continuumDraws: () => (shown ? scene.continuumDraws() : []),
+    destroy() { scene.destroy(); },
   };
 }

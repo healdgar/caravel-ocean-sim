@@ -42,9 +42,11 @@ export function createShipAssetCache() {
             indices,
             groups: fracturedGroups,
           });
-          const collider = createShipCollider({ model, vertices, indices, groups: fracturedGroups, fracture });
           // Her detail layer: what is thinner than a ball, held by the parts it rides (js/vessel-detail.js).
           const detail = buildVesselDetail({ model, vertices, indices, groups: fracturedGroups });
+          // Her anchor's iron is struck where her detail pass lays it: hung by its eye at the cathead, or let go.
+          const ironEye = detail.model[19] > 0 ? Array.from(detail.model.subarray(16, 19)) : null;
+          const collider = createShipCollider({ model, vertices, indices, groups: fracturedGroups, fracture, ironEye });
           const shared={ model, vertices, indices, groups: deepFreeze(fracturedGroups), partAssembly, fracture, collider, detail, gpuPose:true };
           if(model.rig?.backend==='surfaces-v1'){
             shared.rigGPUData=createRigGPUData(shared);

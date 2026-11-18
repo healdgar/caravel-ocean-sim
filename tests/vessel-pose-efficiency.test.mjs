@@ -4,19 +4,7 @@ import {once} from 'node:events';
 import {test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
-import {POSED_VERTEX_LAYOUT,withPosedVesselVertices,createVesselPose} from '../js/vessel-pose.js';
-
-test('posed vertex adapter preserves original material coordinates and rejects unknown layouts',()=>{
-  const shader='struct Out{@builtin(position)p:vec4f};@vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) material:f32,@location(3) uv:vec2f)->Out{let rig=rigVertex(position,normal,material,uv);let local=position;let normalLocal=normal;return Out(vec4f(rig.position,1));}';
-  const posed=withPosedVesselVertices(shader);
-  assert.ok(posed.includes('@location(4) posedPosition:vec3f,@location(5) posedNormal:vec3f'));
-  assert.ok(posed.includes('let local=position;let normalLocal=normal;'));
-  assert.ok(posed.includes('RigVertex(posedPosition,posedNormal,vec3f(hull.size.x/3.6,'));
-  assert.equal(POSED_VERTEX_LAYOUT.arrayStride,32);
-  assert.deepEqual(POSED_VERTEX_LAYOUT.attributes.map(a=>[a.shaderLocation,a.offset]),[[4,0],[5,16]]);
-  assert.throws(()=>withPosedVesselVertices('fn main(){}'),/Unrecognized/);
-  assert.throws(()=>withPosedVesselVertices(posed),/Unrecognized|already posed/);
-});
+import {createVesselPose} from '../js/vessel-pose.js';
 
 test('pose output is per vessel while pipeline sharing, enable gating and GPU-buffer ownership remain explicit',async t=>{
   const prior=Object.getOwnPropertyDescriptor(globalThis,'GPUBufferUsage');

@@ -241,7 +241,7 @@ const SHIP_COLLIDER_QUAD = Object.freeze([[0, 0], [1, 0], [1, 1], [0, 1]]), SHIP
  * Prepare a model's collision from the mesh and fracture table it was drawn from. The arrays are shared, not copied.
  * Triangle numbers are the mesh's, so a hit names its part straight from partAssembly.trianglePartIds.
  */
-export function createShipCollider({ model, vertices, indices, groups, fracture }) {
+export function createShipCollider({ model, vertices, indices, groups, fracture, ironEye = null }) {
   const triangles = indices.length / 3, specs = shipMastSpecs(model.id), { vertexShards, shards, sparMasts } = fracture;
   const leaf = new Int32Array(triangles).fill(-1);
   groups.map((g, index) => ({ index, first: Math.floor(g.firstVertex / 3), count: Math.floor(g.vertexCount / 3) })).filter((r) => r.count > 0)
@@ -257,10 +257,12 @@ export function createShipCollider({ model, vertices, indices, groups, fracture 
     if (named) return specs.findIndex((spec) => spec[0] === named) + 1;
     return shipColliderIsSpar(id) ? mastNumberNear(vertices[indices[t * 3] * 9 + 2]) : 0;
   };
-  const solid = [], ropes = [], hatch = [];
+  const solid = [], ropes = [], hatch = [], iron = [];
   for (let t = 0; t < triangles; t++) {
     const id = leaf[t] >= 0 ? String(groups[leaf[t]].id) : '';
     if (shipColliderIgnored(id)) continue;
+    // Her working anchor's iron is struck where it hangs or, once let go, where it lies (shipColliderIronFrame).
+    if (id === 'anchor.port.iron' && ironEye) { iron.push(t); continue; }
     const at = indices[t * 3] * 9, material = vertices[at + 6], kind = Math.floor(material), s = vertexShards[indices[t * 3]], shard = shards[s];
     const code = shipColliderSailCode(model, material);
     if (SHIP_COLLIDER_CLOTH.has(kind) && sailByCode.has(code)) {
@@ -309,7 +311,9 @@ export function createShipCollider({ model, vertices, indices, groups, fracture 
   const includeTree = (box, tree) => { if (tree) include(box, tree.boxes.slice(0, 3), tree.boxes.slice(3, 6)); };
   const includeSphere = (box, centre, r) => include(box, centre.map((v) => v - r), centre.map((v) => v + r));
   const solidTree = shipColliderTree(vertices, indices, solid), ropeTree = shipColliderTree(vertices, indices, ropes);
+  const ironTree = iron.length ? shipColliderTree(vertices, indices, iron) : null;
   includeTree(bounds, solidTree);
+  includeTree(bounds, ironTree);
   includeTree(softBounds, ropeTree);
   const rig = [], canvas = [];
   for (const sail of sailByCode.values()) {
@@ -337,6 +341,7 @@ export function createShipCollider({ model, vertices, indices, groups, fracture 
   return Object.freeze({
     model, frame: model.designFrame, vertices, indices, vertexShards, mastOf, masts: specs.map((spec) => spec[0]), fracture,
     solidTree, ropeTree, rig, canvas, hatchPart, bounds, softBounds,
+    ironPart: ironTree ? Object.freeze({ tree: ironTree, eye: [...ironEye], first: Math.min(...iron), last: Math.max(...iron) }) : null,
     // What the masts' falls take with them, for each stage they have reached, so a fallen mast costs one lookup.
     fallenByStage: new Map(),
   });
@@ -407,10 +412,45 @@ function shipColliderFirstMoved(tree, collider, frame, ox, oy, oz, dx, dy, dz, r
 }
 
 /**
- * The first solid thing on a line through her, in design units. `boat` says where her rig stands and `damage` what
- * has left her. Returns the shared hit record, valid until the next call, or null.
+ * Where her anchor's iron lies once let go, as her detail pass lays it (js/wgsl/vessel-detail.js, role 2): each design
+ * point p of the iron is carried to the world at `anchor.position` + Rh((p - eye) * scale), Rh its heading, then read
+ * back into her design units, D(w) = ((w - origin) . axes) / scale. That is affine, p -> c + M p, so a line keeps its
+ * fraction. The frame's axes are the rows of M^-1, which shipColliderFirstMoved takes a line into the iron's rest frame
+ * by and shipColliderNormal carries a normal out by (M^-T). Returns { frame, min, max }, the iron's box where it lies,
+ * or null while she has no iron or it is stowed.
  */
-export function shipColliderTrace(collider, boat, damage, ox, oy, oz, dx, dy, dz, r) {
+export function shipColliderIronFrame(collider, anchor, origin, axes, scale) {
+  const part = collider.ironPart;
+  if (!part || !anchor?.installed || anchor.phase === 'stowed' || !anchor.position) return null;
+  const h = ((anchor.worldHeading ?? 0) * Math.PI) / 180, c = Math.cos(h), si = Math.sin(h), [ax, ay, az] = axes;
+  const design = (w) => [(w[0] * ax[0] + w[1] * ax[1] + w[2] * ax[2]) / scale[0], (w[0] * ay[0] + w[1] * ay[1] + w[2] * ay[2]) / scale[1], (w[0] * az[0] + w[1] * az[1] + w[2] * az[2]) / scale[2]];
+  const M = [0, 1, 2].map((k) => { const q = [0, 0, 0]; q[k] = scale[k]; return design([c * q[0] - si * q[2], q[1], si * q[0] + c * q[2]]); });
+  const A = design([anchor.position.x - origin[0], anchor.position.y - origin[1], anchor.position.z - origin[2]]), e = part.eye;
+  const at = [0, 1, 2].map((i) => A[i] - M[0][i] * e[0] - M[1][i] * e[1] - M[2][i] * e[2]);
+  // M's columns are M[0..2]; its inverse by cofactors.
+  const [a, b, d] = M, det = a[0] * (b[1] * d[2] - b[2] * d[1]) - b[0] * (a[1] * d[2] - a[2] * d[1]) + d[0] * (a[1] * b[2] - a[2] * b[1]);
+  if (!(Math.abs(det) > 1e-12)) return null;
+  const x = [(b[1] * d[2] - b[2] * d[1]) / det, (b[2] * d[0] - b[0] * d[2]) / det, (b[0] * d[1] - b[1] * d[0]) / det];
+  const y = [(a[2] * d[1] - a[1] * d[2]) / det, (a[0] * d[2] - a[2] * d[0]) / det, (a[1] * d[0] - a[0] * d[1]) / det];
+  const z = [(a[1] * b[2] - a[2] * b[1]) / det, (a[2] * b[0] - a[0] * b[2]) / det, (a[0] * b[1] - a[1] * b[0]) / det];
+  const box = part.tree.boxes, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (let k = 0; k < 8; k++) {
+    const p = [box[(k & 1) * 3], box[((k >> 1) & 1) * 3 + 1], box[((k >> 2) & 1) * 3 + 2]];
+    for (let i = 0; i < 3; i++) {
+      const q = at[i] + M[0][i] * p[0] + M[1][i] * p[1] + M[2][i] * p[2];
+      if (q < min[i]) min[i] = q;
+      if (q > max[i]) max[i] = q;
+    }
+  }
+  return { frame: { origin: at, x, y, z }, min, max };
+}
+
+/**
+ * The first solid thing on a line through her, in design units. `boat` says where her rig stands and `damage` what
+ * has left her; `iron` is where her anchor's iron lies once let go (shipColliderIronFrame), else it hangs at the
+ * cathead. Returns the shared hit record, valid until the next call, or null.
+ */
+export function shipColliderTrace(collider, boat, damage, ox, oy, oz, dx, dy, dz, r, iron = null) {
   const broken = damage?.fracture?.brokenCount > 0 ? damage.fracture.broken : null, fallen = shipColliderFallen(collider, damage?.mastState);
   shipColliderHit.triangle = -1;
   shipColliderHit.frame = null;
@@ -429,6 +469,12 @@ export function shipColliderTrace(collider, boat, damage, ox, oy, oz, dx, dy, dz
   const lid = collider.hatchPart;
   if (lid && shipColliderMissSquared(lid.hinge, ox, oy, oz, dx, dy, dz) <= (lid.reach + r) ** 2) {
     best = shipColliderFirstMoved(lid.tree, collider, shipColliderHatchFrame(collider.model, boat.hatchesClosed).frame, ox, oy, oz, dx, dy, dz, r, best, broken, fallen);
+  }
+  const anchor = collider.ironPart;
+  if (anchor && iron) best = shipColliderFirstMoved(anchor.tree, collider, iron.frame, ox, oy, oz, dx, dy, dz, r, best, broken, fallen);
+  else if (anchor) {
+    best = shipColliderFirst(anchor.tree, collider, ox, oy, oz, dx, dy, dz, r, best, broken, fallen);
+    if (shipColliderStruck >= 0) { shipColliderHit.t = best; shipColliderHit.triangle = shipColliderStruck; shipColliderHit.frame = null; }
   }
   return shipColliderHit.triangle >= 0 ? shipColliderHit : null;
 }

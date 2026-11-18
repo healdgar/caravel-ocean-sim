@@ -83,7 +83,7 @@ wgslModules.push('js/wgsl/ground-detail.js');
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/old-world-works.js','js/old-world-buildings.js');
 // The one cut (its pose kinds, then its select, lists and pipeline family, js/wgsl/continuum-cut.js), then the city
 // continuum: its bodies' packing, then its material, which reads the buildings' own constants.
-order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/continuum-kinds.js','js/wgsl/continuum-cut.js','js/city-continuum.js','js/wgsl/city-continuum.js');
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/continuum-kinds.js','js/wgsl/ship-kinds.js','js/wgsl/continuum-cut.js','js/city-continuum.js','js/wgsl/city-continuum.js');
 // The animal continuum: its atlas format, then its programs, which the herds' and the sea's shaders are built on.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/animal-continuum.js','js/wgsl/animal-continuum.js');
 wgslModules.push('js/wgsl/animal-continuum.js');
@@ -95,9 +95,10 @@ order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/meadow-continuum.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
-// Ships drawn through the one continuum: the bodies' format, the cut and the draws, ahead of the families that draw them.
-order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js','js/wgsl/ship-continuum.js','js/ship-continuum-draw.js');
-// The fleet's own ships on the same continuum (js/vessel-continuum.js), drawn by main.js.
+// Ships in the one continuum: the bodies' format and loading, ahead of the families that draw them (their kinds,
+// js/wgsl/ship-kinds.js, stand beside the kernel's).
+order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js');
+// The fleet's own ships in the same continuum (js/vessel-continuum.js), drawn by main.js.
 order.splice(order.indexOf('js/main.js'),0,'js/vessel-continuum.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/continuum-scene.js','js/city-continuum-draw.js','js/prefab-continuum-ports.js','js/prefab-continuum.js');

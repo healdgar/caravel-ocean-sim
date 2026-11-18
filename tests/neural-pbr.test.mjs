@@ -25,11 +25,11 @@ import {
   withNeuralPbrVessel,
   withNeuralPbrTerrain,
 } from '../js/wgsl/neural-pbr.js';
-import { CARAVEL, CARAVEL_DAMAGED } from '../js/wgsl/caravel.js';
+import { CARAVEL } from '../js/wgsl/caravel.js';
+import { VESSEL_CONTINUUM_MATERIAL } from '../js/vessel-continuum.js';
 import { TERRAIN } from '../js/wgsl/terrain.js';
 import { PROP_CONTINUUM_MATERIAL_SPEC } from '../js/wgsl/prop-continuum.js';
 import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
-import { withPosedVesselVertices } from '../js/vessel-pose.js';
 import { createSubmergedShader } from '../js/water-optics.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -140,16 +140,16 @@ test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero 
 
   const mainVariants = {
     caravel: withNeuralPbrVessel(mainCaravel.CARAVEL),
-    caravelDamaged: withNeuralPbrVessel(mainCaravel.CARAVEL_DAMAGED),
     terrain: withNeuralPbrTerrain(mainTerrain.TERRAIN),
   };
 
   const headVariants = {
-    caravel: withNeuralPbrVessel(withPosedVesselVertices(CARAVEL)),
-    caravelDamaged: withNeuralPbrVessel(withPosedVesselVertices(CARAVEL_DAMAGED)),
+    caravel: withNeuralPbrVessel(CARAVEL),
+    // The ships' continuum view wears the bank in her shading, damage and all (js/vessel-continuum.js).
+    vessel: continuumModuleWGSL({ pass: 'view', material: VESSEL_CONTINUUM_MATERIAL }),
     terrain: withNeuralPbrTerrain(TERRAIN),
     terrainSubmerged: createSubmergedShader(withNeuralPbrTerrain(TERRAIN), 'fs', 'in.world', true, true),
-    vesselSubmerged: createSubmergedShader(withNeuralPbrVessel(withPosedVesselVertices(CARAVEL)), 'fs', 'in.world', false, false),
+    vesselSubmerged: createSubmergedShader(withNeuralPbrVessel(CARAVEL), 'fs', 'in.world', false, false),
     props: continuumModuleWGSL({ pass: 'view', material: PROP_CONTINUUM_MATERIAL_SPEC }),
   };
 

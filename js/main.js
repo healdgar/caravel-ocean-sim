@@ -125,7 +125,7 @@ import { loseHandInGale } from './crew-overboard.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors } from './ship-colors.js';
 import { createDockingBoardingState, computeBoardingStrength, mooringLinesState } from './boarding-docking.js';
-import { writeVesselDetailState, VESSEL_DETAIL_STATE_FLOATS } from './vessel-detail.js';
+import { writeVesselDetailState, vesselDetailReach, VESSEL_DETAIL_STATE_FLOATS } from './vessel-detail.js';
 import { createFreeCannon } from './free-cannon.js';
 import { createCastleDuelController, CASTLE_DUEL_DISTANCE_M } from './castle-duel.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
@@ -751,13 +751,9 @@ async function main() {
     fleetModelCode(asset.model); // A future model needs an explicit hull backend.
     // Her body on the ship continuum (assets/ships/continuum/player-<model>), checked against her as built here.
     const [programs,body]=await Promise.all([vesselProgramsPromise,loadVesselContinuumBody(device,asset)]);
-    const result={asset,gpuPose,programs,body,poseAssets:null,damaged:null,
-      // Compiled once the game is running: until then a damaged ship draws whole for a moment.
-      async compileDamaged(){result.damaged=await programs.requestDamaged();}};
+    const result={asset,gpuPose,programs,body,poseAssets:null};
     renderAssets.set(modelId,result);return result;
   }
-  // No vessel's cut is shifted to a near domain: her hull uniform places her in the scene's own coordinates.
-  const vesselContinuumOffset=mkBuf(32,GU.UNIFORM|GU.COPY_DST,'vessel continuum offset');
   const uniqueShipAssetsPromise=Promise.all([...new Set(fleetSpecs.map(s=>s.modelId))].map(shipRenderAsset));
   uniqueShipAssetsPromise.catch(()=>{});
   const oakTex = await oakTexPromise;
@@ -788,37 +784,28 @@ async function main() {
     // People are drawn through the continuum alone, so a body not baked leaves the company unseen, and says so.
     catch(error){if(index===0)crewError=error?.missing?'Crew bodies not baked':'Crew unavailable';console.error(spec.id+' crew initialization:',error);}
     interaction.setShadows(shadows);
-    // She is drawn, shadowed and seen from under the water through her own cut of her body (js/vessel-continuum.js),
-    // which reads her posed vertices and her own copy of the assembly. Its buffers are named for her model and row
-    // ('<model> vessel <id> continuum draws'), so a frame's indirect draws say which ship they are.
-    const continuum=createVesselContinuum({device,programs:render.programs,data:render.body,asset,vertices:vertexBuffer,pose,
-      frame:{buffer:frameUBO},offset:{buffer:vesselContinuumOffset},shadowFrame:{buffer:shadows.uniform},identity:index+1,samples:MSAA,label:`${asset.model.id} vessel ${spec.id}`});
-    shadows.castWith((pass,cloth,own)=>continuum.cast(pass,cloth,own));
+    // She is drawn, shadowed and seen from under the water through her own scene of the one continuum
+    // (js/vessel-continuum.js), which reads her posed vertices and her own copy of the assembly. Its buffers are named
+    // for her model and row ('<model> vessel <id> continuum draws'), so a frame's indirect draws say which ship they are.
+    const continuum=createVesselContinuum({device,programs:render.programs,body:render.body,asset,pose,frame:frameUBO,shadows,
+      identity:index+1,samples:MSAA,label:`${asset.model.id} vessel ${spec.id}`});
+    shadows.castWith((pass,cloth)=>continuum.cast(pass,cloth));
     vessels.push({...spec,boat:null,asset,render,hullUBO,holesUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
       rowingWater,continuum,ownGroups:new Map(),recoilMap});
   }
-  const hullBelongsDamaged=v=>Boolean(v.render.damaged&&(v.pose?.scarred||v.boat.damage?.holes?.length||v.boat.damage?.craters?.length));
-  // A vessel's own resources and lighting (groups 0 and 1) for one of the continuum's scene programs, made once a resize.
+  // Holed, scarred or broken: her record is flagged DAMAGED, so the cut draws her clusters alone and her material masks
+  // what shot has taken away (js/vessel-continuum.js).
+  const hullBelongsDamaged=v=>Boolean(v.pose?.scarred||v.boat.damage?.holes?.length||v.boat.damage?.craters?.length);
+  // A vessel's own resources (group 0: her hull program's, her damage record, the neural material bank, her assembly)
+  // and lighting (group 1) for her continuum's view, made once a resize.
+  const vesselGroupEntries=v=>[...v.hullResources,{buffer:v.holesUBO},{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer},{buffer:v.vertexBuffer}];
   function vesselOwnGroups(v,pipeline){
     let made=v.ownGroups.get(pipeline);
-    if(!made){made=[bg(pipeline,[...v.hullResources,null,{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer}],v.id+' vessel'),v.shadows.bind(pipeline)];v.ownGroups.set(pipeline,made);}
+    if(!made){made=[bg(pipeline,vesselGroupEntries(v),v.id+' vessel'),v.shadows.bind(pipeline)];v.ownGroups.set(pipeline,made);}
     return made;
   }
-  // The same for one of its water captures (js/water-optics.js).
-  function vesselCaptureGroups(v,capture){
-    let made=v.ownGroups.get(capture);
-    if(!made){made=[capture.bindGroup([...v.hullResources.map((resource,binding)=>({binding,resource})),...neuralPbr.vesselBindings(16,17)]),v.shadows.bind(capture.pipeline)];v.ownGroups.set(capture,made);}
-    return made;
-  }
-  function damagedHullGroups(v){
-    if(v.damagedGroups)return v.damagedGroups;
-    const {surviving,shade}=v.render.damaged,resources=[...v.hullResources,{buffer:v.holesUBO},{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer}];
-    // The depth entry reads only the vertex stage's resources and the damage record.
-    const forDepth=new Set([0,6,13,14,15]);
-    return v.damagedGroups={surviving:bg(surviving,resources.map((resource,binding)=>forDepth.has(binding)?resource:null),v.id+' surviving surface'),
-      empty:device.createBindGroup({label:v.id+' surviving surface lighting',layout:surviving.getBindGroupLayout(1),entries:[]}),
-      shade:bg(shade,resources,v.id+' damaged vessel'),lighting:v.shadows.bind(shade)};
-  }
+  // The same entries for her continuum's water capture (js/water-optics.js).
+  const vesselCaptureEntries=v=>vesselGroupEntries(v).map((resource,binding)=>({binding,resource}));
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
   let fortSoldiers=null;
   try{if(sharedCrew)fortSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew});}catch(error){console.error('Fort garrison initialization:',error);}
@@ -1058,7 +1045,7 @@ async function main() {
       const resources=[{buffer:frameUBO},transView,skyView,sampClamp,
         envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction.deck.view,
         {buffer:v.wetness.state},{buffer:v.wetness.lookup}];
-      v.hullResources=resources;v.damagedGroups=null;v.ownGroups=new Map();
+      v.hullResources=resources;v.ownGroups=new Map();
     }
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
     bloomLevels = Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.max(bw, bh))) + 1);
@@ -1514,7 +1501,8 @@ async function main() {
       if(v.crew)manGunStationsImmediate(v.crew.state,v.boat);
     }
   }
-  for(const v of vessels)v.anchor=createAnchorState(v.boat,{source:'anchor:'+v.id,onSurfaceEvent:event=>surfaceWaves.emit(event)});
+  // Hung on her too, so a ball meets her iron where it lies (js/gunnery-control.js shipIronWhereItLies).
+  for(const v of vessels)v.boat.anchorState=v.anchor=createAnchorState(v.boat,{source:'anchor:'+v.id,onSurfaceEvent:event=>surfaceWaves.emit(event)});
   for(const v of vessels)if(v.rowingWater)v.boat.rowingWater=v.rowingWater;
   // Refresh the entry level from the latest local wave probe throughout the fall.
   const anchor=vessels[0].anchor,anchorEnvironment={terrain,settings:P,waterHeight:()=>boat.target.heave};
@@ -5381,7 +5369,7 @@ async function main() {
       // Light from her own fires: the GPU writes it here from its fire records (gunEffects.encodeLights).
       data[51]=0;
       device.queue.writeBuffer(v.hullUBO,0,data);
-      v.continuum.place(ship,{important:!index||v===aimedVessel,damaged:hullBelongsDamaged(v)});
+      v.continuum.place(ship,{important:!index||v===aimedVessel,damaged:hullBelongsDamaged(v),reach:vesselDetailReach(v.detailState,ship)});
       v.flood?.update(ship);
       updateHullHoleEffects(v,ship,dt);
       ship.crewEvents??=crewSeaEvents(v);
@@ -5610,7 +5598,7 @@ async function main() {
     for(const v of vessels){
       if(!v.boat.showProw)continue;
       if(v.bakedWreck&&v.entirelySubmerged&&Math.hypot((v.boat.x??0)-cam.x,(v.boat.z??0)-cam.z)>350)continue;
-      v.continuum.drawCapture(underwater,false,capture=>vesselCaptureGroups(v,capture));
+      v.continuum.drawCapture(underwater,false,()=>vesselCaptureEntries(v),v.ownGroups);
       if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(underwater);
     }
     props?.drawSubmerged(underwater);
@@ -5620,7 +5608,7 @@ async function main() {
       terrain?.drawSubmerged(aboveWater,true);
       for(const v of vessels){
         if(!v.boat.showProw||(v.bakedWreck&&v.entirelySubmerged))continue;
-        v.continuum.drawCapture(aboveWater,true,capture=>vesselCaptureGroups(v,capture));
+        v.continuum.drawCapture(aboveWater,true,()=>vesselCaptureEntries(v),v.ownGroups);
         if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(aboveWater,true);
       }
       props?.drawSubmerged(aboveWater,true);
@@ -5681,7 +5669,6 @@ async function main() {
     rp.draw(3);
     celestial.drawLines(rp,clouds.output);
     // Anything that cuts fragments or blends follows the opaque scene.
-    for(const v of hulls)if(v.continuum.damaged)v.continuum.drawDamaged(rp,v.render.damaged,()=>damagedHullGroups(v));
     if(drawProw){
       for(const v of hulls){
         if(vesselHasVisibleCrew(v))v.crew?.drawCut(rp);
@@ -5779,7 +5766,6 @@ async function main() {
     for(const v of vessels)v.rowingWater?.readback();
     if(!oceanStartupFirstFrameSubmitted){
       oceanStartupFirstFrameSubmitted=true;
-      for(const render of renderAssets.values())render.compileDamaged().catch(error=>console.warn('Damaged hull shader:',error));
       // Setup uploads submit earlier too. Only this submission contains the
       // first canvas composite, and its completion must precede revealing it.
       device.queue.onSubmittedWorkDone().then(()=>{

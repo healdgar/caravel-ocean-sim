@@ -30,7 +30,7 @@ test('posed Niña and Victory canvas occludes sky and ocean backgrounds while tr
       const {CARAVEL}=await import('/js/wgsl/caravel.js'),{createShipAssetCache}=await import('/js/ship-mesh.js');
       const {withCelestialFrame,CELESTIAL_FRAME_FLOATS}=await import('/js/wgsl/celestial.js');
       const {createLateenPoses,writeLateenUniform}=await import('/js/lateen.js');
-      const {POSED_VERTEX_LAYOUT,withPosedVesselVertices,createVesselPose}=await import('/js/vessel-pose.js');
+      const {createVesselPose}=await import('/js/vessel-pose.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,T=GPUTextureUsage,W=128,H=128,bytesPerRow=W*8;
       const buffer=(data,usage)=>{const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
@@ -49,8 +49,8 @@ test('posed Niña and Victory canvas occludes sky and ocean backgrounds while tr
       const report=[],shipAssets=createShipAssetCache();
       for(const c of [{name:'Niña lateen',model:0,material:13+1/16,eye:[15,7,-2],range:7},{name:'Victory course',model:1,material:9+1/64,eye:[0,4.3,-15],range:3.8},{name:'Victory headsail',model:1,material:13+9/64,eye:[15,4,-5.4],range:4.5},{name:'Victory spanker',model:1,material:9+12/64,eye:[15,4.5,5],range:3.2}]){
         const modelId=c.model?'victory':'nina',asset=shipAssets.get(modelId),gpuPose=asset.gpuPose??asset.model.gpuPose??(modelId==='victory');
-        const vertexLayouts=Function('gpuPose','POSED_VERTEX_LAYOUT','return ('+layoutSource+');')(gpuPose,POSED_VERTEX_LAYOUT);
-        const clothSource=withCelestialFrame(Function('gpuPose','CARAVEL','withPosedVesselVertices','return ('+shaderSource+');')(gpuPose,CARAVEL,withPosedVesselVertices));
+        const vertexLayouts=Function('gpuPose','return ('+layoutSource+');')(gpuPose);
+        const clothSource=withCelestialFrame(Function('gpuPose','CARAVEL','return ('+shaderSource+');')(gpuPose,CARAVEL));
         const module=device.createShaderModule({code:clothSource+'\n@fragment fn coverageFS(in:BoatVertex)->@location(0)vec4f{return vec4f(1);}',label:'production cloth opacity'});
         const info=await module.getCompilationInfo();errors.push(...info.messages.filter(m=>m.type==='error').map(m=>m.message));
         const descriptor=Function('modelId','module','HDR','MSAA','vertexLayouts','return ('+descriptorSource+');')(modelId,module,'rgba16float',4,vertexLayouts);

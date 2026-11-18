@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
-import { CARAVEL, CARAVEL_DAMAGED } from '../js/wgsl/caravel.js';
+import { CARAVEL, vesselShadingWGSL } from '../js/wgsl/caravel.js';
 import { vesselDeck } from '../js/hull.js';
 import { LATER_SAIL_DESIGNS } from '../js/models/later-sail.js';
 
@@ -23,7 +23,8 @@ function functionBody(source, name) {
 const occurrences = (text, needle) => text.split(needle).length - 1;
 
 test('a vessel fragment reads the sea height once: three cascade samples, where it took nine or twelve', () => {
-  for (const [label, source] of [['whole', CARAVEL], ['damaged', CARAVEL_DAMAGED]]) {
+  // The continuum's vessel material wears the damaged shading on every ship (js/vessel-continuum.js).
+  for (const [label, source] of [['whole', CARAVEL], ['continuum', vesselShadingWGSL()]]) {
     const ocean = functionBody(source, 'oceanHeight');
     const cascades = Number(/for \(var c = 0u; c < (\d+)u; c\+\+\)/.exec(ocean)?.[1]);
     const perCall = cascades * occurrences(ocean, 'textureSampleLevel(');

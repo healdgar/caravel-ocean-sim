@@ -1240,7 +1240,9 @@ export function blastFloatingWreckageAt(worldPos, blastRadius, targetBoat, { vel
 const fractureGPUOwners = new WeakMap();
 
 // One per vessel. The compute pass exists only once something has broken, and runs after every other pose stage.
-export async function createShipFractureGPU({ device, computePipe, posedBuffer, fracture, shared = null }) {
+// `posedOffset` and `posedSize` (bytes; the offset 256-aligned) name the vessel's run of a buffer shared by several,
+// such as her slot of a continuum scene's pose buffer; by default the whole of `posedBuffer` is hers.
+export async function createShipFractureGPU({ device, computePipe, posedBuffer, posedOffset = 0, posedSize = undefined, fracture, shared = null }) {
   let assets = shared;
   if (!assets) {
     const pipeline = await computePipe(SHIP_FRACTURE_POSE_UPDATE, 'ship fracture');
@@ -1264,7 +1266,10 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
   device.queue.writeBuffer(clockBuffer, 0, clockData);
   const group = device.createBindGroup({
     layout: assets.pipeline.getBindGroupLayout(0),
-    entries: [posedBuffer, assets.vertexShards, records, clockBuffer].map((buffer, binding) => ({ binding, resource: { buffer } })),
+    entries: [
+      { binding: 0, resource: { buffer: posedBuffer, offset: posedOffset, ...(posedSize ? { size: posedSize } : {}) } },
+      ...[assets.vertexShards, records, clockBuffer].map((buffer, i) => ({ binding: i + 1, resource: { buffer } })),
+    ],
   });
   const workgroups = Math.ceil(fracture.vertexShards.length / 64);
   let current = null, active = false, destroyed = false, seenRevision = -1;

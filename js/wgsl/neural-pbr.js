@@ -256,7 +256,7 @@ function neuralPbrReplaceRequired(source, pattern, replacement, label) {
 
 /**
  * Injects Shared Neural PBR Material Bank evaluation & anisotropic GGX fiber/grain specular
- * into CARAVEL / CARAVEL_DAMAGED (compatible across `main`, feature branches, and minified WGSL).
+ * into the vessel shading (js/wgsl/caravel.js vesselShadingWGSL, and CARAVEL), compatible with minified WGSL.
  */
 export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, weightBinding = 17 } = {}) {
   const block = createNeuralPbrWGSL({ group, latentBinding, weightBinding });
@@ -496,7 +496,8 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
 
 /**
  * Injects Shared Neural PBR Material Bank evaluation & anisotropic GGX specular
- * into TRADE_VESSELS (`tradeVesselsSource`: cogs, carracks, caravels, harbor barques, river barges).
+ * into the trade vessels' continuum material (js/trade-vessels.js TRADE_VESSEL_CONTINUUM_MATERIAL: cogs, carracks,
+ * caravels, harbor barques, river barges), whose shading gives its vessel's turn (`tvTurn`) and the eye (`tvEye`).
  */
 export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3, weightBinding = 4 } = {}) {
   const block = createNeuralPbrWGSL({ group, latentBinding, weightBinding });
@@ -526,13 +527,13 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
 
   out = neuralPbrReplaceRequired(
     out,
-    /let\s+sunDir\s*=\s*normalize\(\s*F\.sunDir\.xyz\s*\)\s*;\s*let\s+viewDir\s*=\s*normalize\(\s*F\.camPos\.xyz\s*-\s*in\.world\s*\)\s*;/,
+    /let\s+sunDir\s*=\s*normalize\(\s*F\.sunDir\.xyz\s*\)\s*;\s*let\s+viewDir\s*=\s*normalize\(\s*tvEye\s*-\s*in\.world\s*\)\s*;/,
     `var npbrMatId = 0u;
   var npbrMask = 0.0;
   var npbrUV = vec2f(tvMetres.z + floor(course) * 0.41, tvMetres.y);
   var npbrDuDx = vec2f(npbrDxM.z, npbrDxM.y);
   var npbrDuDy = vec2f(npbrDyM.z, npbrDyM.y);
-  var npbrHintT = rotateVessel(vec3f(0.0, 0.0, 1.0), tvYaw, tvPitch, tvRoll);
+  var npbrHintT = continuumQuat(tvTurn, vec3f(0.0, 0.0, 1.0));
   let tvPaintedWood = (m >= 20u && m <= 26u && m != 22u && m != 23u && m != 25u);
   if (m == 11u) {
     npbrMask = 0.0;
@@ -558,7 +559,7 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
     npbrUV = select(vec2f(tvMetres.x + tvMetres.z, tvMetres.y), npbrSailM, m != 23u);
     npbrDuDx = select(vec2f(npbrDxM.x + npbrDxM.z, npbrDxM.y), npbrSailDx, m != 23u);
     npbrDuDy = select(vec2f(npbrDyM.x + npbrDyM.z, npbrDyM.y), npbrSailDy, m != 23u);
-    npbrHintT = rotateVessel(vec3f(0.0, 1.0, 0.0), tvYaw, tvPitch, tvRoll);
+    npbrHintT = continuumQuat(tvTurn, vec3f(0.0, 1.0, 0.0));
   } else if (m == 2u || m == 12u || m == 19u) {
     npbrMatId = 7u;
     npbrMask = 0.92;
@@ -566,7 +567,7 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
     npbrUV = select(vec2f(tvMetres.z + tvMetres.x, tvMetres.y), vec2f(tvMetres.y, tvMetres.x + tvMetres.z), ropeVertical);
     npbrDuDx = select(vec2f(npbrDxM.z + npbrDxM.x, npbrDxM.y), vec2f(npbrDxM.y, npbrDxM.x + npbrDxM.z), ropeVertical);
     npbrDuDy = select(vec2f(npbrDyM.z + npbrDyM.x, npbrDyM.y), vec2f(npbrDyM.y, npbrDyM.x + npbrDyM.z), ropeVertical);
-    npbrHintT = rotateVessel(select(vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), ropeVertical), tvYaw, tvPitch, tvRoll);
+    npbrHintT = continuumQuat(tvTurn, select(vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), ropeVertical));
   } else if (m == 10u || isLusoriaOar || isLusoriaSweep) {
     npbrMatId = 1u;
     npbrMask = 1.0;
@@ -574,14 +575,14 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
     npbrUV = select(vec2f(tvMetres.x + tvMetres.z, tvMetres.y), vec2f(tvMetres.y, tvMetres.x - tvMetres.z), mastUpright);
     npbrDuDx = select(vec2f(npbrDxM.x + npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.y, npbrDxM.x - npbrDxM.z), mastUpright);
     npbrDuDy = select(vec2f(npbrDyM.x + npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.y, npbrDyM.x - npbrDyM.z), mastUpright);
-    npbrHintT = rotateVessel(select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), mastUpright), tvYaw, tvPitch, tvRoll);
+    npbrHintT = continuumQuat(tvTurn, select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), mastUpright));
   } else if (m == 0u) {
     npbrMatId = 2u;
     npbrMask = 1.0;
     npbrUV = vec2f(tvMetres.z + floor(deckCourse) * 0.37, tvMetres.x);
     npbrDuDx = vec2f(npbrDxM.z, npbrDxM.x);
     npbrDuDy = vec2f(npbrDyM.z, npbrDyM.x);
-    npbrHintT = rotateVessel(vec3f(0.0, 0.0, 1.0), tvYaw, tvPitch, tvRoll);
+    npbrHintT = continuumQuat(tvTurn, vec3f(0.0, 0.0, 1.0));
   } else if (isWoodMat(m) || m == 28u || tvPaintedWood) {
     npbrMatId = 0u;
     npbrMask = select(1.0, 0.85, tvPaintedWood);
@@ -589,10 +590,10 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
     npbrUV = select(vec2f(tvMetres.z + floor(course) * 0.41, tvMetres.y), vec2f(tvMetres.x + floor(course) * 0.41, tvMetres.y), transomFace);
     npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), transomFace);
     npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), transomFace);
-    npbrHintT = rotateVessel(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), transomFace), tvYaw, tvPitch, tvRoll);
+    npbrHintT = continuumQuat(tvTurn, select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), transomFace));
   }
   let npbrBasis = neuralPbrTangentBasis(n, npbrHintT);
-  let npbrCamDist = distance(in.world, F.camPos.xyz);
+  let npbrCamDist = distance(in.world, tvEye);
   let npbr = evalNeuralPbr(npbrMatId, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrMask * (1.0 - tvWet * 0.25));
   let npbrAlbedoWeight = select(1.0, 0.45, tvPaintedWood);
   let npbrNormalWeight = select(1.0, 0.78, tvPaintedWood);
@@ -600,7 +601,7 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
   rough = clamp(rough + npbr.roughDelta * (1.0 - tvWet * 0.55), 0.06, 0.98);
   n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS * npbrNormalWeight * (1.0 - tvWet * 0.35));
   let sunDir = normalize(F.sunDir.xyz);
-  let viewDir = normalize(F.camPos.xyz - in.world);`,
+  let viewDir = normalize(tvEye - in.world);`,
     'trade vessels material eval'
   );
 

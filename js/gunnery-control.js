@@ -13,7 +13,7 @@ import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
 import { shipMastSpecs, fracturePartsGone, shatterFloatingWreckageOnSegment, blastFloatingWreckageAt } from './ship-fracture.js';
-import { shipColliderCrossings, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
+import { shipColliderCrossings, shipColliderIronFrame, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
 import { sweepJettySegment, applyJettyImpactDamage } from './port-props.js';
 import { TRACE_GUN_ARC_COS, enclosurePlan } from './fort-plan.js';
@@ -1103,17 +1103,34 @@ function shipFractionPastCraters(craters, segment, t) {
   return Math.min(1, t + Math.min(across, along));
 }
 
+// Her anchor's iron once let go, where it lies (js/ship-collider.js shipColliderIronFrame), with her bounds grown to
+// hold it, or null while it hangs at her cathead. Her anchor's state is hung on her as `anchorState` (js/main.js).
+function shipIronWhereItLies(boat, collider) {
+  const anchor = boat.anchorState;
+  if (!collider.ironPart || !anchor?.installed || anchor.phase === 'stowed') return null;
+  const frame = collider.frame, { runtime } = collider.model, { ax, ay, az } = vesselBasisAxes(boat);
+  const scale = [(boat.beam ?? runtime.beam) / frame.beam, frame.verticalScale ?? 1, (boat.length ?? runtime.length) / frame.length];
+  const iron = shipColliderIronFrame(collider, anchor, [boat.x ?? 0, boat.heave ?? 0, boat.z ?? 0], [ax, ay, az], scale);
+  if (!iron) return null;
+  const { min, max } = collider.bounds;
+  iron.bounds = { min: min.map((v, c) => Math.min(v, iron.min[c])), max: max.map((v, c) => Math.max(v, iron.max[c])) };
+  return iron;
+}
+
 export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat = null, options = null) {
   if (!targetBoat || targetBoat === sourceBoat || targetBoat.showProw === false) return null;
   const collider = shipColliderOf(targetBoat);
   if (!collider) return null;
-  const segment = shipSegmentInFrame(from, to, radius, targetBoat, collider, collider.bounds);
+  const iron = shipIronWhereItLies(targetBoat, collider);
+  const segment = shipSegmentInFrame(from, to, radius, targetBoat, collider, iron?.bounds ?? collider.bounds);
   if (!segment) return null;
   const { p0, p1, sx, sy, sz } = segment, damage = targetBoat.damage;
-  const hit = shipColliderTrace(collider, targetBoat, damage, segment.ox, segment.oy, segment.oz, segment.dx, segment.dy, segment.dz, segment.r);
+  const hit = shipColliderTrace(collider, targetBoat, damage, segment.ox, segment.oy, segment.oz, segment.dx, segment.dy, segment.dz, segment.r, iron);
   if (!hit) return null;
   const previewOnly = options?.previewOnly === true, mast = collider.mastOf[hit.triangle];
-  const hitZone = mast ? 'rigging' : 'hull', struck = hit.triangle;
+  // A ball that meets her let-go iron stops on it, and does her no harm (applyShipImpactDamage).
+  const onIron = iron !== null && hit.triangle >= collider.ironPart.first && hit.triangle <= collider.ironPart.last;
+  const hitZone = onIron ? 'anchor' : mast ? 'rigging' : 'hull', struck = hit.triangle;
   const [nx, ny, nz] = shipColliderNormal(collider, hit);
   let t = Math.min(1, hit.t);
   if (!previewOnly && !mast && damage?.craters?.length) t = shipFractionPastCraters(damage.craters, segment, t);
@@ -1227,6 +1244,7 @@ function addVesselFire(damage, localPos, event, addIntensity) {
 // together grow past what they can put out.
 export const ARROW_FIRE_INTENSITY = 0.22;
 export function applyArrowImpact(targetBoat, event) {
+  if (event?.hitZone === 'anchor') return null;
   const damage = createVesselDamageState(targetBoat);
   damage.hits = (damage.hits ?? 0) + 1;
   const c = damage.crewCasualties;
@@ -1278,7 +1296,8 @@ export function applyArrowImpact(targetBoat, event) {
 }
 
 export function applyShipImpactDamage(targetBoat, event) {
-  if (!targetBoat || !event) return null;
+  // Her let-go iron lies on its own, made fast to her only by its rode.
+  if (!targetBoat || !event || event.hitZone === 'anchor') return null;
   const damage = createVesselDamageState(targetBoat);
   let estimatedLeak = null;
   const vel = event.velocity ?? [200, 0, 0];

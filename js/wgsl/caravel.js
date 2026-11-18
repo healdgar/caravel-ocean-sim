@@ -49,8 +49,9 @@ fn sailPanelPillow(u:f32)->f32 {return sin(fract(u*10.0+0.5)*3.14159265);}
 // Exact marker recognized by createSubmergedShader. Both hull and rudder retain
 // their authored material IDs/finishes; only the surrounding optical medium
 // changes in the capture variant. No new resource or vertex-layout contract.
-export const VESSEL_MATERIAL_MEDIUM=/* wgsl */ `
-const vesselWaterCapture=false;
+// The continuum's under-water capture composes the medium with `capture` true from the first.
+const vesselMaterialMedium=(capture=false)=>/* wgsl */ `
+const vesselWaterCapture=${capture};
 fn vesselWoodDielectricF0()->f32 {
   let medium=select(1.0,1.333,vesselWaterCapture);
   let ratio=(1.5-medium)/(1.5+medium);return select(0.04,ratio*ratio,vesselWaterCapture);
@@ -70,6 +71,7 @@ fn vesselWoodOptics(rough:f32,absorbed:f32,film:f32,relief:f32,grain:f32)->vec4f
   return vec4f(darkening,mix(intrinsic,0.27+grain*0.09,surfaceFilm),vesselWoodDielectricF0(),surfaceFilm);
 }
 `;
+export const VESSEL_MATERIAL_MEDIUM=vesselMaterialMedium(false);
 
 // Authored aged/cast-iron finish, not a measured Victory conservation recipe.
 // Oxide is a dark dielectric; exposed iron is a separate area fraction. A dark
@@ -107,10 +109,12 @@ fn vesselIronTransmission(film:f32,nv:f32,nl:f32)->f32 {
   return mix(1.0,(1.0-fv)*(1.0-fl),film);
 }
 `;
-// Two shaders from one source. A whole ship has no damage code at all: no discard, so the GPU
-// shades only what the eye can see of her. A damaged ship lays depth with `surviving`, which
-// decides what shot and tearing have taken away, then `fs` shades just the surface that is left.
-function vesselSource(damaged) { return FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + VESSEL_MATERIAL_MEDIUM + IRON_SURFACE + VESSEL_FINISH_RULES + VESSEL_COLOURS_WGSL + /* wgsl */ `
+// A vessel's shading in three parts: its prelude (what it reads, group 0, and the vertex it is handed), its vertex
+// stage from her posed assembly, and vesselShade, which wears and lights one fragment. A damaged ship's variant also
+// reads her damage record (group 0, binding 15) and asks vesselSurvives what shot and tearing have taken away; the
+// continuum's vessel material (js/vessel-continuum.js) wears that variant on every ship, whose record is empty until
+// she is struck. `capture` composes the medium for the water's own capture.
+function vesselPrelude(damaged,capture=false) { return FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + vesselMaterialMedium(capture) + IRON_SURFACE + VESSEL_FINISH_RULES + VESSEL_COLOURS_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -142,6 +146,8 @@ struct BoatVertex {
   @location(6) wet:vec2f,
   ${damaged?'@location(7) damage: f32,':''}
 };
+`; }
+function vesselVertexWGSL() { return /* wgsl */ `
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f,@builtin(vertex_index) index:u32) -> BoatVertex {
   let inputNormLen=length(normal);
   let unitInputNormal=select(normal,normal/max(inputNormLen,0.0001),inputNormLen>1.002);
@@ -155,9 +161,10 @@ struct BoatVertex {
   o.normal = normalize(rotateHull(unitRigNormal / rig.scale));
   o.local = position;
   o.material = u32(material); o.normalLocal = unitInputNormal; o.uv=uv;o.wet=moisture[wetLookup[index]];
-  ${damaged?'let rigNormLen=max(inputNormLen,rawRigLen);o.damage=select(0.0,clamp(rigNormLen-1.0,0.0,1.5),rigNormLen>1.002);':''}
   return o;
 }
+`; }
+function vesselShadeWGSL(damaged) { return /* wgsl */ `
 fn oceanHeight(p: vec2f) -> f32 {
   var h = 0.0;
   for (var c = 0u; c < 3u; c++) {
@@ -223,17 +230,18 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let keepRim=(1.0-smoothstep(0.0,0.035,vesselClothEdge(uv,material)))*0.35;
   return CanvasTear(warpTear*0.48+shotTear*0.34+threadFray*0.18+seamWeakness-keepRim,clamp(0.96-damage*0.56,0.24,0.92),threadFray);
 }
-// Depth for a damaged ship. Whatever fails here is gone, so it is never shaded.
-@fragment fn surviving(in:BoatVertex)->@location(0) vec4f {
-  if(vesselWoodMaterial(in.material,vesselPainted(in.material)) && hullHoleRim(in.local)<0.0){discard;}
-  if((in.material==2u || in.material==12u || in.material==19u) && ropeParted(in.local,in.damage)){discard;}
+// What of a damaged ship survives: false where a hole, parted rope or torn canvas has taken her surface away, which
+// is then never drawn (the continuum's sample mask, no discard).
+fn vesselSurvives(in:BoatVertex)->bool {
+  if(vesselWoodMaterial(in.material,vesselPainted(in.material)) && hullHoleRim(in.local)<0.0){return false;}
+  if((in.material==2u || in.material==12u || in.material==19u) && ropeParted(in.local,in.damage)){return false;}
   if((in.material==9u || in.material==13u) && in.damage>0.04){
     let tear=canvasTear(in.uv,in.local,in.material,in.damage);
-    if(tear.value>tear.threshold){discard;}
+    if(tear.value>tear.threshold){return false;}
   }
-  return vec4f(0);
+  return true;
 }
-`:''}@fragment fn fs(in: BoatVertex, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+`:''}fn vesselShade(in: BoatVertex, front: bool) -> vec4f {
   let p = in.local;
   var wet=clamp(in.wet,vec2f(0),vec2f(1));
   if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){wet.x=max(wet.x,sampleDeck(deckUV(p)).z);}
@@ -1002,12 +1010,20 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
       }
     }
   }
-  col=surfaceAir(col,in.world);
+  col=vesselAir(col,in.world);
   return vec4f(col,1.0);
 }
 `; }
-export const CARAVEL = vesselSource(false);
-export const CARAVEL_DAMAGED = vesselSource(true);
+// The vessel shading the continuum's vessel material wears (js/vessel-continuum.js): the damaged variant's prelude
+// and vesselShade, which a ship's empty damage record leaves whole, its medium composed for the water's capture when
+// `capture`. The material brings vesselAir, its vertex and its sample mask.
+export const vesselShadingWGSL=(capture=false)=>vesselPrelude(true,capture)+vesselShadeWGSL(true);
+// A whole vessel's shading as one program over her assembly as a vertex buffer: no ship is drawn so, but the tests put
+// her finish rules and her medium's capture marker to it (tests/vessel-finish-gpu.test.mjs and others).
+export const CARAVEL = vesselPrelude(false)+vesselVertexWGSL()+vesselShadeWGSL(false)+/* wgsl */ `
+fn vesselAir(colour:vec3f,world:vec3f)->vec3f { return surfaceAir(colour,world); }
+@fragment fn fs(in: BoatVertex, @builtin(front_facing) front: bool) -> @location(0) vec4f { return vesselShade(in,front); }
+`;
 
 // HDR mip chain suppresses raw single-pixel sun glints in rough timber reflections.
 export const WATER_FILTER = SANE_HDR + /* wgsl */ `
