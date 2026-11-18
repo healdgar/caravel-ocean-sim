@@ -887,6 +887,52 @@ export function emitCairnScene(sceneSpec, helpers) {
         return;
       }
 
+      // An upright solid on a plan of any outline: `points` ([x, z] each, round it either way, convex or not), from
+      // height `from` up to `to`. Its sides are cut into panels of about a box's own size (so a shot breaks it as it
+      // breaks a box), its top is closed and, if asked (`includeBottom`), its foot. A bastion's head, a tower's
+      // salient: what no box can be without a stretch or a seam.
+      if (pType === 'prism') {
+        let P = (prim.points ?? []).map((p) => [resolveNumeric(p[0], 0), resolveNumeric(p[1], 0)]);
+        if (P.length < 3) return;
+        let area = 0;
+        for (let i = 0; i < P.length; i++) { const [ax, az] = P[i], [bx, bz] = P[(i + 1) % P.length]; area += ax * bz - bx * az; }
+        if (Math.abs(area) < 1e-6) return;
+        if (area < 0) P = P.reverse();
+        const y0 = resolveNumeric(prim.from, 0), y1 = resolveNumeric(prim.to, y0 + 1);
+        const ny = y1 - y0 >= 1.8 ? Math.min(8, Math.max(2, Math.round((y1 - y0) / 1.45))) : 1;
+        for (let i = 0; i < P.length; i++) {
+          const [ax, az] = P[i], [bx, bz] = P[(i + 1) % P.length], len = Math.hypot(bx - ax, bz - az);
+          if (len < 1e-4) continue;
+          const nu = len >= 2.2 ? Math.min(12, Math.max(2, Math.round(len / 1.75))) : 1;
+          for (let v = 0; v < ny; v++) {
+            const ya = y0 + (y1 - y0) * v / ny, yb = y0 + (y1 - y0) * (v + 1) / ny;
+            for (let u = 0; u < nu; u++) {
+              const xa = ax + (bx - ax) * u / nu, za = az + (bz - az) * u / nu, xb = ax + (bx - ax) * (u + 1) / nu, zb = az + (bz - az) * (u + 1) / nu;
+              pushQuad(primToWorld(xa, ya, za), primToWorld(xb, ya, zb), primToWorld(xb, yb, zb), primToWorld(xa, yb, za), kind, shade * 0.94);
+            }
+          }
+        }
+        // The top and the foot, cut into triangles ear by ear.
+        const cross = (a, b, c) => (P[b][0] - P[a][0]) * (P[c][1] - P[a][1]) - (P[b][1] - P[a][1]) * (P[c][0] - P[a][0]);
+        const inside = (j, a, b, c) => cross(a, b, j) >= -1e-9 && cross(b, c, j) >= -1e-9 && cross(c, a, j) >= -1e-9;
+        const ring = P.map((_, i) => i), ears = [];
+        for (let guard = 0; ring.length > 3 && guard < 4 * P.length; guard++) {
+          let cut = false;
+          for (let k = 0; k < ring.length && !cut; k++) {
+            const a = ring[(k + ring.length - 1) % ring.length], b = ring[k], c = ring[(k + 1) % ring.length];
+            if (cross(a, b, c) <= 1e-9 || ring.some((j) => j !== a && j !== b && j !== c && inside(j, a, b, c))) continue;
+            ears.push([a, b, c]); ring.splice(k, 1); cut = true;
+          }
+          if (!cut) break;
+        }
+        if (ring.length === 3) ears.push(ring.slice());
+        for (const [a, b, c] of ears) {
+          pushTri(primToWorld(P[a][0], y1, P[a][1]), primToWorld(P[b][0], y1, P[b][1]), primToWorld(P[c][0], y1, P[c][1]), kind, shade);
+          if (prim.includeBottom) pushTri(primToWorld(P[a][0], y0, P[a][1]), primToWorld(P[c][0], y0, P[c][1]), primToWorld(P[b][0], y0, P[b][1]), kind, shade * 0.8);
+        }
+        return;
+      }
+
       if (pType === 'frame') {
         const f = resolvePosition(prim.from);
         const t = resolvePosition(prim.to);
