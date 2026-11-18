@@ -1,37 +1,41 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // "Two Castles" Cannon Duel Side Game:
-// Two manned 16th-century star-bastioned stone sea fortresses face each other across a 280 m channel.
-// No aiming arcs allowed — players must elevate their guns (about +2° to +4°) and adjust traverse
-// by watching where their roundshot and hot shot strike.
+// The mouth of Havana's harbour in 1600, where the Morro on its headland and La Punta across the channel faced each
+// other: Antonelli and Tejeda's works of 1589–1600 (js/fort-records.js). Each is the work the board founds there in
+// that year and stands of the city's types (js/old-world-board.js): its guns are the ones drawn on its platforms, its
+// men its garrison, and it is struck through its pieces as any work is (js/gunnery-control.js strikeWorkThroughPiece).
+// The player holds La Punta, the enemy the Morro. No aiming arcs: the guns are laid by watching where the shot falls.
 //
-// It is a debug side game played on the normal game's coast. While it runs the normal game waits:
-// main.js stops stepping ships and the voyage, and this controller puts back everything it borrowed
-// (the port, the camera, the sky, a coast it had to raise) when it stops.
+// It is a debug side game, played on a coast of its own raised at open sea. While it runs the normal game waits:
+// main.js stops stepping ships and the voyage, and this controller puts back everything it borrowed (the camera, the
+// sky, the coast it raised) when it stops.
 
-import { buildPortPrefabGeometry } from './terrain-model.js';
+import { portWorkBuildings } from './fort-plan.js';
 import {
+  buildingGunBears,
   createBuildingDamageState,
   createBuildingGunnery,
   stepPortDamage,
 } from './gunnery-control.js';
-import { createFortGarrison, stepFortGarrison } from './crew.js';
+import { createFortGarrison, reviveGarrisonSoldiers, stepFortGarrison } from './crew.js';
 import { fireGunnery, prepareGunnery } from './gunnery-state.js';
 
-export const CASTLE_DUEL_DISTANCE_M = 280;
+// The place and year the duel is fought in, and the works each side holds there.
+export const CASTLE_DUEL_PLACE = Object.freeze({
+  port: 'havana', name: 'Havana', latitude: 23.1355, longitude: -82.345, year: 1600,
+  player: 'Castillo de San Salvador de la Punta', enemy: 'Castillo de los Tres Reyes del Morro',
+});
 export const CASTLE_DUEL_MUZZLE_SPEED_MPS = 300;
-// Water the duel wants to itself: the channel between the castles and the camera stations beside it.
-const CASTLE_DUEL_CLEAR_X_M = 180;
-const CASTLE_DUEL_CLEAR_Z_M = 220;
-const CASTLE_DUEL_RINGS_M = Object.freeze([320, 440, 560, 700, 860]);
+const CASTLE_DUEL_GRAVITY = 9.81;
 // The score panel is read a few times a second; a hit or a shot refreshes it at once.
 const CASTLE_DUEL_HUD_PERIOD_S = 0.5;
 const CASTLE_DUEL_STILL_AIR = Object.freeze([0, 0, 0]);
 const CASTLE_DUEL_BATTERY_STEP = Object.freeze({ skipBuildingDamage: true });
-// The elevations that strike the enemy's walls across the strait: laid lower the shot finds the foundation
-// under them, laid higher it clears the parapet. tests/castle-duel.test.mjs holds these to the ballistics.
-export const CASTLE_DUEL_WALL_ELEVATION_DEG = Object.freeze([2, 4]);
-const CASTLE_DUEL_ELEVATION_HINT = `+${CASTLE_DUEL_WALL_ELEVATION_DEG[0].toFixed(1)}° to +${CASTLE_DUEL_WALL_ELEVATION_DEG[1].toFixed(1)}°`;
-const CASTLE_DUEL_AIM_HINT = `No arcs allowed! Elevate your guns (${CASTLE_DUEL_ELEVATION_HINT}) to strike the walls of Fuerte del Moro across the ${CASTLE_DUEL_DISTANCE_M} m strait.`;
+// Either side of the elevation that strikes the enemy's walls: laid lower the shot falls short at their foot, laid
+// higher it clears the parapet. tests/castle-duel.test.mjs holds the band to the ballistics.
+const CASTLE_DUEL_WALL_BAND_DEG = 1;
+// How far a splash may fall from the enemy's line and still be called at its foot.
+const CASTLE_DUEL_SPLASH_NEAR_M = 18;
 
 const DUEL_RELOAD_DURATIONS = Object.freeze({
   swab: 0.35,
@@ -52,27 +56,74 @@ function configureCastleDuelBattery(battery, muzzleSpeed = CASTLE_DUEL_MUZZLE_SP
   }
 }
 
-// The guns that bear across the strait: found once when a battery is raised, never per frame.
-function castleDuelFrontGuns(battery) {
-  if (!battery?.state?.guns) return [];
-  return battery.state.guns.filter(
-    (g) => g.side === 'port' && Math.abs(g.directionDesign?.[2] ?? 0) > 0.8,
-  );
+// The two works the duel is fought between, from the port the board stood: null where it has not both.
+export function castleDuelCastles(port, place = CASTLE_DUEL_PLACE) {
+  const works = portWorkBuildings(port);
+  const player = works.find((w) => w.label === place.player), enemy = works.find((w) => w.label === place.enemy);
+  return player && enemy ? { player, enemy } : null;
 }
 
-function applyGunAim(battery, frontGuns, elevationDeg, traverseDeg) {
-  if (!battery?.building) return;
+// The guns of a work that bear on the other: found once when a battery is raised, never per frame.
+export function castleDuelFrontGuns(battery, target) {
+  if (!battery?.state?.guns || !target) return [];
+  return battery.state.guns.filter((g) => buildingGunBears(g, battery.building, target.x, target.z));
+}
+
+// The middle of some of a work's own points (local), in the world, `drop` metres lower.
+function castleDuelMean(castle, guns, pointOf, drop = 0) {
+  const c = Math.cos(castle.yaw ?? 0), s = Math.sin(castle.yaw ?? 0), base = castle.baseY ?? castle.y ?? 0;
+  let x = 0, y = 0, z = 0;
+  for (const g of guns) { const [lx, ly, lz] = pointOf(g); x += lx; y += ly; z += lz; }
+  const n = Math.max(1, guns.length);
+  x /= n; y /= n; z /= n;
+  return [castle.x + x * c + z * s, base + y - drop, castle.z - x * s + z * c];
+}
+
+// Where a work's front guns fire from: the middle of their muzzles.
+const castleDuelMuzzles = (castle, guns) => castleDuelMean(castle, guns, (g) => g.muzzleDesign ?? g.localPosition);
+
+// Where a ball strikes a work's walls before those guns: the face of the parapet below their trunnions.
+const CASTLE_DUEL_PARAPET_FACE_M = 1.5;
+const castleDuelWall = (castle, guns) => castleDuelMean(castle, guns, (g) => g.localPosition, CASTLE_DUEL_PARAPET_FACE_M);
+
+/**
+ * The elevations, in degrees, that put a ball of `muzzleSpeed` from `from` into the walls at `to` (world points):
+ * the low solution, with the band either side of it that still strikes stone.
+ */
+export function castleDuelWallElevation(from, to, muzzleSpeed = CASTLE_DUEL_MUZZLE_SPEED_MPS) {
+  const d = Math.hypot(to[0] - from[0], to[2] - from[2]), dy = to[1] - from[1], v2 = muzzleSpeed * muzzleSpeed, g = CASTLE_DUEL_GRAVITY;
+  const root = v2 * v2 - g * (g * d * d + 2 * dy * v2);
+  const deg = (Math.atan2(v2 - Math.sqrt(Math.max(0, root)), g * d) * 180) / Math.PI;
+  return [deg - CASTLE_DUEL_WALL_BAND_DEG, deg + CASTLE_DUEL_WALL_BAND_DEG];
+}
+
+// The way a work looks at the other, in its own frame, turned `traverseDeg` (positive to the right).
+function castleDuelBearing(from, to, traverseDeg = 0) {
+  const c = Math.cos(from.yaw ?? 0), s = Math.sin(from.yaw ?? 0), dx = to.x - from.x, dz = to.z - from.z;
+  const length = Math.hypot(dx, dz) || 1, lx = (dx * c - dz * s) / length, lz = (dx * s + dz * c) / length;
+  const t = (traverseDeg * Math.PI) / 180, ct = Math.cos(t), st = Math.sin(t);
+  return [lx * ct - lz * st, 0, lx * st + lz * ct];
+}
+
+function applyGunAim(battery, frontGuns, target, elevationDeg, traverseDeg) {
+  if (!battery?.building || !target) return;
   const elev = Math.max(-4, Math.min(18, Number(elevationDeg) || 0));
   const trav = Math.max(-28, Math.min(28, Number(traverseDeg) || 0));
-  const travRad = (trav * Math.PI) / 180;
-  const sinT = Math.sin(travRad), cosT = Math.cos(travRad);
   battery.building.gunneryElevation = elev;
   battery.building.gunneryTraverse = trav;
+  const way = castleDuelBearing(battery.building, target, trav);
   for (const g of frontGuns) {
     g.elevation = elev;
-    g.aimDirectionLocal = [sinT, 0, -cosT];
+    g.aimDirectionLocal = [...way];
     g.aimPoint = null;
   }
+}
+
+// Fires `guns` of a battery, whichever side of its work each looks out of.
+function fireCastleDuelGuns(battery, guns, options) {
+  let fired = 0;
+  for (const side of ['port', 'starboard']) fired += fireGunnery(battery.state, side, { ...options, only: guns });
+  return fired;
 }
 
 /**
@@ -113,108 +164,20 @@ export function castleDuelStatus(inst, frontGuns = [], out = {}) {
 }
 
 /**
- * Open water for the two castles, off the port and seaward first. Water a ship is lying in is
- * taken only when there is no other: the duel never moves a ship of the normal game.
- */
-export function chooseCastleDuelArena(terrain, vessels = []) {
-  const portRef = terrain?.port;
-  const baseX = portRef?.center?.x ?? 0;
-  const baseZ = portRef?.center?.z ?? -420;
-  const seaX = portRef?.seaDir?.x ?? 0;
-  const seaZ = portRef?.seaDir?.z ?? -1;
-  const arena = { x: baseX + seaX * 380, z: baseZ + seaZ * 380 };
-  if (typeof terrain?.height !== 'function') return arena;
-  const occupied = (cx, cz) => {
-    for (const v of vessels) {
-      const b = v?.boat ?? v;
-      if (!b || b.showProw === false) continue;
-      if (Math.abs((b.x ?? 0) - cx) < CASTLE_DUEL_CLEAR_X_M && Math.abs((b.z ?? 0) - cz) < CASTLE_DUEL_CLEAR_Z_M) return true;
-    }
-    return false;
-  };
-  let bestScore = Infinity;
-  const baseAngle = Math.atan2(seaZ, seaX);
-  for (const dist of CASTLE_DUEL_RINGS_M) {
-    for (let k = 0; k < 16; k++) {
-      const ang = baseAngle + (k * Math.PI * 2) / 16;
-      const cx = baseX + Math.cos(ang) * dist;
-      const cz = baseZ + Math.sin(ang) * dist;
-      const maxBed = Math.max(
-        terrain.height(cx, cz),
-        terrain.height(cx, cz + 115),
-        terrain.height(cx, cz - 115),
-        Math.min(terrain.height(cx - 140, cz), terrain.height(cx + 140, cz)),
-      );
-      const score = maxBed + (occupied(cx, cz) ? 1000 : 0);
-      if (score < bestScore) {
-        bestScore = score;
-        arena.x = cx;
-        arena.z = cz;
-      }
-      if (bestScore < -4.0) return arena;
-    }
-  }
-  return arena;
-}
-
-/**
  * @param {object} cfg
- *  getTerrain(): terrain|null. ensureTerrain(): Promise<terrain|null> raises a coast when there is
- *  none, and disposeTerrain(terrain) takes it away again when the duel stops.
+ *  getTerrain(): terrain|null. ensureTerrain(place): Promise<terrain|null> raises the duel's place at open sea, in
+ *  its year; disposeTerrain(terrain) takes it away again when the duel stops.
  *  saveScene(): whatever the normal game needs to put its view and sky back (camera, field of view,
  *  camera mode, sun); restoreScene(saved) puts it back. The duel treats it as opaque.
- *  getVessels(): the fleet, to site the castles clear of it. getCamera(), setCameraMode(mode).
+ *  getCamera(), setCameraMode(mode).
  *  getSunElevation(): degrees; setSunElevation(degrees) sets the sun by hand, whatever the sky mode.
  *  onNotice(text): a line for the player when the duel cannot be played here.
  */
-// The duel's port, by the name its castles' continuum bodies are shipped under (scripts/prepare-prefab-continuum.mjs),
-// and its two castles about `arena`: the same stone wherever the strait lies, so their bodies are baked once.
-export const CASTLE_DUEL_PORT_ID = 'castle-duel';
-export function castleDuelCastles(arena) {
-  const halfSpan = CASTLE_DUEL_DISTANCE_M * 0.5;
-  return [
-    {
-      id: 'castle_duel_player',
-      prefabId: 'bastion_trace_fortress',
-      label: 'Castillo de San Felipe (Player)',
-      x: arena.x,
-      y: 1.6,
-      baseY: 1.6,
-      foundationDepth: 12.0,
-      z: arena.z + halfSpan,
-      yaw: 0, // -Z faces North toward enemyCastle
-      width: 36,
-      depth: 34,
-      length: 34,
-      height: 7.6,
-      armed: true,
-      friendlyToPlayer: true,
-    },
-    {
-      id: 'castle_duel_enemy',
-      prefabId: 'bastion_trace_fortress',
-      label: 'Fuerte del Moro (Enemy)',
-      x: arena.x,
-      y: 15.6,
-      baseY: 15.6,
-      foundationDepth: 26.0,
-      z: arena.z - halfSpan,
-      yaw: Math.PI, // -Z faces South (+Z) toward playerCastle
-      width: 36,
-      depth: 34,
-      length: 34,
-      height: 7.6,
-      armed: true,
-      friendlyToPlayer: false,
-    },
-  ];
-}
 
 export function createCastleDuelController({
   getTerrain,
   ensureTerrain,
   disposeTerrain,
-  getVessels,
   getCamera,
   setCameraMode,
   saveScene,
@@ -224,9 +187,10 @@ export function createCastleDuelController({
   onShoreShot,
   onNotice,
 }) {
+  const place = CASTLE_DUEL_PLACE;
   let active = false;
   let duelPort = null;
-  let duelGeo = null;
+  let duelTerrain = null;
   let playerCastle = null;
   let enemyCastle = null;
   let playerBattery = null;
@@ -234,11 +198,16 @@ export function createCastleDuelController({
   let playerFront = [];
   let enemyFront = [];
   let garrison = null;
-  // What the normal game looked like, and a coast raised only for the duel: both given back by stop().
+  // The strait as the two works lie: the range between them, and the elevations that strike the enemy's walls.
+  let rangeM = 0;
+  let wallBand = [0, 0];
+  let enemyBand = [0, 0];
+  let enemyMuzzles = [0, 0, 0];
+  // What the normal game looked like, and the coast raised for the duel: both given back by stop().
   let savedScene = null;
   let raisedTerrain = null;
 
-  let elevationDeg = 1.0; // Starts low: the first shot strikes the foundation under the enemy's walls until the guns are raised.
+  let elevationDeg = 0; // Laid below the walls when the duel begins (begin).
   let traverseDeg = 0.0;
   let ammoType = 'round';
   let viewPreset = 'parapet'; // 'parapet' | 'embrasure' | 'spyglass' | 'channel' | 'free'
@@ -247,7 +216,9 @@ export function createCastleDuelController({
   let enemyCooldown = 3.2;
   let enemySalvoCount = 0;
   let winner = null; // null | 'player' | 'enemy' | 'draw'
-  let lastShotFeedback = CASTLE_DUEL_AIM_HINT;
+  const bandText = () => `+${wallBand[0].toFixed(1)}° to +${wallBand[1].toFixed(1)}°`;
+  const aimHint = () => `No arcs allowed! Elevate your guns (${bandText()}) to strike the walls of the Morro across the ${Math.round(rangeM)} m channel.`;
+  let lastShotFeedback = '';
   let hudDirty = true;
   let hudTimer = 0;
   const playerStatus = {};
@@ -323,21 +294,21 @@ export function createCastleDuelController({
   hud.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
       <div id="cd-player-score" style="flex:1;min-width:210px;padding:6px 10px;border-radius:8px;background:rgba(45,95,65,0.28);border:1px solid rgba(110,205,145,0.35);">
-        <div style="font-weight:700;color:#9ef0b8;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">🛡️ Your Castle · San Felipe</div>
+        <div style="font-weight:700;color:#9ef0b8;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">🛡️ Your Castle · La Punta</div>
         <div id="cd-player-metrics" style="margin-top:3px;font-size:13px;"></div>
       </div>
       <div style="text-align:center;min-width:130px;">
         <div style="font-weight:800;font-size:14px;color:#ffd280;letter-spacing:0.04em;">⚔️ CASTLE DUEL ⚔️</div>
-        <div style="font-size:11px;color:#cbb494;">Range: ${CASTLE_DUEL_DISTANCE_M} m · ${CASTLE_DUEL_MUZZLE_SPEED_MPS} m/s · No Arcs</div>
+        <div style="font-size:11px;color:#cbb494;"><span id="cd-range">Havana, 1600</span> · ${CASTLE_DUEL_MUZZLE_SPEED_MPS} m/s · No Arcs</div>
       </div>
       <div id="cd-enemy-score" style="flex:1;min-width:210px;padding:6px 10px;border-radius:8px;background:rgba(120,38,32,0.32);border:1px solid rgba(235,105,90,0.38);text-align:right;">
-        <div style="font-weight:700;color:#ff9e92;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">🎯 Enemy · Fuerte del Moro</div>
+        <div style="font-weight:700;color:#ff9e92;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">🎯 Enemy · El Morro</div>
         <div id="cd-enemy-metrics" style="margin-top:3px;font-size:13px;"></div>
       </div>
     </div>
 
     <div id="cd-banner" style="margin-bottom:9px;padding:6px 10px;border-radius:6px;background:rgba(255,215,130,0.10);border:1px solid rgba(255,215,130,0.24);color:#ffe2a8;font-size:12.5px;text-align:center;font-weight:500;">
-      ${CASTLE_DUEL_AIM_HINT}
+      Havana, 1600: the Morro and La Punta across the channel.
     </div>
 
     <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;">
@@ -392,43 +363,46 @@ export function createCastleDuelController({
     free: '🕊️ View: Free Cam',
   };
 
-  // Where a fixed view stands and looks. It moves only when the view or the aim does.
+  // Where a fixed view stands and looks, from the player's guns toward the enemy's. It moves only when the view or the
+  // aim does.
+  let playerMuzzles = [0, 0, 0];
   function refreshViewPose() {
     if (!playerCastle || !enemyCastle || viewPreset === 'free') return;
-    const yTop = (playerCastle.y ?? 1.6) + (playerCastle.height ?? 7.6);
+    const [mx, my, mz] = playerMuzzles, dx = enemyCastle.x - mx, dz = enemyCastle.z - mz, length = Math.hypot(dx, dz) || 1;
+    const fx = dx / length, fz = dz / length, rx = -fz, rz = fx, ahead = Math.atan2(fx, -fz);
     const travRad = (traverseDeg * Math.PI) / 180;
     const pose = viewPose;
     if (viewPreset === 'parapet') {
-      pose.x = playerCastle.x + Math.sin(travRad) * 2.0;
-      pose.y = yTop + 2.25;
-      pose.z = playerCastle.z - 11.4;
-      pose.yaw = travRad * 0.65;
+      pose.x = mx - fx * 6 + rx * Math.sin(travRad) * 2.0;
+      pose.y = my + 2.25;
+      pose.z = mz - fz * 6 + rz * Math.sin(travRad) * 2.0;
+      pose.yaw = ahead + travRad * 0.65;
       pose.pitch = -0.04 + Math.max(0, elevationDeg - 5) * 0.007;
       pose.fovY = (52 * Math.PI) / 180;
     } else if (viewPreset === 'embrasure') {
-      pose.x = playerCastle.x + 2.1;
-      pose.y = yTop + 1.25;
-      pose.z = playerCastle.z - 14.2;
-      pose.yaw = travRad * 0.85;
+      pose.x = mx - fx * 1.5 + rx * 2.1;
+      pose.y = my + 1.25;
+      pose.z = mz - fz * 1.5 + rz * 2.1;
+      pose.yaw = ahead + travRad * 0.85;
       pose.pitch = (elevationDeg * 0.45 * Math.PI) / 180;
       pose.fovY = (46 * Math.PI) / 180;
     } else if (viewPreset === 'spyglass') {
-      pose.x = playerCastle.x;
-      pose.y = yTop + 2.4;
-      pose.z = playerCastle.z - 15.2;
-      pose.yaw = travRad * 0.9;
+      pose.x = mx - fx * 3;
+      pose.y = my + 2.4;
+      pose.z = mz - fz * 3;
+      pose.yaw = ahead + travRad * 0.9;
       pose.pitch = -0.015;
       pose.fovY = (20 * Math.PI) / 180;
     } else if (viewPreset === 'channel') {
-      const terrain = getTerrain?.();
-      const midZ = 0.5 * (playerCastle.z + enemyCastle.z);
-      const hWest = typeof terrain?.height === 'function' ? terrain.height(playerCastle.x - 135, midZ) : -10;
-      const hEast = typeof terrain?.height === 'function' ? terrain.height(playerCastle.x + 135, midZ) : -10;
-      const useEast = hEast < hWest;
-      pose.x = playerCastle.x + (useEast ? 135 : -135);
+      // From the water off the channel's middle, on whichever hand is open water.
+      const terrain = getTerrain?.(), cx = (mx + enemyCastle.x) * 0.5, cz = (mz + enemyCastle.z) * 0.5, off = Math.max(135, length * 0.45);
+      const hRight = typeof terrain?.height === 'function' ? terrain.height(cx + rx * off, cz + rz * off) : -10;
+      const hLeft = typeof terrain?.height === 'function' ? terrain.height(cx - rx * off, cz - rz * off) : -10;
+      const hand = hRight < hLeft ? 1 : -1;
+      pose.x = cx + rx * off * hand;
       pose.y = 22;
-      pose.z = midZ;
-      pose.yaw = useEast ? -Math.PI * 0.5 : Math.PI * 0.5;
+      pose.z = cz + rz * off * hand;
+      pose.yaw = Math.atan2(-rx * hand, rz * hand);
       pose.pitch = -0.10;
       pose.fovY = (56 * Math.PI) / 180;
     }
@@ -451,7 +425,7 @@ export function createCastleDuelController({
     elTravVal.textContent = `${traverseDeg >= 0 ? '+' : ''}${traverseDeg.toFixed(1)}°`;
     elElevSlider.value = String(elevationDeg);
     elTravSlider.value = String(traverseDeg);
-    if (playerBattery) applyGunAim(playerBattery, playerFront, elevationDeg, traverseDeg);
+    if (playerBattery) applyGunAim(playerBattery, playerFront, enemyCastle, elevationDeg, traverseDeg);
     refreshViewPose();
   }
 
@@ -488,103 +462,112 @@ export function createCastleDuelController({
     hudDirty = true;
   }
 
+  // What the player's last shot did, read from where it fell and from the Morro's own state.
   function handleDuelEvent(sideLabel, prefix, event) {
     onShoreShot?.(prefix, event);
     hudDirty = true;
-    if (event.type !== 'impact' || sideLabel !== 'player' || !playerCastle) return;
+    if (event.type !== 'impact' || sideLabel !== 'player' || !playerCastle || !enemyCastle) return;
+    const struck = event.building?.workBuilding ?? event.building;
     if (event.kind === 'water') {
-      const dz = Math.abs((event.surfacePosition?.[2] ?? playerCastle.z) - playerCastle.z);
-      const shortBy = Math.round(CASTLE_DUEL_DISTANCE_M - dz);
-      if (shortBy > 18) {
-        lastShotFeedback = `🌊 Splash in the channel (${Math.round(dz)}m out, ${shortBy}m short)! Aim higher (${CASTLE_DUEL_ELEVATION_HINT}).`;
-      } else if (shortBy < -18) {
-        lastShotFeedback = `🌊 Overshot the enemy castle (${Math.round(dz)}m)! Lower your elevation slightly.`;
+      const [sx, , sz] = event.surfacePosition ?? event.position ?? playerMuzzles;
+      const out = Math.hypot(sx - playerMuzzles[0], sz - playerMuzzles[2]), shortBy = Math.round(rangeM - out);
+      if (shortBy > CASTLE_DUEL_SPLASH_NEAR_M) {
+        lastShotFeedback = `🌊 Splash in the channel, ${Math.round(out)} m out and ${shortBy} m short. Raise the guns (${bandText()}).`;
+      } else if (shortBy < -CASTLE_DUEL_SPLASH_NEAR_M) {
+        lastShotFeedback = `🌊 Over the Morro, ${Math.round(out)} m out. Lower the guns a little.`;
       } else {
-        lastShotFeedback = `🌊 Splash right at the base of Fuerte del Moro (${Math.round(dz)}m)! Raise your guns to ${CASTLE_DUEL_ELEVATION_HINT} to strike the walls.`;
+        lastShotFeedback = `🌊 Splash at the foot of the Morro (${Math.round(out)} m). Raise the guns to ${bandText()} to strike its walls.`;
       }
-    } else if (event.kind === 'building' && event.building === enemyCastle) {
-      const rep = event.damageReport;
-      if (rep?.magazineExploded) {
-        lastShotFeedback = `💥 CATACLYSMIC HIT! You detonated Fuerte del Moro's powder magazine!`;
-      } else if (rep?.dismountedGuns > 0) {
-        lastShotFeedback = `🎯 Direct hit on Fuerte del Moro (${rep.hitSubAssembly ?? 'rampart'})! Enemy guns dismounted: ${rep.dismountedGuns}, fires: ${rep.fires}.`;
+    } else if (event.kind === 'building' && struck === enemyCastle) {
+      const status = castleDuelStatus(enemyCastle, enemyFront, enemyStatus);
+      if (status.magazineExploded) {
+        lastShotFeedback = `💥 The Morro's powder magazine has gone up!`;
       } else {
-        lastShotFeedback = `🎯 Direct masonry hit on Fuerte del Moro (${rep?.hitSubAssembly ?? 'walls'})! Integrity ${Math.round((rep?.integrity ?? 1) * 100)}%.`;
+        const down = status.totalGuns - status.activeGuns;
+        lastShotFeedback = `🎯 Hit on the Morro: walls ${status.integrityPct}%, ${down ? `${down} of its ${status.totalGuns} guns dismounted` : 'its guns still mounted'}.`;
       }
+    } else if (event.kind === 'building' || event.kind === 'terrain') {
+      lastShotFeedback = `🪨 The ball struck the shore short of the Morro's walls. Lay the guns along the channel.`;
     }
   }
 
-  // Whole walls, a full magazine and a fresh garrison for both castles: at the start and for a rematch.
+  // The pieces of a work that a ball has struck: each stands whole again for a rematch.
+  function restoreWork(castle) {
+    const terrain = getTerrain?.();
+    for (const piece of duelPort.instances) {
+      if (piece.workBuilding !== castle || !piece.damageState?.hits) continue;
+      terrain?.rebuildPortBuilding?.(piece);
+      piece.damageState = null;
+      piece.magazine = null;
+      createBuildingDamageState(piece);
+    }
+    castle.damageState = null;
+    castle.magazine = null;
+    castle.gunnery = null;
+    createBuildingDamageState(castle);
+    reviveGarrisonSoldiers(castle);
+  }
+
+  // Whole walls, a full magazine and the garrison back at its posts in both works: at the start and for a rematch.
   function manCastles() {
-    for (const castle of duelPort.instances) {
-      castle.damageState = null;
-      castle.magazine = null;
-      castle.gunnery = null;
-      createBuildingDamageState(castle);
-    }
-    garrison = createFortGarrison(duelPort);
+    garrison = duelPort.garrison ?? createFortGarrison(duelPort);
+    restoreWork(playerCastle);
+    restoreWork(enemyCastle);
   }
 
+  // Each work's guns that bear on the other, where they fire from, and the walls they strike.
   function mountBatteries() {
     playerBattery = createBuildingGunnery(playerCastle, {
       onEvent: (ev) => handleDuelEvent('player', 'duel-p-', ev),
-      getVessels: () => [],
       getTerrain,
-      town: { instances: [playerCastle], center: { x: playerCastle.x, z: playerCastle.z } },
+      town: duelPort,
     });
     enemyBattery = createBuildingGunnery(enemyCastle, {
       onEvent: (ev) => handleDuelEvent('enemy', 'duel-e-', ev),
-      getVessels: () => [],
       getTerrain,
-      town: { instances: [enemyCastle], center: { x: enemyCastle.x, z: enemyCastle.z } },
+      town: duelPort,
     });
     configureCastleDuelBattery(playerBattery);
     configureCastleDuelBattery(enemyBattery);
-    playerFront = castleDuelFrontGuns(playerBattery);
-    enemyFront = castleDuelFrontGuns(enemyBattery);
+    playerFront = castleDuelFrontGuns(playerBattery, enemyCastle);
+    enemyFront = castleDuelFrontGuns(enemyBattery, playerCastle);
+    if (!playerFront.length || !enemyFront.length) return false;
+    playerMuzzles = castleDuelMuzzles(playerCastle, playerFront);
+    enemyMuzzles = castleDuelMuzzles(enemyCastle, enemyFront);
+    const playerWall = castleDuelWall(playerCastle, playerFront), enemyWall = castleDuelWall(enemyCastle, enemyFront);
+    rangeM = Math.hypot(enemyWall[0] - playerMuzzles[0], enemyWall[2] - playerMuzzles[2]);
+    wallBand = castleDuelWallElevation(playerMuzzles, enemyWall);
+    enemyBand = castleDuelWallElevation(enemyMuzzles, playerWall);
 
     winner = null;
     enemyCooldown = 3.0;
     enemySalvoCount = 0;
     nextGunCursor = 0;
-    lastShotFeedback = CASTLE_DUEL_AIM_HINT;
+    lastShotFeedback = aimHint();
     setAmmo(ammoType);
     syncAimUI();
     refreshHud();
+    return true;
   }
 
-  // Raises the two castles in open water. False, with nothing of the normal game touched, when this
-  // coast cannot take them.
-  function buildArena(terrain) {
-    const arena = chooseCastleDuelArena(terrain, getVessels?.() ?? []);
-    [playerCastle, enemyCastle] = castleDuelCastles(arena);
-    duelPort = {
-      regionId: CASTLE_DUEL_PORT_ID,
-      name: 'Strait of the Two Castles',
-      // No part of the career: its damage is neither restored from the save nor written to it.
-      transient: true,
-      center: { x: arena.x, z: arena.z },
-      seaDir: { x: 0, z: -1 },
-      reach: 320,
-      clearRadius: 280,
-      instances: [playerCastle, enemyCastle],
-      streets: null,
-      sceneryBakes: [],
-      sceneryFires: [],
-    };
-    duelGeo = buildPortPrefabGeometry(duelPort, null);
+  // The duel is fought on the works the board stood at Havana in 1600. False, with nothing of the normal game touched,
+  // where this coast has not both.
+  function takeArena(terrain) {
+    const port = terrain?.port, castles = port ? castleDuelCastles(port, place) : null;
+    if (!castles) return false;
+    duelPort = port;
+    // No part of the career: what is shot down here is never written to the save.
+    duelPort.transient = true;
+    playerCastle = castles.player;
+    enemyCastle = castles.enemy;
     manCastles();
-    if (terrain.setCustomPort?.(duelPort, duelGeo) !== true) {
-      clearArena();
-      return false;
-    }
-    mountBatteries();
-    return true;
+    if (mountBatteries()) return true;
+    clearArena();
+    return false;
   }
 
   function clearArena() {
     duelPort = null;
-    duelGeo = null;
     playerCastle = null;
     enemyCastle = null;
     playerBattery = null;
@@ -594,15 +577,14 @@ export function createCastleDuelController({
     garrison = null;
   }
 
-  // The same stone stands again: nothing is rebuilt but the damage, the garrison and the guns' state.
+  // The same stone stands again: nothing is raised anew but the struck pieces, the garrison and the guns' state.
   function rematch() {
     if (!active || !duelPort) return false;
     manCastles();
-    if (getTerrain?.()?.setCustomPort?.(duelPort, duelGeo) !== true) {
+    if (!mountBatteries()) {
       stop();
       return false;
     }
-    mountBatteries();
     return true;
   }
 
@@ -617,20 +599,20 @@ export function createCastleDuelController({
   function firePlayerGun(salvo = false) {
     if (!active || !playerBattery || winner) return 0;
     if (magazineDry(playerCastle)) {
-      say('🪣 The magazine is empty: San Felipe has no powder left to fire.');
+      say('🪣 The magazine is empty: La Punta has no powder left to fire.');
       return 0;
     }
-    applyGunAim(playerBattery, playerFront, elevationDeg, traverseDeg);
+    applyGunAim(playerBattery, playerFront, enemyCastle, elevationDeg, traverseDeg);
     let fired = 0;
     if (salvo) {
-      fired = fireGunnery(playerBattery.state, 'port', { interval: 0.12, ammo: ammoType, only: playerFront });
+      fired = fireCastleDuelGuns(playerBattery, playerFront, { interval: 0.12, ammo: ammoType });
     } else {
       const count = playerFront.length;
       for (let i = 0; i < count && !fired; i++) {
         const gun = playerFront[(nextGunCursor + i) % count];
         if (gun.dismounted || gun.stage !== 'ready' || gun.queued) continue;
         oneGun[0] = gun;
-        fired = fireGunnery(playerBattery.state, 'port', { interval: 0.04, ammo: ammoType, only: oneGun });
+        fired = fireCastleDuelGuns(playerBattery, oneGun, { interval: 0.04, ammo: ammoType });
         if (fired) nextGunCursor = (nextGunCursor + i + 1) % count;
       }
       oneGun[0] = null;
@@ -651,17 +633,14 @@ export function createCastleDuelController({
     }
     if (!enemyVolley.length) return 0;
     enemySalvoCount++;
-    // The first volley strikes low on the player's wall; later ones walk up onto the parapet.
-    const baseElev = enemySalvoCount === 1 ? -3.6 : -2.4;
+    // The first volley falls short at the foot of the player's walls; later ones walk up onto them.
+    const middle = (enemyBand[0] + enemyBand[1]) * 0.5;
+    const baseElev = enemySalvoCount === 1 ? enemyBand[0] - 0.6 : middle;
     const jitterElev = (Math.sin(enemySalvoCount * 2.3) * 0.45) + (Math.random() - 0.5) * 0.45;
-    const jitterTrav = (Math.cos(enemySalvoCount * 1.7) * 2.8) + (Math.random() - 0.5) * 2.0;
+    const jitterTrav = (Math.cos(enemySalvoCount * 1.7) * 1.2) + (Math.random() - 0.5) * 1.0;
     enemyBattery.setAmmo(enemySalvoCount % 3 === 0 ? 'hot' : 'round');
-    applyGunAim(enemyBattery, enemyFront, baseElev + jitterElev, jitterTrav);
-    const fired = fireGunnery(enemyBattery.state, 'port', {
-      interval: 0.18,
-      ammo: enemyBattery.state.ammo,
-      only: enemyVolley,
-    });
+    applyGunAim(enemyBattery, enemyFront, playerCastle, baseElev + jitterElev, jitterTrav);
+    const fired = fireCastleDuelGuns(enemyBattery, enemyVolley, { interval: 0.18, ammo: enemyBattery.state.ammo });
     enemyVolley.length = 0;
     return fired;
   }
@@ -693,13 +672,13 @@ export function createCastleDuelController({
     if (!winner) {
       if (eStat.defeated && pStat.defeated) {
         winner = 'draw';
-        lastShotFeedback = `⚖️ MUTUAL DESTRUCTION! Both castles have been silenced (${SILENCED_BY[pStat.silencedBy]}; ${SILENCED_BY[eStat.silencedBy]}). Click Rematch to play again.`;
+        lastShotFeedback = `⚖️ MUTUAL DESTRUCTION! Both works have been silenced (${SILENCED_BY[pStat.silencedBy]}; ${SILENCED_BY[eStat.silencedBy]}). Click Rematch to play again.`;
       } else if (eStat.defeated) {
         winner = 'player';
-        lastShotFeedback = `🏆 VICTORY! Fuerte del Moro has been silenced (${SILENCED_BY[eStat.silencedBy]})! Castillo de San Felipe rules the strait!`;
+        lastShotFeedback = `🏆 VICTORY! The Morro has been silenced (${SILENCED_BY[eStat.silencedBy]})! La Punta holds the mouth of Havana!`;
       } else if (pStat.defeated) {
         winner = 'enemy';
-        lastShotFeedback = `💀 DEFEAT! Castillo de San Felipe has been silenced (${SILENCED_BY[pStat.silencedBy]})! Click Rematch to try again.`;
+        lastShotFeedback = `💀 DEFEAT! La Punta has been silenced (${SILENCED_BY[pStat.silencedBy]})! Click Rematch to try again.`;
       }
     }
     if (lastShotFeedback !== shownBanner) elBanner.textContent = shownBanner = lastShotFeedback;
@@ -728,11 +707,9 @@ export function createCastleDuelController({
   function begin() {
     if (active) return true;
     const terrain = getTerrain?.();
-    if (!terrain) return false;
-    if (!buildArena(terrain)) {
-      onNotice?.('The two castles cannot be raised on this coast. Try the duel from open sea or off another port.');
-      return false;
-    }
+    if (!terrain || !takeArena(terrain)) return false;
+    // The guns start laid low: the first shot falls short at the foot of the Morro until they are raised.
+    setElevation(Math.floor((wallBand[0] - 1) * 4) / 4);
     // Only now is anything of the normal game borrowed: all of it goes back in stop().
     savedScene = saveScene?.() ?? null;
     active = true;
@@ -747,22 +724,25 @@ export function createCastleDuelController({
   }
 
   /**
-   * Starts the duel. True when it is running, false when it cannot be played here, and a promise of
-   * one or the other when a coast has to be raised for it first (open sea).
+   * Starts the duel: Havana in 1600 is raised at open sea, clear of the ship. A promise of true once it is running, or
+   * false (at once, off a coast) when it cannot be played.
    */
   let startingPromise = null;
   function start() {
     if (active) return true;
     if (startingPromise) return startingPromise;
-    if (getTerrain?.() || typeof ensureTerrain !== 'function') return begin();
-    setLaunchLabel('⏳ Raising the castles…');
+    if (getTerrain?.() || typeof ensureTerrain !== 'function') {
+      onNotice?.(`The duel is fought at the mouth of ${place.name} in ${place.year}, raised for it at open sea: put out from this coast first.`);
+      return false;
+    }
+    setLaunchLabel(`⏳ Raising ${place.name}…`);
     const failed = (raised) => {
       if (raised) disposeTerrain?.(raised);
-      else onNotice?.('No coast could be raised for the two castles.');
+      onNotice?.(`${place.name} in ${place.year} could not be raised with both its castles.`);
       syncLaunchBtn();
       return false;
     };
-    startingPromise = Promise.resolve().then(() => ensureTerrain()).then((raised) => {
+    startingPromise = Promise.resolve().then(() => ensureTerrain(place)).then((raised) => {
       startingPromise = null;
       if (!raised || getTerrain?.() !== raised || !begin()) return failed(raised);
       raisedTerrain = raised;
@@ -779,14 +759,13 @@ export function createCastleDuelController({
     active = false;
     hud.hidden = true;
     document.body.classList.remove('castle-duel-active');
-    getTerrain?.()?.setCustomPort?.(null, null);
     restoreScene?.(savedScene);
     savedScene = null;
+    clearArena();
     if (raisedTerrain) {
       disposeTerrain?.(raisedTerrain);
       raisedTerrain = null;
     }
-    clearArena();
     cachedProjectiles.length = 0;
     cachedWorldFires.length = 0;
     syncLaunchBtn();
@@ -899,7 +878,9 @@ export function createCastleDuelController({
     status() {
       return {
         active,
-        distanceMeters: CASTLE_DUEL_DISTANCE_M,
+        place,
+        rangeM,
+        wallBand: [...wallBand],
         elevationDeg,
         traverseDeg,
         ammoType,
@@ -918,8 +899,10 @@ export function createCastleDuelController({
           stepFortGarrison(garrison, dt, Math.hypot(windVec[0] ?? 0, windVec[2] ?? 0));
         }
         // Every fired gun goes straight back through its drill.
-        prepareGunnery(playerBattery.state, 'port');
-        prepareGunnery(enemyBattery.state, 'port');
+        for (const side of ['port', 'starboard']) {
+          prepareGunnery(playerBattery.state, side);
+          prepareGunnery(enemyBattery.state, side);
+        }
         playerBattery.update(dt, windVec, CASTLE_DUEL_BATTERY_STEP);
         enemyBattery.update(dt, windVec, CASTLE_DUEL_BATTERY_STEP);
 

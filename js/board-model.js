@@ -140,6 +140,8 @@ export const BAKED_BOARDS = Object.freeze({
   // The towns Spain and Portugal had planted by 1550 (js/colonial-towns.js), by their ports.
   'santo-domingo:1550': 'assets/boards/santo-domingo-1550.json',
   'havana:1550': 'assets/boards/havana-1550.json',
+  // Havana in 1600: the castle duel's place (js/castle-duel.js), the Morro and La Punta across its mouth.
+  'havana:1600': 'assets/boards/havana-1600.json',
   'san-juan:1550': 'assets/boards/san-juan-1550.json',
   'cartagena:1550': 'assets/boards/cartagena-1550.json',
   'nombre-de-dios:1550': 'assets/boards/nombre-de-dios-1550.json',
@@ -187,6 +189,7 @@ export const BAKED_WORLDS = Object.freeze({
   'rio-de-janeiro:1550': 'assets/boards/rio-de-janeiro-1550.world',
   'santo-domingo:1550': 'assets/boards/santo-domingo-1550.world',
   'havana:1550': 'assets/boards/havana-1550.world',
+  'havana:1600': 'assets/boards/havana-1600.world',
   'san-juan:1550': 'assets/boards/san-juan-1550.world',
   'cartagena:1550': 'assets/boards/cartagena-1550.world',
   'nombre-de-dios:1550': 'assets/boards/nombre-de-dios-1550.world',

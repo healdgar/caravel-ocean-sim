@@ -2706,6 +2706,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // What a shot meets among the city's buildings, for js/gunnery-control.js. Not while another port stands in.
     sweepCity(from,to,radius,options,sweepBuilding){return cityTargets&&!savedPortOverride?cityTargets.sweep(from,to,radius,options,sweepBuilding):null;},
     get cityTargets(){return cityTargets;},
+    // A struck building of the port in view stands whole again at once (js/castle-duel.js rematch).
+    rebuildPortBuilding(instance){portFractures?.rebuild(instance);},
     get inlandWater(){return inlandWater;},
     inlandWaterAt(x,z){return inlandWaterSampler?inlandWaterSampler(x-worldOffset.x,z-worldOffset.z):null;},
     get herds(){return herds;},

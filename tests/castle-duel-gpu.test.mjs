@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-// The Two Castles duel in the real page: it is reached from the debug panel only, the normal game
-// waits while it runs, and stopping it leaves the camera, the sky, the ships, the port and the
-// career save as they were found.
+// The Two Castles duel in the real page: it is reached from the debug panel only, it raises Havana in 1600 at open sea
+// and is fought on the works the board stands there, the normal game waits while it runs, and stopping it leaves the
+// camera, the sky, the ships and the career save as they were found.
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {after,before,test} from 'node:test';
@@ -54,8 +54,8 @@ const sceneReader=()=>{
   };
 };
 
-test('the duel is a debug side game: entered from the debug panel, it borrows the scene and gives it back',{timeout:900000},async()=>{
-  const {context,page,errors,frames}=await open('/?region=lisbon&view=ship&ship=nina&clouds=0&w=320&h=240&year=1650&boatSpeed=0&continue=1');
+test('the duel is a debug side game: entered from the debug panel at open sea, it borrows the scene and gives it back',{timeout:900000},async()=>{
+  const {context,page,errors,frames}=await open('/?view=ship&ship=nina&follower=0&clouds=0&w=320&h=240&boatSpeed=0&continue=1');
   try{
     await page.evaluate(sceneReader);
     // Player-facing panels carry no duel button, and the debug section of Sea Settings opens closed.
@@ -65,36 +65,19 @@ test('the duel is a debug side game: entered from the debug panel, it borrows th
     assert.equal(await page.locator('#perf-castle-duel-btn').count(),1,'the debug panel has it');
     assert.equal(await page.locator('#environment-debug').evaluate(details=>details.open),false);
 
-    // The town's own bastion is shot about first: its ruin must survive the duel.
-    const bastion=await page.evaluate(async()=>{
-      const {applyBuildingImpactDamage}=await import('/js/gunnery-control.js');
-      const port=oceanFleet.terrain.port,building=port.instances.find(i=>i.prefabId==='stone_sea_bastion');
-      if(!building)return null;
-      const half=(building.depth??building.length)*.5,cos=Math.cos(building.yaw),sin=Math.sin(building.yaw),base=building.baseY??building.y;
-      for(let i=0;i<6;i++){
-        const x=(i-3)*1.5,z=half,y=3+i%3,at=[building.x+x*cos+z*sin,base+y,building.z-x*sin+z*cos];
-        applyBuildingImpactDamage(building,{localPosition:[x,y,z],position:at,surfacePosition:at,normal:[sin,0,cos],velocity:[-sin*400,0,-cos*400],mass:14.5,energy:900000,ammo:'round'});
-      }
-      window.ownPort=port;window.ownBastion=building;
-      return {id:building.id??null};
-    });
-    assert.ok(bastion,'Lisbon has its bastion');
-    await page.waitForFunction(()=>(ownBastion.damageState.fracture?.brokenCount??0)>0&&fractureUploads>0,undefined,{timeout:120000,polling:100});
-    await page.waitForFunction(()=>ownBastion.damageState.fracture.flying.size===0,undefined,{timeout:120000,polling:200});
-    const ruin=await page.evaluate(()=>({hits:ownBastion.damageState.hits,broken:ownBastion.damageState.fracture.brokenCount,uploads:fractureUploads}));
-    assert.ok(ruin.broken>=4,`the bastion has lost blocks (${ruin.broken})`);
-
-    // In through the debug panel's button, with the scene read in the same breath.
-    const found=await page.evaluate(()=>{const scene=readScene();document.querySelector('#perf-castle-duel-btn').click();return {scene,active:castleDuel.active};});
-    assert.equal(found.active,true,'the duel starts on a procedural coast');
+    // In through the debug panel's button, with the scene read in the same breath: Havana in 1600 is raised for it.
+    const found=await page.evaluate(()=>{const scene=readScene();document.querySelector('#perf-castle-duel-btn').click();return {scene};});
     assert.equal(found.scene.duelClass,false);
     assert.deepEqual(found.scene.camera,['View ship']);
+    await page.waitForFunction(()=>castleDuel.active,undefined,{timeout:600000,polling:500});
     await frames(20);
     const during=await page.evaluate(()=>({scene:readScene(),transient:oceanFleet.terrain.port.transient===true,
+      works:[castleDuel.playerCastle.label,castleDuel.enemyCastle.label],
       hidden:['#camera-dock','#helm-controls','#voyage-hud','#captain-panel'].filter(id=>document.querySelector(id)&&getComputedStyle(document.querySelector(id)).display!=='none'),
       launch:document.querySelector('#perf-castle-duel-btn').textContent,hud:document.querySelector('#castle-duel-hud').hidden,
       sight:getComputedStyle(document.body,'::after').display}));
-    assert.equal(during.scene.port,'Strait of the Two Castles');
+    assert.equal(during.scene.port,'Havana');
+    assert.deepEqual(during.works,['Castillo de San Salvador de la Punta','Castillo de los Tres Reyes del Morro'],'La Punta against the Morro, as the board stands them');
     assert.equal(during.transient,true);
     assert.deepEqual(during.scene.camera,['Free camera']);
     assert.deepEqual(during.hidden,[],'the ship\'s controls are out of sight while the duel runs');
@@ -126,23 +109,23 @@ test('the duel is a debug side game: entered from the debug panel, it borrows th
     assert.deepEqual(keyed.chart,chartBefore,'M opens no chart');
     assert.equal(keyed.seaPanel,true,'H opens no settings');
     assert.equal(keyed.spyglass,false,'Z raises no spyglass');
-    // Fresh castles for each trial of the guns: the enemy's first volley is three seconds off.
+    // Fresh works for each trial of the guns: the enemy's first volley is three seconds off.
     assert.equal(await page.evaluate(()=>castleDuel.rematch()),true);
     await page.keyboard.down('Space');await page.keyboard.down('Space');await page.keyboard.down('Space');await page.keyboard.down('Space');await page.keyboard.up('Space');
     await frames(20);
     assert.equal(await page.evaluate(()=>castleDuel.playerCastle.magazine.shotsFired??0),1,'a held Space fires one gun');
 
-    // Castle damage never reaches the career save; the town's own ruin does.
-    await page.evaluate(()=>{castleDuel.rematch();castleDuel.setElevation(3);castleDuel.setTraverse(0);});
+    // Laid in the band the hint names, La Punta's guns strike the Morro's stone; none of it reaches the career save.
+    await page.evaluate(()=>{castleDuel.rematch();const [low,high]=castleDuel.status().wallBand;castleDuel.setElevation((low+high)/2);castleDuel.setTraverse(0);});
     await page.waitForFunction(()=>{castleDuel.fire(true);return (castleDuel.enemyCastle.damageState.hits??0)>0;},undefined,{timeout:60000,polling:250});
+    assert.match(await page.evaluate(()=>castleDuel.status().lastShotFeedback),/Hit on the Morro/);
     const save=await page.evaluate(key=>{
       const voyage=oceanVoyage.voyage,kept=voyage.keepSaved;
       voyage.keepSaved=true;oceanVoyage.saveNow();voyage.keepSaved=kept;
       return localStorage.getItem(key);
     },CAREER_KEY);
     assert.ok(save,'the career was saved while the duel ran');
-    assert.doesNotMatch(save,/Two Castles|castle_duel/,'with nothing of the duel in it');
-    assert.match(save,/stone_sea_bastion/,'and with the town\'s shot-about bastion on record');
+    assert.doesNotMatch(save,/"city_\d+"/,'with nothing the duel shot down in it');
 
     // Night battle and rematch, then out.
     await page.locator('#cd-night-btn').evaluate(button=>button.click());
@@ -151,19 +134,14 @@ test('the duel is a debug side game: entered from the debug panel, it borrows th
     assert.equal(night.sunElev,'-18');assert.equal(night.sky,'manual');
     await page.locator('#cd-reset-btn').evaluate(button=>button.click());
     await frames(5);
-    const rematch=await page.evaluate(()=>({hits:castleDuel.enemyCastle.damageState.hits??0,integrity:castleDuel.enemyCastle.damageState.integrity,winner:castleDuel.winner,port:oceanFleet.terrain.port===castleDuel.port}));
-    assert.deepEqual(rematch,{hits:0,integrity:1,winner:null,port:true});
+    const rematch=await page.evaluate(()=>({hits:castleDuel.enemyCastle.damageState.hits??0,integrity:castleDuel.enemyCastle.damageState.integrity,winner:castleDuel.winner,port:oceanFleet.terrain.port===castleDuel.port,
+      struck:castleDuel.port.instances.filter(piece=>piece.workBuilding===castleDuel.enemyCastle&&piece.damageState?.hits).length}));
+    assert.deepEqual(rematch,{hits:0,integrity:1,winner:null,port:true,struck:0},'the Morro stands whole again, every struck piece of it');
 
-    const uploadsBefore=await page.evaluate(()=>fractureUploads);
-    const left=await page.evaluate(()=>{document.querySelector('#cd-exit-btn').click();return {scene:readScene(),active:castleDuel.active,sameOwnPort:oceanFleet.terrain.port===ownPort};});
+    const left=await page.evaluate(()=>{document.querySelector('#cd-exit-btn').click();return {scene:readScene(),active:castleDuel.active,terrain:oceanFleet.terrain===null};});
     assert.equal(left.active,false);
-    assert.equal(left.sameOwnPort,true,'the coast has its own port again');
+    assert.equal(left.terrain,true,'Havana is taken away again');
     assert.deepEqual(left.scene,found.scene,'camera, lens, sky, ships, voyage and port are as they were found');
-    // The town's ruin is cut again on the port's new buffers, rather than standing whole with its damage forgotten.
-    await page.waitForFunction(before=>fractureUploads>before,uploadsBefore,{timeout:120000,polling:100});
-    const ruinAfter=await page.evaluate(()=>({hits:ownBastion.damageState.hits,broken:ownBastion.damageState.fracture?.brokenCount??0}));
-    assert.equal(ruinAfter.hits,ruin.hits);
-    assert.ok(ruinAfter.broken>=ruin.broken,`the bastion is the ruin it was (${ruinAfter.broken} of ${ruin.broken} blocks down)`);
     await frames(10);
     const settled=await page.evaluate(()=>readScene());
     assert.deepEqual(settled.camera,found.scene.camera);
@@ -173,7 +151,7 @@ test('the duel is a debug side game: entered from the debug panel, it borrows th
     // From the deck: the eye goes back to where it stood.
     await page.locator('#camera-panel button').filter({hasText:'Boat camera'}).evaluate(button=>button.click());
     await frames(10);
-    const deck=await page.evaluate(()=>{const cam=oceanFleet.camera;cam.yaw=0.4;cam.pitch=-0.2;const scene=readScene();castleDuel.start();return scene;});
+    const deck=await page.evaluate(async()=>{const cam=oceanFleet.camera;cam.yaw=0.4;cam.pitch=-0.2;const scene=readScene();await castleDuel.start();return scene;});
     await frames(10);
     const deckBack=await page.evaluate(()=>{castleDuel.stop();return readScene();});
     assert.deepEqual(deckBack,deck,'the deck view is given back too');
@@ -183,19 +161,19 @@ test('the duel is a debug side game: entered from the debug panel, it borrows th
   }finally{await context.close();}
 });
 
-test('on a surveyed island with no port to borrow the duel is refused, and says so',{timeout:600000},async()=>{
-  const {context,page,errors,frames}=await open('/?landfall=coast&clouds=0&w=320&h=240');
+test('off a coast the duel is refused, and says so',{timeout:600000},async()=>{
+  const {context,page,errors,frames}=await open('/?region=lisbon&year=1650&clouds=0&w=320&h=240');
   try{
     await page.evaluate(sceneReader);
     await frames(5);
     const result=await page.evaluate(()=>{const before=readScene();document.querySelector('#perf-castle-duel-btn').click();return {before,after:readScene(),active:castleDuel.active,
       hud:document.querySelector('#castle-duel-hud').hidden,toast:document.querySelector('#voyage-hud .voyage-toast')?.textContent??'',toastHidden:document.querySelector('#voyage-hud .voyage-toast')?.hidden,
       launch:document.querySelector('#perf-castle-duel-btn').textContent};});
-    assert.equal(result.active,false,'no duel with no castles to show');
+    assert.equal(result.active,false,'no duel over the coast in view');
     assert.deepEqual(result.after,result.before,'and nothing of the scene is touched');
     assert.equal(result.hud,true);
     assert.equal(result.launch,'🏰 Castle Duel');
-    assert.match(result.toast,/cannot be raised on this coast/);
+    assert.match(result.toast,/put out from this coast/);
     assert.equal(result.toastHidden,false);
     await frames(5);
     assert.deepEqual(await page.evaluate(()=>gpuErrors),[]);
@@ -203,7 +181,7 @@ test('on a surveyed island with no port to borrow the duel is refused, and says 
   }finally{await context.close();}
 });
 
-test('at open sea the duel raises a coast clear of the ship, and takes it away again',{timeout:900000},async()=>{
+test('at open sea the duel raises Havana clear of the ship, and takes it away again',{timeout:900000},async()=>{
   const {context,page,errors,frames}=await open('/?castles=1&follower=0&clouds=0&w=320&h=240');
   try{
     await page.evaluate(sceneReader);
@@ -213,7 +191,7 @@ test('at open sea the duel raises a coast clear of the ship, and takes it away a
       const terrain=oceanFleet.terrain,boat=oceanFleet.vessels[0].boat,region=terrain.baseRegion??terrain.region,centre=castleDuel.port.center;
       return {scene:readScene(),coastOff:Math.hypot(region.x-boat.x,region.z-boat.z),span:region.span,duelOff:Math.hypot(centre.x-boat.x,centre.z-boat.z),bed:terrain.height(boat.x,boat.z)};
     });
-    assert.equal(during.scene.port,'Strait of the Two Castles');
+    assert.equal(during.scene.port,'Havana');
     assert.ok(during.coastOff>during.span,`the coast is raised ${Math.round(during.coastOff)} m from the ship, beyond its ${during.span} m span`);
     assert.ok(during.duelOff>2000,`and the castles stand ${Math.round(during.duelOff)} m from her`);
     assert.ok(during.bed<-5,`she still lies in deep water (${during.bed.toFixed(1)} m)`);

@@ -2552,7 +2552,8 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
   const previewOnly = options?.previewOnly === true, exact = !previewOnly || options?.exact === true;
   let best = sweepJettySegment(from, to, radius, port, options);
   for (const inst of instances) {
-    if (inst === options?.ignore || inst?.boulder) continue;
+    // A work's guns fire out over its own stone: none of its pieces stops their shot.
+    if (inst === options?.ignore || (options?.ignore && inst?.workBuilding === options.ignore) || inst?.boulder) continue;
     const baseY = inst.baseY ?? inst.y ?? 0;
     const reach = buildingReach(inst);
     const foundDepth = Math.max(0, inst.foundationDepth ?? 4.5);
@@ -2705,8 +2706,10 @@ export function createBuildingMagazineState(building) {
     return building.magazine;
   }
   const prefabId = building.prefabId ?? '';
-  const isFortress = prefabId === 'bastion_trace_fortress';
-  const isBastion = prefabId === 'stone_sea_bastion';
+  // A work's store is by what it is (js/fort-plan.js portWorkBuildings): a fort's vaults, or a battery's.
+  const workKind = building.work?.kind ?? null;
+  const isFortress = workKind === 'fort' || prefabId === 'bastion_trace_fortress';
+  const isBastion = workKind === 'battery' || prefabId === 'stone_sea_bastion';
   const isTimberFort = prefabId === 'english_triangular_palisade_fort';
   const isArsenal = prefabId === 'royal_atarazanas_arsenal';
   const isArmedPier = Boolean(building.armed || building.hasMagazine);

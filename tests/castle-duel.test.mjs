@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-// The Two Castles duel is a side game on the normal game's coast. It must take nothing it does not
-// give back, refuse a coast that cannot hold it, and play by its own rules: guns that reload, a
-// magazine that runs dry, a score read a few times a second.
+// The Two Castles duel is a side game fought at the mouth of Havana in 1600, on the works the board stands there, raised
+// at open sea. It must take nothing it does not give back, refuse where it cannot be fought, and play by its own rules:
+// guns that reload, a magazine that runs dry, a score read a few times a second, a band that is the ballistics.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -37,37 +37,47 @@ const press = (code, extra = {}) => {
   return event;
 };
 
-const { CASTLE_DUEL_DISTANCE_M, CASTLE_DUEL_WALL_ELEVATION_DEG, castleDuelStatus, chooseCastleDuelArena, createCastleDuelController } = await import('../js/castle-duel.js');
+const { CASTLE_DUEL_PLACE, CASTLE_DUEL_MUZZLE_SPEED_MPS, castleDuelStatus, castleDuelWallElevation, createCastleDuelController } = await import('../js/castle-duel.js');
+const CHANNEL_M = 480;
 
-// A procedural coast as the duel sees it: a port it can stand its own in place of, and deep water.
-function coast({ baked = false } = {}) {
-  const ownPort = { name: 'Cartagena', center: { x: 0, z: 0 }, seaDir: { x: 0, z: -1 }, instances: [] };
-  let held = null;
-  const terrain = {
-    port: ownPort, ports: [ownPort], swaps: [], disposed: false,
-    height: () => -30,
-    setCustomPort(port = null, geometry = null) {
-      if (baked) return false;
-      if (port && geometry) { held ??= terrain.port; terrain.port = port; }
-      else if (held) { terrain.port = held; held = null; }
-      else return false;
-      terrain.ports = [terrain.port];
-      terrain.swaps.push({ port, geometry });
-      return true;
-    },
+// A work as the board records it (js/old-world-board.js standWorkOf): a square 40 m across on ground 4 m up, its deck
+// 5 m above that, five guns along its front wall looking out along `turn`.
+function workRecord(name, x, z, turn) {
+  const c = Math.cos(turn), s = Math.sin(turn), world = ([lx, lz]) => [x + lx * c + lz * s, z - lx * s + lz * c];
+  const outline = [[-20, -20], [20, -20], [20, 20], [-20, 20]].map(world);
+  const guns = [-12, -6, 0, 6, 12].map((lx, i) => {
+    const [gx, gz] = world([lx, -19]);
+    return { x: gx, y: 9, z: gz, nx: -s, nz: -c, wall: 0, on: 0, piece: 1 + i };
+  });
+  return {
+    kind: 'fort', form: 'bastioned', name, x, y: 4, z, turn, w: 40, d: 40, outline, guns, salients: [], gate: null,
+    types: [0, 6], bore: { axis: 1.07, muzzle: 1.74, breech: 1.26, calibre: 12 },
   };
-  return { terrain, ownPort };
 }
 
-function duel({ terrain = coast().terrain, vessels = [], ensureTerrain = null, scene = { cameraMode: 'boat', fovY: 1.01 } } = {}) {
-  const calls = [], notices = [], disposed = [];
+// Havana as the board stands it in 1600: La Punta, and the Morro across the channel from it. `castles: false` stands a
+// coast without them.
+function havana({ castles = true } = {}) {
+  const works = castles
+    ? [workRecord(CASTLE_DUEL_PLACE.player, 0, 0, 0), workRecord(CASTLE_DUEL_PLACE.enemy, 0, -CHANNEL_M, Math.PI)]
+    : [workRecord('Castillo de la Real Fuerza', 0, 0, 0)];
+  const port = { name: 'Havana', regionId: 'havana', center: { x: 0, z: -CHANNEL_M / 2 }, instances: [], works };
+  const terrain = {
+    port, ports: [port], rebuilt: [], disposed: false,
+    height: () => -30,
+    rebuildPortBuilding(instance) { terrain.rebuilt.push(instance); },
+  };
+  return terrain;
+}
+
+function duel({ terrain = null, raise = () => havana(), scene = { cameraMode: 'boat', fovY: 1.01 } } = {}) {
+  const calls = [], notices = [], disposed = [], places = [];
   const cam = { x: 5, y: 6, z: 7, yaw: 0.3, pitch: -0.1, fovY: 1.01 };
   let live = terrain, sun = 30;
   const ctrl = createCastleDuelController({
     getTerrain: () => live,
-    ensureTerrain: ensureTerrain ? async () => { live = await ensureTerrain(); return live; } : null,
+    ensureTerrain: raise ? async (place) => { places.push(place); live = await raise(); return live; } : null,
     disposeTerrain: (raised) => { disposed.push(raised); if (raised === live) live = null; },
-    getVessels: () => vessels,
     getCamera: () => cam,
     setCameraMode: (mode) => calls.push(`camera:${mode}`),
     saveScene: () => { calls.push('save'); return scene; },
@@ -78,151 +88,120 @@ function duel({ terrain = coast().terrain, vessels = [], ensureTerrain = null, s
   });
   const hud = hudRoot.current;
   const run = (seconds, dt = 1 / 30) => { for (let t = 0; t < seconds; t += dt) ctrl.update(dt, [0, 0, 0]); };
-  return { ctrl, calls, notices, disposed, cam, hud, run, terrain, sun: () => sun, terrainNow: () => live };
+  return { ctrl, calls, notices, disposed, places, cam, hud, run, sun: () => sun, terrainNow: () => live };
 }
 
-test('the castles are sited clear of every ship, and no ship is moved for them', () => {
-  const { terrain } = coast();
-  const open = chooseCastleDuelArena(terrain, []);
-  // A ship lying exactly where the castles would otherwise stand.
-  const ship = { boat: { x: open.x, z: open.z, heading: 123, surgeVelocity: 2.5, leewayVelocity: 0.3, showProw: true } };
-  const before = { ...ship.boat };
-  const sited = chooseCastleDuelArena(terrain, [ship]);
-  assert.ok(Math.abs(sited.x - ship.boat.x) >= 180 || Math.abs(sited.z - ship.boat.z) >= 220, `the strait is laid clear of her (${JSON.stringify(sited)})`);
+// A duel running on a raised Havana.
+async function fought(options = {}) {
+  const d = duel(options);
+  assert.equal(await d.ctrl.start(), true);
+  return d;
+}
 
-  const { ctrl } = duel({ terrain, vessels: [ship] });
-  assert.equal(ctrl.start(), true);
-  assert.deepEqual(ship.boat, before, 'she lies where she lay, with the way she had on');
-  assert.ok(Math.abs(ctrl.port.center.x - ship.boat.x) >= 180 || Math.abs(ctrl.port.center.z - ship.boat.z) >= 220);
-  ctrl.stop();
-  assert.deepEqual(ship.boat, before);
-});
-
-test('starting borrows the port, the camera and the sky, and stopping gives each back', () => {
-  const { terrain, ownPort } = coast();
-  const { ctrl, calls, cam, hud } = duel({ terrain });
+test('at open sea Havana in 1600 is raised for the duel, and the camera, the sky and the coast are given back', async () => {
+  const { ctrl, calls, cam, hud, disposed, places, terrainNow } = duel();
   const button = element();
   ctrl.bindLaunchButton(button);
   assert.equal(button.textContent, '🏰 Castle Duel');
-  assert.equal(ctrl.start(), true);
-  assert.equal(ctrl.active, true);
+  const starting = ctrl.start();
+  assert.equal(typeof starting.then, 'function', 'the start waits for the coast');
+  assert.equal(button.textContent, '⏳ Raising Havana…');
+  assert.equal(ctrl.start(), starting, 'asking again while it loads raises no second coast');
+  assert.equal(await starting, true);
+  assert.deepEqual(places, [CASTLE_DUEL_PLACE], 'the place raised is the duel\'s, in its year');
+  assert.equal(places[0].port, 'havana');
+  assert.equal(places[0].year, 1600);
+  const raised = terrainNow();
   assert.deepEqual(calls, ['save', 'camera:free'], 'the scene is saved before the camera is taken');
-  assert.equal(terrain.port, ctrl.port);
-  assert.equal(ctrl.port.transient, true, 'the duel port is marked as no part of the career');
-  assert.equal(ctrl.port.name, 'Strait of the Two Castles');
+  assert.equal(ctrl.port, raised.port, 'the duel is fought in the port the board stood');
+  assert.equal(ctrl.port.transient, true, 'which is marked as no part of the career');
+  assert.equal(ctrl.playerCastle.label, CASTLE_DUEL_PLACE.player);
+  assert.equal(ctrl.enemyCastle.label, CASTLE_DUEL_PLACE.enemy);
+  assert.equal(ctrl.playerCastle.work, raised.port.works[0], 'each side holds the work its record stands');
   assert.equal(bodyClasses.has('castle-duel-active'), true);
   assert.equal(hud.hidden, false);
   assert.equal(button.textContent, '🏰 Exit Castle Duel');
   assert.notEqual(cam.fovY, 1.01, 'the duel looks through its own lens');
-  assert.equal(Math.abs(ctrl.playerCastle.z - ctrl.enemyCastle.z), CASTLE_DUEL_DISTANCE_M);
+  const range = ctrl.status().rangeM;
+  assert.ok(Math.abs(range - (CHANNEL_M - 2 * 19)) < 3, `the range is from La Punta's muzzles to the Morro's front (${range.toFixed(1)} m)`);
 
   ctrl.stop();
   assert.equal(ctrl.active, false);
-  assert.equal(terrain.port, ownPort, 'the coast has its own port again');
-  assert.deepEqual(terrain.swaps.at(-1), { port: null, geometry: null });
+  assert.deepEqual(disposed, [raised], 'the coast raised for the duel goes when the duel does');
+  assert.equal(terrainNow(), null, 'and the sea is open again');
   assert.deepEqual(calls, ['save', 'camera:free', 'restore']);
   assert.equal(bodyClasses.has('castle-duel-active'), false);
   assert.equal(hud.hidden, true);
   assert.equal(button.textContent, '🏰 Castle Duel');
-  assert.equal(ctrl.port, null, 'and the castles are let go');
+  assert.equal(ctrl.port, null, 'and the works are let go');
   ctrl.stop();
   assert.deepEqual(calls, ['save', 'camera:free', 'restore'], 'stopping twice gives nothing back twice');
 });
 
-test('a coast that cannot take the castles refuses the duel and is left untouched', () => {
-  const { terrain, ownPort } = coast({ baked: true });
-  const { ctrl, calls, notices, cam, hud } = duel({ terrain });
+test('off a coast the duel is refused, and nothing of it is touched', () => {
+  const coast = havana();
+  const { ctrl, calls, notices, cam, hud, disposed, places } = duel({ terrain: coast });
   const lens = cam.fovY;
   assert.equal(ctrl.start(), false);
   assert.equal(ctrl.active, false);
+  assert.deepEqual(places, [], 'no coast is raised over the one in view');
+  assert.deepEqual(disposed, [], 'and the one the player had is never disposed');
   assert.deepEqual(calls, [], 'no scene saved, no camera taken');
   assert.equal(cam.fovY, lens);
-  assert.equal(terrain.port, ownPort);
+  assert.equal(coast.port.transient, undefined);
   assert.equal(bodyClasses.has('castle-duel-active'), false);
   assert.equal(hud.hidden, true);
   assert.equal(notices.length, 1, 'and the player is told why nothing happened');
-  assert.match(notices[0], /cannot be raised on this coast/);
+  assert.match(notices[0], /put out from this coast/);
 });
 
-test('at open sea a coast is raised for the duel and taken away with it', async () => {
-  const raised = coast().terrain;
-  const { ctrl, disposed, calls, terrainNow } = duel({ terrain: null, ensureTerrain: async () => raised });
-  const button = element();
-  ctrl.bindLaunchButton(button);
-  const starting = ctrl.start();
-  assert.equal(typeof starting.then, 'function', 'the start waits for the coast');
-  assert.equal(button.textContent, '⏳ Raising the castles…');
-  assert.equal(ctrl.start(), starting, 'asking again while it loads raises no second coast');
-  assert.equal(await starting, true);
-  assert.equal(ctrl.active, true);
-  assert.equal(terrainNow(), raised);
-  ctrl.stop();
-  assert.deepEqual(disposed, [raised], 'the coast raised for the duel goes when the duel does');
-  assert.equal(terrainNow(), null, 'and the sea is open again');
-  assert.equal(calls.at(-1), 'restore');
+test('a coast raised without both castles is taken away again', async () => {
+  const bare = havana({ castles: false });
+  const refused = duel({ raise: () => bare });
+  assert.equal(await refused.ctrl.start(), false);
+  assert.deepEqual(refused.disposed, [bare]);
+  assert.deepEqual(refused.calls, []);
+  assert.match(refused.notices[0], /could not be raised/);
 
-  const none = duel({ terrain: null, ensureTerrain: async () => null });
+  const none = duel({ raise: () => null });
+  const button = element();
   none.ctrl.bindLaunchButton(button);
   assert.equal(await none.ctrl.start(), false);
   assert.equal(none.ctrl.active, false);
   assert.equal(none.notices.length, 1);
   assert.equal(button.textContent, '🏰 Castle Duel');
-
-  // A coast raised only to find it cannot take the castles is not left standing either.
-  const bakedCoast = coast({ baked: true }).terrain;
-  const refused = duel({ terrain: null, ensureTerrain: async () => bakedCoast });
-  assert.equal(await refused.ctrl.start(), false);
-  assert.deepEqual(refused.disposed, [bakedCoast]);
-  assert.deepEqual(refused.calls, []);
 });
 
 test('the debug panel closes when the duel is running, not while a coast is raised or after a refusal', async () => {
   let closed = 0;
-  const here = duel();
-  const button = element();
-  here.ctrl.bindLaunchButton(button, () => closed++);
-  button.click();
-  assert.equal(here.ctrl.active, true);
-  assert.equal(closed, 1, 'on a coast that takes the castles it closes at once');
-  button.click();
-  assert.equal(here.ctrl.active, false, 'the same button ends the duel');
-  assert.equal(closed, 1);
-
-  closed = 0;
-  const baked = duel({ terrain: coast({ baked: true }).terrain });
-  const bakedButton = element();
-  baked.ctrl.bindLaunchButton(bakedButton, () => closed++);
-  bakedButton.click();
+  const ashore = duel({ terrain: havana() });
+  const ashoreButton = element();
+  ashore.ctrl.bindLaunchButton(ashoreButton, () => closed++);
+  ashoreButton.click();
   assert.equal(closed, 0, 'a refusal leaves the panel where the player can read why');
 
   let raise;
-  const sea = duel({ terrain: null, ensureTerrain: () => new Promise((resolve) => { raise = resolve; }) });
+  const sea = duel({ raise: () => new Promise((resolve) => { raise = resolve; }) });
   const seaButton = element();
   sea.ctrl.bindLaunchButton(seaButton, () => closed++);
   seaButton.click();
   await Promise.resolve();
-  assert.equal(seaButton.textContent, '⏳ Raising the castles…');
+  assert.equal(seaButton.textContent, '⏳ Raising Havana…');
   assert.equal(closed, 0, 'the panel stays up to say the coast is being raised');
-  raise(coast().terrain);
+  raise(havana());
   await sea.ctrl.start();
   await Promise.resolve();
   assert.equal(sea.ctrl.active, true);
   assert.equal(closed, 1, 'and closes when the castles stand');
-  sea.ctrl.stop();
+  seaButton.click();
+  assert.equal(sea.ctrl.active, false, 'the same button ends the duel');
 });
 
-test('a coast the player already had is never disposed by the duel', () => {
-  const { ctrl, disposed } = duel();
-  ctrl.start();
-  ctrl.stop();
-  assert.deepEqual(disposed, []);
-});
-
-test('a fired gun must be loaded again, and a held key fires once', () => {
-  const { ctrl, run } = duel();
-  ctrl.start();
+test('a fired gun must be loaded again, and a held key fires once', async () => {
+  const { ctrl, run } = await fought();
   const guns = ctrl.status().player.totalGuns;
-  assert.ok(guns >= 2, `the castle has ${guns} guns bearing on the strait`);
+  assert.equal(guns, 5, 'every gun on La Punta\'s front bears on the Morro');
+  assert.equal(ctrl.status().enemy.totalGuns, 5, 'and every gun on the Morro\'s on La Punta');
   assert.equal(ctrl.status().player.readyGuns, guns);
 
   assert.equal(ctrl.fire(), 1, 'one gun fires');
@@ -233,7 +212,7 @@ test('a fired gun must be loaded again, and a held key fires once', () => {
   run(0.6);
   assert.equal(ctrl.status().player.readyGuns, 0, 'half a second later they are still being served');
   // Read before the enemy's first volley (fired at 3 s) can land and dismount any of them.
-  run(2.6);
+  run(2.2);
   assert.equal(ctrl.status().player.readyGuns, guns, 'and after the drill they are loaded again');
 
   // Held down, Space repeats thirty times a second: only the press itself fires.
@@ -254,9 +233,8 @@ test('a fired gun must be loaded again, and a held key fires once', () => {
   assert.equal(quiet.prevented, false, 'once the duel is over its keys are nobody\'s');
 });
 
-test('the castles keep the fortress magazine, and a castle out of powder is silenced', () => {
-  const { ctrl, run } = duel();
-  ctrl.start();
+test('each work keeps a fort\'s magazine, and a work out of powder is silenced', async () => {
+  const { ctrl, run } = await fought();
   const status = ctrl.status();
   assert.ok(status.player.powderKg > 5000, `the magazine holds ${status.player.powderKg} kg, enough for a long duel`);
   assert.equal(status.player.silencedBy, null);
@@ -266,7 +244,7 @@ test('the castles keep the fortress magazine, and a castle out of powder is sile
   assert.match(ctrl.status().lastShotFeedback, /magazine is empty/);
   assert.equal(ctrl.status().player.silencedBy, 'powder');
   run(1);
-  assert.equal(ctrl.winner, 'enemy', 'a castle that cannot fire has lost');
+  assert.equal(ctrl.winner, 'enemy', 'a work that cannot fire has lost');
 
   assert.equal(ctrl.rematch(), true);
   assert.equal(ctrl.winner, null);
@@ -290,20 +268,25 @@ test('castleDuelStatus names what silenced a castle', () => {
   assert.equal(castleDuelStatus({ ...whole, garrisonSoldiers: [{ casualtyState: 'fallen' }] }, guns).silencedBy, 'garrison');
 });
 
-test('a rematch raises the same stone again with whole walls and a fresh garrison', () => {
-  const { ctrl, terrain, calls } = duel();
-  ctrl.start();
-  const port = ctrl.port, geometry = terrain.swaps[0].geometry, garrison = port.garrison;
+test('a rematch stands the struck pieces again, with whole walls and the garrison back at its posts', async () => {
+  const { ctrl, calls, terrainNow } = await fought();
+  const port = ctrl.port, garrison = port.garrison, terrain = terrainNow();
+  // A piece of the Morro shot down, and a man of its garrison fallen with it.
+  const piece = { id: 'city_7', workBuilding: ctrl.enemyCastle, damageState: { hits: 4, integrity: 0.1 } };
+  port.instances.push(piece);
+  const man = ctrl.enemyCastle.garrisonSoldiers[0];
+  man.casualtyState = 'fallen';
   ctrl.enemyCastle.damageState.integrity = 0.3;
   ctrl.enemyCastle.magazine.exploded = true;
   ctrl.setElevation(4);
   assert.equal(ctrl.rematch(), true);
-  assert.equal(ctrl.port, port, 'the same strait');
-  assert.equal(terrain.swaps.at(-1).geometry, geometry, 'the same geometry: nothing is built twice');
-  assert.equal(terrain.swaps.at(-1).port, port);
+  assert.equal(ctrl.port, port, 'the same harbour');
+  assert.deepEqual(terrain.rebuilt, [piece], 'the struck piece stands again, and nothing else is raised');
+  assert.ok(!piece.damageState.hits, 'whole');
   assert.equal(ctrl.enemyCastle.damageState.integrity, 1);
   assert.equal(ctrl.status().enemy.magazineExploded, false);
-  assert.notEqual(port.garrison, garrison, 'new men on the walls');
+  assert.equal(port.garrison, garrison, 'the same garrison');
+  assert.equal(man.casualtyState, 'able', 'back on its walls');
   assert.equal(ctrl.winner, null);
   assert.equal(ctrl.elevation, 4, 'the player keeps his laying');
   assert.equal(calls.filter((call) => call === 'save').length, 1, 'the normal game\'s scene is saved once, at the start');
@@ -311,9 +294,8 @@ test('a rematch raises the same stone again with whole walls and a fresh garriso
   assert.equal(ctrl.rematch(), false, 'there is no rematch of a duel that is over');
 });
 
-test('the score is written a few times a second, not every frame, and the camera mode is set once', () => {
-  const { ctrl, calls, hud, run, cam } = duel();
-  ctrl.start();
+test('the score is written a few times a second, not every frame, and the camera mode is set once', async () => {
+  const { ctrl, calls, hud, run, cam } = await fought();
   run(0.1);
   const metrics = hud.querySelector('#cd-player-metrics'), banner = hud.querySelector('#cd-banner');
   const before = metrics.writes + banner.writes;
@@ -329,9 +311,12 @@ test('the score is written a few times a second, not every frame, and the camera
 
   // The fixed views hold the camera; the free view leaves it to the player.
   ctrl.setView('channel');
+  ctrl.update(1 / 60, [0, 0, 0]);
+  const held = cam.x;
+  assert.ok(Math.abs(held - ctrl.playerCastle.x) >= 135, 'the channel view stands off the line between the works');
   cam.x += 500;
   ctrl.update(1 / 60, [0, 0, 0]);
-  assert.ok(Math.abs(cam.x - ctrl.playerCastle.x) <= 135.01, 'a fixed view is held');
+  assert.equal(cam.x, held, 'a fixed view is held');
   ctrl.setView('free');
   assert.equal(ctrl.freeView, true);
   cam.x = 9999;
@@ -341,9 +326,8 @@ test('the score is written a few times a second, not every frame, and the camera
   assert.equal(ctrl.freeView, false);
 });
 
-test('the night battle sets the sun by hand and says which way the button goes', () => {
-  const { ctrl, hud, sun } = duel();
-  ctrl.start();
+test('the night battle sets the sun by hand and says which way the button goes', async () => {
+  const { ctrl, hud, sun } = await fought();
   const night = hud.querySelector('#cd-night-btn');
   assert.equal(night.textContent, '🌙 Night Battle');
   night.click();
@@ -354,26 +338,22 @@ test('the night battle sets the sun by hand and says which way the button goes',
   ctrl.stop();
 });
 
-test('the hint tells the truth: guns laid as it says strike the enemy walls', () => {
-  // One gun at each laying, read before the enemy's first volley is in the air.
-  const strike = (elevation) => {
-    const { ctrl, run } = duel();
-    ctrl.start();
-    ctrl.setElevation(elevation);
-    assert.equal(ctrl.fire(), 1);
-    run(2.5);
-    const hits = ctrl.enemyCastle.damageState.hits ?? 0, feedback = ctrl.status().lastShotFeedback;
-    ctrl.stop();
-    return { hits, feedback };
+test('the band the hint names is the ballistics: its middle strikes the walls, its edges fall short and carry over', async () => {
+  // A ball in still air from the muzzles, as far as the range: where it is when it gets there.
+  const heightAt = (from, to, degrees) => {
+    const d = Math.hypot(to[0] - from[0], to[2] - from[2]), a = (degrees * Math.PI) / 180, v = CASTLE_DUEL_MUZZLE_SPEED_MPS;
+    const t = d / (v * Math.cos(a));
+    return from[1] + v * Math.sin(a) * t - 0.5 * 9.81 * t * t;
   };
-  const [low, high] = CASTLE_DUEL_WALL_ELEVATION_DEG;
-  for (const elevation of [low, (low + high) / 2, high]) {
-    const shot = strike(elevation);
-    assert.equal(shot.hits, 1, `laid at +${elevation}° the gun strikes Fuerte del Moro (${shot.feedback})`);
-    assert.match(shot.feedback, /Fuerte del Moro/);
-  }
-  const over = strike(high + 0.5);
-  assert.equal(over.hits, 0, `laid above the hint the shot clears the castle (${over.feedback})`);
-  const under = strike(low - 0.75);
-  assert.match(under.feedback, /foundation/, `laid below the hint it finds only the foundation (${under.feedback})`);
+  const from = [0, 10, 0], to = [0, 7.5, -442];
+  const [low, high] = castleDuelWallElevation(from, to);
+  assert.ok(Math.abs(heightAt(from, to, (low + high) / 2) - to[1]) < 0.05, 'laid in the middle of the band the ball meets the wall');
+  assert.ok(heightAt(from, to, low) < to[1] - 5, 'at its foot it falls short');
+  assert.ok(heightAt(from, to, high) > to[1] + 5, 'at its head it carries over the parapet');
+
+  const { ctrl } = await fought();
+  const { wallBand, lastShotFeedback } = ctrl.status();
+  assert.ok(wallBand[0] > 0 && wallBand[1] < 4, `across the channel the band is a low one (${wallBand.map((v) => v.toFixed(2))})`);
+  assert.match(lastShotFeedback, new RegExp(`\\+${wallBand[0].toFixed(1)}° to \\+${wallBand[1].toFixed(1)}°`), 'and the hint names it');
+  ctrl.stop();
 });

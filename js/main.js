@@ -127,7 +127,7 @@ import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, s
 import { createDockingBoardingState, computeBoardingStrength, mooringLinesState } from './boarding-docking.js';
 import { writeVesselDetailState, vesselDetailReach, VESSEL_DETAIL_STATE_FLOATS } from './vessel-detail.js';
 import { createFreeCannon } from './free-cannon.js';
-import { createCastleDuelController, CASTLE_DUEL_DISTANCE_M } from './castle-duel.js';
+import { createCastleDuelController, CASTLE_DUEL_PLACE } from './castle-duel.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
 import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera } from './camera.js';
 import { createFreeCamMobileControls, installViewportZoomGuard } from './free-cam-mobile.js';
@@ -1476,10 +1476,9 @@ async function main() {
   const DUEL_FLY_KEYS=new Set(['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','KeyC','ShiftLeft','ShiftRight']);
   const castleDuel=createCastleDuelController({
     getTerrain:()=>terrain,
-    // At open sea a coast is raised for the duel well clear of the ship, and taken away when it ends.
-    ensureTerrain:()=>terrain?Promise.resolve(terrain):spawnTerrainLate({region:{id:'cartagena',name:'Cartagena',latitude:10.42,longitude:-75.55},placement:{x:boat.x+DUEL_COAST_OFFSET_M,z:boat.z}}),
+    // At open sea the duel's place is raised in its year well clear of the ship, and taken away when it ends.
+    ensureTerrain:place=>terrain?Promise.resolve(null):spawnTerrainLate({region:{id:place.port,name:place.name,latitude:place.latitude,longitude:place.longitude},year:place.year,placement:{x:boat.x+DUEL_COAST_OFFSET_M,z:boat.z}}),
     disposeTerrain:raised=>disposeTerrainLate(raised),
-    getVessels:()=>vessels,
     getCamera:()=>cam,
     setCameraMode:mode=>setCameraMode(mode),
     saveScene:()=>saveDuelScene(),
@@ -4226,7 +4225,7 @@ async function main() {
     perfDebugBox.innerHTML='<strong style="display:block;font-size:12px;margin-bottom:6px;opacity:0.85;">Debug &amp; Side Modes</strong><div class="encounter-buttons" style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" id="perf-castle-duel-btn">🏰 Castle Duel</button><button type="button" id="perf-coastline-btn">Switch Coastline (1550 / 2026)</button></div>';
     const perfDuelBtn=perfDebugBox.querySelector('#perf-castle-duel-btn');
     const perfCoastBtn=perfDebugBox.querySelector('#perf-coastline-btn');
-    perfDuelBtn.title=`Two castles trade shot across a ${CASTLE_DUEL_DISTANCE_M} m strait, laid by eye. The ship and the voyage wait until it ends.`;
+    perfDuelBtn.title=`La Punta against the Morro across the mouth of ${CASTLE_DUEL_PLACE.name} in ${CASTLE_DUEL_PLACE.year}, laid by eye. Raised at open sea; the ship and the voyage wait until it ends.`;
     castleDuel.bindLaunchButton(perfDuelBtn,()=>setPerformanceOpen(false));
     perfCoastBtn.onclick=()=>dolphinControls.swapCoastline();
     performancePanel.querySelector('.panel-body')?.prepend(perfDebugBox);

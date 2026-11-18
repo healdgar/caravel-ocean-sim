@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Bakes the prefabs of every historical port, on its own ground as the game first makes it (no real elevation), and the
-// castle duel's two castles, into the bodies the page ships (js/prefab-continuum.js), so those ports stand at once:
+// Bakes the prefabs of every historical port, on its own ground as the game first makes it (no real elevation), into the
+// bodies the page ships (js/prefab-continuum.js), so those ports stand at once:
 //   node scripts/prepare-prefab-continuum.mjs [--ports=lisbon,havana] [--threads=12] [--out=assets/prefab-continuum]
 // With --ports, the ports already baked by the same version are kept beside those baked now. Each body is kept as it is
 // baked (node_modules/.cache/prefab-continuum/<version>/), so a run cut short, or one a body failed in, is taken up
@@ -36,12 +36,11 @@ if (!isMainThread) {
   const { PREFAB_CONTINUUM_ASSETS, PREFAB_CONTINUUM_FORMAT, prefabContinuumPlan } = await import(pathToFileURL(path.join(root, 'js/prefab-continuum.js')).href);
   const { generateProceduralCoastalPack, HISTORICAL_1550_PORTS, HISTORICAL_COLONIAL_PORTS } = await import(pathToFileURL(path.join(root, 'js/coastal-world.js')).href);
   const { bundleContinuumBakeWorker } = await import(pathToFileURL(path.join(root, 'scripts/continuum-bake-worker-bundle.mjs')).href);
-  const { CASTLE_DUEL_PORT_ID, castleDuelCastles } = await import(pathToFileURL(path.join(root, 'js/castle-duel.js')).href);
-  // A port as the game first stands it: a historical port on its own ground, or the duel's strait.
-  const portOf = (id) => (id === CASTLE_DUEL_PORT_ID ? { regionId: id, instances: castleDuelCastles({ x: 0, z: 0 }) } : generateProceduralCoastalPack(id, PREFAB_CONTINUUM_GROUND).port);
+  // A port as the game first stands it: a historical port on its own ground.
+  const portOf = (id) => generateProceduralCoastalPack(id, PREFAB_CONTINUUM_GROUND).port;
   const OUT = path.resolve(root, option('out', path.dirname(PREFAB_CONTINUUM_ASSETS['manifest.json'])));
   const started = Date.now(), { version } = await bundleContinuumBakeWorker(root);
-  const ports = option('ports', null)?.split(',') ?? [...new Set([...HISTORICAL_1550_PORTS, ...HISTORICAL_COLONIAL_PORTS].map((port) => port.id)), CASTLE_DUEL_PORT_ID];
+  const ports = option('ports', null)?.split(',') ?? [...new Set([...HISTORICAL_1550_PORTS, ...HISTORICAL_COLONIAL_PORTS].map((port) => port.id))];
   // Every body the ports need, once.
   const bodies = new Map();
   const prefabs = new Map();

@@ -394,6 +394,11 @@
     "bytes": 3740627,
     "sha256": "c50ea98527b2cad7be39cc5416cc87ad7c576ea0f72c079f6f8eb8721ecfc56b"
   },
+  "assets/boards/havana-1600.world": {
+    "url": "assets/boards/havana-1600.362fe72f3899f453.world",
+    "bytes": 3731972,
+    "sha256": "362fe72f3899f45370aad594756d1c9a4599f7865d6ee07b2c52e79d45aea532"
+  },
   "assets/boards/san-juan-1550.world": {
     "url": "assets/boards/san-juan-1550.c2d89898b995bc28.world",
     "bytes": 3442800,
@@ -1053,6 +1058,11 @@
     "url": "assets/boards/havana-1550.5aee589b73e1470c.json",
     "bytes": 737177,
     "sha256": "5aee589b73e1470c88b8e879ca9ce502ded7f7fdaae1017ccb3bcd5137a86c2d"
+  },
+  "assets/boards/havana-1600.json": {
+    "url": "assets/boards/havana-1600.64d5734e8eb3ffd8.json",
+    "bytes": 737720,
+    "sha256": "64d5734e8eb3ffd8d49da1429edbd1084ba652caecb03c3e79e1c4cfe67de569"
   },
   "assets/boards/san-juan-1550.json": {
     "url": "assets/boards/san-juan-1550.f3b9dfba45c22cd8.json",

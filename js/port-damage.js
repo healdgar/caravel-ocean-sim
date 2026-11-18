@@ -113,7 +113,8 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
   const propHits = new WeakMap();
   const capture = (port) => {
     const instances = port?.instances;
-    if (!Array.isArray(instances)) return;
+    // A port raised for a side game (js/castle-duel.js) is no part of the career.
+    if (!Array.isArray(instances) || port.transient) return;
     const key = portKeyOf(port);
     instances.forEach((building, index) => {
       if (!building?.damageState) return;
