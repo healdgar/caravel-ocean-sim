@@ -1,17 +1,16 @@
-import { ISLAND, decodeIsland, decodeBiome, islandGeometry, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
+import { ISLAND, decodeIsland, decodeBiome, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
 import { TREE_PIXEL_ERROR,
   GROUND_COVER, createGroundCoverPatches, groundCoverInstances } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT, COASTAL_FIELD_BAKE } from './wgsl/terrain.js';
 import { GROUND_DETAIL_BAKE } from './wgsl/ground-detail.js';
 import { createCoastalField } from './coastal-field.js';
 import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
-import {loadTerrainNear,terrainNearGeometry,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
+import {loadTerrainNear,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
 import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_VERTEX_WGSL,FOREST_SHADOW_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
 import {FOREST_CROWN_WGSL} from './forest-crowns.js';
 import {loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
-import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {paveCityStreets,streetEdgeAt} from './town-streets.js';
 import {oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard} from './old-world.js';
@@ -30,7 +29,9 @@ import {cityContinuumRenderWGSL} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,requestCityContinuumPipelines,cityContinuumViewPipeline,createCityContinuum} from './city-continuum-draw.js';
 import {createCityTargets} from './city-targets.js';
 import {isPrefabContinuumInstance,prefabContinuumAtlas,prefabContinuumPlan,resolvePrefabContinuum} from './prefab-continuum.js';
-import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize} from './land-craters.js';
+import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize,landCraterTiles,landCraterAmount} from './land-craters.js';
+import {bakeLandContinuumPiece,landContinuumSeams,requestLandContinuumPipelines,landContinuumViewPipeline,createLandContinuum} from './land-continuum.js';
+import {LAND_CONTINUUM_RENDER,LAND_CONTINUUM_ENTRY_LAYOUT} from './wgsl/land-continuum.js';
 import {sharedGroundDetail} from './ground-detail.js';
 import {sharedNeuralPbrBank} from './neural-pbr.js';
 import {withNeuralPbrTerrain} from './wgsl/neural-pbr.js';
@@ -1063,7 +1064,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
   const neuralPbr=sharedNeuralPbrBank(device);
   const terrainSource=withNeuralPbrTerrain(TERRAIN);
-  const modulePromise=shader(terrainSource+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+cityContinuumRenderWGSL(),'island terrain');
+  const modulePromise=shader(terrainSource+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+cityContinuumRenderWGSL()+LAND_CONTINUUM_RENDER,'island terrain');
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
   // A struck building's root and shape, one record an instance.
   const struckInstanceLayout={arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]};
@@ -1087,17 +1088,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     cityContinuumViewPipeline({device,module,format,samples}),
     // One that shot has struck: its pieces, seen from within through the breach, so nothing is left out.
     makePipe(module,'cityStruckVS',[meshLayout,struckInstanceLayout],'fs','none'),
+    // The land itself, every piece cut through the one continuum (js/land-continuum.js).
+    landContinuumViewPipeline({device,module,format,samples}),
   ]));
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
-    wo.capture({source:terrainSource,vertex:{buffers:[meshLayout]},world:'in.world',groups:2,land:true}),
+    // The land's coarser cut of the same patches, morphed at the captures' own pixel error.
+    wo.capture({source:terrainSource+LAND_CONTINUUM_RENDER,vertex:{entryPoint:'landContinuumCaptureVS',buffers:LAND_CONTINUUM_ENTRY_LAYOUT},entry:'landContinuumFS',world:'in.world',groups:3,land:true}),
   ]):[null]);
   submergedPipesPromise.catch(()=>{});
   // The rest of the land's programs, asked for now so that they compile while the land itself is being made. Left
   // until each is first needed, they compile one after another once it is.
   for(const pending of [computePipe(COASTAL_FIELD_BAKE,'coastal field'),computePipe(GROUND_DETAIL_BAKE,'ground detail bake'),
     useProcedural?requestCityContinuumPipelines({device,shader,shadowFormat:activeLandShadows.format}):null,
-    requestLandCraterPipelines({device,shader,computePipe,module:modulePromise,format,samples}),
+    requestLandCraterPipelines({computePipe}),requestLandContinuumPipelines({device,shader}),
     useProcedural?requestInlandWaterPipeline({device,shader,format,samples}):null,
     useProcedural?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
   // A port whose country Castle and Commons' model founded ahead of time: the board is fetched while the rest
@@ -1170,7 +1174,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // For tools and tests: the land as it was made. scripts/bake-board.mjs reads a port's ground from here.
   if(typeof window!=='undefined')window.oceanLand={get region(){return activeRegion;},get pack(){return proceduralPack;}};
   const craterCoast=activeRegion.id??'saba',craterLedger=createLandCraterLedger(portDamage?.openGround(craterCoast),activeRegion);
-  let craters=null,craterLand=null,craterClouds=null;
+  let craters=null;
   let heights,biome,nearTile=null,nearFailure=null,albedoImage=null;
   if(proceduralPack){
     heights=proceduralPack.heights;biome=proceduralPack.biome;
@@ -1227,7 +1231,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     return terrainNearSample(nearTile,x,z)??terrainSample(heights,x,z);
   };
-  let mesh=proceduralPack?proceduralPack.mesh:islandGeometry(heights,nearTile?.bounds);const fineMesh=nearTile?terrainNearGeometry(nearTile,mesh):null;
+  // A coast's mesh is kept for what its points say of the ground (sand), not drawn: the land draws through the continuum.
+  let mesh=proceduralPack?proceduralPack.mesh:null;
   let groundPatches=createGroundCoverPatches(activeRegion,baseGroundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
   const nearBitmapPromise=nearTile?createImageBitmap(new Blob([nearTile.albedo],{type:'image/png'})):null;
   nearBitmapPromise?.catch(()=>{});
@@ -1235,10 +1240,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
     if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;
   };
-  let vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices');
-  let indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices');
-  let submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices'):indices;
-  let submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
   // A port's prefabs are drawn through the one continuum alone (js/prefab-continuum.js); its assembly
   // (portGeometry) is the physical truth that shot, flooding and fracture work on, and nothing draws it.
   // Buildings under fire draw from their own buffers, made when each is first hit.
@@ -1339,9 +1340,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return targetPort;
   };
   if(proceduralPack?.portGeometry?.partAssembly&&proceduralPack?.port?.instances?.length)buildingFracturePipeline(device).catch(()=>{});
-  const fine=fineMesh?{vertices:buffer(fineMesh.vertices,GPUBufferUsage.VERTEX,'Wells Bay immutable near vertices'),
-    indices:buffer(fineMesh.indices,GPUBufferUsage.INDEX,'Wells Bay near indices'),
-    submerged:buffer(fineMesh.submergedIndices,GPUBufferUsage.INDEX,'Wells Bay submerged near indices')}:null;
   const regionalElevationSize=!nearTile&&proceduralPack?257:0;
   const regionalElevationData=regionalElevationSize?new Float32Array(regionalElevationSize*regionalElevationSize):null;
   const getRegionalOcclusionRegion=()=>regionalElevationSize?{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span*5,size:regionalElevationSize}:activeRegion;
@@ -1424,7 +1422,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const [terrainPipe,portShadowPipe,lightPipe,module,cityPipe,cityStruckPipe]=await terrainPipesPromise;
+  const [terrainPipe,portShadowPipe,lightPipe,module,cityPipe,cityStruckPipe,landPipe]=await terrainPipesPromise;
   // A block of slots a ground-cover patch: its rocks, drawn by the boulder continuum.
   const groundBlock=GROUND_COVER.rocksPerPatch;
   const groundBlocks=Math.ceil(Math.PI*(GROUND_RESIDENT_M*GROUND_RESIDENT_RELEASE/GROUND_COVER.patchSpan+1)**2);
@@ -1584,6 +1582,76 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const [submerged]=await submergedPipesPromise;
   let submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
   const submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
+  // The land: every piece cut and drawn through the one continuum (js/land-continuum.js, AGENTS.md rule 3). A piece is
+  // the coast's own lattice ('0,0'; on Saba with the surveyed bay as a finer window in it) or a streamed section. One
+  // is baked when it comes or its ground or a neighbour's changes, one a frame and the nearest first; every frame the
+  // GPU cuts them all at the scene's one pixel error. Height queries go on reading the lattices themselves.
+  const landSpecs=new Map(),landDirty=new Set();
+  let landContinuum=null,landClouds=null,landOrder=0;
+  // Every piece on one grid, so that two place a shared point alike: a section is 1024 units across.
+  const landGridFor=()=>proceduralPack
+    ?{x0:activeRegion.x-activeRegion.span/2,z0:activeRegion.z-activeRegion.span/2,g:activeRegion.span/1024}
+    :{x0:ISLAND.x-ISLAND.span/2,z0:ISLAND.z-ISLAND.span/2,g:nearTile?nearTile.manifest.domain.spacing:2};
+  let landGrid=landGridFor();
+  // Sand, from what the coast's mesh says of each lattice point.
+  const landKind=(vertices,n)=>{const kind=new Float32Array(n*n);if(vertices)for(let k=0;k<n*n;k++)kind[k]=vertices[k*8+7];return kind;};
+  // Saba's surveyed bay: a lattice at the survey's own spacing over the island's patches that hold it, the island's
+  // own surface round the survey. Kind 1 inside it, and how far the survey trusts each point.
+  function landSabaWindow(cell){
+    const {spacing,size}=nearTile.manifest.domain,b=nearTile.bounds,g=landGrid.g,along=cell*16;
+    const unit=(v,origin)=>(v-origin)/g;
+    const gx0=Math.floor(unit(b[0],landGrid.x0)/along)*along,gz0=Math.floor(unit(b[2],landGrid.z0)/along)*along;
+    const side=Math.max(Math.ceil(unit(b[1],landGrid.x0)/along)*along-gx0,Math.ceil(unit(b[3],landGrid.z0)/along)*along-gz0);
+    const n=side*g/spacing+1,heightsOut=new Float32Array(n*n),kind=new Float32Array(n*n);
+    for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+      const x=landGrid.x0+(gx0+i)*g,z=landGrid.z0+(gz0+j)*g,k=j*n+i;
+      const surveyed=terrainNearSample(nearTile,x,z);
+      heightsOut[k]=surveyed??terrainSurfaceSample(heights,x,z);
+      if(surveyed!==null)kind[k]=1-nearTile.measured[Math.round((z-b[2])/spacing)*size+Math.round((x-b[0])/spacing)];
+    }
+    return {n,cell:spacing/g,gx:gx0,gz:gz0,heights:heightsOut,kind};
+  }
+  const landCentreSpec=()=>{
+    const land=()=>bind(landPipe,nearResources),captureLand=()=>submergedGroup??null;
+    if(!proceduralPack){
+      const cell=ISLAND.span/(ISLAND.size-1)/landGrid.g;
+      return {sx:0,sz:0,n:ISLAND.size,cell,heights,kind:null,authority:3,window:nearTile?landSabaWindow(cell):null,near:nearTile?[...nearTile.bounds]:null,land,captureLand};
+    }
+    const n=activeRegion.size;
+    return {sx:0,sz:0,n,cell:1024/(n-1),heights,kind:landKind(mesh?.vertices,n),authority:3,window:null,near:null,land,captureLand};
+  };
+  const landSectionSpec=rec=>{
+    const n=Math.round(Math.sqrt(rec.heights.length));
+    return {sx:rec.secX,sz:rec.secZ,n,cell:1024/(n-1),heights:rec.heights,kind:landKind(rec.meshVertsCpu,n),authority:rec.isMock?1:2,window:null,near:null,land:()=>rec.landGroup,captureLand:()=>rec.submergedGroup??null};
+  };
+  // A piece new, changed or gone (null): it and the neighbours whose shared edges follow it are baked again. Until
+  // then it draws its old ground with its new textures, since the old ones go; one gone goes at once.
+  function landPiece(key,spec){
+    if(spec){landSpecs.set(key,{...spec,order:landSpecs.get(key)?.order??landOrder++});landContinuum?.rebind(key,spec.land(),spec.captureLand());}
+    else{landSpecs.delete(key);landContinuum?.remove(key);}
+    const [sx,sz]=key.split(',').map(Number);
+    for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++){const near=`${sx+dx},${sz+dz}`;if(near===key||landSpecs.has(near))landDirty.add(near);}
+  }
+  // Where shot has dug, as the land's cut keeps it: the crater tiles each crater reaches, and the most it digs or
+  // throws up, the same figures the tiles give the GPU (landCraterWaits).
+  const landCraterMark=record=>({...landCraterTiles(record),amount:landCraterAmount(record)});
+  function landBake(key){
+    const spec=landSpecs.get(key);
+    if(!spec){landContinuum.remove(key);return;}
+    const seam=spec.window?null:landContinuumSeams(landSpecs,key);
+    const baked=bakeLandContinuumPiece({n:spec.n,cell:spec.cell,heights:seam?seam.heights:spec.heights,kind:spec.kind,window:spec.window,
+      gx:spec.sx*1024,gz:spec.sz*1024,edges:seam?.edges,grid:landGrid,craters:craterLedger.records.map(landCraterMark)});
+    landContinuum.set(key,baked,{gx:spec.sx*1024,gz:spec.sz*1024,land:spec.land(),captureLand:spec.captureLand(),near:spec.near});
+  }
+  // One piece a frame, the nearest the camera first.
+  function landFlush(){
+    if(!landContinuum||!landDirty.size)return;
+    const cam=lastCamera?{x:lastCamera.x-worldOffset.x,z:lastCamera.z-worldOffset.z}:{x:activeRegion.x,z:activeRegion.z};
+    const away=key=>{const [sx,sz]=key.split(',').map(Number);return Math.hypot(activeRegion.x+sx*activeRegion.span-cam.x,activeRegion.z+sz*activeRegion.span-cam.z);};
+    const key=[...landDirty].sort((a,b)=>away(a)-away(b))[0];
+    landDirty.delete(key);landBake(key);
+  }
+  landPiece('0,0',landCentreSpec());
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
   try {
@@ -1698,9 +1766,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   function destroySectionRecord(rec){
     if(!rec)return;
-    rec.vertices?.destroy?.();
-    if(rec.submergedIndices&&rec.submergedIndices!==rec.indices)rec.submergedIndices.destroy?.();
-    rec.indices?.destroy?.();
+    // Unless a grown section has already taken its place.
+    if(loadedSections.get(rec.key)===rec||!loadedSections.has(rec.key))landPiece(rec.key,null);
     portDamage?.capture(rec.port);
     rec.portFractures?.destroy();
     rec.uniform?.destroy?.();
@@ -1712,10 +1779,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   function buildSectionGPURecord(secPack){
     const sReg=secPack.region;
     const sMesh=secPack.mesh;
-    const sVerts=buffer(sMesh.vertices,GPUBufferUsage.VERTEX,`coastal section (${secPack.secX},${secPack.secZ}) vertices`);
-    const sIdx=buffer(sMesh.indices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) indices`);
-    const sSubIdx=sMesh.submergedIndices?buffer(sMesh.submergedIndices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) submerged`):sIdx;
-    const sSubCount=sMesh.submergedIndices?.length??sMesh.indices.length;
     // A section's port is laid out with no prefabs (js/coastal-world.js): only boulders join it, when struck.
     if(secPack.port?.instances?.some(isPrefabContinuumInstance))throw Error(`Coastal section (${secPack.secX},${secPack.secZ}) has prefabs, which only a coast's own port draws through the continuum`);
     const sUniform=buffer(new Float32Array([sReg.x,sReg.z,sReg.span,0]),GPUBufferUsage.UNIFORM,`coastal section (${secPack.secX},${secPack.secZ}) domain`);
@@ -1746,7 +1809,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     ];
     const terrainGroup=bind(terrainPipe,secOpaqueResources);
     const submergedSecGroup=submerged?.bindGroup(secOpaqueResources.map(([binding,resource])=>({binding,resource})));
-    return {
+    const rec={
       secX:secPack.secX,
       secZ:secPack.secZ,
       key:`${secPack.secX},${secPack.secZ}`,
@@ -1762,12 +1825,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       beaches:secPack.beaches,
       port:secPack.port,
       vegetation:secPack.vegetation,
-      vertices:sVerts,
+      // Kept for what its points say of the ground (sand); the section's land draws through the continuum.
       meshVertsCpu:sMesh.vertices,
-      indices:sIdx,
-      indexCount:sMesh.indices.length,
-      submergedIndices:sSubIdx,
-      submergedCount:sSubCount,
       portFractures:portFracturesFor(secPack.portGeometry,secPack.port),
       uniform:sUniform,
       albedo:sAlbedo,
@@ -1775,8 +1834,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       townField:sTownField,
       resources:secOpaqueResources,
       terrainGroup,
+      landGroup:bind(landPipe,secOpaqueResources),
       submergedGroup:submergedSecGroup,
     };
+    landPiece(rec.key,landSectionSpec(rec));
+    return rec;
   }
 
   let cachedPorts=null,portsDirty=true;
@@ -1799,19 +1861,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       {taperUnconnectedOuter:true,refreshTextures:false}
     );
     adjRec._cachedForestPlanted=null;
-    const rebuiltMesh=adjRec.mesh;
-    const oldVerts=adjRec.vertices;
-    const oldIdx=adjRec.indices;
-    const oldSubIdx=adjRec.submergedIndices&&adjRec.submergedIndices!==adjRec.indices?adjRec.submergedIndices:null;
-    adjRec.vertices=buffer(rebuiltMesh.vertices,GPUBufferUsage.VERTEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched vertices`);
-    adjRec.meshVertsCpu=rebuiltMesh.vertices;
-    adjRec.indices=buffer(rebuiltMesh.indices,GPUBufferUsage.INDEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched indices`);
-    adjRec.indexCount=rebuiltMesh.indices.length;
-    adjRec.submergedIndices=rebuiltMesh.submergedIndices?buffer(rebuiltMesh.submergedIndices,GPUBufferUsage.INDEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched submerged`):adjRec.indices;
-    adjRec.submergedCount=rebuiltMesh.submergedIndices?.length??rebuiltMesh.indices.length;
-    oldVerts?.destroy?.();
-    oldIdx?.destroy?.();
-    oldSubIdx?.destroy?.();
+    adjRec.meshVertsCpu=adjRec.mesh.vertices;
+    landPiece(adjRec.key,landSectionSpec(adjRec));
     craters?.invalidate(sReg);
     adjRec.biome=synthesizeCoastalBiome(sReg,adjRec.heights,adjRec.beaches,adjRec.port,null);
     device.queue.writeTexture({texture:adjRec.biomeTexture},adjRec.biome,{bytesPerRow:sReg.biomeSize},[sReg.biomeSize,sReg.biomeSize]);
@@ -1846,8 +1897,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const oldTownField=activeTownField;
     activeTownField=townField(streets);
     nearResources=[...resources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources,...neuralPbr.terrainResources];
-    groups[0]=bind(terrainPipe,nearResources);craterLand=null;cityGroup=bind(cityPipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
+    groups[0]=bind(terrainPipe,nearResources);cityGroup=bind(cityPipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+    landContinuum?.rebind('0,0',bind(landPipe,nearResources),submergedGroup??null);
     boulderContinuum?.rebind(nearResources);
     inlandWater?.rebind(nearResources);
     herds?.rebind(nearResources);
@@ -1904,7 +1956,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       secZ,
       getSectionAt,
       {
-        size:proceduralPack.regionalDem?49:33,
+        // A lattice of 2^k + 1 points a side, as the land's continuum cuts it.
+        size:proceduralPack.regionalDem?65:33,
         biomeSize:64,
         albedoSize:proceduralPack.regionalDem?128:64,
         vegetationCandidates:isMobile?180:320,
@@ -2047,13 +2100,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         bordersModified=true;
         proceduralPack._cachedForestPlanted=null;
         device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
-        const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null;
         mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,savedPortOverride?null:proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
-        vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices border-synced');
-        indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices border-synced');
-        submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices border-synced'):indices;
-        submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
-        oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
+        landPiece('0,0',landCentreSpec());
         craters?.invalidate(activeRegion);
       }
     }
@@ -2231,13 +2279,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         boardStamp=stamp;stamp.stamp(albedo,activeRegion.albedoSize);regenerateAlbedoMips();
       }).catch(()=>{});
     }
-    const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null;
     mesh=upgradedPack.mesh;
-    vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices 1550');
-    indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices 1550');
-    submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices 1550'):indices;
-    submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
-    oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
+    // A coast laid out wider or narrower puts every piece of land on another grid.
+    if(landGrid.g!==activeRegion.span/1024){landGrid=landGridFor();landContinuum?.regrid(landGrid);for(const key of landSpecs.keys())landDirty.add(key);}
+    landPiece('0,0',landCentreSpec());
     // The buildings moved, so their ways did too.
     if(!upgradedPack.frontierParcels?.length){
       planUngrownFrontierParcels(upgradedPack,heights,{playerPos:boat?{x:boat.x,z:boat.z}:null});
@@ -2460,21 +2505,22 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   // Anything saved as ruined is a ruin before the port is first seen.
   await portFractures?.restoreNow();
-  craters=createLandCraters({device,module,shader,computePipe,format,samples,ledger:craterLedger,maxLayers:isMobile?96:384,region:activeRegion,
-    surfaces(){
-      const list=[{vertices,indices,count:mesh.indices.length,region:null}];
-      if(fine)list.push({vertices:fine.vertices,indices:fine.indices,count:fineMesh.indices.length,region:null});
-      for(const sec of loadedSections.values())list.push({vertices:sec.vertices,indices:sec.indices,count:sec.indexCount,region:sec.region});
-      return list;
-    },
+  craters=createLandCraters({device,computePipe,ledger:craterLedger,maxLayers:isMobile?96:384,region:activeRegion,
     sectionAt(x,z){
       const sx=Math.round((x-activeRegion.x)/activeRegion.span),sz=Math.round((z-activeRegion.z)/activeRegion.span);
       if(sx===0&&sz===0)return 'main';
       return loadedSections.has(`${sx},${sz}`)?`${sx},${sz}`:null;
     },
     groundAt:(x,z)=>groundSample(x,z),
+    surfaceAt:(x,z)=>baseGroundSample(x,z),
   });
   meadowGrass?.bindCraters?.(craters);
+  // The land's cut and draw, its pits read from the crater tiles in the same draw.
+  landContinuum=createLandContinuum({device,pipelines:await requestLandContinuumPipelines({device,shader}),view:landPipe,capture:submerged??null,frame:frameUBO,grid:landGrid,shared:craters.resources()});
+  landClouds=clouds.bindVolume(landPipe);
+  landContinuum.setPixelError(currentPixelError);landContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
+  craters.onReallocate(()=>landContinuum?.setShared(craters.resources()));
+  landFlush();
   const recentBlastRings=[];
   const EMPTY_BALLISTIC_LIST=[];
   let lastBallisticClock=0;
@@ -2488,7 +2534,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   return {
     waterGroup:pipe=>coastalField.waterGroup(pipe),
     get turbidityScale(){return coastalTurbidityScale(activeRegion.latitude??0,activeRegion.coastalArchetype);},
-    get triangles(){return (mesh.indices.length+(fineMesh?.indices.length??0))/3;},
     get trees(){return forest?.stats.roots??0;},
     // The forest's own roots, as a ball meets them. Null with no forest, and for a moment while one loads.
     get forestTrunks(){return forest?.trunks??null;},
@@ -2496,9 +2541,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     groundStats,forestStats,
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
-    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['prefabs',prefabs]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);cityContinuum?.setPixelError(next);prefabs?.setPixelError(next);}},
-    nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
+    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['prefabs',prefabs],['land',landContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);cityContinuum?.setPixelError(next);prefabs?.setPixelError(next);landContinuum?.setPixelError(next);}},
+    nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null},
+    // The land's cut, read back: for tests. Per piece, the view's and the captures' lists of patches.
+    readLandCut:()=>landContinuum?.readCut()??null,
+    // The land's pieces as baked, for tests: each piece's nodes and numbers (js/land-continuum.js).
+    landPieces:()=>landContinuum?.pieces??null,
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
     surfaceHeight:(x,z)=>baseGroundSample(x-worldOffset.x,z-worldOffset.z),
     groundSample:(x,z)=>groundSample(x-worldOffset.x,z-worldOffset.z),
@@ -2814,6 +2863,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       worldOffset.x=nx;worldOffset.z=nz;
       cityContinuum?.setWorldOffset(nx,nz);prefabs?.setWorldOffset(nx,nz);
       boulderContinuum?.setWorldOffset(nx,nz);
+      landContinuum?.setWorldOffset(nx,nz);
       writeNearDomainUniform();
     },
     getWorldOffset(){return {...worldOffset};},
@@ -2833,6 +2883,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       worldOffset.x=0;worldOffset.z=0;
       cityContinuum?.setWorldOffset(0,0);prefabs?.setWorldOffset(0,0);
       boulderContinuum?.setWorldOffset(0,0);
+      landContinuum?.setWorldOffset(0,0);
       writeNearDomainUniform();
       lastCamera=null;
       return {dx,dz};
@@ -2843,14 +2894,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       sectionEpoch++;sectionQueue.length=0;queuedSections.clear();plannedSections.clear();
       for(const rec of loadedSections.values())destroySectionRecord(rec);
       loadedSections.clear();
-      vertices?.destroy?.();
-      if(submergedIndices&&submergedIndices!==indices)submergedIndices?.destroy?.();
-      indices?.destroy?.();
+      landContinuum?.destroy();landContinuum=null;landSpecs.clear();landDirty.clear();
       portDamage?.capture(proceduralPack?.port);
       for(const sec of loadedSections.values())portDamage?.capture(sec.port);
       craters?.dispose();
       portFractures?.destroy();
-      fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
       elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();groundDetail.dispose();boardStamp?.dispose();
       activeTownField?.texture.destroy();activeTownField?.window.destroy();
@@ -2882,30 +2930,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const sec of loadedSections.values()){
         if(sec.port)flushPort(sec.port,sec.portFractures);
       }
-      if(Array.isArray(this.pendingLandBakes)&&this.pendingLandBakes.length){
-        const landBakes=this.pendingLandBakes.splice(0,this.pendingLandBakes.length);
-        if(mesh?.vertices&&vertices){
-          const dirty=bakeLandImpactDeformations(mesh.vertices,landBakes,8);
-          if(dirty){
-            device.queue.writeBuffer(vertices,dirty.byteOffset,mesh.vertices.buffer,mesh.vertices.byteOffset+dirty.byteOffset,dirty.byteLength);
-            updated=true;
-          }
-        }
-        for(const sec of loadedSections.values()){
-          if(sec.vertices&&sec.meshVertsCpu){
-            const sDirty=bakeLandImpactDeformations(sec.meshVertsCpu,landBakes,8);
-            if(sDirty){
-              device.queue.writeBuffer(sec.vertices,sDirty.byteOffset,sec.meshVertsCpu.buffer,sec.meshVertsCpu.byteOffset+sDirty.byteOffset,sDirty.byteLength);
-              updated=true;
-            }
-          }
-        }
-      }
       // A crater goes in the ledger, and on the GPU, the moment its ball lands.
       if(Array.isArray(this.pendingCraters)&&this.pendingCraters.length){
         const hits=this.pendingCraters.splice(0,this.pendingCraters.length);
         for(const hit of hits){
           const local={...hit,x:hit.x-worldOffset.x,z:hit.z-worldOffset.z},record=craters.strike(local),radius=landCraterSize(record.energyJ).radius;
+          // The land's cut comes down to the pit's own cell where it is, in every piece it reaches.
+          const mark=landCraterMark(record);
+          for(const key of landSpecs.keys())landContinuum?.raise(key,mark,mark.amount);
           recordBlastRing(hit.x,hit.z,Math.min(2.0,Math.max(0.45,Math.cbrt((hit.energyJ??4e5)/1.1e6))),Boolean(hit.heated||hit.hot));
           forest?.strike?.(record.x,record.z,now,groundSample);
         }
@@ -2960,6 +2992,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       boulderContinuum?.prepare(pass);
       cityContinuum?.setPixelError(currentPixelError);cityContinuum?.encode(pass);
       prefabs?.setPixelError(currentPixelError);prefabs?.encode(pass);
+      landFlush();landContinuum?.setPixelError(currentPixelError);landContinuum?.encode(pass);
       forest?.encode(pass);
       herds?.encode(pass);
       meadowGrass?.encode(pass);
@@ -2969,31 +3002,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     drawSubmerged(pass,above=false){
       if(!submerged)return;
-      if(above){
-        submerged.bind(pass,true);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
-        if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
-        for(const sec of loadedSections.values()){
-          if(!sec.submergedGroup||!sec.indexCount||!isSectionVisible(sec.region,lastCamera,lastView))continue;
-          pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
-        }
-      }else{
-        if(submergedCount||fineMesh?.submergedIndices.length||loadedSections.size){
-          submerged.bind(pass,false);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);
-          if(submergedCount){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);}
-          if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
-          for(const sec of loadedSections.values()){
-            if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,4500))continue;
-            pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
-          }
-        }
-      }
+      // Above and below the water alike, the land's coarser cut of the same patches.
+      submerged.bind(pass,above);landContinuum?.drawCapture(pass,submergedClouds);
       tradeVessels?.drawSubmerged?.(pass,above);
     },
     draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
       if(!lastCamera)updateTrees(camera,viewProjection);
+      // The land, every piece, its pits in it: one pipeline, indirect draws the cut wrote.
+      landContinuum?.draw(pass,landClouds);
       pass.setPipeline(terrainPipe);pass.setBindGroup(0,groups[0]);pass.setBindGroup(1,cloudGroups[0]);
-      pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
-      if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
       // A prefab in pieces is drawn as its pieces, with the land's own surfaces.
       if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,4800)){portFractures.draw(pass);if(portFractures.sourced)portFractures.drawSourced(pass,instance=>Boolean(instance.boulder));}
       // Every building and prefab is cut on the GPU: one pipeline, four indirect draws each. Those shot down are drawn
@@ -3012,20 +3029,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         pass.setPipeline(terrainPipe);pass.setBindGroup(0,groups[0]);pass.setBindGroup(1,cloudGroups[0]);
       }
       for(const sec of loadedSections.values()){
-        if(!isSectionVisible(sec.region,camera,viewProjection))continue;
+        if(!sec.portFractures||!isSectionVisible(sec.region,camera,viewProjection,3400))continue;
         pass.setBindGroup(0,sec.terrainGroup);
-        pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
-        if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,3400))sec.portFractures.draw(pass);
-      }
-      // Dug-up ground draws over the land it replaces, with that land's own textures.
-      if(craters?.pipeline&&craters.stats.tiles){
-        craterLand??=bind(craters.pipeline,nearResources);craterClouds??=clouds.bindVolume(craters.pipeline);
-        craters.draw(pass,'main',craterLand,craterClouds);
-        for(const sec of loadedSections.values()){
-          if(!isSectionVisible(sec.region,camera,viewProjection))continue;
-          sec.craterGroup??=bind(craters.pipeline,sec.resources);
-          craters.draw(pass,`${sec.secX},${sec.secZ}`,sec.craterGroup,craterClouds);
-        }
+        sec.portFractures.draw(pass);
       }
       if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,4800))boulderContinuum.draw(pass);
       if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);

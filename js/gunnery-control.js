@@ -3950,8 +3950,6 @@ export function applySceneryImpactDamage(terrain, event) {
       });
     }
   }
-  terrain.pendingLandBakes ??= [];
-  terrain.pendingLandBakes.push(bake);
   const record = {
     position: [...pos],
     normal: [...normal],

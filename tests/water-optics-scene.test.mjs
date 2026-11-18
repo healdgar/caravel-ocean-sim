@@ -54,8 +54,9 @@ function instrumentScene(){
   const setIndex=GPURenderPassEncoder.prototype.setIndexBuffer;
   GPURenderPassEncoder.prototype.setIndexBuffer=function(buffer,...args){passes.get(this).indices=buffer;return setIndex.call(this,buffer,...args);};
   // A ship is drawn and captured through her own continuum cut (js/vessel-continuum.js): indirect draws from her cut's
-  // lists, with her own resources and lighting at groups 0 and 1 (made for each program, or each water capture).
-  for(const method of ['draw','drawIndexed','drawIndirect']){
+  // lists, with her own resources and lighting at groups 0 and 1 (made for each program, or each water capture). The land
+  // is cut on the GPU too and drawn from its own indexed records (js/land-continuum.js).
+  for(const method of ['draw','drawIndexed','drawIndirect','drawIndexedIndirect']){
     const draw=GPURenderPassEncoder.prototype[method];
     GPURenderPassEncoder.prototype[method]=function(...args){
       const pass=passes.get(this),pipeline=pass.pipeline,vessels=window.oceanFleet?.vessels||[];
@@ -63,8 +64,8 @@ function instrumentScene(){
       const resources=groups.get(pass.groups[0])||[],hull=vessels.find(v=>resources.some(entry=>entry.resource?.buffer===v.hullUBO));
       const programs=cut?.render.programs,capture=programs&&[programs.farCapture,programs.clusterCapture].find(c=>c?.pipeline===pipeline);
       const own=cut?.ownGroups.get(capture??pipeline);
-      state.draws.push({pass:pass.label,label:pipeline.label,family:families.get(pipeline)||null,indirect:method==='drawIndirect',
-        count:method==='drawIndirect'?null:args[0],instances:method==='drawIndirect'?null:args[1]??1,
+      state.draws.push({pass:pass.label,label:pipeline.label,family:families.get(pipeline)||null,indirect:method.endsWith('Indirect'),
+        count:method.endsWith('Indirect')?null:args[0],instances:method.endsWith('Indirect')?null:args[1]??1,
         vessel:cut?.id||hull?.id||null,cut:cut?.id||null,hull:hull?.id||null,
         material:cut?pass.groups[0]===own?.[0]:null,lighting:cut?pass.groups[1]===own?.[1]:null});
       return draw.apply(this,args);
@@ -185,7 +186,7 @@ test('the standalone coastal Niña scene composites captured seabed with inline 
   try{
     const frame=await render(page);assertValid(frame);
     assert.ok(frame.draws.some(draw=>draw.pass==='Submerged geometry'&&draw.family==='terrain'),'real coastal seabed is captured');
-    assert.ok(frame.draws.some(draw=>draw.label==='island'),'the ordinary land path remains active');
+    assert.ok(frame.draws.some(draw=>draw.label==='land continuum'),'the ordinary land path remains active');
     assert.equal(frame.draws.filter(draw=>draw.pass==='Submerged geometry'&&draw.family==='hull').length,2);
     const capture=await readScene(page);assert.ok(capture.count>25,'coastal source contains actual submerged geometry');
     assert.deepEqual(errors,[]);assert.deepEqual(await page.evaluate(()=>opticsScene.errors),[]);

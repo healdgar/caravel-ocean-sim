@@ -99,6 +99,16 @@ test('a ball on the ground leaves a pit with a rim, the land around it is as it 
     untouched=await blocks(page);
     await firedAndLanded(page,1);
     await page.waitForTimeout(CLEAR_MS);
+    // The pit is ground drawn: the land's own cut goes below its lattice there, to the crater tiles' cell.
+    const cut=await page.evaluate(async()=>{
+      const terrain=window.oceanFleet.terrain,cut=await terrain.readLandCut(),finer={};
+      for(const [key,piece] of terrain.landPieces()){
+        const words=piece.baked.nodes;
+        for(const list of cut.get(key)?.[0]??[])for(const i of list){const level=words[i*12+8]-piece.baked.R;if(level<0)finer[level]=(finer[level]??0)+1;}
+      }
+      return finer;
+    });
+    assert.ok(Object.keys(cut).some(level=>+level<=-4),`the land is cut below its lattice at the pit: ${JSON.stringify(cut)}`);
     const once=compare(untouched,await blocks(page));
     assert.ok(once.darkest<.6,`a dark pit in the picture: its darkest block has ${once.darkest} of the light it had`);
     assert.ok(once.changed>.002&&once.changed<.05,`and only there, not a stain on the whole field: ${once.changed} of the picture changed`);

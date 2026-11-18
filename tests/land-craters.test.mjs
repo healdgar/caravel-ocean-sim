@@ -101,9 +101,9 @@ test('tiles have the texels their compute shader is written for',()=>{
 
 test('new per-frame work stays off the CPU: crater tiles are written only when something changes',()=>{
   const source=readFileSync(new URL('../js/land-craters.js',import.meta.url),'utf8');
-  const draw=source.slice(source.indexOf('    draw(pass, section'),source.indexOf('    // What the tiles hold'));
-  assert.ok(draw.length>0&&!/writeBuffer|writeTexture|submit|createBuffer/.test(draw),'drawing writes nothing');
-  const follow=source.slice(source.indexOf('    follow(camera)'),source.indexOf('    draw(pass, section'));
+  // The tiles draw nothing of their own: the land's continuum reads them in its one draw.
+  assert.doesNotMatch(source,/\bdraw(Indexed)?\(|beginRenderPass|createRenderPipeline/,'no draw, render pass or render pipeline of its own');
+  const follow=source.slice(source.indexOf('    follow(camera)'),source.indexOf('    // What the tiles hold'));
   assert.match(follow,/if \(!overflow\) return;/,'and following the camera is nothing at all unless the tiles have run out');
   const effects=readFileSync(new URL('../js/gunnery-effects.js',import.meta.url),'utf8');
   // Smoke volumes are laid out on the GPU from guns and fires alone: the stages that build them are never handed a strike.

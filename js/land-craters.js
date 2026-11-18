@@ -1,12 +1,12 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // What shot has done to the ground. The ledger is the record of it: a few numbers per crater, and what is saved.
 // Everything drawn follows from the ledger. JavaScript runs here only when a ball lands or a piece of land comes
-// or goes, and then writes the tiles concerned. Each frame the GPU draws what they hold.
+// or goes, and then writes the tiles concerned. Each frame the land draws what they hold: its vertices stand in the
+// pits and its fragments are lit as dug ground (js/wgsl/land-continuum.js and LAND_CRATER_PIT).
 //
-// Height queries do not see any of this. A pit is a metre or two across on ground the mesh holds at 16 m, and
-// shot, walkers and hulls keep the land they always had (js/terrain.js height and groundSample).
-import { requestOnce } from './gpu-program-cache.js';
-import { LAND_CRATER_BAKE, LAND_CRATER_CAPTURE, LAND_CRATER_CELL_M, LAND_CRATER_DRAWN_CELLS, LAND_CRATER_GUTTER, LAND_CRATER_LOOKUP_SIZE, LAND_CRATER_PER_TILE, LAND_CRATER_REACH, LAND_CRATER_TEXELS, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
+// Height queries do not see the pits: shot, walkers and hulls keep the land's lattice (js/terrain.js height and
+// groundSample), and the land's cut comes down to that lattice wherever a pit lies (js/land-continuum.js).
+import { LAND_CRATER_BAKE, LAND_CRATER_CELL_M, LAND_CRATER_GUTTER, LAND_CRATER_LOOKUP_SIZE, LAND_CRATER_MOST_LAYERS, LAND_CRATER_PER_TILE, LAND_CRATER_REACH, LAND_CRATER_TEXELS, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
 
 const CRATER_REFERENCE_J = 1.1e6;
 const CRATER_MERGE_WITHIN = 0.8;
@@ -14,7 +14,6 @@ const CRATER_LEDGER_LIMIT = 512;
 const CRATER_SAVED_NUMBERS = 6;
 const CRATER_RECORD_FLOATS = 10;
 const CRATER_FIRST_LAYERS = 32;
-const CRATER_INSTANCE_FLOATS = 4;
 
 // A 24-pounder at 450 m/s digs about a cubic metre: a pit you could lie in, thrown out over a few paces. Energy
 // goes as the volume dug, so repeated hits on one spot widen and deepen it by the cube root of what they add up to.
@@ -27,6 +26,16 @@ export function landCraterSize(energyJ) {
 // How far from its centre a crater can touch anything, on sand, the widest ground.
 export function landCraterReach(record) {
   return landCraterSize(record.energyJ).radius * 1.14 * LAND_CRATER_REACH * (1 + 0.32 * record.grazing);
+}
+// The most a crater digs or throws up, which the land's cut keeps as error over every tile it reaches.
+export function landCraterAmount(record) {
+  const size = landCraterSize(record.energyJ);
+  return size.depth + size.rim;
+}
+// The tiles a crater reaches, as world squares: x0 x1 z0 z1, each a whole number of tiles.
+export function landCraterTiles(record) {
+  const reach = landCraterReach(record), T = LAND_CRATER_TILE_M;
+  return { x0: Math.floor((record.x - reach) / T) * T, x1: (Math.floor((record.x + reach) / T) + 1) * T, z0: Math.floor((record.z - reach) / T) * T, z1: (Math.floor((record.z + reach) / T) + 1) * T };
 }
 
 const craterSeed = (x, z) => { const value = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return value - Math.floor(value); };
@@ -96,53 +105,27 @@ export function createLandCraterLedger(saved = null, origin = { x: 0, z: 0 }) {
   };
 }
 
-/**
- * Keeps tiles of damaged ground in step with a ledger, and draws them.
- *   surfaces()       the land's meshes now: [{vertices,indices,count,region}]
- *   sectionAt(x,z)   which draw a point belongs to, or null where no land is loaded
- *   groundAt(x,z)    a rough height, as the tile's zero
- */
-// The pits shot leaves in the land, their tiles and the land caught under a tile: asked for once a device.
-// `module` is the land's own, or the promise of it.
-export function requestLandCraterPipelines({ device, shader, computePipe, module, format, samples }) {
-  return requestOnce(device, `land craters ${format} ${samples}`, async () => {
-    const land = await module;
-    const captureModule = await shader(LAND_CRATER_CAPTURE, 'land under a crater tile');
-    const tileLayout = { arrayStride: CRATER_INSTANCE_FLOATS * 4, stepMode: 'instance', attributes: [{ shaderLocation: 3, offset: 0, format: 'float32x4' }] };
-    const landLayout = { arrayStride: 32, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32x3' }, { shaderLocation: 2, offset: 24, format: 'float32x2' }] };
-    return Promise.all([
-      device.createRenderPipelineAsync({ label: 'land craters', layout: 'auto',
-        vertex: { module: land, entryPoint: 'landCraterVS', buffers: [{ arrayStride: CRATER_INSTANCE_FLOATS * 4, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }] },
-        fragment: { module: land, entryPoint: 'landCraterFS', targets: [{ format }] },
-        // No culling. The pit lies below the land's triangles, so a tiny facet turned away and left out would
-        // show the land through the wall behind it. The nearest ground wins by depth, as it should.
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: samples } }),
-      computePipe(LAND_CRATER_BAKE, 'land crater tiles'),
-      device.createRenderPipelineAsync({ label: 'land under a crater tile', layout: 'auto',
-        vertex: { module: captureModule, entryPoint: 'landCraterCaptureVS', buffers: [landLayout, tileLayout] },
-        fragment: { module: captureModule, entryPoint: 'landCraterCaptureFS', targets: [{ format: 'rgba16float' }] },
-        primitive: { topology: 'triangle-list', cullMode: 'none' } }),
-    ]);
-  });
+// The pits' program, asked for once.
+export function requestLandCraterPipelines({ computePipe }) {
+  return computePipe(LAND_CRATER_BAKE, 'land crater tiles');
 }
-export function createLandCraters({ device, module, shader, computePipe, format, samples, ledger, surfaces, sectionAt, groundAt, maxLayers = 384, region: initialRegion = null }) {
+
+/**
+ * Keeps tiles of damaged ground in step with a ledger.
+ *   sectionAt(x,z)   which piece of land a point belongs to, or null where no land is loaded
+ *   groundAt(x,z)    a rough height, as the tile's zero
+ *   surfaceAt(x,z)   the land's own lattice surface, which a tile's ground is written from
+ */
+export function createLandCraters({ device, computePipe, ledger, sectionAt, groundAt, surfaceAt = groundAt, maxLayers: wantedLayers = LAND_CRATER_MOST_LAYERS, region: initialRegion = null }) {
+  const maxLayers = Math.min(wantedLayers, LAND_CRATER_MOST_LAYERS);
   const tiles = new Map();
-  const quadIndices = new Uint16Array(LAND_CRATER_DRAWN_CELLS * LAND_CRATER_DRAWN_CELLS * 6);
-  for (let j = 0, at = 0; j < LAND_CRATER_DRAWN_CELLS; j++) {
-    for (let i = 0; i < LAND_CRATER_DRAWN_CELLS; i++, at += 6) {
-      const k = j * (LAND_CRATER_DRAWN_CELLS + 1) + i;
-      quadIndices.set([k, k + LAND_CRATER_DRAWN_CELLS + 1, k + LAND_CRATER_DRAWN_CELLS + 2, k, k + LAND_CRATER_DRAWN_CELLS + 2, k + 1], at);
-    }
-  }
-  let indexBuffer = null, instanceBuffer = null, instanceSlots = 0, instances = new Float32Array(0);
-  let groundTexture = null, fieldTexture = null, layerCount = 0, freeLayers = [];
-  let recordBuffer = null, jobBuffer = null, listBuffer = null;
-  let renderPipeline = null, bakePipeline = null, capturePipeline = null, fieldGroup = null, sampler = null;
+  let groundTexture = null, fieldTexture = null, layerCount = 0;
+  const freeLayers = [];
+  let recordBuffer = null, jobBuffer = null, listBuffer = null, bakePipeline = null;
   const retired = [];
   const reallocateListeners = new Set();
-  let draws = new Map(), overflow = false, anchor = { x: 0, z: 0 }, movedFrom = null, wanting = false, disposed = false;
-  const stats = { tiles: 0, layers: 0, captures: 0, bakes: 0, overflow: false, get craters() { return ledger.records.length; } };
+  let overflow = false, anchor = { x: 0, z: 0 }, movedFrom = null, wanting = false, disposed = false;
+  const stats = { tiles: 0, layers: 0, grounds: 0, bakes: 0, overflow: false, get craters() { return ledger.records.length; } };
   const keyOf = (ix, iz) => `${ix},${iz}`;
 
   const snapOrigin = (c, span) => Math.floor(((c ?? 0) - (span ?? 8192) * 0.5) / LAND_CRATER_TILE_M) * LAND_CRATER_TILE_M;
@@ -159,23 +142,31 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     format: 'r16sint',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
-
-  function pickCoastRegion(hint = null) {
-    if (hint && Number.isFinite(hint.x) && Number.isFinite(hint.z) && hint.span >= 4096) return hint;
-    let best = null;
-    for (const m of surfaces?.() ?? []) {
-      if (m?.region && Number.isFinite(m.region.x) && m.region.span >= 4096 && (!best || m.region.span > best.span)) {
-        best = m.region;
-      }
+  // Where the lookup starts and 1 to look, then the rectangle every tile in use lies in, then each layer's most dug or
+  // thrown up: what the land reads (landCraterPlace), so that ground with no pit near reads no texture and the land's
+  // cut knows how much a tile's points wait for.
+  const placed = new Float32Array(8 + LAND_CRATER_MOST_LAYERS);
+  const place = device.createBuffer({ label: 'land crater lookup place', size: placed.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const writePlace = () => {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    placed.fill(0, 8);
+    for (const tile of tiles.values()) {
+      x0 = Math.min(x0, tile.x); x1 = Math.max(x1, tile.x + LAND_CRATER_TILE_M);
+      z0 = Math.min(z0, tile.z); z1 = Math.max(z1, tile.z + LAND_CRATER_TILE_M);
+      for (const index of tile.craters) placed[8 + tile.layer] = Math.max(placed[8 + tile.layer], landCraterAmount(ledger.records[index]));
     }
-    return best;
-  }
+    placed.set([regionOrigin[0], regionOrigin[1], 1, 0, ...(tiles.size ? [x0, x1, z0, z1] : [1, 0, 1, 0])]);
+    device.queue.writeBuffer(place, 0, placed);
+  };
+  const sampler = device.createSampler({ label: 'crater tiles', minFilter: 'linear', magFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
 
-  const startReg = pickCoastRegion(initialRegion);
+  const coastRegion = (hint) => (hint && Number.isFinite(hint.x) && Number.isFinite(hint.z) && hint.span >= 4096 ? hint : initialRegion);
+  const startReg = coastRegion(initialRegion);
   if (startReg) {
     regionOrigin[0] = snapOrigin(startReg.x, startReg.span);
     regionOrigin[1] = snapOrigin(startReg.z, startReg.span);
   }
+  writePlace();
   device.queue.writeTexture(
     { texture: lookupTexture },
     lookupData,
@@ -191,21 +182,17 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     if (lookupData[idx] === val) return;
     lookupData[idx] = val;
     singleLookupTexel[0] = val;
-    device.queue.writeTexture(
-      { texture: lookupTexture, origin: [tx, tz, 0] },
-      singleLookupTexel,
-      { offset: 0 },
-      [1, 1],
-    );
+    device.queue.writeTexture({ texture: lookupTexture, origin: [tx, tz, 0] }, singleLookupTexel, { offset: 0 }, [1, 1]);
   }
 
   function syncRegionOrigin(hint = null) {
-    const reg = pickCoastRegion(hint ?? initialRegion);
+    const reg = coastRegion(hint);
     if (!reg) return false;
     const ox = snapOrigin(reg.x, reg.span), oz = snapOrigin(reg.z, reg.span);
     if (ox === regionOrigin[0] && oz === regionOrigin[1]) return false;
     regionOrigin[0] = ox;
     regionOrigin[1] = oz;
+    writePlace();
     lookupData.fill(-1);
     for (const tile of tiles.values()) {
       const tx = Math.round((tile.x - ox) / LAND_CRATER_TILE_M);
@@ -235,7 +222,7 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     next = Math.min(next, Math.max(maxLayers, needed));
     const size = [LAND_CRATER_TEXELS, LAND_CRATER_TEXELS, next];
     const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST;
-    const ground = device.createTexture({ label: 'land as it was, by crater tile', size, format: 'rgba16float', usage: usage | GPUTextureUsage.RENDER_ATTACHMENT });
+    const ground = device.createTexture({ label: 'land as it was, by crater tile', size, format: 'rgba32float', usage });
     const field = device.createTexture({ label: 'land dug up, by crater tile', size, format: 'rgba16float', usage: usage | GPUTextureUsage.STORAGE_BINDING });
     if (layerCount) {
       const copied = [LAND_CRATER_TEXELS, LAND_CRATER_TEXELS, layerCount];
@@ -246,13 +233,10 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     }
     for (let layer = next - 1; layer >= layerCount; layer--) freeLayers.push(layer);
     groundTexture = ground; fieldTexture = field; layerCount = next; stats.layers = next;
-    fieldGroup = device.createBindGroup({ layout: renderPipeline.getBindGroupLayout(2), entries: [
-      { binding: 0, resource: ground.createView({ dimension: '2d-array' }) },
-      { binding: 1, resource: field.createView({ dimension: '2d-array' }) },
-      { binding: 2, resource: sampler },
-    ] });
     return true;
   }
+  // The first layers, so that the land has a field to read before any shot lands.
+  ensureLayers(null, 1);
   // Every tile each crater reaches, and each tile's craters. Where too many crowd one, the nearest its middle count.
   function tilesWanted() {
     const wanted = new Map();
@@ -291,25 +275,20 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     const half = region.span / 2;
     return tile.x + LAND_CRATER_TILE_M + 1 >= region.x - half && tile.x - 1 <= region.x + half && tile.z + LAND_CRATER_TILE_M + 1 >= region.z - half && tile.z - 1 <= region.z + half;
   };
-  function capture(encoder, list) {
-    const meshes = surfaces();
-    for (const tile of list) {
-      const pass = encoder.beginRenderPass({ label: 'land under a crater tile', colorAttachments: [{
-        view: groundTexture.createView({ dimension: '2d', baseArrayLayer: tile.layer, arrayLayerCount: 1 }),
-        clearValue: { r: 0, g: 0, b: 0, a: -1 }, loadOp: 'clear', storeOp: 'store',
-      }] });
-      pass.setPipeline(capturePipeline);
-      pass.setVertexBuffer(1, instanceBuffer);
-      for (const mesh of meshes) {
-        if (!mesh.count || (mesh.region && !touches(tile, mesh.region))) continue;
-        pass.setVertexBuffer(0, mesh.vertices);
-        pass.setIndexBuffer(mesh.indices, 'uint32');
-        pass.drawIndexed(mesh.count, 1, 0, 0, tile.slot);
-      }
-      pass.end();
-      tile.captured = true;
-      stats.captures++;
+  // The land as it was under a tile, from its own lattice: height above the tile's floor, the normal's x and z, and
+  // below zero where no land is loaded. Written when the tile first comes into use or its land changes.
+  const T = LAND_CRATER_TEXELS, groundTexels = new Float32Array(T * T * 4), groundHeights = new Float32Array(T * T);
+  function writeGround(tile) {
+    const at = (i, j) => groundHeights[Math.min(T - 1, Math.max(0, j)) * T + Math.min(T - 1, Math.max(0, i))];
+    const xAt = (i) => tile.x + (i - LAND_CRATER_GUTTER) * LAND_CRATER_CELL_M, zAt = (j) => tile.z + (j - LAND_CRATER_GUTTER) * LAND_CRATER_CELL_M;
+    for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) groundHeights[j * T + i] = surfaceAt(xAt(i), zAt(j));
+    for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) {
+      const dx = (at(i - 1, j) - at(i + 1, j)) / (2 * LAND_CRATER_CELL_M), dz = (at(i, j - 1) - at(i, j + 1)) / (2 * LAND_CRATER_CELL_M), length = Math.hypot(dx, 1, dz);
+      groundTexels.set([groundHeights[j * T + i] - tile.floorY, dx / length, dz / length, sectionAt(xAt(i), zAt(j)) === null ? -1 : 0], (j * T + i) * 4);
     }
+    device.queue.writeTexture({ texture: groundTexture, origin: [0, 0, tile.layer] }, groundTexels, { bytesPerRow: T * 16, rowsPerImage: T }, [T, T, 1]);
+    tile.grounded = true;
+    stats.grounds++;
   }
   function bake(encoder, list) {
     const packed = new Float32Array(ledger.records.length * CRATER_RECORD_FLOATS);
@@ -344,13 +323,12 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     pass.dispatchWorkgroups(9, 9, list.length);
     pass.end();
   }
-  // Bring tiles and draws in line with the ledger. `changed`, if given, is the one crater that moved.
+  // Bring tiles in line with the ledger. `changed`, if given, is the one crater that moved.
   function refresh(changed = null) {
     if (disposed) return;
-    if (!renderPipeline) { wanting = true; return; }
+    if (!bakePipeline) { wanting = true; return; }
     const originChanged = syncRegionOrigin();
     const wanted = tilesWanted();
-    const encoder = device.createCommandEncoder({ label: 'crater tiles' });
     for (const [key, tile] of tiles) {
       if (!wanted.has(key)) {
         writeLookupTile(tile.x, tile.z, -1);
@@ -358,12 +336,15 @@ export function createLandCraters({ device, module, shader, computePipe, format,
         tiles.delete(key);
       }
     }
-    const reallocated = ensureLayers(encoder, wanted.size);
+    // Grown layers are copied first, so the ground written after lands in the new pair.
+    const grow = device.createCommandEncoder({ label: 'crater tiles grown' });
+    const reallocated = ensureLayers(grow, wanted.size);
+    device.queue.submit([grow.finish()]);
     const touched = changed ? ledger.records.indexOf(changed) : -1, toBake = [];
     for (const [key, want] of wanted) {
       let tile = tiles.get(key);
       if (!tile) {
-        tile = { ...want, layer: freeLayers.pop(), floorY: groundAt(want.x + LAND_CRATER_TILE_M / 2, want.z + LAND_CRATER_TILE_M / 2), captured: false, baked: false };
+        tile = { ...want, layer: freeLayers.pop(), floorY: groundAt(want.x + LAND_CRATER_TILE_M / 2, want.z + LAND_CRATER_TILE_M / 2), grounded: false, baked: false };
         tiles.set(key, tile);
       } else {
         tile.section = want.section;
@@ -373,54 +354,36 @@ export function createLandCraters({ device, module, shader, computePipe, format,
       tile.craters = want.craters;
       if (!tile.baked || moved || want.craters.includes(touched)) toBake.push(tile);
     }
-    // Grouped by section, since each section draws with its own land textures.
-    const bySection = new Map();
-    for (const tile of tiles.values()) { if (!bySection.has(tile.section)) bySection.set(tile.section, []); bySection.get(tile.section).push(tile); }
-    if (tiles.size > instanceSlots) {
-      instanceBuffer?.destroy();
-      instanceSlots = Math.max(64, tiles.size * 2);
-      instanceBuffer = device.createBuffer({ label: 'crater tiles in use', size: instanceSlots * CRATER_INSTANCE_FLOATS * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-      instances = new Float32Array(instanceSlots * CRATER_INSTANCE_FLOATS);
-    }
-    draws = new Map();
-    let slot = 0;
-    for (const [section, list] of bySection) {
-      draws.set(section, { first: slot, count: list.length });
-      for (const tile of list) {
-        tile.slot = slot;
-        instances.set([tile.x, tile.z, tile.floorY, tile.layer], slot * CRATER_INSTANCE_FLOATS);
-        slot++;
-      }
-    }
-    if (slot) device.queue.writeBuffer(instanceBuffer, 0, instances, 0, slot * CRATER_INSTANCE_FLOATS);
-    capture(encoder, toBake.filter((tile) => !tile.captured));
+    for (const tile of toBake) if (!tile.grounded) writeGround(tile);
     if (toBake.length) {
+      const encoder = device.createCommandEncoder({ label: 'crater tiles' });
       bake(encoder, toBake);
+      device.queue.submit([encoder.finish()]);
       for (const tile of toBake) tile.baked = true;
     }
     stats.tiles = tiles.size;
-    device.queue.submit([encoder.finish()]);
+    writePlace();
     for (const texture of retired.splice(0)) texture.destroy();
     if (reallocated || originChanged) {
       for (const fn of reallocateListeners) fn(fieldTexture);
     }
   }
   const ready = (async () => {
-    sampler = device.createSampler({ label: 'crater tiles', minFilter: 'linear', magFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
-    indexBuffer = device.createBuffer({ label: 'crater tile cells', size: quadIndices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(indexBuffer, 0, quadIndices);
-    const [render, compute, grab] = await requestLandCraterPipelines({ device, shader, computePipe, module, format, samples });
+    const compute = await requestLandCraterPipelines({ computePipe });
     if (disposed) return;
-    renderPipeline = render; bakePipeline = compute; capturePipeline = grab;
+    bakePipeline = compute;
     if (wanting || ledger.records.length) refresh();
   })();
   ready.catch((error) => console.error('Land craters unavailable', error));
   return {
     stats, ledger, ready,
-    get pipeline() { return renderPipeline; },
     get fieldTexture() { return fieldTexture; },
     get lookupTexture() { return lookupTexture; },
     get regionOrigin() { return regionOrigin; },
+    // What the land's group 2 holds of the pits (LAND_CRATER_PIT in js/wgsl/land-craters.js).
+    resources() {
+      return [[54, lookupTexture.createView()], [55, fieldTexture.createView({ dimension: '2d-array' })], [56, sampler], [57, place]];
+    },
     onReallocate(fn) {
       if (typeof fn !== 'function') return () => {};
       reallocateListeners.add(fn);
@@ -436,7 +399,7 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     // Land has changed under the tiles, or a section has come or gone. `region` limits it to the tiles there.
     invalidate(region = null) {
       const originChanged = syncRegionOrigin(region);
-      for (const tile of tiles.values()) if (!region || touches(tile, region)) { tile.captured = false; tile.baked = false; }
+      for (const tile of tiles.values()) if (!region || touches(tile, region)) { tile.grounded = false; tile.baked = false; }
       if (ledger.records.length || tiles.size) {
         refresh();
       } else if (originChanged) {
@@ -451,17 +414,6 @@ export function createLandCraters({ device, module, shader, computePipe, format,
       anchor = movedFrom;
       refresh();
     },
-    draw(pass, section, landGroup, cloudGroup) {
-      const range = draws.get(section);
-      if (!range?.count || !fieldGroup) return;
-      pass.setPipeline(renderPipeline);
-      pass.setBindGroup(0, landGroup);
-      pass.setBindGroup(1, cloudGroup);
-      pass.setBindGroup(2, fieldGroup);
-      pass.setVertexBuffer(0, instanceBuffer);
-      pass.setIndexBuffer(indexBuffer, 'uint16');
-      pass.drawIndexed(quadIndices.length, range.count, 0, 0, range.first);
-    },
     // What the tiles hold at a point. For tests and for looking into what went wrong.
     async probe(x, z) {
       const tile = tiles.get(keyOf(Math.floor(x / LAND_CRATER_TILE_M), Math.floor(z / LAND_CRATER_TILE_M)));
@@ -474,16 +426,16 @@ export function createLandCraters({ device, module, shader, computePipe, format,
       }
       device.queue.submit([encoder.finish()]);
       await read.mapAsync(GPUMapMode.READ);
-      const half = new Uint16Array(read.getMappedRange().slice(0));
+      const bytes = read.getMappedRange().slice(0), ground = new Float32Array(bytes, 0, 4), half = new Uint16Array(bytes, 256, 4);
       read.destroy();
       const value = (bits) => { const sign = bits & 0x8000 ? -1 : 1, e = (bits >> 10) & 31, m = bits & 1023; return sign * (e === 0 ? m * 2 ** -24 : e === 31 ? Infinity : (1 + m / 1024) * 2 ** (e - 15)); };
-      return { groundY: tile.floorY + value(half[0]), kind: value(half[3]), height: value(half[128]), soil: value(half[129]), sand: value(half[130]), cover: value(half[131]) };
+      return { groundY: tile.floorY + ground[0], kind: ground[3], height: value(half[0]), soil: value(half[1]), sand: value(half[2]), cover: value(half[3]) };
     },
     dispose() {
       disposed = true;
       reallocateListeners.clear();
-      indexBuffer?.destroy(); instanceBuffer?.destroy(); groundTexture?.destroy(); fieldTexture?.destroy();
-      lookupTexture?.destroy();
+      groundTexture?.destroy(); fieldTexture?.destroy();
+      lookupTexture?.destroy(); place.destroy();
       recordBuffer?.destroy(); jobBuffer?.destroy(); listBuffer?.destroy();
     },
   };

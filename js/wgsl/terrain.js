@@ -2,7 +2,7 @@ import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
-import { LAND_CRATER_RENDER } from './land-craters.js';
+import { LAND_CRATER_PIT } from './land-craters.js';
 import { GROUND_DETAIL_RENDER } from './ground-detail.js';
 import { SHADOW_FRAME } from './shadows.js';
 import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
@@ -1486,7 +1486,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 @fragment fn fs(in:LandVertex)->@location(0) vec4f{return landOpaque(in);}
-`+LAND_CRATER_RENDER+/* wgsl */ `
+`+LAND_CRATER_PIT+/* wgsl */ `
 @vertex fn portShadowVS(@location(0) position:vec3f)->@builtin(position) vec4f{
   return landSH.lightView*vec4f(position-landSH.origin.xyz,1.0);
 }

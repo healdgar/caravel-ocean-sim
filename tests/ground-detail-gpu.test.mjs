@@ -8,6 +8,7 @@ import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 import {GROUND_DETAIL_BAKE,GROUND_DETAIL_CUT_M,GROUND_DETAIL_FADE_M,GROUND_DETAIL_FINE_CUT_M,GROUND_DETAIL_MEAN,GROUND_DETAIL_RENDER} from '../js/wgsl/ground-detail.js';
 import {TERRAIN} from '../js/wgsl/terrain.js';
+import {LAND_CONTINUUM_RENDER} from '../js/wgsl/land-continuum.js';
 
 let browser,server,base;
 before(async()=>{
@@ -35,8 +36,9 @@ test('the land shader never discards, fetches nothing before its cut, and crater
   assert.ok(at.indexOf(`if(away>=${GROUND_DETAIL_CUT_M}.0){return d;}`)<at.indexOf('groundDetailTexel('));
   assert.match(GROUND_DETAIL_RENDER,/if\(near<=0\.0\)\{return w;\}/);
   assert.match(body('landSurface'),/if\(gd\.near>0\.0\)\{\s*let look=groundDetailLook\(/);
-  // A crater's fragments run the land's own material with the same world position, so its edge cannot show.
-  assert.match(body('landCraterFS'),/landSurface\(LandVertex\(v\.pos,v\.world,/);
+  // Dug ground is the land's own fragments, lit by the pit where one reaches, so a pit's edge cannot show.
+  assert.match(body('landContinuumFS',LAND_CONTINUUM_RENDER),/landSurface\(in,landCraterPit\(in\.world,/);
+  assert.doesNotMatch(body('landContinuumFS',LAND_CONTINUUM_RENDER),/\bdiscard\b/);
   assert.match(GROUND_DETAIL_BAKE,/@compute/);
 });
 

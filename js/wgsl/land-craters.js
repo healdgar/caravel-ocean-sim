@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// The ground a ball has dug up. The land mesh is 16 m between vertices and cannot hold a pit a pace across, so
-// damaged ground is drawn again over it from fine tiles held in two texture arrays:
-//  - the ground as it was, rasterized from the land's own triangles once, when a tile first comes into use;
+// The ground a ball has dug up, held in fine tiles of two texture arrays:
+//  - the ground as it was, written from the land's own lattice once, when a tile first comes into use;
 //  - what has been done to it, worked out from every crater near the tile, whenever a shot lands there.
-// Drawing them costs JavaScript nothing. See js/land-craters.js for what is written when.
+// The land draws it (js/wgsl/land-continuum.js): its vertices stand in the pits, its fragments are lit as dug ground.
+// See js/land-craters.js for what is written when.
 import { NOISE_WGSL } from './common.js';
 
 export const LAND_CRATER_TILE_M = 8;
@@ -12,11 +12,12 @@ export const LAND_CRATER_CELL_M = LAND_CRATER_TILE_M / LAND_CRATER_CELLS;
 // A shadow is followed this far past a tile's edge, so one falling across a seam does not stop at it.
 export const LAND_CRATER_GUTTER = 8;
 export const LAND_CRATER_TEXELS = LAND_CRATER_CELLS + 1 + 2 * LAND_CRATER_GUTTER;
-export const LAND_CRATER_DRAWN_CELLS = LAND_CRATER_CELLS + 2;
 export const LAND_CRATER_PER_TILE = 32;
 // How far a crater's spoil reaches at most, in crater radii, before a flat shot draws it out.
 export const LAND_CRATER_REACH = 3.05;
 export const LAND_CRATER_LOOKUP_SIZE = 1024;
+// Tile layers at most, each with the most its craters dig or throw up (landCraterPlace.amounts).
+export const LAND_CRATER_MOST_LAYERS = 384;
 const CELL = LAND_CRATER_CELL_M.toFixed(4);
 const GUTTER = LAND_CRATER_GUTTER.toFixed(1);
 const TEXELS = LAND_CRATER_TEXELS.toFixed(1);
@@ -35,21 +36,6 @@ fn landCraterLayerAt(cell: vec2i, enabled: f32, lookupTex: texture_2d<i32>) -> i
 fn landCraterFieldUV(worldXZ: vec2f, originXZ: vec2f, cell: vec2i) -> vec2f {
   let tileOrig = originXZ + vec2f(cell) * ${LAND_CRATER_TILE_M.toFixed(1)};
   return ((worldXZ - tileOrig) * ${(1 / LAND_CRATER_CELL_M).toFixed(1)} + ${(LAND_CRATER_GUTTER + 0.5).toFixed(1)}) / ${TEXELS};
-}
-`;
-
-// What the land was here, in its own triangles: height above the tile's floor, normal x and z, and kind in the
-// whole and fractional parts. Nothing is written where the land has no triangles, and that stays below zero.
-export const LAND_CRATER_CAPTURE = /* wgsl */ `
-struct LandCraterCapture{@builtin(position) pos:vec4f,@location(0) y:f32,@location(1) normal:vec3f,@location(2) kind:vec2f,@location(3) @interpolate(flat) floorY:f32};
-@vertex fn landCraterCaptureVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,@location(3) tile:vec4f)->LandCraterCapture{
-  let texel=(position.xz-tile.xy)/${CELL}+${GUTTER}+.5;
-  let at=texel/${TEXELS}*2.0-1.0;
-  return LandCraterCapture(vec4f(at.x,-at.y,.5,1.0),position.y,normal,kind,tile.z);
-}
-@fragment fn landCraterCaptureFS(v:LandCraterCapture)->@location(0) vec4f{
-  let n=normalize(v.normal);
-  return vec4f(v.y-v.floorY,n.x,n.z,floor(v.kind.x+.5)+clamp(v.kind.y,0.0,.99));
 }
 `;
 
@@ -120,59 +106,66 @@ fn landCraterStamp(c:LandCraterRecord,p:vec2f,rock:f32)->LandCraterStamp{
 }
 `;
 
-// Added to the land shader, which runs its material for these fragments too, so the ground under the spoil and
-// past the edge of it is the same ground. Only the land as it was decides what material a point is; the pit
+// Added to the land shader (js/wgsl/terrain.js). The ground the land's continuum walks is the lattice with the pits
+// in it (landCraterDepth, through landContinuumRelief in js/wgsl/land-continuum.js), and its fragments lit as the dug ground they are, the
+// same fragment shading the ground round them: only the land as it was decides what material a point is; the pit
 // decides its lighting and what lies on top.
-export const LAND_CRATER_RENDER = /* wgsl */ `
-@group(2)@binding(0) var landCraterGround:texture_2d_array<f32>;
-@group(2)@binding(1) var landCraterField:texture_2d_array<f32>;
-@group(2)@binding(2) var landCraterSampler:sampler;
-struct LandCraterVertex{
-  @builtin(position) pos:vec4f,
-  @location(0) world:vec3f,
-  @location(1) ground:vec3f,
-  @location(2) kind:vec2f,
-  @location(3) uv:vec2f,
-  @location(4) groundY:f32,
-  @location(5) @interpolate(flat) layer:i32,
-  @location(6) @interpolate(flat) floorY:f32,
-};
-struct LandCraterPixel{@location(0) colour:vec4f,@builtin(frag_depth) depth:f32};
-@vertex fn landCraterVS(@builtin(vertex_index) index:u32,@location(0) tile:vec4f)->LandCraterVertex{
-  var o:LandCraterVertex;
-  let shift=vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
-  let away=length(vec3f(tile.x+${(LAND_CRATER_TILE_M / 2).toFixed(1)},tile.z,tile.y+${(LAND_CRATER_TILE_M / 2).toFixed(1)})+shift-F.camPos.xyz);
-  if(away>1600.0){o.pos=vec4f(0.0,0.0,-1.0,1.0);return o;}
-  // Coarser with distance, a tile at a time.
-  let stride=1u<<u32(clamp(floor(log2(max(away,1.0)/70.0)+1.0),0.0,4.0));
-  let raw=vec2u(index%${LAND_CRATER_DRAWN_CELLS + 1}u,index/${LAND_CRATER_DRAWN_CELLS + 1}u);
-  // A cell past each edge, into the gutter: a hairline between tiles down in a pit would show the land above it.
-  let cell=vec2i(min((raw+vec2u(stride>>1u))/stride*stride,vec2u(${LAND_CRATER_DRAWN_CELLS}u)))-vec2i(1);
-  let texel=cell+vec2i(${LAND_CRATER_GUTTER});
-  o.layer=i32(tile.w);
-  o.floorY=tile.z;
-  let ground=textureLoad(landCraterGround,texel,o.layer,0);
-  let field=textureLoad(landCraterField,texel,o.layer,0);
-  o.groundY=tile.z+ground.x;
-  // Dug below the tide on a beach, a pit stands full to the sea's own level.
-  o.world=vec3f(tile.x+f32(cell.x)*${CELL},max(o.groundY+field.x,min(o.groundY,.01)),tile.y+f32(cell.y)*${CELL});
-  o.ground=vec3f(ground.y,sqrt(max(1.0-ground.y*ground.y-ground.z*ground.z,.0001)),ground.z);
-  o.kind=vec2f(floor(ground.w),fract(ground.w));
-  o.uv=(vec2f(texel)+.5)/${TEXELS};
-  o.pos=F.viewProj*vec4f(earthCurve(o.world+shift-F.camPos.xyz,F.camPos.y),1.0);
-  return o;
+export const LAND_CRATER_PIT = LAND_CRATER_SAMPLE_WGSL + /* wgsl */ `
+@group(2)@binding(54) var landCraterLookup:texture_2d<i32>;
+@group(2)@binding(55) var landCraterField:texture_2d_array<f32>;
+@group(2)@binding(56) var landCraterSampler:sampler;
+// The lookup's origin x z and 1 to look; then the world rectangle every tile in use lies in (x0 x1 z0 z1), outside
+// which nothing is read at all; then each layer's most dug or thrown up, four a vector.
+struct LandCraterPlace{origin:vec4f,bounds:vec4f,amounts:array<vec4f,${LAND_CRATER_MOST_LAYERS / 4}>};
+@group(2)@binding(57) var<uniform> landCraterPlace:LandCraterPlace;
+struct LandCraterSpot{layer:i32,uv:vec2f};
+fn landCraterNear(xz:vec2f)->bool{let b=landCraterPlace.bounds;return xz.x>=b.x&&xz.x<=b.y&&xz.y>=b.z&&xz.y<=b.w;}
+// The error the land's cut waits for before it brings in a point between its lattice's (js/wgsl/land-continuum.js):
+// the least of what the tiles holding the point dig or throw up, nothing where any of them is not in use. The cut
+// splits every patch over such a tile at least that far (landContinuumDig in js/land-continuum.js).
+fn landCraterWaits(xz:vec2f)->f32{
+  if(!landCraterNear(xz)){return 0.0;}
+  let t=(xz-landCraterPlace.origin.xy)*${(1 / LAND_CRATER_TILE_M).toFixed(4)};
+  let c=floor(t);
+  let lo=vec2i(c)-vec2i(select(vec2f(0.0),vec2f(1.0),t==c));
+  var least=3.0e38;
+  for(var z=lo.y;z<=i32(c.y);z++){
+    for(var x=lo.x;x<=i32(c.x);x++){
+      let layer=landCraterLayerAt(vec2i(x,z),landCraterPlace.origin.z,landCraterLookup);
+      if(layer<0){return 0.0;}
+      least=min(least,landCraterPlace.amounts[layer/4][layer%4]);
+    }
+  }
+  return least;
+}
+fn landCraterSpot(xz:vec2f)->LandCraterSpot{
+  let cell=landCraterLookupCell(xz,landCraterPlace.origin.xy);
+  return LandCraterSpot(landCraterLayerAt(cell,landCraterPlace.origin.z,landCraterLookup),landCraterFieldUV(xz,landCraterPlace.origin.xy,cell));
 }
 fn landCraterHeight(uv:vec2f,layer:i32)->f32{return textureSampleLevel(landCraterField,landCraterSampler,uv,layer,0.0).r;}
-@fragment fn landCraterFS(v:LandCraterVertex)->LandCraterPixel{
-  let field=textureSampleLevel(landCraterField,landCraterSampler,v.uv,v.layer,0.0);
-  if(field.a<=.002){discard;}
+// What the pits have done to the ground's height at a point.
+fn landCraterDepth(xz:vec2f)->f32{
+  if(!landCraterNear(xz)){return 0.0;}
+  let spot=landCraterSpot(xz);
+  if(spot.layer<0){return 0.0;}
+  return landCraterHeight(spot.uv,spot.layer);
+}
+// The pit at a fragment of ground whose own normal is 'ground', or plain ground (cover below zero) where none reaches.
+// dx and dy are the fragment's world derivatives, taken before any branch.
+fn landCraterPit(world:vec3f,ground:vec3f,dx:vec3f,dy:vec3f)->LandPit{
+  let plain=LandPit(vec3f(0.0),-1.0,vec3f(0.0),0.0,1.0,1.0,0.0,1.0,0.0);
+  if(!landCraterNear(world.xz)){return plain;}
+  let spot=landCraterSpot(world.xz);
+  if(spot.layer<0){return plain;}
+  let field=textureSampleLevel(landCraterField,landCraterSampler,spot.uv,spot.layer,0.0);
+  if(field.a<=.002){return plain;}
   let texel=1.0/${TEXELS};
   let metres=1.0/(${TEXELS}*${CELL});
   // The surface as it is now: the land's slope and the pit's together.
   let e=vec2f(texel,0.0);
-  let gradient=vec2f(landCraterHeight(v.uv+e.xy,v.layer)-landCraterHeight(v.uv-e.xy,v.layer),landCraterHeight(v.uv+e.yx,v.layer)-landCraterHeight(v.uv-e.yx,v.layer))/(2.0*${CELL});
-  let tilt=v.ground.xz/max(v.ground.y,.05);
-  let pool=1.0-smoothstep(0.0,.03,v.world.y);
+  let gradient=vec2f(landCraterHeight(spot.uv+e.xy,spot.layer)-landCraterHeight(spot.uv-e.xy,spot.layer),landCraterHeight(spot.uv+e.yx,spot.layer)-landCraterHeight(spot.uv-e.yx,spot.layer))/(2.0*${CELL});
+  let tilt=ground.xz/max(ground.y,.05);
+  let pool=1.0-smoothstep(0.0,.03,world.y);
   let normal=normalize(mix(vec3f(tilt.x-gradient.x,1.0,tilt.y-gradient.y),vec3f(0.0,1.0,0.0),pool));
   // Walk the height toward the sun, closely at first. The land's light bake knows nothing this small.
   var sun=1.0;
@@ -183,55 +176,34 @@ fn landCraterHeight(uv:vec2f,layer:i32)->f32{return textureSampleLevel(landCrate
     var blocked=-1.0;
     for(var i=0u;i<12u;i++){
       let t=pow(f32(i)+1.0,1.5)*.06;
-      blocked=max(blocked,landCraterHeight(v.uv+along*t*metres,v.layer)-field.r-t*climb);
+      blocked=max(blocked,landCraterHeight(spot.uv+along*t*metres,spot.layer)-field.r-t*climb);
     }
     sun=1.0-smoothstep(.0,.09,blocked);
   }
   // How much of the sky the ground around leaves open.
   let d=.4*metres;
-  let around=.25*(landCraterHeight(v.uv+vec2f(d,0.0),v.layer)+landCraterHeight(v.uv-vec2f(d,0.0),v.layer)+landCraterHeight(v.uv+vec2f(0.0,d),v.layer)+landCraterHeight(v.uv-vec2f(0.0,d),v.layer));
+  let around=.25*(landCraterHeight(spot.uv+vec2f(d,0.0),spot.layer)+landCraterHeight(spot.uv-vec2f(d,0.0),spot.layer)+landCraterHeight(spot.uv+vec2f(0.0,d),spot.layer)+landCraterHeight(spot.uv-vec2f(0.0,d),spot.layer));
   let sky=(1.0-.62*clamp((around-field.r)/.42,0.0,1.0))*(1.0-.3*clamp(-field.r/1.1,0.0,1.0));
   // Turned-over earth: broken clods near, thinning to thrown scatter.
-  let dx=dpdx(v.world);let dy=dpdy(v.world);
   let width=max(length(dx.xz),length(dy.xz));
-  let coarse=landFilteredNoise(v.world.xz*1.7,width*1.7);let fine=landFilteredNoise(v.world.xz*6.3,width*6.3);
+  let coarse=landFilteredNoise(world.xz*1.7,width*1.7);let fine=landFilteredNoise(world.xz*6.3,width*6.3);
   let scatter=coarse*.55+fine*.45;
   // Clods a hand across and lumps a span across, each only as long as a few pixels can hold it.
   let clodNear=1.0-smoothstep(.01,.04,width);
   let lumpNear=1.0-smoothstep(.03,.12,width);
   var clods=vec2f(0.0,1.0);var lumps=vec2f(0.0,1.0);
-  if(clodNear>0.0){clods=landStones(v.world.xz*19.0+scatter*1.5);}
-  if(lumpNear>0.0){lumps=landStones(vec2f(v.world.x*.6+v.world.z*.8,v.world.z*.6-v.world.x*.8)*6.5+vec2f(5.3,71.9)+scatter*.8);}
+  if(clodNear>0.0){clods=landStones(world.xz*19.0+scatter*1.5);}
+  if(lumpNear>0.0){lumps=landStones(vec2f(world.x*.6+world.z*.8,world.z*.6-world.x*.8)*6.5+vec2f(5.3,71.9)+scatter*.8);}
   // Each clod or lump of earth is there or it is not, likelier the nearer the pit. From far off that is a tone.
   let chance=field.g*1.25+scatter*.22-.1;
   let piece=max(smoothstep(1.0-chance-.03,1.0-chance+.03,.5+.5*clods.x),smoothstep(1.0-chance*.8-.03,1.0-chance*.8+.03,.5+.5*lumps.x));
   let lying=max(field.a*mix(smoothstep(.3,.62,chance),piece,lumpNear),pool);
-  let rock=smoothstep(.22,.5,1.0-v.ground.y);
+  let rock=smoothstep(.22,.5,1.0-ground.y);
   let deep=clamp(-field.r/.5,0.0,1.0);
   let topsoil=mix(vec3f(.085,.055,.034),vec3f(.032,.021,.014),clamp(.5+scatter*.9+deep*.35,0.0,1.0));
   let stone=vec3f(.3,.27,.23)*(1.0+coarse*.2);
   let broken=1.0+(clods.x*.3-(1.0-clods.y)*.38)*clodNear+(lumps.x*.3-(1.0-lumps.y)*.3)*lumpNear;
   let relief=((clods.y-.55)*.03*clodNear+(lumps.y-.55)*.07*lumpNear+coarse*.035+fine*.012)*(1.0-pool);
-  let colour=landSurface(LandVertex(v.pos,v.world,v.ground,v.kind,vec2f(0.0)),
-    LandPit(normal,lying,mix(topsoil,stone,rock)*broken,relief,sun,sky,pool,(1.0-.62*deep)*(.72+scatter*.2)*mix(1.0,broken,.45),field.b));
-  // The land's own triangles lie between the eye and a pit. Where the view goes down into the ground, write the
-  // depth of the place it went in, keeping a trace of the true distance so that nearer ground in the pit still wins.
-  let shift=vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
-  let point=v.world+shift;
-  let eye=F.camPos.xyz;
-  let going=point-eye;
-  var surface=point;
-  let facing=min(dot(v.ground,going),-.00001);
-  let first=dot(v.ground,vec3f(point.x,v.groundY+.03,point.z)-eye)/facing;
-  if(first>0.0&&first<1.0){
-    // That place is found on the land itself: the land's facets need not lie in the plane it has here.
-    let entry=(eye+going*first).xz-point.xz;
-    let land=v.floorY+textureSampleLevel(landCraterGround,landCraterSampler,v.uv+entry*metres,v.layer,0.0).r;
-    let lifted=vec3f(point.x+entry.x,max(land,v.groundY-dot(tilt,entry))+.03+length(entry)*.015,point.z+entry.y);
-    let through=dot(v.ground,lifted-eye)/facing;
-    if(through>0.0&&through<1.0){surface=eye+going*mix(through,1.0,.005);}
-  }
-  let clip=F.viewProj*vec4f(earthCurve(surface-eye,F.camPos.y),1.0);
-  return LandCraterPixel(colour,clip.z/clip.w);
+  return LandPit(normal,lying,mix(topsoil,stone,rock)*broken,relief,sun,sky,pool,(1.0-.62*deep)*(.72+scatter*.2)*mix(1.0,broken,.45),field.b);
 }
 `;
