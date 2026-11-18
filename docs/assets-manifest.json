@@ -654,25 +654,10 @@
     "bytes": 1088938,
     "sha256": "9c6893a4d79e52a89fc2676f6ccb208ba00362b46f8d948f0ce520435d830204"
   },
-  "assets/ground-cover/portugal/meadows-gpu/vertices.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/vertices.bin.756917cdd0da6a86.gz",
-    "bytes": 1240597,
-    "sha256": "756917cdd0da6a86d2cab10329200f226e7577a4ece09a738cbc1b7c997946ff"
-  },
-  "assets/ground-cover/portugal/meadows-gpu/indices.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/indices.bin.fd16ac489b6eace1.gz",
-    "bytes": 298305,
-    "sha256": "fd16ac489b6eace1a10b83e31b2503b6c318a34660d667e09f8bd607ef3d008c"
-  },
-  "assets/ground-cover/portugal/meadows-gpu/clusters.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/clusters.bin.bb2807755161f3c0.gz",
-    "bytes": 641,
-    "sha256": "bb2807755161f3c0ae20d12a22b0ef2035aa470abe781a16d8df01ed2d9e8db7"
-  },
-  "assets/ground-cover/portugal/meadows-gpu/morph.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/morph.bin.4c3c9e8f35ac7976.gz",
-    "bytes": 1374,
-    "sha256": "4c3c9e8f35ac79760e010fddfeb84fe683501e61ea69af372e1ee6327f803173"
+  "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
+    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.7714f3b5a494898f.gz",
+    "bytes": 13009474,
+    "sha256": "7714f3b5a494898f0a5c4d399f6f42312a267581429b812f815f33f61b436fc4"
   },
   "assets/world/hyg-stars.bin": {
     "url": "assets/world/hyg-stars.e648341c03cb753b.bin",
@@ -1935,9 +1920,9 @@
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.ba1fc0712d608468.json",
-    "bytes": 6685,
-    "sha256": "ba1fc0712d608468ae00d316da3cd532c68fb9430dd1fea786a2009679e411d5"
+    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.81d687d481350026.json",
+    "bytes": 12593,
+    "sha256": "81d687d4813500269e0b57712da351e215b08c7171b2a8abd2935e7a72f9243c"
   },
   "assets/ships/continuum/trade-cog-underway/manifest.json": {
     "url": "assets/ships/continuum/trade-cog-underway/manifest.645b143f8bccf070.json",
