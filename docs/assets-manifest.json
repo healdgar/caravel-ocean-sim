@@ -520,29 +520,29 @@
     "sha256": "9c6893a4d79e52a89fc2676f6ccb208ba00362b46f8d948f0ce520435d830204"
   },
   "assets/forest-scenery/saba/continuum/atlas.bin.gz": {
-    "url": "assets/forest-scenery/saba/continuum/atlas.bin.e4503aff8b13dd51.gz",
-    "bytes": 111466427,
-    "sha256": "e4503aff8b13dd51fccb864375b965d37088da9fab4ba0bf7e05471c3202f3a8"
+    "url": "assets/forest-scenery/saba/continuum/atlas.bin.59e52ec0ba42218a.gz",
+    "bytes": 103918809,
+    "sha256": "59e52ec0ba42218a81f42e8fee9f82e20854d506b92d006f8aa9b227abb87e38"
   },
   "assets/forest-scenery/subtropical/continuum/atlas.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/continuum/atlas.bin.cee38a12300c78d6.gz",
-    "bytes": 3412775,
-    "sha256": "cee38a12300c78d6cdfa48e18ea06bd1f144a981ba82fc092ce342b827720729"
+    "url": "assets/forest-scenery/subtropical/continuum/atlas.bin.35ffb75e353bc24c.gz",
+    "bytes": 3077813,
+    "sha256": "35ffb75e353bc24c7e26c053522f6fcdcedf5228b8ab9c650ca4edabdcf56852"
   },
   "assets/forest-scenery/portugal/continuum/atlas.bin.gz": {
-    "url": "assets/forest-scenery/portugal/continuum/atlas.bin.a4a72f71d2cde1a7.gz",
-    "bytes": 59068573,
-    "sha256": "a4a72f71d2cde1a731112a1e18b866066d36cbfc3ed1ab261de07e7c5629d278"
+    "url": "assets/forest-scenery/portugal/continuum/atlas.bin.7c1efb2247b87769.gz",
+    "bytes": 54345048,
+    "sha256": "7c1efb2247b8776996eb77ced8db8caec39898125fa396f6ace5c325e271048f"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.d34b60c3c113e824.gz",
-    "bytes": 194986066,
-    "sha256": "d34b60c3c113e824568785c68666c1eeb82e8402c7c19c103ca64e615696b861"
+    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.ef32370e66dc5aac.gz",
+    "bytes": 194992650,
+    "sha256": "ef32370e66dc5aac20795ef064828845f2fd7a6276d520ef130767074c0cee2d"
   },
   "assets/ground-cover/tropical/meadows-gpu/atlas.bin.gz": {
-    "url": "assets/ground-cover/tropical/meadows-gpu/atlas.bin.59f93f4bd8f2adde.gz",
-    "bytes": 147433390,
-    "sha256": "59f93f4bd8f2adde7a209ab07f686700358f907916bcd20a911bf5086bc4b63a"
+    "url": "assets/ground-cover/tropical/meadows-gpu/atlas.bin.30b454c38d93c21f.gz",
+    "bytes": 147439320,
+    "sha256": "30b454c38d93c21f341ebd0b4ac65f82498e13c0c86e3dbce69f7b8a324b0e2b"
   },
   "assets/prefab-continuum/acapulco.bin.gz": {
     "url": "assets/prefab-continuum/acapulco.bin.c6f23e75cd96c032.gz",
@@ -965,19 +965,19 @@
     "sha256": "fafc7f36d27362a77eec5304cd88f6b5568ddd48b36a9a011af01bebd61edeea"
   },
   "assets/forest-scenery/saba/continuum/manifest.json": {
-    "url": "assets/forest-scenery/saba/continuum/manifest.391021a7d473d637.json",
-    "bytes": 7756,
-    "sha256": "391021a7d473d63723852839525c802a0317c9dbd5dc5f8510bcf2c2bb55935c"
+    "url": "assets/forest-scenery/saba/continuum/manifest.dbe5ca90d4ffe369.json",
+    "bytes": 45905,
+    "sha256": "dbe5ca90d4ffe3698fac074e846c4f9d2a5e6d58098d9394f7e68e4177926265"
   },
   "assets/forest-scenery/subtropical/continuum/manifest.json": {
-    "url": "assets/forest-scenery/subtropical/continuum/manifest.2e598da6dfe6943f.json",
-    "bytes": 6400,
-    "sha256": "2e598da6dfe6943f5679be256727120bbe9dc74af6c17d89ede7ea9685a6a4d3"
+    "url": "assets/forest-scenery/subtropical/continuum/manifest.f7c821d23c6bbc73.json",
+    "bytes": 37047,
+    "sha256": "f7c821d23c6bbc73d5d218a5d075591ccb09063f9992b651c2ba2c520ed0642c"
   },
   "assets/forest-scenery/portugal/continuum/manifest.json": {
-    "url": "assets/forest-scenery/portugal/continuum/manifest.9e591b4aedd7c6ed.json",
-    "bytes": 17066,
-    "sha256": "9e591b4aedd7c6ed74c284993ce1c2031075ee59199fd74af0ef44f4d27ae9b0"
+    "url": "assets/forest-scenery/portugal/continuum/manifest.0ac047b702f2ceae.json",
+    "bytes": 108810,
+    "sha256": "0ac047b702f2ceaedbdc96c8b80048f70b9be51f564abdbbd60c4c10c8a758ff"
   },
   "assets/forest-scenery/saba/manifest.json": {
     "url": "assets/forest-scenery/saba/manifest.447959ed7e073853.json",
@@ -1920,14 +1920,14 @@
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.3310e324dff91530.json",
+    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.2342706ca25664a2.json",
     "bytes": 20639,
-    "sha256": "3310e324dff91530a14c141014e56886cff63f54c7d1ce55c10dfe91b932ae6c"
+    "sha256": "2342706ca25664a22735d97c3cec8d4352b23a355d5969a16c478404339d9705"
   },
   "assets/ground-cover/tropical/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/tropical/meadows-gpu/manifest.a1f273cc1f1662d7.json",
+    "url": "assets/ground-cover/tropical/meadows-gpu/manifest.73ede803a5b308da.json",
     "bytes": 20676,
-    "sha256": "a1f273cc1f1662d7a420cb1a49a8a4176c587dadb154989e2801c16be9d86814"
+    "sha256": "73ede803a5b308da9bfd76ffd06677672ebb3f25b0dd9ea88b07b66e1c96eee1"
   },
   "assets/ships/continuum/trade-cog-underway/manifest.json": {
     "url": "assets/ships/continuum/trade-cog-underway/manifest.36801c33a4221ba3.json",

@@ -1217,15 +1217,15 @@
  "atlas": {
   "words": 89222052,
   "bytes": 356888208,
-  "sha256": "f0b278461c2a39a131b2afdd081eed7f41882607c24587ee74282cc3ad418e4d",
+  "sha256": "e197bdf7960c8830145eca8504e326fd2b5dd25b6b5e477b8fce09880cca6bd8",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 147433390,
-   "sha256": "59f93f4bd8f2adde7a209ab07f686700358f907916bcd20a911bf5086bc4b63a"
+   "bytes": 147439320,
+   "sha256": "30b454c38d93c21f341ebd0b4ac65f82498e13c0c86e3dbce69f7b8a324b0e2b"
   },
   "clusters": 97147,
   "vertices": 10607724,
   "indices": 34603776
  },
- "bakeSeconds": 35
+ "bakeSeconds": 34
 }
