@@ -2648,6 +2648,7 @@ const FORTIFIED_STONE_PREFABS = new Set([
   'city_keep',
   'city_gate',
   'city_bastion',
+  'city_gun_tower',
   'city_fort',
   'city_battery',
   'city_watchtower',

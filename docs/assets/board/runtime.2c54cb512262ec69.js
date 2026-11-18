@@ -1904,9 +1904,12 @@ globalThis.BOARD_MODEL = (() => {
         ...(s.wallBuild ? { built: list(s.wallRad, (_, k) => wallBuilt(s, k / s.wallRad.length * 2 * Math.PI) ? 1 : 0) } : {}) } : null,
       castle: castle(s),
       // The works a real map records that stand with it (scripts/board-forts.mjs): each where the model set it, its
-      // front turned to the water it holds (`face`, the bearing of that water); a citadel the place's castle is says so.
-      works: (s.works || []).map((k) => ({ kind: k.kind, name: k.name, x: r1(k.x), z: r1(k.z), w: r1(k.w), d: r1(k.d), turn: r3(k.rot), face: k.face == null ? null : r3(k.face),
-        role: k.role || '', side: k.side || '', from: k.from ?? null, until: k.until ?? null, ...(k.castle ? { castle: true } : {}) })),
+      // front turned to the water it holds (`face`, the bearing of that water), in the form it had in the realm's year
+      // (`form`; `round`, `battery`, `earth` how it was built); a citadel the place's castle is says so. The model keeps
+      // them as the place's forts (s.forts), apart from its works of peace (s.works: mill, granary, market).
+      works: (Array.isArray(s.forts) ? s.forts : []).map((k) => ({ kind: k.kind, form: k.form || k.kind, name: k.name, x: r1(k.x), z: r1(k.z), w: r1(k.w), d: r1(k.d), turn: r3(k.rot), face: k.face == null ? null : r3(k.face),
+        role: k.role || '', side: k.side || '', from: k.from ?? null, until: k.until ?? null,
+        ...(k.round ? { round: true } : {}), ...(k.battery ? { battery: true } : {}), ...(k.earth ? { earth: true } : {}), ...(k.castle ? { castle: true } : {}) })),
       streets: s.streets.filter((t) => !t.hidden && !t.gone && t.kind !== 'edge' && t.pts.length > 1).map((t) => ({ kind: t.kind, half: r1(t.hw), points: line(t.pts) })),
       squares: (s.places || []).map((p) => ({ kind: p.kind || 'market', x: r1(p.x), z: r1(p.z), rad: list(p.r) })),
       past: (s.history || []).filter((h) => h.ad !== undefined).map((h) => [h.ad, h.t]),

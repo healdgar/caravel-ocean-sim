@@ -362,6 +362,202 @@ function watchtowerSpec({ side, stages }) {
   return spec;
 }
 
+// A gun parapet along an open line of a work's top (`line`, [x, z] points in the type's frame; `closed` round to its
+// first again), `inner` a point within the work: as thick as a battery's (CITY_BATTERY), its sill along the whole of
+// it and a merlon between each two embrasures, mitred where it turns. `at[i]` are where along side i its embrasures
+// open, each as a share of the side's length. Answers its primitives (prisms, so a mitre is no seam) and its guns:
+// where each stands on the terreplein `base` high, as far back from the outer face as a battery's guns stand, and the
+// way it looks (`nx, nz`, square out of its side).
+function gunParapet(line, inner, base, at, closed = false) {
+  const { parapet: p, sill, rise, embrasure } = CITY_BATTERY, m = closed ? line.length : line.length - 1, primitives = [], guns = [];
+  const sides = Array.from({ length: m }, (_, i) => {
+    const [ax, az] = line[i], [bx, bz] = line[(i + 1) % line.length], L = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / L, uz = (bz - az) / L;
+    const toward = (inner[0] - (ax + bx) / 2) * -uz + (inner[1] - (az + bz) / 2) * ux >= 0 ? 1 : -1;
+    return { ax, az, L, ux, uz, vx: -uz * toward, vz: ux * toward };
+  });
+  // The parapet's inner line at each corner: square off an open end, mitred where two sides meet.
+  const back = (j) => {
+    const prev = closed || j > 0 ? sides[(j - 1 + m) % m] : null, next = closed || j < m ? sides[j % m] : null, [x, z] = line[j % line.length];
+    if (!prev || !next) { const s = prev ?? next; return [x + p * s.vx, z + p * s.vz]; }
+    const k = p / (1 + prev.vx * next.vx + prev.vz * next.vz);
+    return [x + k * (prev.vx + next.vx), z + k * (prev.vz + next.vz)];
+  };
+  const corners = Array.from({ length: line.length }, (_, j) => back(j));
+  sides.forEach((s, i) => {
+    const O = (t) => [s.ax + s.ux * t, s.az + s.uz * t], I = (t) => (t <= 1e-6 ? corners[i] : t >= s.L - 1e-6 ? corners[(i + 1) % line.length] : [s.ax + s.ux * t + p * s.vx, s.az + s.uz * t + p * s.vz]);
+    const piece = (name, t0, t1, y0, y1) => primitives.push({ primitive: 'prism', name, points: [O(t0), O(t1), I(t1), I(t0)], from: y0, to: y1, material: 'ashlar' });
+    piece('parapet_sill', 0, s.L, base, base + sill);
+    const open = (at[i] ?? []).map((share) => share * s.L).sort((a, b) => a - b);
+    let t = 0;
+    for (const c of open) {
+      if (c - embrasure / 2 - t > 0.2) piece('parapet_merlon', t, c - embrasure / 2, base + sill, base + rise);
+      t = c + embrasure / 2;
+      const [gx, gz] = O(c);
+      guns.push({ x: gx + (p + 0.8) * s.vx, y: base, z: gz + (p + 0.8) * s.vz, nx: -s.vx, nz: -s.vz });
+    }
+    if (s.L - t > 0.2) piece('parapet_merlon', t, s.L, base + sill, base + rise);
+  });
+  return { primitives, guns };
+}
+
+// A bastion at a corner of a work's trace, as the angled bastion was built from the 1530s (the bastioned fort and the
+// citadel; js/fort-records.js): its two curtains run from the corner along +x and +z, the work within between them;
+// its salient out on the diagonal, its point at 75 degrees (the Italian engineers held it to no less than 60, and the
+// works of the 1550s-1590s set it at 70 to 90); its two faces each `bays` bays of the curtain's; its flanks square to
+// the curtains, standing out from them as far as they meet the curtain from the corner, a gun in each to sweep it.
+// Its body is solid to its terreplein `height` up, behind a gun parapet with embrasures. The curtains that close on it
+// meet each flank at its root (cityCornerBastionPlan `F` along each from the corner), so the trace is one line round.
+export const CITY_CORNER_BASTION = Object.freeze({ faces: Object.freeze([6, 8, 10]), heights: Object.freeze([5.5, 7, 8.5, 10]), salient: 75, embrasures: Object.freeze([1, 2, 2]) });
+// Where a corner bastion of `bays` to a face stands from its corner: its flank `F` along each curtain from the corner
+// (and as far out from it), its salient `s` out along each axis, and the length of a face.
+export function cityCornerBastionPlan(bays) {
+  const face = bays * CITY_CURTAIN.bay, half = CITY_CORNER_BASTION.salient / 2 * Math.PI / 180, F = face * Math.sin(half) / Math.SQRT2;
+  return { F: cityMetres(F), s: cityMetres(F / Math.tan(half)), face };
+}
+function cornerBastionSpec({ bays, height }) {
+  const { F, s } = cityCornerBastionPlan(bays), t = CITY_CURTAIN.thick / 2, n = CITY_CORNER_BASTION.embrasures[CITY_CORNER_BASTION.faces.indexOf(bays)];
+  const outline = [[t, t], [F, t], [F, -F], [-s, -s], [-F, F], [t, F]];
+  // The parapet from where the flank leaves the curtain's outer face, round the faces, to the other flank's.
+  const line = [[F, -t], [F, -F], [-s, -s], [-F, F], [-t, F]];
+  const faces = Array.from({ length: n }, (_, k) => (k + 0.5) / n);
+  const { primitives: parapet, guns } = gunParapet(line, [0, 0], height, [[0.5], faces, faces, [0.5]]);
+  // The cordon, the round moulding where the scarp meets the parapet, standing proud of the faces and flanks.
+  const cordon = line.slice(0, -1).map(([ax, az], i) => {
+    const [bx, bz] = line[i + 1], L = Math.hypot(bx - ax, bz - az), nx = (bz - az) / L * 0.22, nz = -(bx - ax) / L * 0.22, out = ax * nx + az * nz > 0 ? 1 : -1;
+    return { primitive: 'prism', name: 'bastion_cordon', points: [[ax, az], [bx, bz], [bx + out * nx, bz + out * nz], [ax + out * nx, az + out * nz]], from: height - 0.95, to: height - 0.65, material: 'limestone' };
+  });
+  return {
+    schemaVersion: '0.4', name: `Baluarte de ângulo (a corner bastion, faces of ${bays} bays, ${height} m high)`, width: 2 * s, length: 2 * s, height: height + CITY_BATTERY.rise, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false, guns,
+    primitives: [
+      { primitive: 'prism', partGroup: 'foundation_plinth', points: outline, from: -FOOTING_M, to: 0, material: 'dark_stone' },
+      { primitive: 'prism', name: 'bastion_faces', points: outline, from: 0, to: height, material: 'ashlar' },
+      ...cordon, ...parapet,
+    ],
+  };
+}
+
+// A gun tower, the artillery tower of the turn of the 16th century (the cubo or torreón of Spain, the baluarte of
+// Portugal's first gun towers; El Morro's of 1539, Belém's of 1514): a squat tower on a battered talus, a cordon where
+// the talus meets the shaft, its guns on its roof behind a gun parapet, looking out over its front (-z) and, square,
+// over its flanks too; entered at the talus' top. Round or square; of a few breadths and two heights.
+export const CITY_ARTILLERY_TOWER = Object.freeze({
+  round: Object.freeze([10, 13, 16, 20, 24]), roundGuns: Object.freeze([1, 2, 3, 4, 5]),
+  square: Object.freeze([9, 12, 15, 18]), squareGuns: Object.freeze([1, 1, 2, 3]),
+  heights: Object.freeze([9, 12]), talus: 0.4, batter: 1.4,
+});
+function artilleryTowerSpec({ round, across, height }) {
+  const { talus, batter } = CITY_ARTILLERY_TOWER, a = across / 2, foot = cityMetres(height * talus), segments = 18;
+  const primitives = [];
+  let guns;
+  if (round) {
+    const n = CITY_ARTILLERY_TOWER.roundGuns[CITY_ARTILLERY_TOWER.round.indexOf(across)], spread = n > 1 ? Math.min(150, (n - 1) * 45) * Math.PI / 180 : 0;
+    primitives.push(
+      { primitive: 'cylinder', partGroup: 'foundation_plinth', base: [0, -FOOTING_M, 0], height: FOOTING_M, radius: a + batter, segments, material: 'dark_stone' },
+      { primitive: 'cylinder', name: 'tower_scarp', base: [0, 0, 0], height: foot, radius: a + batter, radiusTop: a, segments, material: 'ashlar' },
+      { primitive: 'cylinder', name: 'tower_shaft', base: [0, foot, 0], height: height - foot, radius: a, segments, material: 'ashlar' },
+      { primitive: 'cylinder', name: 'tower_cordon', base: [0, foot, 0], height: 0.35, radius: a + 0.2, segments, material: 'limestone' },
+    );
+    // The parapet round its roof, a facet to each of its shaft's, an embrasure to each gun.
+    const ring = Array.from({ length: segments }, (_, k) => [a * Math.cos(k / segments * 2 * Math.PI), a * Math.sin(k / segments * 2 * Math.PI)]);
+    const want = Array.from({ length: n }, (_, k) => -Math.PI / 2 + (n > 1 ? (k / (n - 1) - 0.5) * spread : 0));
+    const at = ring.map(() => []), step = 2 * Math.PI / segments;
+    for (const phi of want) {
+      const u = ((phi % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI), k = Math.floor(u / step);
+      at[k].push(Math.min(0.75, Math.max(0.25, u / step - k)));
+    }
+    const made = gunParapet(ring, [0, 0], height, at, true);
+    primitives.push(...made.primitives);
+    guns = made.guns;
+  } else {
+    const k = CITY_ARTILLERY_TOWER.square.indexOf(across), front = CITY_ARTILLERY_TOWER.squareGuns[k], flanks = across >= 12;
+    primitives.push(
+      { primitive: 'box', partGroup: 'foundation_plinth', from: [-a - batter, -FOOTING_M, -a - batter], to: [a + batter, 0, a + batter], material: 'dark_stone' },
+      { primitive: 'box', name: 'tower_scarp', from: [-a - batter, 0, -a - batter], to: [a + batter, foot, a + batter], topInset: batter, material: 'ashlar' },
+      { primitive: 'box', name: 'tower_shaft', from: [-a, foot, -a], to: [a, height, a], material: 'ashlar', plain: true },
+      { primitive: 'box', name: 'tower_cordon', from: [-a - 0.2, foot, -a - 0.2], to: [a + 0.2, foot + 0.35, a + 0.2], material: 'limestone' },
+    );
+    const line = [[-a, -a], [a, -a], [a, a], [-a, a]], fronts = Array.from({ length: front }, (_, g) => (g + 0.5) / front);
+    const made = gunParapet(line, [0, 0], height, [fronts, flanks ? [0.3] : [], [], flanks ? [0.7] : []], true);
+    primitives.push(...made.primitives);
+    guns = made.guns;
+  }
+  // Its door at the talus' top, to the back, reached by a stair or a bridge from the work.
+  primitives.push({ primitive: 'box', name: 'tower_door', from: [-0.75, foot + 0.4, a - 0.12], to: [0.75, foot + 2.7, a + 0.04], material: 'recess' });
+  const width = cityMetres(across + 2 * batter);
+  return {
+    schemaVersion: '0.4', name: `${round ? 'Cubo' : 'Torreão'} (${round ? 'a round' : 'a square'} gun tower, ${across} m across, ${height} m high)`, width, length: width, height: height + CITY_BATTERY.rise, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false, guns,
+    primitives,
+  };
+}
+
+// A gun on its carriage, in the carriage of its age, at its one size: a demi-culverin, some 3 m of barrel throwing a
+// ball of about 9 lb, the commonest gun of a 16th- and 17th-century work. Until about 1600 the fortress gun lay on the
+// field carriage, the cureña of two great wheels and a long trail resting on the platform (Luis Collado, Plática manual
+// de artillería, 1592); from then the low garrison carriage of four trucks, as aboard ship, took over in the works
+// (Cristóbal Lechuga, Discurso que trata del cargo de maestre de campo… y de la artillería, 1611). Bronze for the first,
+// iron for the second. It stands on its own plank platform, its axle at the origin, its muzzle out (-z).
+export const CITY_GUN = Object.freeze({ trucksFrom: 1600, deck: 0.08 });
+const turnedCylinder = (name, [x, y, z], rotation, base, height, radius, radiusTop, material, segments = 12) => ({
+  primitive: 'group', name, position: [x, y, z], rotation, children: [{ primitive: 'cylinder', base, height, radius, radiusTop: radiusTop ?? radius, segments, material }],
+});
+function gunSpec({ trucks }) {
+  const D = CITY_GUN.deck, primitives = [];
+  // The barrel along its axis, breech (+z) to muzzle (-z): its reinforce, chase and muzzle swell, its cascabel, its trunnions across.
+  const barrel = (axis, trunnion, length, breech, muzzle, material) => {
+    const back = trunnion + length * 0.42, down = [-90, 0, 0];
+    primitives.push(
+      turnedCylinder('gun_barrel', [0, axis, back], down, [0, 0, 0], length * 0.45, breech, breech * 0.9, material),
+      turnedCylinder('gun_barrel', [0, axis, back - length * 0.45], down, [0, 0, 0], length * 0.55, breech * 0.8, muzzle, material),
+      turnedCylinder('gun_barrel', [0, axis, back - length + 0.18], down, [0, 0, 0], 0.18, muzzle * 1.22, muzzle * 1.22, material),
+      turnedCylinder('gun_barrel', [0, axis, back + 0.2], down, [0, 0, 0], 0.2, breech * 0.3, breech * 0.5, material, 8),
+      turnedCylinder('gun_trunnions', [0, axis, trunnion], [0, 0, 90], [0, -breech - 0.14, 0], 2 * breech + 0.28, 0.08, 0.08, material, 8),
+    );
+  };
+  if (!trucks) {
+    // The cureña: two wheels of 1.3 m, an axle-tree, and two cheeks running back and down to the trail on the platform.
+    const R = 0.65, axle = D + R, trail = 3.2, pitch = Math.asin((axle - D - 0.22) / trail) * 180 / Math.PI;
+    primitives.push({ primitive: 'box', partGroup: 'foundation_plinth', from: [-1.15, 0, -1.3], to: [1.15, D, 3.6], material: 'oak' });
+    for (const side of [-1, 1]) {
+      primitives.push(turnedCylinder('gun_wheel', [side * 0.66, axle, 0], [0, 0, 90], [0, -0.07, 0], 0.14, R, R, 'oak', 16));
+      primitives.push(turnedCylinder('gun_hub', [side * 0.66, axle, 0], [0, 0, 90], [0, -0.16, 0], 0.32, 0.13, 0.13, 'iron', 8));
+      primitives.push({ primitive: 'group', name: 'gun_carriage', position: [side * 0.31, axle, 0], rotation: [pitch, 0, 0], children: [
+        { primitive: 'box', from: [-0.08, -0.22, -0.55], to: [0.08, 0.2, trail], material: 'oak' },
+      ] });
+    }
+    primitives.push({ primitive: 'box', name: 'gun_carriage', from: [-0.6, axle - 0.12, -0.12], to: [0.6, axle + 0.1, 0.12], material: 'oak' });
+    primitives.push({ primitive: 'group', name: 'gun_carriage', position: [0, axle, 0], rotation: [pitch, 0, 0], children: [
+      { primitive: 'box', from: [-0.27, -0.2, trail - 0.5], to: [0.27, -0.05, trail - 0.3], material: 'oak' },
+      { primitive: 'box', from: [-0.27, -0.2, 0.9], to: [0.27, -0.06, 1.05], material: 'oak' },
+    ] });
+    barrel(axle + 0.34, 0, 3.0, 0.22, 0.15, 'bronze');
+  } else {
+    // The garrison carriage: two stepped cheeks on two axle-trees, four trucks, a bed and a quoin under the breech.
+    const Rf = 0.25, Rr = 0.23, front = -0.5, rear = 0.62, top = D + 0.78;
+    primitives.push({ primitive: 'box', partGroup: 'foundation_plinth', from: [-1.05, 0, -1.1], to: [1.05, D, 1.6], material: 'oak' });
+    for (const side of [-1, 1]) {
+      for (const [z, R] of [[front, Rf], [rear, Rr]]) primitives.push(turnedCylinder('gun_wheel', [side * 0.46, D + R, z], [0, 0, 90], [0, -0.06, 0], 0.12, R, R, 'oak', 12));
+      primitives.push({ primitive: 'box', name: 'gun_carriage', from: [side * 0.3 - 0.07, D + 0.2, -0.78], to: [side * 0.3 + 0.07, top, 0.1], material: 'oak' });
+      primitives.push({ primitive: 'box', name: 'gun_carriage', from: [side * 0.3 - 0.07, D + 0.2, 0.1], to: [side * 0.3 + 0.07, top - 0.24, 0.52], material: 'oak' });
+      primitives.push({ primitive: 'box', name: 'gun_carriage', from: [side * 0.3 - 0.07, D + 0.2, 0.52], to: [side * 0.3 + 0.07, top - 0.46, 0.88], material: 'oak' });
+    }
+    for (const [z, R] of [[front, Rf], [rear, Rr]]) primitives.push({ primitive: 'box', name: 'gun_carriage', from: [-0.5, D + R - 0.08, z - 0.09], to: [0.5, D + R + 0.1, z + 0.09], material: 'oak' });
+    primitives.push({ primitive: 'box', name: 'gun_carriage', from: [-0.23, D + 0.36, -0.7], to: [0.23, D + 0.44, 0.75], material: 'oak' });
+    primitives.push({ primitive: 'box', name: 'gun_carriage', from: [-0.12, D + 0.44, 0.45], to: [0.12, D + 0.58, 0.85], material: 'oak' });
+    barrel(top + 0.1, -0.3, 2.9, 0.23, 0.15, 'iron');
+  }
+  return {
+    schemaVersion: '0.4', name: trucks ? 'Peça em reparo de rodízios (a demi-culverin on a four-truck garrison carriage)' : 'Peça em cureña (a demi-culverin on a two-wheeled carriage with its trail)',
+    width: trucks ? 2.1 : 2.3, length: trucks ? 4 : 7.4, height: 1.4, foundationDepth: 0, materialKind: 10, roofPitch: 0, waterfront: false, primitives,
+  };
+}
+// The carriage a gun of the realm's `year` lies on: the family's first (the cureña) or its second (the trucks).
+export function cityGunType(year) { return CITY_TYPE.GUN + (Number(year) >= CITY_GUN.trucksFrom ? 1 : 0); }
+// The corner bastion of `bays` to a face and `height` high (both of CITY_CORNER_BASTION's).
+export function cityCornerBastionType(bays, height) {
+  const { faces, heights } = CITY_CORNER_BASTION;
+  return cityFamilyOf(CITY_TYPE.CORNER_BASTION).from + Math.max(0, heights.indexOf(height)) * faces.length + Math.max(0, faces.indexOf(bays));
+}
+
 // The castle's hall: two tall storeys of limewashed wall under a hipped roof, its door in the long front; as long as
 // its bays, a window to each of each storey, and of a narrower or a broader range.
 export const CITY_HALL = Object.freeze({ bay: 4.2, widths: Object.freeze([10, 12]), bays: Object.freeze([4, 5, 6, 7]), height: 10.5, roof: 3.2 });
@@ -514,6 +710,9 @@ const CITY_TYPE_NAMED = {
   })()),
   CURTAIN: cityFamily('CURTAIN', CITY_CURTAIN.heights.flatMap((height) => CITY_CURTAIN.bays.map((bays) => curtainSpec({ bays, height }))), CITY_CURTAIN.heights.indexOf(CITY_CURTAIN.height) * CITY_CURTAIN.bays.length + 3),
   BASTION: cityFamily('BASTION', CITY_BASTION.heights.flatMap((height) => CITY_BASTION.faces.map((bays) => bastionSpec({ bays, height }))), CITY_BASTION.heights.indexOf(CITY_CURTAIN.height) * CITY_BASTION.faces.length + 1),
+  CORNER_BASTION: cityFamily('CORNER_BASTION', CITY_CORNER_BASTION.heights.flatMap((height) => CITY_CORNER_BASTION.faces.map((bays) => cornerBastionSpec({ bays, height }))), CITY_CORNER_BASTION.heights.indexOf(CITY_CURTAIN.height) * CITY_CORNER_BASTION.faces.length + 1),
+  GUN_TOWER_ROUND: cityFamily('GUN_TOWER_ROUND', CITY_ARTILLERY_TOWER.heights.flatMap((height) => CITY_ARTILLERY_TOWER.round.map((across) => artilleryTowerSpec({ round: true, across, height }))), 2),
+  GUN_TOWER_SQUARE: cityFamily('GUN_TOWER_SQUARE', CITY_ARTILLERY_TOWER.heights.flatMap((height) => CITY_ARTILLERY_TOWER.square.map((across) => artilleryTowerSpec({ round: false, across, height }))), 1),
   BATTERY: cityFamily('BATTERY', CITY_BATTERY.depths.flatMap((depth) => CITY_BATTERY.guns.map((guns) => batterySpec({ guns, depth }))), CITY_BATTERY.guns.length - 1),
   WATCHTOWER: cityFamily('WATCHTOWER', CITY_WATCHTOWER.sides.flatMap((side) => CITY_WATCHTOWER.stages.map((stages) => watchtowerSpec({ side, stages }))), 1),
   HALL: cityFamily('HALL', CITY_HALL.widths.flatMap((width) => CITY_HALL.bays.map((bays) => hallSpec({ width, bays }))), CITY_HALL.bays.length + 3),
@@ -527,6 +726,8 @@ CITY_WORKS.forEach(([key, specs, canonical = 0], k) => {
   if (k === CITY_WORKS_BUILT) CITY_TYPE_NAMED.SLIGHT_FROM = cityTypes.length;
   CITY_TYPE_NAMED[key] = cityFamily(key, specs, canonical);
 });
+// The guns of the works, on the carriage of their age (cityGunType), slight as a cart is: they go with their work.
+CITY_TYPE_NAMED.GUN = cityFamily('GUN', [gunSpec({ trucks: false }), gunSpec({ trucks: true })]);
 // The first of the slighter works: from here on a type is written as large as it is, and asked for no footing.
 export const CITY_TYPE_SLIGHT_FROM = CITY_TYPE_NAMED.SLIGHT_FROM;
 delete CITY_TYPE_NAMED.SLIGHT_FROM;
@@ -571,8 +772,8 @@ export const CITY_TYPES_BRIDGES = Object.freeze(new Set(cityFamilyTypes('FOOTBRI
 // What stands in or over the water, never on the ground the land draws.
 export const CITY_TYPES_WATERSIDE = Object.freeze(new Set([...cityFamilyTypes('WHARF', 'WATERMILL'), ...CITY_TYPES_BRIDGES]));
 // What is too slight to be laid as a gun's target or to stop anyone walking: what hangs overhead, a fence,
-// graves, a cairn, a standard.
-export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, ...cityFamilyTypes('FENCE_RAIL', 'FENCE_POST', 'FENCE_STONE', 'GRAVES', 'CAIRN', 'STANDARD')]));
+// graves, a cairn, a standard, a work's guns (silenced with their work, js/port-damage.js).
+export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, ...cityFamilyTypes('FENCE_RAIL', 'FENCE_POST', 'FENCE_STONE', 'GRAVES', 'CAIRN', 'STANDARD', 'GUN')]));
 // Of those, what is stone standing on the ground in its own right, and shatters when struck.
 export const CITY_TYPES_STONE_SLIGHT = Object.freeze(new Set(cityFamilyTypes('CAIRN', 'FENCE_STONE', 'GRAVES')));
 // The paints a front's cloth and boards take, as tints of the land shader's limewash: after its five washes.
@@ -583,6 +784,8 @@ const CITY_TARGETS = Object.freeze({
   HOUSE: { prefabId: 'city_house', label: 'Town house' }, CHURCH_LEFT: { prefabId: 'city_church', label: 'Parish church' }, CHURCH_RIGHT: { prefabId: 'city_church', label: 'Parish church' },
   CHURCH_GREAT: { prefabId: 'city_church', label: 'Cathedral' }, WALL_TOWER: { prefabId: 'city_wall_tower', label: 'Wall tower' }, KEEP: { prefabId: 'city_keep', label: 'Castle keep' },
   GATE: { prefabId: 'city_gate', label: 'City gate' }, CURTAIN: { prefabId: 'city_wall', label: 'City wall' }, BASTION: { prefabId: 'city_bastion', label: 'Bastion' },
+  CORNER_BASTION: { prefabId: 'city_bastion', label: 'Bastion' }, GUN_TOWER_ROUND: { prefabId: 'city_gun_tower', label: 'Gun tower' }, GUN_TOWER_SQUARE: { prefabId: 'city_gun_tower', label: 'Gun tower' },
+  GUN: { prefabId: 'city_gun', label: 'Gun' },
   BATTERY: { prefabId: 'city_battery', label: 'Battery' }, WATCHTOWER: { prefabId: 'city_watchtower', label: 'Watchtower' }, HALL: { prefabId: 'city_castle_hall', label: 'Castle hall' },
   PENTICE: { prefabId: 'city_shop_front', label: 'Shop front' }, SIGN: { prefabId: 'city_shop_front', label: 'Shop front' }, ALE_STAKE: { prefabId: 'city_shop_front', label: 'Shop front' },
   STALL: { prefabId: 'city_market_stall', label: 'Market stall' }, MARKET_CROSS: { prefabId: 'city_market_cross', label: 'Market cross' }, WELL: { prefabId: 'city_well', label: 'Well' },
