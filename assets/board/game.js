@@ -5888,7 +5888,8 @@ function tickTongues(){ // yearly: the court's speech seeps into a town its lord
      knows    the technologies it holds at the founding (TECH_RULES); scale: how many of its people to a place, of the
               Old World's; hair: weights of dark, brown, fair and red
      womenTill  women work the fields in spring and summer; beasts, fences, mills, castle, church, strips: false where
-              its people keep no herds, hedge no fields, raise no mill, castle or church, and plough no strips
+              its people keep no herds, hedge no fields, raise no mill, castle or church, and plough no strips;
+              emblems: the charges (CHARGES) its great houses bear
      titles   {monarch:[his, hers], head:[his, hers]} the words for a paramount and for the head of a great house
      court    the words for the court's priest and for its other councillors; trades: the work of its people, by weight
               ('planter' tends the fields, as the Old World's ploughman does)
@@ -5954,7 +5955,8 @@ const AMERICAS_PEOPLES={
 for(const[k,c]of Object.entries(AMERICAS_PEOPLES)){ // what every tongue has: those the record does not give are their people's own customs
   // drawn:false: spoken where a real map's region speaks it, never drawn by lot for a made-up realm (CULT_DRAWN)
   Object.assign(c,{drawn:false,neu:['*'],house:p=>p,castle:p=>p,saints:[],church:(S,p)=>p,inns:[],trade:{}});
-  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false});
+  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false,
+    emblems:['stag','wave','oak','wolf','comet','sun','crescent','fish','raven','flame']}); // no tower, key, crown, sword, rose or anchor
   CULT[k]=c;KIN[k]={pre:/^(?!)/,suf:null,man:g=>g};
   // no surnames: a household is known by its clan where the record names the clans, else by its town; a man by his kin
   NAMEX[k]={m:[],f:[],roots:[],occ:{},loc:{},nick:{},patr:g=>'kin of '+g,origin:t=>'of '+t};}
@@ -5985,6 +5987,11 @@ function courtWord(role){const T=realmWays()?.court;return !T?role:role==='High 
 function monarchWord(n){const T=realmWays()?.titles;return T?T.monarch[n.sex==='f'?1:0]:n.sex==='f'?'Queen':'King';}
 function nativeTitle(T,n){const f=n.sex==='f'?1:0,ep=n.epithet?' '+n.epithet:'';
   if(n.role==='monarch')return T.monarch[f]+' '+n.name+ep;if(n.role==='head')return T.head[f]+' '+n.name+' of '+houseOf(n).name.replace('House ','');return n.name+ep;}
+function chargeFor(c,ch){const E=CULT[c]?.ways?.emblems;return !E||E.includes(ch)?ch:E[CHARGES.indexOf(ch)%E.length];} // a house's emblem, of its people's world
+function chiefSeat(s){ // where a people's chief lives: his own house about the open place, or, where he lives as his people do, the house nearest it
+  const N=waysOf(s);if(!N||!s.buildings)return null;let best=null,bd=Infinity;
+  for(const b of s.buildings){if(b.removed||b.state!=='sound')continue;if(b.chief)return b;if(!N.homes.includes(b.arch))continue;const d=dist2d(b.x,b.z,s.pos.x,s.pos.z);if(d<bd){bd=d;best=b;}}
+  return best;}
 function nativeKin(c,s){const K=CULT[c].ways.clans;return K?'of the '+K[Math.floor(frand()*K.length)]:NX(c).origin(s.name);} // a new household's name
 /* The map of tongues has eleven colours (uHouse): a realm's tongues take them in the table's order, only those it speaks,
    so however many tongues the program knows, a realm of eleven or fewer is coloured whole. */
@@ -6205,7 +6212,7 @@ function makeHousesAndCast(){
   W.houses.forEach((h,hi)=>{ // each house takes its name in its own tongue, mostly from its seat
     if(hi>0)initHousePurse(h);
     const seat=W.settlements[h.seat]||W.capital,C=CULT[h.cult=seat.cult||W.houseCult[hi]||W.crownCult],r=nameRng(500+hi); // a house speaks its own seat's tongue (it used to take the next house's by an off-by-one)
-    h.name='';h.name=uniqueHouseName(C,seat.name.replace(/^(the |Burg |Château |Castello )/,''),r,h);
+    h.name='';h.name=uniqueHouseName(C,seat.name.replace(/^(the |Burg |Château |Castello )/,''),r,h);h.charge=chargeFor(h.cult,h.charge);
   });
   // settlement ownership: nearest house seat (capital→crown)
   W.settlements.forEach((s,si)=>{
@@ -15150,7 +15157,7 @@ function tickPolitics(){
       const beasts=['Stag','Wolf','Raven','Heron','Boar','Ox','Falcon','Adder'];
       h.name='House '+(chance('sim',0.5)?pick('sim',NAMEB.pfx)+pick('sim',NAMEB.sfx):pick('sim',beasts)+pick('sim',['mane','fell','marck','wood','helm']));
       {const st=W.settlements[h.seat]||W.capital;h.cult=st.cult||h.cult;const C=CULT[h.cult]||CULT.anglo,r=nameRng(day()+exiledIdx*7);h.name=uniqueHouseName(C,st.name,r,h);}
-      h.charge=pick('sim',CHARGES);h.exiled=false;h.extinct=false;h.loyalty=68;h.might=0.6+rand('sim')*0.7;h.grudges={};escheat(h);h.led={};h.memo=[];h.dues=undefined;transfer('crown',h,400,'endowment');
+      h.charge=chargeFor(h.cult,pick('sim',CHARGES));h.exiled=false;h.extinct=false;h.loyalty=68;h.might=0.6+rand('sim')*0.7;h.grudges={};escheat(h);h.led={};h.memo=[];h.dues=undefined;transfer('crown',h,400,'endowment');
       markSigilDirty(h);
       if(W.settlements[h.seat]&&h.seat!==0&&W.settlements[h.seat].owner===0){W.settlements[h.seat].owner=exiledIdx;syncOwner(W.settlements[h.seat]);} // the forfeit seat, if the crown still holds it, really is granted
       const sx=chance('sim',0.5)?'m':'f';
@@ -15194,7 +15201,7 @@ function partition(hi,son){ // the lands are divided between the sons: the outly
   const name='House '+give[0].name.replace(/(mere|holt|ford|caster|wyck|march|fell|combe|worth|bridge|haven|moor|dale|garth|stead|port|field|burn|cester|ham|by)$/,'')+pick('sim',['ing','mont','ric','wald','hurst']);
   const kc=give[0].cult&&give[0].cult!==h.cult&&chance('sim',0.5)?give[0].cult:h.cult; // a branch planted among another people often takes their tongue
   const cC=CULT[kc]||CULT.anglo,cr=nameRng(day()+hi*101),cname=uniqueHouseName(cC,give[0].name,cr,null);
-  const nh={name:[cname,cname+' the Younger',cname+' of the March',cname+' the Cadet'].find(n=>!W.houses.some(o=>o.name===n))||name, /* a cadet takes its name from its fief, in its own tongue */cult:kc,sigilHue:hue,charge:pick('sim',CHARGES),seat:W.settlements.indexOf(give[0]),loyalty:60,might:(h.might||1)*0.8,wealth:(h.wealth||1)*0.7,exiled:false,grudges:{[hi]:true},crown:false,cadetOf:hi};
+  const nh={name:[cname,cname+' the Younger',cname+' of the March',cname+' the Cadet'].find(n=>!W.houses.some(o=>o.name===n))||name, /* a cadet takes its name from its fief, in its own tongue */cult:kc,sigilHue:hue,charge:chargeFor(kc,pick('sim',CHARGES)),seat:W.settlements.indexOf(give[0]),loyalty:60,might:(h.might||1)*0.8,wealth:(h.wealth||1)*0.7,exiled:false,grudges:{[hi]:true},crown:false,cadetOf:hi};
   {const share=Math.max(0,h.gold||0)*0.3;h.gold=(h.gold||0)-share; // the cadet starts with its share of the strongroom, and none of an old name's debts
     Object.assign(nh,{gold:share,led:{},hostageUntil:0,_grantT:undefined,_fortT:undefined,dues:undefined,_debtAsk:false,_summoned:0,extinct:false});}
   if(ci<0){if(W.houses.length>=11){h.gold+=nh.gold;return;}W.houses.push(nh);ci=W.houses.length-1;}else{escheat(W.houses[ci]);Object.assign(W.houses[ci],nh);markSigilDirty(W.houses[ci]);}
@@ -18471,10 +18478,10 @@ function goPerson(p,s){ // fly to wherever this person is now (walking the stree
 function notableResidence(n){ // nobles retain their existing dynasty and purse; their lodging is an ordinary canonical building
   if(n.role==='justice'&&n.fp){const s=W.settlements[n.fp.si],b=n.fp.bh;return s?{s,b:b?.s===s&&!b.removed&&b.state==='sound'?b:null,secure:false,lines:0}:null;}
   if(n.role==='Bandit King')return null;const H=houseOf(n),s=n.house===0?W.capital:W.settlements[H&&H.seat];if(!s||s.owner!==n.house)return null;
-  const b=casKeep(s)||s.buildings.find(b=>b.arch==='hall'&&b.inst&&!b.removed&&b.state==='sound');if(!b)return{s,b:null,secure:false,lines:0};
+  const b=casKeep(s)||s.buildings.find(b=>b.arch==='hall'&&b.inst&&!b.removed&&b.state==='sound')||chiefSeat(s);if(!b)return{s,b:null,secure:false,lines:0};
   let lines=0;for(const c of fortCircuits(s))if(c.wallRad&&!(c.breachUntil>day())&&fortContains(c,b.x,b.z))lines++;
   return{s,b,secure:b.arch==='keep'&&b.state==='sound',lines};}
-function notableResidents(b){if(b.arch!=='keep'&&b.arch!=='hall')return[];const s=b.s,H=W.houses[s.owner],head=s.owner===0?W.monarch:H&&notableById(H.head),R=head&&notableResidence(head);if(!R||R.b!==b)return[];
+function notableResidents(b){if(b.arch!=='keep'&&b.arch!=='hall'&&b!==chiefSeat(b.s))return[];const s=b.s,H=W.houses[s.owner],head=s.owner===0?W.monarch:H&&notableById(H.head),R=head&&notableResidence(head);if(!R||R.b!==b)return[];
   return livingNotableCandidates(n=>n.alive&&n.role!=='Bandit King'&&n.role!=='justice'&&n.house===s.owner&&!W.armies.some(a=>!a.gone&&a.commander===n.id));}
 function notableWhere(n){ // with the host they command, otherwise in the keep of their seat
   const a=W.armies.find(a=>!a.gone&&a.commander===n.id);if(a)return{army:a};

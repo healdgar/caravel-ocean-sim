@@ -43,7 +43,8 @@ const AMERICAS = String.raw`
      knows    the technologies it holds at the founding (TECH_RULES); scale: how many of its people to a place, of the
               Old World's; hair: weights of dark, brown, fair and red
      womenTill  women work the fields in spring and summer; beasts, fences, mills, castle, church, strips: false where
-              its people keep no herds, hedge no fields, raise no mill, castle or church, and plough no strips
+              its people keep no herds, hedge no fields, raise no mill, castle or church, and plough no strips;
+              emblems: the charges (CHARGES) its great houses bear
      titles   {monarch:[his, hers], head:[his, hers]} the words for a paramount and for the head of a great house
      court    the words for the court's priest and for its other councillors; trades: the work of its people, by weight
               ('planter' tends the fields, as the Old World's ploughman does)
@@ -109,7 +110,8 @@ const AMERICAS_PEOPLES={
 for(const[k,c]of Object.entries(AMERICAS_PEOPLES)){ // what every tongue has: those the record does not give are their people's own customs
   // drawn:false: spoken where a real map's region speaks it, never drawn by lot for a made-up realm (CULT_DRAWN)
   Object.assign(c,{drawn:false,neu:['*'],house:p=>p,castle:p=>p,saints:[],church:(S,p)=>p,inns:[],trade:{}});
-  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false});
+  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false,
+    emblems:['stag','wave','oak','wolf','comet','sun','crescent','fish','raven','flame']}); // no tower, key, crown, sword, rose or anchor
   CULT[k]=c;KIN[k]={pre:/^(?!)/,suf:null,man:g=>g};
   // no surnames: a household is known by its clan where the record names the clans, else by its town; a man by his kin
   NAMEX[k]={m:[],f:[],roots:[],occ:{},loc:{},nick:{},patr:g=>'kin of '+g,origin:t=>'of '+t};}
@@ -140,6 +142,11 @@ function courtWord(role){const T=realmWays()?.court;return !T?role:role==='High 
 function monarchWord(n){const T=realmWays()?.titles;return T?T.monarch[n.sex==='f'?1:0]:n.sex==='f'?'Queen':'King';}
 function nativeTitle(T,n){const f=n.sex==='f'?1:0,ep=n.epithet?' '+n.epithet:'';
   if(n.role==='monarch')return T.monarch[f]+' '+n.name+ep;if(n.role==='head')return T.head[f]+' '+n.name+' of '+houseOf(n).name.replace('House ','');return n.name+ep;}
+function chargeFor(c,ch){const E=CULT[c]?.ways?.emblems;return !E||E.includes(ch)?ch:E[CHARGES.indexOf(ch)%E.length];} // a house's emblem, of its people's world
+function chiefSeat(s){ // where a people's chief lives: his own house about the open place, or, where he lives as his people do, the house nearest it
+  const N=waysOf(s);if(!N||!s.buildings)return null;let best=null,bd=Infinity;
+  for(const b of s.buildings){if(b.removed||b.state!=='sound')continue;if(b.chief)return b;if(!N.homes.includes(b.arch))continue;const d=dist2d(b.x,b.z,s.pos.x,s.pos.z);if(d<bd){bd=d;best=b;}}
+  return best;}
 function nativeKin(c,s){const K=CULT[c].ways.clans;return K?'of the '+K[Math.floor(frand()*K.length)]:NX(c).origin(s.name);} // a new household's name
 /* The map of tongues has eleven colours (uHouse): a realm's tongues take them in the table's order, only those it speaks,
    so however many tongues the program knows, a realm of eleven or fewer is coloured whole. */
@@ -202,6 +209,16 @@ export const BOARD_NATIVE = Object.freeze([
   // ---- titles ----
   instead('A paramount is styled in the realm\'s own words.', "${n.sex==='f'?'Queen':'King'}", '${monarchWord(n)}', 2),
   after('And a head of a great house.', 'function fullTitle(n){', "const NT=realmWays()?.titles;if(NT&&n.role!=='justice')return nativeTitle(NT,n);"),
+  instead('Its chief lives in his own house, or in his people\'s, and keeps his household there.',
+    "const b=casKeep(s)||s.buildings.find(b=>b.arch==='hall'&&b.inst&&!b.removed&&b.state==='sound');if(!b)return{s,b:null,secure:false,lines:0};",
+    "const b=casKeep(s)||s.buildings.find(b=>b.arch==='hall'&&b.inst&&!b.removed&&b.state==='sound')||chiefSeat(s);if(!b)return{s,b:null,secure:false,lines:0};"),
+  instead('And it is known to be his.', "function notableResidents(b){if(b.arch!=='keep'&&b.arch!=='hall')return[];",
+    "function notableResidents(b){if(b.arch!=='keep'&&b.arch!=='hall'&&b!==chiefSeat(b.s))return[];"),
+  // ---- heraldry ----
+  after('A great house bears an emblem of its people\'s world.', "h.name='';h.name=uniqueHouseName(C,seat.name.replace(/^(the |Burg |Château |Castello )/,''),r,h);",
+    'h.charge=chargeFor(h.cult,h.charge);'),
+  instead('And so does one raised again.', "h.charge=pick('sim',CHARGES);", "h.charge=chargeFor(h.cult,pick('sim',CHARGES));"),
+  instead('And a cadet branch.', "cult:kc,sigilHue:hue,charge:pick('sim',CHARGES),", "cult:kc,sigilHue:hue,charge:chargeFor(kc,pick('sim',CHARGES)),"),
   // ---- technology ----
   instead('A realm opens knowing only what its people knew; the rest it may yet learn.',
     'for(const key of TECH_KEYS){const r=TECH_RULES[key];',

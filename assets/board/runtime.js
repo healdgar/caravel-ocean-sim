@@ -152,19 +152,26 @@ globalThis.BOARD_MODEL = (() => {
     return out;
   }
 
+  // The court in its own people's words, where they have their own (the model's realmWays: a people of the Americas),
+  // its chief at home in the house the model gives him (chiefSeat), named as the model names it. Else this game's
+  // Lisbon, whose crown keeps court between the Paço da Ribeira and the Alcáçova.
+  const courtWays = () => (typeof realmWays === 'function' ? realmWays() : null);
+  const ruler = () => { const T = courtWays()?.titles; return T && W?.monarch ? T.monarch[W.monarch.sex === 'f' ? 1 : 0] : null; };
+  const chiefLodging = (s, b) => (b ? buildingName(b) || `the ${ARCH[b.arch]?.[4] || b.arch} at ${s.name}` : s?.name || '');
   function notableRoleLabel(n) {
     if (!n) return 'courtier';
-    if (W?.monarch?.id === n.id) return n.sex === 'f' ? 'queen' : 'king';
-    if (W?.monarch && W.monarch.spouse === n.id) return n.sex === 'f' ? 'queen consort' : 'king consort';
+    const T = courtWays()?.titles, f = n.sex === 'f' ? 1 : 0;
+    if (W?.monarch?.id === n.id) return T ? T.monarch[f] : f ? 'queen' : 'king';
+    if (W?.monarch && W.monarch.spouse === n.id) return T ? `${f ? 'wife' : 'husband'} of the ${ruler()}` : f ? 'queen consort' : 'king consort';
     if (n.house === 0) {
-      if (n.role && n.role !== 'heir' && n.role !== 'member') return String(n.role);
+      if (n.role && n.role !== 'heir' && n.role !== 'member') return T ? courtWord(String(n.role)) : String(n.role);
       if (W?.monarch && (n.father === W.monarch.id || n.mother === W.monarch.id)) {
-        return n.sex === 'f' ? 'infanta' : 'infante';
+        return T ? `${f ? 'daughter' : 'son'} of the ${ruler()}` : f ? 'infanta' : 'infante';
       }
-      return n.sex === 'f' ? 'court lady' : 'royal courtier';
+      return T ? `of the ${ruler()}’s kin` : f ? 'court lady' : 'royal courtier';
     }
-    if (W?.houses?.[n.house]?.head === n.id) return n.sex === 'f' ? 'lady' : 'lord';
-    return String(n.role || (n.sex === 'f' ? 'noblewoman' : 'nobleman'));
+    if (W?.houses?.[n.house]?.head === n.id) return T ? T.head[f] : f ? 'lady' : 'lord';
+    return T ? courtWord(String(n.role || (f ? 'kinswoman' : 'kinsman'))) : String(n.role || (f ? 'noblewoman' : 'nobleman'));
   }
 
   function buildNotablePersonInspect(notableId) {
@@ -184,7 +191,8 @@ globalThis.BOARD_MODEL = (() => {
       ? fullTitle(n)
       : `${isMonarch ? (n.sex === 'f' ? 'Queen ' : 'King ') : ''}${n.name}${houseName && !String(n.name || '').includes(houseName) ? ' of ' + houseName : ''}`;
     const age = Math.max(1, Math.round(Number(n.age) || 32));
-    const lodging = (isRoyal && si === 0)
+    const ways = courtWays(), chief = ruler(), f = n.sex === 'f' ? 1 : 0;
+    const lodging = ways ? chiefLodging(s, res?.b) : (isRoyal && si === 0)
       ? 'Paço da Ribeira (Terreiro do Paço) & Alcáçova Keep'
       : (res?.b?.arch === 'keep' ? `${townName} Castle Keep` : `${townName} Manor Hall`);
     const treasuryCrowns = isRoyal
@@ -205,7 +213,10 @@ globalThis.BOARD_MODEL = (() => {
     }
     const bornYr = (typeof AD === 'function' ? AD() : 1550) - age;
     const lifeLines = [`Born AD ${bornYr} into ${houseName}`];
-    if (isMonarch) {
+    if (ways) {
+      lifeLines.push(isMonarch ? `Raised ${ways.titles.monarch[f]} of ${W?.name || townName}, keeping council at ${lodging}`
+        : isRoyal ? `Of the kin of ${W?.monarch ? fullTitle(W.monarch) : townName}, at ${lodging}` : `Of ${houseName}, at ${townName}`);
+    } else if (isMonarch) {
       const num = W?.reignNum?.[n.name] || 1;
       lifeLines.push(`Crowned ${n.sex === 'f' ? 'Queen' : 'King'} ${n.name}${num > 1 ? ' (' + num + ')' : ''} of ${W?.name || townName}, holding court at the waterfront Paço da Ribeira on Terreiro do Paço and the hilltop Alcáçova Keep`);
     } else if (isRoyal) {
@@ -219,7 +230,7 @@ globalThis.BOARD_MODEL = (() => {
         if (txt) lifeLines.push(String(txt));
       }
     }
-    const nowLine = isMonarch && si === 0
+    const nowLine = ways ? (isMonarch ? `Now keeping council at ${lodging}` : `Now at ${lodging}`) : isMonarch && si === 0
       ? `Now holding royal court at the waterfront Paço da Ribeira on Terreiro do Paço and ascending to the Alcáçova Keep above ${townName}`
       : isRoyal && si === 0
         ? `Now in royal attendance between the Paço da Ribeira (Terreiro do Paço) and the Alcáçova Keep`
@@ -231,7 +242,8 @@ globalThis.BOARD_MODEL = (() => {
       `Home ${lodging}`,
       `House ${houseName}`,
       `Treasury ${treasuryCrowns} crowns`,
-      `Personal status ${isMonarch ? 'Sovereign of the Realm' : isRoyal ? 'Royal Blood & Court' : 'Peer of the Realm'}`,
+      `Personal status ${ways ? (isMonarch ? `${ways.titles.monarch[f]} of ${W?.name || townName}` : isRoyal ? `Of the ${chief}’s kin` : 'Of a great house')
+        : isMonarch ? 'Sovereign of the Realm' : isRoyal ? 'Royal Blood & Court' : 'Peer of the Realm'}`,
       `Household members`,
       `Person | Age | Place`,
       ...(memberLines.length ? memberLines : [`${n.name} | ${age} | ${townName}`]),
@@ -1688,7 +1700,9 @@ globalThis.BOARD_MODEL = (() => {
         ? { x: s.pos.x * 0.55 + landPt.x * 0.45, z: s.pos.z * 0.55 + landPt.z * 0.45 }
         : { x: s.pos.x + 14, z: s.pos.z + 24 };
       const ribeiraNode = snapStreet(rawRibeira);
-      const keepRaw = s.keepPos || (typeof casKeep === 'function' && casKeep(s)) || { x: 230.6, z: -370.4 };
+      // A people of the Americas: its chief walks from his house to the open place, on foot, as do his kin.
+      const ways = courtWays();
+      const keepRaw = ways ? (chiefSeat(s) || s.pos) : s.keepPos || (typeof casKeep === 'function' && casKeep(s)) || { x: 230.6, z: -370.4 };
       const keepNode = snapStreet(keepRaw);
       const marketNode = snapStreet((s.places || [])[0] || { x: s.pos.x, z: s.pos.z });
       const houseSurname = (n) => (n.house === 0 ? (W?.houses?.[0]?.name || 'de Avis') : (W?.houses?.[n.house]?.name || ''));
@@ -1699,19 +1713,20 @@ globalThis.BOARD_MODEL = (() => {
         const isRoyal = n.house === 0;
         const isLord = W?.houses?.[n.house]?.head === n.id;
         const role = notableRoleLabel(n);
-        const mounted = Boolean(
+        const court = !ways && isRoyal && si === 0;
+        const mounted = !ways && Boolean(
           (!isMonarch && isLord)
           || n.role === 'marshal'
           || n.role === 'envoy'
           || n.role === 'justice'
           || (isRoyal && !isMonarch && idx >= 2 && (idx % 2 === 1))
         );
-        const startPt = (isRoyal && si === 0)
+        const startPt = court
           ? ((idx % 2 === 0) ? ribeiraNode : keepNode)
           : snapStreet((typeof notableResidence === 'function' ? notableResidence(n)?.b : null) || keepRaw);
         const destPt = (sunday && churchBld)
           ? snapStreet(churchBld)
-          : (isRoyal && si === 0)
+          : court
             ? ((idx % 2 === 0) ? keepNode : ribeiraNode)
             : marketNode;
         const goal = (sunday && churchBld) ? 'church' : 'work';
@@ -1733,11 +1748,11 @@ globalThis.BOARD_MODEL = (() => {
             sex: n.sex || null,
             age: r1(Math.max(1, Number(n.age) || 32)),
             role,
-            lodging: (isRoyal && si === 0) ? 'Paço da Ribeira (Terreiro do Paço) & Alcáçova Keep' : `${s.name} Keep`,
+            lodging: court ? 'Paço da Ribeira (Terreiro do Paço) & Alcáçova Keep' : ways ? chiefLodging(s, notableResidence(n)?.b) : `${s.name} Keep`,
             goal,
-            there: (isRoyal && si === 0)
+            there: court
               ? (isMonarch ? 'holding royal court between Paço da Ribeira and Alcáçova Keep' : 'in attendance upon the Crown at Paço da Ribeira')
-              : `holding court at ${s.name}`,
+              : ways ? (isMonarch ? `in council at ${s.name}` : `at ${s.name}`) : `holding court at ${s.name}`,
             via: walker.via || '',
             open: true,
             run: mounted,
@@ -2004,7 +2019,7 @@ globalThis.BOARD_MODEL = (() => {
           role,
           monarch: Boolean(W?.monarch?.id === n.id),
           royal: n.house === 0,
-          lodging: (n.house === 0 && at === 0) ? 'Paço da Ribeira (Terreiro do Paço) & Alcáçova Keep' : `${s.name} Keep`,
+          lodging: courtWays() ? chiefLodging(s, res?.s === s ? res.b : null) : (n.house === 0 && at === 0) ? 'Paço da Ribeira (Terreiro do Paço) & Alcáçova Keep' : `${s.name} Keep`,
         });
       }
     });
