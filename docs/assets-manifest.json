@@ -730,14 +730,14 @@
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
   "assets/crew/hair-continuum/manifest.json": {
-    "url": "assets/crew/hair-continuum/manifest.7562f9aae79caa87.json",
-    "bytes": 11180,
-    "sha256": "7562f9aae79caa87cc01e38320eafb0cadf9cdfca8606a114c9c22fec15c7a0a"
+    "url": "assets/crew/hair-continuum/manifest.21fc8a09c99f597d.json",
+    "bytes": 10878,
+    "sha256": "21fc8a09c99f597de4a19e3f737207b4b075ea12fd10fc33a55c5e5ef3c514e2"
   },
   "assets/crew/hair-continuum/atlas.bin.gz": {
-    "url": "assets/crew/hair-continuum/atlas.bin.9d06a7bd97387f5c.gz",
-    "bytes": 10296148,
-    "sha256": "9d06a7bd97387f5ca0e4de435897d07163df685ca9e62357a96a67d721b96007"
+    "url": "assets/crew/hair-continuum/atlas.bin.77b5d82bf47e7845.gz",
+    "bytes": 10332238,
+    "sha256": "77b5d82bf47e7845e23bc14a254a37f085f70fad431da358cc8b69338c6c5a55"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",
@@ -1995,9 +1995,9 @@
     "sha256": "40250fb88f9c43af3049ff419bbf636ab5f088afc3126de2d675b93fdd4f7313"
   },
   "assets/continuum/bake-worker.js": {
-    "url": "assets/continuum/bake-worker.121019ea87760670.js",
-    "bytes": 176064,
-    "sha256": "121019ea8776067053a4e8854dd8cae00190af0ef53102dc8814398dfa8bfe7f"
+    "url": "assets/continuum/bake-worker.3db892c7109281e6.js",
+    "bytes": 176065,
+    "sha256": "3db892c7109281e6f751807993099038c26a3ec12085586e26bd9482482726ed"
   },
   "assets/ports/1550/land-materials-pbr.png": {
     "url": "assets/ports/1550/land-materials-pbr.1d2651bbbcdd39c4.png",

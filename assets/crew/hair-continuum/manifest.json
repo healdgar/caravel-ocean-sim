@@ -3,14 +3,14 @@
  "version": 3,
  "generator": "scripts/prepare-hair-continuum.mjs",
  "atlas": {
-  "words": 5380135,
+  "words": 5413435,
   "headerWords": 32,
-  "bytes": 21520540,
-  "sha256": "42452eb64ec4b72816fef707afce294d4259851d9e59f85c20bfb4227c43b355",
+  "bytes": 21653740,
+  "sha256": "abcca19eb932fc85d8d34ebb6a6f1558e7867cc762e0e88f90fdf6c9f71f9e18",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 10296148,
-   "sha256": "9d06a7bd97387f5ca0e4de435897d07163df685ca9e62357a96a67d721b96007"
+   "bytes": 10332238,
+   "sha256": "77b5d82bf47e7845e23bc14a254a37f085f70fad431da358cc8b69338c6c5a55"
   }
  },
  "types": [
@@ -29,41 +29,41 @@
     "rootError": 0.0154
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     18,
-     19,
-     19
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 2,
-    "wrapTriangles": 600,
-    "baseTriangles": 50,
-    "baseVertices": 27,
-    "baseError": 0.0689,
-    "outward": 0.0622,
-    "inward": 0.0689,
-    "simplifyError": 0.04,
-    "steps": 22,
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 3,
+    "depth": 8,
     "errorRange": [
-     0.0689,
-     0.2562
+     0,
+     0.1068
     ],
-    "inflateMax": 0.032,
+    "inflateMax": 0.0239,
     "rootTriangles": 33,
-    "farFirst": 9,
+    "farFirst": 204,
     "farFirstTriangles": 32,
-    "handoffError": 0.1237
+    "handoffError": 0.0667
    },
    "splat": {
     "centre": [
-     0.0086,
-     1.6562,
-     0.0361
+     -0.006,
+     1.684,
+     0.0178
     ],
-    "rx": 0.1383,
-    "ry": 0.16
+    "rx": 0.099,
+    "ry": 0.1045
    }
   },
   {
@@ -81,41 +81,41 @@
     "rootError": 0.0186
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     18,
-     20,
-     19
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 2,
-    "wrapTriangles": 724,
-    "baseTriangles": 332,
-    "baseVertices": 168,
-    "baseError": 0.0798,
-    "outward": 0.0764,
-    "inward": 0.0798,
-    "simplifyError": 0.0131,
-    "steps": 163,
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 5,
+    "depth": 8,
     "errorRange": [
-     0.0798,
-     0.2343
+     0,
+     0.0876
     ],
-    "inflateMax": 0.04,
+    "inflateMax": 0.0206,
     "rootTriangles": 23,
-    "farFirst": 155,
+    "farFirst": 209,
     "farFirstTriangles": 22,
-    "handoffError": 0.151
+    "handoffError": 0.0649
    },
    "splat": {
     "centre": [
-     0,
-     1.6161,
-     0.0313
+     -0.0058,
+     1.6796,
+     0.021
     ],
-    "rx": 0.1529,
-    "ry": 0.2
+    "rx": 0.082,
+    "ry": 0.0952
    }
   },
   {
@@ -133,41 +133,41 @@
     "rootError": 0.0176
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     18,
-     21,
-     21
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 2,
-    "wrapTriangles": 892,
-    "baseTriangles": 88,
-    "baseVertices": 46,
-    "baseError": 0.0849,
-    "outward": 0.0636,
-    "inward": 0.0849,
-    "simplifyError": 0.04,
-    "steps": 41,
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 3,
+    "depth": 7,
     "errorRange": [
-     0.0849,
-     0.2585
+     0,
+     0.1538
     ],
-    "inflateMax": 0.04,
+    "inflateMax": 0.0304,
     "rootTriangles": 39,
-    "farFirst": 25,
+    "farFirst": 201,
     "farFirstTriangles": 38,
-    "handoffError": 0.1653
+    "handoffError": 0.0787
    },
    "splat": {
     "centre": [
-     -0.0074,
-     1.6186,
-     -0.0062
+     -0.0058,
+     1.6225,
+     0.0035
     ],
-    "rx": 0.1751,
-    "ry": 0.2
+    "rx": 0.0753,
+    "ry": 0.1523
    }
   },
   {
@@ -185,41 +185,41 @@
     "rootError": 0.02
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     19,
-     23,
-     19
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 9,
-    "wrapTriangles": 1024,
-    "baseTriangles": 424,
-    "baseVertices": 214,
-    "baseError": 0.0854,
-    "outward": 0.0827,
-    "inward": 0.0854,
-    "simplifyError": 0.0131,
-    "steps": 209,
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 5,
+    "depth": 7,
     "errorRange": [
-     0.0854,
-     0.2599
+     0,
+     0.1168
     ],
-    "inflateMax": 0.052,
+    "inflateMax": 0.0326,
     "rootTriangles": 26,
-    "farFirst": 199,
+    "farFirst": 207,
     "farFirstTriangles": 26,
-    "handoffError": 0.1903
+    "handoffError": 0.0847
    },
    "splat": {
     "centre": [
-     -0.0022,
-     1.5594,
-     0.0019
+     -0.0043,
+     1.6201,
+     -0.0067
     ],
-    "rx": 0.1669,
-    "ry": 0.26
+    "rx": 0.1127,
+    "ry": 0.1632
    }
   },
   {
@@ -237,41 +237,41 @@
     "rootError": 0.0157
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     17,
-     18,
-     18
+     0,
+     0,
+     0
     ],
     "wellComposedCells": 0,
-    "wrapTriangles": 508,
-    "baseTriangles": 40,
-    "baseVertices": 22,
-    "baseError": 0.0711,
-    "outward": 0.0711,
-    "inward": 0.0677,
-    "simplifyError": 0.04,
-    "steps": 17,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 3,
+    "depth": 8,
     "errorRange": [
-     0.0711,
-     0.2382
+     0,
+     0.0976
     ],
-    "inflateMax": 0.032,
+    "inflateMax": 0.0206,
     "rootTriangles": 31,
-    "farFirst": 5,
+    "farFirst": 205,
     "farFirstTriangles": 30,
-    "handoffError": 0.0883
+    "handoffError": 0.0667
    },
    "splat": {
     "centre": [
-     0.0016,
-     1.6487,
-     0.0305
+     -0.006,
+     1.6699,
+     0.021
     ],
-    "rx": 0.1155,
-    "ry": 0.16
+    "rx": 0.0836,
+    "ry": 0.0856
    }
   },
   {
@@ -289,41 +289,41 @@
     "rootError": 0.0206
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     20,
-     24,
-     20
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 4,
-    "wrapTriangles": 1156,
-    "baseTriangles": 302,
-    "baseVertices": 153,
-    "baseError": 0.1123,
-    "outward": 0.0796,
-    "inward": 0.1123,
-    "simplifyError": 0.0205,
-    "steps": 148,
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 5,
+    "depth": 7,
     "errorRange": [
-     0.1123,
-     0.3834
+     0,
+     0.1341
     ],
-    "inflateMax": 0.056,
+    "inflateMax": 0.0293,
     "rootTriangles": 54,
-    "farFirst": 124,
+    "farFirst": 193,
     "farFirstTriangles": 54,
-    "handoffError": 0.2076
+    "handoffError": 0.1015
    },
    "splat": {
     "centre": [
-     0.0096,
-     1.4712,
-     -0.0265
+     0.0009,
+     1.5685,
+     -0.0517
     ],
-    "rx": 0.1893,
-    "ry": 0.28
+    "rx": 0.108,
+    "ry": 0.1466
    }
   },
   {
@@ -341,41 +341,41 @@
     "rootError": 0.0177
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     18,
-     20,
-     20
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 1,
-    "wrapTriangles": 712,
-    "baseTriangles": 304,
-    "baseVertices": 154,
-    "baseError": 0.0911,
-    "outward": 0.0844,
-    "inward": 0.0911,
-    "simplifyError": 0.0131,
-    "steps": 149,
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 6,
+    "depth": 5,
     "errorRange": [
-     0.0911,
-     0.2691
+     0,
+     0.0973
     ],
-    "inflateMax": 0.04,
+    "inflateMax": 0.022,
     "rootTriangles": 39,
-    "farFirst": 133,
+    "farFirst": 201,
     "farFirstTriangles": 38,
-    "handoffError": 0.1591
+    "handoffError": 0.0505
    },
    "splat": {
     "centre": [
-     0.0134,
-     1.5466,
-     -0.0465
+     -0.0032,
+     1.6218,
+     -0.0502
     ],
-    "rx": 0.1592,
-    "ry": 0.2
+    "rx": 0.0832,
+    "ry": 0.0835
    }
   },
   {
@@ -393,41 +393,41 @@
     "rootError": 0.017
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     18,
-     21,
-     20
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 1,
-    "wrapTriangles": 748,
-    "baseTriangles": 58,
-    "baseVertices": 31,
-    "baseError": 0.0929,
-    "outward": 0.0777,
-    "inward": 0.0929,
-    "simplifyError": 0.04,
-    "steps": 26,
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 3,
+    "depth": 6,
     "errorRange": [
-     0.0929,
-     0.2255
+     0,
+     0.108
     ],
-    "inflateMax": 0.044,
+    "inflateMax": 0.0211,
     "rootTriangles": 41,
-    "farFirst": 9,
+    "farFirst": 200,
     "farFirstTriangles": 40,
-    "handoffError": 0.1437
+    "handoffError": 0.0772
    },
    "splat": {
     "centre": [
-     0.0123,
-     1.5455,
-     -0.0242
+     -0.0032,
+     1.6214,
+     -0.0385
     ],
-    "rx": 0.1372,
-    "ry": 0.22
+    "rx": 0.0927,
+    "ry": 0.0972
    }
   },
   {
@@ -445,41 +445,41 @@
     "rootError": 0.0216
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     20,
-     25,
-     20
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 2,
-    "wrapTriangles": 1256,
-    "baseTriangles": 80,
-    "baseVertices": 42,
-    "baseError": 0.1201,
-    "outward": 0.0742,
-    "inward": 0.1201,
-    "simplifyError": 0.04,
-    "steps": 37,
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
     "coreTriangles": 6,
-    "depth": 3,
+    "depth": 7,
     "errorRange": [
-     0.1201,
-     0.3435
+     0,
+     0.1126
     ],
-    "inflateMax": 0.06,
+    "inflateMax": 0.0294,
     "rootTriangles": 27,
-    "farFirst": 27,
+    "farFirst": 207,
     "farFirstTriangles": 26,
-    "handoffError": 0.1992
+    "handoffError": 0.1126
    },
    "splat": {
     "centre": [
-     0.0067,
-     1.4477,
-     -0.0407
+     -0.0016,
+     1.5691,
+     -0.0581
     ],
-    "rx": 0.1836,
-    "ry": 0.3
+    "rx": 0.1098,
+    "ry": 0.1472
    }
   },
   {
@@ -497,41 +497,41 @@
     "rootError": 0.003
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     14,
-     13,
-     12
+     0,
+     0,
+     0
     ],
     "wellComposedCells": 0,
-    "wrapTriangles": 44,
-    "baseTriangles": 8,
-    "baseVertices": 6,
-    "baseError": 0.0549,
-    "outward": 0.0549,
-    "inward": 0.0237,
-    "simplifyError": 0.032,
-    "steps": 1,
+    "wrapTriangles": 144,
+    "baseTriangles": 144,
+    "baseVertices": 74,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 69,
     "coreTriangles": 6,
-    "depth": 1,
+    "depth": 4,
     "errorRange": [
-     0.0549,
-     0.1202
+     0,
+     0.0143
     ],
-    "inflateMax": 0.0096,
+    "inflateMax": 0.0062,
     "rootTriangles": 29,
-    "farFirst": 0,
-    "farFirstTriangles": 8,
-    "handoffError": 0.0549
+    "farFirst": 58,
+    "farFirstTriangles": 28,
+    "handoffError": 0.0049
    },
    "splat": {
     "centre": [
-     0.0167,
-     1.577,
-     0.1553
+     0,
+     1.59,
+     0.1572
     ],
     "rx": 0.05,
-    "ry": 0.06
+    "ry": 0.05
    }
   },
   {
@@ -549,41 +549,41 @@
     "rootError": 0.0055
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     14,
-     15,
-     14
+     0,
+     0,
+     0
     ],
     "wellComposedCells": 0,
-    "wrapTriangles": 136,
-    "baseTriangles": 18,
-    "baseVertices": 11,
-    "baseError": 0.0585,
-    "outward": 0.0585,
-    "inward": 0.028,
-    "simplifyError": 0.04,
-    "steps": 6,
+    "wrapTriangles": 144,
+    "baseTriangles": 144,
+    "baseVertices": 74,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 69,
     "coreTriangles": 6,
-    "depth": 2,
+    "depth": 4,
     "errorRange": [
-     0.0585,
-     0.1303
+     0,
+     0.0344
     ],
-    "inflateMax": 0.016,
+    "inflateMax": 0.0101,
     "rootTriangles": 1,
-    "farFirst": 6,
+    "farFirst": 69,
     "farFirstTriangles": 6,
-    "handoffError": 0.1303
+    "handoffError": 0.0344
    },
    "splat": {
     "centre": [
-     0.0065,
-     1.5482,
-     0.1337
+     0,
+     1.5232,
+     0.1548
     ],
-    "rx": 0.0659,
-    "ry": 0.08
+    "rx": 0.05,
+    "ry": 0.05
    }
   },
   {
@@ -601,41 +601,41 @@
     "rootError": 0.0081
    },
    "chain": {
-    "cell": 0.04,
+    "cell": 0,
     "cells": [
-     14,
-     17,
-     15
+     0,
+     0,
+     0
     ],
-    "wellComposedCells": 1,
-    "wrapTriangles": 200,
-    "baseTriangles": 24,
-    "baseVertices": 14,
-    "baseError": 0.0639,
-    "outward": 0.0639,
-    "inward": 0.0415,
-    "simplifyError": 0.032,
-    "steps": 9,
+    "wellComposedCells": 0,
+    "wrapTriangles": 144,
+    "baseTriangles": 144,
+    "baseVertices": 74,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 69,
     "coreTriangles": 6,
-    "depth": 2,
+    "depth": 4,
     "errorRange": [
-     0.0639,
-     0.1478
+     0,
+     0.0361
     ],
-    "inflateMax": 0.028,
+    "inflateMax": 0.0144,
     "rootTriangles": 2,
-    "farFirst": 9,
+    "farFirst": 69,
     "farFirstTriangles": 6,
-    "handoffError": 0.1478
+    "handoffError": 0.0361
    },
    "splat": {
     "centre": [
-     -0.002,
-     1.4826,
-     0.1387
+     0,
+     1.4992,
+     0.1607
     ],
-    "rx": 0.0663,
-    "ry": 0.14
+    "rx": 0.0516,
+    "ry": 0.072
    }
   }
  ]

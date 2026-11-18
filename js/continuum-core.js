@@ -17,7 +17,7 @@ export const CONTINUUM_MIN_PIXELS = 1.0;
 export const CONTINUUM_SPLAT_AREA = Math.sqrt(Math.PI / (3 * Math.sqrt(3)));
 // Where a finer side of a body hands over to a coarser one (clusters to the far body, leaves to the crown), both
 // are worn, sample by sample, over this share of the distance at which the handoff begins.
-export const CONTINUUM_HANDOFF_BAND = 0.3;
+export const CONTINUUM_HANDOFF_BAND = 0.45;
 // The scene's one triangle budget, in submitted triangles (rule 3, item 5).
 export const CONTINUUM_TRIANGLE_BUDGET = 3_000_000;
 // The pixel error the scene's cut is drawn at before any governor moves it.

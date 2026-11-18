@@ -492,8 +492,10 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
 fn forestBotanicalDetail(uv:vec2f,viewDist:f32,rawAlpha:f32)->vec4f{
  let detailW=1.-smoothstep(10.,38.,viewDist);
  if(detailW<=.001||rawAlpha<=.04){return vec4f(rawAlpha,0.,0.,0.);}
- let edgeSharp=smoothstep(.24,.76,rawAlpha);
- let crispAlpha=mix(rawAlpha,edgeSharp,detailW*.24);
+ // Near, solidify BC7-compressed leaf & twig interiors (rawAlpha >= 0.72 -> 1.0) so MSAA sample-masking never
+ // punches salt-and-pepper stipple dots through solid leaves up close, while preserving smooth anti-aliased edges.
+ let edgeSharp=smoothstep(.18,.72,rawAlpha);
+ let crispAlpha=mix(rawAlpha,edgeSharp,detailW*.96);
  let interior=smoothstep(.20,.65,rawAlpha)*detailW;
  let chevronU=uv.x*22.0-abs(uv.y-.5)*14.0;
  let secVein=sin(chevronU)*exp(-abs(fract(chevronU*.1591549)-.5)*3.2);

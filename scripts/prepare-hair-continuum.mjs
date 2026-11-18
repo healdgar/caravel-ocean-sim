@@ -727,24 +727,187 @@ function buildBeardGroom(ref, style, seed) {
   return mesh;
 }
 
-function buildFarWrapInput(mesh) {
-  const T = mesh.index.length / 3;
+// Builds an exact, smooth, genus-0 (closed, euler === 2) hair far-body shell directly from the fitted skull and
+// baked 3D strands — bypassing voxel-wrapping so the far hair silhouette NEVER bridges across the face or turns boxy.
+// Vertices inside the open facial window (forehead, eyes, nose, cheeks, mouth, ears, throat, and tonsure dome) are
+// recessed deep inside the skull core (r = 4.2 cm), so hardware depth testing always keeps the real face 100% clear
+// at every progressive collapse step while crown, temple, side, back, and draping hair stays smooth and voluminous.
+function buildFarHairShell(ref, mesh, spec) {
+  const isBeard = spec.slot === 'beard';
+  const tonsure = spec.id === 'tonsure-fringe';
+  const isLong = spec.id === 'parted-waves' || spec.id === 'indigenous-long' || spec.id === 'indigenous-long-f';
+  const isQueue = spec.id === 'mariner-queue';
+  const isBun = spec.id === 'nape-chignon';
+
+  const Vmesh = mesh.position.length / 3;
+  // Subsample strand vertices for fast directional silhouette measurement.
+  const stride = Math.max(1, Math.floor(Vmesh / 1800));
+  const strandPts = [];
+  for (let v = 0; v < Vmesh; v += stride) {
+    strandPts.push([mesh.position[v * 3], mesh.position[v * 3 + 1], mesh.position[v * 3 + 2]]);
+  }
+
+  const RINGS = isBeard ? 7 : 12;
+  const SEGS = isBeard ? 12 : 20;
+  const verts = [];
+
+  if (isBeard) {
+    // Tight jawline/lip ellipsoid strictly below nostrils so far beards never touch eyes or nose.
+    const cx = 0;
+    const cy = spec.id === 'moustache' ? ref.lipUpperY - 0.004 : (spec.id === 'sea-beard' ? ref.chinY - 0.020 : ref.chinY + 0.004);
+    const cz = spec.id === 'moustache' ? ref.lipZ - 0.002 : ref.lipZ - 0.018;
+    const rx = spec.id === 'moustache' ? 0.032 : (spec.id === 'sea-beard' ? 0.068 : 0.052);
+    const ry = spec.id === 'moustache' ? 0.010 : (spec.id === 'sea-beard' ? 0.072 : 0.038);
+    const rz = spec.id === 'moustache' ? 0.016 : (spec.id === 'sea-beard' ? 0.056 : 0.044);
+    const maxY = ref.lipUpperY + 0.005;
+    const pushBeardVert = (dx, dy, dz) => {
+      let x = cx + dx * rx;
+      let y = Math.min(maxY, cy + dy * ry);
+      let z = cz + dz * rz;
+      // Recess upper-back vertices into the jaw interior so only the outward beard silhouette shows.
+      if (dz < -0.15) {
+        x *= 0.65;
+        z = cz - 0.018;
+      }
+      verts.push([x, y, z]);
+    };
+    pushBeardVert(0, 1, 0);
+    for (let r = 1; r < RINGS; r++) {
+      const phi = (r / RINGS) * Math.PI;
+      const sp = Math.sin(phi), cp = Math.cos(phi);
+      for (let s = 0; s < SEGS; s++) {
+        const th = (s / SEGS) * Math.PI * 2;
+        pushBeardVert(Math.sin(th) * sp, cp, Math.cos(th) * sp);
+      }
+    }
+    pushBeardVert(0, -1, 0);
+  } else {
+    const center = [0, ref.crownY - 0.090, ref.midZ - 0.006];
+    const evalDir = (dx, dy, dz) => {
+      const dir = norm3([dx, dy, dz]);
+      const hit = ref.raycast(center, dir, 0.035, 0.19);
+      const skullR = hit ? hit.t : 0.088;
+      const sx = center[0] + dir[0] * skullR;
+      const sy = center[1] + dir[1] * skullR;
+      const sz = center[2] + dir[2] * skullR;
+      const ax = Math.abs(sx);
+
+      // Exact open-face window: forehead below hairline, brows, eyes, nose, cheeks, mouth, chin, ears, and front throat.
+      let recessed = false;
+      const widowDip = 0.005 * Math.exp(-((sx / 0.020) ** 2));
+      const templeRecede = 0.012 * Math.exp(-(((ax - 0.044) / 0.020) ** 2));
+      const hairlineY = (ref.crownY - 0.044) - widowDip + templeRecede;
+      if (sz > ref.midZ + 0.006 && sy < hairlineY) {
+        // Keep sideburns/long cheek-framing hair only outside |x| > 0.064 and behind the cheek plane.
+        const behindCheeks = ax > 0.064 && sz < ref.midZ + 0.030;
+        if (!behindCheeks) recessed = true;
+      }
+      // Always keep the front facial cone (nose/eyes/mouth) strictly clear.
+      if (dir[2] > 0.28 && dir[1] < 0.34) recessed = true;
+      // Ears stay clear.
+      const earDy = (sy - ref.earY) / 0.034, earDz = (sz - ref.earZ) / 0.026;
+      if (ax > 0.052 && earDy * earDy + earDz * earDz < 1.0) recessed = true;
+      // Nape/neck bottom cutoff (lower for long hair in the back/sides, strictly clear in front of throat).
+      const backShare = Math.max(0, Math.min(1, (-dir[2] + 0.25) / 0.85));
+      const minHairY = isLong
+        ? (ref.crownY - 0.24 - backShare * 0.16)
+        : (isQueue ? (ref.crownY - 0.20 - backShare * 0.12) : (ref.crownY - 0.175));
+      if (sy < minHairY || (dir[1] < -0.55 && dir[2] > -0.15)) recessed = true;
+      // Tonsure dome stays bare on top.
+      if (tonsure) {
+        const domeR = Math.hypot(sx / 0.056, (sz - (ref.midZ - 0.004)) / 0.068);
+        if (sy > ref.crownY - 0.064 && domeR < 1.0) recessed = true;
+      }
+
+      if (recessed) {
+        // Pull deep inside the cranium core (4.0 cm sphere) so no triangle or collapsed chord can ever cross the face!
+        return add3(center, dir, 0.040);
+      }
+
+      // Measure actual outer hair strand envelope along `dir` (within a 22-deg cone) so the far shell matches each groom.
+      const radialSamples = [];
+      for (let k = 0; k < strandPts.length; k++) {
+        const p = strandPts[k];
+        const vx = p[0] - center[0], vy = p[1] - center[1], vz = p[2] - center[2];
+        const rl = Math.hypot(vx, vy, vz);
+        if (rl < 0.04) continue;
+        const cosA = (vx * dir[0] + vy * dir[1] + vz * dir[2]) / rl;
+        if (cosA > 0.925) radialSamples.push(rl);
+      }
+      let targetR = skullR + 0.006;
+      if (radialSamples.length >= 3) {
+        radialSamples.sort((a, b) => a - b);
+        const q75 = radialSamples[Math.floor(radialSamples.length * 0.72)];
+        const maxExtra = isLong ? 0.095 : (isBun || isQueue ? 0.055 : 0.024);
+        targetR = Math.max(skullR + 0.004, Math.min(skullR + maxExtra, q75));
+      }
+      const out = add3(center, dir, targetR);
+      // Hard safety clamp: never let hair far-shell poke forward past the forehead/cheek plane below the hairline.
+      if (out[1] < ref.crownY - 0.042 && out[2] > ref.midZ + 0.032) {
+        out[2] = ref.midZ + 0.032;
+      }
+      return out;
+    };
+
+    verts.push(evalDir(0, 1, 0));
+    for (let r = 1; r < RINGS; r++) {
+      const phi = (r / RINGS) * Math.PI;
+      const sp = Math.sin(phi), cp = Math.cos(phi);
+      for (let s = 0; s < SEGS; s++) {
+        const th = (s / SEGS) * Math.PI * 2;
+        verts.push(evalDir(Math.sin(th) * sp, cp, Math.cos(th) * sp));
+      }
+    }
+    verts.push(evalDir(0, -1, 0));
+  }
+
+  // Build watertight outward-wound triangle indices (V = 2 + (RINGS - 1) * SEGS, F = 2 * (RINGS - 1) * SEGS, euler === 2).
+  const tris = [];
+  const southIdx = verts.length - 1;
+  const ringIdx = (r, s) => 1 + (r - 1) * SEGS + (s % SEGS);
+  for (let s = 0; s < SEGS; s++) {
+    tris.push([0, ringIdx(1, s), ringIdx(1, s + 1)]);
+  }
+  for (let r = 1; r < RINGS - 1; r++) {
+    for (let s = 0; s < SEGS; s++) {
+      const a = ringIdx(r, s), b = ringIdx(r, s + 1);
+      const c = ringIdx(r + 1, s), d = ringIdx(r + 1, s + 1);
+      tris.push([a, c, d], [a, d, b]);
+    }
+  }
+  for (let s = 0; s < SEGS; s++) {
+    tris.push([ringIdx(RINGS - 1, s), southIdx, ringIdx(RINGS - 1, s + 1)]);
+  }
+
+  // Compute smooth outward vertex normals.
+  const vNorms = verts.map(() => [0, 0, 0]);
+  for (const [ia, ib, ic] of tris) {
+    const fn = cross3(sub3(verts[ib], verts[ia]), sub3(verts[ic], verts[ia]));
+    for (const idx of [ia, ib, ic]) {
+      vNorms[idx][0] += fn[0];
+      vNorms[idx][1] += fn[1];
+      vNorms[idx][2] += fn[2];
+    }
+  }
+  for (let i = 0; i < vNorms.length; i++) vNorms[i] = norm3(vNorms[i]);
+
+  const T = tris.length;
   const vertices = new Float32Array(T * 24);
-  const parts = Uint32Array.from(mesh.triPart);
+  const parts = new Uint32Array(T).fill(isBeard ? JOINT_JAW : JOINT_HEAD);
   for (let t = 0; t < T; t++) {
     for (let k = 0; k < 3; k++) {
-      const v = mesh.index[t * 3 + k], at = (t * 3 + k) * 8;
-      vertices[at] = mesh.position[v * 3];
-      vertices[at + 1] = mesh.position[v * 3 + 1];
-      vertices[at + 2] = mesh.position[v * 3 + 2];
-      vertices[at + 3] = mesh.normal[v * 3];
-      vertices[at + 4] = mesh.normal[v * 3 + 1];
-      vertices[at + 5] = mesh.normal[v * 3 + 2];
-      vertices[at + 6] = (mesh.high[v] & 255) / 255;
+      const v = tris[t][k], at = (t * 3 + k) * 8;
+      vertices[at] = verts[v][0];
+      vertices[at + 1] = verts[v][1];
+      vertices[at + 2] = verts[v][2];
+      vertices[at + 3] = vNorms[v][0];
+      vertices[at + 4] = vNorms[v][1];
+      vertices[at + 5] = vNorms[v][2];
+      vertices[at + 6] = 0.5;
       vertices[at + 7] = 0;
     }
   }
-  return { name: 'hair far wrap', vertices, triangles: T, parts };
+  return { name: `${spec.id} far`, closed: true, vertices, triangles: T, parts };
 }
 
 await MeshoptSimplifier.ready;
@@ -775,28 +938,19 @@ for (const spec of HAIR_CONTINUUM_TYPES) {
   }
 
   const welded = { position, normal, kind, part, index, count, corner: null };
-  const baked = await bakeContinuumBody({ name: spec.id, welded, far: buildFarWrapInput(mesh) });
+  const baked = await bakeContinuumBody({ name: spec.id, welded, far: buildFarHairShell(ref, mesh, spec) });
   const { clusters, far: farBody } = baked;
-
-  // Inflate the far-body hair shell outward along its normals so coarse far/mid steps sit cleanly outside the curved
-  // skull instead of cutting chords inside the 1.98M-triangle head mesh at 8–120 m.
-  const farInflate = spec.slot === 'beard' ? 0.005 : 0.011;
   const V = farBody.position.length / 3;
-  for (let i = 0; i < V; i++) {
-    farBody.position[i * 3] += farBody.normal[i * 3] * farInflate;
-    farBody.position[i * 3 + 1] += farBody.normal[i * 3 + 1] * farInflate;
-    farBody.position[i * 3 + 2] += farBody.normal[i * 3 + 2] * farInflate;
-  }
 
-  // Hand off from individual thin strand clusters to the closed solid far hair shell right as strand ribbons reach
-  // ~8 mm error (before thin strands collapse to sparse 30-tri slivers), using the full base shell (farFirst = 0)
-  // and strictly rising up to ~0.16 m across the collapse chain.
+  // Hand off from individual thin strand clusters to the smooth open-faced far hair shell right as strand ribbons
+  // reach ~9 mm error (before thin strands collapse to sparse slivers), using the full base shell (farFirst = 0)
+  // and disabling post-collapse normal inflation so far steps never puff outward across faces.
   farBody.farFirst = 0;
   const stepN = farBody.steps.length / 4;
   if (stepN > 0) {
     const stepFloats = new Float32Array(farBody.steps.buffer, farBody.steps.byteOffset, farBody.steps.length);
-    const eLo = spec.slot === 'beard' ? 0.007 : 0.008;
-    const eHi = Math.max(0.16, stepFloats[(stepN - 1) * 4 + 1]);
+    const eLo = spec.slot === 'beard' ? 0.008 : 0.009;
+    const eHi = Math.max(0.18, stepFloats[(stepN - 1) * 4 + 1]);
     const origLo = stepFloats[1];
     const origSpan = Math.max(stepFloats[(stepN - 1) * 4 + 1] - origLo, 1e-6);
     for (let s = 0; s < stepN; s++) {
@@ -804,6 +958,7 @@ for (const spec of HAIR_CONTINUUM_TYPES) {
       let nextErr = eLo + (eHi - eLo) * (u * u);
       if (s > 0) nextErr = Math.max(nextErr, stepFloats[(s - 1) * 4 + 1] * (1 + 4e-6) + 1e-7);
       stepFloats[s * 4 + 1] = nextErr;
+      stepFloats[s * 4 + 2] = 0;
     }
   }
 
