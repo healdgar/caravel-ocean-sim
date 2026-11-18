@@ -97,6 +97,7 @@ export function portWorkBuildings(port) {
       id: `work:${work.name}`, prefabId: WORK_PREFAB[work.kind] ?? 'city_fort', label: work.name, work, trace,
       x: work.x, z: work.z, y, baseY: y, yaw: work.turn ?? 0, width: work.w, depth: work.d, length: work.d, height: deck,
       armed: true, hasMagazine: work.kind === 'fort',
+      ...(work.indigenous ? { indigenous: true, friendlyToPlayer: true, cultureId: work.cultureId ?? null } : {}),
     };
   });
   port.workBuildings = { works: port.works, list };

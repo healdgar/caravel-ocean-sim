@@ -9,8 +9,14 @@ import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityF
 import { CITY_ARTILLERY_TOWER, CITY_BASTION, CITY_BATTERY, CITY_BUILDING_TYPES, CITY_CORNER_BASTION, CITY_CHURCH, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_HOUSE_STOREYS, CITY_KEEP, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TOWER, CITY_TYPE, CITY_TYPED_ROOF, cityBatteryGuns, cityCornerBastionPlan, cityCornerBastionType, cityGunType, cityHouseType, cityVariant } from './old-world-buildings.js';
 import { WORKS_BRIDGE, WORKS_WHEEL } from './old-world-works.js';
 import { NATIVE_PALISADE } from './native-works.js';
+import { FORT_RECORDS } from './fort-records.js';
 import { layBoardWaterfront } from './board-waterfront.js';
 import { layPlaceLandmarks } from './place-landmarks.js';
+
+const FORT_RECORD_BY_NAME = new Map();
+for (const entry of Object.values(FORT_RECORDS)) {
+  for (const rec of entry.forts ?? []) if (!FORT_RECORD_BY_NAME.has(rec.name)) FORT_RECORD_BY_NAME.set(rec.name, rec);
+}
 
 // The board's furlongs are drawn into a square of cells this many to a side, each cell holding the furlong it
 // lies in (plus one; none is 0). The same square answers the land's questions here and is the GPU's to stamp from.
@@ -674,6 +680,11 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   const workRecords = [], workKey = (x, z) => `${Math.round(x)},${Math.round(z)}`, workAt = new Set();
   const workGun = cityGunType(region.year ?? board.year ?? 1550);
   const standWorkOf = (place, work) => {
+    const rec = FORT_RECORD_BY_NAME.get(work.name) ?? null;
+    const landmark = work.landmark ?? rec?.landmark ?? null;
+    const encloses = work.encloses ?? rec?.encloses ?? null;
+    const gateKind = work.gate ?? rec?.gate ?? null;
+    const isEarth = Boolean(work.earth || rec?.earth);
     const x = ox + work.x, z = oz + work.z, yaw = work.turn ?? 0, c = Math.cos(yaw), s = Math.sin(yaw), tone = 0.86;
     const at = (lx, lz) => [x + lx * c + lz * s, z - lx * s + lz * c], toward = (lx, lz) => [lx * c + lz * s, -lx * s + lz * c];
     const form = work.form || (work.kind === 'fort' ? 'enclosed' : work.kind);
@@ -685,9 +696,9 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const tc = Math.cos(turn), ts = Math.sin(turn), on = typedTypes.length - 1;
       for (const g of list) guns.push({ x: px + g.x * tc + g.z * ts, y: floor + g.y, z: pz - g.x * ts + g.z * tc, nx: g.nx * tc + g.nz * ts, nz: -g.nx * ts + g.nz * tc, wall: 0, on, piece: -1 });
     };
-    const stand = (id, px, pz, turn = yaw) => {
+    const stand = (id, px, pz, turn = yaw, wall = CITY_WALL.ASHLAR) => {
       const T = CITY_BUILDING_TYPES[id], f = footprint(px, pz, T.width, T.length, turn);
-      const floor = pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone);
+      const floor = pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, wall, tone);
       pushTyped(id, px, floor, pz, turn, tone);
       keep(f); occupy(f);
       if (T.guns) arm(T.guns, px, floor, pz, turn);
@@ -708,16 +719,33 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         pushTyped(workGun, g.x, g.y, g.z, Math.atan2(-g.nx, -g.nz), 0.8, 0);
       }
       keep(footprint(x, z, work.w, work.d, yaw));
-      return { kind: work.kind, form, name: work.name, place: place.name, role: work.role || '', side: work.side || '', x, y: heightAt(x, z), z, turn: yaw, w: work.w, d: work.d, outline, guns, salients, gate: gateAt, types: [first, typedTypes.length], bore: CITY_BUILDING_TYPES[workGun].bore };
+      return {
+        kind: work.kind, form, name: work.name, place: place.name, role: work.role || '', side: work.side || '',
+        x, y: heightAt(x, z), z, turn: yaw, w: work.w, d: work.d, outline, guns, salients, gate: gateAt,
+        types: [first, typedTypes.length], bore: CITY_BUILDING_TYPES[workGun].bore,
+        ...(work.indigenous ? { indigenous: true, cultureId: work.cultureId ?? null } : {}),
+      };
     };
     const backGate = (lx, lz) => { const [gx, gz] = at(lx, lz), [nx, nz] = toward(0, 1); gateAt = { x: gx, z: gz, nx, nz }; };
 
+    if (landmark === 'torre_de_belem_manuelina') {
+      const { T } = stand(CITY_TYPE.TORRE_BELEM, x, z);
+      box(T.width / 2, -T.length / 2, T.length / 2);
+      backGate(0, T.length / 2);
+      return finish();
+    }
     if (form === 'tower') {
       const f = tower(x, z, Math.min(work.w, work.d), 4 * CITY_TOWER.stage, 0.9, CITY_TYPE.WATCHTOWER);
       for (const [lx, lz] of [[-f.w / 2, -f.d / 2], [f.w / 2, -f.d / 2], [f.w / 2, f.d / 2], [-f.w / 2, f.d / 2]]) outline.push(local(f, lx, lz));
       return finish();
     }
     if (form === 'battery') {
+      if (isEarth) {
+        const { T } = stand(CITY_TYPE.EARTH_BATTERY, x, z, yaw, 10);
+        box(T.width / 2, -T.length / 2, T.length / 2);
+        backGate(0, T.length / 2);
+        return finish();
+      }
       const id = cityVariant(CITY_TYPE.BATTERY, work.w, work.d), { T, floor } = stand(id, x, z);
       box(T.width / 2, -T.length / 2, T.length / 2);
       arm(cityBatteryGuns(T.width, T.length), x, floor, z, yaw);
@@ -759,6 +787,45 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const [nx, nz] = toward(0, 1);
       gateAt = { x: m[0], z: m[1], nx, nz };
     };
+    if (form === 'enclosed' && isEarth) {
+      // An earth-and-timber stockade fort (Strachey's triangular James Fort of 1607, or a four-cornered colonial timber
+      // fort): round earthen bulwarks at its corners, palisade stakes between them, and its gate in the river or back side.
+      const B = CITY_BUILDING_TYPES[CITY_TYPE.EARTH_BULWARK], r = B.width / 2;
+      const hx = Math.max(r + 6, work.w / 2 - r), hz = Math.max(r + 6, work.d / 2 - r);
+      const tri = encloses === 'triangle';
+      const localK = tri ? [[-hx, -hz], [hx, -hz], [0, hz]] : [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]];
+      const corners = localK.map(([lx, lz]) => {
+        const [px, pz] = at(lx, lz);
+        stand(CITY_TYPE.EARTH_BULWARK, px, pz, yaw + Math.atan2(-lx, -lz), 10);
+        outline.push([px, pz]);
+        salients.push([px, pz]);
+        return [px, pz];
+      });
+      const per = 3, unitM = per * NATIVE_PALISADE.stake, counts = NATIVE_PALISADE.stakes.map((st) => st / per), pWidth = CITY_BUILDING_TYPES[CITY_TYPE.PALISADE].width;
+      const palisadeSpan = (ax, az, bx, bz) => {
+        if (Math.hypot(bx - ax, bz - az) < 1) return;
+        for (const run of sections(ax, az, bx, bz, { unit: unitM, counts, past: 0.1, cover: true, sink: 0.35 })) {
+          const f = footprint(run.x, run.z, pWidth, 2 * run.half, run.yaw);
+          pushTyped(cityVariant(CITY_TYPE.PALISADE, null, 2 * run.half), run.x, seatRun(run), run.z, run.yaw, 0.5, 0);
+          keep(f); palisadeLengths++;
+        }
+      };
+      const gateSide = gateKind === 'river' ? 0 : tri ? 1 : 2;
+      for (let i = 0; i < corners.length; i++) {
+        const a0 = corners[i], b0 = corners[(i + 1) % corners.length], L = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]) || 1;
+        const ux = (b0[0] - a0[0]) / L, uz = (b0[1] - a0[1]) / L, trim = Math.min(r - 0.6, L * 0.3);
+        const a = [a0[0] + ux * trim, a0[1] + uz * trim], b = [b0[0] - ux * trim, b0[1] - uz * trim];
+        if (i === gateSide) {
+          const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], g = 2.2;
+          palisadeSpan(a[0], a[1], m[0] - ux * g, m[1] - uz * g);
+          palisadeSpan(m[0] + ux * g, m[1] + uz * g, b[0], b[1]);
+          gateAt = { x: m[0], z: m[1], nx: uz, nz: -ux };
+        } else {
+          palisadeSpan(a[0], a[1], b[0], b[1]);
+        }
+      }
+      return finish();
+    }
     if (form === 'enclosed') {
       // A castle of the coast: a gun tower at each seaward corner, a wall tower at each landward, centred on the
       // corner; the curtain from corner to corner closes on each; a keep within where there is room for one.
@@ -818,11 +885,46 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   // Laid along the shore nearest each (js/board-waterfront.js) after the works, which hold their ground, and before the
   // model's buildings, which stand clear of it.
   const shoreField = distanceTo(wet, grid.n, grid.step), shoreAt = (x, z) => fieldAt(shoreField, grid, x, z);
+  const indig = port?.indigenousSettlement ?? null;
+  const sovereign = Boolean(port?.sovereignPolity || indig?.isSovereignPolity);
   const waterfront = [];
   places.forEach((place, at) => {
     if (at > 0 && !place.harbour) return;
-    for (const record of layBoardWaterfront({ place, seat: at === 0, heightAt, inlandAt: shoreAt, inside, taken, keep, occupy, pushBlock, pushTyped, typedTypes, rr })) waterfront.push({ ...record, place: place.name, seat: at === 0 });
+    for (const record of layBoardWaterfront({ place, seat: at === 0, sovereign: at === 0 && sovereign, heightAt, inlandAt: shoreAt, inside, taken, keep, occupy, pushBlock, pushTyped, typedTypes, rr })) waterfront.push({ ...record, place: place.name, seat: at === 0 });
   });
+  // A fortified or sovereign Indigenous nation raises an earth-and-timber coastal artillery redoubt beside its landing,
+  // armed with captured cannon and manned by its own people (js/indigenous-sovereignty.js, js/crew.js).
+  if (seat?.earthen && (indig?.fortified || sovereign) && !workRecords.some((w) => w.indigenous)) {
+    const landing = waterfront.find((w) => w.seat) ?? seat;
+    const toShore = (px, pz) => {
+      const e = 4, gx = shoreAt(px + e, pz) - shoreAt(px - e, pz), gz = shoreAt(px, pz + e) - shoreAt(px, pz - e), L = Math.hypot(gx, gz);
+      return L > 1e-4 ? [-gx / L, -gz / L] : null;
+    };
+    const w0 = toShore(landing.x, landing.z);
+    if (w0) {
+      const dir = [-w0[1], w0[0]], BT = CITY_BUILDING_TYPES[CITY_TYPE.EARTH_BATTERY];
+      for (const off of [52, -52, 80, -80, 112, -112]) {
+        let rx = landing.x + dir[0] * off, rz = landing.z + dir[1] * off;
+        for (let s = 0; s < 6; s++) {
+          const w = toShore(rx, rz);
+          if (!w) break;
+          const err = shoreAt(rx, rz) - (BT.length / 2 + 6);
+          if (Math.abs(err) < 0.2) break;
+          rx += w[0] * err; rz += w[1] * err;
+        }
+        const w = toShore(rx, rz);
+        if (!w || !inside(rx, rz, 28) || heightAt(rx, rz) < 0.8 || heightAt(rx, rz) > 14) continue;
+        const ryaw = Math.atan2(-w[0], -w[1]), rf = footprint(rx, rz, BT.width, BT.length, ryaw);
+        if (taken(rf, 2)) continue;
+        workRecords.push(standWorkOf(seat, {
+          kind: 'battery', form: 'battery', earth: true, indigenous: true, cultureId: indig?.cultureId ?? null,
+          name: `${indig?.shortName || seat.name} Coastal Redoubt`,
+          x: rx - ox, z: rz - oz, w: BT.width, d: BT.length, turn: ryaw, role: 'waterfront', side: '',
+        }));
+        break;
+      }
+    }
+  }
   // The buildings the place's record pins at their sites (js/place-landmarks.js), clear of the waterfront and before
   // the model's own, which stand clear of them.
   const landmarks = layPlaceLandmarks({ port: baked.port, year: baked.year ?? region.year ?? 1550, region, heightAt, inlandAt: shoreAt, inside, taken, keep, occupy, seatBlock, pushBlock, pushTyped, typedTypes, rr });

@@ -144,11 +144,57 @@ const NATIVE_MALOCA = [5, 6, 7, 8].map((bays) => {
   ]);
 });
 
+/* ---- the canoe beaching and tidal fish weir ---- */
+// Drawn up on the strand at the water's edge (-z into the shallows, +z ashore): log beaching rollers, two upturned
+// canoes (dugout mahogany or cypress in the south, paper-birchbark with spruce-root gunwales in the north), a drying
+// rack behind them, and a V of tidal fish-weir stakes in the shallows before them.
+function canoeLandingSpec(birchbark) {
+  const hw = 4.25, hd = 8, hull = birchbark ? 'bark' : 'wood';
+  const rollers = Array.from({ length: 5 }, (_, r) => {
+    const z = -hd + 1.8 + r * 2.6;
+    return [-hw * 0.55, hw * 0.55].map((x) => ({
+      primitive: 'group', name: 'canoe_rollers', position: [x, 0.06, z], rotation: [0, 0, 90],
+      children: [{ primitive: 'cylinder', base: [0, -1.1, 0], height: 2.2, radius: 0.14, segments: 6, material: 'timber' }],
+    }));
+  }).flat();
+  const canoes = [[-hw * 0.42, -1.2, 6.2, 0.92], [hw * 0.42, 1.4, 6.8, 0.98]].flatMap(([cx, cz, len, beam], k) => {
+    const hl = len / 2, hb = beam / 2, tag = `beached_canoe_${k}`;
+    return [
+      nativeBox(tag, [cx - hb, 0.18, cz - hl * 0.65], [cx + hb, 0.68, cz + hl * 0.65], hull, { topInset: 0.06 }),
+      nativeBox(tag, [cx - hb * 0.62, 0.24, cz - hl], [cx + hb * 0.62, 0.88, cz - hl * 0.62], hull, { topInset: hb * 0.2 }),
+      nativeBox(tag, [cx - hb * 0.62, 0.24, cz + hl * 0.62], [cx + hb * 0.62, 0.88, cz + hl], hull, { topInset: hb * 0.2 }),
+      nativeBox(tag, [cx - hb - 0.04, 0.60, cz - hl * 0.65], [cx + hb + 0.04, 0.70, cz + hl * 0.65], 'dark_wood'),
+    ];
+  });
+  const weir = Array.from({ length: 9 }, (_, s) => {
+    const u = (s / 8) * 2 - 1;
+    return { primitive: 'cylinder', name: 'tidal_fish_weir', base: [u * hw * 0.85, -3.2, -hd + 0.4 + (1 - Math.abs(u)) * 2.2], height: 4.6, radius: 0.09, radiusTop: 0.07, segments: 6, material: 'timber' };
+  });
+  return {
+    schemaVersion: '0.4',
+    name: birchbark
+      ? 'Canoe landing (upturned paper-birchbark canoes on log rollers, drying rack and tidal fish weir)'
+      : 'Canoe landing (upturned dugout canoes on log rollers, drying rack and tidal fish weir)',
+    width: 2 * hw, length: 2 * hd, height: 2.2, foundationDepth: 3.2, materialKind: birchbark ? 17 : 10, roofPitch: 0, waterfront: true,
+    primitives: [
+      nativeBox('strand_sill', [-hw * 0.72, -3.2, hd - 2.4], [hw * 0.72, 0.06, hd - 1.7], 'timber', { partGroup: 'foundation_plinth' }),
+      ...rollers,
+      ...canoes,
+      ...weir,
+      { primitive: 'cylinder', name: 'drying_rack', base: [-hw * 0.65, -1.4, hd - 2.05], height: 2.8, radius: 0.1, radiusTop: 0.08, segments: 6, material: 'timber' },
+      { primitive: 'cylinder', name: 'drying_rack', base: [hw * 0.65, -1.4, hd - 2.05], height: 2.8, radius: 0.1, radiusTop: 0.08, segments: 6, material: 'timber' },
+      nativeBox('drying_rack', [-hw * 0.7, 1.12, hd - 2.2], [hw * 0.7, 1.26, hd - 1.9], 'timber'),
+    ],
+  };
+}
+const NATIVE_CANOE_LANDING = [canoeLandingSpec(false), canoeLandingSpec(true)];
+
 // The houses, in the order they follow the Old World's works (CITY_WORKS); `key` is each one's name in CITY_TYPE,
 // then its variants and the one the name stands for (as CITY_WORKS has them).
 export const NATIVE_WORKS = Object.freeze([
   ['BARK_LONGHOUSE', NATIVE_BARK_LONGHOUSE, 1], ['WETU', NATIVE_WETU], ['ARBOUR_HOUSE', NATIVE_ARBOUR_HOUSE, 1], ['BOHIO', NATIVE_BOHIO], ['CANEY', NATIVE_CANEY],
   ['MALOCA', NATIVE_MALOCA, 1], ['CHIEF_HOUSE', NATIVE_CHIEF_HOUSE], ['CHARNEL_HOUSE', NATIVE_CHARNEL_HOUSE], ['SWEAT_LODGE', NATIVE_SWEAT_LODGE],
+  ['CANOE_LANDING', NATIVE_CANOE_LANDING, 0],
 ]);
 
 /* ---- the palisade, a section at a time ---- */
@@ -178,5 +224,5 @@ export const NATIVE_WORKS_TARGETS = Object.freeze({
   BARK_LONGHOUSE: { prefabId: 'native_longhouse', label: 'Bark longhouse' }, WETU: { prefabId: 'native_house', label: 'Wetu' }, ARBOUR_HOUSE: { prefabId: 'native_house', label: 'Arbour house' },
   BOHIO: { prefabId: 'native_house', label: 'Bohío' }, CANEY: { prefabId: 'native_chief_house', label: 'Caney' }, MALOCA: { prefabId: 'native_longhouse', label: 'Maloca' },
   CHIEF_HOUSE: { prefabId: 'native_chief_house', label: 'Chief\'s house' }, CHARNEL_HOUSE: { prefabId: 'native_charnel_house', label: 'Charnel house' }, SWEAT_LODGE: { prefabId: 'native_sweat_lodge', label: 'Sweat lodge' },
-  PALISADE: { prefabId: 'native_palisade', label: 'Palisade' },
+  CANOE_LANDING: { prefabId: 'indigenous_canoe_landing', label: 'Canoe landing' }, PALISADE: { prefabId: 'native_palisade', label: 'Palisade' },
 });

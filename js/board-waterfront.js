@@ -37,9 +37,9 @@ const waterfrontType = (key, k) => cityFamilyOf(CITY_TYPE[key]).from + k;
  * the city's types), x, y (its floor), z, yaw (+z inland: its face to the water at -z), width, length, deck (the height
  * its deck is walked at, or null) }.
  */
-export function layBoardWaterfront({ place, seat = false, heightAt, inlandAt, inside, taken, keep, occupy, pushBlock, pushTyped, typedTypes, rr = Math.random }) {
+export function layBoardWaterfront({ place, seat = false, sovereign = false, heightAt, inlandAt, inside, taken, keep, occupy, pushBlock, pushTyped, typedTypes, rr = Math.random }) {
   const out = [];
-  if (!place || place.earthen) return out;
+  if (!place) return out;
   // The way to the water at a point: down the slope of the distance inland.
   const toWater = (x, z) => {
     const e = 4, gx = inlandAt(x + e, z) - inlandAt(x - e, z), gz = inlandAt(x, z + e) - inlandAt(x, z - e), L = Math.hypot(gx, gz);
@@ -86,6 +86,63 @@ export function layBoardWaterfront({ place, seat = false, heightAt, inlandAt, in
   }
   [ax, az] = onLine(ax, az);
   if (Math.hypot(ax - place.x, az - place.z) > reach || !inside(ax, az, 40) || Math.abs(inlandAt(ax, az) - WATERFRONT_LINE_M) > WATERFRONT_SAG_M) return out;
+
+  // A native place lays no stone quay: its canoes are drawn up on the strand, with a tidal fish weir in the shallows
+  // before them; a proclaimed sovereign polity also runs a timber trade mole out to deep water.
+  if (place.earthen) {
+    const w0 = toWater(ax, az);
+    if (!w0) return out;
+    const birchbark = place.culture === 'iroquoian' || place.culture === 'massachusett' || place.culture === 'lenape';
+    const type = waterfrontType('CANOE_LANDING', birchbark ? 1 : 0), T = CITY_BUILDING_TYPES[type];
+    const dir = [-w0[1], w0[0]], want = seat && (place.people || 0) >= 450 ? 2 : 1;
+    let laid = 0;
+    for (const off of [0, -18, 18, -36, 36]) {
+      if (laid >= want) break;
+      const [x, z] = onLine(ax + dir[0] * off, az + dir[1] * off, T.length / 2 - 2.5);
+      const w = toWater(x, z);
+      if (!w || !inside(x, z, 24)) continue;
+      const yaw = Math.atan2(-w[0], -w[1]), f = footprint(x, z, T.width, T.length, yaw);
+      let lo = Infinity, hi = -Infinity;
+      for (const [lx, lz] of [[-1, 0], [1, 0], [0, 1], [-1, 1], [1, 1]]) {
+        const h = heightAt(x + lx * f.c * T.width / 2 + lz * f.s * T.length / 2, z - lx * f.s * T.width / 2 + lz * f.c * T.length / 2);
+        lo = Math.min(lo, h); hi = Math.max(hi, h);
+      }
+      if (lo < -0.4 || hi - lo > 3.5 || hi > WATERFRONT_LOW_M + 2 || taken(f, 1.5)) continue;
+      const floor = Math.max(0.25, (lo + hi) / 2), tone = 0.72 + 0.18 * rr();
+      keep(f); occupy(f);
+      pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, birchbark ? 17 : 10, tone, { floor, plinth: Math.max(0.3, floor - lo + 0.4), range: hi - lo });
+      pushTyped(type, x, floor, z, yaw, tone);
+      out.push({ kind: 'canoe', type, piece: typedTypes.length - 1, x, y: floor, z, yaw, width: T.width, length: T.length, deck: null });
+      laid++;
+    }
+    if (seat && sovereign) {
+      const pierFamily = cityFamilyOf(CITY_TYPE.PIER), [rx, rz] = onLine(ax + dir[0] * 26, az + dir[1] * 26, 0), pw = toWater(rx, rz);
+      if (pw) {
+        const nx = -pw[0], nz = -pw[1], pyaw = Math.atan2(nx, nz);
+        let pick = null;
+        for (let k = 0; k < pierFamily.count; k++) {
+          const pt = pierFamily.from + k, PT = CITY_BUILDING_TYPES[pt];
+          let wet = true;
+          for (let t = 4; t <= PT.length; t += 4) if (heightAt(rx - nx * t, rz - nz * t) > 0.2) { wet = false; break; }
+          if (!wet) break;
+          const head = heightAt(rx - nx * PT.length, rz - nz * PT.length);
+          pick = { type: pt, T: PT, head };
+          if (head <= -WATERFRONT_BERTH_M) break;
+        }
+        if (pick && pick.head <= -1) {
+          const { type: pt, T: PT } = pick, px = rx - nx * PT.length / 2, pz = rz - nz * PT.length / 2, pf = footprint(px, pz, PT.width, PT.length, pyaw);
+          if (inside(px, pz, 20) && !taken(pf, 1)) {
+            keep(pf);
+            const tone = 0.7 + 0.2 * rr();
+            pushBlock(pf, PT.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, 10, tone, { floor: 0, plinth: 0.3, range: 0 });
+            pushTyped(pt, px, 0, pz, pyaw, tone);
+            out.push({ kind: 'pier', type: pt, piece: typedTypes.length - 1, x: px, y: 0, z: pz, yaw: pyaw, width: PT.width, length: PT.length, deck: CITY_PIER.deck, head: pick.head });
+          }
+        }
+      }
+    }
+    return out;
+  }
 
   // A section of quay from joint a to joint b: its middle on the line, its face to the water.
   const section = (a, b) => {

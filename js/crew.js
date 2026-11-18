@@ -1921,61 +1921,83 @@ export function createFortGarrison(port) {
 }
 
 // Whoever had the stretch under him shot away comes down with it, to whatever is beneath. One walking a rampart
-// keeps to what is left of his beat. Runs only when a building has lost something since the last look.
+// keeps to what is left of his beat. Runs only when a building or a piece of a work has lost something since the last look.
+function settleUnitOnFracture(unit, inst, host, state, garrison, mapPoint = null, holds = null) {
+  const damage = host?.damageState;
+  if (!state || state.brokenCount === (damage?.garrisonSawBroken ?? 0)) return;
+  if (damage) damage.garrisonSawBroken = state.brokenCount;
+  // Nothing in the air means this is a saved ruin coming back: he is already where he fell.
+  const settled = state.flying.size === 0;
+  let low = Infinity, high = -Infinity;
+  for (const s of unit) { if (s.ly < low) low = s.ly; if (s.ly > high) high = s.ly; }
+  const near = state.fracture.shards.filter((shard) => shard && shard.localMin[1] <= high + 0.2 && shard.localMax[1] >= low - 1.1);
+  for (const s of unit) {
+    if (holds && !holds(s.lx, s.lz)) continue;
+    const [px, pz] = mapPoint ? mapPoint(s.lx, s.lz) : [s.lx, s.lz];
+    const footing = footingUnder(state, px, s.ly, pz, near);
+    // A body already lying there comes down with the stretch too, and has nothing more to say.
+    if (footing.stood && !footing.stands) {
+      garrisonSoldierFalls(state, s, inst, settled, garrison);
+      continue;
+    }
+    if (s.casualtyState === 'fallen') continue;
+    if (footing.floor !== null && footing.floor < s.ly - 0.05) {
+      // What he stood on has gone, and the floor is a step below.
+      s.homeBaseLy ??= s.baseLy;
+      s.baseLy -= s.ly - footing.floor;
+      s._poseReady = false;
+    }
+    if (!s.routeZ || Math.abs(s.routeZ[1] - s.routeZ[0]) <= 0.05) continue;
+    s.homeRouteZ ??= [...s.routeZ];
+    const [from, to] = s.homeRouteZ, length = Math.abs(to - from), steps = Math.max(1, Math.ceil(length / 0.5));
+    let lo = s.lz, hi = s.lz;
+    const dir = Math.sign(to - from) || 1;
+    // Out each way from where he stands, as far as there is anything to stand on.
+    for (let i = 1; i <= steps; i++) {
+      const z = s.lz + (dir * length * i) / steps;
+      if ((z - from) * dir > length + 1e-6) break;
+      if (holds && !holds(s.lx, z)) { hi = z; continue; }
+      const [rx, rz] = mapPoint ? mapPoint(s.lx, z) : [s.lx, z];
+      const there = footingUnder(state, rx, s.ly, rz, near);
+      if (there.stood && !there.stands) break;
+      hi = z;
+    }
+    for (let i = 1; i <= steps; i++) {
+      const z = s.lz - (dir * length * i) / steps;
+      if ((z - from) * dir < -1e-6) break;
+      if (holds && !holds(s.lx, z)) { lo = z; continue; }
+      const [rx, rz] = mapPoint ? mapPoint(s.lx, z) : [s.lx, z];
+      const there = footingUnder(state, rx, s.ly, rz, near);
+      if (there.stood && !there.stands) break;
+      lo = z;
+    }
+    s.routeZ = dir > 0 ? [lo, hi] : [hi, lo];
+    s.targetZ = Math.abs(s.targetZ - hi) < Math.abs(s.targetZ - lo) ? hi : lo;
+  }
+}
+
 function settleGarrisonOnWhatIsLeft(garrison) {
   for (const unit of garrison.units ?? garrison.byBuilding.values()) {
-    const inst = unit[0]?.building, damage = inst?.damageState, state = damage?.fracture;
-    // A work is struck through its pieces (js/gunnery-control.js strikeWorkThroughPiece): whoever stood on one that
-    // is broken comes down from it; from a save, he lies where it left him.
+    const inst = unit[0]?.building, damage = inst?.damageState;
+    // Each struck piece of a work carries its own shard state: check footing, step-down floor and rampart beat on it.
+    for (const piece of damage?.struckPieces ?? []) {
+      const pState = piece?.damageState?.fracture;
+      if (!pState) continue;
+      const cw = Math.cos(inst.yaw ?? 0), sw = Math.sin(inst.yaw ?? 0), cp = Math.cos(piece.yaw ?? 0), sp = Math.sin(piece.yaw ?? 0);
+      const toPiece = (lx, lz) => {
+        const dx = (inst.x ?? 0) + lx * cw + lz * sw - (piece.x ?? 0), dz = (inst.z ?? 0) - lx * sw + lz * cw - (piece.z ?? 0);
+        return [dx * cp - dz * sp, dx * sp + dz * cp];
+      };
+      settleUnitOnFracture(unit, inst, piece, pState, garrison, toPiece, (lx, lz) => workPieceUnder(piece, inst, lx, lz));
+    }
+    // A work piece broken past its threshold brings down anyone left standing on it, even before its shards are cut.
     for (const entry of damage?.brokenPieces ?? []) {
       if (entry.seen) continue;
       entry.seen = true;
-      for (const s of unit) if (workPieceUnder(entry.piece, inst, s.lx, s.lz)) garrisonSoldierFalls(null, s, inst, entry.settled, garrison);
+      const pState = entry.piece?.damageState?.fracture ?? null;
+      for (const s of unit) if (workPieceUnder(entry.piece, inst, s.lx, s.lz)) garrisonSoldierFalls(pState, s, inst, entry.settled, garrison);
     }
-    if (!state || state.brokenCount === (damage.garrisonSawBroken ?? 0)) continue;
-    damage.garrisonSawBroken = state.brokenCount;
-    // Nothing in the air means this is a saved ruin coming back: he is already where he fell.
-    const settled = state.flying.size === 0;
-    let low = Infinity, high = -Infinity;
-    for (const s of unit) { if (s.ly < low) low = s.ly; if (s.ly > high) high = s.ly; }
-    const near = state.fracture.shards.filter((shard) => shard && shard.localMin[1] <= high + 0.2 && shard.localMax[1] >= low - 1.1);
-    for (const s of unit) {
-      const footing = footingUnder(state, s.lx, s.ly, s.lz, near);
-      // A body already lying there comes down with the stretch too, and has nothing more to say.
-      if (footing.stood && !footing.stands) {
-        garrisonSoldierFalls(state, s, inst, settled, garrison);
-        continue;
-      }
-      if (s.casualtyState === 'fallen') continue;
-      if (footing.floor !== null && footing.floor < s.ly - 0.05) {
-        // What he stood on has gone, and the floor is a step below.
-        s.homeBaseLy ??= s.baseLy;
-        s.baseLy -= s.ly - footing.floor;
-        s._poseReady = false;
-      }
-      if (!s.routeZ || Math.abs(s.routeZ[1] - s.routeZ[0]) <= 0.05) continue;
-      s.homeRouteZ ??= [...s.routeZ];
-      const [from, to] = s.homeRouteZ, length = Math.abs(to - from), steps = Math.max(1, Math.ceil(length / 0.5));
-      let lo = s.lz, hi = s.lz;
-      const dir = Math.sign(to - from) || 1;
-      // Out each way from where he stands, as far as there is anything to stand on.
-      for (let i = 1; i <= steps; i++) {
-        const z = s.lz + (dir * length * i) / steps;
-        if ((z - from) * dir > length + 1e-6) break;
-        const there = footingUnder(state, s.lx, s.ly, z, near);
-        if (there.stood && !there.stands) break;
-        hi = z;
-      }
-      for (let i = 1; i <= steps; i++) {
-        const z = s.lz - (dir * length * i) / steps;
-        if ((z - from) * dir < -1e-6) break;
-        const there = footingUnder(state, s.lx, s.ly, z, near);
-        if (there.stood && !there.stands) break;
-        lo = z;
-      }
-      s.routeZ = dir > 0 ? [lo, hi] : [hi, lo];
-      s.targetZ = Math.abs(s.targetZ - hi) < Math.abs(s.targetZ - lo) ? hi : lo;
-    }
+    settleUnitOnFracture(unit, inst, inst, damage?.fracture, garrison);
   }
 }
 

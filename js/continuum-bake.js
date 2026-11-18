@@ -151,10 +151,10 @@ export const surfaceArea = (corners, triangles, X) => triangles.reduce((sum, t) 
 // `fold(living)` allows (the least cosine, given how many triangles are left) is refused, so a closed body stays closed
 // and keeps its genus while it can. Where `region` gives each vertex a class (a ship's wood, canvas, iron and paint), a
 // collapse across a border of class costs `border` times as much, so borders go last.
-export const CHAIN_FOLD = (living) => (living > 400 ? 0.2 : living > 60 ? -0.3 : -0.9);
+export const CHAIN_FOLD = (living) => (living > 24 ? 0.35 : living > 10 ? 0.05 : -0.35);
 export function collapseChain(position, index, least, { region = null, border = 6, fold = CHAIN_FOLD, fixed = null } = {}) {
   const V = position.length / 3, T = index.length / 3, corners = Int32Array.from(index), alive = new Uint8Array(T).fill(1), death = new Int32Array(T).fill(-1);
-  const Q = new Float64Array(V * 10), fans = Array.from({ length: V }, () => []);
+  const Q = new Float64Array(V * 10), baseFace = new Float64Array(T * 3), fans = Array.from({ length: V }, () => []);
   for (let t = 0; t < T; t++) {
     const a = corners[t * 3] * 3, b = corners[t * 3 + 1] * 3, c = corners[t * 3 + 2] * 3;
     const ex = position[b] - position[a], ey = position[b + 1] - position[a + 1], ez = position[b + 2] - position[a + 2];
@@ -162,6 +162,7 @@ export function collapseChain(position, index, least, { region = null, border = 
     let nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
     const l = Math.hypot(nx, ny, nz) || 1e-12, w = l / 2;
     nx /= l; ny /= l; nz /= l;
+    baseFace[t * 3] = nx; baseFace[t * 3 + 1] = ny; baseFace[t * 3 + 2] = nz;
     const d = -(nx * position[a] + ny * position[a + 1] + nz * position[a + 2]);
     for (let k = 0; k < 3; k++) {
       const v = corners[t * 3 + k], o = v * 10;
@@ -201,15 +202,19 @@ export function collapseChain(position, index, least, { region = null, border = 
     fan.length = n;
     return tick;
   };
-  // The cosine a triangle (a, b, c) turns through when u goes to v; -2 if it is left with no area.
-  const turn = (a, b, c, u, v) => {
+  // The least cosine triangle t turns through, from both its current plane and its initial base plane, when u goes to
+  // v; -2 if it is left with no area. Holding against the base plane keeps coplanar faces from folding across steps.
+  const turn = (t, u, v) => {
+    const a = corners[t * 3], b = corners[t * 3 + 1], c = corners[t * 3 + 2];
     const P = position, A = (a === u ? v : a) * 3, B = (b === u ? v : b) * 3, C = (c === u ? v : c) * 3, a3 = a * 3, b3 = b * 3, c3 = c * 3;
     const ex = P[b3] - P[a3], ey = P[b3 + 1] - P[a3 + 1], ez = P[b3 + 2] - P[a3 + 2], fx = P[c3] - P[a3], fy = P[c3 + 1] - P[a3 + 1], fz = P[c3 + 2] - P[a3 + 2];
     const gx = P[B] - P[A], gy = P[B + 1] - P[A + 1], gz = P[B + 2] - P[A + 2], hx = P[C] - P[A], hy = P[C + 1] - P[A + 1], hz = P[C + 2] - P[A + 2];
     const n0x = ey * fz - ez * fy, n0y = ez * fx - ex * fz, n0z = ex * fy - ey * fx, n1x = gy * hz - gz * hy, n1y = gz * hx - gx * hz, n1z = gx * hy - gy * hx;
     const l0 = Math.hypot(n0x, n0y, n0z), l1 = Math.hypot(n1x, n1y, n1z);
     if (l1 < 1e-12) return -2;
-    return l0 < 1e-12 ? 1 : (n0x * n1x + n0y * n1y + n0z * n1z) / (l0 * l1);
+    const stepCos = l0 < 1e-12 ? 1 : (n0x * n1x + n0y * n1y + n0z * n1z) / (l0 * l1);
+    const baseCos = (n1x * baseFace[t * 3] + n1y * baseFace[t * 3 + 1] + n1z * baseFace[t * 3 + 2]) / l1;
+    return Math.min(stepCos, baseCos);
   };
   const ringU = [], ringV = [], scratch = [], about = new Set();
   let living = T;
@@ -223,7 +228,7 @@ export function collapseChain(position, index, least, { region = null, border = 
     const least = fold(living);
     for (const t of fans[u]) {
       if (hasCorner(t, v)) continue;
-      if (turn(corners[t * 3], corners[t * 3 + 1], corners[t * 3 + 2], u, v) < least) return false;
+      if (turn(t, u, v) < least) return false;
     }
     // Nor one that would lay two triangles on the same corners (a tetrahedron's last edge): they enclose nothing.
     about.clear();
@@ -354,10 +359,11 @@ export function collapseChain(position, index, least, { region = null, border = 
   const counts = new Map();
   while (living > least) {
     let pick = null;
-    for (const strict of [true, false]) {
+    for (const minCos of [0.2, 0.0, -0.35, -0.8, -3]) {
       for (let t = 0; t < T; t++) {
         if (!alive[t]) continue;
         for (let k = 0; k < 3; k++) for (const [u, v] of [[corners[t * 3 + k], corners[t * 3 + ((k + 1) % 3)]], [corners[t * 3 + ((k + 1) % 3)], corners[t * 3 + k]]]) {
+          if (fixed && fixed[u]) continue;
           let dying = 0, flips = false;
           // What survives about v once u is taken into it, by corners: a pair on the same corners goes too.
           counts.clear();
@@ -367,10 +373,10 @@ export function collapseChain(position, index, least, { region = null, border = 
             if (hasCorner(f, v)) { dying++; continue; }
             const key = pairKey(f, u);
             counts.set(key, (counts.get(key) ?? 0) + 1);
-            if (turn(corners[f * 3], corners[f * 3 + 1], corners[f * 3 + 2], u, v) < -0.9) flips = true;
+            if (turn(f, u, v) < minCos) flips = true;
           }
           for (const n of counts.values()) dying += n - (n % 2);
-          if (living - dying < 4 || (strict && flips) || (fixed && fixed[u])) continue;
+          if (living - dying < 4 || flips) continue;
           const c = cost(u, v);
           if (!pick || c < pick[0]) pick = [c, u, v];
         }

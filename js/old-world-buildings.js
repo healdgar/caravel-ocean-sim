@@ -368,7 +368,7 @@ function watchtowerSpec({ side, stages }) {
 // open, each as a share of the side's length. Answers its primitives (prisms, so a mitre is no seam) and its guns:
 // where each stands on the terreplein `base` high, as far back from the outer face as a battery's guns stand, and the
 // way it looks (`nx, nz`, square out of its side).
-function gunParapet(line, inner, base, at, closed = false) {
+function gunParapet(line, inner, base, at, closed = false, material = 'ashlar') {
   const { parapet: p, sill, rise, embrasure } = CITY_BATTERY, m = closed ? line.length : line.length - 1, primitives = [], guns = [];
   const sides = Array.from({ length: m }, (_, i) => {
     const [ax, az] = line[i], [bx, bz] = line[(i + 1) % line.length], L = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / L, uz = (bz - az) / L;
@@ -385,7 +385,7 @@ function gunParapet(line, inner, base, at, closed = false) {
   const corners = Array.from({ length: line.length }, (_, j) => back(j));
   sides.forEach((s, i) => {
     const O = (t) => [s.ax + s.ux * t, s.az + s.uz * t], I = (t) => (t <= 1e-6 ? corners[i] : t >= s.L - 1e-6 ? corners[(i + 1) % line.length] : [s.ax + s.ux * t + p * s.vx, s.az + s.uz * t + p * s.vz]);
-    const piece = (name, t0, t1, y0, y1) => primitives.push({ primitive: 'prism', name, points: [O(t0), O(t1), I(t1), I(t0)], from: y0, to: y1, material: 'ashlar' });
+    const piece = (name, t0, t1, y0, y1) => primitives.push({ primitive: 'prism', name, points: [O(t0), O(t1), I(t1), I(t0)], from: y0, to: y1, material });
     piece('parapet_sill', 0, s.L, base, base + sill);
     const open = (at[i] ?? []).map((share) => share * s.L).sort((a, b) => a - b);
     let t = 0;
@@ -487,6 +487,64 @@ function artilleryTowerSpec({ round, across, height }) {
   return {
     schemaVersion: '0.4', name: `${round ? 'Cubo' : 'Torreão'} (${round ? 'a round' : 'a square'} gun tower, ${across} m across, ${height} m high)`, width, length: width, height: height + CITY_BATTERY.rise, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false, guns,
     primitives,
+  };
+}
+
+// An earth-and-timber battery or redoubt (the colonial sconce, the timber fortlet, and the native artillery redoubt):
+// a battered earth bank revetted with stakes, an oak plank platform, and an earthen gun parapet of four embrasures.
+function earthBatterySpec() {
+  const width = 22.4, depth = 12, hw = width / 2, hd = depth / 2, base = 2.6, batter = 0.7;
+  const line = [[hw - batter, hd], [hw - batter, -hd + batter], [-hw + batter, -hd + batter], [-hw + batter, hd]];
+  const made = gunParapet(line, [0, hd * 0.5], base, [[], [0.14, 0.38, 0.62, 0.86], []], false, 'earth');
+  const stakes = [];
+  for (let x = -hw + 0.6; x <= hw - 0.6 + 1e-6; x += 0.9) {
+    stakes.push({ primitive: 'cylinder', name: 'revetment_stakes', base: [x, -1.2, -hd + 0.3], height: base + 1.25, radius: 0.13, radiusTop: 0.11, segments: 6, material: 'timber' });
+  }
+  for (const sx of [-1, 1]) for (let z = -hd + 1.2; z <= hd - 0.6 + 1e-6; z += 0.95) {
+    stakes.push({ primitive: 'cylinder', name: 'revetment_stakes', base: [sx * (hw - 0.3), -1.2, z], height: base + 1.25, radius: 0.13, radiusTop: 0.11, segments: 6, material: 'timber' });
+  }
+  return {
+    schemaVersion: '0.4', name: 'Reduto de terra e faxina (an earth-and-timber battery of 4 embrasures)',
+    width, length: depth, height: base + CITY_BATTERY.rise, foundationDepth: FOOTING_M, materialKind: 10, roofPitch: 0, waterfront: false, guns: made.guns,
+    primitives: [
+      { primitive: 'box', partGroup: 'foundation_plinth', from: [-hw, -FOOTING_M, -hd], to: [hw, 0, hd], material: 'earth' },
+      { primitive: 'box', name: 'earth_bank', from: [-hw, 0, -hd], to: [hw, base, hd], topInset: batter, material: 'earth' },
+      { primitive: 'box', name: 'plank_platform', from: [-hw + batter + 0.2, base - 0.08, -hd + batter + 0.2], to: [hw - batter - 0.2, base + 0.04, hd - 0.4], material: 'oak' },
+      ...stakes,
+      ...made.primitives,
+    ],
+  };
+}
+
+// A round earth-and-timber corner bulwark (Strachey's half-moon bulwarks of James Fort, and the corner drums of timber
+// stockades): an earthen drum revetted with pointed logs, an oak gun deck and three embrasures sweeping the curtains.
+function earthBulwarkSpec() {
+  const across = 12, a = across / 2, batter = 0.65, base = 3.2, segments = 16;
+  const ring = Array.from({ length: segments }, (_, k) => [a * Math.cos(k / segments * 2 * Math.PI), a * Math.sin(k / segments * 2 * Math.PI)]);
+  const want = [-Math.PI / 2 - 0.85, -Math.PI / 2, -Math.PI / 2 + 0.85], at = ring.map(() => []), step = 2 * Math.PI / segments;
+  for (const phi of want) {
+    const u = ((phi % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI), k = Math.floor(u / step);
+    at[k].push(Math.min(0.75, Math.max(0.25, u / step - k)));
+  }
+  const made = gunParapet(ring, [0, 0], base, at, true, 'timber');
+  const stakes = Array.from({ length: 24 }, (_, p) => {
+    const ang = (p / 24) * 2 * Math.PI, lx = (a + 0.14) * Math.cos(ang), lz = (a + 0.14) * Math.sin(ang);
+    return [
+      { primitive: 'cylinder', name: 'bulwark_stakes', base: [lx, -1.2, lz], height: base + CITY_BATTERY.sill + 1.2, radius: 0.15, radiusTop: 0.13, segments: 6, material: 'timber' },
+      { primitive: 'cone', name: 'bulwark_points', base: [lx, base + CITY_BATTERY.sill, lz], height: 0.36, radius: 0.13, radiusTop: 0.03, segments: 6, material: 'timber' },
+    ];
+  }).flat();
+  const width = cityMetres(across + 2 * batter);
+  return {
+    schemaVersion: '0.4', name: 'Baluarte de paliçada (a round earth-and-timber bulwark of 3 embrasures)',
+    width, length: width, height: base + CITY_BATTERY.rise, foundationDepth: FOOTING_M, materialKind: 10, roofPitch: 0, waterfront: false, guns: made.guns,
+    primitives: [
+      { primitive: 'cylinder', partGroup: 'foundation_plinth', base: [0, -FOOTING_M, 0], height: FOOTING_M, radius: a + batter, segments, material: 'earth' },
+      { primitive: 'cylinder', name: 'bulwark_drum', base: [0, 0, 0], height: base, radius: a + batter, radiusTop: a, segments, material: 'earth' },
+      { primitive: 'cylinder', name: 'bulwark_deck', base: [0, base - 0.08, 0], height: 0.12, radius: a - 0.15, segments, material: 'oak' },
+      ...stakes,
+      ...made.primitives,
+    ],
   };
 }
 
@@ -730,6 +788,8 @@ const CITY_TYPE_NAMED = {
   GUN_TOWER_ROUND: cityFamily('GUN_TOWER_ROUND', CITY_ARTILLERY_TOWER.heights.flatMap((height) => CITY_ARTILLERY_TOWER.round.map((across) => artilleryTowerSpec({ round: true, across, height }))), 2),
   GUN_TOWER_SQUARE: cityFamily('GUN_TOWER_SQUARE', CITY_ARTILLERY_TOWER.heights.flatMap((height) => CITY_ARTILLERY_TOWER.square.map((across) => artilleryTowerSpec({ round: false, across, height }))), 1),
   BATTERY: cityFamily('BATTERY', CITY_BATTERY.depths.flatMap((depth) => CITY_BATTERY.guns.map((guns) => batterySpec({ guns, depth }))), CITY_BATTERY.guns.length - 1),
+  EARTH_BATTERY: cityFamily('EARTH_BATTERY', earthBatterySpec()),
+  EARTH_BULWARK: cityFamily('EARTH_BULWARK', earthBulwarkSpec()),
   WATCHTOWER: cityFamily('WATCHTOWER', CITY_WATCHTOWER.sides.flatMap((side) => CITY_WATCHTOWER.stages.map((stages) => watchtowerSpec({ side, stages }))), 1),
   HALL: cityFamily('HALL', CITY_HALL.widths.flatMap((width) => CITY_HALL.bays.map((bays) => hallSpec({ width, bays }))), CITY_HALL.bays.length + 3),
   PENTICE: cityFamily('PENTICE', CITY_PENTICES, 1),
@@ -746,6 +806,17 @@ const CITY_TYPE_NAMED = {
   LONJA: cityFamily('LONJA', builtSpec('open_lonja_loggia', 'Lonja de mercaderes (merchants\' exchange, an open arcade)', 13.5, 26, 7.4, 3.5, 11, 2.3, false)),
   // Cairn templates (js/cairn-primitives.js CAIRN_ARCHITECTURAL_TEMPLATES), at the size each is written at.
   JERONIMOS: cityFamily('JERONIMOS', builtSpec('mosteiro_dos_jeronimos', 'Mosteiro dos Jerónimos (Santa Maria de Belém)', 38, 34, 19.5, 4.5, 12, 3.4, false)),
+  TORRE_BELEM: cityFamily('TORRE_BELEM', Object.freeze({
+    ...builtSpec('torre_de_belem_manuelina', 'Torre de São Vicente de Belém (Manueline bulwark and tower)', 18, 28, 22.5, 9.5, 11, 2.2, true),
+    guns: Object.freeze([
+      { x: -3, y: 6.4, z: -10.4, nx: 0, nz: -1 },
+      { x: 3, y: 6.4, z: -10.4, nx: 0, nz: -1 },
+      { x: -5.4, y: 6.4, z: -6, nx: -1, nz: 0 },
+      { x: 5.4, y: 6.4, z: -6, nx: 1, nz: 0 },
+      { x: -5.4, y: 6.4, z: -2, nx: -1, nz: 0 },
+      { x: 5.4, y: 6.4, z: -2, nx: 1, nz: 0 },
+    ].map(Object.freeze)),
+  })),
   AQUEDUCT: cityFamily('AQUEDUCT', builtSpec('acueducto_de_piedra', 'Acueducto de sillería (stone aqueduct, a span of arches)', 32, 6.5, 13.2, 4.5, 11, 0.8, false)),
 };
 // Whatever else Castle and Commons' model builds (js/old-world-works.js), each family by its name there: WINDMILL to
@@ -799,7 +870,7 @@ export const CITY_TYPES_OVERHEAD = Object.freeze(new Set(cityFamilyTypes('PENTIC
 // Bridges are destructible gunnery targets whose intact spans let walkers and caravans cross rivers cleanly.
 export const CITY_TYPES_BRIDGES = Object.freeze(new Set(cityFamilyTypes('FOOTBRIDGE', 'STONE_BRIDGE', 'STONE_BRIDGE_SPAN')));
 // What stands in or over the water, never on the ground the land draws.
-export const CITY_TYPES_WATERSIDE = Object.freeze(new Set([...cityFamilyTypes('WHARF', 'WATERMILL', 'QUAY', 'PIER'), ...CITY_TYPES_BRIDGES]));
+export const CITY_TYPES_WATERSIDE = Object.freeze(new Set([...cityFamilyTypes('WHARF', 'WATERMILL', 'QUAY', 'PIER', 'TORRE_BELEM', 'CANOE_LANDING'), ...CITY_TYPES_BRIDGES]));
 // What is too slight to be laid as a gun's target or to stop anyone walking: what hangs overhead, a fence,
 // graves, a cairn, a standard, a work's guns (silenced with their work, js/port-damage.js).
 export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, ...cityFamilyTypes('FENCE_RAIL', 'FENCE_POST', 'FENCE_STONE', 'GRAVES', 'CAIRN', 'STANDARD', 'GUN')]));
@@ -815,7 +886,8 @@ const CITY_TARGETS = Object.freeze({
   GATE: { prefabId: 'city_gate', label: 'City gate' }, CURTAIN: { prefabId: 'city_wall', label: 'City wall' }, BASTION: { prefabId: 'city_bastion', label: 'Bastion' },
   CORNER_BASTION: { prefabId: 'city_bastion', label: 'Bastion' }, GUN_TOWER_ROUND: { prefabId: 'city_gun_tower', label: 'Gun tower' }, GUN_TOWER_SQUARE: { prefabId: 'city_gun_tower', label: 'Gun tower' },
   GUN: { prefabId: 'city_gun', label: 'Gun' },
-  BATTERY: { prefabId: 'city_battery', label: 'Battery' }, WATCHTOWER: { prefabId: 'city_watchtower', label: 'Watchtower' }, HALL: { prefabId: 'city_castle_hall', label: 'Castle hall' },
+  BATTERY: { prefabId: 'city_battery', label: 'Battery' }, EARTH_BATTERY: { prefabId: 'city_battery', label: 'Earthwork battery' }, EARTH_BULWARK: { prefabId: 'city_bastion', label: 'Timber bulwark' },
+  WATCHTOWER: { prefabId: 'city_watchtower', label: 'Watchtower' }, HALL: { prefabId: 'city_castle_hall', label: 'Castle hall' },
   PENTICE: { prefabId: 'city_shop_front', label: 'Shop front' }, SIGN: { prefabId: 'city_shop_front', label: 'Shop front' }, ALE_STAKE: { prefabId: 'city_shop_front', label: 'Shop front' },
   STALL: { prefabId: 'city_market_stall', label: 'Market stall' }, MARKET_CROSS: { prefabId: 'city_market_cross', label: 'Market cross' }, WELL: { prefabId: 'city_well', label: 'Well' },
   WINDMILL: { prefabId: 'city_windmill', label: 'Windmill' }, WATERMILL: { prefabId: 'city_watermill', label: 'Watermill' }, GRANARY: { prefabId: 'city_granary', label: 'Granary' },
@@ -829,7 +901,7 @@ const CITY_TARGETS = Object.freeze({
   QUAY: { prefabId: 'city_quay', label: 'Stone quay' }, PIER: { prefabId: 'city_pier', label: 'Timber mole' }, SLIPWAY: { prefabId: 'city_slipway', label: 'Slipway' },
   CAREENING_SHED: { prefabId: 'city_careening_shed', label: 'Careening shed' }, CUSTOMHOUSE: { prefabId: 'city_customhouse', label: 'Customhouse' },
   ARSENAL: { prefabId: 'city_arsenal', label: 'Arsenal' }, WAREHOUSE: { prefabId: 'city_warehouse', label: 'Royal storehouses' },
-  LONJA: { prefabId: 'city_exchange', label: 'Exchange' }, JERONIMOS: { prefabId: 'city_monastery', label: 'Monastery' }, AQUEDUCT: { prefabId: 'city_aqueduct', label: 'Aqueduct' },
+  LONJA: { prefabId: 'city_exchange', label: 'Exchange' }, JERONIMOS: { prefabId: 'city_monastery', label: 'Monastery' }, TORRE_BELEM: { prefabId: 'city_gun_tower', label: 'Gun tower' }, AQUEDUCT: { prefabId: 'city_aqueduct', label: 'Aqueduct' },
   ...NATIVE_WORKS_TARGETS,
 });
 for (const family of cityFamilies) if (!CITY_TARGETS[family.key]) throw Error(`The city's ${family.key} is no target the guns know`);

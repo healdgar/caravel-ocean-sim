@@ -124,6 +124,9 @@ function workOf(record, phase) {
     kind, form, ...(phase.round ? { round: true } : {}), ...(phase.battery ? { battery: true } : {}), ...(phase.earth ?? record.earth ? { earth: true } : {}),
     name: record.name, x: Math.round(east(record.lon)), z: Math.round(south(record.lat)), size, from: phase.from, until: record.until ?? null,
     role: record.role ?? '', side: record.side ?? '', ...(record.rough ? { rough: true } : {}),
+    ...(record.landmark ? { landmark: record.landmark } : {}),
+    ...(record.encloses ? { encloses: record.encloses } : {}),
+    ...(record.gate ? { gate: record.gate } : {}),
   };
 }
 const works = [], named = new Set();

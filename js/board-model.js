@@ -63,6 +63,7 @@ function boardWorks(works, span) {
     from: w.from ?? null, until: w.until ?? null, role: String(w.role || ''), side: String(w.side || ''),
     form: String(w.form || (w.kind === 'battery' ? 'battery' : w.kind === 'tower' ? 'tower' : 'enclosed')),
     ...(w.round ? { round: true } : {}), ...(w.battery ? { battery: true } : {}), ...(w.earth ? { earth: true } : {}), ...(w.rough ? { rough: true } : {}),
+    ...(w.landmark ? { landmark: String(w.landmark) } : {}), ...(w.encloses ? { encloses: String(w.encloses) } : {}), ...(w.gate ? { gate: String(w.gate) } : {}),
   }));
 }
 
@@ -240,5 +241,5 @@ export function boardPrefix(request, program = null) {
     `globalThis.KA_MAPS={board:{w:${request.size},h:${request.size},hgt:${heights},` +
     `vscale:1,crown:${JSON.stringify(request.site.culture)},sites:${JSON.stringify(sites)},title:${JSON.stringify(request.site.name)}` +
     (request.manner ? `,manners:${JSON.stringify({ [request.site.culture]: request.manner })},founded:${request.founded},settled:${request.settled}` : '') +
-    (request.works?.length ? `,works:${JSON.stringify(request.works.map((w) => ({ kind: w.kind, form: w.form, name: w.name, u: w.x / request.span, v: w.z / request.span, w: w.size[0], d: w.size[1], from: w.from, until: w.until, role: w.role, side: w.side, ...(w.round ? { round: true } : {}), ...(w.battery ? { battery: true } : {}), ...(w.earth ? { earth: true } : {}), ...(w.rough ? { rough: true } : {}) })))}` : '') + '}};\n';
+    (request.works?.length ? `,works:${JSON.stringify(request.works.map((w) => ({ kind: w.kind, form: w.form, name: w.name, u: w.x / request.span, v: w.z / request.span, w: w.size[0], d: w.size[1], from: w.from, until: w.until, role: w.role, side: w.side, ...(w.round ? { round: true } : {}), ...(w.battery ? { battery: true } : {}), ...(w.earth ? { earth: true } : {}), ...(w.rough ? { rough: true } : {}), ...(w.landmark ? { landmark: w.landmark } : {}), ...(w.encloses ? { encloses: w.encloses } : {}), ...(w.gate ? { gate: w.gate } : {}) })))}` : '') + '}};\n';
 }

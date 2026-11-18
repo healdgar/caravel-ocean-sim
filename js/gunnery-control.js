@@ -2960,12 +2960,15 @@ function workIntegrity(work, piece) {
 }
 // A piece of a work broken: its garrison sees to whoever stood on it (js/crew.js), once.
 function noteWorkPieceBroken(work, piece, settled) {
-  const list = (createBuildingDamageState(work).brokenPieces ??= []);
+  const wd = createBuildingDamageState(work);
+  (wd.struckPieces ??= new Set()).add(piece);
+  const list = (wd.brokenPieces ??= []);
   if (!list.some((entry) => entry.piece === piece)) list.push({ piece, settled, seen: false });
 }
 // After a piece of a work has taken a hit (applyBuildingImpactDamage).
 function strikeWorkThroughPiece(piece, d, worldHit) {
   const work = piece.workBuilding, guns = work.trace?.guns ?? [], index = piece.city?.index, wd = createBuildingDamageState(work);
+  (wd.struckPieces ??= new Set()).add(piece);
   const local = buildingWorldToLocal(work, worldHit), crater = d.craters[d.craters.length - 1];
   wd.hits++;
   workIntegrity(work, piece);
@@ -2986,6 +2989,7 @@ function strikeWorkThroughPiece(piece, d, worldHit) {
 export function workPieceRestored(piece) {
   const work = piece?.workBuilding, d = piece?.damageState;
   if (!work || !d) return;
+  if (d.hits) (createBuildingDamageState(work).struckPieces ??= new Set()).add(piece);
   const index = piece.city?.index, guns = work.trace?.guns ?? [];
   guns.forEach((gun, i) => { if (gun.piece === index && d.hits) setWorkGunDown(work, i, true); });
   if (workPieceBroken(d) && !guns.some((gun) => gun.piece === index)) noteWorkPieceBroken(work, piece, true);
@@ -2999,6 +3003,7 @@ export function workPieceRebuilt(piece, revive) {
   (work.trace?.guns ?? []).forEach((gun, i) => { if (gun.piece === index) setWorkGunDown(work, i, false); });
   workIntegrity(work, piece);
   const wd = work.damageState;
+  wd?.struckPieces?.delete(piece);
   if (wd?.brokenPieces) wd.brokenPieces = wd.brokenPieces.filter((entry) => entry.piece !== piece);
   revive?.(work, (s) => workPieceUnder(piece, work, s.lx, s.lz));
 }
