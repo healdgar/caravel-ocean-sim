@@ -2215,9 +2215,9 @@
     "sha256": "861276eb8be54030e7b87c513a1d673cb91ea55f7dbd75dfaeb3845044972eb0"
   },
   "assets/continuum/bake-worker.js": {
-    "url": "assets/continuum/bake-worker.4214269530ccd376.js",
-    "bytes": 194587,
-    "sha256": "4214269530ccd376c0f91abb6a18455e8594f8a288a9284af2c7953801d8aee6"
+    "url": "assets/continuum/bake-worker.2e9ccc2e1655a8b6.js",
+    "bytes": 195091,
+    "sha256": "2e9ccc2e1655a8b62fc5c2e256812a898775a3d829cf4797b8c7c514765db56b"
   },
   "assets/prefab-continuum/manifest.json": {
     "url": "assets/prefab-continuum/manifest.c3ba17d27cd852b2.json",
