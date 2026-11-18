@@ -28,7 +28,7 @@ import { coastalRegionStageURL } from '../js/landfall.js';
 import { OLD_WORLD_PLACES, boardTownHeld, oldWorldPeople } from '../js/old-world.js';
 import { NATIVE_TOWNS } from '../js/native-towns.js';
 import { COLONIAL_TOWNS } from '../js/colonial-towns.js';
-import { FORT_RECORDS, fortRecordsFor } from '../js/fort-records.js';
+import { FORT_RECORDS, fortPhaseFor, fortRecordsFor } from '../js/fort-records.js';
 import { openBoard } from './board-host.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -107,20 +107,31 @@ function onFoundingGround(x, z) {
   return best ?? { x, z };
 }
 // The works the record says stood on this ground in this year (js/fort-records.js), wherever on it they stood and
-// whichever port's record names them: each a fort, a battery or a watchtower by its shape, as big as the record says
-// or as its kind is, which the model sets on dry ground and stands as a building of the nearest place.
-const WORK_SIZE = Object.freeze({ star: [64, 64], headland: [72, 88], fitted: [70, 70], islet: [52, 52], drum: [30, 30], battery: [44, 14], tower: [14, 14] });
-function workOf(record) {
-  const kind = record.shape === 'battery' ? 'battery' : record.shape === 'drum' && !(record.sizeM?.[0] >= 30) ? 'tower' : 'fort';
-  const size = kind === 'battery' ? [record.sizeM?.[0] ?? WORK_SIZE.battery[0], Math.min(16, Math.max(10, record.sizeM?.[1] ?? WORK_SIZE.battery[1]))]
-    : kind === 'tower' ? WORK_SIZE.tower : record.sizeM ?? WORK_SIZE[record.shape] ?? WORK_SIZE.star;
-  return { kind, name: record.name, x: Math.round(east(record.lon)), z: Math.round(south(record.lat)), size, from: record.from ?? null, until: record.until ?? null, role: record.role ?? '', side: record.side ?? '' };
+// whichever port's record names them: each in the form its phase in this year had (fortPhaseFor), as big as the
+// record says or as its form is, which the model sets on dry ground and stands as a building of the nearest place.
+// To the model a tower of either kind is a tower and a castle or bastioned work a fort; the form goes with it, for the
+// board to build it by (js/old-world-board.js).
+const WORK_KIND = Object.freeze({ tower: 'tower', 'artillery-tower': 'tower', battery: 'battery', enclosed: 'fort', bastioned: 'fort', citadel: 'fort' });
+const WORK_SIZE = Object.freeze({ tower: [12, 12], 'artillery-tower': [22, 22], battery: [44, 14], enclosed: [52, 52], bastioned: [76, 76], citadel: [120, 120] });
+function workOf(record, phase) {
+  const form = phase.form, kind = WORK_KIND[form];
+  // A gun tower with a battery at its foot holds the ground of both, the battery toward the water.
+  const size = form === 'battery' ? [record.sizeM?.[0] ?? WORK_SIZE.battery[0], Math.min(16, Math.max(10, record.sizeM?.[1] ?? WORK_SIZE.battery[1]))]
+    : form === 'tower' ? WORK_SIZE.tower
+      : form === 'artillery-tower' ? (record.sizeM ?? (phase.battery ? [36, 40] : WORK_SIZE['artillery-tower']))
+        : record.sizeM ?? WORK_SIZE[form];
+  return {
+    kind, form, ...(phase.round ? { round: true } : {}), ...(phase.battery ? { battery: true } : {}), ...(phase.earth ?? record.earth ? { earth: true } : {}),
+    name: record.name, x: Math.round(east(record.lon)), z: Math.round(south(record.lat)), size, from: phase.from, until: record.until ?? null,
+    role: record.role ?? '', side: record.side ?? '', ...(record.rough ? { rough: true } : {}),
+  };
 }
 const works = [], named = new Set();
 for (const id of Object.keys(FORT_RECORDS)) for (const record of fortRecordsFor(id, year).forts) {
-  if (named.has(record.name)) continue;
+  const phase = fortPhaseFor(record, year);
+  if (named.has(record.name) || !phase) continue;
   named.add(record.name);
-  works.push(workOf(record));
+  works.push(workOf(record, phase));
 }
 // A port already baked for this year keeps the country it was given: its seed, unless another is asked for.
 const keptRecord = bakedBoardAsset(port, year) && existsSync(resolve(root, bakedBoardAsset(port, year))) ? JSON.parse(readFileSync(resolve(root, bakedBoardAsset(port, year)), 'utf8')).request : null;

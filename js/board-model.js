@@ -30,9 +30,10 @@ export function boardSeat(people) {
 // live every day to `era` (hours of work for a city: only ever for a board baked ahead). A colony's seat says the
 // `manner` its crown planted its towns by ('traza', 'ladeira': scripts/board-colonial.mjs), the year it was `founded`,
 // and how `settled` its country was (0 to 1 of an Old World country's towns and villages). `works` are the forts,
-// batteries and watchtowers the record says stood on this ground ({kind: 'fort', 'battery' or 'tower', name, x, z,
-// size: [across, deep], from, until, role, side}: js/fort-records.js), which the model sets on their ground before its
-// towns are laid and stands as buildings of the nearest place (scripts/board-forts.mjs).
+// batteries and watchtowers the record says stood on this ground ({kind: 'fort', 'battery' or 'tower', form (its form in
+// the year: js/fort-records.js FORT_FORMS), round, battery (a battery at a gun tower's foot), earth, name, x, z, size:
+// [across, deep], from, until, role, side, rough}), which the model sets on their ground before its towns are laid
+// and stands as buildings of the nearest place (scripts/board-forts.mjs).
 export const BOARD_WORK_KINDS = Object.freeze(['fort', 'battery', 'tower']);
 export function boardRequest({ heights, span, site, seed, era = 1550, seat = 1, walls = { capital: 2, town: 1, village: 0 }, fate = 1, places = [], rivers = BOARD_RIVERS, lived = false, manner = null, founded = null, settled = null, works = [] }) {
   const n = Math.round(Math.sqrt(heights.length));
@@ -60,6 +61,8 @@ function boardWorks(works, span) {
     kind: w.kind, name: String(w.name), x: Math.round(w.x), z: Math.round(w.z),
     size: [Math.round(Math.max(6, w.size?.[0] ?? 40)), Math.round(Math.max(6, w.size?.[1] ?? w.size?.[0] ?? 40))],
     from: w.from ?? null, until: w.until ?? null, role: String(w.role || ''), side: String(w.side || ''),
+    form: String(w.form || (w.kind === 'battery' ? 'battery' : w.kind === 'tower' ? 'tower' : 'enclosed')),
+    ...(w.round ? { round: true } : {}), ...(w.battery ? { battery: true } : {}), ...(w.earth ? { earth: true } : {}), ...(w.rough ? { rough: true } : {}),
   }));
 }
 
@@ -234,5 +237,5 @@ export function boardPrefix(request, program = null) {
     `globalThis.KA_MAPS={board:{w:${request.size},h:${request.size},hgt:${heights},` +
     `vscale:1,crown:${JSON.stringify(request.site.culture)},sites:${JSON.stringify(sites)},title:${JSON.stringify(request.site.name)}` +
     (request.manner ? `,manners:${JSON.stringify({ [request.site.culture]: request.manner })},founded:${request.founded},settled:${request.settled}` : '') +
-    (request.works?.length ? `,works:${JSON.stringify(request.works.map((w) => ({ kind: w.kind, name: w.name, u: w.x / request.span, v: w.z / request.span, w: w.size[0], d: w.size[1], from: w.from, until: w.until, role: w.role, side: w.side })))}` : '') + '}};\n';
+    (request.works?.length ? `,works:${JSON.stringify(request.works.map((w) => ({ kind: w.kind, form: w.form, name: w.name, u: w.x / request.span, v: w.z / request.span, w: w.size[0], d: w.size[1], from: w.from, until: w.until, role: w.role, side: w.side, ...(w.round ? { round: true } : {}), ...(w.battery ? { battery: true } : {}), ...(w.earth ? { earth: true } : {}), ...(w.rough ? { rough: true } : {}) })))}` : '') + '}};\n';
 }
