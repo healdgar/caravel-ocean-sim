@@ -445,7 +445,7 @@ fn crewContinuumFarVertex(person:u32,chunk:u32,vertex:u32,state:vec4u)->CrewCont
   up=normalize(up-toward*dot(up,toward)+vec3f(0.0,1e-4,0.0));
   let right=normalize(cross(up,toward));
   // The triangle that circumscribes the outline's ellipse, shrunk to the ellipse's own area.
-  let k=0.7776*scale;
+  let k=CONTINUUM_SPLAT_AREA*scale;
   let corner=array<vec2f,3>(vec2f(0.0,2.0),vec2f(-1.7320508,-1.0),vec2f(1.7320508,-1.0))[min(vertex,2u)];
   let world=centre+right*(corner.x*crewBody.far.w*k)+up*(corner.y*crewBody.far.z*k)+vec3f(touched);
   var out=crewContinuumFinish(slot,world,toward,crewBody.splat.xyz);

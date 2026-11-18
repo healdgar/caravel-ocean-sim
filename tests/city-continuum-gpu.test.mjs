@@ -147,6 +147,7 @@ test('Lisbon\'s buildings are cut on the GPU: the game\'s own lists, read back',
     const result = await page.evaluate(async () => {
       const r = window.cityContinuumAudit, device = r.device, B = GPUBufferUsage, uploads = { ...r.uploads }, frames = r.frames, drawCalls = r.draws;
       const { requestCityContinuumAtlas, cityContinuumListLayout, CITY_CONTINUUM_FELLED } = await import('/js/city-continuum-draw.js');
+      const { CITY_CONTINUUM_INSTANCE_WORDS } = await import('/js/wgsl/city-continuum.js');
       const { CITY_CONTINUUM_TYPE: T, CITY_CONTINUUM_HEADER: H, CITY_CONTINUUM_TYPE_WORDS, CITY_CONTINUUM_STEP_WORDS, CITY_CONTINUUM_CLUSTER_WORDS, CITY_CONTINUUM_CHUNK_TRIANGLES, CITY_CONTINUUM_SMALL_CLUSTER } = await import('/js/city-continuum.js');
       // The atlas the game uploaded (one a device), read here from its own words.
       const { words } = await requestCityContinuumAtlas(device);
@@ -155,9 +156,10 @@ test('Lisbon\'s buildings are cut on the GPU: the game\'s own lists, read back',
         encoder.copyBufferToBuffer(buffer, 0, out, 0, buffer.size); device.queue.submit([encoder.finish()]);
         await out.mapAsync(GPUMapMode.READ); const read = new Uint32Array(out.getMappedRange().slice(0)); out.unmap(); out.destroy(); return read;
       };
-      const [draws, list, flags] = await Promise.all(['draws', 'lists', 'flags'].map((name) => read(r.buffers[`city continuum ${name}`])));
+      const [draws, list, instances] = await Promise.all(['draws', 'lists', 'instances'].map((name) => read(r.buffers[`city continuum ${name}`])));
       // Every entry checked against the building it names, its type and its state for the frame.
-      const count = flags.length, { lists } = cityContinuumListLayout(count), field = (type, f) => words[words[H.typesAt] + type * CITY_CONTINUUM_TYPE_WORDS + f];
+      const count = instances.length / CITY_CONTINUUM_INSTANCE_WORDS, flags = Array.from({ length: count }, (_, b) => instances[b * CITY_CONTINUUM_INSTANCE_WORDS + 8]);
+      const { lists } = cityContinuumListLayout(count), field = (type, f) => words[words[H.typesAt] + type * CITY_CONTINUUM_TYPE_WORDS + f];
       const wrong = [], buildings = [new Set(), new Set(), new Set(), new Set(), new Set()];
       const flaw = (why) => { if (wrong.length < 12) wrong.push(why); };
       for (let index = 0; index < 5; index++) {

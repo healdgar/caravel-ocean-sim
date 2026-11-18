@@ -10,6 +10,7 @@ import {once} from 'node:events';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
+import {CITY_CONTINUUM_BROKEN,CITY_CONTINUUM_GONE} from '../js/wgsl/city-continuum.js';
 
 let browser,server,base;
 before(async()=>{
@@ -28,7 +29,7 @@ test('a jetty and a ball through the prop continuum: clusters, handoff, far body
     const {requestPropContinuumAtlas,requestPropContinuumPipelines,createPropContinuumScene}=await import('/js/prop-continuum-draw.js');
     const {PROP_CONTINUUM_TYPE:T,PROP_CONTINUUM_SHOT}=await import('/js/prop-continuum.js');
     const {CITY_CONTINUUM_HEADER:H,CITY_CONTINUUM_TYPE_WORDS,CITY_CONTINUUM_STEP_WORDS,CITY_CONTINUUM_CLUSTER_WORDS}=await import('/js/city-continuum.js');
-    const {PROP_CONTINUUM_BROKEN,PROP_CONTINUUM_GONE}=await import('/js/wgsl/prop-continuum.js');
+    const {CITY_CONTINUUM_BROKEN:PROP_CONTINUUM_BROKEN,CITY_CONTINUUM_GONE:PROP_CONTINUUM_GONE}=await import('/js/wgsl/city-continuum.js');
     const {setContinuumPixelError}=await import('/js/continuum-core.js');
     const device=await (await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
     device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
@@ -208,7 +209,7 @@ const held=(page,index)=>page.evaluate(async index=>{
   const words=await propRead('props continuum instances'),floats=new Float32Array(words),ints=new Uint32Array(words),at=index*12;
   const records=new Float32Array(await propRead('prop shard records')),block=ints[at+9]*4,state=oceanProps.placed[index].fracture;
   const mine=[...records.subarray(block+4,block+4+state.flight.records.length)],theirs=[...state.flight.records];
-  return {type:ints[at+8]&0xffff,flags:ints[at+8]>>>16,reach:floats[at+10],clockZero:records[block],same:mine.every((v,i)=>v===theirs[i])};
+  return {type:ints[at+8]&0xffff,flags:ints[at+8]&~0xffff,reach:floats[at+10],clockZero:records[block],same:mine.every((v,i)=>v===theirs[i])};
 },index);
 // Where each of an instance's entries is: [list, what] pairs, and the parts of its clusters.
 const entriesOf=(cut,instance)=>cut.lists.flatMap((list,i)=>list.filter(e=>e.instance===instance).map(e=>[i,e.what]));
@@ -258,7 +259,7 @@ test('a shot breaks a jetty where it stands: drawn as its shards, its flights in
   await page.evaluate(()=>propFrames(2));
   const gpu=await held(page,hit.index),cut=await page.evaluate(()=>propCut('props'));
   assert.equal(gpu.type,hit.model);
-  assert.equal(gpu.flags,1,'broken');
+  assert.equal(gpu.flags,CITY_CONTINUUM_BROKEN,'broken');
   assert.ok(gpu.same,'the GPU holds the flights the game computed');
   assert.ok(gpu.reach>0,`its reach grows to take in what is in the air: ${gpu.reach} m`);
   assert.ok(gpu.clockZero>=0&&gpu.clockZero<600,`its clock is set against the frame's: ${gpu.clockZero}`);
@@ -305,7 +306,7 @@ test('a ruined pier takes its cleats with it, a broken one too',{timeout:300000}
   assert.ok(hit.released>0&&hit.owner>=0,`a cleat on a pier, ${hit.released} shards off`);
   await page.evaluate(()=>propFrames(4));
   const broken=await held(page,hit.index);
-  assert.equal(broken.flags,1,'broken, it is still drawn on its pier');
+  assert.equal(broken.flags,CITY_CONTINUUM_BROKEN,'broken, it is still drawn on its pier');
   // The game's own damage state is what the renderer watches.
   await page.evaluate(()=>{const {port,placed}=oceanProps;for(const owner of new Set(placed.filter(p=>p.owner>=0).map(p=>p.owner)))(port.instances[owner].damageState??={}).state='ruined';});
   // Owners are asked every 30 frames, so wait in frames: a loaded machine may not draw 30 in a second.
@@ -314,5 +315,5 @@ test('a ruined pier takes its cleats with it, a broken one too',{timeout:300000}
   const cut=await page.evaluate(()=>propCut('props'));
   assert.ok(cleats.length>0);
   for(const index of cleats)assert.deepEqual(entriesOf(cut,index),[],`cleat ${index} is listed nowhere`);
-  assert.equal((await held(page,hit.index)).flags&2,2,'the broken one is gone with its pier');
+  assert.equal((await held(page,hit.index)).flags&CITY_CONTINUUM_GONE,CITY_CONTINUUM_GONE,'the broken one is gone with its pier');
 });

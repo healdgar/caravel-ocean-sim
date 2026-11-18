@@ -11,6 +11,9 @@ export const CONTINUUM_SPLAT_PIXELS = 3.5;
 export const CONTINUUM_SPLAT_BAND_PIXELS = 5.25;
 // Below this span the splat is thinned by a deterministic hash and the survivors are inflated to keep its area.
 export const CONTINUUM_MIN_PIXELS = 1.0;
+// A splat is the triangle that circumscribes its outline's ellipse (corners (0, 2) and (±√3, -1) of the ellipse's
+// radii), shrunk by this to the ellipse's own area: √(π / 3√3).
+export const CONTINUUM_SPLAT_AREA = Math.sqrt(Math.PI / (3 * Math.sqrt(3)));
 // Where a finer side of a body hands over to a coarser one (clusters to the far body, leaves to the crown), both
 // are worn, sample by sample, over this share of the distance at which the handoff begins.
 export const CONTINUUM_HANDOFF_BAND = 0.3;
@@ -38,6 +41,7 @@ export const CONTINUUM_CORE_WGSL = /* wgsl */`
 const CONTINUUM_SPLAT_PIXELS: f32 = ${CONTINUUM_SPLAT_PIXELS.toFixed(4)};
 const CONTINUUM_SPLAT_BAND_PIXELS: f32 = ${CONTINUUM_SPLAT_BAND_PIXELS.toFixed(4)};
 const CONTINUUM_MIN_PIXELS: f32 = ${CONTINUUM_MIN_PIXELS.toFixed(4)};
+const CONTINUUM_SPLAT_AREA: f32 = ${CONTINUUM_SPLAT_AREA.toFixed(6)};
 const CONTINUUM_HANDOFF_BAND: f32 = ${CONTINUUM_HANDOFF_BAND.toFixed(4)};
 const CONTINUUM_IMPORTANT: f32 = ${CONTINUUM_IMPORTANT.toFixed(4)};
 // The pixel error an instance is cut at: the scene's, or CONTINUUM_IMPORTANT of it for one that matters.

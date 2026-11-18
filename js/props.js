@@ -13,7 +13,7 @@ import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { GUNNERY_FX_LIMITS } from './gunnery-effects.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { PROP_CONTINUUM_SHOT, PROP_CONTINUUM_TYPES, PROP_CONTINUUM_PIGMENT_SIZE } from './prop-continuum.js';
-import { PROP_CONTINUUM_BROKEN, PROP_CONTINUUM_GONE } from './wgsl/prop-continuum.js';
+import { CITY_CONTINUUM_BROKEN, CITY_CONTINUUM_GONE } from './wgsl/city-continuum.js';
 import { requestPropContinuumAtlas, requestPropContinuumPipelines, createPropContinuumScene } from './prop-continuum-draw.js';
 
 const PROP_REACH_M = 3000;
@@ -109,7 +109,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     const { prop, at } = item, model = kit.models[prop.model], radius = propDrawRadius(prop, model, ownerStateOf(item));
     scene.continuum.place(at, {
       x: prop.x, y: prop.y ?? model.standsAt, z: prop.z, yaw: prop.yaw, type: prop.model,
-      flags: (radius > 0 ? 0 : PROP_CONTINUUM_GONE) | (prop.fracture?.damaged ? PROP_CONTINUUM_BROKEN : 0),
+      flags: (radius > 0 ? 0 : CITY_CONTINUUM_GONE) | (prop.fracture?.damaged ? CITY_CONTINUUM_BROKEN : 0),
       records: item.block / 4, reach: Math.max(0, radius - model.radius), seed: at,
     });
   }
@@ -190,7 +190,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     const count = Math.min(n, shot.capacity);
     for (let i = 0; i < count; i++) {
       const r = balls[i * 4 + 3], size = Math.abs(r);
-      shot.place(i, { x: balls[i * 4], y: balls[i * 4 + 1], z: balls[i * 4 + 2], scale: [size, size, size], glow: r < 0 ? 1 : 0, type: PROP_CONTINUUM_SHOT, seed: seeds[i] });
+      shot.place(i, { x: balls[i * 4], y: balls[i * 4 + 1], z: balls[i * 4 + 2], scale: [size, size, size], word: r < 0 ? 1 : 0, type: PROP_CONTINUUM_SHOT, seed: seeds[i] });
     }
     shot.send(0, count);
     shot.setCount(count);
