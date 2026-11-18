@@ -2444,6 +2444,16 @@
     "bytes": 12480,
     "sha256": "38fcb4df7f8093660e345a928a12d827a78e277bc116b41f873ece511d2ad3b8"
   },
+  "assets/prop-continuum/manifest.json": {
+    "url": "assets/prop-continuum/manifest.5bf4423956b6eca7.json",
+    "bytes": 5982,
+    "sha256": "5bf4423956b6eca7d8b49248c4727c0db5b72891b39e008eb3f3b20e09cd269f"
+  },
+  "assets/prop-continuum/atlas.bin.gz": {
+    "url": "assets/prop-continuum/atlas.bin.25edd2589754cfc9.gz",
+    "bytes": 322761,
+    "sha256": "25edd2589754cfc951447fa7bd6aec59cde55ab6658b6bd1e1490110dd8d12d9"
+  },
   "assets/caravel-oak-albedo.webp": {
     "url": "assets/caravel-oak-albedo.79bd1c37de4acc5b.webp",
     "bytes": 343690,
