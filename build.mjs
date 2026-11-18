@@ -92,6 +92,8 @@ order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/meadow-co
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // Ships drawn through the one continuum: the bodies' format, the cut and the draws, ahead of the families that draw them.
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js','js/wgsl/ship-continuum.js','js/ship-continuum-draw.js');
+// The fleet's own ships on the same continuum (js/vessel-continuum.js), drawn by main.js.
+order.splice(order.indexOf('js/main.js'),0,'js/vessel-continuum.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/city-continuum-draw.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js','js/debug-world.js');

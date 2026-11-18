@@ -51,7 +51,6 @@ test('the census counts submitted triangles from the families\' own indirect rec
         await new Promise((r) => setTimeout(r, 30));
         return census.latest;
       };
-      census.report('ships', 95000);
       const first = await frame([{ name: 'forest', draws: [{ buffer: indexed, offset: 16, records: 2, stride: 5 }] }, { name: 'splats', draws: [{ buffer: plain, offset: 0, records: 2, stride: 4 }] }]);
       // The forest's cut shrinks: the census follows the records the GPU holds now.
       device.queue.writeBuffer(indexed, 16, new Uint32Array([384, 10, 0, 0, 0]));
@@ -60,8 +59,8 @@ test('the census counts submitted triangles from the families\' own indirect rec
       return { first, second, errors };
     });
     assert.deepEqual(result.errors, []);
-    assert.deepEqual(result.first.families, { ships: 95000, forest: 128 * 1000 + 12 * 7, splats: 250000 + 10 * 2 });
-    assert.equal(result.first.total, 95000 + 128084 + 250020);
+    assert.deepEqual(result.first.families, { forest: 128 * 1000 + 12 * 7, splats: 250000 + 10 * 2 });
+    assert.equal(result.first.total, 128084 + 250020);
     assert.equal(result.first.budget, CONTINUUM_TRIANGLE_BUDGET);
     assert.equal(result.second.families.forest, 128 * 10 + 12 * 7);
   } finally {

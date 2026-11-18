@@ -76,8 +76,8 @@ import { createFollower, steerFollower, commandFriendlyFleet, stepVesselCombatAI
 import {readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,broadsideFormation,fleetModelCode,fleetViewBounds,createFleetWakePool,validateFleetDevice,normalizeVesselFaction,MAX_FOLLOWERS} from './fleet.js';
 import {withPooledFleetWakes} from './wgsl/fleet-wakes.js';
 import {SCENE_WAKE_SAMPLE} from './wgsl/surface-coupling.js';
-import {withSceneShadowCount, SHADOW_CAST} from './wgsl/shadows.js';
-import { createVesselShadows, createSceneShadows, createLandShadows, requestVesselShadowPipelines } from './shadows.js';
+import {withSceneShadowCount} from './wgsl/shadows.js';
+import { createVesselShadows, createSceneShadows, createLandShadows } from './shadows.js';
 import { createSeaShadows } from './sea-shadows.js';
 import { createWaterInteraction, requestWaterEffectPipelines } from './interaction.js';
 import { requestDeckWaterPipelines } from './deck.js';
@@ -95,9 +95,9 @@ import { createWaterOptics } from './water-optics.js';
 import { createUnderwater, requestUnderwaterPipeline } from './underwater.js';
 import { createNeuralLightPass, requestNeuralLightPipelines, normalizeNeuralLightMode } from './neural-post.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
-import { withNeuralPbrVessel } from './wgsl/neural-pbr.js';
 import { createShipAssetCache } from './ship-mesh.js';
-import { createVesselPose, POSED_VERTEX_LAYOUT, withPosedVesselVertices } from './vessel-pose.js';
+import { createVesselPose } from './vessel-pose.js';
+import { requestVesselContinuumPrograms, loadVesselContinuumBody, createVesselContinuum } from './vessel-continuum.js';
 import { VESSEL_POSE_UPDATE, VESSEL_SURFACE_POSE_UPDATE } from './wgsl/vessel-pose.js';
 import {getShipModel} from './ship-models.js';
 import {getShipParts} from './ship-parts.js';
@@ -118,7 +118,7 @@ import { bakedBoardFor } from './old-world.js';
 import { createProps } from './props.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
-import { CARAVEL, CARAVEL_DAMAGED, WATER_FILTER } from './wgsl/caravel.js';
+import { WATER_FILTER } from './wgsl/caravel.js';
 import { createHullFlood, requestHullFloodPipelines, HULL_DAMAGE_UNIFORM_BYTES } from './hull-flood.js';
 import { hullHoleDepth } from './hull-holes.js';
 import { loseHandInGale } from './crew-overboard.js';
@@ -558,7 +558,6 @@ async function main() {
     computePipe(WET_DEPOSIT, 'spray deposition'),
     computePipe(WET_SEA, 'wetting sea heights'),
     computePipe(withPosedWetnessProbes(), 'surface moisture'),
-    shader(withPosedVesselVertices(SHADOW_CAST), 'vessel shadows'),
     computePipe(SPINDRIFT_UPDATE, 'crest spray update'),
     shader(SPINDRIFT_RENDER, 'crest spray'),
     ...(sceneModelCodes.some(c => c <= 1) ? [computePipe(VESSEL_POSE_UPDATE, 'shared vessel deformation')] : []),
@@ -579,28 +578,13 @@ async function main() {
   const probePipePromise=computePipe(SCENE_HEIGHT_PROBE,'height probe');
   const neuralPbr=sharedNeuralPbrBank(device,{strength:qs.has('neuralPbr')&&Number.isFinite(Number(qs.get('neuralPbr')))?Math.max(0,Math.min(1.5,Number(qs.get('neuralPbr')))):P.neuralPbr});
   window.oceanNeuralPbr=neuralPbr;
-  const vesselSource=withNeuralPbrVessel(withPosedVesselVertices(CARAVEL));
-  const vesselVertexLayouts=[{arrayStride:36,attributes:[
-    {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
-    {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
-  ]},POSED_VERTEX_LAYOUT];
-  const vesselPrograms=new Map();
-  const requestVesselPrograms=modelId=>{
-    if(!vesselPrograms.has(modelId)){
-      const pipeline=shader(vesselSource,modelId+' vessel').then(module=>device.createRenderPipelineAsync({label:modelId+' vessel',layout:'auto',
-        vertex:{module,entryPoint:'vs',buffers:vesselVertexLayouts},fragment:{module,entryPoint:'fs',targets:[{format:HDR}]},
-        primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:MSAA}}));
-      const submerged=waterOpticsPromise.then(optics=>optics.capture({source:vesselSource,vertex:{entryPoint:'vs',buffers:vesselVertexLayouts},world:'in.world',groups:2}));
-      pipeline.catch(()=>{});submerged.catch(()=>{});
-      vesselPrograms.set(modelId,{pipeline,submerged});
-    }
-    return vesselPrograms.get(modelId);
-  };
-  for(const modelId of new Set(fleetSpecs.map(spec=>spec.modelId)))requestVesselPrograms(modelId);
+  // Every ship of the fleet is drawn through the ship continuum (js/vessel-continuum.js): one set of programs for all.
+  const vesselProgramsPromise=requestVesselContinuumPrograms({device,shader,format:HDR,samples:MSAA,waterOptics:waterOpticsPromise});
+  vesselProgramsPromise.catch(()=>{});
   const startupPrograms=[
     seaShadowsPromise,dolphinsPromise,gunEffectsPromise,gunSeaPromise,gunportSafetyPromise,probePipePromise,
     requestCrewPipelines({device,shader,format:HDR,samples:MSAA,waterOptics:waterOpticsPromise}),
-    requestVesselShadowPipelines({device,shader,posed:true}),
+    vesselProgramsPromise,
     requestWaterEffectPipelines({device,shader}),
     requestDeckWaterPipelines({device,shader}),
     requestCrestSprayPipeline({device,shader}),
@@ -766,26 +750,15 @@ async function main() {
     const asset=shipAssets.get(modelId),gpuPose=asset.gpuPose;
     if(gpuPose!==true||typeof asset.pose==='function')throw Error('Ship rendering cannot bypass shared WebGPU deformation');
     fleetModelCode(asset.model); // A future model needs an explicit hull backend.
-    const vertexLayouts=vesselVertexLayouts,programs=requestVesselPrograms(modelId);
-    const [pipeline,submerged]=await Promise.all([programs.pipeline,programs.submerged]);
-    const indexBuffer=mkBuf(asset.indices.byteLength,GU.INDEX|GU.COPY_DST,modelId+' shared indices');
-    device.queue.writeBuffer(indexBuffer,0,asset.indices);
-    const result={asset,gpuPose,pipeline,submerged,indexBuffer,poseAssets:null,damaged:null,
+    // Her body on the ship continuum (assets/ships/continuum/player-<model>), checked against her as built here.
+    const [programs,body]=await Promise.all([vesselProgramsPromise,loadVesselContinuumBody(device,asset)]);
+    const result={asset,gpuPose,programs,body,poseAssets:null,damaged:null,
       // Compiled once the game is running: until then a damaged ship draws whole for a moment.
-      async compileDamaged(){
-        const damagedSource=withNeuralPbrVessel(gpuPose?withPosedVesselVertices(CARAVEL_DAMAGED):CARAVEL_DAMAGED);
-        const damagedModule=await shader(damagedSource,modelId+' damaged vessel');
-        const base={layout:'auto',vertex:{module:damagedModule,entryPoint:'vs',buffers:vertexLayouts},primitive:{topology:'triangle-list',cullMode:'none'},multisample:{count:MSAA}};
-        const [cut,shade]=await Promise.all([
-          device.createRenderPipelineAsync({...base,label:modelId+' surviving surface',fragment:{module:damagedModule,entryPoint:'surviving',targets:[{format:HDR,writeMask:0}]},
-            depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}}),
-          device.createRenderPipelineAsync({...base,label:modelId+' damaged vessel',fragment:{module:damagedModule,entryPoint:'fs',targets:[{format:HDR}]},
-            depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'equal'}}),
-        ]);
-        result.damaged={cut,shade};
-      }};
+      async compileDamaged(){result.damaged=await programs.requestDamaged();}};
     renderAssets.set(modelId,result);return result;
   }
+  // No vessel's cut is shifted to a near domain: her hull uniform places her in the scene's own coordinates.
+  const vesselContinuumOffset=mkBuf(32,GU.UNIFORM|GU.COPY_DST,'vessel continuum offset');
   const uniqueShipAssetsPromise=Promise.all([...new Set(fleetSpecs.map(s=>s.modelId))].map(shipRenderAsset));
   uniqueShipAssetsPromise.catch(()=>{});
   const oakTex = await oakTexPromise;
@@ -804,7 +777,7 @@ async function main() {
     const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,mesh,pristineMesh:asset.vertices,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap,partAssembly:asset.partAssembly??null,fracture:asset.fracture??null});
     if(pose)render.poseAssets=pose.assets;
     const wetnessPromise=createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length+Object.keys(asset.model.supplementalCrewStations??{}).length,posed:pose});
-    const shadowsPromise=wetnessPromise.then(wetness=>createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,vertexBuffer,shader,wetness,targets:sceneShadows.layer(index),posed:pose}));
+    const shadowsPromise=wetnessPromise.then(wetness=>createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,wetness,targets:sceneShadows.layer(index)}));
     const [wetness,shadows,interaction,rowingWater]=await Promise.all([
       wetnessPromise,
       shadowsPromise,
@@ -815,16 +788,35 @@ async function main() {
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}
     catch(error){if(index===0)crewError='Crew unavailable';console.warn(spec.id+' crew initialization:',error);}
     interaction.setShadows(shadows);
+    // She is drawn, shadowed and seen from under the water through her own cut of her body (js/vessel-continuum.js),
+    // which reads her posed vertices and her own copy of the assembly. Its buffers are named for her model and row
+    // ('<model> vessel <id> continuum draws'), so a frame's indirect draws say which ship they are.
+    const continuum=createVesselContinuum({device,programs:render.programs,data:render.body,asset,vertices:vertexBuffer,pose,
+      frame:{buffer:frameUBO},offset:{buffer:vesselContinuumOffset},shadowFrame:{buffer:shadows.uniform},identity:index+1,samples:MSAA,label:`${asset.model.id} vessel ${spec.id}`});
+    shadows.castWith((pass,cloth,own)=>continuum.cast(pass,cloth,own));
     vessels.push({...spec,boat:null,asset,render,hullUBO,holesUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
-      rowingWater,lighting:shadows.bind(render.pipeline),submergedLighting:shadows.bind(render.submerged.pipeline),recoilMap});
+      rowingWater,continuum,ownGroups:new Map(),recoilMap});
   }
   const hullBelongsDamaged=v=>Boolean(v.render.damaged&&(v.pose?.scarred||v.boat.damage?.holes?.length||v.boat.damage?.craters?.length));
+  // A vessel's own resources and lighting (groups 0 and 1) for one of the continuum's scene programs, made once a resize.
+  function vesselOwnGroups(v,pipeline){
+    let made=v.ownGroups.get(pipeline);
+    if(!made){made=[bg(pipeline,[...v.hullResources,null,{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer}],v.id+' vessel'),v.shadows.bind(pipeline)];v.ownGroups.set(pipeline,made);}
+    return made;
+  }
+  // The same for one of its water captures (js/water-optics.js).
+  function vesselCaptureGroups(v,capture){
+    let made=v.ownGroups.get(capture);
+    if(!made){made=[capture.bindGroup([...v.hullResources.map((resource,binding)=>({binding,resource})),...neuralPbr.vesselBindings(16,17)]),v.shadows.bind(capture.pipeline)];v.ownGroups.set(capture,made);}
+    return made;
+  }
   function damagedHullGroups(v){
     if(v.damagedGroups)return v.damagedGroups;
-    const {cut,shade}=v.render.damaged,resources=[...v.hullResources,{buffer:v.holesUBO},{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer}];
+    const {surviving,shade}=v.render.damaged,resources=[...v.hullResources,{buffer:v.holesUBO},{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer}];
     // The depth entry reads only the vertex stage's resources and the damage record.
     const forDepth=new Set([0,6,13,14,15]);
-    return v.damagedGroups={cut:bg(cut,resources.map((resource,binding)=>forDepth.has(binding)?resource:null),v.id+' surviving surface'),
+    return v.damagedGroups={surviving:bg(surviving,resources.map((resource,binding)=>forDepth.has(binding)?resource:null),v.id+' surviving surface'),
+      empty:device.createBindGroup({label:v.id+' surviving surface lighting',layout:surviving.getBindGroupLayout(1),entries:[]}),
       shade:bg(shade,resources,v.id+' damaged vessel'),lighting:v.shadows.bind(shade)};
   }
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
@@ -1067,9 +1059,7 @@ async function main() {
       const resources=[{buffer:frameUBO},transView,skyView,sampClamp,
         envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction.deck.view,
         {buffer:v.wetness.state},{buffer:v.wetness.lookup}];
-      v.hullResources=resources;v.damagedGroups=null;
-      v.bindGroup=bg(v.render.pipeline,[...resources,null,{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer}],v.id+' vessel');
-      v.submergedGroup=v.render.submerged.bindGroup([...resources.map((resource,binding)=>({binding,resource})),...neuralPbr.vesselBindings(16,17)]);
+      v.hullResources=resources;v.damagedGroups=null;v.ownGroups=new Map();
     }
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
     bloomLevels = Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.max(bw, bh))) + 1);
@@ -4325,6 +4315,8 @@ async function main() {
     }
     surfaceWaves.encode(cp);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
+    // Each vessel's cut: what of her the scene, her shadow and the water's captures draw this frame.
+    for(const v of vessels)v.continuum.encode(cp,v.boat.showProw);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
     fortSoldiers?.encodePose(cp);mateSoldiers?.encodePose(cp);
     townsfolk?.encode(cp,gameDateMs());boardLife?.tick(gameDateMs());caravanClock(gameDateMs());
@@ -5350,6 +5342,8 @@ async function main() {
     if (clouds.update(frameF,P,dt)) envFull = true;
     frameStages.mark('Weather and sound');
     for(const v of vessels.slice(1)){v.boat.showProw=!v.dormantEncounter&&followerEnabled;v.boat.crew=boat.crew;v.boat.effects=boat.effects;}
+    // The ship her guns are trained on is cut as finely as her own (js/vessel-continuum.js).
+    const aimedVessel=findSpyglassTargetVessel();
     for(const [index,v] of vessels.entries()){
       const ship=v.boat,data=v.hullData,dmg=ship.damage;
       if(v.bakedWreck&&(needSpectrum||(dmg?.pendingBakes?.length??0)>0||vesselHasActiveSurvivorsOrDebris(v)))v.bakedWreck=false;
@@ -5388,6 +5382,7 @@ async function main() {
       // Light from her own fires: the GPU writes it here from its fire records (gunEffects.encodeLights).
       data[51]=0;
       device.queue.writeBuffer(v.hullUBO,0,data);
+      v.continuum.place(ship,{important:!index||v===aimedVessel,damaged:hullBelongsDamaged(v)});
       v.flood?.update(ship);
       updateHullHoleEffects(v,ship,dt);
       ship.crewEvents??=crewSeaEvents(v);
@@ -5605,8 +5600,7 @@ async function main() {
     for(const v of vessels){
       if(!v.boat.showProw)continue;
       if(v.bakedWreck&&v.entirelySubmerged&&Math.hypot((v.boat.x??0)-cam.x,(v.boat.z??0)-cam.z)>350)continue;
-      v.render.submerged.bind(underwater);underwater.setBindGroup(0,v.submergedGroup);underwater.setBindGroup(1,v.submergedLighting);
-      underwater.setVertexBuffer(0,v.vertexBuffer);if(v.pose)underwater.setVertexBuffer(1,v.pose.buffer);underwater.setIndexBuffer(v.render.indexBuffer,'uint32');underwater.drawIndexed(v.asset.indices.length);
+      v.continuum.drawCapture(underwater,false,capture=>vesselCaptureGroups(v,capture));
       if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(underwater);
       if(!v.bakedWreck)v.anchorRenderer.drawSubmerged(underwater);
     }
@@ -5616,8 +5610,7 @@ async function main() {
       terrain?.drawSubmerged(aboveWater,true);
       for(const v of vessels){
         if(!v.boat.showProw||(v.bakedWreck&&v.entirelySubmerged))continue;
-        v.render.submerged.bind(aboveWater,true);aboveWater.setBindGroup(0,v.submergedGroup);aboveWater.setBindGroup(1,v.submergedLighting);
-        aboveWater.setVertexBuffer(0,v.vertexBuffer);if(v.pose)aboveWater.setVertexBuffer(1,v.pose.buffer);aboveWater.setIndexBuffer(v.render.indexBuffer,'uint32');aboveWater.drawIndexed(v.asset.indices.length);
+        v.continuum.drawCapture(aboveWater,true,capture=>vesselCaptureGroups(v,capture));
         if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(aboveWater,true);
         if(!v.bakedWreck)v.anchorRenderer.drawSubmerged(aboveWater,true);
       }
@@ -5640,13 +5633,8 @@ async function main() {
     }
     const rp = enc.beginRenderPass(mainPass);
     const hulls=!drawProw?[]:vessels.filter(v=>v.boat.showProw&&!(v.bakedWreck&&v.entirelySubmerged));
-    const drawHull=(v,pipeline,group,lighting)=>{
-      rp.setPipeline(pipeline);rp.setBindGroup(0,group);if(lighting)rp.setBindGroup(1,lighting);
-      rp.setVertexBuffer(0,v.vertexBuffer);if(v.pose)rp.setVertexBuffer(1,v.pose.buffer);rp.setIndexBuffer(v.render.indexBuffer,'uint32');rp.drawIndexed(v.asset.indices.length);
-    };
-    for(const v of hulls)if(!hullBelongsDamaged(v))drawHull(v,v.render.pipeline,v.bindGroup,v.lighting);
-    // The ships' hulls are sized on the CPU: a whole hull is drawn once, a damaged one twice (its depth, then its shade).
-    continuumCensus?.report('ships',hulls.reduce((sum,v)=>sum+v.asset.indices.length/3*(hullBelongsDamaged(v)?2:1),0));
+    // Whole hulls through their cuts: clusters, far body and splat, each keeping its own samples of a pixel.
+    for(const v of hulls)v.continuum.draw(rp,pipeline=>vesselOwnGroups(v,pipeline));
     for(const v of hulls)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
     fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);
     townsfolk?.draw(rp);
@@ -5683,11 +5671,7 @@ async function main() {
     rp.draw(3);
     celestial.drawLines(rp,clouds.output);
     // Anything that cuts fragments or blends follows the opaque scene.
-    for(const v of hulls)if(hullBelongsDamaged(v)){
-      const groups=damagedHullGroups(v);
-      drawHull(v,v.render.damaged.cut,groups.cut);
-      drawHull(v,v.render.damaged.shade,groups.shade,groups.lighting);
-    }
+    for(const v of hulls)if(v.continuum.damaged)v.continuum.drawDamaged(rp,v.render.damaged,()=>damagedHullGroups(v));
     if(drawProw){
       for(const v of hulls){
         if(vesselHasVisibleCrew(v))v.crew?.drawCut(rp);
@@ -5770,7 +5754,8 @@ async function main() {
       const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
       // The sea's animals beside the land's (the herds, among terrain's sources).
       const sea=[{name:'dolphins',draws:dolphins.continuumDraws()},{name:'marine life',draws:marineLife.continuumDraws()}].filter(s=>s.draws.length);
-      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...props.continuumSources(),...(people.length?[{name:'people',draws:people}]:[]),...sea]);
+      const ships=hulls.flatMap(v=>v.continuum.continuumDraws());
+      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...props.continuumSources(),...(people.length?[{name:'people',draws:people}]:[]),...(ships.length?[{name:'ships',draws:ships}]:[]),...sea]);
     }
     const doTs=profiler.resolve(enc);
     let readBuf = null;

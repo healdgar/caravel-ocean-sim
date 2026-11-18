@@ -227,47 +227,31 @@ for(const entry of ['index.html','ocean.min.html','docs/index.html'])test(`landf
   }finally{await page.close();}
 });
 
-test('indexed ship matches the original pixels, including profiled rendering', {timeout:180000}, async()=>{
+test('profiled rendering preserves the ship\'s pixels', {timeout:180000}, async()=>{
   const replaceOnce=(input,needle,replacement)=>{
     assert.equal(input.split(needle).length,2,'fixture must replace exactly one production fragment: '+needle);
     return input.replace(needle,replacement);
   };
   // Start on a sampled frame so the comparison also exercises timestamp writes.
   const source=replaceOnce(await readFile(new URL('../js/main.js',import.meta.url),'utf8'),'let frameIndex = 0;','let frameIndex = 7;');
-  // Recreate the previous unindexed/copy schedule only inside this comparison.
-  // Hold the ocean flat to isolate indexing/resolve from Metal's FFT rounding;
-  // travelling-wave and rough-sea fixtures independently cover the wave fields.
-  // `legacy` draws her own triangles unindexed, which isolates indexing. `uncut` draws the model as authored,
-  // before fracture splits her mast tubes at their break heights.
-  const unindexed=(vertices)=>replaceOnce(source,'const asset=shipAssets.get(modelId),gpuPose=',
-    `const asset=((asset)=>{if(modelId!=='nina')throw new Error('Raw mesh fixture requires Niña');const vertices=${vertices};return {...asset,vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)};})(shipAssets.get(modelId)),gpuPose=`);
-  let rawMesh=unindexed('new Float32Array(asset.indices.length*9);for(let i=0;i<asset.indices.length;i++)vertices.set(asset.vertices.subarray(asset.indices[i]*9,asset.indices[i]*9+9),i*9)');
-  let authored=replaceOnce(unindexed('createCaravelMesh()'),"import { createShipAssetCache } from './ship-mesh.js';","import { createShipAssetCache } from './ship-mesh.js';\nimport { createCaravelMesh } from './caravel.js';");
-  // The factory's asset feeds each instance's geometry, wetness and shadows.
-  // Both visible and submerged draws use those same raw instance vertices.
-  for(const pass of ['rp','underwater']){
-    const indexedDraw=`${pass}.setIndexBuffer(v.render.indexBuffer,'uint32');${pass}.drawIndexed(v.asset.indices.length);`,plainDraw=`${pass}.draw(v.mesh.length/9);`;
-    rawMesh=replaceOnce(rawMesh,indexedDraw,plainDraw);authored=replaceOnce(authored,indexedDraw,plainDraw);
-  }
-  const legacy=rawMesh;
-  assert.ok(legacy.includes('rp.draw(v.mesh.length/9);'),'legacy fixture must use the unindexed ship instance draw');
-  assert.ok(legacy.includes('vertices.set(asset.vertices.subarray('),'legacy fixture must replace the factory asset geometry with raw vertices');
+  // The ship is drawn only through her continuum cut (js/vessel-continuum.js) of the assembly her body was baked from,
+  // so the unindexed and uncut meshes this once set beside her cannot be drawn; that cutting her masts leaves an intact
+  // ship's triangles and rims as they were is held in tests/ship-fracture.test.mjs.
   const captures=[];
-  // The last two are drawn without bloom, to set the mesh as authored against the mesh as cut: see below.
-  for(const mode of ['legacy','optimized','profiled','authored unbloomed','optimized unbloomed']){
+  for(const mode of ['optimized','profiled']){
     const page=await browser.newPage({viewport:{width:96,height:72}});
     try{
       const initErrors=[];
       page.on('pageerror',e=>initErrors.push(e.message));
       page.on('console',msg=>{if(msg.text().includes('init failed'))initErrors.push(msg.text());});
       await page.addInitScript(instrumentRenderer);
-      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:mode.startsWith('authored')?authored:source}));
-      await page.goto(`${origin}/?ship=nina&view=ship&sunElev=35&sunAzim=30&clouds=0&windSpeed=0&swellHs=0&choppy=0&shot=compare.png&frames=100000${mode.endsWith('unbloomed')?'&bloom=0':''}${mode==='profiled'?'&profile=1':''}`);
+      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:source}));
+      await page.goto(`${origin}/?ship=nina&view=ship&sunElev=35&sunAzim=30&clouds=0&windSpeed=0&swellHs=0&choppy=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
       try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
       catch(e){throw new Error(`${mode} initialization: ${initErrors.join('\n')||e.message}`);}
       const frame=await step(page,1000);
       assert.ok(parseFloat(await page.locator('#fps').textContent())<2,'FPS must reflect a one-second frame, not the 100 ms simulation clamp');
-      assert.equal(frame.render['nina vessel'],1);
+      assert.ok(frame.render['vessel clusters']>0,'the ship is drawn through her continuum cut');
       const pixels=await page.evaluate(async()=>{
         const texture=check.target,bytesPerRow=Math.ceil(texture.width*4/256)*256;
         const buffer=check.device.createBuffer({size:bytesPerRow*texture.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
@@ -279,22 +263,8 @@ test('indexed ship matches the original pixels, including profiled rendering', {
       captures.push(pixels);
     }finally{await page.close();}
   }
-  const [plain,optimized,profiled,uncut,cut]=captures;
-  assert.deepEqual(optimized,plain,'indexing must preserve pixels');
+  const [optimized,profiled]=captures;
   assert.deepEqual(profiled,optimized,'profiling must preserve pixels');
-  assert.notDeepEqual(cut,optimized,'the comparison below is of pictures without bloom');
-  // Splitting a mast tube leaves its surface where it was, but moves a sample or two on its thin silhouette by
-  // rounding where it is cut: three masts, two cuts each. A seam or a showing cap would change far more of this
-  // 96 x 72 image. The two are set side by side without bloom, because bloom carries each such sample across
-  // the whole frame as changes of a single level in sky and sea: fourteen of those to these six when this was
-  // written, and a count that moves with everything else in the picture.
-  const row=Math.ceil(96*4/256)*256/4,changed=[];
-  for(let pixel=0;pixel<uncut.length/4;pixel++)if([0,1,2].some(c=>uncut[pixel*4+c]!==cut[pixel*4+c]))changed.push([pixel%row,Math.floor(pixel/row)]);
-  const where=changed.map(at=>at.join(',')).join(' ');
-  assert.ok(changed.length<=12,`cutting her masts must not show on an intact ship (${changed.length} pixels changed: ${where})`);
-  // And what does change is on a mast: no more columns of the picture than her three masts stand in.
-  const columns=[...new Set(changed.map(at=>at[0]))].sort((a,b)=>a-b),masts=columns.filter((x,i)=>i===0||x-columns[i-1]>1).length;
-  assert.ok(masts<=3,`the changed pixels stand in ${masts} separate columns: ${where}`);
 });
 
 test('early hull exclusion preserves water edges and the complete ship image', {timeout:180000}, async()=>{
@@ -305,7 +275,7 @@ test('early hull exclusion preserves water edges and the complete ship image', {
   const late=process.env.OCEAN_BASELINE?await readFile(process.env.OCEAN_BASELINE,'utf8'):
     ocean.replace(block,'').replace('  return vec4f(col, 1.0);',block+'\n  return vec4f(col, 1.0);');
   const main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
-  const hullDraw='rp.drawIndexed(v.asset.indices.length);';
+  const hullDraw='for(const v of hulls)v.continuum.draw(rp,pipeline=>vesselOwnGroups(v,pipeline));';
   assert.equal(main.split(hullDraw).length,2,'cutout fixture must suppress exactly the production ship instance draw');
   const exposed=main.replace(hullDraw,'/* expose ocean cutout */');
   for(const view of ['boat','ship']){
@@ -1138,8 +1108,8 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['cloud resolve'].length, 1);
     assert.equal(frame.render['bloom down'], 6); // 32 x 24 supports six mip levels.
     assert.equal(frame.render['bloom up'], 5);
-    assert.equal(frame.render['solid shadows'],undefined);
-    assert.equal(frame.render['canvas shadows'],undefined);
+    assert.equal(frame.render['solid shadows of far bodies'],undefined);
+    assert.equal(frame.render['canvas shadows of far bodies'],undefined);
 
     frame = await step(page);
     assert.equal(frame.compute.skyview, undefined);
@@ -1203,7 +1173,7 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     frame = await step(page);
     for (const key of ['hull contact', 'impact sheets', 'local wake', 'spray update', 'height probe']) assert.equal(frame.compute[key].length, 1);
     assert.equal(frame.render['bow waterline'],undefined,'the ocean mesh replaces the detached waterline ribbon');assert.equal(frame.render['bow sheets'], 1); assert.equal(frame.render.spray, 1);
-    assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
+    assert.equal(frame.render['solid shadows of far bodies'],1);assert.equal(frame.render['canvas shadows of far bodies'],1);
     await page.getByLabel('Wakes & spray', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     await step(page); // One dispatch clears active particles and the local field.
     frame = await step(page);
@@ -1212,15 +1182,15 @@ test('renderer invalidates only changed sky inputs and skips disabled bloom', { 
     assert.equal(frame.compute['crest spray update'].length, 1);
     assert.equal(frame.render['crest spray'], 1, 'crest spray survives disabling boat effects');
     assert.equal(frame.render['bow waterline'],undefined);assert.equal(frame.render['bow sheets'], undefined); assert.equal(frame.render.spray, undefined);
-    assert.equal(frame.render['solid shadows'],1);assert.equal(frame.render['canvas shadows'],1);
+    assert.equal(frame.render['solid shadows of far bodies'],1);assert.equal(frame.render['canvas shadows of far bodies'],1);
     await page.setViewportSize({width:32,height:24});
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = false; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
-    assert.equal(frame.render['nina vessel'],undefined);assert.equal(frame.render.composite,1);
-    assert.equal(frame.render['solid shadows'],undefined);
+    assert.equal(frame.render['vessel clusters'],undefined);assert.equal(frame.render.composite,1);
+    assert.equal(frame.render['solid shadows of far bodies'],undefined);
     await page.getByLabel('Show ship', { exact: true }).evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
     frame=await step(page);
-    assert.equal(frame.render['nina vessel'],1);assert.equal(frame.render['solid shadows'],1);
+    assert.equal(frame.render['vessel clusters'],1);assert.equal(frame.render['solid shadows of far bodies'],1);
     await slider(page, 'Crest spray', 0);
     await step(page);
     frame = await step(page);
@@ -1441,8 +1411,8 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
     await page.route('**/__shadow_test',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto(`${origin}/__shadow_test`);
     const result=await page.evaluate(async()=>{
-      const {createVesselShadows}=await import('/js/shadows.js');
-      const {SHADOW_SAMPLE}=await import('/js/wgsl/shadows.js');
+      const {createVesselShadows,shadowMeshData}=await import('/js/shadows.js');
+      const {SHADOW_SAMPLE,SHADOW_CAST}=await import('/js/wgsl/shadows.js');
       const {HULL_VERTICAL_SCALE:S}=await import('/js/hull.js');
       const {boatRotate}=await import('/js/boat.js');
       const device=await (await navigator.gpu.requestAdapter()).requestDevice();
@@ -1457,7 +1427,22 @@ test('vessel shadows follow the sun and hull, transmit canvas, and leave unblock
       const hull=new Float32Array(24);hull[0]=1;hull[5]=1;hull[10]=-1;hull[12]=3.6;hull[13]=12;
       const hullUBO=buffer(208,B.UNIFORM|B.COPY_DST);
       const wetState=buffer(8,B.STORAGE|B.COPY_DST),wetLookup=buffer(vertices.length/9*4,B.STORAGE);
-      const shadows=await createVesselShadows({device,hullUBO,mesh:vertices,vertexBuffer,shader,resolution:256,wetness:{state:wetState,lookup:wetLookup}});
+      const shadows=createVesselShadows({device,hullUBO,mesh:vertices,resolution:256,wetness:{state:wetState,lookup:wetLookup}});
+      // What casts into its maps is its caster's: in the game the ship continuum's coarse cut of her
+      // (js/vessel-continuum.js); here these quads drawn whole, solid and canvas each into its own map.
+      const castModule=await shader(SHADOW_CAST,'test shadow casters'),parts=shadowMeshData(vertices);
+      const castPipes=await Promise.all([false,true].map(cloth=>device.createRenderPipelineAsync({layout:'auto',
+        vertex:{module:castModule,entryPoint:'vs',buffers:[{arrayStride:36,attributes:[
+          {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
+          {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'}]}]},
+        fragment:{module:castModule,entryPoint:cloth?'canvasFS':'solidFS',targets:cloth?[{format:'rgba16float'}]:[]},
+        primitive:{topology:'triangle-list',cullMode:'none'},
+        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})));
+      const castIndices=[parts.solid,parts.canvas].map(values=>{const b=buffer(Math.max(4,values.byteLength),B.INDEX|B.COPY_DST);device.queue.writeBuffer(b,0,values);return b;});
+      shadows.castWith((pass,cloth,own)=>{
+        const i=cloth?1:0;pass.setPipeline(castPipes[i]);pass.setBindGroup(0,own(castPipes[i]));
+        pass.setVertexBuffer(0,vertexBuffer);pass.setIndexBuffer(castIndices[i],'uint32');pass.drawIndexed([parts.solid,parts.canvas][i].length);
+      });
       const module=await shader(SHADOW_SAMPLE+`
         @group(0) @binding(0) var<storage,read> points:array<vec4f>;
         @group(0) @binding(1) var<storage,read_write> result:array<vec4f>;
@@ -2621,9 +2606,9 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await page.goto(`${origin}/?view=ship&landfall=approach&sunElev=35&clouds=0&w=96&h=72`);
     await ready();
     let frame=await step(page,100);
-    assert.equal(frame.render['nina vessel'],2);assert.equal(frame.render.crew,2);
+    assert.equal(frame.render['vessel clusters'],2);assert.equal(frame.render.crew,2);
     assert.equal(frame.compute['height probe'].length,2);assert.equal(frame.compute['local wake'].length,2);
-    assert.equal(frame.render['solid shadows'],2);assert.equal(frame.render['canvas shadows'],2);
+    assert.equal(frame.render['solid shadows of far bodies'],2);assert.equal(frame.render['canvas shadows of far bodies'],2);
     assert.equal(frame.render.ocean,1,'the water is drawn once for both vessels');
     assert.equal(frame.compute['fft rows'].length,1,'both hulls share the same ocean FFT');
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
@@ -2646,7 +2631,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await Promise.all([page.waitForNavigation({waitUntil:'load',timeout:90000}),page.locator('#follower-toggle').uncheck()]);
     await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'0');
     frame=await step(page,100);
-    assert.equal(frame.render['nina vessel'],1);assert.equal(frame.render.crew,1);assert.equal(frame.render['solid shadows'],1);
+    assert.equal(frame.render['vessel clusters'],1);assert.equal(frame.render.crew,1);assert.equal(frame.render['solid shadows of far bodies'],1);
     assert.equal(frame.compute['height probe'].length,1);await disabledAllocation();
     await page.waitForFunction(()=>fleetFixture.vessels.every(v=>!v.probe.pending));
     frame=await step(page,100);
@@ -2658,10 +2643,10 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
     await ready();assert.equal(new URL(page.url()).searchParams.get('follower'),'1');
     assert.equal(await page.evaluate(()=>fleetFixture.vessels.length),2);
     frame=await step(page,100);
-    assert.equal(frame.render['nina vessel'],2);assert.equal(frame.render.crew,2);assert.equal(frame.compute['height probe'].length,2);assert.deepEqual(frame.errors,[]);
+    assert.equal(frame.render['vessel clusters'],2);assert.equal(frame.render.crew,2);assert.equal(frame.compute['height probe'].length,2);assert.deepEqual(frame.errors,[]);
     await page.goto(`${origin}/?follower=0&view=ship&sunElev=35&clouds=0&w=96&h=72`);
     await ready();
-    frame=await step(page,100);assert.equal(frame.render['nina vessel'],1);assert.equal(frame.compute['height probe'].length,1);
+    frame=await step(page,100);assert.equal(frame.render['vessel clusters'],1);assert.equal(frame.compute['height probe'].length,1);
     assert.equal(await page.locator('#follower-toggle').isChecked(),false);
     assert.equal(await page.evaluate(()=>fleetFixture.vessels.length),1);await disabledAllocation();
   }finally{await page.close();}
@@ -2734,7 +2719,7 @@ test('captain anchor orders connect voices, depth, retrieval and debug dolphin r
     assert.ok(await page.evaluate(()=>encounterFixture.dolphins.state.count>=5&&encounterFixture.dolphins.state.count<=7));
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show ship',{exact:true}).uncheck();
-    const withoutShip=await advance(1);assert.equal(withoutShip.render['nina vessel'],undefined);assert.equal(withoutShip.render.dolphins,1,'wildlife renders with the ship hidden');
+    const withoutShip=await advance(1);assert.equal(withoutShip.render['vessel clusters'],undefined);assert.equal(withoutShip.render.dolphins,1,'wildlife renders with the ship hidden');
     await page.getByRole('button',{name:'Sea settings',exact:true}).click();
     await page.getByRole('button',{name:'End encounter',exact:true}).click();
     assert.equal((await advance(1)).render.dolphins,undefined);

@@ -22,7 +22,7 @@ before(async()=>{
 after(async()=>{await fleetRuntimeBrowser?.close();if(fleetRuntimeServer)await new Promise(resolve=>fleetRuntimeServer.close(resolve));});
 
 function instrumentFleetRuntime(){
-  const r=window.fleetRuntime={callback:null,device:null,errors:[],lost:null,buffers:[],textures:[],views:new WeakMap(),groups:new WeakMap(),writes:new WeakMap(),render:{},compute:{},now:0,target:null};
+  const r=window.fleetRuntime={callback:null,device:null,errors:[],lost:null,buffers:[],textures:[],views:new WeakMap(),groups:new WeakMap(),writes:new WeakMap(),render:{},compute:{},vessels:{},now:0,target:null};
   window.requestAnimationFrame=callback=>{r.callback=callback;return 1;};
   const requestDevice=GPUAdapter.prototype.requestDevice;
   GPUAdapter.prototype.requestDevice=async function(...args){const device=await requestDevice.apply(this,args);r.device=device;device.addEventListener('uncapturederror',event=>r.errors.push(event.error.message));device.lost.then(reason=>r.lost=reason.message);return device;};
@@ -41,8 +41,11 @@ function instrumentFleetRuntime(){
   GPUDevice.prototype.createBindGroup=function(desc){const group=createGroup.call(this,desc);r.groups.set(group,desc.entries);return group;};
   const write=GPUQueue.prototype.writeBuffer;
   GPUQueue.prototype.writeBuffer=function(buffer,...args){r.writes.set(buffer,(r.writes.get(buffer)||0)+1);return write.call(this,buffer,...args);};
-  const render=GPURenderPassEncoder.prototype.setPipeline;
-  GPURenderPassEncoder.prototype.setPipeline=function(pipeline){r.render[pipeline.label]=(r.render[pipeline.label]||0)+1;return render.call(this,pipeline);};
+  const render=GPURenderPassEncoder.prototype.setPipeline,current=new WeakMap();
+  GPURenderPassEncoder.prototype.setPipeline=function(pipeline){current.set(this,pipeline.label);r.render[pipeline.label]=(r.render[pipeline.label]||0)+1;return render.call(this,pipeline);};
+  // Each ship's scene draws, by model: her cut's indirect draws are named for her ('<model> vessel <id> continuum draws').
+  const scene=new Set(['vessel clusters','vessel far bodies','vessel splats','damaged vessel']),indirect=GPURenderPassEncoder.prototype.drawIndirect;
+  GPURenderPassEncoder.prototype.drawIndirect=function(buffer,offset){const ship=/^(\S+) vessel \S+ continuum draws$/.exec(buffer.label??'');if(ship&&scene.has(current.get(this)))r.vessels[ship[1]]=(r.vessels[ship[1]]||0)+1;return indirect.call(this,buffer,offset);};
   const compute=GPUComputePassEncoder.prototype.setPipeline;
   GPUComputePassEncoder.prototype.setPipeline=function(pipeline){r.compute[pipeline.label]=(r.compute[pipeline.label]||0)+1;return compute.call(this,pipeline);};
   // Use the actual final GPU composite texture, without relying on headless
@@ -66,7 +69,7 @@ async function fleetRuntimeOpen(path,params={},capture=false){
   return {page,errors};
 }
 async function fleetRuntimeStep(page,dt=.1){
-  const result=await page.evaluate(async dt=>{const r=fleetRuntime,callback=r.callback;if(typeof callback!=='function')throw Error('Production RAF callback missing');r.callback=null;r.render={};r.compute={};r.now=Math.max(r.now,performance.now())+dt*1000;callback(r.now);await r.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));return {errors:r.errors,lost:r.lost,render:r.render,compute:r.compute,startup:window.oceanStartup?.state};},dt);
+  const result=await page.evaluate(async dt=>{const r=fleetRuntime,callback=r.callback;if(typeof callback!=='function')throw Error('Production RAF callback missing');r.callback=null;r.render={};r.compute={};r.vessels={};r.now=Math.max(r.now,performance.now())+dt*1000;callback(r.now);await r.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));return {errors:r.errors,lost:r.lost,render:r.render,compute:r.compute,vessels:r.vessels,startup:window.oceanStartup?.state};},dt);
   assert.deepEqual(result.errors,[]);assert.equal(result.lost,null);return result;
 }
 async function fleetRuntimeSnapshot(page){
@@ -75,12 +78,13 @@ async function fleetRuntimeSnapshot(page){
     const ids=objects=>new Set(objects).size;
     const sources=await Promise.all([...f.renderAssets.values()].map(async asset=>({model:asset.asset.model.id,vertices:await r.hash(asset.asset.vertices),indices:await r.hash(asset.asset.indices),assetFrozen:Object.isFrozen(asset.asset),groupsFrozen:Object.isFrozen(asset.asset.groups)})));
     const rows=await Promise.all(vessels.map(async(v,index)=>{
-      const views=(r.groups.get(v.lighting)||[]).filter(entry=>[1,3,4].includes(entry.binding)).map(entry=>{const d=r.views.get(entry.resource);return {layer:d?.baseArrayLayer,count:d?.arrayLayerCount,total:d?.texture.depthOrArrayLayers,label:d?.texture.label};});
+      // Her lighting: the shadow group her continuum's cluster program is drawn with (js/main.js vesselOwnGroups).
+      const views=(r.groups.get(v.ownGroups.get(v.render.programs.clusters)?.[1])||[]).filter(entry=>[1,3,4].includes(entry.binding)).map(entry=>{const d=r.views.get(entry.resource);return {layer:d?.baseArrayLayer,count:d?.arrayLayerCount,total:d?.texture.depthOrArrayLayers,label:d?.texture.label};});
       let dynamic=-1;for(let i=0;i<v.mesh.length;i+=9){const material=Math.floor(v.mesh[i+6]);if((material===9||material===13)&&(v.mesh[i]!==v.asset.vertices[i]||v.mesh[i+1]!==v.asset.vertices[i+1]||v.mesh[i+2]!==v.asset.vertices[i+2])){dynamic=i;break;}}
       const sample=dynamic<0?0:dynamic,upload=await r.read(v.vertexBuffer,sample*4,Math.min(36,v.vertexBuffer.size-sample*4));
       return {id:v.id,model:v.asset.model.id,vertices:v.mesh.length/9,indices:v.asset.indices.length,cpuPose:typeof v.asset.pose==='function',gpuPose:!!v.pose,mesh:await r.hash(v.mesh),dynamic,sampleMatches:upload.every((value,i)=>Object.is(value,v.mesh[sample+i])),uploads:r.writes.get(v.vertexBuffer)||0,crew:v.crew?.state.crew.length||0,crewFinite:!!v.crew&&v.crew.state.crew.every(s=>s.transform.every(Number.isFinite)),probeTime:v.probe.state.time,probeFinite:[v.boat.heave,v.boat.pitch,v.boat.roll,v.boat.x,v.boat.z,v.boat.heading].every(Number.isFinite),shadowViews:views};
     }));
-    const sameModels=[];for(let i=0;i<vessels.length;i++)for(let j=i+1;j<vessels.length;j++)if(vessels[i].modelId===vessels[j].modelId)sameModels.push({sharedAsset:vessels[i].asset===vessels[j].asset,sharedRender:vessels[i].render===vessels[j].render,sharedIndices:vessels[i].render.indexBuffer===vessels[j].render.indexBuffer,ownMesh:vessels[i].mesh!==vessels[j].mesh,ownWetness:vessels[i].wetness.state!==vessels[j].wetness.state,ownCrew:vessels[i].crew.state!==vessels[j].crew.state});
+    const sameModels=[];for(let i=0;i<vessels.length;i++)for(let j=i+1;j<vessels.length;j++)if(vessels[i].modelId===vessels[j].modelId)sameModels.push({sharedAsset:vessels[i].asset===vessels[j].asset,sharedRender:vessels[i].render===vessels[j].render,sharedPrograms:vessels[i].render.programs===vessels[j].render.programs&&vessels[i].render.body===vessels[j].render.body,ownMesh:vessels[i].mesh!==vessels[j].mesh,ownWetness:vessels[i].wetness.state!==vessels[j].wetness.state,ownCrew:vessels[i].crew.state!==vessels[j].crew.state});
     return {rows,sources,config:f.config,active:vessels.length,models:[...f.renderAssets.keys()],sameModels,
       unique:{geometry:ids(vessels.map(v=>v.vertexBuffer)),mesh:ids(vessels.map(v=>v.mesh)),hull:ids(vessels.map(v=>v.hullUBO)),wetness:ids(vessels.map(v=>v.wetness.state)),wetnessPoints:ids(vessels.map(v=>v.wetness.points)),probeOutput:ids(vessels.map(v=>v.probe.output)),probeRead:ids(vessels.map(v=>v.probe.read)),probeUniform:ids(vessels.map(v=>v.probe.uniform)),crew:ids(vessels.map(v=>v.crew?.state)),guns:ids(vessels.map(v=>v.gunnery.state)),shadow:ids(vessels.map(v=>v.shadows.uniform)),wakeState:ids(vessels.map(v=>v.interaction))},
       crewBuffers:{joints:r.buffers.filter(b=>b.label==='crew joints').length,actors:r.buffers.filter(b=>b.label==='crew transforms').length,vertices:r.buffers.filter(b=>b.label==='crew vertices').length,indices:r.buffers.filter(b=>b.label==='crew indices').length},
@@ -118,7 +122,7 @@ for(const path of ['/', '/docs/index.html'])for(const model of ['nina','pinta','
     const next=await fleetRuntimeStep(page);await fleetRuntimeStep(page);const last=await fleetRuntimeSnapshot(page);assertFleetSnapshot(last,1);
     assert.deepEqual(last.sources,first.sources,'rest vertices and immutable source indices survive live animation');
     assert.equal(last.rows[0].mesh,first.rows[0].mesh,'live GPU cloth never rewrites CPU rest vertices');
-    assert.ok(next.render[model+' vessel']>0,'requested model actually draws');if(model==='victory')assert.ok(next.compute['shared vessel deformation']>0,'Victory uses real GPU deformation');
+    assert.ok(next.vessels[model]>0,'requested model actually draws');if(model==='victory')assert.ok(next.compute['shared vessel deformation']>0,'Victory uses real GPU deformation');
     assert.equal(await page.evaluate(()=>window.oceanStartup.state),'ready');assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });
@@ -129,7 +133,7 @@ for(const path of ['/', '/docs/index.html'])test(`${path} four different ships s
     await fleetRuntimeStep(page);const first=await fleetRuntimeSnapshot(page);assertFleetSnapshot(first,4);assert.deepEqual(first.rows.map(v=>v.model),['nina','pinta','santa-maria','victory']);assert.equal(first.config.length,4);assert.equal(first.config.filter(v=>!v.enabled).length,1);assert.ok(!first.rows.some(v=>v.id===first.config.find(v=>!v.enabled).id),'disabled configuration row allocates no vessel');
     await page.getByRole('button',{name:'Camera views',exact:true}).click();await page.getByRole('button',{name:'View fleet',exact:true}).click();
     const secondFrame=await fleetRuntimeStep(page);await fleetRuntimeStep(page);const second=await fleetRuntimeSnapshot(page);assertFleetSnapshot(second,4);assert.deepEqual(second.sources,first.sources);
-    for(const model of ['nina','pinta','santa-maria','victory'])assert.ok(secondFrame.render[model+' vessel']>0,'fleet renders '+model);
+    for(const model of ['nina','pinta','santa-maria','victory'])assert.ok(secondFrame.vessels[model]>0,'fleet renders '+model);
     for(const row of second.rows)assert.equal(row.mesh,first.rows.find(v=>v.id===row.id).mesh,row.model+' GPU cloth preserves instance rest geometry');
     if(path==='/docs/index.html'){const shot=await fleetRuntimeCapture(page,'fleet-four-ships');assert.ok(shot.nonblack>1000);}
     assert.deepEqual(errors,[]);
@@ -142,7 +146,7 @@ for(const path of ['/', '/docs/index.html'])test(`${path} maximum nine real GPU 
     await fleetRuntimeStep(page);await fleetRuntimeStep(page);const snapshot=await fleetRuntimeSnapshot(page);assertFleetSnapshot(snapshot,9);assert.equal(snapshot.models.length,4);assert.ok(snapshot.sameModels.length>=5);assert.deepEqual(snapshot.rows.map(v=>v.crew),snapshot.rows.map(v=>fullWatch(v.model)));
     const isolation=await page.evaluate(async()=>{const f=oceanFleet,r=fleetRuntime;await r.device.queue.onSubmittedWorkDone();const prior=await Promise.all(f.vessels.map(v=>r.read(v.wetness.state,0,8)));r.device.queue.writeBuffer(f.vessels[0].wetness.state,0,new Float32Array([.25,.5]));const after=await Promise.all(f.vessels.map(v=>r.read(v.wetness.state,0,8)));return {prior,after};});
     assert.deepEqual(isolation.after[0],[.25,.5]);for(let i=1;i<9;i++)assert.deepEqual(isolation.after[i],isolation.prior[i],'one ship’s moisture write cannot change ship '+i);
-    const next=await fleetRuntimeStep(page);for(const model of snapshot.models)assert.ok(next.render[model+' vessel']>0,'maximum fleet actually renders '+model);assert.deepEqual(next.errors,[]);assert.deepEqual(errors,[]);
+    const next=await fleetRuntimeStep(page);for(const model of snapshot.models)assert.ok(next.vessels[model]>0,'maximum fleet actually renders '+model);assert.deepEqual(next.errors,[]);assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });
 

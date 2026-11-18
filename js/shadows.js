@@ -1,7 +1,4 @@
-import { requestOnce } from './gpu-program-cache.js';
-import { SHADOW_CAST } from './wgsl/shadows.js';
 import { HULL_VERTICAL_SCALE } from './hull.js';
-import {POSED_VERTEX_LAYOUT,withPosedVesselVertices} from './vessel-pose.js';
 
 export function shadowMeshData(mesh,meshIndices=null) {
   const bounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity],solid=[],canvas=[];
@@ -69,24 +66,11 @@ export function createSceneShadows(device,count=2,resolution=2048){
   };
 }
 
-// The two programs a vessel's shadow is cast with, asked for once a device and shared by the fleet.
-export function requestVesselShadowPipelines({device,shader,posed=true}){
-  return requestOnce(device,'vessel shadows '+(posed?'posed':'rigid'),async()=>{
-    const module=await shader(posed?withPosedVesselVertices(SHADOW_CAST):SHADOW_CAST,'vessel shadows');
-    const vertexBuffers=[{arrayStride:36,attributes:[
-      {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
-      {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
-    ]},...(posed?[POSED_VERTEX_LAYOUT]:[])];
-    return Promise.all([false,true].map(cloth=>device.createRenderPipelineAsync({
-      label:cloth?'canvas shadows':'solid shadows',layout:'auto',
-      vertex:{module,entryPoint:'vs',buffers:vertexBuffers},
-      fragment:{module,entryPoint:cloth?'canvasFS':'solidFS',targets:cloth?[{format:'rgba16float'}]:[]},
-      primitive:{topology:'triangle-list',cullMode:'none'},
-      depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5},
-    })));
-  });
-}
-export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048,wetness=null,targets=null,posed=null}) {
+// A vessel's shadow: its frame, fitted to her each frame, and its two maps (solid depth; canvas depth and what the
+// canvas lets through). What casts into them is her caster's (castWith): the ship continuum's coarse cut of her
+// (js/vessel-continuum.js), called once a map with `cloth` and `own(pipeline)`, this shadow's group 0 for a program
+// that reads her hull, this frame, her surface moisture and its lookup (js/wgsl/shadows.js SHADOW_CAST).
+export function createVesselShadows({device,hullUBO,mesh,meshIndices=null,resolution=2048,wetness=null,targets=null}) {
   const B=GPUBufferUsage,T=GPUTextureUsage;
   const data=new Float32Array(28),parts=shadowMeshData(mesh,meshIndices);
   const uniform=device.createBuffer({label:'vessel shadow frame',size:112,usage:B.UNIFORM|B.COPY_DST});
@@ -98,30 +82,30 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
   const linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
   const fallback=wetness?[]:[device.createBuffer({size:8,usage:B.STORAGE}),device.createBuffer({size:mesh.length/9*4,usage:B.STORAGE})];
   const moisture=wetness?.state??fallback[0],lookup=wetness?.lookup??fallback[1];
-  const pipes=await requestVesselShadowPipelines({device,shader,posed:!!posed});
-  const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[
-    {binding:0,resource:{buffer:hullUBO}},{binding:1,resource:{buffer:uniform}},
-    {binding:2,resource:{buffer:moisture}},{binding:3,resource:{buffer:lookup}},
-  ]}));
-  const indices=[parts.solid,parts.canvas].map(values=>{
-    const b=device.createBuffer({size:Math.max(4,values.byteLength),usage:B.INDEX|B.COPY_DST});
-    device.queue.writeBuffer(b,0,values);return b;
-  });
+  const groups=new Map();
+  const own=pipe=>{
+    if(!groups.has(pipe))groups.set(pipe,device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[
+      {binding:0,resource:{buffer:hullUBO}},{binding:1,resource:{buffer:uniform}},
+      {binding:2,resource:{buffer:moisture}},{binding:3,resource:{buffer:lookup}},
+    ]}));
+    return groups.get(pipe);
+  };
   const passes=[0,1].map(i=>({
     label:i?'canvas shadows':'solid shadows',
     colorAttachments:i?[{view:views[2],clearValue:[0,0,0,0],loadOp:'clear',storeOp:'store'}]:[],
     depthStencilAttachment:{view:views[i],depthClearValue:1,depthLoadOp:'clear',depthStoreOp:'store'},
   }));
-  const counts=[parts.solid.length,parts.canvas.length];
+  let caster=null;
   return {
     uniform,data,
+    castWith(cast){caster=cast;},
     update(hull,sun,enabled){fitVesselShadow(data,hull,sun,parts.bounds,resolution,enabled);device.queue.writeBuffer(uniform,0,data);},
     encode(encoder,profiler,extraSolid,timingPrefix=''){
       if(!data[19])return;
       for(let i=0;i<2;i++){
         passes[i].timestampWrites=profiler?.writes(timingPrefix+(i?'Canvas shadows':'Solid shadows'));
-        const pass=encoder.beginRenderPass(passes[i]);pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);
-        pass.setVertexBuffer(0,vertexBuffer);if(posed)pass.setVertexBuffer(1,posed.buffer);pass.setIndexBuffer(indices[i],'uint32');pass.drawIndexed(counts[i]);
+        const pass=encoder.beginRenderPass(passes[i]);
+        caster?.(pass,i===1,own);
         if(i===0)extraSolid?.(pass);pass.end();
       }
     },
@@ -129,7 +113,7 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
       {binding:0,resource:{buffer:uniform}},{binding:1,resource:views[0]},{binding:2,resource:compare},
       {binding:3,resource:views[1]},{binding:4,resource:views[2]},{binding:5,resource:linear},
     ]});},
-    destroy(){solid?.destroy();canvas?.destroy();transmission?.destroy();uniform.destroy();for(const b of [...indices,...fallback])b.destroy();},
+    destroy(){solid?.destroy();canvas?.destroy();transmission?.destroy();uniform.destroy();for(const b of fallback)b.destroy();},
   };
 }
 

@@ -36,6 +36,10 @@ function instrumentOvernightVessels(){
   GPURenderPassEncoder.prototype.setPipeline=function(pipeline){r.pipelines.set(this,pipeline.label);return render.call(this,pipeline);};
   const draw=GPURenderPassEncoder.prototype.drawIndexed;
   GPURenderPassEncoder.prototype.drawIndexed=function(indices,instances=1,...args){const label=r.pipelines.get(this);r.draws[label]??={calls:0,instances:0,indices:0};r.draws[label].calls++;r.draws[label].instances+=instances;r.draws[label].indices+=indices*instances;return draw.call(this,indices,instances,...args);};
+  // A ship's scene draws are her cut's indirect draws, named for her model ('<model> vessel <id> continuum draws'): what
+  // each list holds is the GPU's (read back in tests/vessel-continuum-gpu.test.mjs), so here they are counted as calls.
+  const scene=new Set(['vessel clusters','vessel far bodies','vessel splats','damaged vessel']),indirect=GPURenderPassEncoder.prototype.drawIndirect;
+  GPURenderPassEncoder.prototype.drawIndirect=function(buffer,offset){const ship=/^(\S+) vessel \S+ continuum draws$/.exec(buffer.label??'');const label=ship&&scene.has(r.pipelines.get(this))?ship[1]+' vessel':r.pipelines.get(this);r.draws[label]??={calls:0,instances:0,indices:0};r.draws[label].calls++;return indirect.call(this,buffer,offset);};
   const compute=GPUComputePassEncoder.prototype.setPipeline;
   GPUComputePassEncoder.prototype.setPipeline=function(pipeline){r.compute[pipeline.label]=(r.compute[pipeline.label]||0)+1;return compute.call(this,pipeline);};
   const configs=new WeakMap(),configure=GPUCanvasContext.prototype.configure;
@@ -93,7 +97,7 @@ for(const path of ['/', '/docs/index.html'])for(const [id,count]of Object.entrie
   try{
     const drawn=await settle(page),s=await snapshot(page);assert.equal(s.startup,'ready');assert.equal(s.rows.length,1);const v=s.rows[0];
     assert.equal(v.model,id);assert.equal(v.crew,count);assert.equal(v.crewVisible,count);assert.ok(v.crewFinite&&v.meshFinite&&v.poseFinite);assert.ok(v.vertices>1000&&v.indices>3000);assert.ok(v.uploadMatches);
-    assert.ok(drawn.draws[id+' vessel']?.indices>3000,'actual requested vessel issues indexed GPU draws');assert.equal(drawn.draws.crew?.instances,count,'gender batches draw exactly the real company, including the one-person yacht');
+    assert.ok(drawn.draws[id+' vessel']?.calls>0,'actual requested vessel issues its continuum\'s GPU draws');assert.equal(drawn.draws.crew?.instances,count,'gender batches draw exactly the real company, including the one-person yacht');
     assert.ok(s.image.nonblack>s.image.width*s.image.height*.25);assert.deepEqual(s.errors,[]);assert.equal(s.lost,null);assert.deepEqual(errors,[]);
     if(['oseberg','lusoria','taino-canoe'].includes(id)){
       assert.ok(v.rowingWater&&v.boatWaterAlias);assert.ok(v.waterState?.time>=0);assert.equal(v.waterState.modelId,id);assert.equal(v.waterState.quality,'surface-orbital');assert.ok(v.waterSample&&[v.waterSample.height,...v.waterSample.velocity].every(Number.isFinite));
@@ -217,7 +221,7 @@ test('all five later vessels retain unobstructed 44px helm and sticky settings o
       for(const size of sizes){
         const context=id+' '+size.width+'x'+size.height;await page.setViewportSize(size);
         await page.waitForFunction(()=>Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-height'))-innerHeight)<1,undefined,{polling:20,timeout:3000});
-        const drawn=await settle(page,2);assert.ok(drawn.draws[id+' vessel']?.indices>3000,context+' actual native vessel GPU frame');
+        const drawn=await settle(page,2);assert.ok(drawn.draws[id+' vessel']?.calls>0,context+' actual native vessel GPU frame');
         assert.equal(await page.evaluate(()=>oceanStartup.state),'ready');assert.equal(await page.locator('#boat-panel').isVisible(),false);
         await hud(context);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,context+' no page horizontal overflow');

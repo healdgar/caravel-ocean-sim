@@ -53,19 +53,20 @@ function instrumentScene(){
   GPURenderPassEncoder.prototype.setVertexBuffer=function(index,buffer,...args){passes.get(this).vertices[index]=buffer;return setVertex.call(this,index,buffer,...args);};
   const setIndex=GPURenderPassEncoder.prototype.setIndexBuffer;
   GPURenderPassEncoder.prototype.setIndexBuffer=function(buffer,...args){passes.get(this).indices=buffer;return setIndex.call(this,buffer,...args);};
-  for(const method of ['draw','drawIndexed']){
+  // A ship is drawn and captured through her own continuum cut (js/vessel-continuum.js): indirect draws from her cut's
+  // lists, with her own resources and lighting at groups 0 and 1 (made for each program, or each water capture).
+  for(const method of ['draw','drawIndexed','drawIndirect']){
     const draw=GPURenderPassEncoder.prototype[method];
     GPURenderPassEncoder.prototype[method]=function(...args){
       const pass=passes.get(this),pipeline=pass.pipeline,vessels=window.oceanFleet?.vessels||[];
-      const geometry=vessels.find(v=>v.vertexBuffer===pass.vertices[0]);
+      const cut=method==='drawIndirect'?vessels.find(v=>v.continuum?.cut?.draws===args[0]):null;
       const resources=groups.get(pass.groups[0])||[],hull=vessels.find(v=>resources.some(entry=>entry.resource?.buffer===v.hullUBO));
-      const submerged=pass.label==='Submerged geometry';
-      const family=vessels.some(v=>v.render.submerged.pipeline===pipeline)?'hull':families.get(pipeline)||null;
-      state.draws.push({pass:pass.label,label:pipeline.label,family,count:args[0],instances:args[1]??1,
-        vessel:geometry?.id||hull?.id||null,geometry:geometry?.id||null,hull:hull?.id||null,
-        material:geometry?pass.groups[0]===(submerged?geometry.submergedGroup:geometry.bindGroup):null,
-        lighting:geometry?pass.groups[1]===(submerged?geometry.submergedLighting:geometry.lighting):null,
-        indices:geometry?pass.indices===geometry.render.indexBuffer:null});
+      const programs=cut?.render.programs,capture=programs&&[programs.farCapture,programs.clusterCapture].find(c=>c?.pipeline===pipeline);
+      const own=cut?.ownGroups.get(capture??pipeline);
+      state.draws.push({pass:pass.label,label:pipeline.label,family:families.get(pipeline)||null,indirect:method==='drawIndirect',
+        count:method==='drawIndirect'?null:args[0],instances:method==='drawIndirect'?null:args[1]??1,
+        vessel:cut?.id||hull?.id||null,cut:cut?.id||null,hull:hull?.id||null,
+        material:cut?pass.groups[0]===own?.[0]:null,lighting:cut?pass.groups[1]===own?.[1]:null});
       return draw.apply(this,args);
     };
   }
@@ -137,24 +138,28 @@ test('the actual Niña fleet captures independent hulls and renders submerged wh
     const fleet=await render(page);assertValid(fleet);
     const roster=await page.evaluate(()=>{
       const vessels=window.oceanFleet.vessels,[player,escort]=vessels;
-      return {rows:vessels.map(v=>({id:v.id,model:v.asset.model.id,label:v.render.pipeline.label,indices:v.asset.indices.length})),
-        sharedAsset:player.asset===escort.asset,sharedRender:player.render===escort.render,sharedIndices:player.render.indexBuffer===escort.render.indexBuffer,
+      const captured=v=>v.ownGroups.get(v.render.programs.farCapture)??[];
+      return {rows:vessels.map(v=>({id:v.id,model:v.asset.model.id})),
+        sharedAsset:player.asset===escort.asset,sharedRender:player.render===escort.render,
+        sharedPrograms:player.render.programs===escort.render.programs&&player.render.body===escort.render.body,
         uniqueGeometry:new Set(vessels.map(v=>v.vertexBuffer)).size,uniqueUniforms:new Set(vessels.map(v=>v.hullUBO)).size,
-        uniqueCaptureGroups:new Set(vessels.map(v=>v.submergedGroup)).size,uniqueLighting:new Set(vessels.map(v=>v.submergedLighting)).size};
+        uniqueCuts:new Set(vessels.map(v=>v.continuum.cut.draws)).size,
+        uniqueCaptureGroups:new Set(vessels.map(v=>captured(v)[0])).size,uniqueLighting:new Set(vessels.map(v=>captured(v)[1])).size};
     });
     assert.equal(roster.rows.length,2,'legacy follower=1 allocates two actual fleet vessels');
     assert.deepEqual(roster.rows.map(v=>v.model),['nina','nina']);
-    assert.ok(roster.sharedAsset&&roster.sharedRender&&roster.sharedIndices,'the model factory shares immutable Niña assets and pipelines');
-    for(const property of ['uniqueGeometry','uniqueUniforms','uniqueCaptureGroups','uniqueLighting'])assert.equal(roster[property],2,'each captured vessel owns '+property);
+    assert.ok(roster.sharedAsset&&roster.sharedRender&&roster.sharedPrograms,'the model factory shares immutable Niña assets, her continuum body and its programs');
+    for(const property of ['uniqueGeometry','uniqueUniforms','uniqueCuts','uniqueCaptureGroups','uniqueLighting'])assert.equal(roster[property],2,'each captured vessel owns '+property);
     for(const family of ['hull','crew','anchor'])assert.ok(fleet.draws.filter(draw=>draw.pass==='Submerged geometry'&&draw.family===family).length>=2,`both vessels submit ${family} geometry`);
     for(const vessel of roster.rows){
       const captures=fleet.draws.filter(draw=>draw.pass==='Submerged geometry'&&draw.family==='hull'&&draw.vessel===vessel.id);
-      const visible=fleet.draws.filter(draw=>draw.pass!=='Submerged geometry'&&draw.label===vessel.label&&draw.vessel===vessel.id);
+      const visible=fleet.draws.filter(draw=>draw.pass!=='Submerged geometry'&&draw.label==='vessel clusters'&&draw.vessel===vessel.id);
       assert.equal(captures.length,1,vessel.id+' submits exactly one independent underwater hull');
-      assert.equal(visible.length,1,vessel.id+' submits its actual model-factory surface pipeline');
+      assert.equal(visible.length,1,vessel.id+' draws her clusters through her own cut');
       for(const draw of [...captures,...visible]){
-        assert.equal(draw.geometry,vessel.id);assert.equal(draw.hull,vessel.id,'capture geometry and hull transform belong to the same ship');
-        assert.equal(draw.count,vessel.indices);assert.equal(draw.instances,1);assert.ok(draw.material&&draw.lighting&&draw.indices,'each draw binds its own material and shadow groups with the shared model indices');
+        assert.ok(draw.indirect,'she is drawn from her cut\'s lists');
+        assert.equal(draw.cut,vessel.id);assert.equal(draw.hull,vessel.id,'her cut and her hull transform belong to the same ship');
+        assert.ok(draw.material&&draw.lighting,'each draw binds her own material and shadow groups');
       }
     }
     assert.ok((await readScene(page)).count>5,'a loaded hull produces underwater source fragments');

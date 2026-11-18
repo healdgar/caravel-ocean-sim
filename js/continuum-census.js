@@ -8,7 +8,7 @@
 // A family offers its draws as `continuumDraws()`: a list of { buffer, offset, records, stride }, where `buffer`
 // holds indirect records (made with COPY_SRC), `offset` is in bytes, and `stride` is the record's length in u32s:
 // 5 for drawIndexedIndirect, 4 for drawIndirect. Both begin with the index or vertex count and the instance count,
-// and every continuum draw is a triangle list. Draws the CPU already knows the size of are reported directly.
+// and every continuum draw is a triangle list. Every family is counted from its draws: nothing is sized on the CPU.
 import { CONTINUUM_TRIANGLE_BUDGET } from './continuum-core.js';
 
 const CONTINUUM_CENSUS_WGSL = /* wgsl */`
@@ -30,7 +30,6 @@ struct CensusRegion { first: u32, records: u32, stride: u32, family: u32 }
 export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
   const STORAGE = GPUBufferUsage.STORAGE, COPY_DST = GPUBufferUsage.COPY_DST, COPY_SRC = GPUBufferUsage.COPY_SRC;
   const names = [];
-  const reported = new Map();
   const totals = device.createBuffer({ label: 'continuum census totals', size: maxFamilies * 4, usage: STORAGE | COPY_SRC | COPY_DST });
   const staging = device.createBuffer({ label: 'continuum census read', size: maxFamilies * 4, usage: GPUBufferUsage.MAP_READ | COPY_DST });
   const pipeline = device.createComputePipeline({ label: 'continuum census', layout: 'auto', compute: { module: device.createShaderModule({ label: 'continuum census', code: CONTINUUM_CENSUS_WGSL }), entryPoint: 'main' } });
@@ -74,8 +73,6 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
     get budget() { return CONTINUUM_TRIANGLE_BUDGET; },
     // The last count read: { families: { name: triangles }, total, budget }, or null before the first arrives.
     get latest() { return latest; },
-    // Triangles a family draws with sizes the CPU already holds, counted with the GPU's own each read.
-    report(name, triangles) { familyOf(name); reported.set(name, Math.max(0, triangles | 0)); },
     // After the frame's selections: copy each family's records and sum them. sources: [{ name, draws }].
     encode(encoder, sources) {
       copiedThisFrame = false;
@@ -98,7 +95,7 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
         staging.unmap();
         const families = {};
         let total = 0;
-        names.forEach((name, i) => { const n = counts[i] + (reported.get(name) || 0); families[name] = n; total += n; });
+        names.forEach((name, i) => { families[name] = counts[i]; total += counts[i]; });
         latest = { families, total, budget: CONTINUUM_TRIANGLE_BUDGET };
       }).catch(() => {}).finally(() => { reading = false; });
     },

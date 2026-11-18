@@ -39,7 +39,10 @@ function instrumentVesselGPUContract(){
   const vertices=GPURenderPassEncoder.prototype.setVertexBuffer;
   GPURenderPassEncoder.prototype.setVertexBuffer=function(i,b,...a){let s=r.pass.get(this);if(!s)r.pass.set(this,s={groups:[],vertices:[]});s.vertices[i]=b;return vertices.call(this,i,b,...a);};
   const draw=GPURenderPassEncoder.prototype.drawIndexed;
-  GPURenderPassEncoder.prototype.drawIndexed=function(n,...a){const s=r.pass.get(this);r.draws.push({pipeline:s?.pipeline,vertices:s?.vertices.slice(),count:n});return draw.call(this,n,...a);};
+  GPURenderPassEncoder.prototype.drawIndexed=function(n,...a){const s=r.pass.get(this);r.draws.push({pipeline:s?.pipeline,vertices:s?.vertices.slice(),groups:s?.groups.slice()??[],count:n});return draw.call(this,n,...a);};
+  // A ship is drawn, shadowed and captured through her continuum cut: indirect draws whose groups bind her posed buffer.
+  const indirect=GPURenderPassEncoder.prototype.drawIndirect;
+  GPURenderPassEncoder.prototype.drawIndirect=function(buffer,offset){const s=r.pass.get(this);r.draws.push({pipeline:s?.pipeline,vertices:s?.vertices.slice(),groups:s?.groups.slice()??[],indirect:buffer,count:1});return indirect.call(this,buffer,offset);};
   const dispatch=GPUComputePassEncoder.prototype.dispatchWorkgroups;
   GPUComputePassEncoder.prototype.dispatchWorkgroups=function(...a){const s=r.pass.get(this);r.dispatches.push({pipeline:s?.pipeline,groups:s?.groups.slice(),size:a});return dispatch.apply(this,a);};
 }
@@ -89,7 +92,12 @@ async function contractFrame(page,mutation=null){
     }
     r.now=(r.now??performance.now())+50;callback(r.now);await r.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));
     const rows=ships.map(v=>{
-      const posed=v.pose?.buffer,has=(d,b)=>d.groups.some(g=>groupBuffers(g).includes(b)),consumes=d=>d.vertices?.[1]===posed&&d.count>0;
+      const posed=v.pose?.buffer,has=(d,b)=>d.groups.some(g=>groupBuffers(g).includes(b));
+      // Her draws are her own cut's, binding that exact computed buffer.
+      const consumes=d=>d.indirect===v.continuum?.cut?.draws&&has(d,posed);
+      const programs=v.render.programs,damaged=v.render.damaged;
+      const scene=new Set([programs?.clusters,programs?.far,programs?.splat,damaged?.surviving,damaged?.shade].filter(Boolean));
+      const captures=new Set([programs?.farCapture?.pipeline,programs?.clusterCapture?.pipeline].filter(Boolean));
       const canonical=posed?r.dispatches.filter(d=>d.pipeline===v.pose.assets.pipeline&&has(d,posed)):[];
       const complete=d=>d.size[0]>=Math.ceil(v.pose.vertexCount/64)&&(d.size[1]??1)>0&&(d.size[2]??1)>0;
       const writesTo=buffer=>[
@@ -100,8 +108,8 @@ async function contractFrame(page,mutation=null){
       return {id:v.id,model:v.asset.model.id,required:v.asset.gpuPose===true&&v.render.gpuPose===true,cpuPose:typeof v.asset.pose==='function',pose:!!posed,
         dispatches:canonical.filter(complete).length,canonicalDispatches:canonical.length,dispatchSizes:canonical.map(d=>d.size),
         recoilDispatches:posed?r.dispatches.filter(d=>d.pipeline===v.pose.assets.recoilAssets?.pipeline&&has(d,posed)).length:0,
-        main:r.draws.filter(d=>d.pipeline===v.render.pipeline&&consumes(d)).length,
-        submerged:r.draws.filter(d=>d.pipeline===v.render.submerged.pipeline&&consumes(d)).length,
+        main:r.draws.filter(d=>scene.has(d.pipeline)&&consumes(d)).length,
+        submerged:r.draws.filter(d=>captures.has(d.pipeline)&&consumes(d)).length,
         shadow:r.draws.filter(d=>/shadows/.test(d.pipeline?.label??'')&&consumes(d)).length,shadowExpected:true,
         wetness:posed?r.dispatches.filter(d=>has(d,posed)&&has(d,v.wetness.state)).length:0,
         geometryWrites:writesTo(v.vertexBuffer),poseWrites:writesTo(posed),cpuMeshChanged:changed};
