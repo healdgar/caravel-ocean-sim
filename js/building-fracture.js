@@ -19,9 +19,10 @@ import { depthInOutline } from './fort-plan.js';
 import { sampleVoronoiBlockCell } from './part-assembly.js';
 import { FRACTURE_GRAVITY, FRACTURE_RECORD_FLOATS, createShipFractureState, settleFinishedFlights, writeFlight } from './ship-fracture.js';
 import { SIM_CLOCK_LOOP_S } from './wgsl/common.js';
-import { CITY_CONTINUUM_AS_BUILT, CITY_CONTINUUM_BROKEN } from './wgsl/city-continuum.js';
-import { assembleCityContinuumAtlas, cityContinuumBodyParts, cityContinuumFinestClusters, packCityContinuumPieces } from './city-continuum.js';
-import { createContinuumScene } from './city-continuum-draw.js';
+import { CITY_CONTINUUM_AS_BUILT } from './wgsl/city-continuum.js';
+import { packCityContinuumPieces } from './city-continuum.js';
+import { CONTINUUM_BROKEN, CONTINUUM_KIND, assembleContinuumAtlas, continuumAtlasTypes, continuumFinestClusters, continuumRoom } from './continuum-format.js';
+import { createContinuumScene, uploadContinuumAtlas } from './continuum-scene.js';
 import { bakeFracturePieces } from './prefab-continuum.js';
 
 export const BUILDING_SHARD_KINDS = Object.freeze({ block: 1, whole: 2, cell: 3, gun: 4 });
@@ -1403,14 +1404,17 @@ export function replayBuildingFracture(fracture, damage, log, now = 0) {
 // atlas of their own: the very triangles the shot, the footing and the fall read (rule 1), in a frame stood at the
 // building's root, every piece a part. Its finest clusters are packed the moment it is cut, and its coarser levels are
 // baked in the page's worker (js/prefab-continuum.js bakeFracturePieces) and take their place when they land. It is
-// then a broken instance of the city's cut (js/city-continuum-draw.js), each cluster riding its piece's flight from
-// the instance's block of shard records, which are written only when a piece moves. `continuum()` gives the cut's
-// programs, the view pipeline, the frame and the land's shadow uniform, or nothing until they are made.
+// then a broken instance of the one cut (js/continuum-scene.js), of the SHARDED kind (js/wgsl/continuum-kinds.js): each
+// cluster rides its piece's flight from the instance's block of shard records, which are written only when a piece
+// moves, and wears its piece's scorch from the block's wear, written only when it changes. `continuum()` gives the
+// cut's programs, the city material's view, the frame and the land's shadow uniform, or nothing until they are made.
 const FRACTURE_PIECES_REACH = 24;
 function createFracturedContinuum({ device, continuum }) {
   const entries = new Map(), R = FRACTURE_RECORD_FLOATS;
-  let scene = null, atlas = null, shards = null, stale = false, pixelError = 1, offsetX = 0, offsetZ = 0, destroyed = false;
+  let scene = null, atlas = null, shards = null, stale = false, offsetX = 0, offsetZ = 0, destroyed = false;
   const release = () => { scene?.destroy(); atlas?.destroy(); shards?.destroy(); scene = atlas = shards = null; };
+  // A block: its head (the clock and how many shards), each shard's flight, then each shard's scorch.
+  const wearAt = (entry) => 4 + entry.shardCount * R;
   // Pieces first..end as they now fly, each pivot moved into the instance's frame.
   const copyRecords = (entry, first, end) => {
     const d = entry.data, [x, y, z] = entry.root;
@@ -1419,6 +1423,7 @@ function createFracturedContinuum({ device, continuum }) {
     // The frame time at which the block's flight clock read 0 (main.js's looping simTime).
     d[0] = ((entry.state.epoch % SIM_CLOCK_LOOP_S) + SIM_CLOCK_LOOP_S) % SIM_CLOCK_LOOP_S;
   };
+  const copyWear = (entry) => { entry.data.set(entry.state.scorch, wearAt(entry)); entry.state.scorchDirty = false; };
   // Every struck building's body in one atlas, every block of flights in one buffer, and one scene that cuts them.
   const lay = (ready) => {
     const U = GPUBufferUsage;
@@ -1427,24 +1432,24 @@ function createFracturedContinuum({ device, continuum }) {
     const list = [...entries.values()];
     for (const entry of list) entry.state.dirty.clear();
     if (!list.length) return;
-    const words = assembleCityContinuumAtlas(list.map((entry) => entry.body));
-    atlas = device.createBuffer({ label: 'struck buildings continuum atlas', size: words.byteLength, usage: U.STORAGE | U.COPY_DST });
-    device.queue.writeBuffer(atlas, 0, words);
-    let floats = 0, clusters = 0;
-    for (const entry of list) { entry.block = floats / 4; floats += entry.data.length; clusters += cityContinuumBodyParts(entry.body).clusters; }
+    const words = assembleContinuumAtlas(list.map((entry) => entry.body));
+    atlas = uploadContinuumAtlas(device, words, 'struck buildings');
+    let floats = 0;
+    for (const entry of list) { entry.block = floats / 4; floats += entry.data.length; }
     shards = device.createBuffer({ label: 'struck buildings shard flights', size: floats * 4, usage: U.STORAGE | U.COPY_DST });
+    const { room } = continuumRoom(continuumAtlasTypes(words), list.map(() => 1));
     scene = createContinuumScene({
-      device, atlas: { buffer: atlas }, pipelines: ready.programs, capacity: list.length, room: [clusters, clusters, 1, list.length, 1, clusters],
-      view: ready.view, dataAt: 40, shards, frame: ready.frame, shadowUniform: ready.shadowUniform, samples: ready.samples, label: 'struck buildings',
+      device, atlas: { buffer: atlas }, programs: ready.programs, capacity: list.length, room, view: ready.view, poses: shards,
+      frame: ready.frame, shadowUniform: ready.shadowUniform, samples: ready.samples, label: 'struck buildings',
     });
     list.forEach((entry, i) => {
       copyRecords(entry, 0, entry.shardCount);
+      copyWear(entry);
       device.queue.writeBuffer(shards, entry.block * 16, entry.data);
-      scene.place(i, { x: entry.root[0], y: entry.root[1], z: entry.root[2], word: entry.word, type: i, flags: CITY_CONTINUUM_BROKEN, records: entry.block, reach: FRACTURE_PIECES_REACH, seed: i });
+      scene.place(i, { position: entry.root, type: i, kind: CONTINUUM_KIND.SHARDED, flags: CONTINUUM_BROKEN, pose: entry.block, reach: FRACTURE_PIECES_REACH, seed: i, identity: entry.word });
     });
     scene.send(0, list.length);
     scene.setCount(list.length);
-    scene.setPixelError(pixelError);
     scene.setWorldOffset(offsetX, offsetZ);
   };
   return {
@@ -1463,9 +1468,10 @@ function createFracturedContinuum({ device, continuum }) {
         instance, state, fracture, root, shardCount: fracture.shardCount, block: 0,
         // A city's house wears its own limewash and tiles; a prefab and a boulder are drawn as they were built.
         word: instance.city?.tint ?? CITY_CONTINUUM_AS_BUILT,
-        body: packCityContinuumPieces({ triangles: T }, { welded, clusters: cityContinuumFinestClusters(welded) }).words,
-        data: new Float32Array(4 + fracture.shardCount * R),
+        body: packCityContinuumPieces({ triangles: T }, { welded, clusters: continuumFinestClusters(welded) }).words,
+        data: new Float32Array(4 + fracture.shardCount * R + Math.ceil(fracture.shardCount / 4) * 4),
       };
+      entry.data[1] = fracture.shardCount;
       entries.set(instance, entry);
       stale = true;
       const corners = new Float32Array(T * 24), parts = new Uint32Array(T);
@@ -1494,6 +1500,10 @@ function createFracturedContinuum({ device, continuum }) {
       }
       if (!shards) return;
       for (const entry of entries.values()) {
+        if (entry.state.scorchDirty) {
+          copyWear(entry);
+          device.queue.writeBuffer(shards, (entry.block * 4 + wearAt(entry)) * 4, entry.data, wearAt(entry), entry.data.length - wearAt(entry));
+        }
         const dirty = entry.state.dirty;
         if (!dirty.size) continue;
         const list = [...dirty].sort((a, b) => a - b);
@@ -1508,10 +1518,9 @@ function createFracturedContinuum({ device, continuum }) {
         device.queue.writeBuffer(shards, entry.block * 16, entry.data, 0, 4);
       }
     },
-    encode(pass) { if (scene) { scene.setPixelError(pixelError); scene.encode(pass); } },
+    encode(pass) { scene?.encode(pass); },
     draw(pass, group, clouds) { scene?.draw(pass, group, clouds); },
     drawShadow(pass) { scene?.drawShadow(pass); },
-    setPixelError(pixels) { pixelError = pixels; },
     setWorldOffset(x, z) { offsetX = x; offsetZ = z; scene?.setWorldOffset(x, z); },
     destroy() { destroyed = true; release(); entries.clear(); },
   };
@@ -1616,7 +1625,6 @@ export function createPortFractures({ device, port, geometry, groundAt, waterAt 
     encode(pass) { drawn.encode(pass); },
     draw(pass, group, clouds) { drawn.draw(pass, group, clouds); },
     drawShadow(pass) { drawn.drawShadow(pass); },
-    setPixelError(pixels) { drawn.setPixelError(pixels); },
     setWorldOffset(x, z) { drawn.setWorldOffset(x, z); },
     destroy() { drawn.destroy(); live.clear(); building.clear(); },
   };

@@ -5,6 +5,7 @@
 // bundle's digest is the bake's version. Every body it bakes is kept in the origin's private file system under its
 // fingerprint and that version, so a browser bakes each one once. It is no part of the page's own bundle.
 import { bakeContinuumBody, bakeContinuumPiecesBody } from './continuum-bake.js';
+// Every body it bakes is a city's (a coast's prefab, a struck building's pieces), packed in the one format.
 import { packCityContinuumBody, packCityContinuumPieces } from './city-continuum.js';
 
 const CONTINUUM_BAKE_CACHE = 'continuum-bakes';

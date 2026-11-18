@@ -24,11 +24,11 @@ import {
   createNeuralPbrWGSL,
   withNeuralPbrVessel,
   withNeuralPbrTerrain,
-  withNeuralPbrProps,
 } from '../js/wgsl/neural-pbr.js';
 import { CARAVEL, CARAVEL_DAMAGED } from '../js/wgsl/caravel.js';
 import { TERRAIN } from '../js/wgsl/terrain.js';
-import { propContinuumRenderWGSL } from '../js/wgsl/prop-continuum.js';
+import { PROP_CONTINUUM_MATERIAL_SPEC } from '../js/wgsl/prop-continuum.js';
+import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
 import { withPosedVesselVertices } from '../js/vessel-pose.js';
 import { createSubmergedShader } from '../js/water-optics.js';
 
@@ -124,11 +124,11 @@ test('WGSL transforms respect zero-sampled-texture budget, minification invarian
   const minify = src => src.replace(/\s+/g, ' ').replace(/ ?([{}()[\],;:=<>*&|^!%@.]) ?/g, '$1');
   assert.match(withNeuralPbrVessel(minify(CARAVEL)), /neuralPbrAnisoSpecular/);
   assert.match(withNeuralPbrTerrain(minify(TERRAIN)), /evalNeuralPbr/);
-  assert.match(withNeuralPbrProps(minify(propContinuumRenderWGSL())), /neuralPbrAnisoSpecular/);
+  // The props' material writes the bank into its own shade: its composed view carries it with no rewriting.
+  assert.match(continuumModuleWGSL({ pass: 'view', material: PROP_CONTINUUM_MATERIAL_SPEC }), /neuralPbrAnisoSpecular/);
 
   assert.throws(() => withNeuralPbrVessel('fn broken() {}'), /missing anchor/);
   assert.throws(() => withNeuralPbrTerrain('fn broken() {}'), /missing anchor/);
-  assert.throws(() => withNeuralPbrProps('fn broken() {}'), /missing anchor/);
 });
 
 test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero errors and isolates non-landSurface bindings', { timeout: 120000 }, async () => {
@@ -150,7 +150,7 @@ test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero 
     terrain: withNeuralPbrTerrain(TERRAIN),
     terrainSubmerged: createSubmergedShader(withNeuralPbrTerrain(TERRAIN), 'fs', 'in.world', true, true),
     vesselSubmerged: createSubmergedShader(withNeuralPbrVessel(withPosedVesselVertices(CARAVEL)), 'fs', 'in.world', false, false),
-    props: withNeuralPbrProps(propContinuumRenderWGSL()),
+    props: continuumModuleWGSL({ pass: 'view', material: PROP_CONTINUUM_MATERIAL_SPEC }),
   };
 
   const page = await pbrBrowser.newPage();

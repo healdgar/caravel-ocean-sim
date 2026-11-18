@@ -7,8 +7,10 @@
 //
 // A family offers its draws as `continuumDraws()`: a list of { buffer, offset, records, stride }, where `buffer`
 // holds indirect records (made with COPY_SRC), `offset` is in bytes, and `stride` is the record's length in u32s:
-// 5 for drawIndexedIndirect, 4 for drawIndirect. Both begin with the index or vertex count and the instance count,
-// and every continuum draw is a triangle list. Every family is counted from its draws: nothing is sized on the CPU.
+// 5 for drawIndexedIndirect, 4 for drawIndirect, 1 for a count of triangles. The first two begin with the index or
+// vertex count and the instance count of a triangle list; they count what is submitted, padding and all. A family whose
+// fixed-size entries hide degenerate triangles (the one cut, js/wgsl/continuum-cut.js) counts its real triangles as it
+// lists them and offers those words, stride 1. Every family is counted from its draws: nothing is sized on the CPU.
 import { CONTINUUM_TRIANGLE_BUDGET } from './continuum-core.js';
 
 const CONTINUUM_CENSUS_WGSL = /* wgsl */`
@@ -22,7 +24,7 @@ struct CensusRegion { first: u32, records: u32, stride: u32, family: u32 }
   var sum = 0u;
   for (var k = 0u; k < r.records; k++) {
     let at = r.first + k * r.stride;
-    sum += (records[at] / 3u) * records[at + 1u];
+    if (r.stride == 1u) { sum += records[at]; } else { sum += (records[at] / 3u) * records[at + 1u]; }
   }
   atomicAdd(&totals[r.family], sum);
 }`;
@@ -51,7 +53,7 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
       const family = familyOf(name);
       for (const d of draws || []) {
         if (!d?.buffer || !(d.records > 0)) continue;
-        const stride = d.stride === 4 ? 4 : 5;
+        const stride = d.stride === 4 || d.stride === 1 ? d.stride : 5;
         regions.push(words, d.records, stride, family);
         copies.push({ buffer: d.buffer, offset: d.offset | 0, at: words * 4, bytes: d.records * stride * 4 });
         words += d.records * stride;

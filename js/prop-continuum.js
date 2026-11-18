@@ -3,24 +3,21 @@
 // PROP_MODELS) is baked by scripts/prepare-prop-continuum.mjs from the very mesh its physics strikes, shard by shard,
 // into a cluster hierarchy the GPU cuts by projected error, a closed far body wrapped round it that collapses one
 // half-edge at a time to a few triangles, and a single splat; round shot is a cast-iron sphere baked the same way.
-// The bake is the city's (scripts/prepare-city-continuum.mjs), and so is the atlas's layout (js/city-continuum.js):
-// a header, a record a type, clusters, their vertices and indices, then each type's far body. Only a vertex's last
-// word differs: a prop's surface is its texture, so it carries its UV where a building carries its kind. One atlas
-// holds every type, so props and shot are cut by one program (js/wgsl/prop-continuum.js) and drawn by one list a
-// pass (js/prop-continuum-draw.js).
+// The bake is the one bake (js/continuum-bake.js), the atlas the one format (js/continuum-format.js); this is what a
+// prop puts in it: its UV on its pigment (a side stream; a far-body triangle's in its word), and a type's pigment
+// layer, or a plain type's albedo and roughness. Props, shot and the crews' tools are drawn by the props' material
+// (js/wgsl/prop-continuum.js) through the one cut.
 import { PROP_MODELS } from './port-props.js';
-import { cityContinuumOctahedral } from './city-continuum.js';
+import {
+  CONTINUUM_ATLAS_VERSION, CONTINUUM_HEADER_WORDS, CONTINUUM_NEVER, CONTINUUM_TYPE, continuumFloatWord, packContinuumBody, packContinuumUV, loadContinuumAtlas,
+} from './continuum-format.js';
 
 export const PROP_CONTINUUM_FORMAT = 'waterworld.prop-continuum';
-export const PROP_CONTINUUM_VERSION = 1;
-export const PROP_CONTINUUM_MAGIC = 0x5052_4e43;
-// A type's record: the city's (CITY_CONTINUUM_TYPE), but where a building keeps its roof and walls a prop keeps the
-// layer of its pigment (PROP_CONTINUUM_PLAIN for none), and a plain type its albedo (linear) and roughness.
-export const PROP_CONTINUUM_TYPE = Object.freeze({
-  low: 0, span: 3, sphere: 4, clusterFirst: 8, clusterCount: 9, chainVertices: 10, stepCount: 11,
-  chainVertexCount: 12, records: 13, triangles: 14, steps: 15, baseError: 16, rootError: 17, splatRx: 18, splatRy: 19,
-  splatCentre: 20, layer: 23, albedo: 24, roughness: 27, chainTriangleCount: 28, flags: 29, sourceTriangles: 30, farFirst: 31,
-});
+// A prop manifest is of the atlas's own version: a rebake is the only way to a new one.
+export const PROP_CONTINUUM_VERSION = CONTINUUM_ATLAS_VERSION;
+// A prop type's material block (js/continuum-format.js CONTINUUM_TYPE.material): the layer of its pigment
+// (PROP_CONTINUUM_PLAIN for none), and a plain type's albedo (linear) and roughness (f32).
+export const PROP_CONTINUUM_MATERIAL = Object.freeze({ layer: CONTINUUM_TYPE.material, albedo: CONTINUUM_TYPE.material + 1, roughness: CONTINUUM_TYPE.material + 4 });
 export const PROP_CONTINUUM_PLAIN = 0xffffffff;
 // What the crews work their guns, keep watch and fight with, and the arrows that strike them, each piece at its own
 // size (js/crew-work.js crewGunneryTool, js/gunnery-models.js VESSEL_SIDEARMS, js/crew-wounds.js CREW_ARROW_LENGTH):
@@ -71,17 +68,17 @@ export const PROP_CONTINUUM_ASSETS = Object.freeze({
   'atlas.bin.gz': 'assets/prop-continuum/atlas.bin.gz',
 });
 
-const propUnit16 = (v) => Math.max(0, Math.min(65535, Math.round(v * 65535)));
-// A UV pair in one word, two 16-bit fractions.
-export function packPropContinuumUV([u, v]) {
-  if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1)) throw Error(`A prop's UV lies outside its pigment: ${u}, ${v}`);
-  return (propUnit16(u) | (propUnit16(v) << 16)) >>> 0;
-}
-export const unpackPropContinuumUV = (word) => [(word & 65535) / 65535, (word >>> 16) / 65535];
-// One vertex as four 32-bit words: position quantized over its type's `low` and `span`, an octahedral normal, its UV.
-export function packPropContinuumVertex({ position, normal, uv }, { low, span }) {
-  const p = position.map((v, a) => propUnit16((v - low[a]) / span)), n = cityContinuumOctahedral(normal);
-  return [(p[0] | (p[1] << 16)) >>> 0, p[2] >>> 0, (propUnit16(n[0]) | (propUnit16(n[1]) << 16)) >>> 0, packPropContinuumUV(uv)];
+// How a prop body is packed (js/continuum-format.js packContinuumBody): each point's UV on its pigment in the UV
+// stream, each far triangle's in its word, and its pigment's layer or its plain albedo and roughness. `splat` replaces
+// the bake's, for a body whose outline is not a building's.
+export function packPropContinuumBody({ triangles, layer, albedo, roughness, splat = null }, baked) {
+  const { welded, far } = baked;
+  return packContinuumBody({
+    triangles, splat: splat ?? far.splat,
+    material: [layer >>> 0, ...[...albedo, roughness].map(continuumFloatWord)],
+    farWord: (t) => packContinuumUV([far.kinds[t * 2], far.kinds[t * 2 + 1]]),
+    streams: { uv: (v) => [packContinuumUV([welded.kind[v * 2], welded.kind[v * 2 + 1]])] },
+  }, baked);
 }
 
 // Round shot as cast: a sphere of unit radius, an icosahedron halved `subdivisions` times over and pushed out to the
@@ -137,31 +134,18 @@ export function propContinuumSource(model, name) {
 }
 
 export function validatePropContinuumManifest(manifest) {
-  if (manifest?.format !== PROP_CONTINUUM_FORMAT || manifest.version !== PROP_CONTINUUM_VERSION) throw Error('Invalid prop continuum manifest');
+  if (manifest?.format !== PROP_CONTINUUM_FORMAT || manifest.version !== PROP_CONTINUUM_VERSION) throw Error('Invalid prop continuum manifest: rebake it');
   const { types, atlas } = manifest;
   if (!Array.isArray(types) || types.length !== PROP_CONTINUUM_TYPES.length) throw Error('The prop continuum holds the wrong types');
   types.forEach((type, id) => {
     if (type.id !== id || type.name !== PROP_CONTINUUM_TYPES[id] || !/^[0-9a-f]{64}$/.test(type.fingerprint ?? '')) throw Error(`Prop continuum type ${id} is malformed`);
-    if (!(type.clusters?.count > 0) || !(type.chain?.baseTriangles >= 4) || !(type.chain.steps >= 1 && type.chain.steps < 65535)) throw Error(`Prop continuum type ${id} is incomplete`);
+    if (!(type.clusters?.count > 0) || !(type.chain?.baseTriangles >= 4) || !(type.chain.steps >= 1 && type.chain.steps < CONTINUUM_NEVER)) throw Error(`Prop continuum type ${id} is incomplete`);
   });
-  if (!(atlas?.words > 16) || atlas.bytes !== atlas.words * 4 || !/^[0-9a-f]{64}$/.test(atlas.sha256 ?? '') || !atlas.gzip?.file) throw Error('The prop continuum atlas is malformed');
+  if (!(atlas?.words > CONTINUUM_HEADER_WORDS) || atlas.bytes !== atlas.words * 4 || !/^[0-9a-f]{64}$/.test(atlas.sha256 ?? '') || !atlas.gzip?.file) throw Error('The prop continuum atlas is malformed');
   return manifest;
 }
 
-// The atlas, fetched, unpacked and checked against its receipt. Resolves to { manifest, words }.
-export async function loadPropContinuum({ fetchAsset = fetch } = {}) {
-  const get = async (path) => {
-    const response = await fetchAsset(path);
-    if (!response.ok) throw Error(`Prop continuum unavailable (${response.status}): ${path}`);
-    return response;
-  };
-  const manifest = validatePropContinuumManifest(await (await get(PROP_CONTINUUM_ASSETS['manifest.json'])).json());
-  const response = await get(PROP_CONTINUUM_ASSETS['atlas.bin.gz']);
-  const bytes = new Uint8Array(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
-  if (bytes.byteLength !== manifest.atlas.bytes) throw Error('The prop continuum atlas has the wrong size');
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-  if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== manifest.atlas.sha256) throw Error('The prop continuum atlas failed verification');
-  const words = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
-  if (words[0] !== PROP_CONTINUUM_MAGIC || words[1] !== PROP_CONTINUUM_VERSION) throw Error('The prop continuum atlas is of another format');
-  return { manifest, words };
+// The atlas, fetched, unpacked and checked against its receipt and the cut. Resolves to { manifest, words }.
+export function loadPropContinuum({ fetchAsset = fetch } = {}) {
+  return loadContinuumAtlas({ assets: PROP_CONTINUUM_ASSETS, validate: validatePropContinuumManifest, label: 'prop', fetchAsset });
 }

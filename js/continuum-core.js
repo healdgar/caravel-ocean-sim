@@ -24,6 +24,13 @@ export const CONTINUUM_BASE_PIXEL_ERROR = 3;
 // What the player is looking at, speaking to or firing upon, and whatever is wounded or struck, is cut at this share
 // of the scene's pixel error (rule 3, item 5): every family's importance is this one factor.
 export const CONTINUUM_IMPORTANT = 0.5;
+// A far body's collapse step, as the one bake writes it and the one cut reads it: the triangles alive (a prefix of
+// the far body's triangles in order of death), the error in metres, how far along its normals the surface is grown to
+// keep the outline its collapses take in, and a spare word.
+export const CONTINUUM_STEP_WORDS = 4;
+// The most collapses one far-body vertex may pass through, as far as the GPU follows them: the bake refuses a body
+// deeper than this, and an atlas records it in its header.
+export const CONTINUUM_HOPS = 256;
 
 let continuumScenePixelError = CONTINUUM_BASE_PIXEL_ERROR;
 // The scene's one pixel-error scalar. Every family's cut reads it each frame; only a frame-time or budget governor

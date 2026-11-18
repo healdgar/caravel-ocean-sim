@@ -14,7 +14,9 @@ test('the city continuum counts into the continuum census',{timeout:180000},asyn
     const page=await browser.newPage();await page.route('**/__continuum_city_census',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto('http://127.0.0.1:'+server.address().port+'/__continuum_city_census');
     const result=await page.evaluate(async()=>{
-      const {requestCityContinuumAtlas,requestCityContinuumPipelines,createCityContinuum}=await import('/js/city-continuum-draw.js');
+      const {requestCityContinuumAtlas,createCityContinuum}=await import('/js/city-continuum-draw.js');
+      const {requestContinuumPrograms}=await import('/js/continuum-scene.js');
+      const {setContinuumPixelError}=await import('/js/continuum-core.js');
       const {createContinuumCensus}=await import('/js/continuum-census.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
       const shader=async(code,label)=>{const module=device.createShaderModule({code,label});const bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(label+': '+bad.map(m=>m.message).join('\n'));return module;};
@@ -24,11 +26,11 @@ test('the city continuum counts into the continuum census',{timeout:180000},asyn
       const camY=1+0.75*0.62,frame=new Float32Array(96);
       frame[0]=1;frame[5]=1;frame[11]=1;frame[14]=0.1;frame.set([0,camY,0,0],16);frame.set([0.5,0,0,0],20);frame.set([0,0.5,0,0],24);frame.set([0,0,1,0],28);frame.set([0,1,0,1],32);frame.set([1000,1000,0.001,0.001],36);
       const frameUBO=make(frame,B.UNIFORM);
-      // The city continuum with one house 50 m ahead: its view's four lists offered to the census, which counts the
-      // triangles the GPU's own cut put in them.
-      const atlas=await requestCityContinuumAtlas(device),programs=await requestCityContinuumPipelines({device,shader,shadowFormat:'depth32float'});
-      const cityCut=createCityContinuum({device,atlas,pipelines:programs,view:null,typed:new Float32Array([0,0,50,0,1,1,1,0.5]),types:new Uint32Array([0]),frame:frameUBO,shadowUniform:make(new Float32Array(28),B.UNIFORM)});
-      cityCut.setShadows(false);cityCut.setPixelError(1);cityCut.setWorldOffset(0,0);
+      // The city continuum with one house 50 m ahead: its view's four lists offered to the census, which reads the
+      // real triangles the GPU's own cut counted as it listed them.
+      const atlas=await requestCityContinuumAtlas(device),programs=await requestContinuumPrograms({device,shader,shadowFormat:'depth32float'});
+      const cityCut=createCityContinuum({device,atlas,programs,view:null,typed:new Float32Array([0,0,50,0,1,1,1,0.5]),types:new Uint32Array([0]),frame:frameUBO,shadowUniform:make(new Float32Array(28),B.UNIFORM)});
+      setContinuumPixelError(1);cityCut.setShadows(false);cityCut.setWorldOffset(0,0);
       const census=createContinuumCensus(device),encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();cityCut.encode(pass);pass.end();
       const offered=cityCut.continuumDraws();census.encode(encoder,[{name:'city',draws:offered}]);
       const readCity=device.createBuffer({size:cityCut.draws.size,usage:B.MAP_READ|B.COPY_DST});encoder.copyBufferToBuffer(cityCut.draws,0,readCity,0,readCity.size);
@@ -41,8 +43,9 @@ test('the city continuum counts into the continuum census',{timeout:180000},asyn
     });
     t.diagnostic(JSON.stringify(result));
     assert.deepEqual(result.errors,[]);
-    assert.deepEqual(result.city.offered,[{offset:0,records:4,stride:4}],'the view\'s four lists, read where the cut wrote them');
-    const listed=[0,1,2,3].reduce((sum,i)=>sum+result.city.draws[i*4]*result.city.draws[i*4+1]/3,0);
+    assert.deepEqual(result.city.offered,[{offset:96,records:4,stride:1}],'the view\'s four lists\' real triangles, read where the cut counted them');
+    const listed=[0,1,2,3].reduce((sum,i)=>sum+result.city.draws[24+i],0);
+    assert.ok(listed<=[0,1,2,3].reduce((sum,i)=>sum+result.city.draws[i*4]*result.city.draws[i*4+1]/3,0),'no more than the draws submit');
     assert.ok(result.city.draws[1]+result.city.draws[5]>0,'the house 50 m ahead is drawn as its clusters');
     assert.equal(result.city.census?.families?.city,listed,`the census counts the ${listed} triangles the cut listed`);
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

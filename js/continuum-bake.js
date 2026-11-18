@@ -21,7 +21,7 @@
 // position, normal, kind) in triangles, and each triangle's part.
 import { MeshoptSimplifier } from 'meshoptimizer';
 import { buildDag } from '../third_party/threejs-nanites/dag/build.ts';
-import { CITY_CONTINUUM_STEP_WORDS, CITY_CONTINUUM_HOPS } from './city-continuum.js';
+import { CONTINUUM_STEP_WORDS, CONTINUUM_HOPS } from './continuum-core.js';
 
 // ------------------------------------------------------------------------------------------------ measures
 export const closest = new Float64Array(3);
@@ -877,8 +877,8 @@ function bakeFar(type, welded) {
   const chain = collapseChain(position, index, CHAIN_LEAST_TRIANGLES), S = chain.steps.length;
   let depth = 0;
   for (let v = 0; v < V; v++) { let d = 0; for (let w = v; chain.dieStep[w] >= 0; w = chain.target[w]) d++; depth = Math.max(depth, d); }
-  // The GPU follows a vertex's collapses only so far (js/wgsl/city-continuum.js cityContinuumAncestor).
-  if (depth > CITY_CONTINUUM_HOPS) throw Error(`${type.name}: a far-body vertex collapses ${depth} times, past the GPU's ${CITY_CONTINUUM_HOPS}`);
+  // The GPU follows a vertex's collapses only so far (js/wgsl/continuum-cut.js continuumAncestor).
+  if (depth > CONTINUUM_HOPS) throw Error(`${type.name}: a far-body vertex collapses ${depth} times, past the GPU's ${CONTINUUM_HOPS}`);
   // Errors and inflation, measured at every eighth step and the last few, between them taken in proportion.
   const baseFans = Array.from({ length: V }, () => []);
   allBase.forEach((t) => { for (let k = 0; k < 3; k++) baseFans[index[t * 3 + k]].push(t); });
@@ -942,16 +942,16 @@ function bakeFar(type, welded) {
   if (!(errors[S] < 2 * span)) throw Error(`${type.name}: the far body's last step is ${errors[S]} m in error`);
   // Triangles in order of death, latest first: those alive at step s are a prefix.
   const order = allBase.slice().sort((p, q) => (chain.death[q] < 0 ? Infinity : chain.death[q]) - (chain.death[p] < 0 ? Infinity : chain.death[p]));
-  const steps = new Uint32Array((S + 1) * CITY_CONTINUUM_STEP_WORDS), stepFloats = new Float32Array(steps.buffer);
+  const steps = new Uint32Array((S + 1) * CONTINUUM_STEP_WORDS), stepFloats = new Float32Array(steps.buffer);
   const dying = new Int32Array(S + 2);
   for (let t = 0; t < T; t++) if (chain.death[t] >= 0) dying[chain.death[t]]++;
   for (let s = 0, alive = T; s <= S; s++) {
     alive -= dying[s];
-    steps[s * CITY_CONTINUUM_STEP_WORDS] = alive;
-    stepFloats[s * CITY_CONTINUUM_STEP_WORDS + 1] = errors[s];
-    stepFloats[s * CITY_CONTINUUM_STEP_WORDS + 2] = inflates[s];
+    steps[s * CONTINUUM_STEP_WORDS] = alive;
+    stepFloats[s * CONTINUUM_STEP_WORDS + 1] = errors[s];
+    stepFloats[s * CONTINUUM_STEP_WORDS + 2] = inflates[s];
   }
-  if (steps[S * CITY_CONTINUUM_STEP_WORDS] !== order.filter((t) => chain.death[t] < 0 || chain.death[t] > S).length) throw Error('Chain prefix counts disagree');
+  if (steps[S * CONTINUUM_STEP_WORDS] !== order.filter((t) => chain.death[t] < 0 || chain.death[t] > S).length) throw Error('Chain prefix counts disagree');
 
   // The splat: the wrap above the type's floor, front and side, with the outline's area and its roof's share.
   const top = high[1], floor = Math.max(low[1], 0), ry = Math.max((top - floor) / 2, 0.05), cellArea = (frame.size / frame.cells) ** 2;
@@ -989,7 +989,7 @@ function bakeFar(type, welded) {
     stats: {
       cell: +wrapped.h.toFixed(4), cells: wrapped.cells, wellComposedCells: wrapped.added, wrapTriangles: wrapped.index.length / 3, baseTriangles: T, baseVertices: V,
       baseError: +baseError.toFixed(4), outward: +outward.toFixed(4), inward: +inward.toFixed(4), simplifyError: +base.error.toFixed(4),
-      steps: S, coreTriangles: steps[S * CITY_CONTINUUM_STEP_WORDS], depth, errorRange: [+errors[0].toFixed(4), +errors[S].toFixed(4)], inflateMax: +Math.max(...inflates).toFixed(4),
+      steps: S, coreTriangles: steps[S * CONTINUUM_STEP_WORDS], depth, errorRange: [+errors[0].toFixed(4), +errors[S].toFixed(4)], inflateMax: +Math.max(...inflates).toFixed(4),
     },
   };
 }
@@ -1002,8 +1002,8 @@ export async function bakeContinuumBody(body) {
   const welded = weldDrawn(body), clusters = await bakeClusters(welded), far = bakeFar(body, welded);
   const rootTriangles = clusters.records.reduce((n, record) => n + (record.parentError === Infinity ? record.triangles : 0), 0);
   far.farFirst = 0;
-  while (far.farFirst < far.chain.steps.length && far.steps[far.farFirst * CITY_CONTINUUM_STEP_WORDS] > rootTriangles) far.farFirst++;
-  Object.assign(far.stats, { rootTriangles, farFirst: far.farFirst, farFirstTriangles: far.steps[far.farFirst * CITY_CONTINUUM_STEP_WORDS], handoffError: +new Float32Array(far.steps.buffer)[far.farFirst * CITY_CONTINUUM_STEP_WORDS + 1].toFixed(4) });
+  while (far.farFirst < far.chain.steps.length && far.steps[far.farFirst * CONTINUUM_STEP_WORDS] > rootTriangles) far.farFirst++;
+  Object.assign(far.stats, { rootTriangles, farFirst: far.farFirst, farFirstTriangles: far.steps[far.farFirst * CONTINUUM_STEP_WORDS], handoffError: +new Float32Array(far.steps.buffer)[far.farFirst * CONTINUUM_STEP_WORDS + 1].toFixed(4) });
   return { welded, clusters, far };
 }
 

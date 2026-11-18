@@ -25,8 +25,10 @@ import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.j
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
 import {continuumPixelError} from './continuum-core.js';
-import {cityContinuumRenderWGSL} from './wgsl/city-continuum.js';
-import {requestCityContinuumAtlas,requestCityContinuumPipelines,cityContinuumViewPipeline,createCityContinuum} from './city-continuum-draw.js';
+import {cityContinuumMaterial} from './wgsl/city-continuum.js';
+import {requestCityContinuumAtlas,createCityContinuum} from './city-continuum-draw.js';
+import {requestContinuumPrograms,requestContinuumView} from './continuum-scene.js';
+import {continuumAtlasTypes} from './continuum-format.js';
 import {createCityTargets} from './city-targets.js';
 import {isPrefabContinuumInstance,prefabContinuumAtlas,prefabContinuumPlan,resolvePrefabContinuum} from './prefab-continuum.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize,landCraterMark} from './land-craters.js';
@@ -1066,12 +1068,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
   const neuralPbr=sharedNeuralPbrBank(device);
   const terrainSource=withNeuralPbrTerrain(TERRAIN);
-  const modulePromise=shader(terrainSource+continuumGroundWGSL(2,CONTINUUM_GROUND_LAND_BINDING)+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+cityContinuumRenderWGSL()+LAND_CONTINUUM_RENDER,'island terrain');
+  const modulePromise=shader(terrainSource+continuumGroundWGSL(2,CONTINUUM_GROUND_LAND_BINDING)+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+LAND_CONTINUUM_RENDER,'island terrain');
+  // A city's buildings, through the one continuum: the city's material, shaded by the land's own surfaces, in a view
+  // of its own (js/wgsl/city-continuum.js).
+  const cityViewPromise=requestContinuumView({device,shader,material:cityContinuumMaterial(terrainSource),format,samples});
   const terrainPipesPromise=modulePromise.then(module=>Promise.all([
     computePipe(TERRAIN_LIGHT,'island sunlight'),
     module,
-    // A city's buildings, through the one continuum (js/city-continuum-draw.js).
-    cityContinuumViewPipeline({device,module,format,samples}),
+    cityViewPromise,
     // The land itself, every piece cut through the one continuum (js/land-continuum.js).
     landContinuumViewPipeline({device,module,format,samples}),
   ]));
@@ -1084,7 +1088,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // The rest of the land's programs, asked for now so that they compile while the land itself is being made. Left
   // until each is first needed, they compile one after another once it is.
   for(const pending of [computePipe(COASTAL_FIELD_BAKE,'coastal field'),computePipe(GROUND_DETAIL_BAKE,'ground detail bake'),
-    useProcedural?requestCityContinuumPipelines({device,shader,shadowFormat:activeLandShadows.format}):null,
+    useProcedural?requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}):null,
     requestLandCraterPipelines({computePipe}),requestLandContinuumPipelines({device,shader}),
     useProcedural?requestInlandWaterPipeline({device,shader,format,samples}):null,
     useProcedural?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
@@ -1406,9 +1410,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const [lightPipe,module,cityPipe,landPipe]=await terrainPipesPromise;
-  fractureView=cityPipe;
-  requestCityContinuumPipelines({device,shader,shadowFormat:activeLandShadows.format}).then(programs=>{fracturePrograms=programs;},error=>console.error('struck buildings continuum',error));
+  const [lightPipe,module,cityView,landPipe]=await terrainPipesPromise;
+  const cityPipe=cityView.pipeline;
+  fractureView=cityView;
+  requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}).then(programs=>{fracturePrograms=programs;},error=>console.error('struck buildings continuum',error));
   // A block of slots a ground-cover patch: its rocks, drawn by the boulder continuum.
   const groundBlock=GROUND_COVER.rocksPerPatch;
   const groundBlocks=Math.ceil(Math.PI*(GROUND_RESIDENT_M*GROUND_RESIDENT_RELEASE/GROUND_COVER.patchSpan+1)**2);
@@ -1485,10 +1490,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const old=cityContinuum;cityContinuum=null;if(old)retireGPU(()=>old.destroy());
     const city=pack?.city;
     if(!city?.typedCount)return;
-    const [atlas,programs]=await Promise.all([requestCityContinuumAtlas(device),requestCityContinuumPipelines({device,shader,shadowFormat:activeLandShadows.format})]);
+    const [atlas,programs]=await Promise.all([requestCityContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format})]);
     if(made!==cityContinuumMade||terrainDisposed)return;
-    cityContinuum=createCityContinuum({device,atlas,pipelines:programs,view:cityPipe,typed:city.typed,types:city.typedTypes,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'city'});
-    cityContinuum.setPixelError(currentPixelError);cityContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
+    cityContinuum=createCityContinuum({device,atlas,programs,view:cityView,typed:city.typed,types:city.typedTypes,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'city'});
+    cityContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
     for(const index of cityStruckIndices)cityContinuum.hide(index,1+(city.typedAttached?.[index]??0),true);
     for(const index of cityHitIndices)cityContinuum.strike(index,1+(city.typedAttached?.[index]??0),true);
     cityContinuum.setAim(cityAim);
@@ -1503,7 +1508,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(!prefabLandings.has(port))prefabLandings.set(port,(async()=>{
       const plan=await prefabContinuumPlan(port,{near:lastCamera});
       if(!plan.instances.length)return null;
-      const [words,programs]=await Promise.all([resolvePrefabContinuum(plan,{portId:port.regionId??activeRegion.id}),requestCityContinuumPipelines({device,shader,shadowFormat:activeLandShadows.format})]);
+      const [words,programs]=await Promise.all([resolvePrefabContinuum(plan,{portId:port.regionId??activeRegion.id}),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format})]);
       return {plan,atlas:prefabContinuumAtlas(words),programs};
     })().catch(error=>{prefabLandings.delete(port);throw error;}));
     return prefabLandings.get(port);
@@ -1515,10 +1520,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const landing=await landPrefabs(port);
     if(!landing||made!==prefabsMade||terrainDisposed)return;
     const atlas=buffer(landing.atlas,GPUBufferUsage.STORAGE,'prefab continuum atlas');
-    const continuum=createCityContinuum({device,atlas:{buffer:atlas},pipelines:landing.programs,view:cityPipe,typed:landing.plan.typed,types:landing.plan.types,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'prefabs'});
+    const continuum=createCityContinuum({device,atlas:{buffer:atlas,types:continuumAtlasTypes(landing.atlas)},programs:landing.programs,view:cityView,typed:landing.plan.typed,types:landing.plan.types,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'prefabs'});
     const release=continuum.destroy;
     prefabs=Object.assign(continuum,{plan:landing.plan,destroy(){release();atlas.destroy();}});
-    prefabs.setPixelError(currentPixelError);prefabs.setWorldOffset(worldOffset.x,worldOffset.z);prefabs.setAim(cityAim);
+    prefabs.setWorldOffset(worldOffset.x,worldOffset.z);prefabs.setAim(cityAim);
     prefabMarks();
   })();
   const prefabsFailed=error=>console.error('prefab continuum',error);
@@ -2527,7 +2532,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
     continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['prefabs',prefabs],['land',landContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);cityContinuum?.setPixelError(next);prefabs?.setPixelError(next);landContinuum?.setPixelError(next);}},
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);landContinuum?.setPixelError(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null},
     // The land's cut, read back: for tests. Per piece, the view's and the captures' lists of patches.
     readLandCut:()=>landContinuum?.readCut()??null,
@@ -2978,14 +2983,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       // The land first: its cut writes the ground it draws (js/continuum-ground.js), which everything after stands on.
       landFlush();landContinuum?.setPixelError(currentPixelError);landContinuum?.encode(pass);
       // Every building shot down, cut as its pieces at the scene's one pixel error.
-      portFractures?.setPixelError(currentPixelError);portFractures?.setWorldOffset(worldOffset.x,worldOffset.z);portFractures?.encode(pass);
+      portFractures?.setWorldOffset(worldOffset.x,worldOffset.z);portFractures?.encode(pass);
       for(const sec of loadedSections.values()){
         if(!sec.portFractures)continue;
-        sec.portFractures.setPixelError(currentPixelError);sec.portFractures.setWorldOffset(worldOffset.x,worldOffset.z);sec.portFractures.encode(pass);
+        sec.portFractures.setWorldOffset(worldOffset.x,worldOffset.z);sec.portFractures.encode(pass);
       }
       boulderContinuum?.prepare(pass);
-      cityContinuum?.setPixelError(currentPixelError);cityContinuum?.encode(pass);
-      prefabs?.setPixelError(currentPixelError);prefabs?.encode(pass);
+      // The city's and the prefabs' cuts read the scene's one pixel error themselves (js/continuum-scene.js).
+      cityContinuum?.encode(pass);
+      prefabs?.encode(pass);
       forest?.encode(pass);
       herds?.encode(pass);
       meadowGrass?.encode(pass);

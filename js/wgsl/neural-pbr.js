@@ -11,8 +11,8 @@
 //   - Physical Burley/Heitz anisotropic GGX specular NDF that reduces algebraically bit-for-bit
 //     to vesselSpecular when aniso == 0.
 //
-// Designed as a standalone, branch-portable module (`withNeuralPbrVessel`, `withNeuralPbrTerrain`,
-// `withNeuralPbrProps`) ready for direct import into `main`.
+// Designed as a standalone, branch-portable module (`withNeuralPbrVessel`, `withNeuralPbrTerrain`) ready for direct
+// import into `main`. The prop continuum's material (js/wgsl/prop-continuum.js) writes the block into its own shade.
 
 import {
   NEURAL_PBR_WORDS_PER_BAND,
@@ -489,65 +489,6 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
     n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS);
   }`,
     'terrain landSurface neural pbr'
-  );
-
-  return out;
-}
-
-/**
- * Injects Shared Neural PBR Material Bank evaluation & anisotropic GGX specular
- * into the prop continuum's view shader (js/wgsl/prop-continuum.js propContinuumRenderWGSL: dockside timber, cleats,
- * round shot), plain or minified.
- */
-export function withNeuralPbrProps(source, { group = 0, latentBinding = 14, weightBinding = 15 } = {}) {
-  const block = createNeuralPbrWGSL({ group, latentBinding, weightBinding });
-  let out = neuralPbrReplaceRequired(
-    source,
-    /@group\(0\)\s*@binding\(12\)\s*var\s+pigmentSampler\s*:\s*sampler\s*;/,
-    match => `${match}\n${block}`,
-    'props bindings'
-  );
-
-  out = neuralPbrReplaceRequired(
-    out,
-    /let\s+albedo\s*=\s*propContinuumAlbedo\(\s*v\s*\)\s*;/,
-    'var albedo=propContinuumAlbedo(v);',
-    'props mutable albedo'
-  );
-
-  // Classify prop surface chromaticity/luminance into timber, hemp/canvas, stone, or iron hardware
-  out = neuralPbrReplaceRequired(
-    out,
-    /n\s*=\s*normalize\(\s*n\s*-\s*clamp\(\s*propGrad\s*,\s*vec3f\(\s*-0?\.26\s*\)\s*,\s*vec3f\(\s*0?\.26\s*\)\s*\)\s*\)\s*;/,
-    `n=normalize(n-clamp(propGrad,vec3f(-0.26),vec3f(0.26)));
-  let npbrHoriz = abs(n.y) > 0.65;
-  let npbrAlongX = abs(n.z) >= abs(n.x);
-  let npbrUV = select(select(vec2f(v.world.z, v.world.y), vec2f(v.world.x, v.world.y), npbrAlongX), v.world.xz, npbrHoriz);
-  let npbrDuDx = select(select(vec2f(dx.z, dx.y), vec2f(dx.x, dx.y), npbrAlongX), dx.xz, npbrHoriz);
-  let npbrDuDy = select(select(vec2f(dy.z, dy.y), vec2f(dy.x, dy.y), npbrAlongX), dy.xz, npbrHoriz);
-  let npbrHint = select(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), npbrAlongX), vec3f(1.0, 0.0, 0.0), npbrHoriz);
-  let npbrWarmth = (albedo.r - albedo.b) / max(luma, 0.04);
-  var npbrMat = 0u;
-  if (luma < 0.085 && abs(npbrWarmth) < 0.22) {
-    npbrMat = 8u;
-  } else if (luma > 0.42 && npbrWarmth < 0.32) {
-    npbrMat = 6u;
-  } else if (abs(npbrWarmth) < 0.16) {
-    npbrMat = 3u;
-  }
-  let npbrBasis = neuralPbrTangentBasis(n, npbrHint);
-  let npbr = evalNeuralPbr(npbrMat, npbrUV, npbrDuDx, npbrDuDy, distance(v.world, F.camPos.xyz), 0.94);
-  albedo = clamp(albedo * npbr.albedoMul * npbr.cavityAO, vec3f(0.015), vec3f(0.96));
-  n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS);`,
-    'props normal eval'
-  );
-
-  out = neuralPbrReplaceRequired(
-    out,
-    /let\s+rough\s*=\s*clamp\(([^;]+)\)\s*;\s*let\s+f0\s*=\s*vec3f\(\s*0?\.04\s*\)\s*;\s*let\s+spec\s*=\s*vesselSpecular\(\s*n\s*,\s*view\s*,\s*sun\s*,\s*rough\s*,\s*f0\s*\)\s*;/,
-    (_m, roughArgs) =>
-      `let rough=clamp(clamp(${roughArgs})+npbr.roughDelta,0.12,0.94);let f0=vec3f(.04);let spec=neuralPbrAnisoSpecular(n,npbrBasis,view,sun,rough,npbr.aniso,f0);`,
-    'props rough spec'
   );
 
   return out;

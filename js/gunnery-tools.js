@@ -2,18 +2,21 @@
 // What a crew works its guns, keeps watch and fights with, and the arrows stuck in its people, drawn through the one
 // continuum (AGENTS.md rule 3) as props and shot are. Every piece (a rammer's staff and head, a spyglass's tube and
 // cell, a swivel's chamber, a cutlass, a fall of tackle, an arrow's shaft and fletching) is a type of the prop atlas at
-// its own size (js/prop-continuum.js PROP_CONTINUUM_TOOLS), cut by the one rigid cut (js/city-continuum-draw.js) and
-// worn by the props' own view. JavaScript writes each piece's two ends a frame in the vessel's frame, as a compact
-// record; the arrow pass fills an arrow's two from the joints its body is drawn with (js/wgsl/crew-solve.js). Then a
-// compute pass stands each record as an instance of its type, turned along it in the world, and the cut does the rest.
+// its own size (js/prop-continuum.js PROP_CONTINUUM_TOOLS), cut by the one cut (js/continuum-scene.js) and worn by the
+// props' material. JavaScript writes each piece's two ends a frame in the vessel's frame, as a compact record; the
+// arrow pass fills an arrow's two from the joints its body is drawn with (js/wgsl/crew-solve.js). Then a compute pass
+// stands each record as a record of the one format (a rigid instance of its type, turned along it in the world, a
+// hauled piece STRETCHED to its length), and the cut does the rest.
 import { requestOnce } from './gpu-program-cache.js';
 import { crewGunneryTool } from './crew-work.js';
 import { boatRotate } from './boat.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
-import { CITY_CONTINUUM_GONE, CITY_CONTINUUM_INSTANCE_WORDS } from './wgsl/city-continuum.js';
-import { PROP_CONTINUUM_TOOLS, PROP_CONTINUUM_TOOL_FIRST, PROP_CONTINUUM_TYPES, propContinuumTool } from './prop-continuum.js';
-import { requestPropContinuumAtlas, requestPropContinuumPipelines, createPropContinuumScene, requestPropContinuumSubmerged, propContinuumSubmergedDraw } from './prop-continuum-draw.js';
+import { PROP_CONTINUUM_TOOLS, PROP_CONTINUUM_TOOL_FIRST, PROP_CONTINUUM_TYPES, propContinuumTool, loadPropContinuum } from './prop-continuum.js';
+import { PROP_CONTINUUM_MATERIAL_SPEC } from './wgsl/prop-continuum.js';
+import { continuumRoom } from './continuum-format.js';
+import { CONTINUUM_RECORD_WGSL } from './wgsl/continuum-cut.js';
+import { requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, createContinuumScene } from './continuum-scene.js';
 
 // A record: one end and the piece (its place in PROP_CONTINUUM_TOOLS, -1 for none), then the other end. A piece runs
 // from its type's origin at the first end towards the second.
@@ -24,14 +27,15 @@ export const GUNNERY_TOOL_ARROWS = 34;
 export const GUNNERY_TOOL_PIECE = Object.freeze(Object.fromEntries(PROP_CONTINUUM_TOOLS.map((tool) => [tool.name, propContinuumTool(tool.name)])));
 
 // Each record stood as a turned instance of its piece's type. Its pose: the vessel's axes and where she lies, in the
-// world, and (origin.w) how many records there are.
-export const GUNNERY_TOOL_PLACE_WGSL = /* wgsl */`
+// world, and (origin.w) how many records there are. A hauled piece's stretch is its record's pose data, one vec4f in
+// the scene's own pose buffer at the record's index.
+export const GUNNERY_TOOL_PLACE_WGSL = CONTINUUM_RECORD_WGSL + /* wgsl */`
 struct GunneryToolRecord { a:vec4f, b:vec4f };
 struct GunneryToolPose { right:vec4f, up:vec4f, aft:vec4f, origin:vec4f };
-struct GunneryToolInstance { root:vec4f, shape:vec4f, tag:vec4u, turn:vec4f };
 @group(0) @binding(0) var<storage,read> gunneryTools:array<GunneryToolRecord>;
 @group(0) @binding(1) var<uniform> gunneryToolPose:GunneryToolPose;
-@group(0) @binding(2) var<storage,read_write> gunneryToolInstances:array<GunneryToolInstance>;
+@group(0) @binding(2) var<storage,read_write> gunneryToolInstances:array<ContinuumRecord>;
+@group(0) @binding(3) var<storage,read_write> gunneryToolStretch:array<vec4f>;
 const GUNNERY_TOOL_LENGTHS=array<f32,${PROP_CONTINUUM_TOOLS.length}>(${PROP_CONTINUUM_TOOLS.map((tool) => tool.length.toFixed(4)).join(',')});
 // The pieces drawn out to the length they are hauled to, one bit each.
 const GUNNERY_TOOL_HAULED:u32=${PROP_CONTINUUM_TOOLS.reduce((bits, tool, i) => bits | (tool.hauled ? 1 << i : 0), 0)}u;
@@ -41,23 +45,23 @@ fn gunneryToolWorld(p:vec3f)->vec3f { let P=gunneryToolPose;return P.origin.xyz+
   let record=gunneryTools[id.x];
   let a=gunneryToolWorld(record.a.xyz);let d=gunneryToolWorld(record.b.xyz)-a;let reach=length(d);
   let piece=i32(round(record.a.w));
-  var out:GunneryToolInstance;
-  out.root=vec4f(a,0.0);out.shape=vec4f(1.0,1.0,1.0,0.0);out.turn=vec4f(0.0,0.0,0.0,1.0);
+  var out:ContinuumRecord;
+  out.place=vec4f(a,1.0);out.turn=vec4f(0.0,0.0,0.0,1.0);out.spare=vec4u(0u);
   // A record with no piece, or one whose ends meet (an arrow whose bone is gone), stands nothing.
   if(piece<0||piece>=${PROP_CONTINUUM_TOOLS.length}||reach<1e-5){
-    out.tag=vec4u(${PROP_CONTINUUM_TOOL_FIRST}u|${CITY_CONTINUUM_GONE}u,0u,0u,id.x);
+    out.tag=vec4u(${PROP_CONTINUUM_TOOL_FIRST}u|CONTINUUM_GONE,id.x,id.x,0u);
     gunneryToolInstances[id.x]=out;return;
   }
   // The shortest turn from the piece's own up (+y) onto its line: about the axis +y x along. Straight down is half a
   // turn about +x.
   let along=d/reach;let w=1.0+along.y;
   out.turn=select(normalize(vec4f(along.z,0.0,-along.x,w)),vec4f(1.0,0.0,0.0,0.0),w<1e-6);
-  if(((GUNNERY_TOOL_HAULED>>u32(piece))&1u)!=0u){out.shape.y=reach/GUNNERY_TOOL_LENGTHS[piece];}
-  out.tag=vec4u(${PROP_CONTINUUM_TOOL_FIRST}u+u32(piece),0u,0u,id.x);
+  var flags=0u;
+  if(((GUNNERY_TOOL_HAULED>>u32(piece))&1u)!=0u){flags=CONTINUUM_STRETCHED;gunneryToolStretch[id.x]=vec4f(1.0,reach/GUNNERY_TOOL_LENGTHS[piece],1.0,0.0);}
+  out.tag=vec4u((${PROP_CONTINUUM_TOOL_FIRST}u+u32(piece))|flags,id.x,id.x,0u);
   gunneryToolInstances[id.x]=out;
 }
 `;
-if (CITY_CONTINUUM_INSTANCE_WORDS !== 16) throw Error('A gunnery tool\'s instance is the one cut\'s record');
 
 // The pose the records are stood by: the vessel's right, up and aft in the world, where she lies, and how many records
 // there are, as sixteen floats.
@@ -140,30 +144,32 @@ export function buildGunneryToolVertices(company, boat, vertices) {
   return cursor / 8;
 }
 
-// The pass that stands the records, asked for once a device; and with it the atlas and the props' programs, which
-// the tools are cut and drawn with.
+// The pass that stands the records, asked for once a device; and with it the prop atlas, the one cut's programs and
+// the props' view, which the tools are cut and drawn with.
 export function requestGunneryToolPrograms({ device, shader, format, samples }) {
   return requestOnce(device, `gun tools ${format} ${samples}`, async () => {
-    const [atlas, pipelines, place] = await Promise.all([
-      requestPropContinuumAtlas(device),
-      requestPropContinuumPipelines({ device, shader, format, samples, shadowFormat: LAND_SHADOW_FORMAT }),
+    const [atlas, programs, view, place] = await Promise.all([
+      requestContinuumAtlas(device, 'prop', () => loadPropContinuum()),
+      requestContinuumPrograms({ device, shader, shadowFormat: LAND_SHADOW_FORMAT }),
+      requestContinuumView({ device, shader, material: PROP_CONTINUUM_MATERIAL_SPEC, format, samples }),
       shader(GUNNERY_TOOL_PLACE_WGSL, 'gun tools placed').then((module) => device.createComputePipelineAsync({ label: 'gun tools placed', layout: 'auto', compute: { module, entryPoint: 'gunneryToolPlace' } })),
     ]);
-    return { atlas, pipelines, place };
+    return { atlas, programs, view, place };
   });
 }
 
 // One company's tools: its records and pose, the pass that stands them, and its scene of the one cut, lit by its own
 // vessel (`hullUBO`, and `shadows`, her shadow set) as her people are, and under water through `waterOptics`.
 export async function createGunneryTools({ device, frameUBO, hullUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format, samples, waterOptics = null }) {
-  const B = GPUBufferUsage, [{ atlas, pipelines, place }, submerged] = await Promise.all([requestGunneryToolPrograms({ device, shader, format, samples }), requestPropContinuumSubmerged(waterOptics)]);
+  const B = GPUBufferUsage, [{ atlas, programs, view, place }, submerged] = await Promise.all([requestGunneryToolPrograms({ device, shader, format, samples }), requestContinuumCapture(waterOptics, PROP_CONTINUUM_MATERIAL_SPEC)]);
   const records = new Float32Array(GUNNERY_TOOL_RECORDS * GUNNERY_TOOL_RECORD_FLOATS), pose = new Float32Array(16), placed = [];
   const tubes = device.createBuffer({ label: 'crew gun tool records', size: records.byteLength, usage: B.STORAGE | B.COPY_DST });
   const poseBuffer = device.createBuffer({ label: 'crew gun tool pose', size: 64, usage: B.UNIFORM | B.COPY_DST });
   // Room for every record to be any piece.
   const counts = PROP_CONTINUUM_TYPES.map((_, t) => (t >= PROP_CONTINUUM_TOOL_FIRST ? GUNNERY_TOOL_RECORDS : 0));
-  const scene = createPropContinuumScene({ device, atlas, pipelines, counts, frame: frameUBO, shadowUniform: shadows.uniform, samples, label: 'gun tools' });
-  const placeGroup = device.createBindGroup({ label: 'gun tools placed', layout: place.getBindGroupLayout(0), entries: [tubes, poseBuffer, scene.instances].map((buffer, binding) => ({ binding, resource: { buffer } })) });
+  const { capacity, room } = continuumRoom(atlas.types, counts);
+  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: GUNNERY_TOOL_RECORDS, frame: frameUBO, shadowUniform: shadows.uniform, samples, label: 'gun tools' });
+  const placeGroup = device.createBindGroup({ label: 'gun tools placed', layout: place.getBindGroupLayout(0), entries: [tubes, poseBuffer, scene.records, scene.poses].map((buffer, binding) => ({ binding, resource: { buffer } })) });
   // The props' view, lit by this vessel. Every piece is plain: the pigments are one texel no piece reads.
   const pigment = device.createTexture({ label: 'gun tool pigments (none)', size: [1, 1, 1], format: 'rgba8unorm-srgb', usage: globalThis.GPUTextureUsage?.TEXTURE_BINDING ?? 4 });
   const sampler = device.createSampler({ label: 'gun tool pigment', magFilter: 'linear', minFilter: 'linear' });
@@ -171,8 +177,8 @@ export async function createGunneryTools({ device, frameUBO, hullUBO, transView,
     [0, { buffer: frameUBO }], [1, { buffer: hullUBO }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
     [11, pigment.createView({ dimension: '2d-array' })], [12, sampler], ...sharedNeuralPbrBank(device).propResources,
   ].map(([binding, resource]) => ({ binding, resource }));
-  const sceneGroup = device.createBindGroup({ label: 'gun tools', layout: pipelines.view.getBindGroupLayout(0), entries: main });
-  const lighting = shadows.bind(pipelines.view), under = propContinuumSubmergedDraw(submerged, main, shadows);
+  const sceneGroup = device.createBindGroup({ label: 'gun tools', layout: view.pipeline.getBindGroupLayout(0), entries: main });
+  const lighting = shadows.bind(view.pipeline), under = continuumCaptureDraw(submerged, main, shadows);
   let count = 0;
   return {
     // The records, and which of them are arrows still to be placed from their bodies' joints this frame.

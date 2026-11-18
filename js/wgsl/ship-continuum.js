@@ -47,8 +47,6 @@ export const SHIP_CONTINUUM_IDENTITY_SHIFT = 8;
 export function shipContinuumOrders({ important = false, damagedSlot = -1, identity = 0 } = {}) {
   return (important ? SHIP_CONTINUUM_ORDER_IMPORTANT : 0) + ((damagedSlot + 1) & 31) * 2 + (identity & 32767) * 256;
 }
-// Who is cut finer: their pixel error is this share of the scene's.
-export const SHIP_CONTINUUM_IMPORTANT = 0.5;
 // How many shadow-map texels a shadow's far body may be in error.
 export const SHIP_CONTINUUM_SHADOW_TEXELS = 1.5;
 // A ship's instance record, 12 floats: (x, y, z, yaw), (pitch, roll, scale, body), (phase, motion, orders, furl).
@@ -184,7 +182,6 @@ struct ShipContinuumOffset { domain:vec4f, grid:vec4f };
 @group(0) @binding(6) var<storage,read_write> shipList:array<vec2u>;
 @group(0) @binding(7) var<storage,read_write> shipDraws:array<atomic<u32>>;
 @group(0) @binding(8) var<uniform> shipCut:ShipContinuumCut;
-const SHIP_CONTINUUM_IMPORTANT:f32=${SHIP_CONTINUUM_IMPORTANT.toFixed(4)};
 const SHIP_CONTINUUM_SHADOW_TEXELS:f32=${SHIP_CONTINUUM_SHADOW_TEXELS.toFixed(4)};
 ${continuumClusterPrefixWGSL('shipContinuumPrefix', (i) => `bitcast<f32>(shipShape[shipCutBody.clusters.x+(${i})*${SHIP_CONTINUUM_CLUSTER_WORDS}u+13u])`)}
 ${continuumMorphStepWGSL('shipContinuumMorphStep', (i) => `bitcast<f32>(shipShape[shipCutBody.chain.x+shipCutBody.chain.w+(${i})*${SHIP_CONTINUUM_STEP_WORDS}u+1u])`)}
@@ -234,7 +231,8 @@ fn shipContinuumChunks(list:u32,ship:u32,step:u32){
     let scale=max(inst.attitude.z,1e-3);
     let focal=F.screen.y/max(2.0*length(F.camUp.xyz),1e-4);
     let important=(orders&${SHIP_CONTINUUM_ORDER_IMPORTANT}u)!=0u||damaged!=0u;
-    let pixels=shipCut.view.x*select(1.0,SHIP_CONTINUUM_IMPORTANT,important);
+    // Who is cut finer, by the one core's share (js/continuum-core.js CONTINUUM_IMPORTANT).
+    let pixels=continuumImportance(shipCut.view.x,important);
     shipAt=inst.posYaw.xyz+vec3f(shipOffset.grid.y,0.0,shipOffset.grid.z)-F.camPos.xyz;
     shipPose=vec4f(inst.posYaw.w,inst.attitude.x,inst.attitude.y,0.0);
     shipView=vec4f(focal,pixels,scale,select(1.0,0.0,damaged!=0u));

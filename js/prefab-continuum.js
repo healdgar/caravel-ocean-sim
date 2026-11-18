@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // A coast's prefabs (its quays, forts, churches, warehouses and huts, js/coastal-world.js buildPortPrefabGeometry) on
-// the one continuum (AGENTS.md rule 3), cut and drawn by the city's own programs (js/city-continuum-draw.js) from an
+// the one continuum (AGENTS.md rule 3), cut by the one cut and worn by the city's material (js/city-continuum-draw.js) from an
 // atlas of their own. Nothing else draws them.
 //
 // Each prefab is built once more alone, at its own ground height but unmoved and unturned, and taken down to its floor:
@@ -12,7 +12,7 @@
 // landed. Shot, flooding and fracture work on the full assembly the port was built with, as before.
 import { buildPortPrefabGeometry } from './coastal-world.js';
 import { CITY_TYPED_FLOATS, compileContinuumBody } from './old-world-buildings.js';
-import { assembleCityContinuumAtlas, cityContinuumBodyParts, cityContinuumSourceBytes } from './city-continuum.js';
+import { assembleContinuumAtlas, continuumBodyParts, continuumSourceBytes } from './continuum-format.js';
 import { CITY_CONTINUUM_AS_BUILT } from './wgsl/city-continuum.js';
 import { PREFAB_CONTINUUM_PORT_BODIES } from './prefab-continuum-ports.js';
 
@@ -47,7 +47,7 @@ export async function prefabContinuumPlan(port, { near = null, build = buildPort
   const bodies = [], byPrint = new Map(), types = new Uint32Array(count), typed = new Float32Array(Math.max(1, count) * CITY_TYPED_FLOATS);
   for (let i = 0; i < count; i++) {
     const instance = instances[i], body = prefabContinuumBody(instance, build);
-    const fingerprint = await prefabContinuumDigest(cityContinuumSourceBytes(body));
+    const fingerprint = await prefabContinuumDigest(continuumSourceBytes(body));
     let type = byPrint.get(fingerprint);
     if (type === undefined) { type = bodies.length; byPrint.set(fingerprint, type); bodies.push({ fingerprint, body, away: Infinity }); }
     const away = near ? Math.hypot(instance.x - near.x, instance.z - near.z) : 0;
@@ -151,7 +151,7 @@ export async function resolvePrefabContinuum(plan, { portId = null, fetchAsset =
       await Promise.all(wanted.map(async (type) => {
         const { fingerprint, body } = plan.bodies[type];
         const landed = await bakers.bake(fingerprint, version, body);
-        cityContinuumBodyParts(landed.words);
+        continuumBodyParts(landed.words);
         out[type] = landed.words;
         report?.({ fingerprint, from: landed.from, seconds: landed.seconds, words: landed.words });
       }));
@@ -167,10 +167,10 @@ export function bakeFracturePieces(body, fetchAsset = fetch) {
   fracturePiecesBaker ??= prefabContinuumBakeVersion(fetchAsset).then(({ text }) => prefabBakers(text, 1)).catch((error) => { fracturePiecesBaker = null; throw error; });
   return fracturePiecesBaker.then(async (bakers) => {
     const { words } = await bakers.bake(null, null, body, true);
-    cityContinuumBodyParts(words);
+    continuumBodyParts(words);
     return words;
   });
 }
 
 // The atlas of a plan's bodies, type i being its i-th body.
-export function prefabContinuumAtlas(words) { return assembleCityContinuumAtlas(words); }
+export function prefabContinuumAtlas(words) { return assembleContinuumAtlas(words); }

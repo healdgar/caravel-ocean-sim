@@ -23,26 +23,29 @@ test('one house through the city continuum: clusters, handoff, far body, splat, 
     await page.route('**/__city_continuum', (r) => r.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
     await page.goto(`http://127.0.0.1:${server.address().port}/__city_continuum`);
     const result = await page.evaluate(async () => {
-      const { requestCityContinuumAtlas, requestCityContinuumPipelines, createCityContinuum } = await import('/js/city-continuum-draw.js');
-      const { CITY_CONTINUUM_TYPE: T, CITY_CONTINUUM_HEADER: H, CITY_CONTINUUM_TYPE_WORDS, CITY_CONTINUUM_STEP_WORDS } = await import('/js/city-continuum.js');
+      const { requestCityContinuumAtlas, createCityContinuum } = await import('/js/city-continuum-draw.js');
+      const { requestContinuumPrograms } = await import('/js/continuum-scene.js');
+      const { CONTINUUM_TYPE: T, CONTINUUM_HEADER: H, CONTINUUM_TYPE_WORDS } = await import('/js/continuum-format.js');
+      const { CONTINUUM_STEP_WORDS, setContinuumPixelError } = await import('/js/continuum-core.js');
       const device = await (await navigator.gpu.requestAdapter()).requestDevice(), errors = [];
       device.addEventListener('uncapturederror', (e) => errors.push(e.error.message));
       const shader = async (code, label) => { const module = device.createShaderModule({ code, label }); const bad = (await module.getCompilationInfo()).messages.filter((m) => m.type === 'error'); if (bad.length) throw Error(label + ': ' + bad.map((m) => `${m.lineNum}:${m.message}`).join('\n')); return module; };
       const atlas = await requestCityContinuumAtlas(device);
-      const pipelines = await requestCityContinuumPipelines({ device, shader, shadowFormat: 'depth32float' });
+      const programs = await requestContinuumPrograms({ device, shader, shadowFormat: 'depth32float' });
       const B = GPUBufferUsage, make = (data, usage) => { const buffer = device.createBuffer({ size: Math.max(16, data.byteLength), usage: usage | B.COPY_DST }); device.queue.writeBuffer(buffer, 0, data); return buffer; };
       // A camera 5 m up looking down +z: clip = (x, y, 0.1, z), a focal length of 1000 px.
       const frame = new Float32Array(96);
       frame[0] = 1; frame[5] = 1; frame[11] = 1; frame[14] = 0.1; frame.set([0, 5, 0, 0], 16); frame.set([0.5, 0, 0, 0], 20); frame.set([0, 0.5, 0, 0], 24); frame.set([0, 0, 1, 0], 28); frame.set([0, 1, 0, 1], 32); frame.set([1000, 1000, 0.001, 0.001], 36);
       const frameUBO = make(frame, B.UNIFORM), shadowUBO = make(new Float32Array(28), B.UNIFORM);
-      const typeField = (type, field) => atlas.words[atlas.words[H.typesAt] + type * CITY_CONTINUUM_TYPE_WORDS + field];
+      const typeField = (type, field) => atlas.words[atlas.words[H.typesAt] + type * CONTINUUM_TYPE_WORDS + field];
       const typeFloat = (type, field) => new Float32Array(new Uint32Array([typeField(type, field)]).buffer)[0];
-      const steps = typeField(0, T.steps), stepError = (s) => new Float32Array(atlas.words.buffer, atlas.words.byteOffset + (steps + s * CITY_CONTINUUM_STEP_WORDS + 1) * 4, 1)[0];
+      const steps = typeField(0, T.steps), stepError = (s) => new Float32Array(atlas.words.buffer, atlas.words.byteOffset + (steps + s * CONTINUUM_STEP_WORDS + 1) * 4, 1)[0];
       const house = { farFirst: typeField(0, T.farFirst), stepCount: typeField(0, T.stepCount), clusterFirst: typeField(0, T.clusterFirst), clusterCount: typeField(0, T.clusterCount), rx: typeFloat(0, T.splatRx), ry: typeFloat(0, T.splatRy) };
       house.handoff = stepError(house.farFirst);
       const run = async ({ away, pixels = 3, felled = false, struck = false, aim = null }) => {
-        const city = createCityContinuum({ device, atlas, pipelines, view: null, typed: new Float32Array([0, 0, away, 0, 1, 1, 1, 0.5]), types: new Uint32Array([0]), frame: frameUBO, shadowUniform: shadowUBO, samples: 4 });
-        city.setShadows(false); city.setPixelError(pixels);
+        const city = createCityContinuum({ device, atlas, programs, view: null, typed: new Float32Array([0, 0, away, 0, 1, 1, 1, 0.5]), types: new Uint32Array([0]), frame: frameUBO, shadowUniform: shadowUBO, samples: 4 });
+        // The scene's one pixel error, which every cut reads as it encodes.
+        setContinuumPixelError(pixels); city.setShadows(false);
         if (felled) city.hide(0, 1, true);
         if (struck) city.strike(0, 1, true);
         city.setAim(aim);
@@ -135,7 +138,7 @@ test('Lisbon\'s buildings are cut on the GPU: the game\'s own lists, read back',
       GPUDevice.prototype.createRenderPipelineAsync = function (desc) { r.pipelines.push(desc.label); return pipeline.call(this, desc); };
       const pass = GPURenderPassEncoder.prototype, set = pass.setPipeline, indirect = pass.drawIndirect, current = new WeakMap();
       pass.setPipeline = function (p) { current.set(this, p.label); return set.call(this, p); };
-      pass.drawIndirect = function (...args) { if (current.get(this) === 'city continuum') r.draws++; return indirect.apply(this, args); };
+      pass.drawIndirect = function (...args) { if (current.get(this) === 'cityContinuum view') r.draws++; return indirect.apply(this, args); };
       const texture = GPUCanvasContext.prototype.getCurrentTexture;
       GPUCanvasContext.prototype.getCurrentTexture = function (...args) { r.frames++; return texture.apply(this, args); };
     });
@@ -146,20 +149,26 @@ test('Lisbon\'s buildings are cut on the GPU: the game\'s own lists, read back',
     await page.waitForFunction((from) => cityContinuumAudit.frames >= from + 60, before.frames, { timeout: 90000, polling: 100 });
     const result = await page.evaluate(async () => {
       const r = window.cityContinuumAudit, device = r.device, B = GPUBufferUsage, uploads = { ...r.uploads }, frames = r.frames, drawCalls = r.draws;
-      const { requestCityContinuumAtlas, cityContinuumListLayout, CITY_CONTINUUM_FELLED } = await import('/js/city-continuum-draw.js');
-      const { CITY_CONTINUUM_INSTANCE_WORDS } = await import('/js/wgsl/city-continuum.js');
-      const { CITY_CONTINUUM_TYPE: T, CITY_CONTINUUM_HEADER: H, CITY_CONTINUUM_TYPE_WORDS, CITY_CONTINUUM_STEP_WORDS, CITY_CONTINUUM_CLUSTER_WORDS, CITY_CONTINUUM_CHUNK_TRIANGLES, CITY_CONTINUUM_SMALL_CLUSTER } = await import('/js/city-continuum.js');
+      const { requestCityContinuumAtlas } = await import('/js/city-continuum-draw.js');
+      const { continuumListLayout } = await import('/js/continuum-scene.js');
+      const { CONTINUUM_STEP_WORDS } = await import('/js/continuum-core.js');
+      const {
+        CONTINUUM_TYPE: T, CONTINUUM_HEADER: H, CONTINUUM_TYPE_WORDS, CONTINUUM_CLUSTER_WORDS, CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_SMALL_CLUSTER,
+        CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_GONE, continuumRoom,
+      } = await import('/js/continuum-format.js');
       // The atlas the game uploaded (one a device), read here from its own words.
-      const { words } = await requestCityContinuumAtlas(device);
+      const { words, types: atlasTypes } = await requestCityContinuumAtlas(device);
       const read = async (buffer) => {
         const out = device.createBuffer({ size: buffer.size, usage: B.MAP_READ | B.COPY_DST }), encoder = device.createCommandEncoder();
         encoder.copyBufferToBuffer(buffer, 0, out, 0, buffer.size); device.queue.submit([encoder.finish()]);
         await out.mapAsync(GPUMapMode.READ); const read = new Uint32Array(out.getMappedRange().slice(0)); out.unmap(); out.destroy(); return read;
       };
-      const [draws, list, instances] = await Promise.all(['draws', 'lists', 'instances'].map((name) => read(r.buffers[`city continuum ${name}`])));
+      const [draws, list, records] = await Promise.all(['draws', 'lists', 'records'].map((name) => read(r.buffers[`city continuum ${name}`])));
       // Every entry checked against the building it names, its type and its state for the frame.
-      const count = instances.length / CITY_CONTINUUM_INSTANCE_WORDS, flags = Array.from({ length: count }, (_, b) => instances[b * CITY_CONTINUUM_INSTANCE_WORDS + 8]);
-      const { lists } = cityContinuumListLayout(count), field = (type, f) => words[words[H.typesAt] + type * CITY_CONTINUUM_TYPE_WORDS + f];
+      const count = records.length / CONTINUUM_RECORD_WORDS, flags = Array.from({ length: count }, (_, b) => records[b * CONTINUUM_RECORD_WORDS + CONTINUUM_RECORD.packed]);
+      const counts = new Array(atlasTypes.length).fill(0);
+      for (const packed of flags) counts[packed & 0xffff]++;
+      const { lists } = continuumListLayout(count, continuumRoom(atlasTypes, counts).room), field = (type, f) => words[words[H.typesAt] + type * CONTINUUM_TYPE_WORDS + f];
       const wrong = [], buildings = [new Set(), new Set(), new Set(), new Set(), new Set()];
       const flaw = (why) => { if (wrong.length < 12) wrong.push(why); };
       for (let index = 0; index < 5; index++) {
@@ -168,14 +177,14 @@ test('Lisbon\'s buildings are cut on the GPU: the game\'s own lists, read back',
         for (let k = 0; k < Math.min(n, room); k++) {
           const b = list[(at + k) * 2], word = list[(at + k) * 2 + 1], what = word >>> 28, item = word & 0x0fffffff;
           if (b >= count) { flaw(`list ${index} names building ${b} of ${count}`); continue; }
-          if (flags[b] & CITY_CONTINUUM_FELLED) flaw(`list ${index} draws felled building ${b}`);
+          if (flags[b] & CONTINUUM_GONE) flaw(`list ${index} draws felled building ${b}`);
           const type = flags[b] & 0xffff, share = list[b * 4] & 255, splatShare = (list[b * 4] >> 8) & 255, step = list[b * 4 + 1] & 0xffff, shadowStep = list[b * 4 + 1] >>> 16;
-          const chunks = (s) => Math.ceil(words[field(type, T.steps) + s * CITY_CONTINUUM_STEP_WORDS] / CITY_CONTINUUM_CHUNK_TRIANGLES);
+          const chunks = (s) => Math.ceil(words[field(type, T.steps) + s * CONTINUUM_STEP_WORDS] / CONTINUUM_CHUNK_TRIANGLES);
           buildings[index].add(b);
           if (index < 2) {
-            const first = field(type, T.clusterFirst), triangles = words[words[H.clustersAt] + item * CITY_CONTINUUM_CLUSTER_WORDS + 15] & 255;
+            const first = field(type, T.clusterFirst), triangles = words[words[H.clustersAt] + item * CONTINUUM_CLUSTER_WORDS + 15] & 255;
             if (what !== 1 || item < first || item >= first + field(type, T.clusterCount)) flaw(`cluster ${item} is not one of type ${type}'s`);
-            if ((triangles <= CITY_CONTINUUM_SMALL_CLUSTER) !== (index === 1)) flaw(`cluster ${item} of ${triangles} triangles in list ${index}`);
+            if ((triangles <= CONTINUUM_SMALL_CLUSTER) !== (index === 1)) flaw(`cluster ${item} of ${triangles} triangles in list ${index}`);
             if (share >= 255) flaw(`building ${b} handed off whole yet drawn as clusters`);
           } else if (index === 2) {
             if (what !== 2 || step < field(type, T.farFirst) || item >= chunks(step)) flaw(`far piece ${item} of building ${b} at step ${step}`);
@@ -192,7 +201,7 @@ test('Lisbon\'s buildings are cut on the GPU: the game\'s own lists, read back',
     assert.equal(result.failed, undefined, result.failed);
     assert.equal(result.state, 'ready', result.err);
     assert.deepEqual(errors, []); assert.deepEqual(result.errors, []);
-    assert.ok(result.pipelines.includes('city continuum') && result.pipelines.includes('city continuum shadow'), 'the view and the shadow map draw the city continuum');
+    assert.ok(result.pipelines.includes('cityContinuum view') && result.pipelines.includes('continuum shadow'), 'the city material\'s view and the one shadow program draw the city continuum');
     // The view's four lists, every frame; nothing of the old block or type tiers.
     const frames = result.frames - before.frames, calls = result.drawCalls - before.draws;
     assert.ok(calls >= 4 * (frames - 2) && calls <= 4 * (frames + 2), `${calls} city draws in ${frames} frames`);
@@ -205,7 +214,7 @@ test('Lisbon\'s buildings are cut on the GPU: the game\'s own lists, read back',
     // only where a building comes within its handoff (tests/old-world-city-gpu.test.mjs looks from over the quay).
     assert.ok(far > 0 && splat > 0, 'the town is drawn as far bodies, and the farthest as splats');
     assert.ok(shadow > 0, 'the far bodies cast the shadow map\'s shadows');
-    // The census counts the city's triangles from these very records.
+    // The census counts the city's real triangles, as the cut listed them.
     const listed = (result.draws[0] / 3) * clusters + (result.draws[4] / 3) * small + (result.draws[8] / 3) * far + splat;
     assert.ok(result.census?.families?.city > 0, 'the city reaches the continuum census');
     assert.ok(listed > 0);

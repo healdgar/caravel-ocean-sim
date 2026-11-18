@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Every tool a gun crew holds is stood on the GPU as an instance of its piece of the props' atlas (js/gunnery-tools.js
-// GUNNERY_TOOL_PLACE_WGSL), which the one continuum then cuts. Here each instance is checked against its record: it
-// stands at the record's first end in the world, its piece's own up turned onto the line to the second, a hauled
-// piece drawn out to reach it, and a record with no piece stands nothing.
+// GUNNERY_TOOL_PLACE_WGSL), a record of the one format which the one continuum then cuts. Here each instance is checked
+// against its record: it stands at the record's first end in the world, its piece's own up turned onto the line to the
+// second, a hauled piece STRETCHED out to reach it, and a record with no piece stands nothing.
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {test} from 'node:test';
@@ -17,14 +17,17 @@ test('the GPU stands every gun crew\'s tools as turned pieces of the props\' atl
     const result=await page.evaluate(async()=>{
       const {SHIP_MODELS}=await import('/js/ship-models.js'),{createGunDefinitions}=await import('/js/gunnery-models.js'),{crewGunStation}=await import('/js/crew-work.js');
       const {GUNNERY_TOOL_PLACE_WGSL,GUNNERY_TOOL_RECORDS,GUNNERY_TOOL_RECORD_FLOATS,writeGunneryToolInstances,gunneryToolPose}=await import('/js/gunnery-tools.js');
-      const {PROP_CONTINUUM_TOOLS,PROP_CONTINUUM_TOOL_FIRST}=await import('/js/prop-continuum.js'),{CITY_CONTINUUM_GONE,CITY_CONTINUUM_INSTANCE_WORDS:W}=await import('/js/wgsl/city-continuum.js');
+      const {PROP_CONTINUUM_TOOLS,PROP_CONTINUUM_TOOL_FIRST}=await import('/js/prop-continuum.js');
+      const {CONTINUUM_GONE,CONTINUUM_STRETCHED,CONTINUUM_RECORD_WORDS:W,CONTINUUM_RECORD:R}=await import('/js/continuum-format.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,errors=[];device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
       const module=device.createShaderModule({code:GUNNERY_TOOL_PLACE_WGSL});
       const compilation=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message);if(compilation.length)throw Error(compilation.join('\n'));
       const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'gunneryToolPlace'}});
       const records=device.createBuffer({size:GUNNERY_TOOL_RECORDS*GUNNERY_TOOL_RECORD_FLOATS*4,usage:B.STORAGE|B.COPY_DST}),pose=device.createBuffer({size:64,usage:B.UNIFORM|B.COPY_DST});
       const out=device.createBuffer({size:GUNNERY_TOOL_RECORDS*W*4,usage:B.STORAGE|B.COPY_SRC}),read=device.createBuffer({size:out.size,usage:B.COPY_DST|B.MAP_READ});
-      const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[records,pose,out].map((buffer,binding)=>({binding,resource:{buffer}}))});
+      // A hauled piece's stretch: its record's pose data, a vec4f at its index.
+      const stretch=device.createBuffer({size:GUNNERY_TOOL_RECORDS*16,usage:B.STORAGE|B.COPY_SRC}),readStretch=device.createBuffer({size:stretch.size,usage:B.COPY_DST|B.MAP_READ});
+      const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[records,pose,out,stretch].map((buffer,binding)=>({binding,resource:{buffer}}))});
       const turn=(q,v)=>{const t=[2*(q[1]*v[2]-q[2]*v[1]),2*(q[2]*v[0]-q[0]*v[2]),2*(q[0]*v[1]-q[1]*v[0])];return [0,1,2].map(k=>v[k]+q[3]*t[k]+[q[1]*t[2]-q[2]*t[1],q[2]*t[0]-q[0]*t[2],q[0]*t[1]-q[1]*t[0]][k]);};
       const values=new Float32Array(GUNNERY_TOOL_RECORDS*GUNNERY_TOOL_RECORD_FLOATS),gunIDs=[],pieces=new Set();
       let cases=0,stood=0,root=0,along=0,reach=0,typed=0,unit=0,emptyReady=true,emptyPrime=true;
@@ -42,23 +45,25 @@ test('the GPU stands every gun crew\'s tools as turned pieces of the props\' atl
           const P=gunneryToolPose(boat,count+1);
           device.queue.writeBuffer(records,0,values,0,(count+1)*GUNNERY_TOOL_RECORD_FLOATS);device.queue.writeBuffer(pose,0,P);
           const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(1);pass.end();
-          encoder.copyBufferToBuffer(out,0,read,0,(count+1)*W*4);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ,0,(count+1)*W*4);
+          encoder.copyBufferToBuffer(out,0,read,0,(count+1)*W*4);encoder.copyBufferToBuffer(stretch,0,readStretch,0,(count+1)*16);device.queue.submit([encoder.finish()]);
+          await Promise.all([read.mapAsync(GPUMapMode.READ,0,(count+1)*W*4),readStretch.mapAsync(GPUMapMode.READ,0,(count+1)*16)]);
           const range=read.getMappedRange(0,(count+1)*W*4),floats=new Float32Array(range.slice(0)),words=new Uint32Array(floats.buffer);read.unmap();
+          const stretched=new Float32Array(readStretch.getMappedRange(0,(count+1)*16).slice(0));readStretch.unmap();
           const world=p=>[0,1,2].map(k=>P[12+k]+P[k]*p[0]+P[4+k]*p[1]+P[8+k]*p[2]);
           for(let r=0;r<count;r++){
             const at=r*GUNNERY_TOOL_RECORD_FLOATS,piece=values[at+3],tool=PROP_CONTINUUM_TOOLS[piece],a=world(values.subarray(at,at+3)),b=world(values.subarray(at+4,at+7));
-            const d=b.map((v,k)=>v-a[k]),n=Math.hypot(...d),i=r*W,q=Array.from(floats.subarray(i+12,i+16));
+            const d=b.map((v,k)=>v-a[k]),n=Math.hypot(...d),i=r*W,q=Array.from(floats.subarray(i+R.turn,i+R.turn+4));
             pieces.add(tool.name);stood++;
-            if(words[i+8]!==PROP_CONTINUUM_TOOL_FIRST+piece)typed++;
-            root=Math.max(root,Math.hypot(...a.map((v,k)=>v-floats[i+k])));
+            if(words[i+R.packed]!==((PROP_CONTINUUM_TOOL_FIRST+piece)|(tool.hauled?CONTINUUM_STRETCHED:0))>>>0||words[i+R.pose]!==r)typed++;
+            root=Math.max(root,Math.hypot(...a.map((v,k)=>v-floats[i+R.position+k])),Math.abs(floats[i+R.scale]-1));
             unit=Math.max(unit,Math.abs(Math.hypot(...q)-1));
             const up=turn(q,[0,1,0]);along=Math.max(along,Math.hypot(...up.map((v,k)=>v-d[k]/n)));
-            const drawn=(tool.hauled?floats[i+5]:1)*tool.length;reach=Math.max(reach,tool.hauled?Math.abs(drawn-n):Math.abs(floats[i+5]-1));
+            const drawn=(tool.hauled?stretched[r*4+1]:1)*tool.length;reach=Math.max(reach,tool.hauled?Math.abs(drawn-n)+Math.abs(stretched[r*4]-1)+Math.abs(stretched[r*4+2]-1)+Math.abs(stretched[r*4+3]):0);
           }
-          if(!(words[count*W+8]&CITY_CONTINUUM_GONE))typed++;
+          if(!(words[count*W+R.packed]&CONTINUUM_GONE))typed++;
         }
       }
-      for(const b of [records,pose,out,read])b.destroy();device.destroy();
+      for(const b of [records,pose,out,read,stretch,readStretch])b.destroy();device.destroy();
       return {errors,gunIDs,cases,stood,root,along,reach,typed,unit,emptyReady,emptyPrime,pieces:[...pieces].sort()};
     });
     t.diagnostic(JSON.stringify(result));assert.deepEqual(result.errors,[]);assert.ok(result.gunIDs.length>=116&&result.cases>1000&&result.stood>1000);

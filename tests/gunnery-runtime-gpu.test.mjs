@@ -158,7 +158,7 @@ for(const model of ['nina','victory'])test(`${model}: captain UI, attended loadi
     assert.ok(battleHud.fireStbdRect.right<=battleHud.loadedStbdRect.left+1,'fire button does not overlap loaded button');
     let maxSmoke=0,sawBall=false,sawFlash=false,sawCrown=false,sawProbe=false,sawResolve=false,sawRecoil=false,shotFrame=null,impactFrame=null,last=null;
     for(let i=0;i<180;i++){
-      last=await gunneryRuntimeStep(page);maxSmoke=Math.max(maxSmoke,last.counts.volumes);sawBall||=last.balls>0&&!!last.render['prop continuum']&&!last.render.gunneryBall;sawFlash||=last.counts.volumes>0;
+      last=await gunneryRuntimeStep(page);maxSmoke=Math.max(maxSmoke,last.counts.volumes);sawBall||=last.balls>0&&!!last.render['propContinuum view']&&!last.render.gunneryBall;sawFlash||=last.counts.volumes>0;
       sawCrown||=!!last.render.gunneryCrown;sawProbe||=!!last.compute['roundshot actual sea sweep'];sawResolve||=!!last.compute['resolve cannon effects depth'];
       const recoil=await page.evaluate(()=>gunneryFixture.shipGuns.state.guns.some(g=>g.stage==='recoil'&&g.offset>0));sawRecoil||=recoil;
       if(last.shots&&!shotFrame){shotFrame=i;await gunneryRuntimeCapture(page,`gunnery-${model}-first-shot.png`);}

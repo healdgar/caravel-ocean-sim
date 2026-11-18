@@ -25,7 +25,7 @@ test('a city\'s buildings are cut and counted by the GPU through the one continu
       const pipeline=GPUDevice.prototype.createRenderPipelineAsync;GPUDevice.prototype.createRenderPipelineAsync=function(desc){r.pipelines.push(desc.label);return pipeline.call(this,desc);};
       const pass=GPURenderPassEncoder.prototype,set=pass.setPipeline,indirect=pass.drawIndirect,current=new WeakMap();
       pass.setPipeline=function(p){current.set(this,p.label);return set.call(this,p);};
-      pass.drawIndirect=function(...args){if(current.get(this)==='city continuum')r.draws++;return indirect.apply(this,args);};
+      pass.drawIndirect=function(...args){if(current.get(this)==='cityContinuum view')r.draws++;return indirect.apply(this,args);};
       const texture=GPUCanvasContext.prototype.getCurrentTexture;GPUCanvasContext.prototype.getCurrentTexture=function(...args){r.frames++;return texture.apply(this,args);};
     });
     const url=coastalRegionStageURL('http://127.0.0.1:'+server.address().port+'/','lisbon','dock','clear',1650);
@@ -53,7 +53,7 @@ test('a city\'s buildings are cut and counted by the GPU through the one continu
     t.diagnostic(JSON.stringify({frames:after.frames-before.frames,draws:after.draws-before.draws,uploads:after.uploads,census:after.census?.families?.city,listed}));
     assert.equal(after.state,'ready',after.error);assert.deepEqual(errors,[]);assert.deepEqual(after.errors,[]);
     // One pipeline for the view and one for the shadow map; nothing of the old blocks or per-type meshes.
-    assert.ok(after.pipelines.includes('city continuum')&&after.pipelines.includes('city continuum shadow'),after.pipelines.join(', '));
+    assert.ok(after.pipelines.includes('cityContinuum view')&&after.pipelines.includes('continuum shadow'),after.pipelines.join(', '));
     assert.ok(!after.pipelines.some(label=>label==='city blocks'||label==='city buildings'||label==='city shadow'),'the block and type tiers are retired');
     assert.ok(!after.buffers.some(label=>label.startsWith('city type')||label==='city blocks'),'no per-type mesh or block buffer is made');
     // Every building of the plan is in the cut: four indirect draws a frame, their counts written by the GPU.

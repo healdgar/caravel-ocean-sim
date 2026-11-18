@@ -44,10 +44,18 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
   const originalSignature=source.slice(marker.index,bodyStart).replace(new RegExp(`\\b${entry}\\s*\\(`),'submergedFS(');
   const materialSignature=`fn waterCaptureMaterial(${plain})->vec4f `;
   source=source.slice(0,marker.index)+materialSignature+source.slice(bodyStart);
+  return WATER_CAPTURE_DIRECTIVE+source+waterCaptureWGSL({fragment:originalSignature,args:argumentsList,world,surfaceWaves,land});
+}
+
+// The early exit in a capture's fragment is not uniform control flow. Fragments beside a surviving one stay alive as
+// helpers, so the derivatives a surviving fragment reads are those of a whole quad. A capture module begins with this.
+export const WATER_CAPTURE_DIRECTIVE='diagnostic(off,derivative_uniformity);\n';
+// The capture's own WGSL, after a material that defines `fn waterCaptureMaterial(<args>)->vec4f`: the sea it is cut by
+// (group 3), and `fragment` (a whole fragment signature returning @location(0) vec4f), which leaves out whatever lies
+// past the surface and shades the rest by that material, called with `args`. `world` is the fragment's world position.
+export function waterCaptureWGSL({fragment,args,world,surfaceWaves=false,land=false}){
   const shoreMargin=land?WATER_CAPTURE_LAND_MARGIN:WATER_CAPTURE_MARGIN;
-  // The early exit below is not uniform control flow. Fragments beside a surviving one stay alive as helpers, so the
-  // derivatives a surviving fragment reads are those of a whole quad.
-  return 'diagnostic(off,derivative_uniformity);\n'+source+/* wgsl */ `
+  return /* wgsl */ `
 @group(3) @binding(0) var captureSea:texture_2d_array<f32>;
 @group(3) @binding(1) var captureSeaSampler:sampler;
 @group(3) @binding(4) var<uniform> captureMode:vec4f;
@@ -68,7 +76,7 @@ fn captureHeight(p:vec2f,footprint:f32)->f32{
   for(var i=0;i<3;i++){q=p-captureDisplacement(q,footprint).xz;}
   return captureDisplacement(q,footprint).y${surfaceWaves?'+surfaceWaveAt(p).x':''};
 }
-${originalSignature}{
+${fragment}{
   // Most of a ship is on the wrong side of the surface here. Leave before lighting any of it.
   let captureWorld=${world};
   let eyeDist=length(captureWorld-F.camPos.xyz);
@@ -85,7 +93,7 @@ ${originalSignature}{
   }
   let eyeDepth=dot(captureWorld-F.camPos.xyz,F.camFwd.xyz);
   if(eyeDepth<=0.0){discard;return vec4f(0);}
-  let material=waterCaptureMaterial(${argumentsList});
+  let material=waterCaptureMaterial(${args});
   let rgbOk=(material.rgb==material.rgb)&((bitcast<vec3u>(material.rgb)&vec3u(0x7fffffffu))<vec3u(0x7f800000u));
   let safeRgb=clamp(select(vec3f(0.0),material.rgb,rgbOk),vec3f(0.0),vec3f(6.0e4));
   let depthOk=(eyeDepth==eyeDepth)&&((bitcast<u32>(eyeDepth)&0x7fffffffu)<0x7f800000u);
@@ -105,40 +113,56 @@ export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba
     device.queue.writeBuffer(b,0,new Float32Array([above,0,0,0]));
     return b;
   });
+  // One capture pipeline a module, with its groups: `code` the module's whole source, `needsWaves` whether its tail
+  // reads the surface's waves (group 3 then binds them too).
+  function build({key,vertex,groups,needsWaves,code}){
+    if(groups>3)throw new Error('Water capture reserves bind group 3');
+    const vertexState={entryPoint:'vs',...vertex};
+    // The module is always generated here; a caller-supplied surface pipeline
+    // or module does not affect this capture's state.
+    delete vertexState.module;
+    const id=JSON.stringify([key,vertexState,groups]);
+    if(captures.has(id))return captures.get(id);
+    const pending=(async()=>{
+      const module=await shader(code(),'submerged material');
+      const captured=await device.createRenderPipelineAsync({label:'submerged opaque material',
+        layout:'auto',
+        vertex:{...vertexState,module},fragment:{module,entryPoint:'submergedFS',targets:[{format}]},
+        primitive:{topology:'triangle-list',cullMode:'none'},
+        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:1}});
+      const makeGroups=modeBuffer=>(needsWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:captured.getBindGroupLayout(3),entries:[{binding:0,resource:seaView},{binding:1,resource:seaSampler},
+        ...(view?[{binding:2,resource:{buffer:surfaceWaves.uniform}},{binding:3,resource:view}]:[]),{binding:4,resource:{buffer:modeBuffer}}]}));
+      const captureGroups=makeGroups(modeBuffers[0]),aboveCaptureGroups=makeGroups(modeBuffers[1]);
+      const emptyGroups=Array.from({length:3-groups},(_,i)=>device.createBindGroup({layout:captured.getBindGroupLayout(i+groups),entries:[]}));
+      return {pipeline:captured,entry:'submergedFS',bindGroup(resources,index=0){
+        const entries=resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource});
+        return device.createBindGroup({layout:captured.getBindGroupLayout(index),entries});
+      },bind(pass,above=false){
+        pass.setPipeline(captured);
+        for(let i=groups;i<3;i++)pass.setBindGroup(i,emptyGroups[i-groups]);
+        const set=above?aboveCaptureGroups:captureGroups;
+        pass.setBindGroup(3,set[needsWaves?surfaceWaves.current:0]);
+      }};
+    })();
+    captures.set(id,pending);
+    pending.catch(()=>{if(captures.get(id)===pending)captures.delete(id);});
+    return pending;
+  }
   return {
-    async capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1,land=false}){
-      if(groups>3)throw new Error('Water capture reserves bind group 3');
-      const vertexState={entryPoint:'vs',...vertex};
-      // The module is always generated here; a caller-supplied surface pipeline
-      // or module does not affect this capture's state.
-      delete vertexState.module;
-      const key=JSON.stringify([source,entry,world,vertexState,groups,land]);
-      if(captures.has(key))return captures.get(key);
-      const pending=(async()=>{
-        const captureNeedsWaves=surfaceWaves&&!/\bfn\s+surfaceWaveAt\s*\(/.test(source);
-        const module=await shader(createSubmergedShader(source,entry,world,!!surfaceWaves,land),'submerged material');
-        const captured=await device.createRenderPipelineAsync({label:'submerged opaque material',
-          layout:'auto',
-          vertex:{...vertexState,module},fragment:{module,entryPoint:'submergedFS',targets:[{format}]},
-          primitive:{topology:'triangle-list',cullMode:'none'},
-          depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:1}});
-        const makeGroups=modeBuffer=>(captureNeedsWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:captured.getBindGroupLayout(3),entries:[{binding:0,resource:seaView},{binding:1,resource:seaSampler},
-          ...(view?[{binding:2,resource:{buffer:surfaceWaves.uniform}},{binding:3,resource:view}]:[]),{binding:4,resource:{buffer:modeBuffer}}]}));
-        const captureGroups=makeGroups(modeBuffers[0]),aboveCaptureGroups=makeGroups(modeBuffers[1]);
-        const emptyGroups=Array.from({length:3-groups},(_,i)=>device.createBindGroup({layout:captured.getBindGroupLayout(i+groups),entries:[]}));
-        return {pipeline:captured,entry:'submergedFS',bindGroup(resources,index=0){
-          const entries=resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource});
-          return device.createBindGroup({layout:captured.getBindGroupLayout(index),entries});
-        },bind(pass,above=false){
-          pass.setPipeline(captured);
-          for(let i=groups;i<3;i++)pass.setBindGroup(i,emptyGroups[i-groups]);
-          const set=above?aboveCaptureGroups:captureGroups;
-          pass.setBindGroup(3,set[captureNeedsWaves?surfaceWaves.current:0]);
-        }};
-      })();
-      captures.set(key,pending);
-      try{return await pending;}
-      catch(error){if(captures.get(key)===pending)captures.delete(key);throw error;}
+    // A material's capture, made from its view's source (createSubmergedShader).
+    capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1,land=false}){
+      return build({key:['rewritten',source,entry,world,land],vertex,groups,needsWaves:!!surfaceWaves&&!/\bfn\s+surfaceWaveAt\s*\(/.test(source),
+        code:()=>createSubmergedShader(source,entry,world,!!surfaceWaves,land)});
+    },
+    // What a module composed as a capture from the first (js/wgsl/continuum-cut.js) begins with, and its tail: the
+    // water's own sea, with the surface's waves when the optics carry them, and the fragment that cuts by it.
+    captureDirective:WATER_CAPTURE_DIRECTIVE,
+    captureTail({fragment,args,world,land=false}){
+      return (surfaceWaves?surfaceWaveSource(3,2,3,'captureSeaSampler'):'')+waterCaptureWGSL({fragment,args,world,surfaceWaves:!!surfaceWaves,land});
+    },
+    // A capture of a module composed whole, its tail from captureTail: nothing in it is rewritten.
+    captureComposed({source,vertex,groups=1}){
+      return build({key:['composed',source],vertex,groups,needsWaves:!!surfaceWaves,code:()=>source});
     },
   };
 }

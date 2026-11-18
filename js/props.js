@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // The generated, textured models about the nearest port, and the iron in the air, drawn through the one continuum
-// (js/prop-continuum-draw.js): every frame the GPU cuts each by projected error, from its own mesh, cluster by
-// cluster, through its far body to a single splat. JavaScript uploads a port's props once when it comes into reach.
+// (js/continuum-scene.js), worn by the props' material (js/wgsl/prop-continuum.js): every frame the GPU cuts each by
+// projected error, from its own mesh, cluster by cluster, through its far body to a single splat. JavaScript uploads a port's props once when it comes into reach.
 // After that it sends only what changes: a prop when what it stood on has gone, and a prop's shard flights when a shot
-// breaks it and again as each shard comes to rest. A broken prop is drawn as its shards, each a cut of its own
-// clusters riding its flight. The balls are placed each update by the gunnery effects (js/gunnery-effects.js shot).
+// breaks it and again as each shard comes to rest. A broken prop is drawn as its shards (the SHARDED pose kind,
+// js/wgsl/continuum-kinds.js), each a cut of its own clusters riding its flight. The balls are placed each update by the gunnery effects (js/gunnery-effects.js shot).
 // The models' physics (js/port-props.js) is read from the same files the atlas was baked from, and their textures,
 // decoded by the browser, are loaded only once a port needs them.
 import { PROP_MODELS, preparePortJetties, propDrawRadius, readPropModel, stepJettyFracture } from './port-props.js';
@@ -12,14 +12,18 @@ import { SIM_CLOCK_LOOP_S } from './wgsl/common.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { GUNNERY_FX_LIMITS } from './gunnery-effects.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
-import { PROP_CONTINUUM_SHOT, PROP_CONTINUUM_TYPES, PROP_CONTINUUM_PIGMENT_SIZE } from './prop-continuum.js';
-import { CITY_CONTINUUM_BROKEN, CITY_CONTINUUM_GONE } from './wgsl/city-continuum.js';
-import { requestPropContinuumAtlas, requestPropContinuumPipelines, createPropContinuumScene, requestPropContinuumSubmerged, propContinuumSubmergedDraw } from './prop-continuum-draw.js';
+import { PROP_CONTINUUM_SHOT, PROP_CONTINUUM_TYPES, PROP_CONTINUUM_PIGMENT_SIZE, loadPropContinuum } from './prop-continuum.js';
+import { PROP_CONTINUUM_MATERIAL_SPEC } from './wgsl/prop-continuum.js';
+import { CONTINUUM_BROKEN, CONTINUUM_GONE, CONTINUUM_KIND, continuumRoom } from './continuum-format.js';
+import { requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, createContinuumScene } from './continuum-scene.js';
 
 const PROP_REACH_M = 3000;
 const PROP_CHECK_FRAMES = 30;
-// A prop's block in the shard records: one vec4f for its clock, then each shard's flight.
+// A prop's block in the shard records, as the SHARDED kind reads it: one vec4f for its clock and its shard count, then
+// each shard's flight (four vec4f), then a float of wear a shard.
 const BLOCK_HEAD_FLOATS = 4;
+const SHARD_FLOATS = 16;
+const propBlockFloats = (records) => { const shards = records.length / SHARD_FLOATS; return BLOCK_HEAD_FLOATS + records.length + Math.ceil(shards / 4) * 4; };
 
 // Every model's image in its own layer of one array, each fitted to the same square, in half-size steps to one texel.
 async function uploadPigments(device, models) {
@@ -58,21 +62,27 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
       [0, { buffer: frameUBO }], [1, { buffer: hull }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
       [11, pigment.createView({ dimension: '2d-array' })], [12, sampler], ...neuralPbr.propResources,
     ].map(([binding, resource]) => ({ binding, resource }));
-    sceneGroup = device.createBindGroup({ label: 'prop continuum', layout: ready.pipelines.view.getBindGroupLayout(0), entries });
-    under = propContinuumSubmergedDraw(submerged, entries, shadows);
+    sceneGroup = device.createBindGroup({ label: 'prop continuum', layout: ready.view.pipeline.getBindGroupLayout(0), entries });
+    under = continuumCaptureDraw(submerged, entries, shadows);
   }
   // Under water, a jetty's pilings and whatever else stands in the sea, through the water's own capture.
-  requestPropContinuumSubmerged(waterOptics).then((pipeline) => { if (destroyed || !pipeline) return; submerged = pipeline; makeSceneGroup(); }, (error) => console.warn('props under water', error));
+  requestContinuumCapture(waterOptics, PROP_CONTINUUM_MATERIAL_SPEC).then((capture) => { if (destroyed || !capture) return; submerged = capture; makeSceneGroup(); }, (error) => console.warn('props under water', error));
 
+  // One scene of the one cut, of `counts` instances of each type at most.
+  const propScene = (counts, label, poses = null) => {
+    const { capacity, room } = continuumRoom(ready.atlas.types, counts);
+    return createContinuumScene({ device, atlas: ready.atlas, programs: ready.programs, capacity, room, view: ready.view, poses, frame: frameUBO, shadowUniform: shadows.uniform, samples, label });
+  };
   // The atlas and the programs are wanted from the start: a ball may be fired anywhere.
-  Promise.all([requestPropContinuumAtlas(device), requestPropContinuumPipelines({ device, shader, format, samples, shadowFormat: LAND_SHADOW_FORMAT })]).then(([atlas, pipelines]) => {
+  Promise.all([
+    requestContinuumAtlas(device, 'prop', () => loadPropContinuum()),
+    requestContinuumPrograms({ device, shader, shadowFormat: LAND_SHADOW_FORMAT }),
+    requestContinuumView({ device, shader, material: PROP_CONTINUUM_MATERIAL_SPEC, format, samples }),
+  ]).then(([atlas, programs, view]) => {
     if (destroyed) return;
-    ready = { atlas, pipelines, lighting: shadows.bind(pipelines.view) };
+    ready = { atlas, programs, view, lighting: shadows.bind(view.pipeline) };
     makeSceneGroup();
-    shot = createPropContinuumScene({
-      device, atlas, pipelines, counts: PROP_CONTINUUM_TYPES.map((_, t) => (t === PROP_CONTINUUM_SHOT ? GUNNERY_FX_LIMITS.projectiles : 0)),
-      frame: frameUBO, shadowUniform: shadows.uniform, samples, label: 'shot',
-    });
+    shot = propScene(PROP_CONTINUUM_TYPES.map((_, t) => (t === PROP_CONTINUUM_SHOT ? GUNNERY_FX_LIMITS.projectiles : 0)), 'shot');
     if (shotPlaced) placeShot(...shotPlaced);
   }).catch((error) => { unavailable = true; console.warn(error.message); });
 
@@ -107,11 +117,12 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
   // A prop as it now stands: gone with what it stood on or when nothing of it is left; broken, its shards flying on
   // their own records, once a shot has moved any; and how far past its model's sphere its timber may lie.
   function placeProp(item) {
-    const { prop, at } = item, model = kit.models[prop.model], radius = propDrawRadius(prop, model, ownerStateOf(item));
+    const { prop, at } = item, model = kit.models[prop.model], radius = propDrawRadius(prop, model, ownerStateOf(item)), broken = Boolean(prop.fracture?.damaged);
     scene.continuum.place(at, {
-      x: prop.x, y: prop.y ?? model.standsAt, z: prop.z, yaw: prop.yaw, type: prop.model,
-      flags: (radius > 0 ? 0 : CITY_CONTINUUM_GONE) | (prop.fracture?.damaged ? CITY_CONTINUUM_BROKEN : 0),
-      records: item.block / 4, reach: Math.max(0, radius - model.radius), seed: at,
+      position: [prop.x, prop.y ?? model.standsAt, prop.z], yaw: prop.yaw ?? 0, type: prop.model,
+      kind: broken ? CONTINUUM_KIND.SHARDED : CONTINUUM_KIND.RIGID,
+      flags: (radius > 0 ? 0 : CONTINUUM_GONE) | (broken ? CONTINUUM_BROKEN : 0),
+      pose: item.block / 4, reach: Math.max(0, radius - model.radius), seed: at,
     });
   }
 
@@ -124,18 +135,16 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     let recordFloats = 0;
     const entries = placed.map((prop, at) => {
       const item = { at, prop, inst: prop.owner >= 0 ? port.instances[prop.owner] : null, block: recordFloats, struck: null };
-      recordFloats += BLOCK_HEAD_FLOATS + prop.fracture.flight.records.length;
+      recordFloats += propBlockFloats(prop.fracture.flight.records);
       return item;
     });
     const recordData = new Float32Array(recordFloats), struck = new Set(), owners = new Map();
     const records = buffer('prop shard records', recordData, B.STORAGE);
-    const continuum = createPropContinuumScene({
-      device, atlas: ready.atlas, pipelines: ready.pipelines, counts: PROP_CONTINUUM_TYPES.map((_, t) => placed.filter((p) => p.model === t).length),
-      shards: records, frame: frameUBO, shadowUniform: shadows.uniform, samples, label: 'props',
-    });
+    const continuum = propScene(PROP_CONTINUUM_TYPES.map((_, t) => placed.filter((p) => p.model === t).length), 'props', records);
     scene = { count: placed.length, continuum, records, recordData, entries, owners, struck, flying: new Set() };
     for (const item of entries) {
       const state = item.prop.fracture;
+      recordData[item.block + 1] = state.flight.records.length / SHARD_FLOATS;
       recordData.set(state.flight.records, item.block + BLOCK_HEAD_FLOATS);
       state.flight.dirty.clear();
       item.struck = () => struck.add(item);
@@ -191,7 +200,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     const count = Math.min(n, shot.capacity);
     for (let i = 0; i < count; i++) {
       const r = balls[i * 4 + 3], size = Math.abs(r);
-      shot.place(i, { x: balls[i * 4], y: balls[i * 4 + 1], z: balls[i * 4 + 2], scale: [size, size, size], word: r < 0 ? 1 : 0, type: PROP_CONTINUUM_SHOT, seed: seeds[i] });
+      shot.place(i, { position: [balls[i * 4], balls[i * 4 + 1], balls[i * 4 + 2]], scale: size, identity: r < 0 ? 1 : 0, type: PROP_CONTINUUM_SHOT, seed: seeds[i] });
     }
     shot.send(0, count);
     shot.setCount(count);
