@@ -6,7 +6,7 @@
 // game has it. Ground keeps the look of its geography: what the board adds to it is drawn by the GPU
 // (js/board-stamp.js) from the compact tables made here once.
 import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist, segRectDist } from './old-world-city.js';
-import { CITY_BASTION, CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType, cityVariant } from './old-world-buildings.js';
+import { CITY_BASTION, CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TOWER, CITY_TYPE, CITY_TYPED_ROOF, cityBatteryGuns, cityHouseType, cityVariant } from './old-world-buildings.js';
 import { WORKS_BRIDGE, WORKS_WHEEL } from './old-world-works.js';
 import { NATIVE_PALISADE } from './native-works.js';
 
@@ -662,6 +662,97 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (citadel?.rad?.length) ring(ox + citadel.x, oz + citadel.z, citadel.rad, null, [citadel.gate], 9.5, 48, true, null, circuitLength(citadel.rad) / 4);
   }
 
+  /* ---- works: the forts, batteries and watchtowers the record names, each where the model set it ---- */
+  // The model stands each as a building of its nearest place (scripts/board-forts.mjs); it is built here of the wall's
+  // own types, its front (-z of its turn) to the water. A fort as broad as two bastions and a curtain between them is
+  // a bastioned work, a bastion at each corner of its curtain; a smaller one a castle of the coast, a tower at each
+  // corner and a keep within. Each is entered in `works` for the guns and the garrison: its line round its salients
+  // and shoulders (`outline`), its guns (where each stands on its parapet, `nx, nz` the way it looks out, `wall` the
+  // side of the outline it stands on), its salients, its gate, and the types it is built of (`types`, the first and
+  // after the last of them in the order stood).
+  const workRecords = [], workKey = (x, z) => `${Math.round(x)},${Math.round(z)}`, workAt = new Set();
+  const workBastion = cityVariant(CITY_TYPE.BASTION, 0, 0, CITY_CURTAIN.height), workBastionHalf = CITY_BUILDING_TYPES[workBastion].width / 2;
+  const standWorkOf = (place, work) => {
+    const x = ox + work.x, z = oz + work.z, yaw = work.turn ?? 0, c = Math.cos(yaw), s = Math.sin(yaw), tone = 0.86;
+    const at = (lx, lz) => [x + lx * c + lz * s, z - lx * s + lz * c], toward = (lx, lz) => [lx * c + lz * s, -lx * s + lz * c];
+    const first = typedTypes.length, guns = [], outline = [], salients = [];
+    let gateAt = null;
+    const record = () => ({ kind: work.kind, name: work.name, place: place.name, role: work.role || '', side: work.side || '', x, z, turn: yaw, w: work.w, d: work.d, outline, guns, salients, gate: gateAt, types: [first, typedTypes.length] });
+    if (work.kind === 'battery') {
+      const id = cityVariant(CITY_TYPE.BATTERY, work.w, work.d), T = CITY_BUILDING_TYPES[id], f = footprint(x, z, T.width, T.length, yaw);
+      const floor = pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone);
+      pushTyped(id, x, floor, z, yaw, tone);
+      keep(f); occupy(f);
+      for (const [lx, lz] of [[-T.width / 2, -T.length / 2], [T.width / 2, -T.length / 2], [T.width / 2, T.length / 2], [-T.width / 2, T.length / 2]]) outline.push(at(lx, lz));
+      const [nx, nz] = toward(0, -1);
+      for (const g of cityBatteryGuns(T.width, T.length)) { const [gx, gz] = at(g.x, g.z); guns.push({ x: gx, y: floor + g.y, z: gz, nx, nz, wall: 0 }); }
+      return record();
+    }
+    if (work.kind === 'tower') {
+      const f = tower(x, z, Math.min(work.w, work.d), 4 * CITY_TOWER.stage, 0.9, CITY_TYPE.WATCHTOWER);
+      for (const [lx, lz] of [[-f.w / 2, -f.d / 2], [f.w / 2, -f.d / 2], [f.w / 2, f.d / 2], [-f.w / 2, f.d / 2]]) outline.push(local(f, lx, lz));
+      return record();
+    }
+    // A fort: its curtain round four corners, its front to the water and its gate in its back.
+    const W = workBastionHalf, bastioned = Math.min(work.w, work.d) >= 4 * W + 2 * CITY_GATE.span;
+    const inset = bastioned ? 2 * W / Math.SQRT2 : CITY_TOWER.sides[1] / 2, hx = work.w / 2 - inset, hz = work.d / 2 - inset;
+    const corners = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([lx, lz]) => at(lx, lz));
+    const height = CITY_CURTAIN.height;
+    if (bastioned) {
+      corners.forEach(([px, pz]) => {
+        const L = Math.hypot(px - x, pz - z) || 1, o = [(px - x) / L, (pz - z) / L], t = [-o[1], o[0]];
+        const f = bastion(px, pz, o[0], o[1], W, height, 0.84 + rr() * 0.1), top = seatBlock(f).floor + CITY_BUILDING_TYPES[workBastion].height;
+        const C = [px + o[0] * W, pz + o[1] * W], S = [C[0] + o[0] * W, C[1] + o[1] * W];
+        const A = [C[0] - t[0] * W, C[1] - t[1] * W], B = [C[0] + t[0] * W, C[1] + t[1] * W];
+        const wall = outline.length;
+        outline.push(A, S, B); salients.push(S);
+        // A gun to each face, at its middle, looking square out of it.
+        for (const [E, sign, side] of [[A, -1, wall], [B, 1, wall + 1]]) {
+          const n = [(o[0] + sign * t[0]) / Math.SQRT2, (o[1] + sign * t[1]) / Math.SQRT2];
+          guns.push({ x: (S[0] + E[0]) / 2 - n[0] * 1.6, y: top, z: (S[1] + E[1]) / 2 - n[1] * 1.6, nx: n[0], nz: n[1], wall: side });
+        }
+      });
+    } else {
+      for (const [px, pz] of corners) { const f = tower(px, pz, CITY_TOWER.sides[1], height + 3.5, 0.88); outline.push(local(f, 0, 0)); }
+      // Guns along its front to the water, between the towers.
+      const run = 2 * hx - CITY_TOWER.sides[1], n = Math.max(1, Math.floor(run / (2 * CITY_CURTAIN.bay) - 1)), [nx, nz] = toward(0, -1);
+      for (let g = 0; g < n; g++) {
+        const [gx, gz] = at(-run / 2 + (g + 0.5) * run / n, -hz + CITY_CURTAIN.thick);
+        guns.push({ x: gx, y: heightAt(gx, gz) + height, z: gz, nx, nz, wall: 0 });
+      }
+    }
+    // The curtain between the corners, its parapet outward; the back's in two lengths either side of the gate.
+    const out = (a, b) => [(a[0] + b[0]) / 2 - x, (a[1] + b[1]) / 2 - z];
+    for (const [a, b] of [[corners[0], corners[1]], [corners[1], corners[2]], [corners[3], corners[0]]]) curtain(a[0], a[1], b[0], b[1], out(a, b), height, 0.84 + rr() * 0.1);
+    {
+      const [a, b] = [corners[2], corners[3]], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], g = CITY_GATE.span / 2;
+      curtain(a[0], a[1], m[0] - u[0] * g, m[1] - u[1] * g, out(a, b), height, 0.86);
+      curtain(m[0] + u[0] * g, m[1] + u[1] * g, b[0], b[1], out(a, b), height, 0.86);
+      const gyaw = Math.atan2(-u[1], u[0]), floor = heightAt(m[0], m[1]), f = footprint(m[0], m[1], CITY_GATE.span, CITY_GATE.thick, gyaw);
+      blocks.push(m[0], floor, m[1], gyaw, CITY_GATE.span, CITY_GATE.thick, CITY_GATE.passage + CITY_GATE.chamber, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, 0.9, 0);
+      keep(f);
+      pushTyped(CITY_TYPE.GATE, m[0], floor, m[1], gyaw, 0.9);
+      const [nx, nz] = toward(0, 1);
+      gateAt = { x: m[0], z: m[1], nx, nz };
+    }
+    // Within: a bastioned fort's quarters along its left curtain, a castle's keep in its middle.
+    if (bastioned) {
+      const id = cityVariant(CITY_TYPE.HALL, CITY_HALL.widths[0], 2 * hz - 2 * CITY_CURTAIN.thick - 4), T = CITY_BUILDING_TYPES[id];
+      const [hxw, hzw] = at(-hx + CITY_CURTAIN.thick + 1 + T.width / 2, 0), f = footprint(hxw, hzw, T.width, T.length, yaw);
+      const floor = pushBlock(f, T.height, CITY_HALL.roof, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 0.9);
+      pushTyped(id, hxw, floor, hzw, yaw, 0.9);
+      keep(f); occupy(f);
+    } else {
+      occupy(tower(x, z, Math.min(2 * hx, 2 * hz) - 2 * CITY_TOWER.sides[1] - 4, 18, 0.95, CITY_TYPE.KEEP));
+    }
+    keep(footprint(x, z, work.w, work.d, yaw));
+    return record();
+  };
+  for (const place of places) for (const work of place.works ?? []) {
+    workAt.add(workKey(ox + work.x, oz + work.z));
+    if (!work.castle) workRecords.push(standWorkOf(place, work));
+  }
+
   /* ---- buildings: each one the model stood, as this game's type of that size, turned to its street ---- */
   const { count, stand, form, kinds } = board.buildings, arches = board.arches;
   const market = board.quarters?.indexOf('market') ?? -1, quarter = board.buildings.quarter ?? null;
@@ -878,6 +969,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const w = wharfAlign ? wharfAlign.w : stand[k * 6 + 3];
     const d = wharfAlign ? wharfAlign.d : stand[k * 6 + 4];
     const h = stand[k * 6 + 5];
+    // A work the record names is built above, of its own types (a citadel being its place's castle).
+    if (arch === 'fort' || arch === 'battery' || (arch === 'tower' && workAt.has(workKey(x, z)))) continue;
     if (!inside(x, z, 12)) { dropped.edge++; continue; }
     if (heightAt(x, z) < BOARD_DRY_M && arch !== 'wharf') { dropped.wet++; continue; }
     // Turned so that its own back (+z) is away from its street; a quarter turn swaps its front and depth.
@@ -2634,6 +2727,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     riverReaches,
     // Who mans the seat, by the model's own roll on the board's day: its port's posts are manned from it (js/crew.js).
     watch: seat.watch ? { ...seat.watch, place: seat.name, day: board.day ?? 0 } : null,
+    // The forts, batteries and watchtowers the record names, as built: their lines, guns and gates (js/fort-works.js).
+    works: workRecords,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each
     // furlong's use, and every way that runs across it.
     stamp: {

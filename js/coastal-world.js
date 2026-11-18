@@ -10189,6 +10189,8 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   const cityPlan = country?.plan ?? null;
   // A founded country names who mans its seat; the port's forts are manned from that roll.
   if (country?.watch) port.watch = country.watch;
+  // The forts, batteries and watchtowers of its board, as built: their guns and posts are manned from its watch.
+  port.works = country?.works ?? [];
   if (cityPlan?.paving?.length) port.streets = paveCityStreets(port.streets, cityPlan.paving);
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {
