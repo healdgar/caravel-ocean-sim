@@ -6,7 +6,7 @@
 // game has it. Ground keeps the look of its geography: what the board adds to it is drawn by the GPU
 // (js/board-stamp.js) from the compact tables made here once.
 import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist, segRectDist } from './old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType, cityVariant } from './old-world-buildings.js';
+import { CITY_BASTION, CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType, cityVariant } from './old-world-buildings.js';
 import { WORKS_BRIDGE, WORKS_WHEEL } from './old-world-works.js';
 import { NATIVE_PALISADE } from './native-works.js';
 
@@ -408,7 +408,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     Math.hypot(fp.w, fp.d) * 0.5 + 16 + pad,
     (g) => segRectDist(fp, g.ax, g.az, g.bx, g.bz) < g.hw + pad
   );
-  const { seatBlock, pushBlock, pushTyped, fit, sections, seatRun, fence: layFence, curtain, tower, gate } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr });
+  const { seatBlock, pushBlock, pushTyped, fit, sections, seatRun, fence: layFence, curtain, tower, bastion, gate } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr });
   // The port's own buildings stand where they stand; the board builds round them.
   for (const inst of port.instances || []) {
     const f = { x: inst.x, z: inst.z, w: (inst.width ?? 12) + 2, d: (inst.depth ?? inst.length ?? 20) + 2, c: inst._cosNegYaw ?? Math.cos(inst.yaw ?? 0), s: inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0) };
@@ -565,8 +565,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   // The model says of each stretch how its line was chosen, not what it is built of: 0 a wall on open ground, 1 a
   // cliff that is itself the wall (nothing is built there), 2 a wall along a bank, 3 one on the crest of a slope.
   // What it is built of is the circuit's own: stone, or a palisade. `built` is given while a circuit is still
-  // going up: which stretches stand so far.
-  const ring = (cx, cz, rad, kind, gateAngles, stoneHeight, towerEvery = 56, stone = true, built = null) => {
+  // going up: which stretches stand so far. A stone circuit of the Italian trace has its angled bastions `bastionEvery`
+  // metres apart along each standing run, as the model draws its trace, none within CITY_BASTION.clear of a run's end
+  // or beside a gate; a tower stands where a bastion does not.
+  const ring = (cx, cz, rad, kind, gateAngles, stoneHeight, towerEvery = 56, stone = true, built = null, bastionEvery = 0) => {
     const n = rad.length, pts = [], first = gates.length;
     for (let k = 0; k < n; k++) {
       const a = k / n * 2 * Math.PI, x = cx + Math.cos(a) * rad[k], z = cz + Math.sin(a) * rad[k];
@@ -578,12 +580,38 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       if (a.open || b.open) continue;
       gates.push({ x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f, half: 3.4, k });
     }
+    const flanked = [];
+    if (stone && bastionEvery > 0) {
+      const step = (k) => Math.hypot(pts[(k + 1) % n].x - pts[k].x, pts[(k + 1) % n].z - pts[k].z);
+      // How far along its run each point stands from the run's open ends, behind and ahead (all the way round when none).
+      const behind = new Float32Array(n).fill(Infinity), ahead = new Float32Array(n).fill(Infinity);
+      for (let k = 0; k < n; k++) {
+        if (pts[k].open) continue;
+        for (let j = 1, d = 0; j < n; j++) { const p = (k - j + n) % n; d += step(p); if (pts[p].open) { behind[k] = d; break; } }
+        for (let j = 1, d = 0; j < n; j++) { const p = (k + j) % n; d += step((p + n - 1) % n); if (pts[p].open) { ahead[k] = d; break; } }
+      }
+      let along = bastionEvery;
+      for (let k = 0; k < n; k++) {
+        const a = pts[k], b = pts[(k + 1) % n], prev = pts[(k + n - 1) % n];
+        if (a.open) { along = bastionEvery; continue; }
+        along += step((k + n - 1) % n);
+        if (along < bastionEvery || Math.min(behind[k], ahead[k]) < CITY_BASTION.clear) continue;
+        const tl = Math.hypot(b.x - prev.x, b.z - prev.z) || 1, tx = (b.x - prev.x) / tl, tz = (b.z - prev.z) / tl;
+        const side = (-tz * (a.x - cx) + tx * (a.z - cz)) >= 0 ? 1 : -1, ox = -tz * side, oz = tx * side, half = CITY_BASTION.half;
+        if (gates.some((q) => Math.hypot(q.x - a.x, q.z - a.z) < q.half + half + CITY_GATE.reach)) continue;
+        const reach = footprint(a.x + ox * half, a.z + oz * half, 2 * half, 2 * half, Math.atan2(oz, -ox));
+        if (!inside(reach.x, reach.z, 20) || heightAt(a.x + ox * 2 * half, a.z + oz * 2 * half) <= 1.4 || hitsRiverCorridor(reach, 0) || taken(reach, 1)) continue;
+        bastion(a.x, a.z, ox, oz, half, stoneHeight, 0.84 + rr() * 0.1);
+        flanked.push({ x: a.x, z: a.z, half });
+        along = 0;
+      }
+    }
     let since = towerEvery;
     for (let k = 0; k < n; k++) {
       const a = pts[k], b = pts[(k + 1) % n], prev = pts[(k + n - 1) % n];
       if (a.open) { since = towerEvery; continue; }
       const height = a.stone ? stoneHeight : BOARD_PALISADE_M;
-      const nearGate = gates.some((q) => Math.hypot(q.x - a.x, q.z - a.z) < q.half + 9);
+      const nearGate = gates.some((q) => Math.hypot(q.x - a.x, q.z - a.z) < q.half + 9) || flanked.some((q) => Math.hypot(q.x - a.x, q.z - a.z) < q.half + 6);
       if (a.stone && !nearGate && (since >= towerEvery || prev.open || b.open)) { tower(a.x, a.z, 6.2, height + 3.5 + rr() * 1.5, 0.86 + rr() * 0.12); since = 0; }
       if (b.open) continue;
       const mx = (a.x + b.x) * 0.5, mz = (a.z + b.z) * 0.5;
@@ -599,6 +627,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       gate(q, (b.x - a.x) / L, (b.z - a.z) / L);
     }
   };
+  // How long a ring of radii, one to each bearing, runs about its centre.
+  const circuitLength = (rad) => { let L = 0; for (let k = 0, n = rad.length; k < n; k++) { const a = k / n * 2 * Math.PI, b = (k + 1) / n * 2 * Math.PI; L += Math.hypot(Math.cos(b) * rad[(k + 1) % n] - Math.cos(a) * rad[k], Math.sin(b) * rad[(k + 1) % n] - Math.sin(a) * rad[k]); } return L; };
   // A place built of earth and timber is ringed by a palisade of stakes (js/native-works.js), stood a section at a time
   // along the model's circuit, whole metres of its stakes, each on its own ground; open where the model has a gate,
   // where a way runs through it, over water and where the cliff is the wall.
@@ -625,10 +655,11 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   };
   for (const place of places) {
     if (place.wall && place.earthen) stakes(place.x, place.z, place.wall.rad, place.wall.kind, place.wall.gates, place.wall.built ?? null);
-    else if (place.wall) ring(place.x, place.z, place.wall.rad, place.wall.kind, place.wall.gates, CITY_CURTAIN.height, 56, place.walls >= 2 || place.wall.bastions, place.wall.built ?? null);
+    else if (place.wall) ring(place.x, place.z, place.wall.rad, place.wall.kind, place.wall.gates, CITY_CURTAIN.height, 56, place.walls >= 2 || place.wall.bastions, place.wall.built ?? null, place.wall.bastions ? CITY_BASTION.every : 0);
     const hill = place.castle?.hill, citadel = place.castle?.citadel;
     if (hill?.rad?.length) ring(ox + hill.x, oz + hill.z, hill.rad, hill.kind, [hill.gate], Math.max(7.5, hill.height || 0) + 2, 40, hill.walls >= 2 && !hill.timber);
-    if (citadel?.rad?.length) ring(ox + citadel.x, oz + citadel.z, citadel.rad, null, [citadel.gate], 9.5, 48);
+    // The model's citadel is a bastioned work: a bastion to each quarter of its circuit.
+    if (citadel?.rad?.length) ring(ox + citadel.x, oz + citadel.z, citadel.rad, null, [citadel.gate], 9.5, 48, true, null, circuitLength(citadel.rad) / 4);
   }
 
   /* ---- buildings: each one the model stood, as this game's type of that size, turned to its street ---- */

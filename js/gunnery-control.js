@@ -2647,6 +2647,7 @@ const FORTIFIED_STONE_PREFABS = new Set([
   'city_wall_tower',
   'city_keep',
   'city_gate',
+  'city_bastion',
 ]);
 
 const TIMBER_BUILDING_PREFABS = new Set([

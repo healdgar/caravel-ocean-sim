@@ -301,6 +301,33 @@ function curtainSpec({ bays, height }) {
   };
 }
 
+// An angled bastion of the Italian trace, standing out from the wall: two faces meeting at a right-angled salient and
+// two flanks back to the curtain, filled with earth to its terreplein behind a parapet of an embrasure to each bay. Its
+// faces are whole bays of the curtain's own; it is built to the curtain's heights. Its back (+x) stands on the wall's
+// line, its salient (-x) outward; it is as broad as it stands out, `bays * bay / sqrt 2` to either side of its middle.
+// The model's own trace (assets/board/game.js, its wall drawing) stands one every 88 m, none within 26 m of a run's
+// end, each some 28 m across its gorge and standing 28 m out: the bastion of eight bays to a face, asked for by `half`.
+export const CITY_BASTION = Object.freeze({ faces: Object.freeze([6, 8, 10]), heights: Object.freeze([5.5, 7, 8.5, 10]), every: 88, clear: 26, half: 15 });
+function bastionSpec({ bays, height }) {
+  const W = cityMetres(bays * CITY_CURTAIN.bay / Math.SQRT2), a = W / Math.SQRT2, p = CITY_CURTAIN.parapet, q = p / 2 / Math.SQRT2, sill = 0.3;
+  const parapet = { primitive: 'wall', height: sill, thickness: p, material: 'ashlar', crenellated: true, merlonWidth: CITY_CURTAIN.bay - CITY_CURTAIN.merlon, merlonGap: CITY_CURTAIN.merlon, merlonHeight: CITY_CURTAIN.rise - sill };
+  return {
+    schemaVersion: '0.4', name: `Baluarte (an angled bastion, faces of ${bays} bays, ${height} m high)`, width: 2 * W, length: 2 * W, height, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false,
+    primitives: [
+      { primitive: 'box', partGroup: 'foundation_plinth', from: [0, -FOOTING_M, -W], to: [W, 0, W], material: 'dark_stone' },
+      { primitive: 'box', name: 'bastion_flanks', from: [0, 0, -W], to: [W, height, W], material: 'ashlar' },
+      { primitive: 'group', name: 'bastion_head', position: [0, 0, 0], rotation: [0, 45, 0], children: [
+        { primitive: 'box', partGroup: 'foundation_plinth', from: [-a, -FOOTING_M, -a], to: [a, 0, a], material: 'dark_stone' },
+        { primitive: 'box', name: 'bastion_faces', from: [-a, 0, -a], to: [a, height, a], material: 'ashlar' },
+      ] },
+      { ...parapet, name: 'bastion_flank_parapet', from: [W, height, -W + p / 2], to: [0, height, -W + p / 2] },
+      { ...parapet, name: 'bastion_face_parapet', from: [q, height, -W + q], to: [-W + q, height, q] },
+      { ...parapet, name: 'bastion_face_parapet', from: [-W + q, height, -q], to: [q, height, W - q] },
+      { ...parapet, name: 'bastion_flank_parapet', from: [0, height, W - p / 2], to: [W, height, W - p / 2] },
+    ],
+  };
+}
+
 // The castle's hall: two tall storeys of limewashed wall under a hipped roof, its door in the long front; as long as
 // its bays, a window to each of each storey, and of a narrower or a broader range.
 export const CITY_HALL = Object.freeze({ bay: 4.2, widths: Object.freeze([10, 12]), bays: Object.freeze([4, 5, 6, 7]), height: 10.5, roof: 3.2 });
@@ -452,6 +479,7 @@ const CITY_TYPE_NAMED = {
     };
   })()),
   CURTAIN: cityFamily('CURTAIN', CITY_CURTAIN.heights.flatMap((height) => CITY_CURTAIN.bays.map((bays) => curtainSpec({ bays, height }))), CITY_CURTAIN.heights.indexOf(CITY_CURTAIN.height) * CITY_CURTAIN.bays.length + 3),
+  BASTION: cityFamily('BASTION', CITY_BASTION.heights.flatMap((height) => CITY_BASTION.faces.map((bays) => bastionSpec({ bays, height }))), CITY_BASTION.heights.indexOf(CITY_CURTAIN.height) * CITY_BASTION.faces.length + 1),
   HALL: cityFamily('HALL', CITY_HALL.widths.flatMap((width) => CITY_HALL.bays.map((bays) => hallSpec({ width, bays }))), CITY_HALL.bays.length + 3),
   PENTICE: cityFamily('PENTICE', CITY_PENTICES, 1),
   ...Object.fromEntries(CITY_STREET_FURNITURE.map(([key, spec]) => [key, cityFamily(key, spec)])),
@@ -513,12 +541,12 @@ export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, 
 export const CITY_TYPES_STONE_SLIGHT = Object.freeze(new Set(cityFamilyTypes('CAIRN', 'FENCE_STONE', 'GRAVES')));
 // The paints a front's cloth and boards take, as tints of the land shader's limewash: after its five washes.
 export const CITY_PAINT = Object.freeze({ LINEN: 1, RED: 5, BLUE: 6, GOLD: 7, GREEN: 8, BROWN: 9, DARK: 10 });
-// What a type is to the guns: the name its damage is kept under and reported by. The wall and
-// its towers, the keep and the gate are fortified stone (js/gunnery-control.js); the rest is masonry.
+// What a type is to the guns: the name its damage is kept under and reported by. The wall, its
+// towers and bastions, the keep and the gate are fortified stone (js/gunnery-control.js); the rest is masonry.
 const CITY_TARGETS = Object.freeze({
   HOUSE: { prefabId: 'city_house', label: 'Town house' }, CHURCH_LEFT: { prefabId: 'city_church', label: 'Parish church' }, CHURCH_RIGHT: { prefabId: 'city_church', label: 'Parish church' },
   CHURCH_GREAT: { prefabId: 'city_church', label: 'Cathedral' }, WALL_TOWER: { prefabId: 'city_wall_tower', label: 'Wall tower' }, KEEP: { prefabId: 'city_keep', label: 'Castle keep' },
-  GATE: { prefabId: 'city_gate', label: 'City gate' }, CURTAIN: { prefabId: 'city_wall', label: 'City wall' }, HALL: { prefabId: 'city_castle_hall', label: 'Castle hall' },
+  GATE: { prefabId: 'city_gate', label: 'City gate' }, CURTAIN: { prefabId: 'city_wall', label: 'City wall' }, BASTION: { prefabId: 'city_bastion', label: 'Bastion' }, HALL: { prefabId: 'city_castle_hall', label: 'Castle hall' },
   PENTICE: { prefabId: 'city_shop_front', label: 'Shop front' }, SIGN: { prefabId: 'city_shop_front', label: 'Shop front' }, ALE_STAKE: { prefabId: 'city_shop_front', label: 'Shop front' },
   STALL: { prefabId: 'city_market_stall', label: 'Market stall' }, MARKET_CROSS: { prefabId: 'city_market_cross', label: 'Market cross' }, WELL: { prefabId: 'city_well', label: 'Well' },
   WINDMILL: { prefabId: 'city_windmill', label: 'Windmill' }, WATERMILL: { prefabId: 'city_watermill', label: 'Watermill' }, GRANARY: { prefabId: 'city_granary', label: 'Granary' },

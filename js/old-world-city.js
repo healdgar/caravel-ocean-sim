@@ -6,7 +6,7 @@
 // ground: house, street, square, garden or yard, and whether a tree may stand there.
 // Each house, church, tower and gate is a building of a type written in Cairn (js/old-world-buildings.js),
 // stood at its own size and drawn by the one continuum (js/city-continuum-draw.js).
-import { CITY_BUILDING_TYPES, CITY_CURTAIN, CITY_GATE, CITY_TYPE, CITY_TYPED_ROOF, cityVariant } from './old-world-buildings.js';
+import { CITY_BASTION, CITY_BUILDING_TYPES, CITY_CURTAIN, CITY_GATE, CITY_TYPE, CITY_TYPED_ROOF, cityVariant } from './old-world-buildings.js';
 import { WORKS_FENCE } from './old-world-works.js';
 
 export const CITY_BLOCK_FLOATS = 12;
@@ -173,9 +173,11 @@ export function cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, 
   };
 
   /* ---- the wall and the castle ---- */
+  // The bastions stood on the wall's line so far, each { x, z, half }: the curtain is not built through one.
+  const bastions = [];
   // A curtain from a to b, its parapet toward `out`, as high as the nearest of its heights to `height`: whole bays,
   // covering the run and a little past each end into the towers and turns that close it, broken where a gate stands
-  // across it (to the middles of the gate's towers).
+  // across it (to the middles of the gate's towers) and where a bastion stands on it.
   const curtain = (ax, az, bx, bz, out, height, tone) => {
     const L = Math.hypot(bx - ax, bz - az);
     if (L < 1) return;
@@ -184,6 +186,10 @@ export function cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, 
     for (const q of gates) {
       const t = (q.x - ax) * ux + (q.z - az) * uz, off = Math.abs((q.z - az) * ux - (q.x - ax) * uz);
       if (off < CITY_GATE.thick && t > -CITY_GATE.reach && t < L + CITY_GATE.reach) cuts.push([t - CITY_GATE.reach, t + CITY_GATE.reach]);
+    }
+    for (const q of bastions) {
+      const t = (q.x - ax) * ux + (q.z - az) * uz, off = Math.abs((q.z - az) * ux - (q.x - ax) * uz);
+      if (off < CITY_CURTAIN.thick && t > -q.half && t < L + q.half) cuts.push([t - q.half + CITY_CURTAIN.bay / 2, t + q.half - CITY_CURTAIN.bay / 2]);
     }
     cuts.sort((p, q) => p[0] - q[0]);
     const lay = (s0, s1) => {
@@ -207,6 +213,16 @@ export function cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, 
     keep(f);
     return f;
   };
+  // A bastion standing out from the wall's line at (x, z) toward (ox, oz), as high as the nearest of its heights to
+  // `height`: of the size its family has nearest `half` to either side. The curtain is then not built through it.
+  const bastion = (x, z, ox, oz, half, height, tone) => {
+    const id = cityVariant(CITY_TYPE.BASTION, 2 * half, 2 * half, height), T = CITY_BUILDING_TYPES[id], W = T.width / 2, yaw = Math.atan2(oz, -ox);
+    const f = footprint(x + ox * W, z + oz * W, T.width, T.length, yaw), floor = pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone);
+    pushTyped(id, f.x, floor, f.z, yaw, tone);
+    keep(f);
+    bastions.push({ x, z, half: W });
+    return f;
+  };
   // A gate in a wall running along (ux, uz): a tower to either side and an arched passage under a chamber between
   // them, each of its one size.
   const gate = (q, ux, uz) => {
@@ -216,5 +232,5 @@ export function cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, 
     keep(f);
     pushTyped(CITY_TYPE.GATE, q.x, floor, q.z, yaw, 0.9);
   };
-  return { seatBlock, pushBlock, pushTyped, fit, sections, seatRun, fence, curtain, tower, gate };
+  return { seatBlock, pushBlock, pushTyped, fit, sections, seatRun, fence, curtain, tower, bastion, gate };
 }
