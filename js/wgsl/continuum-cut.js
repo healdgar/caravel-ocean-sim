@@ -473,6 +473,14 @@ fn continuumEye()->vec3f { return F.camPos.xyz-continuumShift(); }
 //   coverage  whether its surface cuts (a leaf card's alpha): it then also writes <name>Coverage(v:ContinuumVarying,
 //             front:bool)->u32, the samples of the pixel its surface covers, and the view keeps only those (rule 2: a
 //             cut by the sample mask, never discard).
+// A heightfield (the land, js/wgsl/land-continuum.js) is cut by its own quadtree select, which lists nodes, not this
+// one's clusters; it shares the core, the scene's pixel error and this family of programs. It sets instead:
+//   heightfield true.
+//   varying    its varying struct's name.
+//   entryLayout the vertex buffers its lists are read through (one node a draw).
+//   prelude(pass) its WGSL for that pass ('view' or 'capture'), its own data among it.
+//   wgsl()     <name>Vertex(vertex:u32, node:u32, coarse:bool)->varying and <name>Shade(v:varying)->vec4f, opaque,
+//              with no handoff; coarse for the captures' cut.
 function continuumVaryingWGSL(material) {
   const fields = material.varyings.map(([name, type, flat], i) => `  @location(${3 + i})${flat ? ' @interpolate(flat)' : ''} ${name}:${type},`).join('\n');
   return /* wgsl */`
@@ -542,7 +550,16 @@ export function continuumModuleWGSL({ pass, material = null, capture = null }) {
   }
   if (!material || (pass !== 'view' && pass !== 'capture')) throw Error(`No continuum pass ${pass}`);
   if (pass === 'capture' && (!material.capture || !capture)) throw Error(`The ${material.name} material has no under-water capture`);
-  const air = !material.air ? '' : pass === 'view'
+  if (material.heightfield) {
+    const V = material.varying, name = material.name;
+    const body = material.prelude(pass) + (material.core ? '' : CONTINUUM_CORE_WGSL) + material.wgsl();
+    const vertex = (entry, coarse) => `@vertex fn ${entry}(@builtin(vertex_index) vertex:u32,@location(0) node:u32)->${V} { return ${name}Vertex(vertex,node,${coarse}); }\n`;
+    if (pass === 'view') return body + vertex('continuumVS', false) + `@fragment fn continuumFS(v:${V})->@location(0) vec4f { return ${name}Shade(v); }\n`;
+    // Ground is captured a little above the surface, so a shore seen through a wave has ground behind it.
+    return capture.directive + body + vertex('continuumCaptureVS', true) + `fn waterCaptureMaterial(v:${V})->vec4f { return ${name}Shade(v); }\n`
+      + capture.tail({ fragment: `@fragment fn submergedFS(v:${V})->@location(0) vec4f`, args: 'v', world: 'v.world', land: true });
+  }
+  const air =!material.air ? '' : pass === 'view'
     ? 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { return surfaceAir(colour,world); }\n'
     // Under water the water's surface applies the air once; the call is kept so that every binding stays reachable.
     : 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { if(F.screen.x>=0.0&&captureMode.x<.5){return colour;} return surfaceAir(colour,world); }\n';

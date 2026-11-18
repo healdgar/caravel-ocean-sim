@@ -14,7 +14,7 @@ import { requestOnce } from './gpu-program-cache.js';
 import {
   LAND_CONTINUUM_PATCH, LAND_CONTINUUM_TESSELLATIONS, LAND_CONTINUUM_LISTS, LAND_CONTINUUM_SLOTS, LAND_CONTINUUM_DRAW_WORDS,
   LAND_CONTINUUM_RECORDS, LAND_CONTINUUM_CAPTURE_COARSENING, LAND_CONTINUUM_NODE_WORDS, LAND_CONTINUUM_POINT_FLOATS,
-  LAND_CONTINUUM_PIECE_BYTES, LAND_CONTINUUM_VIEW_BYTES, LAND_CONTINUUM_ENTRY_LAYOUT, landContinuumIndices, landContinuumCutWGSL,
+  LAND_CONTINUUM_PIECE_BYTES, LAND_CONTINUUM_VIEW_BYTES, landContinuumIndices, landContinuumCutWGSL,
   landContinuumFinest, landGroundWriteWGSL, LAND_GROUND_ROOM, LAND_GROUND_WORK_WORDS,
 } from './wgsl/land-continuum.js';
 import { continuumGroundField, continuumGroundForget, CONTINUUM_GROUND_TEXELS, CONTINUUM_GROUND_CUTS, CONTINUUM_GROUND_LEVELS } from './continuum-ground.js';
@@ -390,20 +390,10 @@ export function requestLandContinuumPipelines({ device, shader }) {
   });
 }
 
-// The view's pipeline, from the land's module (js/wgsl/terrain.js with LAND_CONTINUUM_RENDER appended).
-export function landContinuumViewPipeline({ device, module, format, samples }) {
-  return device.createRenderPipelineAsync({
-    label: 'land continuum', layout: 'auto',
-    vertex: { module, entryPoint: 'landContinuumVS', buffers: LAND_CONTINUUM_ENTRY_LAYOUT },
-    fragment: { module, entryPoint: 'landContinuumFS', targets: [{ format }] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: samples },
-  });
-}
-
 /**
- * Every piece of land, cut and drawn. `pipelines` from requestLandContinuumPipelines, `view` from
- * landContinuumViewPipeline, `capture` the water's capture of the same (or null), `frame` the scene's frame uniform,
+ * Every piece of land, cut and drawn. `pipelines` from requestLandContinuumPipelines, `view` the land material's view
+ * pipeline and `capture` its under-water capture or null (requestContinuumView and requestContinuumCapture in
+ * js/continuum-scene.js, with landContinuumMaterial from js/wgsl/land-continuum.js), `frame` the scene's frame uniform,
  * `grid` the grid every piece is placed on: {x0, z0, g}.
  */
 export function createLandContinuum({ device, pipelines: P, view: viewPipeline, capture = null, frame, grid, shared = [] }) {

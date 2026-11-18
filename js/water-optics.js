@@ -26,14 +26,7 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
   }
   const sharedSurface=/\bfn\s+surfaceWaveAt\s*\(/.test(source);
   if(surfaceWaves&&!sharedSurface)source+=surfaceWaveSource(3,2,3,'captureSeaSampler');
-  const air=/\bfn\s+surfaceAir\s*\([^)]*\)\s*->\s*vec3f\s*\{/m.exec(source);
-  if(air){
-    const start=source.indexOf('{',air.index);
-    const argument=/\(\s*(\w+)\s*:/.exec(air[0])[1];
-    // Keep the normal path reachable to WGSL reflection, retaining every
-    // original resource binding while submerged captures bypass air fog.
-    source=source.slice(0,start+1)+`if(F.screen.x>=0.0&&captureMode.x<.5){return ${argument};}`+source.slice(start+1);
-  }
+  source=withCapturedAir(source);
   const marker=new RegExp(`@fragment\\s+fn\\s+${entry}\\s*\\(`).exec(source);
   if(!marker)throw new Error(`Missing capture fragment ${entry}`);
   const argsStart=source.indexOf('(',marker.index),argsEnd=opticsMatching(source,argsStart,'(',')');
@@ -45,6 +38,16 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
   const materialSignature=`fn waterCaptureMaterial(${plain})->vec4f `;
   source=source.slice(0,marker.index)+materialSignature+source.slice(bodyStart);
   return WATER_CAPTURE_DIRECTIVE+source+waterCaptureWGSL({fragment:originalSignature,args:argumentsList,world,surfaceWaves,land});
+}
+
+// A capture's source whose `surfaceAir` (if it holds one) leaves its colour as it is under water, where the water's
+// surface applies the air once. The normal path stays reachable, so WGSL reflection keeps every binding it reads.
+export function withCapturedAir(source){
+  const air=/\bfn\s+surfaceAir\s*\([^)]*\)\s*->\s*vec3f\s*\{/m.exec(source);
+  if(!air)return source;
+  const start=source.indexOf('{',air.index);
+  const argument=/\(\s*(\w+)\s*:/.exec(air[0])[1];
+  return source.slice(0,start+1)+`if(F.screen.x>=0.0&&captureMode.x<.5){return ${argument};}`+source.slice(start+1);
 }
 
 // The early exit in a capture's fragment is not uniform control flow. Fragments beside a surviving one stay alive as

@@ -25,15 +25,14 @@ import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_TYPED_FLOATS,CITY_TYPE,CITY_TYPES_BRIDGES,compileCityBuildingTypes} from './old-world-buildings.js';
 import {cityContinuumMaterial} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,createCityContinuum} from './city-continuum-draw.js';
-import {requestContinuumPrograms,requestContinuumView} from './continuum-scene.js';
+import {requestContinuumPrograms,requestContinuumView,requestContinuumCapture} from './continuum-scene.js';
 import {continuumAtlasTypes} from './continuum-format.js';
 import {createCityTargets} from './city-targets.js';
 import {isPrefabContinuumInstance,prefabContinuumAtlas,prefabContinuumPlan,resolvePrefabContinuum} from './prefab-continuum.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize,landCraterMark} from './land-craters.js';
 import {createLandBanks} from './land-banks.js';
-import {bakeLandContinuumPiece,landContinuumSeams,requestLandContinuumPipelines,landContinuumViewPipeline,createLandContinuum} from './land-continuum.js';
-import {LAND_CONTINUUM_RENDER,LAND_CONTINUUM_ENTRY_LAYOUT} from './wgsl/land-continuum.js';
-import {continuumGroundWGSL,CONTINUUM_GROUND_LAND_BINDING} from './continuum-ground.js';
+import {bakeLandContinuumPiece,landContinuumSeams,requestLandContinuumPipelines,createLandContinuum} from './land-continuum.js';
+import {landContinuumMaterial} from './wgsl/land-continuum.js';
 import {sharedGroundDetail} from './ground-detail.js';
 import {sharedNeuralPbrBank} from './neural-pbr.js';
 import {withNeuralPbrTerrain} from './wgsl/neural-pbr.js';
@@ -1072,24 +1071,24 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
   const neuralPbr=sharedNeuralPbrBank(device);
   const terrainSource=withNeuralPbrTerrain(TERRAIN);
-  const modulePromise=shader(terrainSource+continuumGroundWGSL(2,CONTINUUM_GROUND_LAND_BINDING)+LAND_CONTINUUM_RENDER,'island terrain');
+  // The land itself, every piece cut by its own quadtree and drawn as a heightfield of the one family's programs
+  // (js/land-continuum.js, js/wgsl/land-continuum.js): its view, and under water the captures' coarser cut.
+  const landMaterial=landContinuumMaterial(terrainSource);
   // A city's buildings, through the one continuum: the city's material, shaded by the land's own surfaces, in a view
   // of its own (js/wgsl/city-continuum.js).
   const cityViewPromise=requestContinuumView({device,shader,material:cityContinuumMaterial(terrainSource),format,samples});
   // The ground cover's rocks, through the one continuum: their stone, lit by the land's light (js/wgsl/boulder-continuum.js).
   const boulderViewPromise=requestContinuumView({device,shader,material:BOULDER_CONTINUUM_MATERIAL_SPEC,format,samples});
   boulderViewPromise.catch(()=>{});
-  const terrainPipesPromise=modulePromise.then(module=>Promise.all([
+  const terrainPipesPromise=Promise.all([
     computePipe(TERRAIN_LIGHT,'island sunlight'),
-    module,
     cityViewPromise,
-    // The land itself, every piece cut through the one continuum (js/land-continuum.js).
-    landContinuumViewPipeline({device,module,format,samples}),
-  ]));
+    requestContinuumView({device,shader,material:landMaterial,format,samples}).then(view=>view.pipeline),
+  ]);
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
     // The land's coarser cut of the same patches, morphed at the captures' own pixel error.
-    wo.capture({source:terrainSource+LAND_CONTINUUM_RENDER,vertex:{entryPoint:'landContinuumCaptureVS',buffers:LAND_CONTINUUM_ENTRY_LAYOUT},entry:'landContinuumFS',world:'in.world',groups:3,land:true}),
+    requestContinuumCapture(wo,landMaterial),
   ]):[null]);
   submergedPipesPromise.catch(()=>{});
   // The rest of the land's programs, asked for now so that they compile while the land itself is being made. Left
@@ -1424,7 +1423,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const [lightPipe,module,cityView,landPipe]=await terrainPipesPromise;
+  const [lightPipe,cityView,landPipe]=await terrainPipesPromise;
   const cityPipe=cityView.pipeline;
   fractureView=cityView;
   requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}).then(programs=>{fracturePrograms=programs;},error=>console.error('struck buildings continuum',error));

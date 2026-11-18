@@ -37,8 +37,8 @@ test('the land shader never discards, fetches nothing before its cut, and crater
   assert.match(GROUND_DETAIL_RENDER,/if\(near<=0\.0\)\{return w;\}/);
   assert.match(body('landSurface'),/if\(gd\.near>0\.0\)\{\s*let look=groundDetailLook\(/);
   // Dug ground is the land's own fragments, lit by the pit where one reaches, so a pit's edge cannot show.
-  assert.match(body('landContinuumFS',LAND_CONTINUUM_RENDER),/landSurface\(in,landCraterPit\(in\.world,/);
-  assert.doesNotMatch(body('landContinuumFS',LAND_CONTINUUM_RENDER),/\bdiscard\b/);
+  assert.match(body('landContinuumShade',LAND_CONTINUUM_RENDER),/landSurface\(in,landCraterPit\(in\.world,/);
+  assert.doesNotMatch(body('landContinuumShade',LAND_CONTINUUM_RENDER),/\bdiscard\b/);
   assert.match(GROUND_DETAIL_BAKE,/@compute/);
 });
 

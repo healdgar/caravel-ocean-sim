@@ -44,7 +44,7 @@ export function requestContinuumView({ device, shader, material, format, samples
     const module = await shader(continuumModuleWGSL({ pass: 'view', material }), `${material.name} view`);
     const pipeline = await device.createRenderPipelineAsync({
       label: `${material.name} view`, layout: 'auto',
-      vertex: { module, entryPoint: 'continuumVS', buffers: CONTINUUM_ENTRY_LAYOUT },
+      vertex: { module, entryPoint: 'continuumVS', buffers: material.entryLayout ?? CONTINUUM_ENTRY_LAYOUT },
       fragment: { module, entryPoint: 'continuumFS', targets: [{ format }] },
       primitive: { topology: 'triangle-list', cullMode: material.cullMode },
       depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: samples },
@@ -59,7 +59,7 @@ export async function requestContinuumCapture(waterOptics, material) {
   const optics = await waterOptics;
   if (!optics) return null;
   const source = continuumModuleWGSL({ pass: 'capture', material, capture: { directive: optics.captureDirective, tail: (options) => optics.captureTail(options) } });
-  const capture = await optics.captureComposed({ source, vertex: { entryPoint: 'continuumCaptureVS', buffers: CONTINUUM_ENTRY_LAYOUT }, groups: 3 });
+  const capture = await optics.captureComposed({ source, vertex: { entryPoint: 'continuumCaptureVS', buffers: material.entryLayout ?? CONTINUUM_ENTRY_LAYOUT }, groups: 3 });
   return { ...capture, material };
 }
 // A capture's groups for a family, from its view's: `main` its group 0's entries, `shadows` the shadow set it is lit by

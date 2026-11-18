@@ -28,6 +28,7 @@ import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
 import { CONTINUUM_GROUND_PLACE_WGSL, CONTINUUM_GROUND_TEXELS, CONTINUUM_GROUND_LEVELS, CONTINUUM_GROUND_CUTS, CONTINUUM_GROUND_TILE } from '../continuum-ground.js';
 import { LAND_BANK_WGSL, LAND_BANK_LEVEL, LAND_BANK_CELL_M } from './land-banks.js';
 import { LAND_CRATER_GROUND } from './land-craters.js';
+import { withCapturedAir } from '../water-optics.js';
 
 export const LAND_CONTINUUM_PATCH = 16;
 // The patch sizes a list draws, finest first: the quadtree's patches, then the root's own far end.
@@ -397,7 +398,9 @@ fn landContinuumRelief(xz:vec2f,h:f32)->f32 { let hb=h+landBankAt(xz).x;return m
 fn landContinuumDug(xz:vec2f,level:u32)->f32 { return max(landCraterWaits(xz),select(0.0,landBankWaits(xz),level>=${LAND_BANK_LEVEL}u)); }
 `;
 export const LAND_CONTINUUM_RENDER = landContinuumData(2, 50, 'read') + LAND_CONTINUUM_HEIGHT + LAND_CONTINUUM_RELIEF + /* wgsl */`
-fn landContinuumVertex(vertex:u32,node:u32,pixels:f32)->LandVertex {
+fn landContinuumVertex(vertex:u32,node:u32,coarse:bool)->LandVertex {
+  // The water's captures draw the coarser cut, morphed at its own pixel error.
+  let pixels=select(landView.scene.x,landView.scene.y,coarse);
   let at=node*${LAND_CONTINUUM_NODE_WORDS}u;
   let corner=vec2i(i32(landNodes[at+6u]),i32(landNodes[at+7u]));
   let stride=1<<landNodes[at+8u];let c=landNodes[at+9u];
@@ -417,12 +420,21 @@ fn landContinuumVertex(vertex:u32,node:u32,pixels:f32)->LandVertex {
   o.pos=F.viewProj*vec4f(earthCurve(o.world+landContinuumShift()-F.camPos.xyz,F.camPos.y),1.0);
   return o;
 }
-@vertex fn landContinuumVS(@builtin(vertex_index) vertex:u32,@location(0) node:u32)->LandVertex { return landContinuumVertex(vertex,node,landView.scene.x); }
-// The water's captures draw the coarser cut, morphed at its own pixel error.
-@vertex fn landContinuumCaptureVS(@builtin(vertex_index) vertex:u32,@location(0) node:u32)->LandVertex { return landContinuumVertex(vertex,node,landView.scene.y); }
 // One shading for all land, dug or not: the pit lights what it reaches and leaves the rest plain.
-@fragment fn landContinuumFS(in:LandVertex)->@location(0) vec4f{
+fn landContinuumShade(in:LandVertex)->vec4f{
   let dx=dpdx(in.world);let dy=dpdy(in.world);
   return landSurface(in,landCraterPit(in.world,normalize(in.normal),dx,dy));
 }
 `;
+
+// The land as a material of the one family's programs (continuumModuleWGSL in js/wgsl/continuum-cut.js), a
+// heightfield: its view and its under-water capture, composed over the land's own shading (`landSource`, js/wgsl/
+// terrain.js), whose air the capture leaves to the water's surface (withCapturedAir).
+export function landContinuumMaterial(landSource) {
+  const captured = withCapturedAir(landSource);
+  return Object.freeze({
+    name: 'landContinuum', heightfield: true, varying: 'LandVertex', entryLayout: LAND_CONTINUUM_ENTRY_LAYOUT,
+    prelude: (pass) => (pass === 'capture' ? captured : landSource), core: true, wgsl: () => LAND_CONTINUUM_RENDER,
+    cullMode: 'none', capture: true,
+  });
+}
