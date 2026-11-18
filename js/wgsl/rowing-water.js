@@ -25,7 +25,7 @@ fn rowingWaterDisplacement(q:vec2f)->vec3f {
   }
   return value;
 }
-fn rowingWaterExtra(p:vec2f)->f32{return 0.0;}
+fn rowingWaterExtra(p:vec2f)->f32{return f32(0);}
 fn rowingWaterPast(q:vec2f)->vec4f {
   let delta=q-RW.previousDomain.xy;
   let uv=vec2f(dot(delta,RW.previousAxes.xy),dot(delta,RW.previousAxes.zw))/RW.previousDomain.zw+.5;

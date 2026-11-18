@@ -40,7 +40,7 @@ export async function createRowingWaterProbe({device,frameUBO,seaView,seaSampler
   const output=device.createBuffer({label:modelId+' rowing water field',size:bytes,usage:B.STORAGE|B.COPY_SRC});
   const read=device.createBuffer({label:modelId+' rowing water readback',size:bytes,usage:B.COPY_DST|B.MAP_READ});
   const uniform=device.createBuffer({label:modelId+' rowing water query',size:96,usage:B.UNIFORM|B.COPY_DST});
-  const source=surfaceWaves?coupleSurfaceHeight(ROWING_WATER_QUERY,'0.0','p',{uniformBinding:7,textureBinding:8,samplerName:'rowingWaterSampler'}):ROWING_WATER_QUERY;
+  const source=surfaceWaves?coupleSurfaceHeight(ROWING_WATER_QUERY,'f32(0)','p',{uniformBinding:7,textureBinding:8,samplerName:'rowingWaterSampler'}):ROWING_WATER_QUERY;
   const pipeline=await computePipe(source,'rowing actual water field');
   const groups=history.map((previous,i)=>(surfaceWaves?surfaceWaves.views:[null]).map(view=>device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:
     [{buffer:frameUBO},seaView,seaSampler,{buffer:previous},{buffer:history[1-i]},{buffer:output},{buffer:uniform},...(view?[{buffer:surfaceWaves.uniform},view]:[])].map((resource,binding)=>({binding,resource}))})));
