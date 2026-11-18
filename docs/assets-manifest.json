@@ -2605,14 +2605,14 @@
     "sha256": "74784e6d8ff93e7c4e7bf4a690ba257f15e2c859dd5f1e38d15bbe656d67cf86"
   },
   "assets/continuum/bake-worker.js": {
-    "url": "assets/continuum/bake-worker.ab18be33cf1673bc.js",
-    "bytes": 184898,
-    "sha256": "ab18be33cf1673bc4cfac505f4e899137bf2883f95ce7f6cc125dc35fac5fde9"
+    "url": "assets/continuum/bake-worker.1d0ac0795abea7d5.js",
+    "bytes": 185624,
+    "sha256": "1d0ac0795abea7d5e72cea2ba81d7d9d47c9a3a3b47cf733181c06b1737f3b2c"
   },
   "assets/prefab-continuum/manifest.json": {
-    "url": "assets/prefab-continuum/manifest.39e743c914e3191d.json",
-    "bytes": 198959,
-    "sha256": "39e743c914e3191db885f0c203b03a86be400def11a6435b390082757f3e5aa5"
+    "url": "assets/prefab-continuum/manifest.30ce93ffc3d07b50.json",
+    "bytes": 198940,
+    "sha256": "30ce93ffc3d07b50692aaf13bb385e0ad8b6e38342a6b89f92e8a9cfce05116e"
   },
   "assets/world/saba/manifest.json": {
     "url": "assets/world/saba/manifest.2697c31e9c5d8c95.json",
