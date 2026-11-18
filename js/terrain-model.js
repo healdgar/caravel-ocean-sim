@@ -166,16 +166,11 @@ export function classifyGroundingSubstrate(arg0, arg1, arg2 = {}, arg3 = null, a
   if (substrate && Object.hasOwn(GROUNDING_SUBSTRATES, substrate)) {
     return GROUNDING_SUBSTRATES[substrate];
   }
-  if (hitStructure) {
-    const pid = hitStructure.prefabId ?? '';
-    if (pid === 'stone_quay_seawall') {
-      return GROUNDING_SUBSTRATES.stone;
-    }
-    return GROUNDING_SUBSTRATES.shoal;
-  }
+  // A port's waterfront (js/board-waterfront.js) is what a keel strikes there: a stone quay, or the piles of a mole.
+  if (hitStructure) return hitStructure.kind === 'quay' ? GROUNDING_SUBSTRATES.stone : GROUNDING_SUBSTRATES.shoal;
   if (Array.isArray(ports)) {
     for (const port of ports) {
-      const instances = port?.instances;
+      const instances = port?.waterfront;
       if (!Array.isArray(instances) || !instances.length) continue;
       if (port.center && (port.clearRadius ?? 0) > 0) {
         const pRad = Math.max(port.clearRadius, port.reach ?? 0) + 140;
@@ -194,13 +189,7 @@ export function classifyGroundingSubstrate(arg0, arg1, arg2 = {}, arg3 = null, a
         const sinY = inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0);
         const lx = dx * cosY - dz * sinY;
         const lz = dx * sinY + dz * cosY;
-        if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) {
-          const pid = inst.prefabId ?? '';
-          if (pid === 'stone_quay_seawall') {
-            return GROUNDING_SUBSTRATES.stone;
-          }
-          return GROUNDING_SUBSTRATES.shoal;
-        }
+        if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) return inst.kind === 'quay' ? GROUNDING_SUBSTRATES.stone : GROUNDING_SUBSTRATES.shoal;
       }
     }
   }
@@ -315,7 +304,7 @@ export function probeHullBottomContact(heights, boat, x, z, region = ISLAND, sam
   if (Array.isArray(rawPorts)) {
     for (let p = 0; p < rawPorts.length; p++) {
       const port = rawPorts[p];
-      if (!Array.isArray(port?.instances) || !port.instances.length) continue;
+      if (!Array.isArray(port?.waterfront) || !port.waterfront.length) continue;
       if (port.center && (port.clearRadius ?? 0) > 0) {
         const pRad = Math.max(port.clearRadius, port.reach ?? 0) + L + 140;
         if (Math.abs(x - (port.center.x ?? 0)) > pRad || Math.abs(z - (port.center.z ?? 0)) > pRad) continue;
@@ -331,8 +320,7 @@ export function probeHullBottomContact(heights, boat, x, z, region = ISLAND, sam
     let ptStruct = null;
     if (nearPorts) {
       for (const port of nearPorts) {
-        const instances = port.instances;
-        for (const inst of instances) {
+        for (const inst of port.waterfront) {
           const baseY = inst.baseY ?? inst.y ?? 0;
           const foundDepth = inst.foundationDepth ?? 4.5;
           if (baseY - foundDepth > 0.5) continue;
@@ -602,4 +590,4 @@ export function constrainIslandMotion(heights,boat,previousX,previousZ,sample=nu
   if(boat.groundingPitch)boat.groundingPitch*=0.9;
   return false;
 }
-export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_1550_PORTS, HISTORICAL_COLONIAL_PORTS, findHistoricalColonialPort, hasHistorical1550ColonialPort, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, SOVEREIGN_INDIGENOUS_POLITIES, createIndigenousSovereigntyState, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, resetActiveIndigenousSovereigntyState, saveIndigenousSovereigntyToStorage, loadIndigenousSovereigntyFromStorage, serializeIndigenousSovereignty, restoreIndigenousSovereignty, resolveRegionSovereigntyRecord, applyIndigenousSupportAction, PORT_PREFABS, COCONUT_PALM_GENOME_SPEC, coastalUberNoise2D, coastalFrame, resolveGlobalCoastalRegion, classifyKoppenClimateFromNormals, estimateLocalClimateProfile, fetchPublicClimateProfile, synthesizeCoastalTerrain, synthesizeCoastalBeaches, synthesizeCoastalBiome, synthesizeCoastalAlbedo, placeCoastalPort, portClearanceEnvelope, buildPortPrefabGeometry, seedCoastalVegetation, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './coastal-world.js';
+export { SPANISH_MAIN_1550_REGIONS, COLONIAL_ERAS, resolveColonialEra, HISTORICAL_1550_PORTS, HISTORICAL_COLONIAL_PORTS, findHistoricalColonialPort, hasHistorical1550ColonialPort, computeColonyGrowthProfile, INDIGENOUS_CULTURE_REGIONS, UNINHABITED_PELAGIC_ISLANDS, resolveIndigenousCultureRegion, computeIndigenousSettlementProfile, SOVEREIGN_INDIGENOUS_POLITIES, createIndigenousSovereigntyState, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, resetActiveIndigenousSovereigntyState, saveIndigenousSovereigntyToStorage, loadIndigenousSovereigntyFromStorage, serializeIndigenousSovereignty, restoreIndigenousSovereignty, resolveRegionSovereigntyRecord, applyIndigenousSupportAction, COCONUT_PALM_GENOME_SPEC, coastalUberNoise2D, coastalFrame, resolveGlobalCoastalRegion, classifyKoppenClimateFromNormals, estimateLocalClimateProfile, fetchPublicClimateProfile, synthesizeCoastalTerrain, synthesizeCoastalBeaches, synthesizeCoastalBiome, synthesizeCoastalAlbedo, placeCoastalPort, portClearanceEnvelope, buildCityTypeGeometry, seedCoastalVegetation, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './coastal-world.js';

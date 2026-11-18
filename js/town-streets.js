@@ -1,14 +1,13 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// A town's ways, worked out once when its buildings are placed. Each door joins the ways by the
-// cheapest walk over the ground, so ways merge as real ones do, and how many trips cross a stretch
-// decides whether it is a street, a lane or a path. A road then leaves for the country.
-// The result is immutable: a distance field the land shader reads, and routes a compute pass walks.
-import { WALL_SOLID_HALF_WIDTH_M, enclosurePlan, pointOnEnclosureWall, pointWithinEnclosure } from './fort-plan.js';
+// A port's ways along its waterfront, worked out once when its board's country is laid: the quays, moles, slipways
+// and careening sheds js/board-waterfront.js lays (port.waterfront). Each door joins the ways by the cheapest walk over
+// the ground, so ways merge as real ones do, and how many trips cross a stretch decides whether it is a street, a lane
+// or a path. The town's own streets are its board's (paveCityStreets); a road leaves for the country only where the
+// board lays none. The result is immutable: a distance field the land shader reads, and routes a compute pass walks.
 
 const CELL_M = 2;
 // A deck that butts onto another, as a pier's head mole does, can be walked from one to the other.
 const DECK_RUNS_ON_M = 1;
-const BRIDGE_RAMP_M = 6.0;
 const SITE_MARGIN_M = 26;
 const MOST_TOWN_RADIUS_M = 560;
 const WALL_CLEARANCE_M = 1;
@@ -40,17 +39,13 @@ const INDOOR_SECONDS = [15, 80];
 const PAUSE_SECONDS = 9;
 const PAUSE_SHARE = 0.3;
 
-const NOT_WALKED_ON = new Set(['timber_mole_pier', 'stone_quay_seawall', 'stone_arch_bridge', 'indigenous_palisade_ring', 'english_triangular_palisade_fort']);
-const WITHOUT_DOORS = new Set(['stone_quay_seawall', 'stone_arch_bridge', 'indigenous_palisade_ring', 'english_triangular_palisade_fort', 'curtain_wall_and_gate', 'acueducto_de_piedra']);
-// Places in the open, where someone arriving stays in view rather than going indoors.
-const OPEN_AIR = new Set(['timber_mole_pier', 'open_lonja_loggia', 'indigenous_canoe_landing', 'taino_batey_court']);
-const DEFENCES = new Set(['torreon_atalaya_farol']);
+// Of the waterfront's kinds (js/board-waterfront.js): what is walked on rather than round, what has no door, and the
+// places in the open, where someone arriving stays in view rather than going indoors.
+const NOT_WALKED_ON = new Set(['pier', 'quay']);
+const WITHOUT_DOORS = new Set(['quay']);
+const OPEN_AIR = new Set(['pier']);
 // How often people have business at a place. Anything else counts for two.
-const PLACE_BUSINESS = Object.freeze({
-  timber_mole_pier: 5, open_lonja_loggia: 6, casa_de_contratacion: 5, catedral_basilica: 6, mission_chapel: 4, royal_warehouse: 4,
-  royal_atarazanas_arsenal: 3, palacio_del_gobernador: 3, mosteiro_dos_jeronimos: 3, colonial_town_block: 3,
-  torreon_atalaya_farol: 1, walled_mule_corral: 1, taino_batey_court: 5, taino_cacique_caney: 4, indigenous_canoe_landing: 4,
-});
+const PLACE_BUSINESS = Object.freeze({ pier: 5, slipway: 3, careening: 2 });
 // People abroad at once at each size of town, before those indoors are taken off.
 const TOWNSFOLK_BY_STAGE = Object.freeze({
   'citadel-metropolis': 520, 'fortified-port': 360, settlement: 220, outpost: 110,
@@ -163,18 +158,17 @@ function worldToLocal(inst, x, z) {
   const c = Math.cos(inst.yaw ?? 0), s = Math.sin(inst.yaw ?? 0), dx = x - inst.x, dz = z - inst.z;
   return { lx: dx * c - dz * s, lz: dx * s + dz * c };
 }
-// Whether a point stands inside one of a port's own solid buildings: `townSolids(port)` answers a test of it.
-// A pier, quay or bridge is walked on, a loggia or an aqueduct walked under, and of a fort only the wall is solid.
-// The buildings are sorted into squares once, since every point of every way the people of a founded board take
-// is asked (js/board-folk.js).
+// Whether a point stands inside one of the waterfront's solid works: `townSolids(port)` answers a test of it. A
+// quay or mole is walked on; a slipway or careening shed is walked round. The works are sorted into squares once,
+// since every point of every way the people of a founded board take is asked (js/board-folk.js).
 const SOLIDS_SQUARE_M = 24;
 export function townSolids(port, margin = 0.8) {
   const squares = new Map(), square = (i, j) => (i + 32768) * 65536 + (j + 32768);
-  for (const inst of port?.instances ?? []) {
-    if (deckOf(inst) || OPEN_AIR.has(inst.prefabId) || inst.prefabId === 'acueducto_de_piedra' || inst.prefabId === 'stone_arch_bridge') continue;
+  for (const inst of port?.waterfront ?? []) {
+    if (deckOf(inst) || OPEN_AIR.has(inst.kind)) continue;
     if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z) || !(inst.width > 0) || !(inst.length > 0)) continue;
-    const walled = enclosurePlan(inst), reach = Math.hypot(inst.width, inst.length) * 0.5 + margin + WALL_SOLID_HALF_WIDTH_M;
-    const entry = { inst, walled, c: Math.cos(inst.yaw ?? 0), s: Math.sin(inst.yaw ?? 0), hw: inst.width * 0.5 + margin, hl: inst.length * 0.5 + margin };
+    const reach = Math.hypot(inst.width, inst.length) * 0.5 + margin;
+    const entry = { inst, c: Math.cos(inst.yaw ?? 0), s: Math.sin(inst.yaw ?? 0), hw: inst.width * 0.5 + margin, hl: inst.length * 0.5 + margin };
     for (let i = Math.floor((inst.x - reach) / SOLIDS_SQUARE_M); i <= Math.floor((inst.x + reach) / SOLIDS_SQUARE_M); i++) {
       for (let j = Math.floor((inst.z - reach) / SOLIDS_SQUARE_M); j <= Math.floor((inst.z + reach) / SOLIDS_SQUARE_M); j++) {
         const at = square(i, j), list = squares.get(at);
@@ -185,21 +179,17 @@ export function townSolids(port, margin = 0.8) {
   return (x, z) => {
     const list = squares.get(square(Math.floor(x / SOLIDS_SQUARE_M), Math.floor(z / SOLIDS_SQUARE_M)));
     if (!list) return false;
-    for (const { inst, walled, c, s, hw, hl } of list) {
-      if (walled) { if (pointOnEnclosureWall(inst, walled, x, z)) return true; continue; }
+    for (const { inst, c, s, hw, hl } of list) {
       const dx = x - inst.x, dz = z - inst.z;
       if (Math.abs(dx * c - dz * s) <= hw && Math.abs(dx * s + dz * c) <= hl) return true;
     }
     return false;
   };
 }
-// The walkable top of a pier, quay or bridge, and how far either side of its middle one may walk.
+// The walkable top of a mole or quay, and how far either side of its middle one may walk: a mole's between its curbs.
 function deckOf(inst) {
-  const top = inst.y + inst.height;
-  if (inst.prefabId === 'timber_mole_pier') return { y: top, halfWidth: inst.width * 0.5 - 0.9 };
-  if (inst.prefabId === 'stone_quay_seawall') return { y: top, halfWidth: inst.width * 0.5 };
-  if (inst.prefabId === 'stone_arch_bridge') return { y: top - 0.85 + 0.14, halfWidth: Math.min(4.2, inst.width * 0.5) - 0.9 };
-  return null;
+  if (inst.deck == null) return null;
+  return { y: inst.y + inst.deck, halfWidth: inst.width * 0.5 - (inst.kind === 'pier' ? 0.9 : 0) };
 }
 
 function chaikin(points) {
@@ -237,7 +227,7 @@ function resample(points, step) {
 
 function chooseDoor(inst, grid, towards) {
   const hw = inst.width * 0.5, hl = inst.length * 0.5;
-  if (inst.prefabId === 'timber_mole_pier') {
+  if (inst.kind === 'pier') {
     // People walk out along the pier deck, stopping clear of the pierhead capstan and Padrão beacon plinth.
     const reach = Math.max(2.0, hl - 8.2);
     const a = localToWorld(inst, 0, reach), b = localToWorld(inst, 0, -reach);
@@ -249,10 +239,8 @@ function chooseDoor(inst, grid, towards) {
     const middle = localToWorld(inst, sx * hw, sz * hl);
     return { sx, sz, facing: (middle.x - inst.x) * (towards.x - inst.x) + (middle.z - inst.z) * (towards.z - inst.z) };
   });
-  // Colonial buildings have their door in the -X wall, and Indigenous houses in the -Z one.
-  const preferred = inst.indigenous ? [sides[2], sides[3], sides[0], sides[1]] : [sides[0], sides[1], sides[2], sides[3]];
-  const order = DEFENCES.has(inst.prefabId) ? [...sides].sort((a, b) => b.facing - a.facing) : preferred;
-  for (const { sx, sz } of order) {
+  // A shed's door is in its landward end (+z, its water end at -z), else in a side.
+  for (const { sx, sz } of [sides[3], sides[0], sides[1], sides[2]]) {
     const reach = (sx ? hw : hl) + WALL_CLEARANCE_M + CELL_M * 0.5;
     const outside = localToWorld(inst, sx * reach, sz * reach);
     const cell = nearestFreeCell(grid, outside.x, outside.z);
@@ -459,7 +447,7 @@ export function streetEdgeAt(streets, x, z) {
 }
 
 export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSize = MOST_FIELD_SIZE, suppressSyntheticCountryRoads = false } = {}) {
-  const all = port?.instances ?? [];
+  const all = port?.waterfront ?? [];
   if (all.length < 2 || !port.center) return null;
   const started = typeof performance === 'object' ? performance.now() : 0;
   const random = seededRandom(`${port.regionId ?? 'port'}:${port.year ?? 0}`);
@@ -496,23 +484,17 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     return Math.abs(lx) <= inst.width * 0.5 + margin && Math.abs(lz) <= inst.length * 0.5 + margin;
   };
   for (const inst of nearby) {
-    const reach = Math.hypot(inst.width, inst.length) * 0.5 + WALL_CLEARANCE_M + CELL_M * 2 + (inst.prefabId === 'stone_arch_bridge' ? BRIDGE_RAMP_M : 0);
+    const reach = Math.hypot(inst.width, inst.length) * 0.5 + WALL_CLEARANCE_M + CELL_M * 2;
     const i0 = Math.max(0, Math.floor((inst.x - reach - minX) / CELL_M)), i1 = Math.min(grid.nx - 1, Math.ceil((inst.x + reach - minX) / CELL_M));
     const j0 = Math.max(0, Math.floor((inst.z - reach - minZ) / CELL_M)), j1 = Math.min(grid.nz - 1, Math.ceil((inst.z + reach - minZ) / CELL_M));
     const deck = deckOf(inst);
     if (deck) decks.push({ inst, ...deck });
-    const walled = enclosurePlan(inst);
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const c = j * grid.nx + i;
-      // Nobody walks through a palisade: the way into a fort is by its gate.
-      if (walled && pointOnEnclosureWall(inst, walled, grid.x(c), grid.z(c))) grid.cost[c] = Infinity;
-      else if (walled && Number.isFinite(grid.cost[c]) && pointOnEnclosureWall(inst, walled, grid.x(c), grid.z(c), WALL_SOLID_HALF_WIDTH_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
       if (deck) {
         const { lx, lz } = worldToLocal(inst, grid.x(c), grid.z(c));
-        const runOn = inst.prefabId === 'stone_arch_bridge' ? BRIDGE_RAMP_M : DECK_RUNS_ON_M;
-        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && Math.abs(lz) <= inst.length * 0.5 + runOn) grid.cost[c] = 1;
-        else if (inst.prefabId === 'stone_arch_bridge' && Math.abs(lx) <= inst.width * 0.5 + WALL_CLEARANCE_M && Math.abs(lz) <= inst.length * 0.5 + BRIDGE_RAMP_M - 0.8) grid.cost[c] = Infinity;
-      } else if (!NOT_WALKED_ON.has(inst.prefabId)) {
+        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M) grid.cost[c] = 1;
+      } else if (!NOT_WALKED_ON.has(inst.kind)) {
         if (solid(inst, c, WALL_CLEARANCE_M)) grid.cost[c] = Infinity;
         else if (Number.isFinite(grid.cost[c]) && solid(inst, c, WALL_CLEARANCE_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
       }
@@ -524,41 +506,17 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     for (const { inst, y: top, halfWidth } of decks) {
       const { lx, lz } = worldToLocal(inst, x, z);
       if (Math.abs(lx) > halfWidth + 1.2) continue;
-      const hl = inst.length * 0.5;
-      if (inst.prefabId === 'stone_arch_bridge') {
-        if (Math.abs(lz) <= hl) {
-          if (top > y) y = top;
-        } else if (Math.abs(lz) <= hl + BRIDGE_RAMP_M) {
-          const t = 1 - (Math.abs(lz) - hl) / BRIDGE_RAMP_M;
-          const ry = gy + (top - gy) * Math.max(0, Math.min(1, t));
-          if (ry > y) y = ry;
-        }
-      } else if (Math.abs(lz) <= hl + DECK_RUNS_ON_M && top > y) {
-        y = top;
-      }
+      if (Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M && top > y) y = top;
     }
     return y;
   };
 
-  // Doors and axial bridge deck portals (so town ways meet bridge ends head-on rather than skirting banks).
+  // Doors.
   const doors = [];
   for (const inst of nearby) {
-    if (inst.prefabId === 'stone_arch_bridge') {
-      const hl = inst.length * 0.5;
-      const portalReach = hl + BRIDGE_RAMP_M + CELL_M * 0.5;
-      for (const sign of [-1, 1]) {
-        const outside = localToWorld(inst, 0, sign * portalReach);
-        const inside = localToWorld(inst, 0, sign * Math.max(0, hl - 1.8));
-        const cell = nearestFreeCell(grid, outside.x, outside.z);
-        if (cell >= 0 && Math.hypot(grid.x(cell) - outside.x, grid.z(cell) - outside.z) <= CELL_M * 3) {
-          doors.push({ inst, cell, outside, inside, business: 4 });
-        }
-      }
-      continue;
-    }
-    if (WITHOUT_DOORS.has(inst.prefabId)) continue;
+    if (WITHOUT_DOORS.has(inst.kind)) continue;
     const door = chooseDoor(inst, grid, centre);
-    if (door) doors.push({ ...door, business: PLACE_BUSINESS[inst.prefabId] ?? 2 });
+    if (door) doors.push({ ...door, business: PLACE_BUSINESS[inst.kind] ?? 2 });
   }
   if (doors.length < 2) return null;
 
@@ -601,8 +559,8 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
   }
   for (const door of doors) if (onWay[door.cell]) joined.add(door);
   const reachable = doors.filter((door) => joined.has(door));
-  // A fort or a lookout may stand off by itself on a point of land. Anything else with no way to it is a fault.
-  const strandedDoors = doors.filter((door) => !joined.has(door) && door.inst.prefabId !== 'torreon_atalaya_farol').map((door) => door.inst.prefabId);
+  // Anything with no way to it is a fault.
+  const strandedDoors = doors.filter((door) => !joined.has(door)).map((door) => door.inst.kind);
   const stranded = strandedDoors.length;
 
   // A tree of ways sends people the long way round. Where two neighbours are far apart by road, link them.
@@ -712,15 +670,12 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       roadGrid.cost[c] = grade > ROAD_MOST_GRADE ? Infinity : 1 + ROAD_WANDER * (1 + wander * 0.5) + 30 * grade * grade;
     }
     for (const inst of all) {
-      const walled = enclosurePlan(inst);
       const r = Math.hypot(inst.width, inst.length) * 0.5 + 2 + ROAD_CELL_M;
       const i0 = Math.floor((inst.x - r - roadGrid.minX) / ROAD_CELL_M), i1 = Math.ceil((inst.x + r - roadGrid.minX) / ROAD_CELL_M);
       const j0 = Math.floor((inst.z - r - roadGrid.minZ) / ROAD_CELL_M), j1 = Math.ceil((inst.z + r - roadGrid.minZ) / ROAD_CELL_M);
       for (let j = Math.max(0, j0); j <= Math.min(roadGrid.nz - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(roadGrid.nx - 1, i1); i++) {
         const c = j * roadGrid.nx + i;
-        // A road is too coarse to find a gate, so it keeps out of a fort altogether.
-        if (walled && pointWithinEnclosure(inst, walled, roadGrid.x(c), roadGrid.z(c), ROAD_CELL_M)) roadGrid.cost[c] = Infinity;
-        if (NOT_WALKED_ON.has(inst.prefabId)) continue;
+        if (NOT_WALKED_ON.has(inst.kind)) continue;
         const { lx, lz } = worldToLocal(inst, roadGrid.x(c), roadGrid.z(c));
         if (Math.abs(lx) <= inst.width * 0.5 + 2 && Math.abs(lz) <= inst.length * 0.5 + 2) roadGrid.cost[c] = Infinity;
       }
@@ -789,7 +744,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       const [x, z] = line[k];
       const c = grid.at(x, z);
       const halfWidth = c >= 0 && onWay[c] ? Math.min(widthOf(c) * 0.5, roomOf(c)) : narrowest * 0.5;
-      const onPier = (a.inst.prefabId === 'timber_mole_pier' || b.inst.prefabId === 'timber_mole_pier') && climbed[k] > 1.8;
+      const onPier = (a.inst.kind === 'pier' || b.inst.kind === 'pier') && climbed[k] > 1.8;
       routeSamples.push(x, climbed[k], z, Math.max(0, halfWidth - (onPier ? 1.15 : 0.45)));
     }
     return { first, count: line.length, length: (line.length - 1) * ROUTE_STEP_M };
@@ -805,9 +760,9 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     const speed = WALKING_SPEEDS[0] + (WALKING_SPEEDS[1] - WALKING_SPEEDS[0]) * random();
     const pauses = random() < PAUSE_SHARE;
     let first = route.first, count = route.count;
-    if (count > 8 && OPEN_AIR.has(trip.b.inst.prefabId)) {
+    if (count > 8 && OPEN_AIR.has(trip.b.inst.kind)) {
       count = Math.max(4, count - (w % Math.min(8, Math.floor(count * 0.35))));
-    } else if (count > 8 && OPEN_AIR.has(trip.a.inst.prefabId)) {
+    } else if (count > 8 && OPEN_AIR.has(trip.a.inst.kind)) {
       const trim = w % Math.min(8, Math.floor(count * 0.35));
       first += trim;
       count -= trim;
@@ -823,8 +778,8 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     floats[at + 8] = (count - 1) * ROUTE_STEP_M;
     floats[at + 9] = random(); // How readily they stay out after dark.
     words[at + 10] = Math.floor(random() * 0xffff);
-    const pierTrip = trip.a.inst.prefabId === 'timber_mole_pier' || trip.b.inst.prefabId === 'timber_mole_pier';
-    words[at + 11] = (w & 1) | (OPEN_AIR.has(trip.a.inst.prefabId) ? 2 : 0) | (OPEN_AIR.has(trip.b.inst.prefabId) ? 4 : 0) | (pierTrip ? 8 : 0);
+    const pierTrip = trip.a.inst.kind === 'pier' || trip.b.inst.kind === 'pier';
+    words[at + 11] = (w & 1) | (OPEN_AIR.has(trip.a.inst.kind) ? 2 : 0) | (OPEN_AIR.has(trip.b.inst.kind) ? 4 : 0) | (pierTrip ? 8 : 0);
   }
 
   const mounts = null;
@@ -832,7 +787,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
   return {
     window, field, size,
     ways: fieldWays,
-    doors: reachable.map((door) => ({ prefabId: door.inst.prefabId, x: door.outside.x, z: door.outside.z })),
+    doors: reachable.map((door) => ({ kind: door.inst.kind, x: door.outside.x, z: door.outside.z })),
     samples: new Float32Array(routeSamples),
     walkers: floats,
     mounts,

@@ -150,8 +150,9 @@ export function computeTownAmbienceState(arg1,arg2,arg3={}){
   if(!nearest||bestDist>320){
     return {active:false,nearTown:false,distance:Infinity,gain:0,crowdGain:0,busyWalkGain:0,pan:0,underFire:false,hasIndigenous:false,cultureId:null,position:null,livingBuildings:0,livingPeople:0,dayFactor:1};
   }
-  const instances=Array.isArray(nearest.instances)?nearest.instances:[];
-  const livingBuildings=instances.length?instances.filter(inst=>!inst?.damage?.collapsed&&inst?.damageState?.state!=='ruined').length:12;
+  // A town is heard as a dozen houses' worth, less those its struck buildings (port.instances, js/city-targets.js) have lost.
+  const struck=Array.isArray(nearest.instances)?nearest.instances:[];
+  const livingBuildings=Math.max(0,12-struck.filter(inst=>inst?.damage?.collapsed||inst?.damageState?.state==='ruined').length);
   const rawPeople=nearest.streets?.people??nearest.townsfolk?.people??0;
   const livingPeople=typeof rawPeople==='number'?rawPeople:Array.isArray(rawPeople)?rawPeople.filter(p=>p&&p.alive!==false&&!p.dead).length:0;
   const dayFactor=sunElev>2?1:sunElev>-6?0.58:0.28;

@@ -20,15 +20,14 @@ export const PROP_MODELS = Object.freeze([
 ]);
 export const PROP_WORDS = 8;
 const CLEAT = 0, FIRST_JETTY = 1, JETTY_KINDS = 2;
-const CLEAT_SPACING_M = 9, CLEAT_END_CLEARANCE_M = 3, CLEAT_EDGE_INSET_M = 0.55;
-const QUAY_SEA_PROBE_M = 3;
+const CLEAT_EDGE_INSET_M = 0.55;
 const JETTY_DECK_ABOVE_SEA_M = 1.5;
 const JETTY_NEAREST_M = 60, JETTY_FURTHEST_M = 600, JETTY_WALK_M = 6, JETTY_BEARINGS = 96, JETTY_MOST = 2;
 const JETTY_OUT_M = 5, JETTY_ROOT_HIGHEST_M = JETTY_DECK_ABOVE_SEA_M, JETTY_SLOPE_PROBE_M = 12;
 const JETTY_BUILDING_GAP_M = 12, JETTY_APART_M = 70;
-const CLEATED = Object.freeze({ timber_mole_pier: 'both', stone_quay_seawall: 'sea' });
-// A timber pier as js/coastal-world.js builds it, measured along it from its middle. Its piles stand in bents, with
-// a bollard post on every other bent. Its crane and its boarding brow take up part of its +x edge.
+// A timber mole of the waterfront (js/board-waterfront.js) as js/coastal-world.js builds it, measured along it from its
+// middle. Its piles stand in bents, with a bollard post on every other bent. Its crane and its boarding brow take up
+// part of its +x edge. A stone quay's bollards and cleats are its own type's, built with it.
 const PIER_BENT_INSET_M = 1.2, PIER_BAY_M = 4.8, PIER_FEWEST_BAYS = 4;
 const PIER_CRANE_CLEAR_M = 2.2, PIER_BROW_CLEAR_M = 0.5;
 export function pierBentStations(length) {
@@ -48,34 +47,25 @@ const loadedPropModels = new Array(PROP_MODELS.length).fill(null);
 
 const footprintRadius = (inst) => Math.hypot(inst.length ?? 20, inst.width ?? 16) / 2;
 
-function layCleats(port, groundAt, add) {
-  (port.instances ?? []).forEach((inst, owner) => {
-    const sides = CLEATED[inst.prefabId];
-    if (!sides) return;
-    const halfLength = inst.length / 2, halfWidth = inst.width / 2, c = Math.cos(inst.yaw), s = Math.sin(inst.yaw);
+// A cleat along both edges of every mole, owned by the mole's piece of the city (its index among the city's types):
+// it goes when the mole does.
+function layCleats(port, add) {
+  for (const inst of port.waterfront ?? []) {
+    if (inst.kind !== 'pier') continue;
+    const halfWidth = inst.width / 2, c = Math.cos(inst.yaw), s = Math.sin(inst.yaw);
     const world = (lx, lz) => [inst.x + lx * c + lz * s, inst.z - lx * s + lz * c];
-    let edges = [-1, 1];
-    if (sides === 'sea') {
-      const low = (side) => { const [x, z] = world(side * (halfWidth + QUAY_SEA_PROBE_M), 0); return groundAt(x, z); };
-      edges = [low(-1) < low(1) ? -1 : 1];
-    }
-    const top = inst.y + inst.height, stations = [];
-    if (sides === 'both') {
-      // Midway between bents in every other bay, so no cleat stands in a pile head or on a bollard post.
-      const bents = pierBentStations(inst.length);
-      for (let b = 1; b + 1 < bents.length; b += 2) stations.push((bents[b] + bents[b + 1]) / 2);
-    } else {
-      const count = Math.floor((inst.length - 2 * CLEAT_END_CLEARANCE_M) / CLEAT_SPACING_M);
-      for (let k = 0; k <= count; k++) stations.push(-halfLength + CLEAT_END_CLEARANCE_M + k * CLEAT_SPACING_M);
-    }
+    const top = inst.y + inst.deck, stations = [];
+    // Midway between bents in every other bay, so no cleat stands in a pile head or on a bollard post.
+    const bents = pierBentStations(inst.length);
+    for (let b = 1; b + 1 < bents.length; b += 2) stations.push((bents[b] + bents[b + 1]) / 2);
     const crane = pierCraneStation(inst.length), [browFrom, browTo] = pierBrowStations(inst.length);
-    const taken = (edge, along) => sides === 'both' && edge > 0 && (Math.abs(along - crane) < PIER_CRANE_CLEAR_M || (along > browFrom - PIER_BROW_CLEAR_M && along < browTo + PIER_BROW_CLEAR_M));
-    for (const edge of edges) for (const along of stations) {
+    const taken = (edge, along) => edge > 0 && (Math.abs(along - crane) < PIER_CRANE_CLEAR_M || (along > browFrom - PIER_BROW_CLEAR_M && along < browTo + PIER_BROW_CLEAR_M));
+    for (const edge of [-1, 1]) for (const along of stations) {
       if (taken(edge, along)) continue;
       const [x, z] = world(edge * (halfWidth - CLEAT_EDGE_INSET_M), along);
-      add(CLEAT, x, top, z, inst.yaw, owner);
+      add(CLEAT, x, top, z, inst.yaw, inst.piece ?? -1);
     }
-  });
+  }
 }
 
 // Out from the town along each bearing to where the ground meets the sea, nearest first.
@@ -95,7 +85,7 @@ function shoreSpots(centre, groundAt) {
 function layJetties(port, groundAt, add) {
   // Plank jetties belong to colonial towns. Every port carries a settlement profile, so ask what it says.
   if (port.indigenousSettlement?.isSovereignPolity) return;
-  const taken = [], instances = port.instances ?? [];
+  const taken = [], instances = port.waterfront ?? [];
   const clearOfBuildings = (x, z) => instances.every((inst) => Math.hypot(inst.x - x, inst.z - z) > footprintRadius(inst) + JETTY_BUILDING_GAP_M);
   for (const { x, z } of shoreSpots(port.center, groundAt)) {
     if (taken.length >= JETTY_MOST) return;
@@ -111,16 +101,19 @@ function layJetties(port, groundAt, add) {
   }
 }
 
-// Each prop as model, place, turn and the building it stands on, if any: what goes with it when that goes.
+// Each prop as model, place, turn and the piece of the city it stands on, if any (`owner`, its index among the city's
+// types, or -1): what goes with it when that goes.
 export function layPortProps(port, groundAt) {
   const placed = [];
   const add = (model, x, y, z, yaw, owner) => placed.push({ model, x, y, z, yaw, owner });
-  if (port?.instances?.length && port.center) {
-    layCleats(port, groundAt, add);
+  if (port?.center) {
+    layCleats(port, add);
     layJetties(port, groundAt, add);
   }
   return placed;
 }
+// The building a prop stands on, once a shot has made it one of the port's own (js/city-targets.js), or null.
+export const propOwner = (port, prop) => (prop.owner >= 0 ? port?.instances?.find((inst) => inst?.city?.index === prop.owner) ?? null : null);
 
 function partitionPropModel(rawVertices, rawIndices, height, spec = {}) {
   const isJetty = Boolean(spec.deckShare) || (spec.metres ?? 1) >= 4;
@@ -734,7 +727,7 @@ export function sweepJettySegment(from, to, radius = 0.08, port, options = null)
     if (!prop || !(prop.model >= 0)) continue;
     if (options?.ignore === prop) continue;
     if (prop.owner >= 0) {
-      const ownerState = port.instances?.[prop.owner]?.damageState?.state;
+      const ownerState = propOwner(port, prop)?.damageState?.state;
       if (ownerState === 'ruined' || ownerState === 'breached') continue;
     }
     const model = prop.fracture?.model ?? loadedPropModels[prop.model];

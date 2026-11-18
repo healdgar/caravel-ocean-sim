@@ -78,8 +78,8 @@ export function forestGroveCover({ region, heights, biome, beaches = null, port 
   const inside = span / 2 - 0.01;
   const ground = (x, z) => terrainSurfaceSample(heights, Math.max(region.x - inside, Math.min(region.x + inside, x)), Math.max(region.z - inside, Math.min(region.z + inside, z)), region);
   const town = port?.clearRadius > 0 ? port : null;
-  const pad = town ? (town.hasOrthophotoFootprints ? 8 : town.hasIndigenousSettlement ? 8.5 : 10) : 0;
-  const cleared = town && !town.hasOrthophotoFootprints && !town.hasIndigenousSettlement ? (town.clearRadius * 0.38) ** 2 : 0;
+  const pad = town ? (town.hasIndigenousSettlement ? 8.5 : 10) : 0;
+  const cleared = town && !town.hasIndigenousSettlement ? (town.clearRadius * 0.38) ** 2 : 0;
   const waterWide = port?.country ? createInlandWaterSampler(port.country, { margin: 8.0 }) : null;
   for (let j = 0; j < size; j++) {
     const z = z0 + (j + 0.5) * step, row = Math.min(mask - 1, Math.floor((j + 0.5) * mask / size)) * mask;
@@ -206,5 +206,5 @@ export function forestGroveStamp(section, planted) {
   for (let i = 0; i < heights.length; i += 7) ground = (ground * 31 + Math.round(heights[i] * 64)) | 0;
   for (let i = 0; i < biome.length; i += 5) marked = (marked * 33 + biome[i]) | 0;
   for (let i = 0; i < planted.length; i += FOREST_GROVE_ROOT_FLOATS) trees = (trees * 31 + Math.round(planted[i] * 8) + Math.round(planted[i + 2] * 8) * 7) | 0;
-  return [region.x, region.z, region.span, region.size, region.biomeSize, ground, marked, trees, section.port?.instances?.length ?? 0, section.port?.streets?.size ?? 0, section.beaches?.drySandMask ? 1 : 0, section.port?.country?.riverReaches?.length ?? 0].join(',');
+  return [region.x, region.z, region.span, region.size, region.biomeSize, ground, marked, trees, section.port?.waterfront?.length ?? 0, section.port?.streets?.size ?? 0, section.beaches?.drySandMask ? 1 : 0, section.port?.country?.riverReaches?.length ?? 0].join(',');
 }

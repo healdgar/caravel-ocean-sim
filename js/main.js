@@ -3461,10 +3461,10 @@ async function main() {
       const port=nearestFoundedPort(HISTORICAL_COLONIAL_PORTS,v.true.lat,v.true.lon,new Date(v.dateMs).getUTCFullYear());
       return port&&careerGreatCircleKm(v.true.lat,v.true.lon,port.latitude,port.longitude)<=PILOT_RANGE_KM?port:null;
     };
+    // Within reach of what the port's board built at its water or as its works.
     const nearPortBuildings=()=>{
-      const instances=terrain?.port?.instances;
-      if(!instances?.length)return false;
-      for(const inst of instances)if(Math.hypot((inst.x??0)-boat.x,(inst.z??0)-boat.z)<=700)return true;
+      const port=terrain?.port;
+      for(const built of [...(port?.waterfront??[]),...(port?.works??[])])if(Math.hypot((built.x??0)-boat.x,(built.z??0)-boat.z)<=700)return true;
       return false;
     };
     const mooredAtPier=()=>dockingBoarding.state.mooringPhase==='moored'&&dockingBoarding.state.mooringTargetKind==='pier';
@@ -4380,9 +4380,9 @@ async function main() {
     if(port.center&&Number.isFinite(port.center.x)&&Number.isFinite(port.center.z)){
       best=Math.hypot(port.center.x+off.x-boat.x,port.center.z+off.z-boat.z);
     }
-    for(const inst of port.instances??[]){
-      if(!inst)continue;
-      const d=Math.hypot((inst.x??0)+off.x-boat.x,(inst.z??0)+off.z-boat.z);
+    for(const built of [...(port.waterfront??[]),...(port.works??[])]){
+      if(!built)continue;
+      const d=Math.hypot((built.x??0)+off.x-boat.x,(built.z??0)+off.z-boat.z);
       if(d<best)best=d;
     }
     return best;

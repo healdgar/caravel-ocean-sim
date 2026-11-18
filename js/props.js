@@ -7,7 +7,7 @@
 // js/wgsl/continuum-kinds.js), each a cut of its own clusters riding its flight. The balls are placed each update by the gunnery effects (js/gunnery-effects.js shot).
 // The models' physics (js/port-props.js) is read from the same files the atlas was baked from, and their textures,
 // decoded by the browser, are loaded only once a port needs them.
-import { PROP_MODELS, preparePortJetties, propDrawRadius, readPropModel, stepJettyFracture } from './port-props.js';
+import { PROP_MODELS, preparePortJetties, propDrawRadius, propOwner, readPropModel, stepJettyFracture } from './port-props.js';
 import { SIM_CLOCK_LOOP_S } from './wgsl/common.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { GUNNERY_FX_LIMITS } from './gunnery-effects.js';
@@ -114,7 +114,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
   }
 
   const ownerGone = (inst) => { const state = inst?.damageState?.state; return state === 'ruined' || state === 'breached'; };
-  const ownerStateOf = (item) => item.inst?.damageState?.state ?? null;
+  const ownerStateOf = (item) => item.owner?.inst?.damageState?.state ?? null;
   // A prop as it now stands: gone with what it stood on or when nothing of it is left; broken, its shards flying on
   // their own records, once a shot has moved any; and how far past its model's sphere its timber may lie. One laid on
   // the land itself (`grounded`) stands on the ground the land draws; none laid today is (js/port-props.js: cleats on
@@ -137,14 +137,14 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     preparePortJetties(port, kit.models);
     let recordFloats = 0;
     const entries = placed.map((prop, at) => {
-      const item = { at, prop, inst: prop.owner >= 0 ? port.instances[prop.owner] : null, block: recordFloats, struck: null };
+      const item = { at, prop, owner: null, block: recordFloats, struck: null };
       recordFloats += propBlockFloats(prop.fracture.flight.records);
       return item;
     });
     const recordData = new Float32Array(recordFloats), struck = new Set(), owners = new Map();
     const records = buffer('prop shard records', recordData, B.STORAGE);
     const continuum = propScene(PROP_CONTINUUM_TYPES.map((_, t) => placed.filter((p) => p.model === t).length), 'props', records);
-    scene = { count: placed.length, continuum, records, recordData, entries, owners, struck, flying: new Set() };
+    scene = { port, count: placed.length, continuum, records, recordData, entries, owners, struck, flying: new Set() };
     for (const item of entries) {
       const state = item.prop.fracture;
       recordData[item.block + 1] = state.flight.records.length / SHARD_FLOATS;
@@ -154,7 +154,13 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
       state.onStruck = item.struck;
       // Timber still in the air from before this port was last out of reach: the first frame sets its clock.
       if (state.flight.flying.size) struck.add(item);
-      if (item.inst) { if (!owners.has(item.inst)) owners.set(item.inst, { gone: ownerGone(item.inst), items: [] }); owners.get(item.inst).items.push(item); }
+      // The piece it stands on, by its index among the city's types: a building of the port's own once a shot strikes it.
+      if (item.prop.owner >= 0) {
+        if (!owners.has(item.prop.owner)) owners.set(item.prop.owner, { inst: propOwner(port, item.prop), gone: false, items: [] });
+        item.owner = owners.get(item.prop.owner);
+        item.owner.items.push(item);
+        item.owner.gone = ownerGone(item.owner.inst);
+      }
       placeProp(item);
     }
     device.queue.writeBuffer(records, 0, recordData);
@@ -171,10 +177,12 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     flight.dirty.clear();
     device.queue.writeBuffer(scene.records, item.block * 4, data, item.block, length);
   }
-  // What stood on a pier goes when the pier does. A pier is asked, not each thing on it.
+  // What stood on a pier goes when the pier does. A pier is asked, not each thing on it; it is found among the port's
+  // own once struck.
   function followOwners() {
-    for (const [inst, owner] of scene.owners) {
-      const gone = ownerGone(inst);
+    for (const owner of scene.owners.values()) {
+      owner.inst ??= propOwner(scene.port, owner.items[0].prop);
+      const gone = ownerGone(owner.inst);
       if (gone === owner.gone) continue;
       owner.gone = gone;
       for (const item of owner.items) sendProp(item);

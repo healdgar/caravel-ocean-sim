@@ -1,5 +1,5 @@
 import { footingUnder, restingHeightUnder } from './building-fracture.js';
-import { WORK_GUNNER_BACK_M, WORK_GUNNER_BESIDE_M, enclosurePlan, insetOutline, portWorkBuildings, traceWalls, workPieceUnder } from './fort-plan.js';
+import { WORK_GUNNER_BACK_M, WORK_GUNNER_BESIDE_M, insetOutline, portWorkBuildings, traceWalls, workPieceUnder } from './fort-plan.js';
 import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
 import { gltfTRS, readGLB, gltfAccessor } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
@@ -792,29 +792,9 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   };
 }
 
-export const FORTIFICATION_PREFAB_IDS = Object.freeze([
-  // The works a board stands (js/fort-plan.js portWorkBuildings).
-  'city_fort',
-  'city_battery',
-  'city_watchtower',
-  'torreon_atalaya_farol',
-  'curtain_wall_and_gate',
-  'english_triangular_palisade_fort',
-]);
-
-export const INDIGENOUS_VILLAGE_PREFAB_IDS = Object.freeze([
-  'abenaki_birchbark_wigwam',
-  'algonquian_longhouse',
-  'indigenous_palisade_ring',
-  'taino_cacique_caney',
-  'taino_circular_bohio',
-  'taino_batey_court',
-  'kalinago_carbet_hall',
-  'tupinamba_oca_longhouse',
-  'palafito_estuary_village',
-  'maya_limestone_shrine_and_na',
-  'indigenous_canoe_landing',
-]);
+// The works a board stands (js/fort-plan.js portWorkBuildings): the only posts a port mans. Whoever else is ashore is a
+// person of its board's model (js/board-folk.js).
+export const FORTIFICATION_PREFAB_IDS = Object.freeze(['city_fort', 'city_battery', 'city_watchtower']);
 
 let cachedIndigenousModels = new WeakMap();
 
@@ -1722,17 +1702,14 @@ const GARRISON_TROUSERS = Object.freeze([
 ]);
 
 export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
-  if (!inst || !FORTIFICATION_PREFAB_IDS.includes(inst.prefabId)) return [];
-  const hw = (inst.width ?? 24) * 0.5;
-  const hl = (inst.length ?? 28) * 0.5;
+  if (!inst?.trace || !FORTIFICATION_PREFAB_IDS.includes(inst.prefabId)) return [];
   const yGround = inst.y ?? 0;
   const yTop = yGround + (inst.height ?? 8);
   const cosY = Math.cos(inst.yaw ?? 0);
   const sinY = Math.sin(inst.yaw ?? 0);
-  const wallT = 1.75;
   const specs = [];
 
-  if (inst.trace) {
+  {
     // A work's garrison (js/fort-plan.js portWorkBuildings): a gunner beside each gun, sentries on its salients, on its
     // longest walls and at its gate.
     const yDeck = yTop - 0.85, trace = inst.trace;
@@ -1759,96 +1736,6 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     for (const hand of [-1, 1]) {
       const gateX = gate.x - gate.nx * 3.2 + gate.ux * 2.6 * hand, gateZ = gate.z - gate.nz * 3.2 + gate.uz * 2.6 * hand;
       if (free(gateX, gateZ)) specs.push({ lx: gateX, ly: yDeck, lz: gateZ, routeZ: [gateZ, gateZ], localYaw: Math.atan2(gate.nx, gate.nz), role: 'Guardia de Puerta', stationKind: 'rampart' });
-    }
-  } else if (inst.prefabId === 'torreon_atalaya_farol') {
-    const rBase = Math.min(hw, hl);
-    const yPlinth = yGround + 0.85;
-    const cairnName = String(inst.cairnSpec?.name ?? inst.label ?? '');
-    if (cairnName.includes('Torre de Belém')) {
-      // Torre de Belém: 2 lookouts on the Keep crown (yGround + 21.0, z = 2..11) + 4 sentries on the seaward Bastion deck (yGround + 6.4, z = -9..1)
-      const yKeepRoof = yGround + 21.0;
-      const yBastionDeck = yGround + 6.4;
-      for (const sx of [-1, 1]) {
-        specs.push({ lx: sx * 2.8, ly: yKeepRoof, lz: 6.7, routeZ: [4.2, 9.2], localYaw: sx < 0 ? 0 : Math.PI, role: 'Vigía da Torre', stationKind: 'crown' });
-        specs.push({ lx: sx * 4.6, ly: yBastionDeck, lz: -6.2, routeZ: [-8.2, -3.2], localYaw: Math.PI, role: 'Bombardeiro do Baluarte', stationKind: 'rampart' });
-        specs.push({ lx: sx * 3.0, ly: yBastionDeck, lz: -10.8, routeZ: [-11.6, -9.8], localYaw: Math.PI, role: 'Alabardeiro Real', stationKind: 'plinth' });
-      }
-    } else if (cairnName.includes('Torreão do Paço')) {
-      // Torreão do Paço da Ribeira: 2 guards on the Seaward Royal Balcony (yGround + 7.9) + 2 sentries on the Crown Cornice (yGround + 15.65) + 2 at Water Stairs (yGround + 1.4)
-      for (const sx of [-1, 1]) {
-        specs.push({ lx: sx * 6.0, ly: yGround + 15.65, lz: -2.0, routeZ: [-6.5, 2.5], localYaw: Math.PI, role: 'Vigía do Torreão', stationKind: 'crown' });
-        specs.push({ lx: sx * 2.4, ly: yGround + 7.9, lz: -9.7, routeZ: [-9.7, -9.7], localYaw: Math.PI, role: 'Guarda Real da Varanda', stationKind: 'rampart' });
-        specs.push({ lx: sx * 3.2, ly: yGround + 1.4, lz: -9.8, routeZ: [-9.8, -9.8], localYaw: Math.PI, role: 'Alabardeiro do Cais', stationKind: 'plinth' });
-      }
-    } else if (inst.materialKind === 10) {
-      for (const sx of [-1, 1]) {
-        specs.push({ lx: sx * rBase * 0.35, ly: yTop, lz: -rBase * 0.35, routeZ: [-rBase * 0.35, -rBase * 0.35], localYaw: Math.PI, role: 'Vigía de Atalaya', stationKind: 'crown' });
-        specs.push({ lx: sx * rBase * 0.68, ly: yPlinth, lz: -rBase - 0.35, routeZ: [-rBase - 0.35, -rBase + 0.45], localYaw: Math.PI, role: 'Centinela', stationKind: 'plinth' });
-      }
-    } else {
-      const yCrown = yTop + 0.65;
-      const rCrown = rBase * 0.62;
-      for (let s = 0; s < 4; s++) {
-        const angle = (s + 0.5) * (Math.PI * 0.5);
-        const lx = Math.sin(angle) * rCrown;
-        const lz = Math.cos(angle) * rCrown;
-        specs.push({ lx, ly: yCrown, lz, routeZ: [lz, lz], localYaw: angle, role: 'Vigía de Torreón', stationKind: 'crown' });
-      }
-      for (const sx of [-1, 1]) {
-        specs.push({ lx: sx * 2.2, ly: yPlinth, lz: -rBase - 0.38, routeZ: [-rBase - 0.38, -rBase - 0.38], localYaw: Math.PI, role: 'Alabardero de Torre', stationKind: 'plinth' });
-      }
-    }
-  } else if (inst.prefabId === 'english_triangular_palisade_fort') {
-    const yPlinth = yGround + 0.25;
-    const yWallTop = yPlinth + 4.4;
-    const yBulwarkDeck = yWallTop - 0.95;
-    const yBanquette = yWallTop - 1.10;
-    const plan = enclosurePlan(inst), [bSW, bSE] = plan.bastions;
-    const [one, two, three, four] = plan.guns;
-    for (const [gunIndex, [gun, role]] of [
-      [one, 'Master Gunner'],
-      [two, 'Culverin Gunner'],
-      [three, 'Bulwark Gunner'],
-      [four, 'North Bulwark Sentry'],
-    ].entries()) {
-      const gx = gun.x - gun.nx * 1.15;
-      const gz = gun.z - gun.nz * 1.15;
-      specs.push({
-        lx: gx,
-        ly: yBulwarkDeck,
-        lz: gz,
-        routeZ: [gz - 0.7, gz + 0.7],
-        localYaw: Math.atan2(gun.nx, gun.nz),
-        role,
-        stationKind: 'embrasure',
-        gunIndex,
-      });
-    }
-    specs.push({ lx: -hw * 0.38, ly: yBanquette, lz: bSW[1] + 1.2, routeZ: [bSW[1] + 0.6, bSW[1] + 2.4], localYaw: Math.PI, role: 'Captain of the Guard', stationKind: 'rampart' });
-    specs.push({ lx: hw * 0.38, ly: yBanquette, lz: bSE[1] + 1.2, routeZ: [bSE[1] + 0.6, bSE[1] + 2.4], localYaw: Math.PI, role: 'Pikeman / Musketeer', stationKind: 'rampart' });
-    // Two at the gate, either side of it, just outside.
-    const gate = plan.gate;
-    for (const [hand, role] of [[-1, 'Gate Halberdier'], [1, 'Gate Musketeer']]) {
-      const lz = gate.z + gate.nz * 2.2 + gate.uz * hand * 3.2;
-      specs.push({ lx: gate.x + gate.nx * 2.2 + gate.ux * hand * 3.2, ly: yPlinth, lz, routeZ: [lz - 1.2, lz + 1.2], localYaw: Math.atan2(gate.nx, gate.nz), role, stationKind: 'parade' });
-    }
-  } else if (inst.prefabId === 'curtain_wall_and_gate') {
-    const wallHW = Math.min(3.4, hw);
-    const yWalk = yTop - 0.18;
-    const yGateTop = yTop + 2.8;
-    const gHW = wallHW + 1.15;
-    const zWingMax = Math.max(6.2, hl - 2.0);
-    const zWingMin = Math.min(zWingMax - 1.2, 4.8);
-    for (const sideZ of [-1, 1]) {
-      const z0 = sideZ < 0 ? -zWingMax : zWingMin;
-      const z1 = sideZ < 0 ? -zWingMin : zWingMax;
-      const zMid = (z0 + z1) * 0.5;
-      specs.push({ lx: -wallHW + 1.05, ly: yWalk, lz: zMid - 0.8, routeZ: [z0, zMid], localYaw: 0, role: 'Centinela de Muralla', stationKind: 'adarve' });
-      specs.push({ lx: wallHW - 1.05, ly: yWalk, lz: zMid + 0.8, routeZ: [zMid, z1], localYaw: Math.PI, role: 'Arcabucero', stationKind: 'adarve' });
-    }
-    for (const sz of [-1, 1]) {
-      specs.push({ lx: -wallHW * 0.45, ly: yGateTop, lz: sz * 1.4, routeZ: [sz * 1.4, sz * 1.4], localYaw: -Math.PI / 2, role: 'Vigía de Puerta', stationKind: 'gate-roof' });
-      specs.push({ lx: -gHW - 0.35, ly: yGround + 0.65, lz: sz * 2.2, routeZ: [sz * 2.2, sz * 2.2], localYaw: -Math.PI / 2, role: 'Guardia de Puerta', stationKind: 'gate-portal' });
     }
   }
 
@@ -1937,103 +1824,6 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
   });
 }
 
-export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultureId = null) {
-  if (!inst || !INDIGENOUS_VILLAGE_PREFAB_IDS.includes(inst.prefabId)) return [];
-  const hw = (inst.width ?? 10) * 0.5;
-  const hl = (inst.length ?? 12) * 0.5;
-  const yGround = inst.y ?? 0;
-  const cosY = Math.cos(inst.yaw ?? 0);
-  const sinY = Math.sin(inst.yaw ?? 0);
-  const specs = [];
-
-  if (inst.prefabId === 'abenaki_birchbark_wigwam' || inst.prefabId === 'taino_circular_bohio') {
-    const rDoor = Math.min(hw, hl) + 1.15;
-    specs.push({ lx: -1.1, ly: yGround + 0.04, lz: -rDoor, routeZ: [-rDoor - 1.8, -rDoor + 0.4], localYaw: 0, role: 'Villager' });
-    specs.push({ lx: 1.1, ly: yGround + 0.04, lz: -rDoor - 0.6, routeZ: [-rDoor - 2.2, -rDoor], localYaw: 0, role: 'Artisan / Weaver' });
-  } else if (inst.prefabId === 'algonquian_longhouse' || inst.prefabId === 'tupinamba_oca_longhouse' || inst.prefabId === 'kalinago_carbet_hall') {
-    const zFront = -hl - 1.4;
-    const zSide0 = -hl * 0.65;
-    const zSide1 = hl * 0.65;
-    specs.push({ lx: -1.4, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.0, zFront + 0.2], localYaw: 0, role: 'Sachem / Cacique' });
-    specs.push({ lx: 1.4, ly: yGround + 0.05, lz: zFront - 0.5, routeZ: [zFront - 2.2, zFront], localYaw: 0, role: 'Elder / Speaker' });
-    specs.push({ lx: -(hw + 1.45), ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: 0, role: 'Hunter / Bowyer' });
-    specs.push({ lx: hw + 1.45, ly: yGround + 0.04, lz: 0, routeZ: [zSide0, zSide1], localYaw: Math.PI, role: 'Potter / Cultivator' });
-  } else if (inst.prefabId === 'taino_cacique_caney' || inst.prefabId === 'maya_limestone_shrine_and_na') {
-    const yPlinth = yGround + (inst.prefabId === 'maya_limestone_shrine_and_na' ? 0.55 : 0.12);
-    const zFront = -hl - 1.3;
-    specs.push({ lx: 0, ly: yPlinth, lz: -hl * 0.68, routeZ: [-hl * 0.75, -hl * 0.45], localYaw: 0, role: 'Cacique / Halach Uinic' });
-    specs.push({ lx: -2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: 0, role: 'Behique / Guardian' });
-    specs.push({ lx: 2.2, ly: yGround + 0.05, lz: zFront, routeZ: [zFront - 2.4, zFront + 0.4], localYaw: 0, role: 'Weaver / Noble' });
-  } else if (inst.prefabId === 'taino_batey_court' || inst.prefabId === 'indigenous_palisade_ring') {
-    const zSpan = Math.max(2.2, hl * 0.48);
-    for (const sx of [-1, 1]) {
-      specs.push({ lx: sx * (hw * 0.42), ly: yGround + 0.05, lz: 0, routeZ: [-zSpan, zSpan], localYaw: sx < 0 ? 0 : Math.PI, role: 'Plaza Villager' });
-    }
-  } else if (inst.prefabId === 'palafito_estuary_village') {
-    const yDeck = yGround + (inst.height ?? 6.8) * 0.36 + 0.16;
-    specs.push({ lx: -1.8, ly: yDeck, lz: -1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: 0, role: 'Lagoon Fisher' });
-    specs.push({ lx: 1.8, ly: yDeck, lz: 1.2, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Net Maker' });
-  } else if (inst.prefabId === 'indigenous_canoe_landing') {
-    specs.push({ lx: -hw * 0.32, ly: yGround + 0.06, lz: -0.6, routeZ: [-hl * 0.45, hl * 0.45], localYaw: 0, role: 'Canoe Builder' });
-    specs.push({ lx: hw * 0.32, ly: yGround + 0.06, lz: 0.4, routeZ: [-hl * 0.45, hl * 0.45], localYaw: Math.PI, role: 'Shore Lookout' });
-  }
-
-  return specs.map((spec, idx) => {
-    const globalIdx = startIndex + idx;
-    const sex = (globalIdx % 2 === 0) ? 'female' : 'male';
-    const namePool = INDIGENOUS_NAMES[sex];
-    const name = namePool[Math.floor(globalIdx / 2) % namePool.length];
-    const dress = indigenousDress(cultureId ?? inst.indigenousCultureId ?? inst.cultureId, sex, globalIdx, { role: spec.role });
-    const s = createDeckhand();
-    const baseLy = spec.ly;
-    const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
-    const wx = (inst.x ?? 0) + spec.lx * cosY + spec.lz * sinY;
-    const wy = effLy + 0.028;
-    const wz = (inst.z ?? 0) - spec.lx * sinY + spec.lz * cosY;
-    const worldYaw = (spec.localYaw ?? 0) + (inst.yaw ?? 0);
-    Object.assign(s, {
-      id: `${inst.id ?? inst.prefabId}_villager_${idx + 1}`,
-      name,
-      sex,
-      indigenous: true,
-      cultureId: cultureId ?? inst.indigenousCultureId ?? null,
-      modelVariant: sex === 'female' ? 'indigenous-female' : 'indigenous-male',
-      role: spec.role,
-      stationKind: 'indigenous-village',
-      gunIndex: null,
-      buildingId: inst.id ?? inst.prefabId,
-      buildingPrefabId: inst.prefabId,
-      building: inst,
-      lx: spec.lx,
-      baseLy,
-      ly: effLy,
-      lz: spec.lz,
-      routeZ: [...spec.routeZ],
-      targetZ: spec.localYaw === Math.PI ? spec.routeZ[0] : spec.routeZ[1],
-      localYaw: spec.localYaw ?? 0,
-      yaw: worldYaw,
-      wait: (globalIdx % 6) * 0.42,
-      time: globalIdx * 0.39,
-      walkTime: globalIdx * 0.27,
-      crewIndex: globalIdx,
-      garrison: true,
-      strength: 1.0,
-      shirt: dress.shirt,
-      trousers: dress.trousers,
-      skin: dress.skin,
-      hair: dress.hair,
-      face: dress.face,
-      dress: dress.mask,
-    });
-    s.scale.fill((s.sex === 'female' ? 0.99 : 0.97) * (1 + ((globalIdx % 3) - 1) * 0.02));
-    s.position.set([wx, wy, wz]);
-    const half = s.yaw * 0.5;
-    s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
-    gltfTRS(s.transform, s.position, s.rotation, s.scale);
-    return s;
-  });
-}
-
 // A port whose country Castle and Commons' model founded mans its posts from that model's own roll of the place
 // (`port.watch`, from the board its land was laid from: js/old-world-board.js): whoever holds the place for its lord
 // has a captain's post, and the men of the hosts within it and of its watch take the others in the roll's order.
@@ -2068,22 +1858,16 @@ export function garrisonEnlist(s, person) {
 }
 
 export function createFortGarrison(port) {
-  // The port's own buildings and the works its board stands (js/fort-plan.js portWorkBuildings).
-  const instances = [...(port?.instances ?? []), ...portWorkBuildings(port)];
+  // The works its board stands (js/fort-plan.js portWorkBuildings).
+  const instances = portWorkBuildings(port);
   const origin = [port?.center?.x ?? 0, 0, port?.center?.z ?? 0];
   const soldiers = [];
   // `units` is every building's men. `byBuilding` is by name, and two buildings of one plan may share a name.
   const byBuilding = new Map(), units = [];
-  const cultureId = port?.indigenousSettlement?.cultureId ?? null;
   const muster = garrisonMuster(port?.watch);
   for (const inst of instances) {
-    let unit = null;
-    if (FORTIFICATION_PREFAB_IDS.includes(inst.prefabId)) {
-      unit = createFortificationSoldiersForInstance(inst, soldiers.length);
-      if (muster && !inst.indigenous) unit = unit.filter((s) => { const person = muster(s); return person ? garrisonEnlist(s, person) : false; });
-    } else if (INDIGENOUS_VILLAGE_PREFAB_IDS.includes(inst.prefabId)) {
-      unit = createIndigenousVillagersForInstance(inst, soldiers.length, cultureId);
-    }
+    let unit = createFortificationSoldiersForInstance(inst, soldiers.length);
+    if (muster && !inst.indigenous) unit = unit.filter((s) => { const person = muster(s); return person ? garrisonEnlist(s, person) : false; });
     if (!unit?.length) continue;
     for (const s of unit) {
       const relPos = [s.position[0] - origin[0], s.position[1] - origin[1], s.position[2] - origin[2]];
@@ -2588,7 +2372,7 @@ export async function createFortSoldiers({
   function syncPort(nextPort) {
     activePort = nextPort;
     posesDirty = true;
-    if (!nextPort?.instances?.length) {
+    if (!portWorkBuildings(nextPort).length) {
       garrison = null;
       for (const b of batches) b.people = [];
       return;

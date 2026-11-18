@@ -9,14 +9,13 @@ import { GUNNERY_ORDER_SECONDS } from './gunnery-audio.js';
 import { boatRotate, boatHydrodynamics, boatForwardSpeed } from './boat.js';
 import { SHIP_MODELS } from './ship-models.js';
 import { createShipAssetCache } from './ship-mesh.js';
-import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
 import { shipMastSpecs, fracturePartsGone, shatterFloatingWreckageOnSegment, blastFloatingWreckageAt } from './ship-fracture.js';
 import { shipColliderCrossings, shipColliderIronFrame, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
 import { sweepJettySegment, applyJettyImpactDamage } from './port-props.js';
-import { TRACE_GUN_ARC_COS, WORK_GUNNER_BACK_M, WORK_GUNNER_BESIDE_M, enclosurePlan, portWorkBuildings, workPieceUnder } from './fort-plan.js';
+import { TRACE_GUN_ARC_COS, WORK_GUNNER_BACK_M, WORK_GUNNER_BESIDE_M, portWorkBuildings, workPieceUnder } from './fort-plan.js';
 import { HARBOUR_GUN_RANGE_M } from './harbour-geography.js';
 import { FOREST_LONG_FALLEN, buildForestTrunkGrid, foreshorePalmPlacement, forestTrunkShape, sweepForestTrunks } from './forest-trunks.js';
 import { landCraterSize } from './land-craters.js';
@@ -99,19 +98,6 @@ function resolveShipHitPart(targetBoat, localPosition, hitZone, struckTriangle =
         : ['keel-and-frame', 'decks-and-interior', 'ordnance-and-helm', 'hull-and-bulwarks'];
     const fracture = targetBoat.damage?.fracture;
     return locatePartAtLocalPoint(partAssembly, designPt, { subAssemblies, gone: fracture?.brokenCount ? fracturePartsGone(fracture) : null });
-  } catch {
-    return null;
-  }
-}
-
-function resolveBuildingHitPart(building, localPosition) {
-  if (!building || !building.prefabId || !PORT_PREFABS[building.prefabId] || !Array.isArray(localPosition)) {
-    return null;
-  }
-  try {
-    const adapter = getBuildingParts(building.prefabId);
-    const clampedPt = [localPosition[0], Math.max(0.1, localPosition[1]), localPosition[2]];
-    return adapter.locatePartAtLocalPoint(clampedPt);
   } catch {
     return null;
   }
@@ -2559,7 +2545,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
     const foundDepth = Math.max(0, inst.foundationDepth ?? 4.5);
     const roofExtra = Math.max(
       inst.roofHeight ?? inst.roofPitch ?? 2.0,
-      inst.prefabId === 'mission_chapel' ? 9.2 : inst.prefabId === 'timber_mole_pier' ? 6.2 : 1.5,
+      1.5,
     );
     const instHeight = inst.height ?? 10;
     const collapseDropFrac = Math.max(0, Math.min(0.65, inst.damageState?.collapseDropFrac ?? 0));
@@ -2618,7 +2604,6 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
         ? [(from[0] - to[0]) / dLength, (from[1] - to[1]) / dLength, (from[2] - to[2]) / dLength]
         : [ln[0] * cosY + ln[2] * sinY, ln[1], -ln[0] * sinY + ln[2] * cosY];
       const localPosition = [p0[0] + d[0] * tMin, p0[1] + d[1] * tMin, p0[2] + d[2] * tMin];
-      const hitPart = previewOnly ? null : resolveBuildingHitPart(inst, localPosition);
       const floorHit = met ? Boolean(met.normal && met.normal[1] > 0.7 && met.kind === 16) : (hitAxis === 1 && hitSign > 0);
       best = {
         fraction: tMin,
@@ -2627,9 +2612,9 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
         buildingId: inst.id,
         buildingName: inst.label ?? inst.prefabId,
         prefabId: inst.prefabId,
-        hitPartId: hitPart?.id ?? null,
-        hitSubAssembly: hitPart?.subAssembly ?? null,
-        hitLayer: hitPart?.layer ?? null,
+        hitPartId: null,
+        hitSubAssembly: null,
+        hitLayer: null,
         localPosition,
         normal,
         floorHit,
@@ -2640,7 +2625,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
 }
 
 const FORTIFIED_STONE_PREFABS = new Set([
-  'stone_quay_seawall',
+  'city_quay',
   // A walled city's defences (js/old-world-buildings.js cityTypeTarget).
   'city_wall',
   'city_wall_tower',
@@ -2654,17 +2639,9 @@ const FORTIFIED_STONE_PREFABS = new Set([
 ]);
 
 const TIMBER_BUILDING_PREFABS = new Set([
-  'timber_mole_pier',
-  'careening_shed',
-  'wooden_watchtower_beacon',
-  'drying_fish_flakes_racks',
-  'ropewalk_cordage_shed',
-  'cooperage_barrel_yard',
-  'indigenous_bohio_village_compound',
-  'palisade_stockade_wall',
-  'english_triangular_palisade_fort',
-  'english_half_timber_hall',
-  'english_timber_cottage',
+  'city_pier',
+  'city_careening_shed',
+  'city_slipway',
   'city_timber_bridge',
   // A gun's carriage (js/old-world-buildings.js gunSpec).
   'city_gun',
@@ -2708,8 +2685,7 @@ export function createBuildingMagazineState(building) {
   const workKind = building.work?.kind ?? null;
   const isFortress = workKind === 'fort';
   const isBastion = workKind === 'battery';
-  const isTimberFort = prefabId === 'english_triangular_palisade_fort';
-  const isArsenal = prefabId === 'royal_atarazanas_arsenal';
+  const isArsenal = prefabId === 'city_arsenal';
   const isArmedPier = Boolean(building.armed || building.hasMagazine);
   const barrelMassKg = 40.8;
   const barrelsTotal = isFortress
@@ -2718,11 +2694,9 @@ export function createBuildingMagazineState(building) {
       ? 120
       : isArsenal
         ? 80
-        : isTimberFort
-          ? 48
-          : isArmedPier
-            ? 24
-            : 0;
+        : isArmedPier
+          ? 24
+          : 0;
   const initialPowderKg = +(barrelsTotal * barrelMassKg).toFixed(1);
   const initialRounds = barrelsTotal > 0
     ? {
@@ -3071,9 +3045,7 @@ export function applyBuildingImpactDamage(building, event) {
   d.state = d.integrity > 0.75 ? 'intact' : d.integrity > 0.4 ? 'damaged' : d.integrity > 0.1 ? 'breached' : 'ruined';
 
   const localPos = event.localPosition ?? [0, Math.min(2.5, (building.height ?? 5) * 0.5), 0];
-  const resolvedPart = event.hitPartId
-    ? { id: event.hitPartId, subAssembly: event.hitSubAssembly ?? null, layer: event.hitLayer ?? null }
-    : resolveBuildingHitPart(building, localPos);
+  const resolvedPart = event.hitPartId ? { id: event.hitPartId, subAssembly: event.hitSubAssembly ?? null, layer: event.hitLayer ?? null } : null;
   const hitPartId = resolvedPart?.id ?? `${building.prefabId ?? 'building'}:walls`;
   const hitSubAssembly = resolvedPart?.subAssembly ?? 'walls-and-bastions';
   const partBudget = d.maxEnergy * 0.18;
@@ -3535,8 +3507,6 @@ export function stepPortDamage(port, dt) {
 export function createBuildingGunDefinitions(building) {
   if (!building) return [];
   const prefabId = building.prefabId ?? '';
-  const hw = (building.width ?? 16) * 0.5;
-  const hl = (building.depth ?? building.length ?? 16) * 0.5;
   const yTop = building.height ?? 6.0;
   const guns = [];
   const addEmbrasureGun = (side, sideSign, lx, ly, lz, dirLocal, calibre = 24, muzzle = 0.55, breech = 0.45) => {
@@ -3573,15 +3543,6 @@ export function createBuildingGunDefinitions(building) {
       def.station = [gun.x - gun.nx * WORK_GUNNER_BACK_M + gun.nz * WORK_GUNNER_BESIDE_M, gun.y, gun.z - gun.nz * WORK_GUNNER_BACK_M - gun.nx * WORK_GUNNER_BESIDE_M];
       def.floorDesign = gun.y;
     }
-  } else if (prefabId === 'english_triangular_palisade_fort') {
-    const yBulwark = 0.35 + Math.max(4.4, (building.height ?? 6.8) * 0.68) - 0.25;
-    for (const gun of enclosurePlan(building).guns) {
-      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x + gun.nx * 0.55, yBulwark, gun.z + gun.nz * 0.55, [gun.nx, 0, gun.nz], 12);
-      guns[guns.length - 1].arcCos = TRACE_GUN_ARC_COS;
-    }
-  } else if (building.armed && (prefabId === 'stone_quay_seawall' || prefabId === 'timber_mole_pier')) {
-    addEmbrasureGun('port', -1, -hw * 0.35, yTop + 0.35, -hl, [0, 0, -1], 12);
-    addEmbrasureGun('starboard', 1, hw * 0.35, yTop + 0.35, hl, [0, 0, 1], 12);
   }
   return guns;
 }
@@ -4905,7 +4866,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
           if(loc[0]*sideSign<=1.0)continue;
           const d=Math.hypot(loc[0],loc[2]);
           const isRuined=inst.damageState?.state==='ruined';
-          const isFort=inst.prefabId==='english_triangular_palisade_fort'||Boolean(inst.gunnery?.guns?.length);
+          const isFort=Boolean(inst.gunnery?.guns?.length);
           if(isFort&&!isRuined&&d<bestFortDist){
             bestFortDist=d;bestFortLocal=loc;
           }

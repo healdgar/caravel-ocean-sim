@@ -256,7 +256,8 @@ export const MOORING_LINE_REACH_M = 36;
 export const BOARDING_APPROACH_STALL_S = 60;
 const COMBAT_LOG_LINES = 12;
 export const MOORING_SHIP_REACH_M = 30;
-const MOORING_PIER_PREFAB = /jetty|pier|wharf|dock|quay|mole|slip/i;
+// What of a port's waterfront (js/board-waterfront.js) a ship makes fast to: its moles and its quay.
+const MOORING_KINDS = new Set(['pier', 'quay']);
 
 // The nearest point of a pier's footprint to a point in the world.
 function pierClosestPoint(inst, offset, px, pz) {
@@ -268,15 +269,15 @@ function pierClosestPoint(inst, offset, px, pz) {
   return { x: cx + lx * c + lz * sn, z: cz - lx * sn + lz * c };
 }
 
-// The nearest real pier within reach of a line, or null. There is no such thing as a pier
-// that exists only because she wants one.
+// The nearest real mole or quay within reach of a line, or null: of the port's waterfront as its board laid it
+// (`env.portWaterfront` to ask of another list). There is no such thing as a pier that exists only because she wants one.
 export function findNearestPier(boat, env = {}) {
   const bx = boat?.x ?? 0, bz = boat?.z ?? 0;
-  const instances = env?.portInstances ?? env?.terrain?.port?.instances ?? [];
+  const instances = env?.portWaterfront ?? env?.terrain?.port?.waterfront ?? [];
   const offset = env?.terrain?.getWorldOffset?.() ?? { x: 0, z: 0 };
   let nearest = null, nearestDistance = MOORING_LINE_REACH_M;
   for (const inst of Array.isArray(instances) ? instances : []) {
-    if (!inst || !MOORING_PIER_PREFAB.test(inst.prefabId ?? inst.assetId ?? '')) continue;
+    if (!inst || !MOORING_KINDS.has(inst.kind)) continue;
     const point = pierClosestPoint(inst, offset, bx, bz);
     const distance = Math.hypot(point.x - bx, point.z - bz);
     if (distance <= nearestDistance) { nearest = { inst, point }; nearestDistance = distance; }
@@ -287,9 +288,9 @@ export function findNearestPier(boat, env = {}) {
   const across = (point.x - bx) * rightX + (point.z - bz) * rightZ;
   return {
     kind: 'pier',
-    label: inst.label || env?.portLabel || 'the pier',
+    label: env?.portLabel || (inst.kind === 'quay' ? 'the quay' : 'the mole'),
     x: point.x,
-    y: Math.max(1.25, (inst.y ?? 0) + 1.35),
+    y: Math.max(1.25, (inst.y ?? 0) + (inst.deck ?? 1.35)),
     z: point.z,
     heading: (((inst.yaw ?? inst.rotY ?? 0) * 180) / Math.PI) % 360,
     distance: Math.abs(across),
