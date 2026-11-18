@@ -6,22 +6,22 @@
  "model": "nina",
  "label": "Niña",
  "source": {
-  "vertices": 92043,
-  "indices": 207021,
-  "shards": 287,
-  "key": "43ba7c0505871beb6144d809d4fdbcbbb18bca5dc6ec7d3c762c29b42f5b93c7",
+  "vertices": 93958,
+  "indices": 211821,
+  "shards": 290,
+  "key": "19ce5dbc0c5c6bc5cd491e2e0240fc96a242e6286fe1b0171194630184201a21",
   "surface": {
-   "area": 405.30868412056606,
+   "area": 414.16483553474376,
    "centroid": [
-    0.07057319859228711,
-    2.092571413214822,
-    0.4517671763856845
+    0.06799284040171538,
+    2.183691405655543,
+    0.49350072862275607
    ],
    "materials": {
     "0": 34.41447114793769,
-    "1": 74.54127465120641,
+    "1": 79.10092951718967,
     "2": 2.1303986723980555,
-    "3": 8.28221640215957,
+    "3": 9.172685103760186,
     "4": 48.28758563349344,
     "5": 8.243670561839789,
     "6": 5.3047904038662255,
@@ -36,7 +36,10 @@
     "16": 24.654998872073286,
     "17": 8.454926065075007,
     "18": 0.845990339351365,
-    "19": 5.962449556179746
+    "19": 5.962449556179746,
+    "25": 0.020709812362669253,
+    "29": 2.9475582427917857,
+    "30": 0.43775979143855714
    }
   },
   "designScale": [
@@ -48,138 +51,138 @@
  "clusterWords": 16,
  "farVertexWords": 6,
  "stepWords": 4,
- "clusterCount": 2029,
- "indexCount": 351177,
+ "clusterCount": 2112,
+ "indexCount": 361518,
  "copyCount": 426,
  "clusters": {
-  "triangles": 117059,
-  "levels": 8,
-  "roots": 794,
-  "groups": 162,
-  "parts": 448,
-  "rootError": 12.4548
+  "triangles": 120506,
+  "levels": 7,
+  "roots": 803,
+  "groups": 172,
+  "parts": 455,
+  "rootError": 17.0958
  },
  "far": {
-  "vertexCount": 3992,
+  "vertexCount": 4000,
   "triangleCount": 8000,
-  "stepCount": 3985,
+  "stepCount": 3995,
   "offsets": {
    "vertices": 0,
-   "records": 23952,
-   "triangles": 27944,
-   "steps": 51944
+   "records": 24000,
+   "triangles": 28000,
+   "steps": 52000
   },
-  "voxel": 0.0686,
+  "voxel": 0.0856,
   "pieces": [
    {
     "kind": "rigid",
-    "close": 0.2745,
+    "close": 0.3423,
     "grid": [
-     106,
-     351,
-     373
+     88,
+     284,
+     332
     ],
     "count": 1,
     "dropped": 0,
-    "genus": 6,
-    "surfaceTriangles": 1272656
+    "genus": 3,
+    "surfaceTriangles": 764904
    },
    {
     "kind": "canvas",
-    "close": 0.1372,
+    "close": 0.1712,
     "grid": [
-     31,
-     264,
-     305
+     27,
+     214,
+     321
     ],
-    "count": 1,
+    "count": 2,
     "dropped": 0,
     "genus": 0,
-    "surfaceTriangles": 731288
+    "surfaceTriangles": 504540
    }
   ],
   "baseTriangles": 8000,
-  "baseVertices": 3992,
-  "baseError": 0.2635,
-  "baseGeometric": 0.0377,
-  "steps": 3985,
+  "baseVertices": 4000,
+  "baseError": 0.2632,
+  "baseGeometric": 0.0788,
+  "steps": 3995,
   "coreTriangles": 4,
-  "depth": 10,
+  "depth": 11,
   "errorRange": [
-   0.2635,
-   17.1976
+   0.2632,
+   17.3796
   ],
-  "inflateMax": 0.7785,
-  "euler": -8
+  "inflateMax": 0.9594,
+  "euler": 0
  },
  "splat": {
   "centre": [
-   0.0038,
-   9.4316,
-   -1.669
+   0.0222,
+   9.4205,
+   1.4029
   ],
-  "ry": 11.6977,
-  "rxSide": 7.8743,
-  "rxEnd": 1.5851,
+  "ry": 11.7214,
+  "rxSide": 8.3254,
+  "rxEnd": 1.6668,
   "colour": [
-   0.55223,
-   0.47765,
-   0.37759
+   0.52465,
+   0.44972,
+   0.35327
   ]
  },
  "bound": {
   "centre": [
    0,
    9.4661,
-   -1.6687
+   1.3838
   ],
-  "radius": 27.4557
+  "radius": 28.4124
  },
  "poses": 1,
  "files": {
   "clusters.bin": {
-   "bytes": 129856,
-   "sha256": "798035650ed5cbf893ffc10d36001365f8baa8679a6a157587894b2009ccab75",
+   "bytes": 135168,
+   "sha256": "613cf3a318f7bcd248e185efbb931e934e0941467594e3153134c00c6e34fd18",
    "gzip": {
     "file": "clusters.bin.gz",
-    "bytes": 51163,
-    "sha256": "0bff1be6d1be25a29fba45ef6b31eaa01241162357b00c8ffa828ca7ff469d98"
+    "bytes": 53996,
+    "sha256": "373fbea57c076acb7ab5e4b739c1dc2b062d0b0b6164c3f25dd111763c8e521f"
    }
   },
   "indices.bin": {
-   "bytes": 1404708,
-   "sha256": "f752a63f07e98e43be0b8bacf9794535509e423099f2cbcb64307795310e2859",
+   "bytes": 1446072,
+   "sha256": "00a6234ecff5a961d017fa43220b48f14a5632dc0c757fa668bb8fcdf161100b",
    "gzip": {
     "file": "indices.bin.gz",
-    "bytes": 439422,
-    "sha256": "845f6d1fbfc84ec0bf45fbba1c6588138338073bbd083ee0ff8e745917710a84"
+    "bytes": 454433,
+    "sha256": "10fe673f07536796d7190462aef53e0860c94ef63c389c0a48ec7e36b1600b19"
    }
   },
   "copies.bin": {
    "bytes": 1704,
-   "sha256": "33b59d2544bd61861ddaab33797f49aa25e7a3ae9f5c6546e97695f516e09715",
+   "sha256": "1cdfa36be3fccd2cb58455c79173d90093ed374b5bf7b32b68a919d27ebb0adc",
    "gzip": {
     "file": "copies.bin.gz",
-    "bytes": 866,
-    "sha256": "e653eeeb65c78bd646a7522ceb7009ecd5d93d232c00ec0b9012f67985a9411b"
+    "bytes": 865,
+    "sha256": "cc29e1297b22cf187cfab4c8668cfc249baffa057e691fa657fa22895c063dcb"
    }
   },
   "far.bin": {
-   "bytes": 271552,
-   "sha256": "161aae9bfd99a7ba76c2f40480e76e71b630324aac28c56ada9e2ba2218da249",
+   "bytes": 271936,
+   "sha256": "0706d6edebd49841619ba5f232ea3cd4637bc597881115813962880296b3309a",
    "gzip": {
     "file": "far.bin.gz",
-    "bytes": 156678,
-    "sha256": "2b104200f21f82060aa812df0b952754258722aea3ab2e5f9385728540c254fe"
+    "bytes": 156377,
+    "sha256": "82b93055fb0d3dccd7441ce571815db3f1f518b108b9bb831692b5421a937556"
    }
   },
   "corners.bin": {
-   "bytes": 828084,
-   "sha256": "2f3b822fe28ec28c5117f351997a4bf54034c2e6e9e34445d4e2c2f881f17221",
+   "bytes": 847284,
+   "sha256": "ba5a89e38dd30e17e84e969df32f389c37a24ef0f73528428e6fd7793991bd0d",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 248840,
-    "sha256": "7cd6b69503aec6d8e53ad2d34c0c76099422cb1e1cb2e3cf9b1caae779d57c24"
+    "bytes": 254554,
+    "sha256": "e6bbee18ff25baf995153257f85462c9eb9d0a05697653d44d09c734b382699c"
    }
   }
  }

@@ -2325,19 +2325,19 @@
     "sha256": "4adb8679f83e9f9a533b32ed9ce6f2e809fadb80093d4b8ca9046f281a71e03c"
   },
   "assets/ships/continuum/player-victory/manifest.json": {
-    "url": "assets/ships/continuum/player-victory/manifest.9c3bae061473f11c.json",
-    "bytes": 3889,
-    "sha256": "9c3bae061473f11c210edfbe2146730834cd546e9608a2b427c8aaedb4daee8c"
+    "url": "assets/ships/continuum/player-victory/manifest.2d5589f19248845d.json",
+    "bytes": 3951,
+    "sha256": "2d5589f19248845da42bda330fff1e0688b76beb6630c0ba0e6618dee800cf71"
   },
   "assets/ships/continuum/player-victory/clusters.bin.gz": {
-    "url": "assets/ships/continuum/player-victory/clusters.bin.e682363566f6f749.gz",
-    "bytes": 92036,
-    "sha256": "e682363566f6f749ecd2580d27bfff81b792d502a549fdd70d09a9f211711a02"
+    "url": "assets/ships/continuum/player-victory/clusters.bin.c97af20a24270a72.gz",
+    "bytes": 92026,
+    "sha256": "c97af20a24270a72ea6d09e235f6737591e669ecef6a09a6105e020af0233b49"
   },
   "assets/ships/continuum/player-victory/indices.bin.gz": {
-    "url": "assets/ships/continuum/player-victory/indices.bin.e0cdefe79f3a4e3c.gz",
-    "bytes": 629970,
-    "sha256": "e0cdefe79f3a4e3c62e6a451c2c006c82843a531f54440da075f61dc3d4bfdb7"
+    "url": "assets/ships/continuum/player-victory/indices.bin.2d5979c1f2d11be8.gz",
+    "bytes": 637289,
+    "sha256": "2d5979c1f2d11be87514da7c6b4870a127e11a369bcddaaf000c67108fb89279"
   },
   "assets/ships/continuum/player-victory/copies.bin.gz": {
     "url": "assets/ships/continuum/player-victory/copies.bin.10b53b007fb398e8.gz",
@@ -2345,164 +2345,164 @@
     "sha256": "10b53b007fb398e81bacee71138def9256e9a97dfec5ada16cf34fd02479f916"
   },
   "assets/ships/continuum/player-victory/far.bin.gz": {
-    "url": "assets/ships/continuum/player-victory/far.bin.ade930537698175b.gz",
-    "bytes": 150782,
-    "sha256": "ade930537698175b49c1a6e80cfb4439aa8ca7d235797d2e62db61f7a664026c"
+    "url": "assets/ships/continuum/player-victory/far.bin.dd339888bd70b469.gz",
+    "bytes": 151210,
+    "sha256": "dd339888bd70b4694dd94a3e27175d724e387e607d9b4089f24d39301ad85747"
   },
   "assets/ships/continuum/player-victory/corners.bin.gz": {
-    "url": "assets/ships/continuum/player-victory/corners.bin.18143be7de654650.gz",
-    "bytes": 354518,
-    "sha256": "18143be7de654650c8636a787e3a690fa8b498c1bccfcc62566f90c241530559"
+    "url": "assets/ships/continuum/player-victory/corners.bin.1b36091f6e9a153f.gz",
+    "bytes": 357274,
+    "sha256": "1b36091f6e9a153fb4cec57d1fb8e1f0bdbe0577bf6df44562ce015fb1d6e599"
   },
   "assets/ships/continuum/player-nina/manifest.json": {
-    "url": "assets/ships/continuum/player-nina/manifest.7a2d6dd2a013ef4f.json",
-    "bytes": 3800,
-    "sha256": "7a2d6dd2a013ef4f382fbeed86f94202e313d7b3fe8e3d693a0971d2947140b2"
+    "url": "assets/ships/continuum/player-nina/manifest.f7f1afbbbafa102e.json",
+    "bytes": 3891,
+    "sha256": "f7f1afbbbafa102effbeff92df6c52671ade4036660a0e2327a2493aa21109c8"
   },
   "assets/ships/continuum/player-nina/clusters.bin.gz": {
-    "url": "assets/ships/continuum/player-nina/clusters.bin.0bff1be6d1be25a2.gz",
-    "bytes": 51163,
-    "sha256": "0bff1be6d1be25a29fba45ef6b31eaa01241162357b00c8ffa828ca7ff469d98"
+    "url": "assets/ships/continuum/player-nina/clusters.bin.373fbea57c076acb.gz",
+    "bytes": 53996,
+    "sha256": "373fbea57c076acb7ab5e4b739c1dc2b062d0b0b6164c3f25dd111763c8e521f"
   },
   "assets/ships/continuum/player-nina/indices.bin.gz": {
-    "url": "assets/ships/continuum/player-nina/indices.bin.845f6d1fbfc84ec0.gz",
-    "bytes": 439422,
-    "sha256": "845f6d1fbfc84ec0bf45fbba1c6588138338073bbd083ee0ff8e745917710a84"
+    "url": "assets/ships/continuum/player-nina/indices.bin.10fe673f07536796.gz",
+    "bytes": 454433,
+    "sha256": "10fe673f07536796d7190462aef53e0860c94ef63c389c0a48ec7e36b1600b19"
   },
   "assets/ships/continuum/player-nina/copies.bin.gz": {
-    "url": "assets/ships/continuum/player-nina/copies.bin.e653eeeb65c78bd6.gz",
-    "bytes": 866,
-    "sha256": "e653eeeb65c78bd646a7522ceb7009ecd5d93d232c00ec0b9012f67985a9411b"
+    "url": "assets/ships/continuum/player-nina/copies.bin.cc29e1297b22cf18.gz",
+    "bytes": 865,
+    "sha256": "cc29e1297b22cf187cfab4c8668cfc249baffa057e691fa657fa22895c063dcb"
   },
   "assets/ships/continuum/player-nina/far.bin.gz": {
-    "url": "assets/ships/continuum/player-nina/far.bin.2b104200f21f8206.gz",
-    "bytes": 156678,
-    "sha256": "2b104200f21f82060aa812df0b952754258722aea3ab2e5f9385728540c254fe"
+    "url": "assets/ships/continuum/player-nina/far.bin.82b93055fb0d3dcc.gz",
+    "bytes": 156377,
+    "sha256": "82b93055fb0d3dccd7441ce571815db3f1f518b108b9bb831692b5421a937556"
   },
   "assets/ships/continuum/player-nina/corners.bin.gz": {
-    "url": "assets/ships/continuum/player-nina/corners.bin.7cd6b69503aec6d8.gz",
-    "bytes": 248840,
-    "sha256": "7cd6b69503aec6d8e53ad2d34c0c76099422cb1e1cb2e3cf9b1caae779d57c24"
+    "url": "assets/ships/continuum/player-nina/corners.bin.e6bbee18ff25baf9.gz",
+    "bytes": 254554,
+    "sha256": "e6bbee18ff25baf995153257f85462c9eb9d0a05697653d44d09c734b382699c"
   },
   "assets/ships/continuum/player-pinta/manifest.json": {
-    "url": "assets/ships/continuum/player-pinta/manifest.8ea034c5ceb56d13.json",
-    "bytes": 3799,
-    "sha256": "8ea034c5ceb56d138c0db8fc6e7f2d2d55fd34fbcd48d593ab8bc65cc68d3441"
+    "url": "assets/ships/continuum/player-pinta/manifest.0deefba6fde25ad6.json",
+    "bytes": 3861,
+    "sha256": "0deefba6fde25ad6881a46b4a3c0426328e76e09fbc60657483ca6a16f4afd0b"
   },
   "assets/ships/continuum/player-pinta/clusters.bin.gz": {
-    "url": "assets/ships/continuum/player-pinta/clusters.bin.0e805a84cfdb38cd.gz",
-    "bytes": 40595,
-    "sha256": "0e805a84cfdb38cdf0a214a940fe09820162071e855d19c66fe130d1e8774b58"
+    "url": "assets/ships/continuum/player-pinta/clusters.bin.ca09ba6323514aef.gz",
+    "bytes": 41477,
+    "sha256": "ca09ba6323514aef3403824d88a1f3fcaf098b4ee3899e1f4b8c53a766e940b6"
   },
   "assets/ships/continuum/player-pinta/indices.bin.gz": {
-    "url": "assets/ships/continuum/player-pinta/indices.bin.57b34f9edcca2d55.gz",
-    "bytes": 313459,
-    "sha256": "57b34f9edcca2d55403b8e99e9e5a995bd0ff1f9564376aab6965afe920675df"
+    "url": "assets/ships/continuum/player-pinta/indices.bin.2a302de09e78e9fa.gz",
+    "bytes": 318840,
+    "sha256": "2a302de09e78e9fa6a649f9dfa2fb3ba3299e7c2c5bf4c4c524840537d18be39"
   },
   "assets/ships/continuum/player-pinta/copies.bin.gz": {
-    "url": "assets/ships/continuum/player-pinta/copies.bin.f9a1854277285c00.gz",
-    "bytes": 647,
-    "sha256": "f9a1854277285c0028559f07534bcbf5378b8b49516605811593d32135019e38"
+    "url": "assets/ships/continuum/player-pinta/copies.bin.9a5634e654340848.gz",
+    "bytes": 619,
+    "sha256": "9a5634e65434084895dd746b66b4c1f898ec6a23897e8457f3f9ad03d9b13ce7"
   },
   "assets/ships/continuum/player-pinta/far.bin.gz": {
-    "url": "assets/ships/continuum/player-pinta/far.bin.c01de207fe7c07d0.gz",
-    "bytes": 157501,
-    "sha256": "c01de207fe7c07d0fea5e9ac6d691cdc3830edf223cdb6d6f0a662818f0aabdf"
+    "url": "assets/ships/continuum/player-pinta/far.bin.bacf1103d804d823.gz",
+    "bytes": 158318,
+    "sha256": "bacf1103d804d823ce4a7cccdb14194d8d46aed110e64d2bc114173a53ec3cdf"
   },
   "assets/ships/continuum/player-pinta/corners.bin.gz": {
-    "url": "assets/ships/continuum/player-pinta/corners.bin.8dfb2a83f0682dd7.gz",
-    "bytes": 172503,
-    "sha256": "8dfb2a83f0682dd78f8f4588dd1bcc8aa7adc436b97b9386c09b59b340fa1094"
+    "url": "assets/ships/continuum/player-pinta/corners.bin.a31468c3e2d0623d.gz",
+    "bytes": 177859,
+    "sha256": "a31468c3e2d0623ded537139b929bd6fd11170949b49ed770b969592d0499a3c"
   },
   "assets/ships/continuum/player-santa-maria/manifest.json": {
-    "url": "assets/ships/continuum/player-santa-maria/manifest.fac9f8a4229a667e.json",
-    "bytes": 3831,
-    "sha256": "fac9f8a4229a667e3ebc78d4283615cf8435ce571ecdb15bf393b926898bbfe2"
+    "url": "assets/ships/continuum/player-santa-maria/manifest.3dfa83325efae4b1.json",
+    "bytes": 3887,
+    "sha256": "3dfa83325efae4b1ed99555af6a3157eeb5eba02f542f8691746802e519455ad"
   },
   "assets/ships/continuum/player-santa-maria/clusters.bin.gz": {
-    "url": "assets/ships/continuum/player-santa-maria/clusters.bin.e98d70534a7bb7ea.gz",
-    "bytes": 47250,
-    "sha256": "e98d70534a7bb7eab0265817730cd9159c5d137588874fe6844088c9211fa113"
+    "url": "assets/ships/continuum/player-santa-maria/clusters.bin.73e5f357aa742ab7.gz",
+    "bytes": 48409,
+    "sha256": "73e5f357aa742ab75c204e2c4dbc3e1f3ac80d9399233ffa278c62ab34b54609"
   },
   "assets/ships/continuum/player-santa-maria/indices.bin.gz": {
-    "url": "assets/ships/continuum/player-santa-maria/indices.bin.1b16db1aa5275214.gz",
-    "bytes": 374673,
-    "sha256": "1b16db1aa527521499693db34fa965663f44c9d389b2c4049eb24894835ffe04"
+    "url": "assets/ships/continuum/player-santa-maria/indices.bin.f98d4cd0b144a0ce.gz",
+    "bytes": 381858,
+    "sha256": "f98d4cd0b144a0ce8cf1f514ef83b41c8582290db79872da87fc762ad543db20"
   },
   "assets/ships/continuum/player-santa-maria/copies.bin.gz": {
-    "url": "assets/ships/continuum/player-santa-maria/copies.bin.f9453089624b071d.gz",
-    "bytes": 621,
-    "sha256": "f9453089624b071d43fa3b745758c257afe6b6519c0633c04fd6849ee5932147"
+    "url": "assets/ships/continuum/player-santa-maria/copies.bin.d5374c2e575dfc84.gz",
+    "bytes": 619,
+    "sha256": "d5374c2e575dfc8481dae9b900e297667f8988bac3b7c268e974bf2f6d45e6f5"
   },
   "assets/ships/continuum/player-santa-maria/far.bin.gz": {
-    "url": "assets/ships/continuum/player-santa-maria/far.bin.ce83117c1eba29aa.gz",
-    "bytes": 158662,
-    "sha256": "ce83117c1eba29aa91b8acb0812c5e49943df99f826083fa90c594e9ac9d2456"
+    "url": "assets/ships/continuum/player-santa-maria/far.bin.2e302f2e0dd5f22a.gz",
+    "bytes": 158327,
+    "sha256": "2e302f2e0dd5f22ab460d4eaed20d31c5a8beb8b6d02ad29f495a98aa3b237aa"
   },
   "assets/ships/continuum/player-santa-maria/corners.bin.gz": {
-    "url": "assets/ships/continuum/player-santa-maria/corners.bin.942051862a1e2cb7.gz",
-    "bytes": 201413,
-    "sha256": "942051862a1e2cb73583cbb5dee98657db8668c4238c6988775570629d1a126d"
+    "url": "assets/ships/continuum/player-santa-maria/corners.bin.84b9e9f507359fb4.gz",
+    "bytes": 207200,
+    "sha256": "84b9e9f507359fb477e12665643d3873a8357680a297de5bffd5b5302f36f1af"
   },
   "assets/ships/continuum/player-oseberg/manifest.json": {
-    "url": "assets/ships/continuum/player-oseberg/manifest.74cd979e1200cf14.json",
-    "bytes": 3595,
-    "sha256": "74cd979e1200cf1463432427efe2438bbc8568b50c5374dcc65421ac86b689ef"
+    "url": "assets/ships/continuum/player-oseberg/manifest.c40e0f52f8bd04c4.json",
+    "bytes": 3691,
+    "sha256": "c40e0f52f8bd04c469848bd8d00935ed4e9fab3b04696f4d35e852713ac0f6c3"
   },
   "assets/ships/continuum/player-oseberg/clusters.bin.gz": {
-    "url": "assets/ships/continuum/player-oseberg/clusters.bin.7785490919b612b7.gz",
-    "bytes": 54136,
-    "sha256": "7785490919b612b71d4a7cd49d25e2781cb0fcecabfde256b94e4d5a32781e1f"
+    "url": "assets/ships/continuum/player-oseberg/clusters.bin.46d2e995c5a52abc.gz",
+    "bytes": 55327,
+    "sha256": "46d2e995c5a52abcbf5d4d5c61dbe09e102e99a67f1fca45771068611c89480f"
   },
   "assets/ships/continuum/player-oseberg/indices.bin.gz": {
-    "url": "assets/ships/continuum/player-oseberg/indices.bin.b813ae94c0e8cc82.gz",
-    "bytes": 402254,
-    "sha256": "b813ae94c0e8cc82e2a68e7219099515a441261a80f303dbe4f615f3647865aa"
+    "url": "assets/ships/continuum/player-oseberg/indices.bin.c26a3d16b1ed0094.gz",
+    "bytes": 409382,
+    "sha256": "c26a3d16b1ed0094a5f8923d21db6ad9884dc4c3ee53e2f3c0816ab27737fa3a"
   },
   "assets/ships/continuum/player-oseberg/copies.bin.gz": {
-    "url": "assets/ships/continuum/player-oseberg/copies.bin.b323e0ebc69bf6de.gz",
-    "bytes": 182,
-    "sha256": "b323e0ebc69bf6de224a22f749f6683287f7997c254c654f9ab41476311d5617"
+    "url": "assets/ships/continuum/player-oseberg/copies.bin.c31cb673e462dc4c.gz",
+    "bytes": 168,
+    "sha256": "c31cb673e462dc4c0cf2caaf09d605e445c44eebea6ee4744600ad0a8632ecff"
   },
   "assets/ships/continuum/player-oseberg/far.bin.gz": {
-    "url": "assets/ships/continuum/player-oseberg/far.bin.e9e90ee191165141.gz",
-    "bytes": 150528,
-    "sha256": "e9e90ee191165141a293d1483287bffcfcce4ce0d553a17da27cffed8d010cd9"
+    "url": "assets/ships/continuum/player-oseberg/far.bin.3902ce99230dc4a6.gz",
+    "bytes": 150620,
+    "sha256": "3902ce99230dc4a6723ed1018430ecacfcfad13bd2147300184865a2c04fd903"
   },
   "assets/ships/continuum/player-oseberg/corners.bin.gz": {
-    "url": "assets/ships/continuum/player-oseberg/corners.bin.a063e61db789c4f9.gz",
-    "bytes": 199629,
-    "sha256": "a063e61db789c4f925f181fd5b4487da164ce70dfce41c29b73c6dbf6f5cecac"
+    "url": "assets/ships/continuum/player-oseberg/corners.bin.4ac6cbf8ba840b0a.gz",
+    "bytes": 202263,
+    "sha256": "4ac6cbf8ba840b0afedd450f28aa11427f594d7fa0d38854f8eeee7bd2112325"
   },
   "assets/ships/continuum/player-lusoria/manifest.json": {
-    "url": "assets/ships/continuum/player-lusoria/manifest.6191bc77133e1254.json",
-    "bytes": 3589,
-    "sha256": "6191bc77133e1254d9bd33ac87043e500f31e53a88c09d96b5ecc0b51ae88f57"
+    "url": "assets/ships/continuum/player-lusoria/manifest.5913151202cd8c98.json",
+    "bytes": 3686,
+    "sha256": "5913151202cd8c98d6baf31a3085b8b85b065d4d2ed1d4bca8d24a668abc2979"
   },
   "assets/ships/continuum/player-lusoria/clusters.bin.gz": {
-    "url": "assets/ships/continuum/player-lusoria/clusters.bin.184dd011ab434ed0.gz",
-    "bytes": 30274,
-    "sha256": "184dd011ab434ed0fa59e77e288ff5c0e1778e57a53bf96ffac364f6c58a53a1"
+    "url": "assets/ships/continuum/player-lusoria/clusters.bin.9695de3f42eb4f1c.gz",
+    "bytes": 30632,
+    "sha256": "9695de3f42eb4f1cc17d02786da4feb01922cd28543a316d488a77f90d41b4d9"
   },
   "assets/ships/continuum/player-lusoria/indices.bin.gz": {
-    "url": "assets/ships/continuum/player-lusoria/indices.bin.bf833bdbb364ef68.gz",
-    "bytes": 218486,
-    "sha256": "bf833bdbb364ef688422a723ea1dffed9400fb6fee8727d27e1a9b9a8865e033"
+    "url": "assets/ships/continuum/player-lusoria/indices.bin.499720c3736d2b25.gz",
+    "bytes": 229531,
+    "sha256": "499720c3736d2b250e3327c4b850b0007b8737df4a3551054f02604f43d3c2fd"
   },
   "assets/ships/continuum/player-lusoria/copies.bin.gz": {
-    "url": "assets/ships/continuum/player-lusoria/copies.bin.1663a817e51b3e30.gz",
-    "bytes": 172,
-    "sha256": "1663a817e51b3e30023d7cf0b02e952a51b30b468c3a45fc7e6b37f9d2d5808d"
+    "url": "assets/ships/continuum/player-lusoria/copies.bin.3361e30f39be09f4.gz",
+    "bytes": 179,
+    "sha256": "3361e30f39be09f42452ca8c9b2d09194454faac6ff5658815d564b9bbfcda23"
   },
   "assets/ships/continuum/player-lusoria/far.bin.gz": {
-    "url": "assets/ships/continuum/player-lusoria/far.bin.a8c2acf93eb4153d.gz",
-    "bytes": 153759,
-    "sha256": "a8c2acf93eb4153d49de680d03c7fde75e6c2659f98b0ff307de98c5c49e9a84"
+    "url": "assets/ships/continuum/player-lusoria/far.bin.75543ea957cd611e.gz",
+    "bytes": 150898,
+    "sha256": "75543ea957cd611e5dbd9a897466138c77d600fb9e28b29e811541a76e77c9d4"
   },
   "assets/ships/continuum/player-lusoria/corners.bin.gz": {
-    "url": "assets/ships/continuum/player-lusoria/corners.bin.0bd280d1258a45b5.gz",
-    "bytes": 107434,
-    "sha256": "0bd280d1258a45b500df54a2ee9342125ddaf777b09741e0c9079d674ac59a09"
+    "url": "assets/ships/continuum/player-lusoria/corners.bin.1991a5c918763111.gz",
+    "bytes": 110042,
+    "sha256": "1991a5c918763111b47a15f008e304da17b7ed46738fb4150d17452ffb75405e"
   },
   "assets/ships/continuum/player-taino-canoe/manifest.json": {
     "url": "assets/ships/continuum/player-taino-canoe/manifest.07720fb17ecd5b5e.json",
@@ -2535,64 +2535,64 @@
     "sha256": "f8873887f559c6b9e60ec6b44c0a170a2d7ca0c85ebe1eabe210b9b653e365b9"
   },
   "assets/ships/continuum/player-flying-cloud/manifest.json": {
-    "url": "assets/ships/continuum/player-flying-cloud/manifest.fbc67ef451a08e77.json",
-    "bytes": 3816,
-    "sha256": "fbc67ef451a08e77794db6b92dac8b27e13208a5c7b30aaca367ec96ebdf7c03"
+    "url": "assets/ships/continuum/player-flying-cloud/manifest.54eaab909ad2919a.json",
+    "bytes": 3870,
+    "sha256": "54eaab909ad2919ada16c8771c9b28220044dcf000bded6a8dd1ecda7738cf52"
   },
   "assets/ships/continuum/player-flying-cloud/clusters.bin.gz": {
-    "url": "assets/ships/continuum/player-flying-cloud/clusters.bin.b9223dd00e6784d9.gz",
-    "bytes": 74945,
-    "sha256": "b9223dd00e6784d96b331eedafb72aa944c71e694ef4a5e6a60065d2cb4d5860"
+    "url": "assets/ships/continuum/player-flying-cloud/clusters.bin.ee0af7f91d7ef00d.gz",
+    "bytes": 77078,
+    "sha256": "ee0af7f91d7ef00d715f79c993359baca938c3033cd981c2cfb5555f5b084d47"
   },
   "assets/ships/continuum/player-flying-cloud/indices.bin.gz": {
-    "url": "assets/ships/continuum/player-flying-cloud/indices.bin.81e3dda7a5727ae4.gz",
-    "bytes": 618201,
-    "sha256": "81e3dda7a5727ae4f08663572c9565b95df260b3b032113b7383186901e1c164"
+    "url": "assets/ships/continuum/player-flying-cloud/indices.bin.16bfb72ad59495e1.gz",
+    "bytes": 631414,
+    "sha256": "16bfb72ad59495e1938b7b80ad61722cddb34bc4db9c689ab92c95aa764d1438"
   },
   "assets/ships/continuum/player-flying-cloud/copies.bin.gz": {
-    "url": "assets/ships/continuum/player-flying-cloud/copies.bin.e13616cfd28f79cc.gz",
-    "bytes": 571,
-    "sha256": "e13616cfd28f79cc677513ad3eff3cd5df6e7ee83358751cfc38606ad9ee870d"
+    "url": "assets/ships/continuum/player-flying-cloud/copies.bin.cbc33c883eb89136.gz",
+    "bytes": 569,
+    "sha256": "cbc33c883eb8913677500b8283c66a2d54a9d5dd134465102f9ee4051af5cb46"
   },
   "assets/ships/continuum/player-flying-cloud/far.bin.gz": {
-    "url": "assets/ships/continuum/player-flying-cloud/far.bin.0353710ee6e585eb.gz",
-    "bytes": 155816,
-    "sha256": "0353710ee6e585eb1ea6b30d00735da7646b3af6c732e4fda0b0ebd36227bf1d"
+    "url": "assets/ships/continuum/player-flying-cloud/far.bin.044be3aad153e28a.gz",
+    "bytes": 155946,
+    "sha256": "044be3aad153e28a015fdbd5a2c39cdf782d8a8c521dfd8638e2f7c97a65a4b1"
   },
   "assets/ships/continuum/player-flying-cloud/corners.bin.gz": {
-    "url": "assets/ships/continuum/player-flying-cloud/corners.bin.d22f3769fe8be41c.gz",
-    "bytes": 300740,
-    "sha256": "d22f3769fe8be41c10f1a4e645ff6d506cbb776ad4389457a98f4eb3301746ba"
+    "url": "assets/ships/continuum/player-flying-cloud/corners.bin.0bcbacd2874760fb.gz",
+    "bytes": 303542,
+    "sha256": "0bcbacd2874760fb9b69e1ef6cf4c20789e37e9a097f0e1332dee489ef16b9d4"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/manifest.json": {
-    "url": "assets/ships/continuum/player-gipsy-moth-iv/manifest.fc559ab05086f180.json",
-    "bytes": 3709,
-    "sha256": "fc559ab05086f180f1257b43cf12b56e7bc513c85a801e80a393d445d7a7c569"
+    "url": "assets/ships/continuum/player-gipsy-moth-iv/manifest.a0faaf7a5b610c8f.json",
+    "bytes": 3760,
+    "sha256": "a0faaf7a5b610c8ff75ac68126c2825d72cb92503f49e6aa754e900ba6bf4433"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/clusters.bin.gz": {
-    "url": "assets/ships/continuum/player-gipsy-moth-iv/clusters.bin.612b30605770ce9b.gz",
-    "bytes": 21515,
-    "sha256": "612b30605770ce9bc6c2f9cfba718c12485c55b23f43a8dab80acd24c97a0536"
+    "url": "assets/ships/continuum/player-gipsy-moth-iv/clusters.bin.e3e6cc9cec6a5fac.gz",
+    "bytes": 21877,
+    "sha256": "e3e6cc9cec6a5fac16f56e605dfab5e9bda34d5b83e28149a44763a90e02f171"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/indices.bin.gz": {
-    "url": "assets/ships/continuum/player-gipsy-moth-iv/indices.bin.73f48c288944b3c0.gz",
-    "bytes": 175380,
-    "sha256": "73f48c288944b3c017818e0d2d7fbb884a78e0ab288612b018bbb302400b3951"
+    "url": "assets/ships/continuum/player-gipsy-moth-iv/indices.bin.fbfe26903eaed1ff.gz",
+    "bytes": 178517,
+    "sha256": "fbfe26903eaed1ff29e6891c867d12090fee92d119c214748ad9377d8a6f9c99"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/copies.bin.gz": {
-    "url": "assets/ships/continuum/player-gipsy-moth-iv/copies.bin.7c032ecb69d3f483.gz",
-    "bytes": 463,
-    "sha256": "7c032ecb69d3f4837b5e9071563c5efcb8b398b499e322cf6e3dadc572851154"
+    "url": "assets/ships/continuum/player-gipsy-moth-iv/copies.bin.902f37948d4ab69a.gz",
+    "bytes": 464,
+    "sha256": "902f37948d4ab69a68e79262d037be3e5fef9c172644e7affdb3726457f6fb2c"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/far.bin.gz": {
-    "url": "assets/ships/continuum/player-gipsy-moth-iv/far.bin.a098eda5a3ad2a77.gz",
-    "bytes": 156039,
-    "sha256": "a098eda5a3ad2a77e737b62fedcaaadf616fbb81f47eb8a9e126e81e1db4d323"
+    "url": "assets/ships/continuum/player-gipsy-moth-iv/far.bin.bb5f9258415f6b34.gz",
+    "bytes": 154632,
+    "sha256": "bb5f9258415f6b343ba740139eac351d524d20140cf001f39868274d727cdf1c"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/corners.bin.gz": {
-    "url": "assets/ships/continuum/player-gipsy-moth-iv/corners.bin.a682bf488a07a805.gz",
-    "bytes": 89927,
-    "sha256": "a682bf488a07a80584f5230b55e66617862cdf8b079c1d65258f08d19f0cc593"
+    "url": "assets/ships/continuum/player-gipsy-moth-iv/corners.bin.74784e6d8ff93e7c.gz",
+    "bytes": 92630,
+    "sha256": "74784e6d8ff93e7c4e7bf4a690ba257f15e2c859dd5f1e38d15bbe656d67cf86"
   },
   "assets/continuum/bake-worker.js": {
     "url": "assets/continuum/bake-worker.ab18be33cf1673bc.js",

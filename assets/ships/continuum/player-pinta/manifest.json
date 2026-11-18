@@ -6,22 +6,22 @@
  "model": "pinta",
  "label": "Pinta",
  "source": {
-  "vertices": 57994,
-  "indices": 144972,
-  "shards": 237,
-  "key": "ce5fd99de74927f3c46aa7c74f13f4898f7cfef282c7c3cec6481bd9e31a7804",
+  "vertices": 59910,
+  "indices": 149772,
+  "shards": 239,
+  "key": "19724e06339becc9a3b142d7459f20f92a530f1490708721fa03e493207b5452",
   "surface": {
-   "area": 316.2852820167977,
+   "area": 324.572611194777,
    "centroid": [
-    0.0002636397570547131,
-    2.336453493976868,
-    0.17026875016101384
+    -0.000693431083269233,
+    2.4608966891750477,
+    0.2504923195846318
    ],
    "materials": {
     "0": 44.8843691193524,
-    "1": 35.80130524373965,
+    "1": 40.21031756763084,
     "2": 13.854927586730717,
-    "3": 3.884691781511477,
+    "3": 4.682250988482672,
     "4": 2.2964077990321927,
     "6": 0.48210464558221133,
     "7": 0.2086550809995595,
@@ -36,7 +36,9 @@
     "17": 13.123485687472003,
     "18": 1.9750002264976558,
     "19": 3.678230645674918,
-    "25": 0.13886080344124538
+    "25": 0.15957055798943262,
+    "29": 2.6652057196535566,
+    "30": 0.3948421729156699
    }
   },
   "designScale": [
@@ -48,138 +50,138 @@
  "clusterWords": 16,
  "farVertexWords": 6,
  "stepWords": 4,
- "clusterCount": 1582,
- "indexCount": 259467,
+ "clusterCount": 1603,
+ "indexCount": 263754,
  "copyCount": 316,
  "clusters": {
-  "triangles": 86489,
-  "levels": 6,
-  "roots": 582,
-  "groups": 133,
-  "parts": 400,
+  "triangles": 87918,
+  "levels": 11,
+  "roots": 580,
+  "groups": 152,
+  "parts": 406,
   "rootError": 19.7205
  },
  "far": {
-  "vertexCount": 4008,
+  "vertexCount": 4014,
   "triangleCount": 8000,
-  "stepCount": 4004,
+  "stepCount": 4010,
   "offsets": {
    "vertices": 0,
-   "records": 24048,
-   "triangles": 28056,
-   "steps": 52056
+   "records": 24084,
+   "triangles": 28098,
+   "steps": 52098
   },
-  "voxel": 0.0885,
+  "voxel": 0.1078,
   "pieces": [
    {
     "kind": "rigid",
-    "close": 0.2654,
+    "close": 0.3234,
     "grid": [
-     149,
-     320,
-     371
+     124,
+     265,
+     333
     ],
     "count": 1,
     "dropped": 0,
-    "genus": 0,
-    "surfaceTriangles": 941700
+    "genus": -1,
+    "surfaceTriangles": 670472
    },
    {
     "kind": "canvas",
-    "close": 0.1769,
+    "close": 0.1078,
     "grid": [
-     142,
-     210,
-     243
+     116,
+     209,
+     272
     ],
-    "count": 3,
+    "count": 5,
     "dropped": 0,
     "genus": 0,
-    "surfaceTriangles": 842628
+    "surfaceTriangles": 611332
    }
   ],
   "baseTriangles": 8000,
-  "baseVertices": 4008,
-  "baseError": 0.3248,
-  "baseGeometric": 0.1508,
-  "steps": 4004,
+  "baseVertices": 4014,
+  "baseError": 0.3363,
+  "baseGeometric": 0.1939,
+  "steps": 4010,
   "coreTriangles": 4,
-  "depth": 9,
+  "depth": 12,
   "errorRange": [
-   0.3248,
-   11.8495
+   0.3363,
+   21.9865
   ],
-  "inflateMax": 0.9902,
-  "euler": 8
+  "inflateMax": 1.2049,
+  "euler": 14
  },
  "splat": {
   "centre": [
-   -0.0155,
-   11.3383,
-   -1.6872
+   -0.0392,
+   11.3501,
+   1.7709
   ],
-  "ry": 13.79,
-  "rxSide": 6.0117,
-  "rxEnd": 5.4885,
+  "ry": 13.8379,
+  "rxSide": 6.789,
+  "rxEnd": 5.5852,
   "colour": [
-   0.45086,
-   0.37281,
-   0.28241
+   0.43017,
+   0.35245,
+   0.26551
   ]
  },
  "bound": {
   "centre": [
    0,
    11.381,
-   -1.6967
+   1.7819
   ],
-  "radius": 33.6696
+  "radius": 35.9512
  },
  "poses": 1,
  "files": {
   "clusters.bin": {
-   "bytes": 101248,
-   "sha256": "422333a5298e270694a66f0375f2ca2c5739ec4fd1f1a1cfab3942bfda58a785",
+   "bytes": 102592,
+   "sha256": "4d1d2722841c9c14dba2b13313f7d0c76a01973124137157cbe13bed12ed3d2c",
    "gzip": {
     "file": "clusters.bin.gz",
-    "bytes": 40595,
-    "sha256": "0e805a84cfdb38cdf0a214a940fe09820162071e855d19c66fe130d1e8774b58"
+    "bytes": 41477,
+    "sha256": "ca09ba6323514aef3403824d88a1f3fcaf098b4ee3899e1f4b8c53a766e940b6"
    }
   },
   "indices.bin": {
-   "bytes": 1037868,
-   "sha256": "ca78ccdaac4df029a37c1a7a3f451a8f8c9851982b0e4b60732c1f2fb3430a56",
+   "bytes": 1055016,
+   "sha256": "f31f05346996c4e52f9214cd2d1a36ea98f14771ad5e696f1227a54d1f911a74",
    "gzip": {
     "file": "indices.bin.gz",
-    "bytes": 313459,
-    "sha256": "57b34f9edcca2d55403b8e99e9e5a995bd0ff1f9564376aab6965afe920675df"
+    "bytes": 318840,
+    "sha256": "2a302de09e78e9fa6a649f9dfa2fb3ba3299e7c2c5bf4c4c524840537d18be39"
    }
   },
   "copies.bin": {
    "bytes": 1264,
-   "sha256": "597785c370f7e4acec677196eff731a4745c8de697fbec34f5a36e54b533f4d3",
+   "sha256": "2c189a3c7ef20085856aab628a2e65a84dcf5459efb94298d580e466d1d1d800",
    "gzip": {
     "file": "copies.bin.gz",
-    "bytes": 647,
-    "sha256": "f9a1854277285c0028559f07534bcbf5378b8b49516605811593d32135019e38"
+    "bytes": 619,
+    "sha256": "9a5634e65434084895dd746b66b4c1f898ec6a23897e8457f3f9ad03d9b13ce7"
    }
   },
   "far.bin": {
-   "bytes": 272304,
-   "sha256": "a41d216aaaf19c24cb0845cb7d4fa9b9542af06fada7467981ff1bb512e024f6",
+   "bytes": 272568,
+   "sha256": "b9a33279cfe2594cfd4654f0cee48e4aeff829e14644290499ed7dca87b4409b",
    "gzip": {
     "file": "far.bin.gz",
-    "bytes": 157501,
-    "sha256": "c01de207fe7c07d0fea5e9ac6d691cdc3830edf223cdb6d6f0a662818f0aabdf"
+    "bytes": 158318,
+    "sha256": "bacf1103d804d823ce4a7cccdb14194d8d46aed110e64d2bc114173a53ec3cdf"
    }
   },
   "corners.bin": {
-   "bytes": 579888,
-   "sha256": "410581ed16524cc29aa72131f124f46530b8c63b048cb9842d3b057e9e66a9d6",
+   "bytes": 599088,
+   "sha256": "a3335091828be07ac609be5d94abd7cd7f8ea6cea8ec53db8726a69eb41e1fbf",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 172503,
-    "sha256": "8dfb2a83f0682dd78f8f4588dd1bcc8aa7adc436b97b9386c09b59b340fa1094"
+    "bytes": 177859,
+    "sha256": "a31468c3e2d0623ded537139b929bd6fd11170949b49ed770b969592d0499a3c"
    }
   }
  }
