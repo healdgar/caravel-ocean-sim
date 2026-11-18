@@ -70,7 +70,7 @@ async function nineSnapshot(page){
     }
     return {rows,active:vessels.length,assets:f.renderAssets.size,config:f.config.length,wake:{count:f.wakes.count,layers:f.wakes.textures.map(t=>t.depthOrArrayLayers)},
       unique:{boat:unique(vessels.map(v=>v.boat)),vertex:unique(vessels.map(v=>v.vertexBuffer)),mesh:unique(vessels.map(v=>v.mesh)),hull:unique(vessels.map(v=>v.hullUBO)),crew:unique(vessels.map(v=>v.crew?.state)),sails:unique(vessels.map(v=>v.boat.sailState)),guns:unique(vessels.map(v=>v.gunnery.state)),anchor:unique(vessels.map(v=>v.anchor)),wetness:unique(vessels.map(v=>v.wetness.state)),wake:unique(vessels.map(v=>v.interaction)),shadow:unique(vessels.map(v=>v.shadows.uniform)),probe:unique(vessels.map(v=>v.probe.output)),rowing:unique(vessels.filter(v=>v.rowingWater).map(v=>v.rowingWater))},
-      bodies:r.buffers.filter(b=>/^crew continuum .+ cut and far body$/.test(b.label)).map(b=>b.label),sharedCrew:{vertices:r.buffers.filter(b=>b.label==='crew vertices').length,indices:r.buffers.filter(b=>b.label==='crew indices').length,joints:r.buffers.filter(b=>b.label==='crew joints').length,actors:r.buffers.filter(b=>b.label==='crew transforms').length},startup:window.oceanStartup.state,image:await r.image(),errors:r.errors,lost:r.lost};
+      bodies:r.buffers.filter(b=>/^crew .+ continuum atlas$/.test(b.label)).map(b=>b.label),sharedCrew:{vertices:r.buffers.filter(b=>b.label==='crew vertices').length,indices:r.buffers.filter(b=>b.label==='crew indices').length,joints:r.buffers.filter(b=>b.label==='crew joints').length,actors:r.buffers.filter(b=>b.label==='crew transforms').length},startup:window.oceanStartup.state,image:await r.image(),errors:r.errors,lost:r.lost};
   });
 }
 

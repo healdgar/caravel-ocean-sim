@@ -2624,7 +2624,7 @@ test('two vessels share global water but own transforms, probes, wakes, rigs and
         sameAsset:player.asset===following.asset,cachedAsset:shipAssets.get(boat.modelId)===shipAsset,groups:shipAsset.groups.length,
         companyModels:vessels.map(v=>v.crew.state.modelId),
         sameHull:vessels[0].hullUBO===vessels[1].hullUBO,sameWetness:vessels[0].wetness.state===vessels[1].wetness.state,
-        sameCrewMesh:(bodies=>bodies.length>=3&&new Set(bodies).size===bodies.length)(fleetAllocations.buffers.map(b=>b.label).filter(label=>/^crew continuum .+ cut and far body$/.test(label))),
+        sameCrewMesh:(bodies=>bodies.length>=3&&new Set(bodies).size===bodies.length)(fleetAllocations.buffers.map(b=>b.label).filter(label=>/^crew .+ continuum atlas$/.test(label))),
         probes:vessels.map(v=>v.probe.state.time),positions:vessels.map(v=>Array.from(v.hullData.subarray(16,19)))};
     });
     assert.ok(state.separation>50);assert.equal(state.sameRig,false);assert.equal(state.sameHull,false);assert.equal(state.sameWetness,false);assert.equal(state.sameCrewMesh,true);
