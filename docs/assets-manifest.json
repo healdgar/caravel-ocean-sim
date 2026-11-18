@@ -655,239 +655,239 @@
     "sha256": "9c6893a4d79e52a89fc2676f6ccb208ba00362b46f8d948f0ce520435d830204"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.7714f3b5a494898f.gz",
-    "bytes": 13009474,
-    "sha256": "7714f3b5a494898f0a5c4d399f6f42312a267581429b812f815f33f61b436fc4"
+    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.94a2f923063c86a8.gz",
+    "bytes": 13009814,
+    "sha256": "94a2f923063c86a831b563c781353b13783acb22bcb8699bb03865b9aa4c5df6"
   },
   "assets/prefab-continuum/acapulco.bin.gz": {
-    "url": "assets/prefab-continuum/acapulco.bin.383f778aa0ad4f14.gz",
-    "bytes": 878727,
-    "sha256": "383f778aa0ad4f147755fa2c620ecf482243350f09469a96533e5f16de6ace52"
+    "url": "assets/prefab-continuum/acapulco.bin.8823a2919f54cfff.gz",
+    "bytes": 879015,
+    "sha256": "8823a2919f54cfff50920fd1b7e4fc8c52eeb038dfb7a9d36b12c3833020e68c"
   },
   "assets/prefab-continuum/angra.bin.gz": {
-    "url": "assets/prefab-continuum/angra.bin.4e94db9a2dedea63.gz",
-    "bytes": 2969851,
-    "sha256": "4e94db9a2dedea63435e46850fa703537f3f3e151260f650a1c5968bf66e4369"
+    "url": "assets/prefab-continuum/angra.bin.e764293ac42c0708.gz",
+    "bytes": 2968813,
+    "sha256": "e764293ac42c070858c0351d29a547722615c733538b2ee273a78d292fa860fe"
   },
   "assets/prefab-continuum/boston.bin.gz": {
-    "url": "assets/prefab-continuum/boston.bin.c393408cf14cd7f9.gz",
-    "bytes": 442299,
-    "sha256": "c393408cf14cd7f9a51c6d1f0984da0913236d549579b07b7ec6af9028fcd8b3"
+    "url": "assets/prefab-continuum/boston.bin.70528fb2bcf7c757.gz",
+    "bytes": 442148,
+    "sha256": "70528fb2bcf7c7572ee36fbe18067b603f76f434378b870211e2eb6674eb2fa5"
   },
   "assets/prefab-continuum/bridgetown.bin.gz": {
-    "url": "assets/prefab-continuum/bridgetown.bin.d5469f9be84406a7.gz",
-    "bytes": 346131,
-    "sha256": "d5469f9be84406a7c0208e2e18e312de52c88ef321c948ba87a47d9f228717fd"
+    "url": "assets/prefab-continuum/bridgetown.bin.cf423e6b814d61e1.gz",
+    "bytes": 346376,
+    "sha256": "cf423e6b814d61e1c6c6ae78361657981f4ce1c94fd24de6efbd2428cee0f0b6"
   },
   "assets/prefab-continuum/cadiz-sanlucar.bin.gz": {
-    "url": "assets/prefab-continuum/cadiz-sanlucar.bin.cf0d183d84d6d906.gz",
-    "bytes": 2790375,
-    "sha256": "cf0d183d84d6d906b2b164f2a24bca1eee9df2b14370818fee60290b57ce1892"
+    "url": "assets/prefab-continuum/cadiz-sanlucar.bin.f14a6b670aacab9e.gz",
+    "bytes": 2790453,
+    "sha256": "f14a6b670aacab9eb83e9c25fc30f6310c21d8abc0d2d2ba2a29dad9778d38e8"
   },
   "assets/prefab-continuum/callao.bin.gz": {
-    "url": "assets/prefab-continuum/callao.bin.1a0886961783f6d4.gz",
-    "bytes": 1183694,
-    "sha256": "1a0886961783f6d49f707a4b3b0d5b1dbe9666b1335801e51470f1e1601ffdf6"
+    "url": "assets/prefab-continuum/callao.bin.1c800b15a574a2a3.gz",
+    "bytes": 1183786,
+    "sha256": "1c800b15a574a2a358fbd31c29a464fc901eaebbe815f4ea9fed2e8b4d97ab53"
   },
   "assets/prefab-continuum/campeche.bin.gz": {
-    "url": "assets/prefab-continuum/campeche.bin.2663347c272c46d9.gz",
-    "bytes": 1044264,
-    "sha256": "2663347c272c46d96159001acd1ac0ccd68be7975e125666440b85dff6a1eb53"
+    "url": "assets/prefab-continuum/campeche.bin.05a55c3b651dd358.gz",
+    "bytes": 1043834,
+    "sha256": "05a55c3b651dd3588d911941d9da639cf09a8b0e320c8818f97a2496471cc311"
   },
   "assets/prefab-continuum/cartagena.bin.gz": {
-    "url": "assets/prefab-continuum/cartagena.bin.b89103a01019c6a3.gz",
-    "bytes": 2948546,
-    "sha256": "b89103a01019c6a3feac6077aa686dbbb71d1876ea709b7cd5c58b5d50b53e42"
+    "url": "assets/prefab-continuum/cartagena.bin.830d92d4e5f0a736.gz",
+    "bytes": 2949046,
+    "sha256": "830d92d4e5f0a7362a46d4bb5555470804b12d06635cdb76f63579c4867ccab5"
   },
   "assets/prefab-continuum/castle-duel.bin.gz": {
-    "url": "assets/prefab-continuum/castle-duel.bin.7e8416eb11c476a0.gz",
-    "bytes": 759169,
-    "sha256": "7e8416eb11c476a0514bc4d0c3c35127e6edd55248fcd2b0e215d5994672b871"
+    "url": "assets/prefab-continuum/castle-duel.bin.55d2042662db604a.gz",
+    "bytes": 759036,
+    "sha256": "55d2042662db604af4f88a1c82a0df31bed81650caf3f822d49a178b7f54d393"
   },
   "assets/prefab-continuum/charleston.bin.gz": {
-    "url": "assets/prefab-continuum/charleston.bin.ab71c3c69a86dfc0.gz",
-    "bytes": 387089,
-    "sha256": "ab71c3c69a86dfc0cd7df7c673a040bf5980d4f6431dd4c3ea6b10a30f237f4a"
+    "url": "assets/prefab-continuum/charleston.bin.f855c37053b36263.gz",
+    "bytes": 387046,
+    "sha256": "f855c37053b3626316a9f79692641b65fca23c71b665241c03cb614a1f3b7593"
   },
   "assets/prefab-continuum/coro.bin.gz": {
-    "url": "assets/prefab-continuum/coro.bin.b27cc21928727f4d.gz",
-    "bytes": 2107640,
-    "sha256": "b27cc21928727f4dc10c001d8532a1b57614b246c62ce334edc12147c28f1131"
+    "url": "assets/prefab-continuum/coro.bin.dc8146bfae0bd0c5.gz",
+    "bytes": 2108091,
+    "sha256": "dc8146bfae0bd0c55419ecedeca145edfd6f990efd86598c5f54a073396076d9"
   },
   "assets/prefab-continuum/cumana.bin.gz": {
-    "url": "assets/prefab-continuum/cumana.bin.0075a084e3ecdd4f.gz",
-    "bytes": 2945837,
-    "sha256": "0075a084e3ecdd4f370af65638bf46a71e96453f433f2e457fb2e8408c8e93df"
+    "url": "assets/prefab-continuum/cumana.bin.52002c2fad3bb357.gz",
+    "bytes": 2945992,
+    "sha256": "52002c2fad3bb3577101ca8ddcdc1881280e59ddae542f754340e7fe4982c6ac"
   },
   "assets/prefab-continuum/curacao.bin.gz": {
-    "url": "assets/prefab-continuum/curacao.bin.d97fb84da3060119.gz",
-    "bytes": 388852,
-    "sha256": "d97fb84da3060119b02c9de1c0a8f735fe30102554a153e114300cf51b0bf7ed"
+    "url": "assets/prefab-continuum/curacao.bin.d7b18247bd2cff08.gz",
+    "bytes": 388874,
+    "sha256": "d7b18247bd2cff086693bfcb9984eb3c0c08cb9f7f5d5a03f68ab679c8f23a1d"
   },
   "assets/prefab-continuum/fort-royal-martinique.bin.gz": {
-    "url": "assets/prefab-continuum/fort-royal-martinique.bin.51306cffb1759ff9.gz",
-    "bytes": 393256,
-    "sha256": "51306cffb1759ff96e304d44865cd5127bd3acbb94c6e15780e8b489fc4ffe84"
+    "url": "assets/prefab-continuum/fort-royal-martinique.bin.4b46fe4fd17f3b2a.gz",
+    "bytes": 392529,
+    "sha256": "4b46fe4fd17f3b2a9ef98f8707d698dbb181441d315dd074a65634cf6ac8b8cc"
   },
   "assets/prefab-continuum/funchal.bin.gz": {
-    "url": "assets/prefab-continuum/funchal.bin.6a005ed4432164cf.gz",
-    "bytes": 2808799,
-    "sha256": "6a005ed4432164cf820160a4078ad15dd8a16110023f605b566468895405ffa0"
+    "url": "assets/prefab-continuum/funchal.bin.5e45565135ea45a0.gz",
+    "bytes": 2809227,
+    "sha256": "5e45565135ea45a0277853666099172561b3a56816ad520d7470e62610027303"
   },
   "assets/prefab-continuum/goa.bin.gz": {
-    "url": "assets/prefab-continuum/goa.bin.bb2947a1598a1fc1.gz",
-    "bytes": 2864169,
-    "sha256": "bb2947a1598a1fc12792c2d6cb988aa5b063a37f122b8634526c1320c5202e7a"
+    "url": "assets/prefab-continuum/goa.bin.b3359c2debcf659a.gz",
+    "bytes": 2864702,
+    "sha256": "b3359c2debcf659a8840dae040a218c963e1d356a8a8827adf9d89667e2886ca"
   },
   "assets/prefab-continuum/havana.bin.gz": {
-    "url": "assets/prefab-continuum/havana.bin.112de455c60d3ed7.gz",
-    "bytes": 2945437,
-    "sha256": "112de455c60d3ed7c00cee31dccb5786f2d1145b0606d1d7a735e38a4826836a"
+    "url": "assets/prefab-continuum/havana.bin.64c9d9bc54cafddc.gz",
+    "bytes": 2946036,
+    "sha256": "64c9d9bc54cafddc54bfd3e0b38e1d9dae951f23210bd93874f85d6dc5a1619c"
   },
   "assets/prefab-continuum/jamestown.bin.gz": {
-    "url": "assets/prefab-continuum/jamestown.bin.a03ea68db6c0053e.gz",
-    "bytes": 390846,
-    "sha256": "a03ea68db6c0053e4bd3651a43af82b578cddbf11c699272efd0016c54c1e28f"
+    "url": "assets/prefab-continuum/jamestown.bin.74f090e8b442f841.gz",
+    "bytes": 390753,
+    "sha256": "74f090e8b442f84127c9d40ac16be9207a751641f442bcddecb7686c7c77fdc9"
   },
   "assets/prefab-continuum/la-coruna.bin.gz": {
-    "url": "assets/prefab-continuum/la-coruna.bin.39a90f5090a820db.gz",
-    "bytes": 2904480,
-    "sha256": "39a90f5090a820db5876b38665daa8b726ad43a975b3e7f6a89a8d8852e9bd8e"
+    "url": "assets/prefab-continuum/la-coruna.bin.0eb4468d237fe5be.gz",
+    "bytes": 2904917,
+    "sha256": "0eb4468d237fe5bed81e3c7692486cb1dffea2a88c0f2c25e3b3f55eb27459f4"
   },
   "assets/prefab-continuum/las-palmas.bin.gz": {
-    "url": "assets/prefab-continuum/las-palmas.bin.649ce1f313cbc255.gz",
-    "bytes": 2879034,
-    "sha256": "649ce1f313cbc255640cac66304cfc3a24fdd123e15dbf11f9da521d079f7753"
+    "url": "assets/prefab-continuum/las-palmas.bin.f58120ca9cf5be8b.gz",
+    "bytes": 2879407,
+    "sha256": "f58120ca9cf5be8bc473e2abb48168acae25e1e348d9ed446bca4d2b2d3072be"
   },
   "assets/prefab-continuum/lisbon.bin.gz": {
-    "url": "assets/prefab-continuum/lisbon.bin.8c91ee0a5f07bbb3.gz",
-    "bytes": 4103994,
-    "sha256": "8c91ee0a5f07bbb38d54167e63e83c879f17d9ceaf760b0ecdf1222cb7a5c2cf"
+    "url": "assets/prefab-continuum/lisbon.bin.5a2c1462f2d037ba.gz",
+    "bytes": 4103960,
+    "sha256": "5a2c1462f2d037ba72dbab33572f39bdf5518f6c0c33ba1965352506e8f510d0"
   },
   "assets/prefab-continuum/malacca.bin.gz": {
-    "url": "assets/prefab-continuum/malacca.bin.ba92b51603d81e0b.gz",
-    "bytes": 2760134,
-    "sha256": "ba92b51603d81e0b33419f986eb7a5eeaa843dcf79a0574a091a35f60d65a18b"
+    "url": "assets/prefab-continuum/malacca.bin.79810d5d4924eccf.gz",
+    "bytes": 2760145,
+    "sha256": "79810d5d4924eccf921cbec3c1110c6f29525f51e57932ba8502f3067a337920"
   },
   "assets/prefab-continuum/nagasaki.bin.gz": {
-    "url": "assets/prefab-continuum/nagasaki.bin.2799a8d873ce6bcb.gz",
-    "bytes": 988422,
-    "sha256": "2799a8d873ce6bcbdae2b12a4d2c682f456408aa2a84c7d87a81bc3328b44be7"
+    "url": "assets/prefab-continuum/nagasaki.bin.210e8891eb5af9d7.gz",
+    "bytes": 988196,
+    "sha256": "210e8891eb5af9d7783e1e10f7d26dd5c80d6743ed75dd784e3e3018dad9f115"
   },
   "assets/prefab-continuum/new-amsterdam.bin.gz": {
-    "url": "assets/prefab-continuum/new-amsterdam.bin.7f06bc93282ecc3e.gz",
-    "bytes": 447578,
-    "sha256": "7f06bc93282ecc3ed38069753eeebfc9959614c25585f5e63d95be6df1a32dbd"
+    "url": "assets/prefab-continuum/new-amsterdam.bin.45d0e3ebb3cbeeaf.gz",
+    "bytes": 447476,
+    "sha256": "45d0e3ebb3cbeeaf9208a5a26b6811be118573f88a48aa016acb72c76de52e98"
   },
   "assets/prefab-continuum/nombre-de-dios.bin.gz": {
-    "url": "assets/prefab-continuum/nombre-de-dios.bin.2e73d30b126c3944.gz",
-    "bytes": 2872232,
-    "sha256": "2e73d30b126c394473920f72124703eea968fd48858a1e8720e3fb89583a72ff"
+    "url": "assets/prefab-continuum/nombre-de-dios.bin.6d66c78e1dc0d56b.gz",
+    "bytes": 2872249,
+    "sha256": "6d66c78e1dc0d56b8d75a73181d65ad2db0ec997ae0f564d48820e4155700c67"
   },
   "assets/prefab-continuum/olinda.bin.gz": {
-    "url": "assets/prefab-continuum/olinda.bin.046827346fc04191.gz",
-    "bytes": 2753206,
-    "sha256": "046827346fc041912d6f811683634f7ac37b57d7925658c7eac91ec4829d5c03"
+    "url": "assets/prefab-continuum/olinda.bin.8f15904c6dd6542a.gz",
+    "bytes": 2753018,
+    "sha256": "8f15904c6dd6542a311d6eab8990d2041ff7daf310f775689d65954647867a4b"
   },
   "assets/prefab-continuum/palos-huelva.bin.gz": {
-    "url": "assets/prefab-continuum/palos-huelva.bin.8eb2725e38b4be5f.gz",
-    "bytes": 2962748,
-    "sha256": "8eb2725e38b4be5f5170df1a0ab39475a09051ba12a35464eac0ad9309f75dbc"
+    "url": "assets/prefab-continuum/palos-huelva.bin.b968be2ee479d987.gz",
+    "bytes": 2962807,
+    "sha256": "b968be2ee479d98771bc20c41b2b92f6fcb35112357a3ad9c3d27fea1fe51865"
   },
   "assets/prefab-continuum/panama-viejo.bin.gz": {
-    "url": "assets/prefab-continuum/panama-viejo.bin.a7cd2560e5b06972.gz",
-    "bytes": 2951317,
-    "sha256": "a7cd2560e5b06972cf3744e6ecd20fb9c997efd4e68e5275151b495291e59e3d"
+    "url": "assets/prefab-continuum/panama-viejo.bin.fc2a108146be50ba.gz",
+    "bytes": 2951618,
+    "sha256": "fc2a108146be50baaaa91a1b9058c140400f30c36843143f0f78aa0d1fbc3894"
   },
   "assets/prefab-continuum/philadelphia.bin.gz": {
-    "url": "assets/prefab-continuum/philadelphia.bin.5b0a56f8ce80d89d.gz",
-    "bytes": 387317,
-    "sha256": "5b0a56f8ce80d89de6475451ec9a2803a0b47c43adbedb686079311431095f9c"
+    "url": "assets/prefab-continuum/philadelphia.bin.14e5da43aef106e9.gz",
+    "bytes": 386878,
+    "sha256": "14e5da43aef106e9f15b1c3eafdd92985004bdd763c12da2c0d7ffb16c0e1a1a"
   },
   "assets/prefab-continuum/plymouth-colony.bin.gz": {
-    "url": "assets/prefab-continuum/plymouth-colony.bin.84dcf67032b97707.gz",
-    "bytes": 444409,
-    "sha256": "84dcf67032b97707e56c3ce385e3ed1168770b443eb107555a53165f1f8f164d"
+    "url": "assets/prefab-continuum/plymouth-colony.bin.459b572dc12f2877.gz",
+    "bytes": 444710,
+    "sha256": "459b572dc12f2877c99818ebf087efcbe970bfcb6f8510e9c4e684ed0c96be5c"
   },
   "assets/prefab-continuum/portobelo.bin.gz": {
-    "url": "assets/prefab-continuum/portobelo.bin.ae61d3abb8a0be7c.gz",
-    "bytes": 434970,
-    "sha256": "ae61d3abb8a0be7caf58c7a6564d8b6ac158b3a29c178149cab6ce44855438ae"
+    "url": "assets/prefab-continuum/portobelo.bin.3cef17ffdfbce9ec.gz",
+    "bytes": 435019,
+    "sha256": "3cef17ffdfbce9ec50f7e3b77f3d20b6cc0ce7767e5d8863c3d57415329f9788"
   },
   "assets/prefab-continuum/quebec.bin.gz": {
-    "url": "assets/prefab-continuum/quebec.bin.45d33b40e742d42f.gz",
-    "bytes": 441308,
-    "sha256": "45d33b40e742d42fd0ab23161b456ca4f390289abb76a320975c9bc29ec3a9bf"
+    "url": "assets/prefab-continuum/quebec.bin.0efc32d38cba488e.gz",
+    "bytes": 441368,
+    "sha256": "0efc32d38cba488ec4ba0ae440282127c0862f2dc20910385126eacebce62eee"
   },
   "assets/prefab-continuum/ribeira-grande.bin.gz": {
-    "url": "assets/prefab-continuum/ribeira-grande.bin.e79eed1e53f4e86a.gz",
-    "bytes": 2272378,
-    "sha256": "e79eed1e53f4e86a83d4c5981a2507201a86a3530fd4c07672c7bf7bd9cf9a0c"
+    "url": "assets/prefab-continuum/ribeira-grande.bin.a9022bf7e3962964.gz",
+    "bytes": 2271972,
+    "sha256": "a9022bf7e3962964c0dada5820f08c19473c627c555b306d8692cf18de40c539"
   },
   "assets/prefab-continuum/rio-de-janeiro.bin.gz": {
-    "url": "assets/prefab-continuum/rio-de-janeiro.bin.09b6fc4f65ab9475.gz",
-    "bytes": 303401,
-    "sha256": "09b6fc4f65ab94751ff0eecd7908604b1c216995695ac77f31020aae9f94bdf1"
+    "url": "assets/prefab-continuum/rio-de-janeiro.bin.f0783f7f09559147.gz",
+    "bytes": 303516,
+    "sha256": "f0783f7f09559147c679030fc853cfcf6b077e11cd0547622f60c19155830aaa"
   },
   "assets/prefab-continuum/saba.bin.gz": {
-    "url": "assets/prefab-continuum/saba.bin.e02218f63f2b8224.gz",
-    "bytes": 1045371,
-    "sha256": "e02218f63f2b82245181269a62aa090b3a492658364883767e2f88b6d5f17043"
+    "url": "assets/prefab-continuum/saba.bin.4d2d980a3d9b8421.gz",
+    "bytes": 1045096,
+    "sha256": "4d2d980a3d9b842159ebaaf262d0b422d6203d0881a7131532e661306cdea569"
   },
   "assets/prefab-continuum/salvador-da-bahia.bin.gz": {
-    "url": "assets/prefab-continuum/salvador-da-bahia.bin.f56fd6243be1d077.gz",
-    "bytes": 793812,
-    "sha256": "f56fd6243be1d0771502561a619e54bad7edbc9d743d7176abfc889e185d522c"
+    "url": "assets/prefab-continuum/salvador-da-bahia.bin.0902d2f707fdb378.gz",
+    "bytes": 794179,
+    "sha256": "0902d2f707fdb378969f5f2a72bf9fd7206aafc43ac16915f70ffd04e54287c0"
   },
   "assets/prefab-continuum/san-juan.bin.gz": {
-    "url": "assets/prefab-continuum/san-juan.bin.b80eb3a0a4779447.gz",
-    "bytes": 3012643,
-    "sha256": "b80eb3a0a4779447989315a57f818159d4c32baed083f083e32ba019f2910eb4"
+    "url": "assets/prefab-continuum/san-juan.bin.a743faf2411c8754.gz",
+    "bytes": 3011781,
+    "sha256": "a743faf2411c87542669faec936cef4c2a795a8116ff00c3e48dddf9d4ba2721"
   },
   "assets/prefab-continuum/santa-marta.bin.gz": {
-    "url": "assets/prefab-continuum/santa-marta.bin.8580fd6c5b945245.gz",
-    "bytes": 2101850,
-    "sha256": "8580fd6c5b945245068ec42b3c84a78338a53baca65f64667513958daf685575"
+    "url": "assets/prefab-continuum/santa-marta.bin.8e621fa4b726e2c9.gz",
+    "bytes": 2101420,
+    "sha256": "8e621fa4b726e2c982d747ae48f07581d8c15f3935e64e65c60a215b8928459d"
   },
   "assets/prefab-continuum/santiago-de-cuba.bin.gz": {
-    "url": "assets/prefab-continuum/santiago-de-cuba.bin.2b57f78936072a83.gz",
-    "bytes": 2925933,
-    "sha256": "2b57f78936072a838597355a2e97296afb7be577a4d6a8ec4135bde317de0b99"
+    "url": "assets/prefab-continuum/santiago-de-cuba.bin.fa21d3bb174978a7.gz",
+    "bytes": 2927007,
+    "sha256": "fa21d3bb174978a7777928a86759de7654273a93f5db3ca5395aee8d095dc89b"
   },
   "assets/prefab-continuum/santo-domingo.bin.gz": {
-    "url": "assets/prefab-continuum/santo-domingo.bin.29f6d2c3b1e7a4e6.gz",
-    "bytes": 3151282,
-    "sha256": "29f6d2c3b1e7a4e6f3c8e43d706b9f8e38502ae29186a79e8b0d5adc3005d582"
+    "url": "assets/prefab-continuum/santo-domingo.bin.76139f22bf284f8a.gz",
+    "bytes": 3151560,
+    "sha256": "76139f22bf284f8a1950048dc856267d016d076572a2b3f8b1a91d1d1de7d8ac"
   },
   "assets/prefab-continuum/sao-vicente.bin.gz": {
-    "url": "assets/prefab-continuum/sao-vicente.bin.c3e3f268d9041c3b.gz",
-    "bytes": 1884966,
-    "sha256": "c3e3f268d9041c3b06cb4bcf7d384e50112cc51435e6891a0c35b80e49c3e2c8"
+    "url": "assets/prefab-continuum/sao-vicente.bin.8a9d677fe5a5abed.gz",
+    "bytes": 1884819,
+    "sha256": "8a9d677fe5a5abed34397cf33850540dd9c38a6dd1493392c36435d0d145e151"
   },
   "assets/prefab-continuum/st-augustine.bin.gz": {
-    "url": "assets/prefab-continuum/st-augustine.bin.0c070d7eee06cebc.gz",
-    "bytes": 454555,
-    "sha256": "0c070d7eee06cebcc503a09d591f3a0add5010ac00b445205c3bb92da0660625"
+    "url": "assets/prefab-continuum/st-augustine.bin.492f4b918e87afdb.gz",
+    "bytes": 454272,
+    "sha256": "492f4b918e87afdba5e2dac08616d8be23e62d83c02b7a80077d7acba9cbe168"
   },
   "assets/prefab-continuum/st-kitts.bin.gz": {
-    "url": "assets/prefab-continuum/st-kitts.bin.d88d169f6f83c046.gz",
-    "bytes": 393042,
-    "sha256": "d88d169f6f83c0465e6ab601614a970ca5b0f5c91d026a4f7cbff6ed39ab2b7f"
+    "url": "assets/prefab-continuum/st-kitts.bin.333a3c130dc79bba.gz",
+    "bytes": 393294,
+    "sha256": "333a3c130dc79bbacaa364e16ac79972271b7b265e1bf2759faaf7aedf9583d2"
   },
   "assets/prefab-continuum/tenerife.bin.gz": {
-    "url": "assets/prefab-continuum/tenerife.bin.17fd50905c0f4810.gz",
-    "bytes": 2770588,
-    "sha256": "17fd50905c0f4810df00283670c42fb0d063f198f421d202e141136d0709cadc"
+    "url": "assets/prefab-continuum/tenerife.bin.37c267d2ffc820ae.gz",
+    "bytes": 2770810,
+    "sha256": "37c267d2ffc820aea6851a258feebb5a2806961d403120726742ca714b9824c8"
   },
   "assets/prefab-continuum/trujillo.bin.gz": {
-    "url": "assets/prefab-continuum/trujillo.bin.2407fbbb14418f58.gz",
-    "bytes": 2093549,
-    "sha256": "2407fbbb14418f584118ac5a8741a9b47a0852cb29b2e2371ea4328c942bdee2"
+    "url": "assets/prefab-continuum/trujillo.bin.d722095a0618678d.gz",
+    "bytes": 2093502,
+    "sha256": "d722095a0618678da14bc789d37ef2c417fcf19caaf4ba2c651945a390e6e6ef"
   },
   "assets/prefab-continuum/veracruz.bin.gz": {
-    "url": "assets/prefab-continuum/veracruz.bin.754a842cdb140f4e.gz",
-    "bytes": 2717066,
-    "sha256": "754a842cdb140f4ed590d2fbbedfb71beb7c0a9b6800ec98a0e7300b1f86ff8b"
+    "url": "assets/prefab-continuum/veracruz.bin.ee69421605223e6b.gz",
+    "bytes": 2717322,
+    "sha256": "ee69421605223e6bbf5e2c3dcd97185fd7136b046aa42baccc2e28ed17a342eb"
   },
   "assets/world/hyg-stars.bin": {
     "url": "assets/world/hyg-stars.e648341c03cb753b.bin",
@@ -900,24 +900,24 @@
     "sha256": "230404cc6e431ee18b0683c1a680b90463e83ac02da9652c607387090c8cc12e"
   },
   "assets/city-continuum/manifest.json": {
-    "url": "assets/city-continuum/manifest.a07ff6adaacef348.json",
-    "bytes": 101103,
-    "sha256": "a07ff6adaacef34841e03d463f8b790d6ee589fc592101b2d6f02802a29641c7"
+    "url": "assets/city-continuum/manifest.0c36194cc3409829.json",
+    "bytes": 101108,
+    "sha256": "0c36194cc3409829971bfd80e0a5446b92d815ce826be564de99fd6f8c73b18a"
   },
   "assets/city-continuum/atlas.bin.gz": {
-    "url": "assets/city-continuum/atlas.bin.768680c45c6470da.gz",
-    "bytes": 3863707,
-    "sha256": "768680c45c6470daa51278711a0e1fae435b925be8e2a76f8bba81780d47d76e"
+    "url": "assets/city-continuum/atlas.bin.849db54609996528.gz",
+    "bytes": 3863662,
+    "sha256": "849db54609996528c5fa1f1efe65ae6a592b71ad95af4ab4325978fc0a4fac41"
   },
   "assets/animal-continuum/manifest.json": {
-    "url": "assets/animal-continuum/manifest.4f3f16975c0513e2.json",
-    "bytes": 14646,
-    "sha256": "4f3f16975c0513e2ae959fe4a552d07680c8a961bdcc47188b3d82de863df9fe"
+    "url": "assets/animal-continuum/manifest.0581e39f4282990f.json",
+    "bytes": 14638,
+    "sha256": "0581e39f4282990f397e93b20e5c5cf3bcdd19e411c54918e9e9ac65ba08759b"
   },
   "assets/animal-continuum/atlas.bin.gz": {
-    "url": "assets/animal-continuum/atlas.bin.577d8d1fffd7dab1.gz",
-    "bytes": 1568334,
-    "sha256": "577d8d1fffd7dab1e726c49d6ae758e24f3dbb01af32aa828dad13d71d9e83ed"
+    "url": "assets/animal-continuum/atlas.bin.a69168f93e51765f.gz",
+    "bytes": 1567729,
+    "sha256": "a69168f93e51765fee6832910313ab773abbfdc875d0233571f598ebdd4eece0"
   },
   "assets/wildlife/whale.glb": {
     "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",
@@ -2075,14 +2075,14 @@
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.81d687d481350026.json",
-    "bytes": 12593,
-    "sha256": "81d687d4813500269e0b57712da351e215b08c7171b2a8abd2935e7a72f9243c"
+    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.6aac960af7111818.json",
+    "bytes": 12594,
+    "sha256": "6aac960af7111818c604e60e87334b870b6705dc2e2d8b2447abdda96b7566e9"
   },
   "assets/ships/continuum/trade-cog-underway/manifest.json": {
-    "url": "assets/ships/continuum/trade-cog-underway/manifest.645b143f8bccf070.json",
-    "bytes": 4112,
-    "sha256": "645b143f8bccf070a65228863910e8cf6e1c814447f59f403c8de0b1fb715dcb"
+    "url": "assets/ships/continuum/trade-cog-underway/manifest.64a0dc44552b4362.json",
+    "bytes": 4113,
+    "sha256": "64a0dc44552b436288e879a4b86990d886cf90a537318c276e14bda4935444e3"
   },
   "assets/ships/continuum/trade-cog-underway/clusters.bin.gz": {
     "url": "assets/ships/continuum/trade-cog-underway/clusters.bin.e4963511847746a0.gz",
@@ -2100,9 +2100,9 @@
     "sha256": "1c7300adbf08c6b35dad5cbdebd978aebeacac289766e39df10cb9d0586aa753"
   },
   "assets/ships/continuum/trade-cog-underway/far.bin.gz": {
-    "url": "assets/ships/continuum/trade-cog-underway/far.bin.1ffcd3bf4f5610ec.gz",
-    "bytes": 156998,
-    "sha256": "1ffcd3bf4f5610eca852f44e0641dc67735fb196976050f09605e60dcdc9cb9f"
+    "url": "assets/ships/continuum/trade-cog-underway/far.bin.b2f706744f5d43bc.gz",
+    "bytes": 157102,
+    "sha256": "b2f706744f5d43bc6c4c328486687570d1eb9cf483c464cbde3a6a5ec7e761ed"
   },
   "assets/ships/continuum/trade-cog-underway/vertices.bin.gz": {
     "url": "assets/ships/continuum/trade-cog-underway/vertices.bin.bd452a0f3d8da368.gz",
@@ -2115,9 +2115,9 @@
     "sha256": "1f2d39b58daf966b4e9eae3c651a10591f805628764e492c6384a00f1cd2f243"
   },
   "assets/ships/continuum/trade-cog-anchored/manifest.json": {
-    "url": "assets/ships/continuum/trade-cog-anchored/manifest.f7a8e1f2ebae5276.json",
-    "bytes": 4052,
-    "sha256": "f7a8e1f2ebae52767a785a900bfd5c2793a63a818f0c793848fcb007099ec1db"
+    "url": "assets/ships/continuum/trade-cog-anchored/manifest.57f5cdc9270b8dd3.json",
+    "bytes": 4051,
+    "sha256": "57f5cdc9270b8dd3ca161878a692d0349afc3d1c350f7d3bb15260eb90195bcc"
   },
   "assets/ships/continuum/trade-cog-anchored/clusters.bin.gz": {
     "url": "assets/ships/continuum/trade-cog-anchored/clusters.bin.a5f7b7b588e246ec.gz",
@@ -2135,9 +2135,9 @@
     "sha256": "5c686ebccbe7aff3176fc6349fef8fc5ee471835b55f58911e66b0b1e80f2333"
   },
   "assets/ships/continuum/trade-cog-anchored/far.bin.gz": {
-    "url": "assets/ships/continuum/trade-cog-anchored/far.bin.ca1df0a5db8a6abf.gz",
-    "bytes": 158273,
-    "sha256": "ca1df0a5db8a6abf4a11ddb36b63cb571689b3cb2338b718bf3a0ebd08547a75"
+    "url": "assets/ships/continuum/trade-cog-anchored/far.bin.ecee9393b6da4437.gz",
+    "bytes": 158360,
+    "sha256": "ecee9393b6da4437a0eec6f3929902bc28b37f556be4447b6102ee3f95689746"
   },
   "assets/ships/continuum/trade-cog-anchored/vertices.bin.gz": {
     "url": "assets/ships/continuum/trade-cog-anchored/vertices.bin.eb206c66260132d9.gz",
@@ -2150,9 +2150,9 @@
     "sha256": "612581336ccac5c806281406bcf5936d5185ecc8c4d448e24a8aa14c2269d7c7"
   },
   "assets/ships/continuum/trade-carrack-underway/manifest.json": {
-    "url": "assets/ships/continuum/trade-carrack-underway/manifest.631111eb161162d6.json",
-    "bytes": 4135,
-    "sha256": "631111eb161162d6f930c961380f96502c8d6b1c34834ae48dc4c143fa209608"
+    "url": "assets/ships/continuum/trade-carrack-underway/manifest.ea51f7563f42afb3.json",
+    "bytes": 4133,
+    "sha256": "ea51f7563f42afb3f2bf52451411f1be2fdb8f53c64450eb8789a38e3104145c"
   },
   "assets/ships/continuum/trade-carrack-underway/clusters.bin.gz": {
     "url": "assets/ships/continuum/trade-carrack-underway/clusters.bin.f2868eaa94fa7fd0.gz",
@@ -2170,9 +2170,9 @@
     "sha256": "244233d4855de30380f5af3615a88840d18fc49f3fce25b48fc265c44618e49f"
   },
   "assets/ships/continuum/trade-carrack-underway/far.bin.gz": {
-    "url": "assets/ships/continuum/trade-carrack-underway/far.bin.8bf5d58c298aa0d4.gz",
-    "bytes": 158110,
-    "sha256": "8bf5d58c298aa0d48a2f6b34533471da72b42cc1a6730c41ef4579091abd969c"
+    "url": "assets/ships/continuum/trade-carrack-underway/far.bin.79c6e4dcf4c0040a.gz",
+    "bytes": 158256,
+    "sha256": "79c6e4dcf4c0040a0fd4d5c1f7c68f7cd06d6deb27b58914053ea476c53b3667"
   },
   "assets/ships/continuum/trade-carrack-underway/vertices.bin.gz": {
     "url": "assets/ships/continuum/trade-carrack-underway/vertices.bin.f1d358b4434c4960.gz",
@@ -2185,9 +2185,9 @@
     "sha256": "b535350cf2159c5a3a30fa186fbcd7f7f5181f0dc5c1d9715adbd6b8bf32056b"
   },
   "assets/ships/continuum/trade-carrack-anchored/manifest.json": {
-    "url": "assets/ships/continuum/trade-carrack-anchored/manifest.b38bb84619aa8a24.json",
-    "bytes": 4072,
-    "sha256": "b38bb84619aa8a24fe5e430d7b84b5c499074750bd0b4c86d95ee50d53f84c80"
+    "url": "assets/ships/continuum/trade-carrack-anchored/manifest.70d1b46765a54c25.json",
+    "bytes": 4071,
+    "sha256": "70d1b46765a54c2576aab4a582b99183f7fb2d395cf7bf0843c4527acb3942a1"
   },
   "assets/ships/continuum/trade-carrack-anchored/clusters.bin.gz": {
     "url": "assets/ships/continuum/trade-carrack-anchored/clusters.bin.f163e3b90c15283a.gz",
@@ -2205,9 +2205,9 @@
     "sha256": "b830e90012b81fdb8f5e7c795a60893b9abca3a1154f1e4eff32058ad37df805"
   },
   "assets/ships/continuum/trade-carrack-anchored/far.bin.gz": {
-    "url": "assets/ships/continuum/trade-carrack-anchored/far.bin.fe87f8a24152c577.gz",
-    "bytes": 158839,
-    "sha256": "fe87f8a24152c577141cd8f3721257ef996461a8d92859b712df8a79d86b500c"
+    "url": "assets/ships/continuum/trade-carrack-anchored/far.bin.18fc859d1ea26a4f.gz",
+    "bytes": 158969,
+    "sha256": "18fc859d1ea26a4f0e1500b1670f0fcef1339938fa78a5ccc53d710677948aa8"
   },
   "assets/ships/continuum/trade-carrack-anchored/vertices.bin.gz": {
     "url": "assets/ships/continuum/trade-carrack-anchored/vertices.bin.eddc179c9b60eb46.gz",
@@ -2220,9 +2220,9 @@
     "sha256": "1f1211f9be47135364f4b7565ad51e77c20f08e921214c9e91b9a7c20227d723"
   },
   "assets/ships/continuum/trade-river-barge/manifest.json": {
-    "url": "assets/ships/continuum/trade-river-barge/manifest.9d6a4471cfec1c69.json",
-    "bytes": 3896,
-    "sha256": "9d6a4471cfec1c691033e75cb5d083d5d0bb68c7be0676bc675ac9941cf96538"
+    "url": "assets/ships/continuum/trade-river-barge/manifest.e5b87061f677ebb8.json",
+    "bytes": 3895,
+    "sha256": "e5b87061f677ebb828c491c2caf9e414d5cf56c35217a041b1271c38ff1d31ab"
   },
   "assets/ships/continuum/trade-river-barge/clusters.bin.gz": {
     "url": "assets/ships/continuum/trade-river-barge/clusters.bin.ff924f619097b012.gz",
@@ -2240,9 +2240,9 @@
     "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837"
   },
   "assets/ships/continuum/trade-river-barge/far.bin.gz": {
-    "url": "assets/ships/continuum/trade-river-barge/far.bin.00c46788fa5e60de.gz",
-    "bytes": 155199,
-    "sha256": "00c46788fa5e60de10cc7655b3162d6319a2f5dcd386e67184009c9104129aad"
+    "url": "assets/ships/continuum/trade-river-barge/far.bin.37849f4028d4b5b5.gz",
+    "bytes": 155245,
+    "sha256": "37849f4028d4b5b5e98d002f5ffea46a88d4468f58406c995016f6c761e37f2b"
   },
   "assets/ships/continuum/trade-river-barge/vertices.bin.gz": {
     "url": "assets/ships/continuum/trade-river-barge/vertices.bin.cf439876972f27bc.gz",
@@ -2255,9 +2255,9 @@
     "sha256": "974eba305c217d9a708691764712f28c5185cd30cce6130b8d03b1392f04a929"
   },
   "assets/ships/continuum/trade-lateen-caravel/manifest.json": {
-    "url": "assets/ships/continuum/trade-lateen-caravel/manifest.7eb7155251433add.json",
+    "url": "assets/ships/continuum/trade-lateen-caravel/manifest.ebb82bf9d1c05ce4.json",
     "bytes": 4115,
-    "sha256": "7eb7155251433addce59b65e381842b408162601f28e8f10683b00410c5a31c3"
+    "sha256": "ebb82bf9d1c05ce42a814ebeb0a944f7bbde9d96f8486c95c12a5a61f75bfcf2"
   },
   "assets/ships/continuum/trade-lateen-caravel/clusters.bin.gz": {
     "url": "assets/ships/continuum/trade-lateen-caravel/clusters.bin.8883d3df41c97c9f.gz",
@@ -2275,9 +2275,9 @@
     "sha256": "12bc996eefd3e1a0f9473b2acbc6647e1cbdb8deccac148d8d3eb58eb96f3949"
   },
   "assets/ships/continuum/trade-lateen-caravel/far.bin.gz": {
-    "url": "assets/ships/continuum/trade-lateen-caravel/far.bin.bc5c55956b539b0d.gz",
-    "bytes": 156536,
-    "sha256": "bc5c55956b539b0dddb0966c08d930bfa50a38fc21899d57299c9bf827bb8f2e"
+    "url": "assets/ships/continuum/trade-lateen-caravel/far.bin.2519a804a72e9e10.gz",
+    "bytes": 156703,
+    "sha256": "2519a804a72e9e10ac6a745fdb928c4f6d1916b13e63b3122c73d734a8da96bc"
   },
   "assets/ships/continuum/trade-lateen-caravel/vertices.bin.gz": {
     "url": "assets/ships/continuum/trade-lateen-caravel/vertices.bin.b5e340f6228d1fe1.gz",
@@ -2290,9 +2290,9 @@
     "sha256": "f99b7e696b214a416645e81d038e0bcd32ce646bf5e8d197a8c6bb6d6c79b4c1"
   },
   "assets/ships/continuum/trade-harbor-barque/manifest.json": {
-    "url": "assets/ships/continuum/trade-harbor-barque/manifest.666f1cdd70335a8f.json",
+    "url": "assets/ships/continuum/trade-harbor-barque/manifest.c99375504509c291.json",
     "bytes": 4103,
-    "sha256": "666f1cdd70335a8f53e1cc66a00f326869228f999e8183514505bf9ab2196460"
+    "sha256": "c99375504509c291fbe3879ef4695958aa7990fb1ce6ac54e8ade598f0e32d9a"
   },
   "assets/ships/continuum/trade-harbor-barque/clusters.bin.gz": {
     "url": "assets/ships/continuum/trade-harbor-barque/clusters.bin.b2161fe12f1320b9.gz",
@@ -2310,9 +2310,9 @@
     "sha256": "7bc21297d7c50717570b52003479b64d5a6a52abecc0d32a2bb780c45b1481a2"
   },
   "assets/ships/continuum/trade-harbor-barque/far.bin.gz": {
-    "url": "assets/ships/continuum/trade-harbor-barque/far.bin.2c6cd43813c553a6.gz",
-    "bytes": 157148,
-    "sha256": "2c6cd43813c553a666216a1d27d7b64a0b7ef6529fd341e170a9a2292fb69bb3"
+    "url": "assets/ships/continuum/trade-harbor-barque/far.bin.0b96dde4416abc9d.gz",
+    "bytes": 157192,
+    "sha256": "0b96dde4416abc9d4074de5d337973dc5b283975ce23b97b777d0149ba0ad574"
   },
   "assets/ships/continuum/trade-harbor-barque/vertices.bin.gz": {
     "url": "assets/ships/continuum/trade-harbor-barque/vertices.bin.cd117deadc171224.gz",
@@ -2325,9 +2325,9 @@
     "sha256": "4adb8679f83e9f9a533b32ed9ce6f2e809fadb80093d4b8ca9046f281a71e03c"
   },
   "assets/ships/continuum/player-victory/manifest.json": {
-    "url": "assets/ships/continuum/player-victory/manifest.4e0ce032217e305d.json",
-    "bytes": 3891,
-    "sha256": "4e0ce032217e305d77ee65b813c98b7ebb785cb89ba3684c1508ca6404b19447"
+    "url": "assets/ships/continuum/player-victory/manifest.9c3bae061473f11c.json",
+    "bytes": 3889,
+    "sha256": "9c3bae061473f11c210edfbe2146730834cd546e9608a2b427c8aaedb4daee8c"
   },
   "assets/ships/continuum/player-victory/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-victory/clusters.bin.e682363566f6f749.gz",
@@ -2345,9 +2345,9 @@
     "sha256": "10b53b007fb398e81bacee71138def9256e9a97dfec5ada16cf34fd02479f916"
   },
   "assets/ships/continuum/player-victory/far.bin.gz": {
-    "url": "assets/ships/continuum/player-victory/far.bin.1e9cae3fcbb46c57.gz",
-    "bytes": 147179,
-    "sha256": "1e9cae3fcbb46c57ee96c632a8d5eb4d9c38fde8ac542fa93458389893e74bc1"
+    "url": "assets/ships/continuum/player-victory/far.bin.ade930537698175b.gz",
+    "bytes": 150782,
+    "sha256": "ade930537698175b49c1a6e80cfb4439aa8ca7d235797d2e62db61f7a664026c"
   },
   "assets/ships/continuum/player-victory/corners.bin.gz": {
     "url": "assets/ships/continuum/player-victory/corners.bin.18143be7de654650.gz",
@@ -2355,9 +2355,9 @@
     "sha256": "18143be7de654650c8636a787e3a690fa8b498c1bccfcc62566f90c241530559"
   },
   "assets/ships/continuum/player-nina/manifest.json": {
-    "url": "assets/ships/continuum/player-nina/manifest.14fad0814e91fd42.json",
+    "url": "assets/ships/continuum/player-nina/manifest.7a2d6dd2a013ef4f.json",
     "bytes": 3800,
-    "sha256": "14fad0814e91fd42a3a5f3e698e0ed3fc070396c17c86c674ee2dfe567be2061"
+    "sha256": "7a2d6dd2a013ef4f382fbeed86f94202e313d7b3fe8e3d693a0971d2947140b2"
   },
   "assets/ships/continuum/player-nina/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-nina/clusters.bin.0bff1be6d1be25a2.gz",
@@ -2375,9 +2375,9 @@
     "sha256": "e653eeeb65c78bd646a7522ceb7009ecd5d93d232c00ec0b9012f67985a9411b"
   },
   "assets/ships/continuum/player-nina/far.bin.gz": {
-    "url": "assets/ships/continuum/player-nina/far.bin.13e53fd201fb33c2.gz",
-    "bytes": 156421,
-    "sha256": "13e53fd201fb33c27b09a9f5cfdf179d4ab8d0946d2636b2a7667eccc9305406"
+    "url": "assets/ships/continuum/player-nina/far.bin.2b104200f21f8206.gz",
+    "bytes": 156678,
+    "sha256": "2b104200f21f82060aa812df0b952754258722aea3ab2e5f9385728540c254fe"
   },
   "assets/ships/continuum/player-nina/corners.bin.gz": {
     "url": "assets/ships/continuum/player-nina/corners.bin.7cd6b69503aec6d8.gz",
@@ -2385,9 +2385,9 @@
     "sha256": "7cd6b69503aec6d8e53ad2d34c0c76099422cb1e1cb2e3cf9b1caae779d57c24"
   },
   "assets/ships/continuum/player-pinta/manifest.json": {
-    "url": "assets/ships/continuum/player-pinta/manifest.438707f8dffe2ece.json",
-    "bytes": 3800,
-    "sha256": "438707f8dffe2eceb608748936e162f8bd4fd2a29b755ac2e02ab7b714a2a6f9"
+    "url": "assets/ships/continuum/player-pinta/manifest.8ea034c5ceb56d13.json",
+    "bytes": 3799,
+    "sha256": "8ea034c5ceb56d138c0db8fc6e7f2d2d55fd34fbcd48d593ab8bc65cc68d3441"
   },
   "assets/ships/continuum/player-pinta/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-pinta/clusters.bin.0e805a84cfdb38cd.gz",
@@ -2405,9 +2405,9 @@
     "sha256": "f9a1854277285c0028559f07534bcbf5378b8b49516605811593d32135019e38"
   },
   "assets/ships/continuum/player-pinta/far.bin.gz": {
-    "url": "assets/ships/continuum/player-pinta/far.bin.3f14948b5ae14f1e.gz",
-    "bytes": 157415,
-    "sha256": "3f14948b5ae14f1eb40e667d691f2a458ae45b0fb59bd6afbc2cbbe7fff1a19c"
+    "url": "assets/ships/continuum/player-pinta/far.bin.c01de207fe7c07d0.gz",
+    "bytes": 157501,
+    "sha256": "c01de207fe7c07d0fea5e9ac6d691cdc3830edf223cdb6d6f0a662818f0aabdf"
   },
   "assets/ships/continuum/player-pinta/corners.bin.gz": {
     "url": "assets/ships/continuum/player-pinta/corners.bin.8dfb2a83f0682dd7.gz",
@@ -2415,9 +2415,9 @@
     "sha256": "8dfb2a83f0682dd78f8f4588dd1bcc8aa7adc436b97b9386c09b59b340fa1094"
   },
   "assets/ships/continuum/player-santa-maria/manifest.json": {
-    "url": "assets/ships/continuum/player-santa-maria/manifest.3bb4ad0e96cba8f7.json",
-    "bytes": 3832,
-    "sha256": "3bb4ad0e96cba8f7503b0571e17cc4809d6d94a1eace0c20c7760d16199342ea"
+    "url": "assets/ships/continuum/player-santa-maria/manifest.fac9f8a4229a667e.json",
+    "bytes": 3831,
+    "sha256": "fac9f8a4229a667e3ebc78d4283615cf8435ce571ecdb15bf393b926898bbfe2"
   },
   "assets/ships/continuum/player-santa-maria/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-santa-maria/clusters.bin.e98d70534a7bb7ea.gz",
@@ -2435,9 +2435,9 @@
     "sha256": "f9453089624b071d43fa3b745758c257afe6b6519c0633c04fd6849ee5932147"
   },
   "assets/ships/continuum/player-santa-maria/far.bin.gz": {
-    "url": "assets/ships/continuum/player-santa-maria/far.bin.b9daa38212d58d3a.gz",
-    "bytes": 158520,
-    "sha256": "b9daa38212d58d3a18933c4164aca87abdc6197080a23fd4127909dff234c103"
+    "url": "assets/ships/continuum/player-santa-maria/far.bin.ce83117c1eba29aa.gz",
+    "bytes": 158662,
+    "sha256": "ce83117c1eba29aa91b8acb0812c5e49943df99f826083fa90c594e9ac9d2456"
   },
   "assets/ships/continuum/player-santa-maria/corners.bin.gz": {
     "url": "assets/ships/continuum/player-santa-maria/corners.bin.942051862a1e2cb7.gz",
@@ -2445,9 +2445,9 @@
     "sha256": "942051862a1e2cb73583cbb5dee98657db8668c4238c6988775570629d1a126d"
   },
   "assets/ships/continuum/player-oseberg/manifest.json": {
-    "url": "assets/ships/continuum/player-oseberg/manifest.cdacddc4582f7c26.json",
+    "url": "assets/ships/continuum/player-oseberg/manifest.74cd979e1200cf14.json",
     "bytes": 3595,
-    "sha256": "cdacddc4582f7c26a087e7c0bc5d67e195630a80e3caa0a6562808b66a3e6be5"
+    "sha256": "74cd979e1200cf1463432427efe2438bbc8568b50c5374dcc65421ac86b689ef"
   },
   "assets/ships/continuum/player-oseberg/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-oseberg/clusters.bin.7785490919b612b7.gz",
@@ -2465,9 +2465,9 @@
     "sha256": "b323e0ebc69bf6de224a22f749f6683287f7997c254c654f9ab41476311d5617"
   },
   "assets/ships/continuum/player-oseberg/far.bin.gz": {
-    "url": "assets/ships/continuum/player-oseberg/far.bin.f7732c250da4b899.gz",
-    "bytes": 148271,
-    "sha256": "f7732c250da4b89952ef6fa0b4e9c876f90d409f228af1eb3726b90bd1e736da"
+    "url": "assets/ships/continuum/player-oseberg/far.bin.e9e90ee191165141.gz",
+    "bytes": 150528,
+    "sha256": "e9e90ee191165141a293d1483287bffcfcce4ce0d553a17da27cffed8d010cd9"
   },
   "assets/ships/continuum/player-oseberg/corners.bin.gz": {
     "url": "assets/ships/continuum/player-oseberg/corners.bin.a063e61db789c4f9.gz",
@@ -2475,9 +2475,9 @@
     "sha256": "a063e61db789c4f925f181fd5b4487da164ce70dfce41c29b73c6dbf6f5cecac"
   },
   "assets/ships/continuum/player-lusoria/manifest.json": {
-    "url": "assets/ships/continuum/player-lusoria/manifest.16a41e45df4e662b.json",
-    "bytes": 3590,
-    "sha256": "16a41e45df4e662bc25f3d5797df1e18a210c2b9f19c9ecf0a0a912f4cf01ae0"
+    "url": "assets/ships/continuum/player-lusoria/manifest.6191bc77133e1254.json",
+    "bytes": 3589,
+    "sha256": "6191bc77133e1254d9bd33ac87043e500f31e53a88c09d96b5ecc0b51ae88f57"
   },
   "assets/ships/continuum/player-lusoria/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-lusoria/clusters.bin.184dd011ab434ed0.gz",
@@ -2495,9 +2495,9 @@
     "sha256": "1663a817e51b3e30023d7cf0b02e952a51b30b468c3a45fc7e6b37f9d2d5808d"
   },
   "assets/ships/continuum/player-lusoria/far.bin.gz": {
-    "url": "assets/ships/continuum/player-lusoria/far.bin.91e3331f14554a41.gz",
-    "bytes": 153089,
-    "sha256": "91e3331f14554a415289023b9c4e2b70a1dda089fdfcd8e75ddd3c28d04ed419"
+    "url": "assets/ships/continuum/player-lusoria/far.bin.a8c2acf93eb4153d.gz",
+    "bytes": 153759,
+    "sha256": "a8c2acf93eb4153d49de680d03c7fde75e6c2659f98b0ff307de98c5c49e9a84"
   },
   "assets/ships/continuum/player-lusoria/corners.bin.gz": {
     "url": "assets/ships/continuum/player-lusoria/corners.bin.0bd280d1258a45b5.gz",
@@ -2505,9 +2505,9 @@
     "sha256": "0bd280d1258a45b500df54a2ee9342125ddaf777b09741e0c9079d674ac59a09"
   },
   "assets/ships/continuum/player-taino-canoe/manifest.json": {
-    "url": "assets/ships/continuum/player-taino-canoe/manifest.1e9fa37946e75e75.json",
+    "url": "assets/ships/continuum/player-taino-canoe/manifest.07720fb17ecd5b5e.json",
     "bytes": 3284,
-    "sha256": "1e9fa37946e75e75bfd05dba174bfde4537387f8d6065f6c1a66c2f6518202fe"
+    "sha256": "07720fb17ecd5b5e281c7e807883beda199e1b449975e32844869df5d5406837"
   },
   "assets/ships/continuum/player-taino-canoe/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-taino-canoe/clusters.bin.6da2fc2d71a701af.gz",
@@ -2525,9 +2525,9 @@
     "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837"
   },
   "assets/ships/continuum/player-taino-canoe/far.bin.gz": {
-    "url": "assets/ships/continuum/player-taino-canoe/far.bin.c4ab207f8c4a41e1.gz",
-    "bytes": 151833,
-    "sha256": "c4ab207f8c4a41e1ba2e42beb580cdacec64c75c79f4b9f53469f0a6ff9b73c8"
+    "url": "assets/ships/continuum/player-taino-canoe/far.bin.4399d1e61249f1ad.gz",
+    "bytes": 151834,
+    "sha256": "4399d1e61249f1ad96d6db901a7aef7a823401f8dfdb87e40787ef17ff5a3e39"
   },
   "assets/ships/continuum/player-taino-canoe/corners.bin.gz": {
     "url": "assets/ships/continuum/player-taino-canoe/corners.bin.f8873887f559c6b9.gz",
@@ -2535,9 +2535,9 @@
     "sha256": "f8873887f559c6b9e60ec6b44c0a170a2d7ca0c85ebe1eabe210b9b653e365b9"
   },
   "assets/ships/continuum/player-flying-cloud/manifest.json": {
-    "url": "assets/ships/continuum/player-flying-cloud/manifest.c1264a41a8b0384d.json",
-    "bytes": 3818,
-    "sha256": "c1264a41a8b0384d8dc31ece02d2e5d0fa20076a3bd492e45a1c674854553f9f"
+    "url": "assets/ships/continuum/player-flying-cloud/manifest.fbc67ef451a08e77.json",
+    "bytes": 3816,
+    "sha256": "fbc67ef451a08e77794db6b92dac8b27e13208a5c7b30aaca367ec96ebdf7c03"
   },
   "assets/ships/continuum/player-flying-cloud/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-flying-cloud/clusters.bin.b9223dd00e6784d9.gz",
@@ -2555,9 +2555,9 @@
     "sha256": "e13616cfd28f79cc677513ad3eff3cd5df6e7ee83358751cfc38606ad9ee870d"
   },
   "assets/ships/continuum/player-flying-cloud/far.bin.gz": {
-    "url": "assets/ships/continuum/player-flying-cloud/far.bin.dfabf7bd0098543e.gz",
-    "bytes": 155167,
-    "sha256": "dfabf7bd0098543e770303f700d8f7d5418ff88cc769c34a4ad7fa458715cc1f"
+    "url": "assets/ships/continuum/player-flying-cloud/far.bin.0353710ee6e585eb.gz",
+    "bytes": 155816,
+    "sha256": "0353710ee6e585eb1ea6b30d00735da7646b3af6c732e4fda0b0ebd36227bf1d"
   },
   "assets/ships/continuum/player-flying-cloud/corners.bin.gz": {
     "url": "assets/ships/continuum/player-flying-cloud/corners.bin.d22f3769fe8be41c.gz",
@@ -2565,9 +2565,9 @@
     "sha256": "d22f3769fe8be41c10f1a4e645ff6d506cbb776ad4389457a98f4eb3301746ba"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/manifest.json": {
-    "url": "assets/ships/continuum/player-gipsy-moth-iv/manifest.f54f2c2638f40dd5.json",
+    "url": "assets/ships/continuum/player-gipsy-moth-iv/manifest.fc559ab05086f180.json",
     "bytes": 3709,
-    "sha256": "f54f2c2638f40dd582dbb8e7bc5fe75aa4f1f79980ec1e004076acad0c6d4bb8"
+    "sha256": "fc559ab05086f180f1257b43cf12b56e7bc513c85a801e80a393d445d7a7c569"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/clusters.bin.gz": {
     "url": "assets/ships/continuum/player-gipsy-moth-iv/clusters.bin.612b30605770ce9b.gz",
@@ -2585,9 +2585,9 @@
     "sha256": "7c032ecb69d3f4837b5e9071563c5efcb8b398b499e322cf6e3dadc572851154"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/far.bin.gz": {
-    "url": "assets/ships/continuum/player-gipsy-moth-iv/far.bin.2f587561daa682a8.gz",
-    "bytes": 155922,
-    "sha256": "2f587561daa682a8b37204c3a6b004c938f34fd30b04d76ed3f3be3a92bb13ba"
+    "url": "assets/ships/continuum/player-gipsy-moth-iv/far.bin.a098eda5a3ad2a77.gz",
+    "bytes": 156039,
+    "sha256": "a098eda5a3ad2a77e737b62fedcaaadf616fbb81f47eb8a9e126e81e1db4d323"
   },
   "assets/ships/continuum/player-gipsy-moth-iv/corners.bin.gz": {
     "url": "assets/ships/continuum/player-gipsy-moth-iv/corners.bin.a682bf488a07a805.gz",
@@ -2595,14 +2595,14 @@
     "sha256": "a682bf488a07a80584f5230b55e66617862cdf8b079c1d65258f08d19f0cc593"
   },
   "assets/continuum/bake-worker.js": {
-    "url": "assets/continuum/bake-worker.2317bb60f908ec77.js",
-    "bytes": 183902,
-    "sha256": "2317bb60f908ec7778999c2485296f413de5527da5703969d562035a17dcb2f4"
+    "url": "assets/continuum/bake-worker.ab18be33cf1673bc.js",
+    "bytes": 184898,
+    "sha256": "ab18be33cf1673bc4cfac505f4e899137bf2883f95ce7f6cc125dc35fac5fde9"
   },
   "assets/prefab-continuum/manifest.json": {
-    "url": "assets/prefab-continuum/manifest.0b5eeca0723fe7be.json",
-    "bytes": 198986,
-    "sha256": "0b5eeca0723fe7beb4331c379de092d337efd5260769eb58dba47e38e9f5acdf"
+    "url": "assets/prefab-continuum/manifest.39e743c914e3191d.json",
+    "bytes": 198959,
+    "sha256": "39e743c914e3191db885f0c203b03a86be400def11a6435b390082757f3e5aa5"
   },
   "assets/world/saba/manifest.json": {
     "url": "assets/world/saba/manifest.2697c31e9c5d8c95.json",
@@ -3030,14 +3030,14 @@
     "sha256": "38fcb4df7f8093660e345a928a12d827a78e277bc116b41f873ece511d2ad3b8"
   },
   "assets/prop-continuum/manifest.json": {
-    "url": "assets/prop-continuum/manifest.8e81afff66ac4cc7.json",
-    "bytes": 5983,
-    "sha256": "8e81afff66ac4cc75dc16f19f97bfbaa71b167e2d202ff0da329ce6574a0b561"
+    "url": "assets/prop-continuum/manifest.3f83982b15610dc6.json",
+    "bytes": 17715,
+    "sha256": "3f83982b15610dc611a44457d607ba48250fd5535cade2c1869f69570550bceb"
   },
   "assets/prop-continuum/atlas.bin.gz": {
-    "url": "assets/prop-continuum/atlas.bin.77edf8eda0ca6bf1.gz",
-    "bytes": 323403,
-    "sha256": "77edf8eda0ca6bf19df75db017d6c339051d326db951efb5682d0039773730ce"
+    "url": "assets/prop-continuum/atlas.bin.bc7563449af351ed.gz",
+    "bytes": 336966,
+    "sha256": "bc7563449af351edfdbcefbbdcebd3e7f18cd75c2772389ffccb4323e8af13dd"
   },
   "assets/caravel-oak-albedo.webp": {
     "url": "assets/caravel-oak-albedo.79bd1c37de4acc5b.webp",
