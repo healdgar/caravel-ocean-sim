@@ -300,59 +300,59 @@
     "sha256": "7bb0dd5949280010ee43702453ed62116a5aef953b1db6934a75381ee2191662"
   },
   "assets/boards/lisbon-1550.world": {
-    "url": "assets/boards/lisbon-1550.22672fd86ad06091.world",
-    "bytes": 11715708,
-    "sha256": "22672fd86ad06091f74d8518f1b21fabc97267f5af08abebb2d8e20fa7fa6f12"
+    "url": "assets/boards/lisbon-1550.a075ba18119c93c6.world",
+    "bytes": 12102450,
+    "sha256": "a075ba18119c93c60b26803b064ae228452ed1ce5132e6f53bd648e656597052"
   },
   "assets/boards/cadiz-1550.world": {
-    "url": "assets/boards/cadiz-1550.607096d0bf599a1c.world",
-    "bytes": 3636649,
-    "sha256": "607096d0bf599a1ca2494af205be6e97cb314b7bee426f1a7f139aa0726e8b7f"
+    "url": "assets/boards/cadiz-1550.bc98d0e58c06faef.world",
+    "bytes": 3687141,
+    "sha256": "bc98d0e58c06faef89153ac4999fdd643a0b2330dec4dd222838ab826cb4d5a2"
   },
   "assets/boards/sanlucar-1550.world": {
-    "url": "assets/boards/sanlucar-1550.f0ec136e78456013.world",
-    "bytes": 6336540,
-    "sha256": "f0ec136e784560137a44f22601041e394509a300712cef892676e68e56ec29fc"
+    "url": "assets/boards/sanlucar-1550.520562da7a104ad6.world",
+    "bytes": 6285289,
+    "sha256": "520562da7a104ad6d855632fbb3f4d86061055f06ed8458d640712a336b6c8e9"
   },
   "assets/boards/palos-huelva-1550.world": {
-    "url": "assets/boards/palos-huelva-1550.9cd278f748a2b501.world",
-    "bytes": 5741912,
-    "sha256": "9cd278f748a2b5013aa342e4a06e1c8abe366b83120d334378b127369e9c50a6"
+    "url": "assets/boards/palos-huelva-1550.dd04ed9dadaf88f7.world",
+    "bytes": 5741574,
+    "sha256": "dd04ed9dadaf88f7e3f53d5a6c45f4313154885e2960df670ce13239f4a35c3c"
   },
   "assets/boards/huelva-1550.world": {
-    "url": "assets/boards/huelva-1550.5e196e66499f8f80.world",
-    "bytes": 5164358,
-    "sha256": "5e196e66499f8f8023b1f2676d01580896b5f65b6be2d864910bc720c480dd0d"
+    "url": "assets/boards/huelva-1550.f3c7781c3c102faf.world",
+    "bytes": 5120557,
+    "sha256": "f3c7781c3c102faf8a7238082ea9a411de37c24a6aa85df47a6ae1a5878ea3e1"
   },
   "assets/boards/la-coruna-1550.world": {
-    "url": "assets/boards/la-coruna-1550.fcc6c5fe1b0ae538.world",
-    "bytes": 4953743,
-    "sha256": "fcc6c5fe1b0ae538064cc303ae30c7c8f64faf5072c11ba2a938f96c1d45f106"
+    "url": "assets/boards/la-coruna-1550.e278a049e4f277f0.world",
+    "bytes": 4969338,
+    "sha256": "e278a049e4f277f053f3ce32b847fdffffdc2e28a4a1274164a248854d4155dc"
   },
   "assets/boards/setubal-1550.world": {
-    "url": "assets/boards/setubal-1550.04d0c5f1dc030931.world",
-    "bytes": 6054833,
-    "sha256": "04d0c5f1dc030931672020afdf949172475404086bcde2319e4fe1045055d32e"
+    "url": "assets/boards/setubal-1550.6b8990013f458c29.world",
+    "bytes": 5955614,
+    "sha256": "6b8990013f458c29aa5ed1251d7146706d1cbe1a7b01b455b90b4af839fd6c60"
   },
   "assets/boards/seville-1550.world": {
-    "url": "assets/boards/seville-1550.a0e168b7a615f87f.world",
-    "bytes": 12336397,
-    "sha256": "a0e168b7a615f87f56536d5cc645436c12aec76697485acdf67c1c3782ebf602"
+    "url": "assets/boards/seville-1550.751e8092943f7736.world",
+    "bytes": 12570238,
+    "sha256": "751e8092943f77363e84a4b1847e5cb4d622dbd7028b4b500db95a2d94804995"
   },
   "assets/boards/porto-1550.world": {
-    "url": "assets/boards/porto-1550.ad6f9e5efdec0936.world",
-    "bytes": 5933878,
-    "sha256": "ad6f9e5efdec09366813b2bf3be890f983be17cc8bb4ca1dcc967727581f18a9"
+    "url": "assets/boards/porto-1550.b077c34133438fd9.world",
+    "bytes": 5958853,
+    "sha256": "b077c34133438fd96a92d6651958bcc7903ced6765444e67191ec9ddc56bdc0c"
   },
   "assets/boards/cadiz-sanlucar-1550.world": {
-    "url": "assets/boards/cadiz-sanlucar-1550.2ed5ff17aa9e2fb3.world",
-    "bytes": 3582196,
-    "sha256": "2ed5ff17aa9e2fb3fec0ca863fb05f77985d43df98f1af178922fb65b96034d4"
+    "url": "assets/boards/cadiz-sanlucar-1550.87449c1d10ddb2ad.world",
+    "bytes": 3601095,
+    "sha256": "87449c1d10ddb2adfccbeb2142f02197ed061aea651eb8e2744a8a22d47c9d64"
   },
   "assets/boards/quebec-1550.world": {
-    "url": "assets/boards/quebec-1550.ce2c0b5245bdbcef.world",
-    "bytes": 4250365,
-    "sha256": "ce2c0b5245bdbcefe922f788ecbc058b9aa53579fcea44cf6c62d69a08ad2d98"
+    "url": "assets/boards/quebec-1550.643167289d87377d.world",
+    "bytes": 4250349,
+    "sha256": "643167289d87377dedcc95840eee65fad455232c7097e1ed8c10ccb09863894b"
   },
   "assets/boards/boston-1550.world": {
     "url": "assets/boards/boston-1550.664cda7fc708dbae.world",
@@ -370,9 +370,9 @@
     "sha256": "80718be90e5c75d561212d6ca4f929bd585585a794233d18202f419e887a6a58"
   },
   "assets/boards/philadelphia-1550.world": {
-    "url": "assets/boards/philadelphia-1550.a8fa0e9891ee5bda.world",
-    "bytes": 4651422,
-    "sha256": "a8fa0e9891ee5bda951aa2e0ba5f845c8fa627211abe6851ab4e6fa70844ba78"
+    "url": "assets/boards/philadelphia-1550.039ffb83d79af73a.world",
+    "bytes": 4653675,
+    "sha256": "039ffb83d79af73a2cd17b03db79191fa11ee7340c11bba3481c727a45494d48"
   },
   "assets/boards/jamestown-1550.world": {
     "url": "assets/boards/jamestown-1550.3621789d34e0afed.world",
@@ -380,139 +380,139 @@
     "sha256": "3621789d34e0afedcc2c1f890562a9747a75b300d7e2ef2feb3b71829aa49d3c"
   },
   "assets/boards/rio-de-janeiro-1550.world": {
-    "url": "assets/boards/rio-de-janeiro-1550.3fe45859e26b11fe.world",
-    "bytes": 4485684,
-    "sha256": "3fe45859e26b11feed1f7dca275ffdbfea3437b55fc517765496c65a5a902c91"
+    "url": "assets/boards/rio-de-janeiro-1550.464102dcc886c9b1.world",
+    "bytes": 4486406,
+    "sha256": "464102dcc886c9b1d7203bb271ada23baa348f3dbd179037cde6b777e5cd1507"
   },
   "assets/boards/santo-domingo-1550.world": {
-    "url": "assets/boards/santo-domingo-1550.3e47227034c9bce8.world",
-    "bytes": 4774190,
-    "sha256": "3e47227034c9bce81fa3811d9fc1c54fb51fd1c3ead10e4fccc08426e116c07d"
+    "url": "assets/boards/santo-domingo-1550.7ca8dfda4c934908.world",
+    "bytes": 4774207,
+    "sha256": "7ca8dfda4c93490871279a4c33a869fdaa3194d216a7cf70cb64e1adcd000c68"
   },
   "assets/boards/havana-1550.world": {
-    "url": "assets/boards/havana-1550.c50ea98527b2cad7.world",
-    "bytes": 3740627,
-    "sha256": "c50ea98527b2cad7be39cc5416cc87ad7c576ea0f72c079f6f8eb8721ecfc56b"
+    "url": "assets/boards/havana-1550.7a5cba742aed608b.world",
+    "bytes": 3740512,
+    "sha256": "7a5cba742aed608b61bf9c9e3d86059c7589a704c830a67ca7c1460376917d3c"
   },
   "assets/boards/havana-1600.world": {
-    "url": "assets/boards/havana-1600.362fe72f3899f453.world",
-    "bytes": 3731972,
-    "sha256": "362fe72f3899f45370aad594756d1c9a4599f7865d6ee07b2c52e79d45aea532"
+    "url": "assets/boards/havana-1600.6c7bd0e95ab2533f.world",
+    "bytes": 3732041,
+    "sha256": "6c7bd0e95ab2533f9bde4a377c7205e5b979ce6356e9d11d56aa6000d693a8e0"
   },
   "assets/boards/san-juan-1550.world": {
-    "url": "assets/boards/san-juan-1550.c2d89898b995bc28.world",
-    "bytes": 3442800,
-    "sha256": "c2d89898b995bc2802e1a9c4d5482b569c600992e99d8291704c6b437783d59a"
+    "url": "assets/boards/san-juan-1550.f5677aff9f07964a.world",
+    "bytes": 3442644,
+    "sha256": "f5677aff9f07964a8090fc98bcaa22bff5e7d49d63b6aa945d043d5e3d032fbb"
   },
   "assets/boards/cartagena-1550.world": {
-    "url": "assets/boards/cartagena-1550.fa5ee1b9c35feb67.world",
-    "bytes": 3510202,
-    "sha256": "fa5ee1b9c35feb6702ecb829d903e5e321b05ccd30db26477edc5cac6a99e159"
+    "url": "assets/boards/cartagena-1550.0ac3cbd0b51d32a0.world",
+    "bytes": 3510145,
+    "sha256": "0ac3cbd0b51d32a0ee2212d57cc894d420123a8df320c33b4cdb3f08bc409726"
   },
   "assets/boards/nombre-de-dios-1550.world": {
-    "url": "assets/boards/nombre-de-dios-1550.c7e9f58f32490a5c.world",
-    "bytes": 3791792,
-    "sha256": "c7e9f58f32490a5c0dd9690fac1d9b81172b91537fd69b409166e890349c5cb7"
+    "url": "assets/boards/nombre-de-dios-1550.f308713d10745dd3.world",
+    "bytes": 3793740,
+    "sha256": "f308713d10745dd3675307a77bc5e88c6612a21815aba947927be7c49b7bb35b"
   },
   "assets/boards/veracruz-1550.world": {
-    "url": "assets/boards/veracruz-1550.8316880c9de18aba.world",
-    "bytes": 3347851,
-    "sha256": "8316880c9de18aba7028e105d846dec0bd62e50a3f7c3d5f9b0ba768c878b4c7"
+    "url": "assets/boards/veracruz-1550.ed8c4043f870f4e9.world",
+    "bytes": 3347837,
+    "sha256": "ed8c4043f870f4e9d66892692e6cc22ef271be27a01719605fd4810b299848bb"
   },
   "assets/boards/campeche-1550.world": {
-    "url": "assets/boards/campeche-1550.569658c5d09b2833.world",
-    "bytes": 3480965,
-    "sha256": "569658c5d09b28334b3bf2676a21c14c8bb8fd4b3acc908a85590b50ee364488"
+    "url": "assets/boards/campeche-1550.cef27d588cf27b3d.world",
+    "bytes": 3482973,
+    "sha256": "cef27d588cf27b3dbc8bdfa5e82f89973409a13b7e634eed69c288af69780590"
   },
   "assets/boards/santa-marta-1550.world": {
-    "url": "assets/boards/santa-marta-1550.a33c40bea3bde4fe.world",
-    "bytes": 3468228,
-    "sha256": "a33c40bea3bde4fe41c064d71eaa919a0aa6c9841b7acb8e96f0909e9590cd72"
+    "url": "assets/boards/santa-marta-1550.46d0240d472191c0.world",
+    "bytes": 3468000,
+    "sha256": "46d0240d472191c0ce5c32e2d497e76c0704522d935dcbf5ec5f89ffdbab4bba"
   },
   "assets/boards/cumana-1550.world": {
-    "url": "assets/boards/cumana-1550.fa53207893debede.world",
-    "bytes": 3221514,
-    "sha256": "fa53207893debedebae34c9326b127d05933d6d8ee09032da3db854d900579e6"
+    "url": "assets/boards/cumana-1550.e92f0847fb744327.world",
+    "bytes": 3221504,
+    "sha256": "e92f0847fb7443270c3117ecfd23e53a70a857898ac798f040ab4ca10d7b743c"
   },
   "assets/boards/coro-1550.world": {
-    "url": "assets/boards/coro-1550.c3ad46dd7d2cf466.world",
-    "bytes": 3719923,
-    "sha256": "c3ad46dd7d2cf4668ad5808f7ac4e6baec15ed939c6ba2d0c74c30e484fa8d99"
+    "url": "assets/boards/coro-1550.6d2d2434411c280d.world",
+    "bytes": 3720294,
+    "sha256": "6d2d2434411c280ddea786ebabe5ba0b098f0dc7b7b79d433f99030623a2b760"
   },
   "assets/boards/panama-viejo-1550.world": {
-    "url": "assets/boards/panama-viejo-1550.3680b7745c616919.world",
-    "bytes": 4537517,
-    "sha256": "3680b7745c61691912025f82649b97e7c79bdb09664baa43464322e598406034"
+    "url": "assets/boards/panama-viejo-1550.219667873aefe206.world",
+    "bytes": 4537570,
+    "sha256": "219667873aefe2066c5099e1e5b16cee47bc813934b970310f8fb2fdd9a9bf14"
   },
   "assets/boards/acapulco-1550.world": {
-    "url": "assets/boards/acapulco-1550.7b7ff1c4537728cd.world",
-    "bytes": 3672117,
-    "sha256": "7b7ff1c4537728cdfd18d0fccb2d67b4ae0febbafb23cf8e28442b8bcacb12b3"
+    "url": "assets/boards/acapulco-1550.1dc6c3e8224e90c7.world",
+    "bytes": 3672843,
+    "sha256": "1dc6c3e8224e90c76efb2d85e557d266fe724a1b127f085f9d46646f56119d19"
   },
   "assets/boards/santiago-de-cuba-1550.world": {
-    "url": "assets/boards/santiago-de-cuba-1550.5603ccfaa92b5455.world",
-    "bytes": 4126639,
-    "sha256": "5603ccfaa92b54557cea044862876127ecd32dad063bc13634d79c23b8c7b68b"
+    "url": "assets/boards/santiago-de-cuba-1550.f13a374eb943d625.world",
+    "bytes": 4126636,
+    "sha256": "f13a374eb943d625211bcb4eb1fcec5e1ad1ef00627c36e39df33a0d09a8bfbf"
   },
   "assets/boards/trujillo-1550.world": {
-    "url": "assets/boards/trujillo-1550.8beafddf06093951.world",
-    "bytes": 3920965,
-    "sha256": "8beafddf060939515b9615352dd26c3031d3731bec92004abedd1d9654cc8306"
+    "url": "assets/boards/trujillo-1550.c7d03ff44846f2a6.world",
+    "bytes": 3921205,
+    "sha256": "c7d03ff44846f2a6f6cbbcb9aa22964f43958ca1af30043ab5ce54039df4f4d4"
   },
   "assets/boards/callao-1550.world": {
-    "url": "assets/boards/callao-1550.c5cd5cab7df42708.world",
-    "bytes": 3392962,
-    "sha256": "c5cd5cab7df427084dc224636966da85dbcac48b57379052124a87f032c423c8"
+    "url": "assets/boards/callao-1550.d4d00e87455c2713.world",
+    "bytes": 3380837,
+    "sha256": "d4d00e87455c2713a8c71b9522a5b212ddac7fe046658c0cc9264aacd52a66b9"
   },
   "assets/boards/las-palmas-1550.world": {
-    "url": "assets/boards/las-palmas-1550.e5789d1e867fc9c1.world",
-    "bytes": 5183253,
-    "sha256": "e5789d1e867fc9c143c2833d09b64530ac72f87b0be58db0c047d143ce7a6e84"
+    "url": "assets/boards/las-palmas-1550.365e8c7538351c28.world",
+    "bytes": 5179309,
+    "sha256": "365e8c7538351c28677ef35eb014ff50a97d0211800f06974d023375398ada24"
   },
   "assets/boards/tenerife-1550.world": {
-    "url": "assets/boards/tenerife-1550.a2a0152bc0e60d53.world",
-    "bytes": 5001743,
-    "sha256": "a2a0152bc0e60d53353e7ffc36b50f1efd0a755565439cf384714575d4f100bb"
+    "url": "assets/boards/tenerife-1550.e85efd2ce9f07993.world",
+    "bytes": 5001909,
+    "sha256": "e85efd2ce9f079935f3c28b7609596e7452d7f55d81ceec297c981a291d0a9dc"
   },
   "assets/boards/funchal-1550.world": {
-    "url": "assets/boards/funchal-1550.528346d14b8621da.world",
-    "bytes": 6269349,
-    "sha256": "528346d14b8621dadcaea36783280fdf4e79d3834830007808b22a2c58a990d1"
+    "url": "assets/boards/funchal-1550.9ac54c0c955cc6c5.world",
+    "bytes": 6368187,
+    "sha256": "9ac54c0c955cc6c5a00dfe61d64dce5585717deb4eaa23edbcf26f2e41a502be"
   },
   "assets/boards/angra-1550.world": {
-    "url": "assets/boards/angra-1550.177efcecf0e15789.world",
-    "bytes": 5845909,
-    "sha256": "177efcecf0e157891fe8d009fd69a12eb822aa754dfe85c79acaabb620acd896"
+    "url": "assets/boards/angra-1550.23e69e8c0d7831e9.world",
+    "bytes": 5845927,
+    "sha256": "23e69e8c0d7831e930b807b09713d4f1523ae4bde5c1f3661409df274b34b444"
   },
   "assets/boards/ribeira-grande-1550.world": {
-    "url": "assets/boards/ribeira-grande-1550.20f459e56371be14.world",
-    "bytes": 4465395,
-    "sha256": "20f459e56371be14752463bb00915ad41584974502015aacf2532cbfb348645d"
+    "url": "assets/boards/ribeira-grande-1550.2e0815950c516cdc.world",
+    "bytes": 4470275,
+    "sha256": "2e0815950c516cdcf98c30b4a2cdf07bc18a30b7345e0594cf02f1071e44e243"
   },
   "assets/boards/salvador-da-bahia-1550.world": {
-    "url": "assets/boards/salvador-da-bahia-1550.00f95db6006620e9.world",
-    "bytes": 3508030,
-    "sha256": "00f95db6006620e926383faf5fabdbe23f507cad277504f3f54a1e5be491b660"
+    "url": "assets/boards/salvador-da-bahia-1550.d75b10475e905e24.world",
+    "bytes": 3507999,
+    "sha256": "d75b10475e905e24f9284dec875c2bcde8e69fe73fc021eeee8e2078a572a900"
   },
   "assets/boards/sao-vicente-1550.world": {
-    "url": "assets/boards/sao-vicente-1550.d79b191e62b347f0.world",
-    "bytes": 3838556,
-    "sha256": "d79b191e62b347f06a22abce80f5623681a6843d5fedb488e226b658b0a7b90b"
+    "url": "assets/boards/sao-vicente-1550.4c785ffe92612ddb.world",
+    "bytes": 3838206,
+    "sha256": "4c785ffe92612ddbcaab6614ab6474f4064cf911cb36ff3424add63b69fe9a36"
   },
   "assets/boards/olinda-1550.world": {
-    "url": "assets/boards/olinda-1550.7fba2538c8ff9599.world",
-    "bytes": 4124553,
-    "sha256": "7fba2538c8ff9599e1859fc0243af9fc2d52f36b55758712b32a6d8153f33e92"
+    "url": "assets/boards/olinda-1550.3ddcf6e1b0863c54.world",
+    "bytes": 4124425,
+    "sha256": "3ddcf6e1b0863c54cf556d4849702196047338f5d23697a5d4e2f2ff745cb21d"
   },
   "assets/boards/goa-1550.world": {
-    "url": "assets/boards/goa-1550.cf97a3321d3b6bb5.world",
-    "bytes": 5153468,
-    "sha256": "cf97a3321d3b6bb53a4c3fcc61c4894b362040fff059ceced1102114947409fb"
+    "url": "assets/boards/goa-1550.75facc91340a13e6.world",
+    "bytes": 5153846,
+    "sha256": "75facc91340a13e629b2726f765febb3532941b3a99739f3ce73784046985e3b"
   },
   "assets/boards/malacca-1550.world": {
-    "url": "assets/boards/malacca-1550.795271fd154f4e9d.world",
-    "bytes": 5185120,
-    "sha256": "795271fd154f4e9d1f99ddcf8c22fa3958682513277173d084ade100bc8160ab"
+    "url": "assets/boards/malacca-1550.d28cd12f806aefd0.world",
+    "bytes": 5185129,
+    "sha256": "d28cd12f806aefd036e1721bd5d95b91b66b63ce7395b9620a32933ee2e5c83e"
   },
   "assets/board/game.js": {
     "url": "assets/board/game.bedab35f7c445a2b.js",
@@ -674,226 +674,6 @@
     "bytes": 147439294,
     "sha256": "add9e9e63a81e1d5f3462bb5468c664dcc832cd8cc8b22dd822682ea18027636"
   },
-  "assets/prefab-continuum/acapulco.bin.gz": {
-    "url": "assets/prefab-continuum/acapulco.bin.07d449dd29540969.gz",
-    "bytes": 325508,
-    "sha256": "07d449dd295409696cd1641c4fa0496d493825f2415e3aa056364732dfbc9583"
-  },
-  "assets/prefab-continuum/angra.bin.gz": {
-    "url": "assets/prefab-continuum/angra.bin.e122329a2f2a0dcd.gz",
-    "bytes": 791156,
-    "sha256": "e122329a2f2a0dcd1a2730d7d5eff34480e90786947da33512989a4071906039"
-  },
-  "assets/prefab-continuum/bridgetown.bin.gz": {
-    "url": "assets/prefab-continuum/bridgetown.bin.eb5b39cadabcfe1d.gz",
-    "bytes": 414387,
-    "sha256": "eb5b39cadabcfe1d44db8fa07146fc107def7baae96958e1ee981aa0bf8ee48b"
-  },
-  "assets/prefab-continuum/cadiz.bin.gz": {
-    "url": "assets/prefab-continuum/cadiz.bin.3be7ffe0b2b3cd5a.gz",
-    "bytes": 802007,
-    "sha256": "3be7ffe0b2b3cd5ac2ef96b840a958f477083a0ca7b66efb21994e05836a28e3"
-  },
-  "assets/prefab-continuum/cadiz-sanlucar.bin.gz": {
-    "url": "assets/prefab-continuum/cadiz-sanlucar.bin.43afc5d8afee1d23.gz",
-    "bytes": 800209,
-    "sha256": "43afc5d8afee1d2304b23bf052bfbe02512fedf6abccf303c1485e9727d686c0"
-  },
-  "assets/prefab-continuum/callao.bin.gz": {
-    "url": "assets/prefab-continuum/callao.bin.6178b899a072f4a2.gz",
-    "bytes": 330771,
-    "sha256": "6178b899a072f4a2ad01576c624d8832b0172bc5a94f02d8d108ba66ee588ce5"
-  },
-  "assets/prefab-continuum/campeche.bin.gz": {
-    "url": "assets/prefab-continuum/campeche.bin.0e197209fcc6061e.gz",
-    "bytes": 336638,
-    "sha256": "0e197209fcc6061e4596a13afea3588b81c1019f47cff1ef1c756ac36b95a2a7"
-  },
-  "assets/prefab-continuum/cartagena.bin.gz": {
-    "url": "assets/prefab-continuum/cartagena.bin.3b40d600d9e66281.gz",
-    "bytes": 794071,
-    "sha256": "3b40d600d9e662814604a225e2bff8474727a0711e434a0af80a391d257c44a7"
-  },
-  "assets/prefab-continuum/charleston.bin.gz": {
-    "url": "assets/prefab-continuum/charleston.bin.2566d6f473f130ab.gz",
-    "bytes": 607746,
-    "sha256": "2566d6f473f130abc7b3a175168bcba4d7743277b1db368f05c008cc326b99b6"
-  },
-  "assets/prefab-continuum/coro.bin.gz": {
-    "url": "assets/prefab-continuum/coro.bin.24f2e19cc896d6f3.gz",
-    "bytes": 817462,
-    "sha256": "24f2e19cc896d6f3ed1ad3d7ed1dff600b49b489298f8e11b8f629d61873aef8"
-  },
-  "assets/prefab-continuum/cumana.bin.gz": {
-    "url": "assets/prefab-continuum/cumana.bin.2ca9f37eb063be2d.gz",
-    "bytes": 816588,
-    "sha256": "2ca9f37eb063be2d3fb275441caea039f25303ad10115710d7faa3cb7f06bb41"
-  },
-  "assets/prefab-continuum/curacao.bin.gz": {
-    "url": "assets/prefab-continuum/curacao.bin.0fc8acada7186bd1.gz",
-    "bytes": 424627,
-    "sha256": "0fc8acada7186bd18088c8ec65b96ee2c5b5480e0e6a483a72e75af590528d5e"
-  },
-  "assets/prefab-continuum/fort-royal-martinique.bin.gz": {
-    "url": "assets/prefab-continuum/fort-royal-martinique.bin.531fc485f2d8c157.gz",
-    "bytes": 441382,
-    "sha256": "531fc485f2d8c1570c642621cad9d8cfa5e325d5b3f528cba192292af3c391a0"
-  },
-  "assets/prefab-continuum/funchal.bin.gz": {
-    "url": "assets/prefab-continuum/funchal.bin.7d7aa4ef13cb967c.gz",
-    "bytes": 783207,
-    "sha256": "7d7aa4ef13cb967cc79709b8fb2209d080adcaa8c96f9ab36ab8094a31e01f7e"
-  },
-  "assets/prefab-continuum/goa.bin.gz": {
-    "url": "assets/prefab-continuum/goa.bin.6ecdc88ed1003f5f.gz",
-    "bytes": 816244,
-    "sha256": "6ecdc88ed1003f5f36e3cc59836070b333c9441765153bb6e6a84fe647c0eb78"
-  },
-  "assets/prefab-continuum/havana.bin.gz": {
-    "url": "assets/prefab-continuum/havana.bin.a45b4b72bb3306e9.gz",
-    "bytes": 791891,
-    "sha256": "a45b4b72bb3306e996ae7bf63ae732d9b2a40a11f4855618da232571689f30a6"
-  },
-  "assets/prefab-continuum/huelva.bin.gz": {
-    "url": "assets/prefab-continuum/huelva.bin.8768a257f892466a.gz",
-    "bytes": 789501,
-    "sha256": "8768a257f892466a55659b583db3cab65bdd19bad280fec868ec69b44f6f235e"
-  },
-  "assets/prefab-continuum/la-coruna.bin.gz": {
-    "url": "assets/prefab-continuum/la-coruna.bin.27f6b6667acbb21c.gz",
-    "bytes": 799221,
-    "sha256": "27f6b6667acbb21c464b1fd243a03648aad49455e3e9347886a664bb83c866b5"
-  },
-  "assets/prefab-continuum/las-palmas.bin.gz": {
-    "url": "assets/prefab-continuum/las-palmas.bin.973c71ab37a330e1.gz",
-    "bytes": 797570,
-    "sha256": "973c71ab37a330e1a77ca8896166f7b929a7a5febb92c633b2e55c9772aca6e0"
-  },
-  "assets/prefab-continuum/lisbon.bin.gz": {
-    "url": "assets/prefab-continuum/lisbon.bin.5478bd1b77d6cf07.gz",
-    "bytes": 3581891,
-    "sha256": "5478bd1b77d6cf0710af6db4d36490454fee69601baa8524d391bda7b408291e"
-  },
-  "assets/prefab-continuum/malacca.bin.gz": {
-    "url": "assets/prefab-continuum/malacca.bin.a58249db25a11a47.gz",
-    "bytes": 793670,
-    "sha256": "a58249db25a11a471c2529597b07b9a9f5a31dc749fd3eb74ad9704ede5d6512"
-  },
-  "assets/prefab-continuum/nagasaki.bin.gz": {
-    "url": "assets/prefab-continuum/nagasaki.bin.b5ffe6b2c6aa92c1.gz",
-    "bytes": 148135,
-    "sha256": "b5ffe6b2c6aa92c10cc079dc8c3df731b71d188c75d02634bca7120f7ef625ef"
-  },
-  "assets/prefab-continuum/nombre-de-dios.bin.gz": {
-    "url": "assets/prefab-continuum/nombre-de-dios.bin.79b7330c7376022b.gz",
-    "bytes": 711795,
-    "sha256": "79b7330c7376022bb6847aa95ce944797f2782d0d66877b1164b792ebdffb4ee"
-  },
-  "assets/prefab-continuum/olinda.bin.gz": {
-    "url": "assets/prefab-continuum/olinda.bin.3027d53b2943e7e2.gz",
-    "bytes": 654935,
-    "sha256": "3027d53b2943e7e23a612e25fd26952beb53bfe6f073b1c5d5dd377a46f6d730"
-  },
-  "assets/prefab-continuum/palos-huelva.bin.gz": {
-    "url": "assets/prefab-continuum/palos-huelva.bin.468ac14c9040c8e0.gz",
-    "bytes": 769587,
-    "sha256": "468ac14c9040c8e02ecefb485de4426f526c72b1658d1895b9dc24f6d8cb996e"
-  },
-  "assets/prefab-continuum/panama-viejo.bin.gz": {
-    "url": "assets/prefab-continuum/panama-viejo.bin.1189ab3bb5d32484.gz",
-    "bytes": 792312,
-    "sha256": "1189ab3bb5d324843cf9c1ea2208c708a02434951c5fb74cc25683bdd9b54331"
-  },
-  "assets/prefab-continuum/porto.bin.gz": {
-    "url": "assets/prefab-continuum/porto.bin.6252ea5a1d96a823.gz",
-    "bytes": 784677,
-    "sha256": "6252ea5a1d96a8239f5e448c21e5f2170d84b8d913c9e55384a07621238aa9fa"
-  },
-  "assets/prefab-continuum/portobelo.bin.gz": {
-    "url": "assets/prefab-continuum/portobelo.bin.714ca35a41f7c915.gz",
-    "bytes": 466188,
-    "sha256": "714ca35a41f7c91551a21adf6e097c563215dfebe852131b929cec331aab6274"
-  },
-  "assets/prefab-continuum/ribeira-grande.bin.gz": {
-    "url": "assets/prefab-continuum/ribeira-grande.bin.a7ca14c63511dec5.gz",
-    "bytes": 792009,
-    "sha256": "a7ca14c63511dec5c48c7a3d1f30503d8d2f5cca5afd2c2cb827e7252fc9ce7a"
-  },
-  "assets/prefab-continuum/saba.bin.gz": {
-    "url": "assets/prefab-continuum/saba.bin.b5ffe6b2c6aa92c1.gz",
-    "bytes": 148135,
-    "sha256": "b5ffe6b2c6aa92c10cc079dc8c3df731b71d188c75d02634bca7120f7ef625ef"
-  },
-  "assets/prefab-continuum/salvador-da-bahia.bin.gz": {
-    "url": "assets/prefab-continuum/salvador-da-bahia.bin.b91646c454a59f63.gz",
-    "bytes": 326386,
-    "sha256": "b91646c454a59f638b6fe3cdcf81b3e9c8e83bf047a302d0038e4db4cc06c3f9"
-  },
-  "assets/prefab-continuum/san-juan.bin.gz": {
-    "url": "assets/prefab-continuum/san-juan.bin.3d19d8af99d98d39.gz",
-    "bytes": 811298,
-    "sha256": "3d19d8af99d98d3911e2b6711da5466e38b01f4d9a619122ce80d19795e82ac1"
-  },
-  "assets/prefab-continuum/sanlucar.bin.gz": {
-    "url": "assets/prefab-continuum/sanlucar.bin.93c33d2c9c4b1b04.gz",
-    "bytes": 703794,
-    "sha256": "93c33d2c9c4b1b046dfe1b6568f9047fbbcff4d1502418ec73ffeb112721aa6b"
-  },
-  "assets/prefab-continuum/santa-marta.bin.gz": {
-    "url": "assets/prefab-continuum/santa-marta.bin.abf4632f10e36b3d.gz",
-    "bytes": 798518,
-    "sha256": "abf4632f10e36b3da2f1b9b09d87869cae91e3bd57147b67e122e0100bc86a9c"
-  },
-  "assets/prefab-continuum/santiago-de-cuba.bin.gz": {
-    "url": "assets/prefab-continuum/santiago-de-cuba.bin.3c9e9d2367b8da46.gz",
-    "bytes": 789415,
-    "sha256": "3c9e9d2367b8da465105ce0ffa558dee240363f18fe6f195582d7428ef13e875"
-  },
-  "assets/prefab-continuum/santo-domingo.bin.gz": {
-    "url": "assets/prefab-continuum/santo-domingo.bin.984bce03ce627842.gz",
-    "bytes": 820715,
-    "sha256": "984bce03ce627842a4e42ec85b555f8fb0f62a7dcd5cd4ea0a6254a5e90827ef"
-  },
-  "assets/prefab-continuum/sao-vicente.bin.gz": {
-    "url": "assets/prefab-continuum/sao-vicente.bin.5f11c0b677a17b14.gz",
-    "bytes": 773724,
-    "sha256": "5f11c0b677a17b14283f1839e32f4302c49fd04a647e0ad4140c7b3bbde1f76a"
-  },
-  "assets/prefab-continuum/setubal.bin.gz": {
-    "url": "assets/prefab-continuum/setubal.bin.88549dfb7d44a6f0.gz",
-    "bytes": 792595,
-    "sha256": "88549dfb7d44a6f0b55cfbc1b76f4a5a448bc31db461d2fdefa08a367739178e"
-  },
-  "assets/prefab-continuum/seville.bin.gz": {
-    "url": "assets/prefab-continuum/seville.bin.2cdeeb721723cc64.gz",
-    "bytes": 3679205,
-    "sha256": "2cdeeb721723cc64068197a4a45ac827c7318ecf19446dc3432214313dfc7605"
-  },
-  "assets/prefab-continuum/st-augustine.bin.gz": {
-    "url": "assets/prefab-continuum/st-augustine.bin.eb08646b78de7faf.gz",
-    "bytes": 517147,
-    "sha256": "eb08646b78de7faf3da0bea28439abe6f620e1ccaef76bec9c42b153655324d1"
-  },
-  "assets/prefab-continuum/st-kitts.bin.gz": {
-    "url": "assets/prefab-continuum/st-kitts.bin.84185f4237529604.gz",
-    "bytes": 406238,
-    "sha256": "84185f42375296044c7a8c115288e40260c7081340c0f3c1925ea3897e46805e"
-  },
-  "assets/prefab-continuum/tenerife.bin.gz": {
-    "url": "assets/prefab-continuum/tenerife.bin.a9a61a5839c70839.gz",
-    "bytes": 659919,
-    "sha256": "a9a61a5839c70839701d403c691de61ba53ac2e71dd8ee7ac71832804f90d2e2"
-  },
-  "assets/prefab-continuum/trujillo.bin.gz": {
-    "url": "assets/prefab-continuum/trujillo.bin.8b63e43110f73b20.gz",
-    "bytes": 806511,
-    "sha256": "8b63e43110f73b20ff793c798b28d2327d978b2414cc5cdd3f4ba59d2092e6be"
-  },
-  "assets/prefab-continuum/veracruz.bin.gz": {
-    "url": "assets/prefab-continuum/veracruz.bin.e68039c8fedbe4ca.gz",
-    "bytes": 773040,
-    "sha256": "e68039c8fedbe4caae9f75ba52dacad5c103a24a263041e1bcbebfe1aa6baeb2"
-  },
   "assets/world/hyg-stars.bin": {
     "url": "assets/world/hyg-stars.e648341c03cb753b.bin",
     "bytes": 42975,
@@ -905,14 +685,14 @@
     "sha256": "230404cc6e431ee18b0683c1a680b90463e83ac02da9652c607387090c8cc12e"
   },
   "assets/city-continuum/manifest.json": {
-    "url": "assets/city-continuum/manifest.7521cb3b55119659.json",
-    "bytes": 712195,
-    "sha256": "7521cb3b551196591efcd53c7db554e7709e2bfdbbeb15d61ac487b252aedcf2"
+    "url": "assets/city-continuum/manifest.8ccdbadff9ac03ac.json",
+    "bytes": 735588,
+    "sha256": "8ccdbadff9ac03ac5d4bbfd346bfbf678ad9b569ebe9687b69db4d4fb1e185b9"
   },
   "assets/city-continuum/atlas.bin.gz": {
-    "url": "assets/city-continuum/atlas.bin.8d1ead1b163d55d1.gz",
-    "bytes": 40292551,
-    "sha256": "8d1ead1b163d55d1bf05e6d143767a9c60cc8ecc9074bdefa2dee6cc14037de2"
+    "url": "assets/city-continuum/atlas.bin.06632e8b2d1a0f24.gz",
+    "bytes": 42414490,
+    "sha256": "06632e8b2d1a0f246bbc493b3aad7e10cb91eb7003e16c3c1277115971d2d582"
   },
   "assets/animal-continuum/manifest.json": {
     "url": "assets/animal-continuum/manifest.401bf68e45335b49.json",
@@ -960,59 +740,59 @@
     "sha256": "c8015f5c74ddbd435cae3b08157e35cbcc79aac46bdc2d30c28f9f5ad984fb28"
   },
   "assets/boards/lisbon-1550.json": {
-    "url": "assets/boards/lisbon-1550.ba7ca5c4c05ace75.json",
-    "bytes": 1474950,
-    "sha256": "ba7ca5c4c05ace75ffe1c3f5138283ad106e48b1edcb6ed0ac1e788f445bef42"
+    "url": "assets/boards/lisbon-1550.5e59beb65a2e17d0.json",
+    "bytes": 1574467,
+    "sha256": "5e59beb65a2e17d0ac1e27850c7e2c333ac8cc2c368ba20d0b95e202ca7ea838"
   },
   "assets/boards/cadiz-1550.json": {
-    "url": "assets/boards/cadiz-1550.8e0c38b54e0737a7.json",
-    "bytes": 700357,
-    "sha256": "8e0c38b54e0737a7e9f52559ecc0f300e6e656ac524633cd762382039b6df996"
+    "url": "assets/boards/cadiz-1550.62e62e4bb73ba058.json",
+    "bytes": 707081,
+    "sha256": "62e62e4bb73ba058c1fc8f6fdb1c175d2577c75c2aa2f2aab684a582253fa626"
   },
   "assets/boards/sanlucar-1550.json": {
-    "url": "assets/boards/sanlucar-1550.63e74ea030587452.json",
-    "bytes": 948318,
-    "sha256": "63e74ea03058745203e9af884ed1fe57d18f314e1859fdb76a08a2a8310ce7b1"
+    "url": "assets/boards/sanlucar-1550.b56511d3ac17d8ea.json",
+    "bytes": 950718,
+    "sha256": "b56511d3ac17d8ea453c4c72ee4f0d4106023e4308ddb25213cb0d54fb762e01"
   },
   "assets/boards/palos-huelva-1550.json": {
-    "url": "assets/boards/palos-huelva-1550.fd4f4644d437c3b7.json",
-    "bytes": 946193,
-    "sha256": "fd4f4644d437c3b7ee641d4722a004582ccbab92421ff54bf0ccda24f4603c99"
+    "url": "assets/boards/palos-huelva-1550.e3947396d1f09a29.json",
+    "bytes": 933273,
+    "sha256": "e3947396d1f09a295e57de30fee9d5dc12f1cef5e1683811bc21c2e92bca7570"
   },
   "assets/boards/huelva-1550.json": {
-    "url": "assets/boards/huelva-1550.763429b0fb961330.json",
-    "bytes": 851843,
-    "sha256": "763429b0fb96133085e7da6908c2f467867fa4736d032207cd54a25ba1b67d9c"
+    "url": "assets/boards/huelva-1550.e3a29fea441897fc.json",
+    "bytes": 854034,
+    "sha256": "e3a29fea441897fc4919132509d9e2c4d2c9535f7f63c4e0e8bd7dad84057802"
   },
   "assets/boards/la-coruna-1550.json": {
-    "url": "assets/boards/la-coruna-1550.ee1cdb0c4a16f106.json",
-    "bytes": 804163,
-    "sha256": "ee1cdb0c4a16f1061f8bd2e2a50aa25a5b5d291343d28e9b274ee6c49e96d759"
+    "url": "assets/boards/la-coruna-1550.f7169b304d20054f.json",
+    "bytes": 803236,
+    "sha256": "f7169b304d20054f93d358c6d709b2f178b1ff81368ac4c939d61457edb7c744"
   },
   "assets/boards/setubal-1550.json": {
-    "url": "assets/boards/setubal-1550.05ad69e1ffd39192.json",
-    "bytes": 988371,
-    "sha256": "05ad69e1ffd39192b8df52d1c7ecc92ac6c4db3618cd56a499c4d059bdcfa4e4"
+    "url": "assets/boards/setubal-1550.bcdfb10806c99bf8.json",
+    "bytes": 967042,
+    "sha256": "bcdfb10806c99bf8fb5b403e0465b02421ab498d45000231999446b755334aae"
   },
   "assets/boards/seville-1550.json": {
-    "url": "assets/boards/seville-1550.4247c58fbb012c7b.json",
-    "bytes": 1633065,
-    "sha256": "4247c58fbb012c7bdbe610bb964561be78a3346002f912a42e53cb2f873b5035"
+    "url": "assets/boards/seville-1550.552769338eb2817a.json",
+    "bytes": 1665008,
+    "sha256": "552769338eb2817a1cf7f8b5232451983c2b49b51b54db75abefa7325dc9e59c"
   },
   "assets/boards/porto-1550.json": {
-    "url": "assets/boards/porto-1550.a868227ad20d3034.json",
-    "bytes": 945466,
-    "sha256": "a868227ad20d3034e08256800f11f88491b2f5a1d9ad36cef54a2e48dcb9b721"
+    "url": "assets/boards/porto-1550.f5187826574a5e65.json",
+    "bytes": 947697,
+    "sha256": "f5187826574a5e65990c043c6e3414949cf180c45fd063f54fb32b8c3795613d"
   },
   "assets/boards/cadiz-sanlucar-1550.json": {
-    "url": "assets/boards/cadiz-sanlucar-1550.30a53065f0c137bf.json",
-    "bytes": 698352,
-    "sha256": "30a53065f0c137bf2e10546ddc0a782cd0b3bee997272aaaf7e0d79f219cf5fb"
+    "url": "assets/boards/cadiz-sanlucar-1550.0e6a92deb603fb5e.json",
+    "bytes": 691427,
+    "sha256": "0e6a92deb603fb5e3c185d9e34d7e2b54a3058976ec3188bb1d478522566ac22"
   },
   "assets/boards/quebec-1550.json": {
-    "url": "assets/boards/quebec-1550.898d5eedab27ef08.json",
-    "bytes": 695775,
-    "sha256": "898d5eedab27ef084104d74378a08d6f6ef5341857eb5289d042c6b0ba0696c5"
+    "url": "assets/boards/quebec-1550.08ac071ef206fd1a.json",
+    "bytes": 695707,
+    "sha256": "08ac071ef206fd1ab0ba91ca0519ad6084101af30a403cb1ca3207af652b5d9e"
   },
   "assets/boards/boston-1550.json": {
     "url": "assets/boards/boston-1550.81b810a95f67369c.json",
@@ -1030,9 +810,9 @@
     "sha256": "3a1ff03b244432208ea456cd5693acfd2c75017bde9c22bae454c47221916b58"
   },
   "assets/boards/philadelphia-1550.json": {
-    "url": "assets/boards/philadelphia-1550.15d70612960f381b.json",
-    "bytes": 758391,
-    "sha256": "15d70612960f381b4c98cb8f5a9420030d63f0c45f51a9906dae90246fd1c974"
+    "url": "assets/boards/philadelphia-1550.09e0ebb8d058f796.json",
+    "bytes": 759566,
+    "sha256": "09e0ebb8d058f796fcaa452deb7b92cb9e8f0893e83f92529b8b103f831493a2"
   },
   "assets/boards/jamestown-1550.json": {
     "url": "assets/boards/jamestown-1550.c61da878c92a2777.json",
@@ -1040,144 +820,139 @@
     "sha256": "c61da878c92a27772212cfab139be85e4a7f76a3a06a3a9ca9a7d83d45b42340"
   },
   "assets/boards/rio-de-janeiro-1550.json": {
-    "url": "assets/boards/rio-de-janeiro-1550.3e85a678021198a1.json",
-    "bytes": 717484,
-    "sha256": "3e85a678021198a17a2cfe4de59c579482fa7e89087c1aa402e5e24b1e823c97"
+    "url": "assets/boards/rio-de-janeiro-1550.eb685f2aa5f77720.json",
+    "bytes": 717831,
+    "sha256": "eb685f2aa5f7772047735b45fb47fcd086d6ff68b385c973e8e45f88bb6693bf"
   },
   "assets/boards/santo-domingo-1550.json": {
-    "url": "assets/boards/santo-domingo-1550.533d11f3ed9b2126.json",
-    "bytes": 786997,
-    "sha256": "533d11f3ed9b2126095ece11a0e711cef5a0db946752f8a064243138fa855543"
+    "url": "assets/boards/santo-domingo-1550.8f672a078cc08fc8.json",
+    "bytes": 786995,
+    "sha256": "8f672a078cc08fc88301b972498ba1b0818a1887fe092ec30ad0972ab42b7227"
   },
   "assets/boards/havana-1550.json": {
-    "url": "assets/boards/havana-1550.5aee589b73e1470c.json",
-    "bytes": 737177,
-    "sha256": "5aee589b73e1470c88b8e879ca9ce502ded7f7fdaae1017ccb3bcd5137a86c2d"
+    "url": "assets/boards/havana-1550.b3888c12e7e78381.json",
+    "bytes": 737290,
+    "sha256": "b3888c12e7e7838133e2e822fac10842884ae4791c8bb6d23c207c7a8290e274"
   },
   "assets/boards/havana-1600.json": {
-    "url": "assets/boards/havana-1600.64d5734e8eb3ffd8.json",
-    "bytes": 737720,
-    "sha256": "64d5734e8eb3ffd8d49da1429edbd1084ba652caecb03c3e79e1c4cfe67de569"
+    "url": "assets/boards/havana-1600.d63e2a850a23c0e4.json",
+    "bytes": 737832,
+    "sha256": "d63e2a850a23c0e404a4025e99e661b4d0e6fe281c8bdac4277c1a179359841d"
   },
   "assets/boards/san-juan-1550.json": {
-    "url": "assets/boards/san-juan-1550.f3b9dfba45c22cd8.json",
-    "bytes": 594297,
-    "sha256": "f3b9dfba45c22cd8c094f1271bb7a49a35501222b3848f0847815eb3d8fa9b6e"
+    "url": "assets/boards/san-juan-1550.5fa9e81f7d3cd849.json",
+    "bytes": 594183,
+    "sha256": "5fa9e81f7d3cd84935e641b9754a7412ffedac7bf1f541fb29faccdb85aab6f7"
   },
   "assets/boards/cartagena-1550.json": {
-    "url": "assets/boards/cartagena-1550.8e34e95ffda45aff.json",
-    "bytes": 628973,
-    "sha256": "8e34e95ffda45affd49faee5f54c996c0b879568e3d88d4fbc5f287504a6036d"
+    "url": "assets/boards/cartagena-1550.befee54e45d579e6.json",
+    "bytes": 629007,
+    "sha256": "befee54e45d579e6db6ccb908183335573b0d7eb6f17bdc3b92589b4eee6d4ef"
   },
   "assets/boards/nombre-de-dios-1550.json": {
-    "url": "assets/boards/nombre-de-dios-1550.1b721c2d28800469.json",
-    "bytes": 636697,
-    "sha256": "1b721c2d2880046942507c6501f1f83b635ef5b72902f1ca4cc9fd2af1e30c80"
+    "url": "assets/boards/nombre-de-dios-1550.748c797b3237a342.json",
+    "bytes": 634708,
+    "sha256": "748c797b3237a3426b8d9276d6a455c10e8735f62f409910829eb16c0a0050e9"
   },
   "assets/boards/veracruz-1550.json": {
-    "url": "assets/boards/veracruz-1550.323c78ae9d4ad581.json",
+    "url": "assets/boards/veracruz-1550.1e049f58351c66c6.json",
     "bytes": 624524,
-    "sha256": "323c78ae9d4ad58186a87e3756a0f85d0e1410f5ebc9dca64fa1a32499e82bd2"
+    "sha256": "1e049f58351c66c6b929f15f64ebe40e6abce9828ce6394c6854310aa0707e0b"
   },
   "assets/boards/campeche-1550.json": {
-    "url": "assets/boards/campeche-1550.9e68496a521bce9b.json",
-    "bytes": 629509,
-    "sha256": "9e68496a521bce9bf545425713a95c02bf979fe8841a43d8b71a5180c1e450f2"
+    "url": "assets/boards/campeche-1550.3956061dccec841b.json",
+    "bytes": 629338,
+    "sha256": "3956061dccec841b11ffe16031c5fae6b96cba42b28a37772e4066faca1096c1"
   },
   "assets/boards/santa-marta-1550.json": {
-    "url": "assets/boards/santa-marta-1550.223b7bb698d7cbb3.json",
+    "url": "assets/boards/santa-marta-1550.3b9bbf57d149577d.json",
     "bytes": 656000,
-    "sha256": "223b7bb698d7cbb36a7d03525fef9986f2512f6c95c2abcb48863d4fc3019bb4"
+    "sha256": "3b9bbf57d149577da02f3512cb1b99a10a4060e4fa60ecdfc7709aac81f84965"
   },
   "assets/boards/cumana-1550.json": {
-    "url": "assets/boards/cumana-1550.fc13945b66c4812b.json",
-    "bytes": 605295,
-    "sha256": "fc13945b66c4812bae3ce53b524a7642e667029182a405c7fc6a97b50bf65c82"
+    "url": "assets/boards/cumana-1550.4d68ffb0d5fc2175.json",
+    "bytes": 606022,
+    "sha256": "4d68ffb0d5fc217573b5c6d1ad94efabbf46e7971c76c9743c75d00b9ca73736"
   },
   "assets/boards/coro-1550.json": {
-    "url": "assets/boards/coro-1550.f64131ad314d1835.json",
-    "bytes": 697840,
-    "sha256": "f64131ad314d18354d5b734551916b3a0cac560b3c8017cd23badf65f824f079"
+    "url": "assets/boards/coro-1550.d2f2b3c7cb446373.json",
+    "bytes": 697038,
+    "sha256": "d2f2b3c7cb4463733ac3823bc99532914dbac205e3fd3ba7a732d6e24ab597f8"
   },
   "assets/boards/panama-viejo-1550.json": {
-    "url": "assets/boards/panama-viejo-1550.8d1c068de0106bb2.json",
-    "bytes": 777671,
-    "sha256": "8d1c068de0106bb25c0b4756a0bdeb5498e4432e4d148ee4067468e9769ed451"
+    "url": "assets/boards/panama-viejo-1550.1a501ca22875ddfb.json",
+    "bytes": 777672,
+    "sha256": "1a501ca22875ddfb2ff2a0288d55bf0c29e5d28a0058e76639452ef140d27f78"
   },
   "assets/boards/acapulco-1550.json": {
-    "url": "assets/boards/acapulco-1550.c8bfb178967bcc57.json",
-    "bytes": 626965,
-    "sha256": "c8bfb178967bcc5796c485504bca8f50ca5d9b9674db64b28249b0f138c6ddfc"
+    "url": "assets/boards/acapulco-1550.200dff9ec6cd789d.json",
+    "bytes": 627784,
+    "sha256": "200dff9ec6cd789d9c32f72038ca6c094fe52e19be7f04420dafbadeada4b37b"
   },
   "assets/boards/santiago-de-cuba-1550.json": {
-    "url": "assets/boards/santiago-de-cuba-1550.acbd777fc056c1a1.json",
-    "bytes": 764942,
-    "sha256": "acbd777fc056c1a1ccf4d1982659469f8fc175cca4f5b69005833c93b0126eec"
+    "url": "assets/boards/santiago-de-cuba-1550.d0b906293abd72df.json",
+    "bytes": 764944,
+    "sha256": "d0b906293abd72df71f7ce1afcd3456ddb255ec5f4c41b78ca40ef701bc15af5"
   },
   "assets/boards/trujillo-1550.json": {
-    "url": "assets/boards/trujillo-1550.408010e72dc91b51.json",
-    "bytes": 629181,
-    "sha256": "408010e72dc91b515bccfdcc365b27b3d80ccf4ce56cb670ae2449c3625cb052"
+    "url": "assets/boards/trujillo-1550.a6b872317e295bb1.json",
+    "bytes": 629355,
+    "sha256": "a6b872317e295bb16a1c53c93e5fcb3675ce535f38af072519e9c8e6acba27f8"
   },
   "assets/boards/callao-1550.json": {
-    "url": "assets/boards/callao-1550.c4397ab3dbed30d7.json",
-    "bytes": 653978,
-    "sha256": "c4397ab3dbed30d71a19635e723cded25eb993ff1bfb3657bfef8278a6caa892"
+    "url": "assets/boards/callao-1550.36c1dbbaed12b683.json",
+    "bytes": 654000,
+    "sha256": "36c1dbbaed12b683c2a774521723156ec62f2da9dbf48237ca01407cd20a4a50"
   },
   "assets/boards/las-palmas-1550.json": {
-    "url": "assets/boards/las-palmas-1550.f37e82e8a93b49b4.json",
-    "bytes": 831244,
-    "sha256": "f37e82e8a93b49b4e7756edf509e70214fed34940862fab712023a660c53ca53"
+    "url": "assets/boards/las-palmas-1550.8dc81c80c42cdb40.json",
+    "bytes": 831051,
+    "sha256": "8dc81c80c42cdb40b8b56cb9715ab02e1e1501ed7622d8fbfa2c97916c717b0f"
   },
   "assets/boards/tenerife-1550.json": {
-    "url": "assets/boards/tenerife-1550.aa9112c3f029738c.json",
-    "bytes": 728288,
-    "sha256": "aa9112c3f029738ce46e0669a2c74efac9c77a3b4b34a4d77787d1c6f02df2ae"
+    "url": "assets/boards/tenerife-1550.76e944d4dd698b37.json",
+    "bytes": 727882,
+    "sha256": "76e944d4dd698b3786b41634396417df18faa1e84560ff951b5dfc2ed9b07cb5"
   },
   "assets/boards/funchal-1550.json": {
-    "url": "assets/boards/funchal-1550.a57773ca104903ac.json",
-    "bytes": 877103,
-    "sha256": "a57773ca104903acecd3f6dc38f79e6a8fb1edf5257890e4609e397341e3a8bb"
+    "url": "assets/boards/funchal-1550.5e551d62170bbec9.json",
+    "bytes": 887485,
+    "sha256": "5e551d62170bbec93fbd68c4d9f942445790fc86a6bf02439cede9f24fd98591"
   },
   "assets/boards/angra-1550.json": {
-    "url": "assets/boards/angra-1550.e70b753081d2d0c5.json",
+    "url": "assets/boards/angra-1550.00d89b01d86fef18.json",
     "bytes": 857657,
-    "sha256": "e70b753081d2d0c5f08e69e8dfe6b975c2dfc655f359cc2b7f22a981967e7ade"
+    "sha256": "00d89b01d86fef18d04bef09dab629bad71bdf3fcd3d29c66e9f3b0f3503cfc9"
   },
   "assets/boards/ribeira-grande-1550.json": {
-    "url": "assets/boards/ribeira-grande-1550.2bd23260142d2cbc.json",
-    "bytes": 789988,
-    "sha256": "2bd23260142d2cbcdca855aa0a75ef481bc176bc97b90a259ea419ec3ea83fae"
+    "url": "assets/boards/ribeira-grande-1550.7f6c948cbc7af6b5.json",
+    "bytes": 787438,
+    "sha256": "7f6c948cbc7af6b58d509125bf62b0f963e8cf09d22326a87dd7885dded63460"
   },
   "assets/boards/salvador-da-bahia-1550.json": {
-    "url": "assets/boards/salvador-da-bahia-1550.335a97c5beaf5f60.json",
+    "url": "assets/boards/salvador-da-bahia-1550.6d0e745703608092.json",
     "bytes": 667619,
-    "sha256": "335a97c5beaf5f60066131d9f82083c243d7d48e9bf0e635750a373299252a44"
+    "sha256": "6d0e7457036080921951841fdea461e6e6fd4267de33713f0587f441a1e29aa9"
   },
   "assets/boards/sao-vicente-1550.json": {
-    "url": "assets/boards/sao-vicente-1550.afb6b380fde284ba.json",
-    "bytes": 719538,
-    "sha256": "afb6b380fde284ba0e7b19861621d6b51c4639bed74a8ddd4f1d9eaec83017db"
+    "url": "assets/boards/sao-vicente-1550.de34b357add82792.json",
+    "bytes": 720078,
+    "sha256": "de34b357add82792f06deae5c6031a412865acb0fddc425f5ffd66abc06fcebe"
   },
   "assets/boards/olinda-1550.json": {
-    "url": "assets/boards/olinda-1550.b345c55232a57e85.json",
-    "bytes": 720566,
-    "sha256": "b345c55232a57e8594f94b3ce9e291179354c57fc6e319ceddba764818243333"
+    "url": "assets/boards/olinda-1550.cdf9e008185abd5f.json",
+    "bytes": 720569,
+    "sha256": "cdf9e008185abd5f24b809f20961cd4e52e1901e6f0d1ecd4792354b74f8ea4f"
   },
   "assets/boards/goa-1550.json": {
-    "url": "assets/boards/goa-1550.0a5494c0c5bd9fab.json",
-    "bytes": 873120,
-    "sha256": "0a5494c0c5bd9fab263c222364abbed13465f45f808b92945fc6cf6438600d1d"
+    "url": "assets/boards/goa-1550.510200db0fd5c5eb.json",
+    "bytes": 873479,
+    "sha256": "510200db0fd5c5ebd19f569f9d33438fde5692f679401967fa16d899c1c1f3de"
   },
   "assets/boards/malacca-1550.json": {
-    "url": "assets/boards/malacca-1550.da36c49b812c2758.json",
-    "bytes": 830466,
-    "sha256": "da36c49b812c2758af967fe44101a95ac8d8b2707b233c18b593ec3b7bc05422"
-  },
-  "assets/ports/1550/buildings-1550-lrm.bin": {
-    "url": "assets/ports/1550/buildings-1550-lrm.070f343b9c5ba729.bin",
-    "bytes": 1160216,
-    "sha256": "070f343b9c5ba729b3ab9e2a88a279ab5b823c5fb72d9963baaecd5d59b109ad"
+    "url": "assets/boards/malacca-1550.2ec81f7dee6efdb2.json",
+    "bytes": 830497,
+    "sha256": "2ec81f7dee6efdb2f6d595df6db9775b5501a5322a08426a5a5322c53600f92c"
   },
   "assets/world/land.json": {
     "url": "assets/world/land.171586c7917a28dc.json",
@@ -2169,6 +1944,11 @@
     "bytes": 68550,
     "sha256": "40250fb88f9c43af3049ff419bbf636ab5f088afc3126de2d675b93fdd4f7313"
   },
+  "assets/continuum/bake-worker.js": {
+    "url": "assets/continuum/bake-worker.1db7fecf92589f7a.js",
+    "bytes": 174019,
+    "sha256": "1db7fecf92589f7afc83756bf434ddf8586c0ff3151752d7819b85c326162c1d"
+  },
   "assets/ports/1550/land-materials-pbr.png": {
     "url": "assets/ports/1550/land-materials-pbr.1d2651bbbcdd39c4.png",
     "bytes": 1673220,
@@ -2468,16 +2248,6 @@
     "url": "assets/boulder-continuum/atlas.bin.c3429e381f83244c.gz",
     "bytes": 15826,
     "sha256": "c3429e381f83244c37629d0d16086d68e918158f095937412eb4ccd5ac90fe86"
-  },
-  "assets/continuum/bake-worker.js": {
-    "url": "assets/continuum/bake-worker.0096740849e6bd4d.js",
-    "bytes": 206308,
-    "sha256": "0096740849e6bd4dd7ff04831b2a5b0f0dddb153e814ca3b5ba314f992ed4c37"
-  },
-  "assets/prefab-continuum/manifest.json": {
-    "url": "assets/prefab-continuum/manifest.5276ecddac2ba4bf.json",
-    "bytes": 101288,
-    "sha256": "5276ecddac2ba4bf8fd92f8f09fa56fabba935158208367dd7630c626442f0dc"
   },
   "assets/world/saba/manifest.json": {
     "url": "assets/world/saba/manifest.2697c31e9c5d8c95.json",
