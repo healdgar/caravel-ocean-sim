@@ -11,8 +11,44 @@ import {createCompany,stepCompany} from '../js/crew.js';
 import {SHIP_COLORS,setVesselColors,strikeVesselColors} from '../js/ship-colors.js';
 import {createShipAssetCache} from '../js/ship-mesh.js';
 import {advanceSails,sailingState,sailMastCap,sailCanvasTarget,sailLosingCanvas} from '../js/sailing.js';
-import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort,buildPortPrefabGeometry,generateProceduralCoastalPack,getBuildingParts} from '../js/coastal-world.js';
+import {readFileSync} from 'node:fs';
+import {buildCityTypeGeometry,generateProceduralCoastalPack} from '../js/coastal-world.js';
 import {applyBuildingFractureEvents,prepareBuildingFracture} from '../js/building-fracture.js';
+import {CITY_BUILDING_TYPES,CITY_TYPE,cityTypeTarget,compileCityBuildingType} from '../js/old-world-buildings.js';
+import {portWorkBuildings} from '../js/fort-plan.js';
+import {BAKED_BOARDS} from '../js/board-model.js';
+import {registerBakedBoard} from '../js/old-world.js';
+// A city type stood as a building of the port, as js/city-targets.js stands a struck one: its source mesh, standing
+// at `x, y, z` unturned, with its footing and roof as the mesh has them.
+function cityBuilding(key,x,y,z){
+ const type=CITY_TYPE[key],T=CITY_BUILDING_TYPES[type],source=compileCityBuildingType(type,buildCityTypeGeometry).source,target=cityTypeTarget(type);
+ const vertices=new Float32Array(source.vertices);
+ for(let v=0;v<vertices.length;v+=8){vertices[v]+=x;vertices[v+1]+=y;vertices[v+2]+=z;}
+ const building={id:`${key.toLowerCase()}_${type}`,prefabId:target.prefabId,label:target.label,x,y,baseY:y,z,yaw:0,width:T.width,depth:T.length,length:T.length,height:T.height,
+  roofHeight:Math.max(0,source.max[1]-T.height),foundationDepth:Math.max(0,-source.min[1])};
+ return {building,T,mesh:{vertices,indices:source.indices,partAssembly:source.partAssembly}};
+}
+function upsampleSurvey(survey,n){
+ const sN=Math.round(Math.sqrt(survey.length)),out=new Float32Array(n*n);
+ for(let j=0;j<n;j++){
+  const sy=j/(n-1)*(sN-1),y0=Math.min(sN-2,Math.floor(sy)),ty=sy-y0;
+  for(let i=0;i<n;i++){
+   const sx=i/(n-1)*(sN-1),x0=Math.min(sN-2,Math.floor(sx)),tx=sx-x0;
+   const a=survey[y0*sN+x0],b=survey[y0*sN+x0+1],c=survey[(y0+1)*sN+x0],d=survey[(y0+1)*sN+x0+1];
+   out[j*n+i]=(a*(1-tx)+b*tx)*(1-ty)+(c*(1-tx)+d*tx)*ty;
+  }
+ }
+ return out;
+}
+// A port laid on its board, on the ground the board was founded on: its works are the board's.
+let havana=null;
+function havanaPack(){
+ if(havana)return havana;
+ const baked=JSON.parse(readFileSync(new URL('../'+BAKED_BOARDS['havana:1600'],import.meta.url),'utf8'));
+ const region={...baked.region,size:129,biomeSize:64,albedoSize:64,vegetationCandidates:120,year:1600};
+ registerBakedBoard(baked);
+ return havana=generateProceduralCoastalPack(region,{},upsampleSurvey(baked.survey,region.size));
+}
 function fixture(options={}){
  const boat={modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:0};
  boat.hydrodynamics=boatHydrodynamics(20,6);const events=[],orders=[];
@@ -163,12 +199,9 @@ test('cannonballs strike other ships in hull and rigging zones, imparting 6-DOF 
 });
 
 test('cannonballs strike 16th-century port buildings and coastal land, recording structural damage and craters',()=>{
- const region=resolveGlobalCoastalRegion({id:'cartagena',name:'Cartagena',latitude:10.423,longitude:-75.548,size:65,biomeSize:64,albedoSize:64});
- const heights=synthesizeCoastalTerrain(region);
- const port=placeCoastalPort(region,heights);
- const bastion=port.instances.find(i=>i.prefabId==='casa_de_contratacion'||i.prefabId==='royal_warehouse');
- const shed=port.instances.find(i=>i.prefabId==='careening_shed')??port.instances.find(i=>i.prefabId==='timber_mole_pier');
- assert.ok(bastion&&shed);
+ // A customhouse of stone and a careening shed of timber, as a struck town's buildings join its port.
+ const bastion=cityBuilding('CUSTOMHOUSE',0,2,0).building,shed=cityBuilding('CAREENING_SHED',80,1,0).building;
+ const port={center:{x:0,z:0},instances:[bastion,shed]};
 
  // Building OBB sweep & damage comparison (masonry house vs timber structure)
  const bFrom=[bastion.x,bastion.baseY+bastion.height*0.5,bastion.z+40];
@@ -324,16 +357,13 @@ test('3D aerial aiming trajectory arcs predict range, respond to quoin elevation
 });
 
 test('shore structure foundation scarps, rotated building OBBs, and coastal palms/trees intersect cannonfire and come apart',()=>{
- const region=resolveGlobalCoastalRegion({id:'cartagena',name:'Cartagena',latitude:10.423,longitude:-75.548,size:65,biomeSize:64,albedoSize:64});
- const heights=synthesizeCoastalTerrain(region);
- const port=placeCoastalPort(region,heights);
- const bastion=port.instances.find(i=>i.prefabId==='casa_de_contratacion')??port.instances[0];
+ // A corner bastion of the city's works on ground 4.6 m up, its footing in the bank below.
+ const {building:bastion,T:bastionType,mesh:portGeo}=cityBuilding('CORNER_BASTION',0,4.6,0);
  const samplePalms=new Float32Array([
   bastion.x+28,2.2,bastion.z+12,3.4,9.5,0.4,0.02,-0.02,
   bastion.x+36,2.5,bastion.z+18,3.2,8.8,0.6,0.01,-0.01,
  ]);
- const portGeo=buildPortPrefabGeometry(port,samplePalms);
- assert.ok(port.palms instanceof Float32Array&&port.palms.length>=8,'port exposes 3D coastal palms for gunnery sweeps');
+ const port={center:{x:0,z:0},instances:[bastion],palms:samplePalms};
 
  // 1. Low horizontal cannon shot (y = 2.0 m) against a sea bastion (baseY = 4.6 m, foundationDepth = 4.5 m)
  const lowShotY=Math.max(1.2,(bastion.baseY??bastion.y??4.6)-2.4);
@@ -341,10 +371,10 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  assert.ok(hitScarp,'low horizontal broadside intersects bastion stone scarp below baseY');
  assert.equal(hitScarp.building,bastion);
 
- // 2. Rotated building OBB alignment with buildPortPrefabGeometry toWorld convention
+ // 2. Rotated building OBB alignment with the city's toWorld convention
  const rotInst={
   id:'rot-warehouse',
-  prefabId:'customs_aduana_warehouse',
+  prefabId:'city_warehouse',
   x:200,
   y:2.0,
   baseY:2.0,
@@ -362,9 +392,9 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  const rotHit=sweepBuildingSegment([tipWx-6*sinY,5.0,tipWz-6*cosY],[tipWx+6*sinY,5.0,tipWz+6*cosY],0.08,{instances:[rotInst]});
  assert.ok(rotHit,'rotated building OBB intersects at its exact rotated world extremity');
 
- // 3. A hit on the port mesh takes blocks out of the wall, through flight records
- // On a wall of its trace, where a gun looks out, square on.
- const face=bastion.trace.guns[0],wallCos=Math.cos(bastion.yaw),wallSin=Math.sin(bastion.yaw);
+ // 3. A hit on its mesh takes blocks out of the wall, through flight records
+ // On its parapet, where a gun looks out, square on.
+ const face=bastionType.guns[0],wallCos=Math.cos(bastion.yaw),wallSin=Math.sin(bastion.yaw);
  const wallAt=[bastion.x+face.x*wallCos+face.z*wallSin,bastion.baseY+2.5,bastion.z-face.x*wallSin+face.z*wallCos],wallOut=[face.nx*wallCos+face.nz*wallSin,0,-face.nx*wallSin+face.nz*wallCos];
  const bReport=applyBuildingImpactDamage(bastion,{
   position:wallAt,
@@ -377,10 +407,10 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  });
  assert.ok(bReport&&bastion.damageState.pendingBakes.length>0);
  const vertsCopy=new Float32Array(portGeo.vertices);
- const fracture=prepareBuildingFracture({vertices:portGeo.vertices,indices:portGeo.indices,catalog:portGeo.partAssembly,instanceIndex:port.instances.indexOf(bastion),instance:bastion,materialClass:bastion.damageState.materialClass,groundAt:()=>bastion.baseY??0}).fracture;
+ const fracture=prepareBuildingFracture({vertices:portGeo.vertices,indices:portGeo.indices,catalog:portGeo.partAssembly,instanceIndex:0,instance:bastion,materialClass:bastion.damageState.materialClass,groundAt:()=>bastion.baseY??0}).fracture;
  const released=applyBuildingFractureEvents(fracture,bastion.damageState,bastion.damageState.pendingBakes.splice(0),0);
  assert.ok(released>0,'mid-wall cannonball hit knocks blocks out of the wall');
- assert.deepEqual(portGeo.vertices,vertsCopy,'a hit changes no vertex of the port mesh');
+ assert.deepEqual(portGeo.vertices,vertsCopy,'a hit changes no vertex of its mesh');
  const state=bastion.damageState.fracture;
  assert.ok(state.records.some((value,i)=>i%16===15&&value===-1),'what broke flies by a record the GPU reads');
  assert.ok(state.scorch.some(value=>value>.05),'what it did not break is scorched');
@@ -580,16 +610,15 @@ test('impact with shoals, reef, stone, and sand models substrate-scaled hull dam
  assert.ok(rockBoat.damage.maxSinkDepth<=2.5,'vessel wrecked on shallow rocks settles onto the ledge rather than sinking into deep abyss');
 });
 
-test('town fortifications (bastion, star fortress, watchtower, curtain wall & gate) are staffed with garrison soldiers who patrol ramparts and man embrasures',()=>{
- const pack=generateProceduralCoastalPack('cartagena',{size:65,biomeSize:64,albedoSize:64,vegetationCandidates:120});
+test('a port\'s works are manned by a garrison who stand their posts apart and walk their ramparts',()=>{
+ const pack=havanaPack();
  const pg=createPortGunnery(pack.port);
- // The port's own towers and walls; its forts are its board's works (js/fort-plan.js portWorkBuildings).
+ // Its forts are its board's works (js/fort-plan.js portWorkBuildings), manned from its watch.
  assert.ok(pg.garrison&&pg.soldiers.length>=8,`expected at least 8 fortification soldiers, got ${pg.soldiers.length}`);
- const byPrefab=new Set(pg.soldiers.map(s=>s.buildingPrefabId));
- for(const prefabId of ['torreon_atalaya_farol','curtain_wall_and_gate']){
-  assert.ok(byPrefab.has(prefabId),`expected garrison soldiers on ${prefabId}`);
-  const unit=pg.soldiers.filter(s=>s.buildingPrefabId===prefabId);
-  assert.ok(unit.length>=4,`${prefabId} has ${unit.length} soldiers`);
+ assert.ok(pg.garrison.units.length>=2,`${pg.garrison.units.length} works manned`);
+ for(const unit of pg.garrison.units){
+  assert.equal(unit[0].buildingPrefabId,'city_fort');
+  assert.ok(unit.length>=4,`${unit[0].buildingId} has ${unit.length} soldiers`);
   for(let i=0;i<unit.length;i++){
    const s=unit[i];
    assert.ok(s.position.every(Number.isFinite)&&s.transform.every(Number.isFinite));
@@ -604,7 +633,7 @@ test('town fortifications (bastion, star fortress, watchtower, curtain wall & ga
  const initialPositions=pg.soldiers.map(s=>Array.from(s.position));
  for(let step=0;step<60;step++)pg.update(0.1,[4,0,0]);
  const patrolled=pg.soldiers.filter((s,i)=>Math.hypot(s.position[0]-initialPositions[i][0],s.position[2]-initialPositions[i][2])>0.25);
- assert.ok(patrolled.length>=12,`expected rampart/bastion sentries to patrol along walls, got ${patrolled.length} moving`);
+ assert.ok(patrolled.length>=4,`expected rampart/bastion sentries to patrol along walls, got ${patrolled.length} moving`);
 });
 
 test('ship colors, human crew casualties, battle morale, and surrender signalling work across gunnery and AI',()=>{
@@ -824,7 +853,7 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
   getAdditionalVessels:()=>[pirateVessel],
  });
  // A real pier 14 m off her starboard beam, running along her side.
- const pierBeside=boat=>{const h=(boat.heading??0)*Math.PI/180;return {portLabel:'Ribeira das Naus Pier',portInstances:[{prefabId:'timber_mole_pier',label:'Ribeira das Naus Pier',x:boat.x+Math.cos(h)*14,y:1,z:boat.z+Math.sin(h)*14,yaw:-h,length:40,width:6}]};};
+ const pierBeside=boat=>{const h=(boat.heading??0)*Math.PI/180;return {portLabel:'Ribeira das Naus Pier',portWaterfront:[{kind:'pier',type:CITY_TYPE.PIER,x:boat.x+Math.cos(h)*14,y:0,z:boat.z+Math.sin(h)*14,yaw:-h,length:40,width:6,deck:2.15}]};};
  const openSea=db.dockAtPier({portLabel:'Ribeira das Naus Pier'});
  assert.equal(openSea.ok,false,'no pier in reach means no mooring, wherever she wants one');
  assert.equal(db.state.mooringPhase,'clear');
@@ -835,10 +864,10 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
  assert.equal(pirateBoat.x,pirateAt+500,'and she is not dragged alongside from afar');
  assert.equal(db.state.mooringPhase,'clear');
  pirateBoat.x=pirateAt;
- const farAway=pierBeside(playerBoat);farAway.portInstances[0].x+=400;
+ const farAway=pierBeside(playerBoat);farAway.portWaterfront[0].x+=400;
  assert.equal(db.dockAtPier(farAway).ok,false,'a pier out of reach is no pier');
- const building=pierBeside(playerBoat);building.portInstances[0].prefabId='colonial_church';
- assert.equal(db.dockAtPier(building).ok,false,'lines do not make fast to a church');
+ const building=pierBeside(playerBoat);building.portWaterfront[0].kind='slipway';
+ assert.equal(db.dockAtPier(building).ok,false,'lines do not make fast to a slipway');
  const dockRes=db.dockAtPier(pierBeside(playerBoat));
  assert.equal(dockRes.ok,true);
  assert.equal(db.state.mooringPhase,'throwing-lines');
@@ -1216,13 +1245,15 @@ test('the shared canvas limit matches where damaged rigs actually settle',()=>{
 });
 
 test('a fort returns fire on the ships that fired on it, not the nearest hull',()=>{
- const region=resolveGlobalCoastalRegion('cartagena'),pack=generateProceduralCoastalPack(region);
+ const pack=havanaPack();
  const make=(id,x,z,faction)=>{const b={id,modelId:'nina',length:20,beam:6,heading:0,x,z,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:0,faction};b.hydrodynamics=boatHydrodynamics(20,6);createVesselDamageState(b);return b;};
- const fortInstance=pack.port.instances.find(i=>createPortGunnery({instances:[i]}).batteries.length>0);
- assert.ok(fortInstance,'the port has a gun battery');
+ // One bastioned work of its board alone, its guns looking every way.
+ const fortPort={center:pack.port.center,works:pack.port.works.filter(w=>w.form==='bastioned').slice(0,1)};
+ const [fortInstance]=portWorkBuildings(fortPort);
+ assert.ok(fortInstance?.trace.guns.length>0,'the port has a gun battery');
  const near=make('player',fortInstance.x+60,fortInstance.z,'friendly'),raider=make('raider',fortInstance.x+150,fortInstance.z,'enemy');
  const vessels=[{boat:near,faction:'friendly'},{boat:raider,faction:'enemy'}];
- const aimed=[];const pg=createPortGunnery({...pack.port,instances:[fortInstance]},{getVessels:()=>vessels,returnFireRange:400});
+ const aimed=[];const pg=createPortGunnery(fortPort,{getVessels:()=>vessels,returnFireRange:400});
  for(const b of pg.batteries){const fire=b.fireAtTarget;b.fireAtTarget=(target,o)=>{aimed.push(target.id);return fire(target,o);};}
  const shot=source=>applyBuildingImpactDamage(fortInstance,{sourceBoat:source,ammo:'round',localPosition:[0,2,0],position:[fortInstance.x,3,fortInstance.z],normal:[0,0,-1],velocity:[0,0,300],mass:1,energy:45000});
  shot(raider);

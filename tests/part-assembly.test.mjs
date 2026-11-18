@@ -1,6 +1,9 @@
 import test from 'node:test';
+import fs from 'node:fs';
 import { portWorkBuildings } from '../js/fort-plan.js';
 import assert from 'node:assert/strict';
+import { BAKED_BOARDS } from '../js/board-model.js';
+import { registerBakedBoard } from '../js/old-world.js';
 
 import {
   SHIP_SUB_ASSEMBLIES,
@@ -27,15 +30,11 @@ import { SHIP_MODELS } from '../js/ship-models.js';
 import { getShipParts, SHIP_PART_CAPABILITIES } from '../js/ship-parts.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
 import { applyFractureEvents, evaluateShardFlight } from '../js/ship-fracture.js';
-import { applyBuildingFractureEvents, prepareBuildingFracture } from '../js/building-fracture.js';
+import { applyBuildingFractureEvents, noteBuildingMesh, prepareBuildingFracture } from '../js/building-fracture.js';
+import { CITY_FAMILIES, CITY_TYPE, CITY_TYPES_SLIGHT, cityTypeTarget, compileCityBuildingType } from '../js/old-world-buildings.js';
 import {
-  PORT_PREFABS,
-  getBuildingParts,
-  resolveGlobalCoastalRegion,
-  synthesizeCoastalTerrain,
-  placeCoastalPort,
   generateProceduralCoastalPack,
-  buildPortPrefabGeometry,
+  buildCityTypeGeometry,
   CAIRN_ARCHITECTURAL_TEMPLATES,
   isFraction,
   parseFraction,
@@ -112,6 +111,42 @@ const WORK_FORT = Object.freeze({
   salients: [], gate: null, types: [0, 6], bore: { axis: 1.07, muzzle: 1.74, breech: 1.26, calibre: 12 },
 });
 
+// A city type's building as its builder draws it (js/old-world-buildings.js compileCityBuildingType): its mesh and part
+// catalogue at the origin, unturned, its floor at nought.
+const cityTypeParts = new Map();
+function partsOfType(type) {
+  if (!cityTypeParts.has(type)) {
+    const T = compileCityBuildingType(type, buildCityTypeGeometry), target = cityTypeTarget(type);
+    cityTypeParts.set(type, {
+      type, prefabId: target.prefabId, label: target.label, vertices: T.source.vertices, indices: T.source.indices, partAssembly: T.source.partAssembly,
+      min: T.source.min, max: T.source.max, dimensions: { width: T.width, length: T.length, height: T.height },
+    });
+  }
+  return cityTypeParts.get(type);
+}
+
+// A city type stood as a port building at (x, floor, z), unturned, as js/city-targets.js stands one a shot comes near:
+// its instance, and its mesh moved there.
+function standType(type, { id = `type_${type}`, x = 0, floor = 0, z = 0 } = {}) {
+  const parts = partsOfType(type), vertices = new Float32Array(parts.vertices);
+  for (let v = 0; v < vertices.length; v += 8) { vertices[v] += x; vertices[v + 1] += floor; vertices[v + 2] += z; }
+  const { width, length, height } = parts.dimensions;
+  const instance = {
+    id, prefabId: parts.prefabId, label: parts.label, x, y: floor, baseY: floor, z, yaw: 0, width, length, depth: length, height,
+    roofHeight: Math.max(0, parts.max[1] - height), foundationDepth: Math.max(0, -parts.min[1]),
+  };
+  return { instance, vertices, indices: parts.indices, partAssembly: parts.partAssembly, parts };
+}
+
+// A Cairn spec or template as the city's builder draws it (js/coastal-world.js buildCityTypeGeometry), at its own size.
+function cairnParts(spec) {
+  const built = buildCityTypeGeometry({
+    width: spec.width ?? 22, length: spec.length ?? 34, height: spec.height ?? 18, foundationDepth: spec.foundationDepth ?? 3.5,
+    materialKind: spec.materialKind ?? 11, roofPitch: spec.roofPitch ?? 3.5, cairnSpec: spec,
+  });
+  return { ...built, vertexCount: built.vertices.length / 8 };
+}
+
 test('all 9 playable ship models expose hierarchical part-assembly catalogs and node manifests', () => {
   const modelIds = Object.keys(SHIP_MODELS);
   assert.equal(modelIds.length, 9);
@@ -154,44 +189,42 @@ test('all 9 playable ship models expose hierarchical part-assembly catalogs and 
   }
 });
 
-test('all 34 colonial and Native American port building prefabs expose hierarchical part-assembly catalogs across structural layers', () => {
-  const prefabIds = Object.keys(PORT_PREFABS);
-  assert.equal(prefabIds.length, 34);
+// Every type the guns are laid on (all but what is too slight to be a target: CITY_TYPES_SLIGHT).
+test('every building type of the city exposes a hierarchical part-assembly catalog across structural layers', () => {
+  const types = CITY_FAMILIES.map((family) => family.canonical).filter((type) => !CITY_TYPES_SLIGHT.has(type));
+  assert.ok(types.length >= 15, `${types.length} types`);
   assert.equal(BUILDING_SUB_ASSEMBLIES.length, 6);
 
   const observedSubAssemblies = new Set();
 
-  for (const prefabId of prefabIds) {
-    const bparts = getBuildingParts(prefabId);
-    assert.equal(bparts.prefabId, prefabId);
-    assert.ok(bparts.groups.length >= 2, `${prefabId} should record multiple semantic part groups`);
-
+  for (const type of types) {
+    const bparts = partsOfType(type), name = `${bparts.prefabId} (${type})`;
     const catalog = bparts.partAssembly;
     assert.equal(catalog.domain, 'building');
-    assert.equal(catalog.modelId, prefabId);
-    assert.equal(catalog.partCount, bparts.groups.length);
+    assert.ok(catalog.partCount >= 2, `${name} should record multiple semantic part groups`);
+    assert.equal(catalog.vertexCount, bparts.vertices.length / 8);
     assert.equal(catalog.vertexPartBuffer.length, catalog.vertexCount * 8);
     assert.equal(catalog.partDescriptors.length, catalog.partCount * 8);
 
     for (const part of catalog.parts) {
       observedSubAssemblies.add(part.subAssembly);
       assert.ok(part.layer >= 0 && part.layer <= 5);
-      assert.ok(part.totalTriangleCount > 0, `${prefabId}:${part.id} should span triangles`);
+      assert.ok(part.totalTriangleCount > 0, `${name}:${part.id} should span triangles`);
       if (part.isLeaf) {
-        assert.ok(part.triangleCount > 0, `leaf part ${prefabId}:${part.id} should own leaf triangles`);
-        assert.ok(part.vertexCount > 0, `leaf part ${prefabId}:${part.id} should own vertices`);
+        assert.ok(part.triangleCount > 0, `leaf part ${name}:${part.id} should own leaf triangles`);
+        assert.ok(part.vertexCount > 0, `leaf part ${name}:${part.id} should own vertices`);
       }
     }
 
     // Verify locatePartAtLocalPoint resolves a building component
     const samplePart = catalog.parts.find((p) => p.isLeaf) ?? catalog.parts[0];
-    const located = bparts.locatePartAtLocalPoint(samplePart.centroid);
-    assert.ok(located, `${prefabId} should locate a part near centroid`);
+    const located = locatePartAtLocalPoint(catalog, samplePart.centroid);
+    assert.ok(located, `${name} should locate a part near centroid`);
   }
 
-  // Across the 20 port prefabs, all 6 building structural layers should be represented
+  // Across the city's types, all 6 building structural layers should be represented
   for (const sub of BUILDING_SUB_ASSEMBLIES) {
-    assert.ok(observedSubAssemblies.has(sub.id), `Expected building sub-assembly ${sub.id} across PORT_PREFABS`);
+    assert.ok(observedSubAssemblies.has(sub.id), `Expected building sub-assembly ${sub.id} across the city's types`);
   }
 });
 
@@ -255,8 +288,8 @@ test('part-by-part assembly, exploded view, cutaway modes, and per-part damage t
   }
 
   // Building roof cutaway hides roof-and-canopy (layer 5) while exposing interior walls/foundations
-  const chapel = getBuildingParts('mission_chapel');
-  const bState = chapel.createAssemblyState();
+  const chapel = partsOfType(CITY_TYPE.CHURCH_LEFT);
+  const bState = chapel.partAssembly.createState();
   bState.setCutaway({ mode: 'layer', maxLayer: 4 });
   for (const part of chapel.partAssembly.parts) {
     const ps = bState.evaluatePartPose(part.id);
@@ -360,7 +393,7 @@ test('WGSL part-assembly shaders contain required structs and entry points', () 
   assert.ok(PART_ASSEMBLY_POSE_UPDATE.includes('@compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u)'));
 });
 
-test('cannonball impacts on ships and 1550 port buildings resolve hitPartId, hitSubAssembly, and per-part damage', () => {
+test('cannonball impacts on ships resolve hitPartId, hitSubAssembly, and per-part damage, and port buildings keep theirs', () => {
   const source = { id: 'player', modelId: 'victory', x: 0, z: 0, heave: 0, heading: 0, pitch: 0, roll: 0 };
   const targetShip = {
     id: 'enemy-nina',
@@ -395,40 +428,30 @@ test('cannonball impacts on ships and 1550 port buildings resolve hitPartId, hit
   assert.ok(shipRep.partDamage > 0);
   assert.ok(targetShip.damage.partDamage[hullHit.hitPartId] > 0);
 
-  const region = resolveGlobalCoastalRegion({
-    id: 'cartagena',
-    name: 'Cartagena',
-    latitude: 10.423,
-    longitude: -75.548,
-    size: 65,
-    biomeSize: 64,
-    albedoSize: 64,
-  });
-  const heights = synthesizeCoastalTerrain(region);
-  const port = placeCoastalPort(region, heights);
-  // The port's stone quay: its forts are its board's works, struck through their pieces (js/city-targets.js).
-  const bastion = port.instances.find((i) => i.prefabId === 'stone_quay_seawall');
-  assert.ok(bastion);
+  // A port's stone quay, stood as js/city-targets.js stands it, its mesh traced by the shot. A building's damage is kept
+  // against its walls unless the hit names a part.
+  const quay = standType(CITY_TYPE.QUAY, { id: 'quay' }), bastion = quay.instance;
+  const port = { center: { x: 0, z: 0 }, instances: [bastion] };
+  noteBuildingMesh(bastion, { vertices: quay.vertices, indices: quay.indices, firstIndex: 0, endIndex: quay.indices.length, min: quay.parts.min, max: quay.parts.max });
 
-  const bFrom = [bastion.x, bastion.baseY + bastion.height * 0.5, bastion.z + 40];
-  const bTo = [bastion.x, bastion.baseY + bastion.height * 0.5, bastion.z - 40];
+  // From the water, at its face (-z).
+  const bFrom = [bastion.x, bastion.baseY + bastion.height * 0.5, bastion.z - 40];
+  const bTo = [bastion.x, bastion.baseY + bastion.height * 0.5, bastion.z + 40];
   const bHit = sweepBuildingSegment(bFrom, bTo, 0.08, port);
   assert.ok(bHit, 'cannonball should intersect port building');
   assert.equal(bHit.kind, 'building');
-  assert.ok(bHit.hitPartId, 'building sweep should identify specific hitPartId');
-  assert.ok(bHit.hitSubAssembly, 'building sweep should identify specific hitSubAssembly');
-  assert.ok(Number.isInteger(bHit.hitLayer));
+  assert.equal(bHit.building, bastion);
 
   const bRep = applyBuildingImpactDamage(bastion, {
     ...bHit,
-    velocity: [0, 0, -420],
+    velocity: [0, 0, 420],
     mass: 14.5,
     energy: 0.5 * 14.5 * 420 * 420,
   });
-  assert.equal(bRep.hitPartId, bHit.hitPartId);
-  assert.equal(bRep.hitSubAssembly, bHit.hitSubAssembly);
+  assert.equal(bRep.hitPartId, 'city_quay:walls');
+  assert.equal(bRep.hitSubAssembly, 'walls-and-bastions');
   assert.ok(bRep.partDamage > 0);
-  assert.ok(bastion.damageState.partDamage[bHit.hitPartId] > 0);
+  assert.ok(bastion.damageState.partDamage[bRep.hitPartId] > 0);
 });
 
 test('syncVesselDamage maps cannonball impact sites and modular part damage into live GPU state', () => {
@@ -1228,26 +1251,15 @@ test('all 9 playable ship models take battle damage, mark their meshes and sink 
 
 test('cannon shot extrapolates to stone, masonry, and wooden land structures with material-specific penetration, hot-shot fires, Polvorín magazine detonation, rigid masonry shards, and shore battery return fire', async () => {
   const { boatHydrodynamics } = await import('../js/boat.js');
-  const region = resolveGlobalCoastalRegion({
-    id: 'cartagena',
-    name: 'Cartagena',
-    latitude: 10.423,
-    longitude: -75.548,
-    size: 65,
-    biomeSize: 64,
-    albedoSize: 64,
-  });
-  const heights = synthesizeCoastalTerrain(region);
-  const port = placeCoastalPort(region, heights);
-  assert.ok(port && port.instances.length >= 6, 'Coastal port places stone, masonry, and wooden structures');
-  const portGeom = buildPortPrefabGeometry(port);
-  assert.ok(portGeom.vertices.length > 0, 'buildPortPrefabGeometry generates 3D port building vertices');
-
-  // Stone the port builds itself (its quay), and a fort as its board records one (js/fort-plan.js portWorkBuildings).
-  const bastion = port.instances.find((i) => i.prefabId === 'stone_quay_seawall');
+  // A port's waterfront and its customhouse, each a city type stood where its board laid it (js/city-targets.js), and a
+  // fort as its board records one (js/fort-plan.js portWorkBuildings).
+  const stood = [
+    standType(CITY_TYPE.QUAY, { id: 'quay', x: 0, z: 0 }),
+    standType(CITY_TYPE.PIER, { id: 'pier', x: 60, z: -30 }),
+    standType(CITY_TYPE.CUSTOMHOUSE, { id: 'customhouse', x: -60, z: 30, floor: 1.5 }),
+  ];
+  const [bastion, pier, warehouse] = stood.map((s) => s.instance);
   const [fortress] = portWorkBuildings({ works: [WORK_FORT] });
-  const pier = port.instances.find((i) => i.prefabId === 'timber_mole_pier');
-  const warehouse = port.instances.find((i) => i.prefabId === 'casa_de_contratacion' || i.prefabId === 'royal_warehouse');
   assert.ok(bastion && fortress && pier && warehouse, 'Port contains a stone quay, a fort, a timber mole pier, and a masonry building');
 
   // 1. Material classification & penetration resistance (fortified stone vs masonry vs timber)
@@ -1325,13 +1337,15 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   assert.ok(polvorinRep.magazineExplosionYieldMj > 30000, 'Polvorín explosion releases >30,000 MJ of blast energy');
   assert.ok(fortress.damageState.dismountedGuns >= 4, 'Polvorín explosion dismounts fortress embrasure cannons');
 
-  // 4. Hits on stone and wooden port structures take pieces off them, and never touch the port's vertices
-  const portVertsCopy = new Float32Array(portGeom.vertices);
-  const fractureOf = (instance) => prepareBuildingFracture({
-    vertices: portGeom.vertices, indices: portGeom.indices, catalog: portGeom.partAssembly,
-    instanceIndex: port.instances.indexOf(instance), instance,
-    materialClass: instance.damageState?.materialClass ?? 'masonry', groundAt: () => instance.baseY ?? instance.y ?? 0,
-  }).fracture;
+  // 4. Hits on stone and wooden port structures take pieces off them, and never touch their meshes' vertices
+  const vertsCopy = stood.map((s) => new Float32Array(s.vertices));
+  const fractureOf = (instance) => {
+    const { vertices, indices, partAssembly } = stood.find((s) => s.instance === instance);
+    return prepareBuildingFracture({
+      vertices, indices, catalog: partAssembly, instanceIndex: 0, instance,
+      materialClass: instance.damageState?.materialClass ?? 'masonry', groundAt: () => instance.baseY ?? instance.y ?? 0,
+    }).fracture;
+  };
   // A work's own explosion goes to its pieces (js/gunnery-control.js strikeWorkThroughPiece); the port's buildings are cut here.
   assert.ok(fortress.damageState.pendingBakes.some((b) => b.kind === 'building-explosion'), 'Queues a building-explosion event');
   const queued = [bastion, pier].map((b) => [b, b.damageState.pendingBakes.splice(0)]);
@@ -1342,7 +1356,7 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
     applyBuildingFractureEvents(fractureOf(building), building.damageState, bakes, 0);
     assert.ok(building.damageState.fracture.brokenCount > 0, `${building.prefabId} loses pieces to its hits`);
   }
-  assert.deepEqual(portGeom.vertices, portVertsCopy, 'No hit changes a vertex of the port mesh');
+  stood.forEach((s, i) => assert.deepEqual(s.vertices, vertsCopy[i], 'No hit changes a vertex of a building\'s mesh'));
 
   // 5. Shore battery gunnery & return fire against an offshore warship
   // A battery as its board records one, its five guns on the platform looking out to sea (-z).
@@ -1409,8 +1423,8 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   {
     const ground = volleyBastion.baseY ?? volleyBastion.y ?? 0;
     const fracture = prepareBuildingFracture({
-      vertices: portGeom.vertices, indices: portGeom.indices, catalog: portGeom.partAssembly,
-      instanceIndex: port.instances.indexOf(bastion), instance: volleyBastion, materialClass: 'fortified-stone', groundAt: () => ground,
+      vertices: stood[0].vertices, indices: stood[0].indices, catalog: stood[0].partAssembly,
+      instanceIndex: 0, instance: volleyBastion, materialClass: 'fortified-stone', groundAt: () => ground,
     }).fracture;
     applyBuildingFractureEvents(fracture, volleyBastion.damageState, volleyBastion.damageState.pendingBakes.splice(0), 0);
     const state = volleyBastion.damageState.fracture;
@@ -1690,6 +1704,24 @@ test('Universal Boat Part Taxonomy classifies all 9 ships and applies non-rubber
   assert.equal(osebergSpec.activeOarPairs, 8);
 });
 
+// A board's survey as the land's heights, bilinear, at the size the pack is laid at.
+function upsampleSurvey(survey, targetN = 257) {
+  const sN = Math.round(Math.sqrt(survey.length));
+  const out = new Float32Array(targetN * targetN);
+  for (let j = 0; j < targetN; j++) {
+    const sy = (j / (targetN - 1)) * (sN - 1);
+    const y0 = Math.min(sN - 2, Math.floor(sy)), ty = sy - y0;
+    for (let i = 0; i < targetN; i++) {
+      const sx = (i / (targetN - 1)) * (sN - 1);
+      const x0 = Math.min(sN - 2, Math.floor(sx)), tx = sx - x0;
+      const a = survey[y0 * sN + x0], b = survey[y0 * sN + x0 + 1];
+      const c = survey[(y0 + 1) * sN + x0], d = survey[(y0 + 1) * sN + x0 + 1];
+      out[j * targetN + i] = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+    }
+  }
+  return out;
+}
+
 test('3D Voronoi blocks and the Cairn declarative JSON primitive/voxel language compile, and come apart rigidly', () => {
   // 1. Cairn fraction arithmetic & coordinate resolution
   assert.equal(isFraction('5/3'), true);
@@ -1708,8 +1740,7 @@ test('3D Voronoi blocks and the Cairn declarative JSON primitive/voxel language 
 
   // 3. Cairn declarative JSON architectural template (catedral_basilica) + custom voxel/primitive scene
   assert.ok(CAIRN_ARCHITECTURAL_TEMPLATES.catedral_basilica, 'Cairn templates include catedral_basilica');
-  const cathedral = getBuildingParts('catedral_basilica');
-  assert.equal(cathedral.prefabId, 'catedral_basilica');
+  const cathedral = cairnParts(CAIRN_ARCHITECTURAL_TEMPLATES.catedral_basilica);
   assert.ok(cathedral.vertexCount > 800, `catedral_basilica compiles >800 vertices (got ${cathedral.vertexCount})`);
   assert.ok(cathedral.groups.length >= 6, 'catedral_basilica exposes semantic Cairn part groups');
   const groupKeys = new Set(cathedral.groups.map((g) => g.partKey));
@@ -1785,7 +1816,7 @@ test('3D Voronoi blocks and the Cairn declarative JSON primitive/voxel language 
       },
     ],
   };
-  const customParts = getBuildingParts('custom_cairn_keep', { cairnSpec: customCairnSpec });
+  const customParts = cairnParts(customCairnSpec);
   assert.ok(customParts.vertexCount > 400, 'Custom Cairn scene with shapes, walls, arches, domes, stairs & voxels compiles cleanly');
 
   // Verify all 7 Lisboa & Spanish Main Cairn landmark templates compile with valid part assemblies
@@ -1800,17 +1831,17 @@ test('3D Voronoi blocks and the Cairn declarative JSON primitive/voxel language 
   ];
   for (const tmplId of requiredTemplates) {
     assert.ok(CAIRN_ARCHITECTURAL_TEMPLATES[tmplId], `CAIRN_ARCHITECTURAL_TEMPLATES defines ${tmplId}`);
-    const tmplParts = getBuildingParts(tmplId);
+    const tmplParts = cairnParts(CAIRN_ARCHITECTURAL_TEMPLATES[tmplId]);
     assert.ok(tmplParts.vertexCount > 300, `${tmplId} compiles >300 vertices (got ${tmplParts.vertexCount})`);
     assert.ok(tmplParts.partAssembly.partCount >= 4, `${tmplId} exposes >=4 modular part groups (got ${tmplParts.partAssembly.partCount})`);
   }
 
   // Verify Cairn `repeat`, `roof` material kind, and flush voxel battlements have zero missing sections or floating gaps
-  const aqueductParts = getBuildingParts('acueducto_de_piedra');
+  const aqueductParts = cairnParts(CAIRN_ARCHITECTURAL_TEMPLATES.acueducto_de_piedra);
   const aqueductGroupKeys = aqueductParts.partAssembly.parts.map((p) => p.partKey);
   assert.ok(aqueductGroupKeys.includes('lower_arch_tier'), 'acueducto_de_piedra emits repeated lower_arch_tier arches');
   assert.ok(aqueductGroupKeys.includes('upper_arch_tier'), 'acueducto_de_piedra emits repeated upper_arch_tier arches');
-  const palaceParts = getBuildingParts('palacio_del_gobernador');
+  const palaceParts = cairnParts(CAIRN_ARCHITECTURAL_TEMPLATES.palacio_del_gobernador);
   assert.ok(
     palaceParts.partAssembly.parts.some((p) => p.partKey === 'plaza_soportal_arcade'),
     'palacio_del_gobernador emits repeated plaza_soportal_arcade arches'
@@ -1829,7 +1860,7 @@ test('3D Voronoi blocks and the Cairn declarative JSON primitive/voxel language 
   const voronoiB = sampleVoronoiBlockCell(2.15, 3.42, -4.18, false);
   assert.equal(voronoiA.sx, voronoiB.sx, 'Nearby points inside the same 3D Voronoi cell resolve to the same block seed');
 
-  const cathedralInst = { prefabId: 'catedral_basilica', x: 0, y: 0, baseY: 0, z: 0, yaw: 0 };
+  const cathedralInst = { prefabId: 'city_church', x: 0, y: 0, baseY: 0, z: 0, yaw: 0 };
   const prepareCathedral = () => prepareBuildingFracture({
     vertices: cathedral.vertices, indices: cathedral.indices, catalog: cathedral.partAssembly, instanceIndex: 0,
     instance: cathedralInst, materialClass: 'masonry', groundAt: () => 0,
@@ -1879,8 +1910,8 @@ test('3D Voronoi blocks and the Cairn declarative JSON primitive/voxel language 
   for (let r = 1; r <= 4; r++) assert.ok(broken[r] > broken[r - 1], `Round ${r} brings down more (${broken[r]} after ${broken[r - 1]})`);
 
   // 7. A pier's pilings stay in the seabed, what breaks off floats away, and only the struck building is touched
-  const pierInst = { prefabId: 'timber_mole_pier', role: 'pier', x: 0, y: 0, z: 0, yaw: 0, width: 7.6, length: 54.0, depth: 54.0, height: 3.1 };
-  const pierMesh = getBuildingParts('timber_mole_pier');
+  const pierMesh = partsOfType(CITY_TYPE.PIER);
+  const pierInst = { prefabId: pierMesh.prefabId, role: 'pier', x: 0, y: 0, z: 0, yaw: 0, ...pierMesh.dimensions, depth: pierMesh.dimensions.length };
   const pierPrepared = prepareBuildingFracture({ vertices: pierMesh.vertices, indices: pierMesh.indices, catalog: pierMesh.partAssembly, instanceIndex: 0, instance: pierInst, materialClass: 'timber', groundAt: () => -7 });
   for (let hit = 0; hit < 10; hit++) {
     applyBuildingImpactDamage(pierInst, { ammo: 'round', localPosition: [0, 2.2, 12.0], position: [0, 2.2, 12.0], surfacePosition: [0, 2.2, 12.0], normal: [0, 0, 1], velocity: [0, -5, -350], mass: 10.8, energy: 650000 });
@@ -1903,25 +1934,40 @@ test('3D Voronoi blocks and the Cairn declarative JSON primitive/voxel language 
   assert.ok(floated > 0, 'Some timber is afloat');
   assert.ok(pierPrepared.vertices.length > 0 && pierPrepared.fracture.indexCount === pierMesh.indices.length, 'The fracture holds exactly this building');
 
-  // 8. An elevated land building's rubble lies on its own ground, its footings stay put, and it never rises
-  const lisbonPack = generateProceduralCoastalPack('lisbon');
-  const lisbonInsts = lisbonPack.port.instances;
-  const lisbonSeawalls = lisbonInsts.filter((i) => i.prefabId === 'stone_quay_seawall');
-  const lisbonSlipways = lisbonInsts.filter((i) => i.prefabId === 'astillero_and_moored_hull');
-  assert.ok(lisbonSeawalls.length >= 2 && lisbonSlipways.length >= 2, 'Lisboa should include seawalls and Ribeira das Naus slipways');
-  for (const sw of lisbonSeawalls) {
-    assert.ok(sw.y + sw.height <= 2.5, `Stone seawall top (${(sw.y + sw.height).toFixed(2)}m) should sit at waterfront plaza elevation`);
-    for (const slip of lisbonSlipways) {
-      const dx = Math.abs(sw.x - slip.x);
-      const dz = Math.abs(sw.z - slip.z);
-      const sepX = dx - (sw.width + slip.width) * 0.5;
-      const sepZ = dz - (sw.length + slip.length) * 0.5;
-      assert.ok(sepX > 0 || sepZ > 0, `Slipway "${slip.label}" must never be embedded inside seawall "${sw.label}"`);
+  // 8. Lisbon's quays stand at the waterfront's level, and its slipway on the beach past them, never inside one
+  // (js/board-waterfront.js). An elevated land building's rubble lies on its own ground, its footings stay put, and it
+  // never rises. A port's waterfront is its board's, so Lisbon is laid on its baked board.
+  const baked = JSON.parse(fs.readFileSync(BAKED_BOARDS['lisbon:1550'], 'utf8'));
+  const lisbonRegion = { ...baked.region, size: 257, biomeSize: 128, albedoSize: 256, year: 1550 };
+  registerBakedBoard(baked);
+  const lisbonWaterfront = generateProceduralCoastalPack(lisbonRegion, {}, upsampleSurvey(baked.survey, lisbonRegion.size)).port.waterfront;
+  const lisbonQuays = lisbonWaterfront.filter((w) => w.kind === 'quay');
+  const lisbonSlipways = lisbonWaterfront.filter((w) => w.kind === 'slipway');
+  assert.ok(lisbonQuays.length >= 2 && lisbonSlipways.length >= 1, 'Lisboa should include quays and the Ribeira das Naus slipway');
+  // Whether two turned footprints overlap: no axis of either separates them.
+  const corners = (w) => {
+    const c = Math.cos(w.yaw), s = Math.sin(w.yaw);
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => {
+      const lx = (a * w.width) / 2, lz = (b * w.length) / 2;
+      return [w.x + lx * c + lz * s, w.z - lx * s + lz * c];
+    });
+  };
+  const overlap = (p, q) => {
+    const P = corners(p), Q = corners(q);
+    for (const w of [p, q]) for (const [ax, az] of [[Math.cos(w.yaw), -Math.sin(w.yaw)], [Math.sin(w.yaw), Math.cos(w.yaw)]]) {
+      const on = (list) => list.map(([x, z]) => x * ax + z * az);
+      const a = on(P), b = on(Q);
+      if (Math.max(...a) <= Math.min(...b) || Math.max(...b) <= Math.min(...a)) return false;
     }
+    return true;
+  };
+  for (const quay of lisbonQuays) {
+    assert.ok(quay.y + quay.deck <= 2.5, `Quay deck (${(quay.y + quay.deck).toFixed(2)}m) should sit at waterfront plaza elevation`);
+    for (const slip of lisbonSlipways) assert.equal(overlap(quay, slip), false, `A slipway at ${slip.x.toFixed(0)},${slip.z.toFixed(0)} must never be embedded inside a quay`);
   }
 
-  const arsenalInst = { prefabId: 'royal_atarazanas_arsenal', x: 0, y: 2.8, baseY: 2.8, z: 0, yaw: 0, width: 26, length: 36, depth: 36, height: 8.2 };
-  const arsenalBase = getBuildingParts('royal_atarazanas_arsenal');
+  const arsenalBase = partsOfType(CITY_TYPE.ARSENAL);
+  const arsenalInst = { prefabId: arsenalBase.prefabId, x: 0, y: 2.8, baseY: 2.8, z: 0, yaw: 0, ...arsenalBase.dimensions, depth: arsenalBase.dimensions.length };
   const arsenalVerts = new Float32Array(arsenalBase.vertices);
   // Shift mesh up to elevated land pad y = 2.8m (so foundation plinth spans y = -1.7m..3.55m and walls span 3.55m..11.0m)
   for (let v = 0; v < arsenalVerts.length / 8; v++) arsenalVerts[v * 8 + 1] += 2.8;

@@ -8,7 +8,6 @@ import {
   INDIGENOUS_ARCHETYPE_IDS,
   buildIndigenousCrewModel,
   createIndigenousCrewModels,
-  createIndigenousVillagersForInstance,
   indigenousArchetypeForCulture,
   loadGroomPackGLB,
 } from '../js/crew.js';
@@ -53,9 +52,9 @@ test('an unknown people gets plain hair and clothes, and nothing assumed',()=>{
   for(const sex of ['male','female'])for(const p of everyone('nobody-we-know-of',sex))assert.equal(p.mask&DRESS_FEATHERS,0);
 });
 
+// A native town's people are its townsfolk (js/townsfolk.js townLooks), each dressed for the town's culture.
 test('villagers wear their own culture rather than one costume',()=>{
-  const dressOf=cultureId=>createIndigenousVillagersForInstance({prefabId:'algonquian_longhouse',x:0,y:1,z:0,yaw:0,width:7,length:22,height:5},0,cultureId).map(s=>s.dress);
-  assert.ok(dressOf('tupinamba-brazil-guiana').length>=2);
+  const dressOf=cultureId=>Array.from({length:8},(_,i)=>indigenousDress(cultureId,i%2?'female':'male',i)).map(p=>[p.mask,p.shirt,p.trousers]);
   assert.notDeepEqual(dressOf('tupinamba-brazil-guiana'),dressOf('maya-mesoamerica-coast'));
 });
 

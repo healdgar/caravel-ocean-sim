@@ -6,8 +6,9 @@ import {createGunneryState} from '../js/gunnery-state.js';
 import {createNavalBattleGunDefinitions} from '../js/gunnery-models.js';
 import {boatHydrodynamics} from '../js/boat.js';
 import {createPortDamageStore} from '../js/port-damage.js';
+import {portWorkBuildings} from '../js/fort-plan.js';
 
-const HOUSE={id:'house',prefabId:'casa_de_contratacion',x:0,z:-100,y:0,baseY:0,yaw:0,width:30,depth:20,height:12,damageState:null};
+const HOUSE={id:'house',prefabId:'city_house',x:0,z:-100,y:0,baseY:0,yaw:0,width:30,depth:20,height:12,damageState:null};
 const VIEW={eye:[0,8,0],forward:[0,0,-1],wind:[0,0,0]};
 
 function hold(seconds,firing=true){
@@ -53,11 +54,16 @@ test('its balls fly where the camera looks and do real damage',()=>{
 });
 
 test('no fort answers it by firing on a ship, nor on arrival at a port saved battered',()=>{
-  // The one fort still a building of its port (a board's works are struck through their pieces, js/city-targets.js).
-  const fort={id:'fort',prefabId:'english_triangular_palisade_fort',x:0,z:-100,y:2,baseY:2,yaw:0,width:40,depth:40,height:6.8,damageState:null,magazine:null};
+  // A fort as its board records it (js/old-world-board.js standWorkOf), 40 m square at the end of the line of fire, two
+  // guns on its east wall bearing on the ship. In the game a work is struck through its pieces (js/city-targets.js);
+  // here the work itself stands among the port's buildings, so that the shells meet it.
+  const bore={axis:1.07,muzzle:1.74,breech:1.26,calibre:12},gun=(z,piece)=>({x:19,y:9,z,nx:1,nz:0,wall:1,on:0,piece});
+  const [fort]=portWorkBuildings({works:[{kind:'fort',form:'bastioned',name:'Fort',x:0,y:2,z:-100,turn:0,w:40,d:40,
+    outline:[[-20,-120],[20,-120],[20,-80],[-20,-80]],guns:[gun(-108,1),gun(-92,2)],salients:[],gate:null,types:[0,3],bore}]});
   const ship={id:'ship',x:150,z:-100,heave:0,length:30,beam:8,heading:0,roll:0,pitch:0};
   const port={center:{x:0,z:0},instances:[fort]};
   const guns=createPortGunnery(port,{getVessels:()=>[ship],getTerrain:()=>({ports:[port]})});
+  assert.equal(guns.batteries.length,1,'the fort is armed');
   const aimed=[];
   for(const b of guns.batteries){const fire=b.fireAtTarget;b.fireAtTarget=(t,o)=>{aimed.push(t.id);return fire(t,o);};}
   const cannon=createFreeCannon({getVessels:()=>[ship],getTerrain:()=>({ports:[port]})});

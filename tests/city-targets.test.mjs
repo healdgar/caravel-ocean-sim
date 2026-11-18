@@ -3,7 +3,7 @@
 // Shot must still strike them, break them up as it does a port's own buildings, and leave a record of it.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {buildPortPrefabGeometry} from '../js/coastal-world.js';
+import {buildCityTypeGeometry} from '../js/coastal-world.js';
 import {oldWorldCountry} from '../js/old-world.js';
 import {CITY_BLOCK_FLOATS} from '../js/old-world-city.js';
 import {CITY_BUILDING_TYPES,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityFamilyOf,cityHouseType,cityTypeTarget,compileCityBuildingTypes} from '../js/old-world-buildings.js';
@@ -23,13 +23,13 @@ function shore(){
   }
   return {region,heights,port:{id:'test-port',center:{x:0,z:-30},clearRadius:150,instances:[]}};
 }
-const types=compileCityBuildingTypes(buildPortPrefabGeometry),typeOf=id=>types[id];
+const types=compileCityBuildingTypes(buildCityTypeGeometry),typeOf=id=>types[id];
 const {region,heights,port:planPort}=shore(),plan=oldWorldCountry(region,heights,planPort).plan;
 const record=index=>plan.typed.subarray(index*CITY_TYPED_FLOATS,(index+1)*CITY_TYPED_FLOATS);
 const firstOf=wanted=>plan.typedTypes.findIndex(type=>wanted(type));
 // Straight down through the middle of a building, from well above its roof to below its floor.
 const plumb=index=>{const t=record(index),top=t[1]+types[plan.typedTypes[index]].source.max[1];return [[t[0],top+40,t[2]],[t[0],t[1]-2,t[2]]];};
-const freshPort=()=>({id:'test-port',center:{x:0,z:-30},instances:[{id:'quay',prefabId:'stone_quay_seawall',x:0,z:-30,yaw:0}]});
+const freshPort=()=>({id:'test-port',center:{x:0,z:-30},instances:[{id:'quay',prefabId:'city_quay',x:0,z:-30,yaw:0}]});
 
 test('every block of the plan belongs to one typed building, and each type keeps the mesh it was built from',()=>{
   assert.equal(plan.typedBlocks.length,plan.typedCount*2);

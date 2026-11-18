@@ -2,46 +2,43 @@
 // Hits must take blocks off a building, not pull its vertices around. They land on the ground, and what they held up comes down.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyBuildingFractureEvents, BUILDING_SHARD_KINDS, buildingFractureStateOf, buildingKindWithYaw, footingUnder, prepareBuildingFracture, prepareBuildingFractureSteps, replayBuildingFracture, supportScan, traceShotThroughBreach } from '../js/building-fracture.js';
-import { buildPortPrefabGeometry, getBuildingParts, PORT_PREFABS } from '../js/coastal-world.js';
+import { applyBuildingFractureEvents, BUILDING_SHARD_KINDS, buildingFractureStateOf, buildingKindWithYaw, prepareBuildingFracture, prepareBuildingFractureSteps, replayBuildingFracture, supportScan, traceShotThroughBreach } from '../js/building-fracture.js';
+import { buildCityTypeGeometry } from '../js/coastal-world.js';
 import { evaluateShardFlight, FRACTURE_RECORD_FLOATS, settleFinishedFlights } from '../js/ship-fracture.js';
 import { applyBuildingImpactDamage, classifyBuildingMaterial, createBuildingDamageState, createGunnerySolidSweep, sweepBuildingSegment } from '../js/gunnery-control.js';
 import { createPortDamageStore } from '../js/port-damage.js';
-import { createFortGarrison, stepFortGarrison } from '../js/crew.js';
 import { bakeLandImpactDeformations, sampleVoronoiBlockCell } from '../js/part-assembly.js';
-import { CITY_TYPE, cityTypeTarget, compileCityBuildingType } from '../js/old-world-buildings.js';
+import { CITY_BUILDING_TYPES, CITY_FAMILIES, CITY_TYPE, cityTypeTarget, compileCityBuildingType } from '../js/old-world-buildings.js';
 
 const recordOf = (state, s) => state.records.subarray(s * FRACTURE_RECORD_FLOATS, (s + 1) * FRACTURE_RECORD_FLOATS);
 const NOWHERE = 1e6;
 
-// A fort's pieces are its board's works (js/fort-plan.js): each a city type standing at its own size, as
-// js/city-targets.js stands it when shot comes near. A port's own prefab is named; a work's piece is its type.
-const { BATTERY, BASTION, CORNER_BASTION, GUN } = CITY_TYPE;
-const workPieces = new Map();
-function partsOf(kind) {
-  if (typeof kind === 'string') return { prefabId: kind, ...getBuildingParts(kind) };
-  const T = workPieces.get(kind) ?? workPieces.set(kind, compileCityBuildingType(kind, buildPortPrefabGeometry)).get(kind);
+// Every building is a city type standing at its own size, as js/city-targets.js stands it when shot comes near: a
+// work's pieces (js/fort-plan.js), a port's waterfront (js/board-waterfront.js) and the town alike.
+const { ARSENAL, BATTERY, BASTION, CAREENING_SHED, CORNER_BASTION, CURTAIN, CUSTOMHOUSE, GUN, PIER, QUAY, SLIPWAY, WAREHOUSE, WATCHTOWER } = CITY_TYPE;
+const typeParts = new Map();
+function partsOf(type) {
+  const T = typeParts.get(type) ?? typeParts.set(type, compileCityBuildingType(type, buildCityTypeGeometry)).get(type);
   return {
-    prefabId: cityTypeTarget(kind).prefabId, vertices: T.source.vertices, indices: T.source.indices, partAssembly: T.source.partAssembly,
+    prefabId: cityTypeTarget(type).prefabId, vertices: T.source.vertices, indices: T.source.indices, partAssembly: T.source.partAssembly,
     dimensions: { width: T.width, length: T.length, height: T.height },
   };
 }
 
-function prepared(kind, { ground = 0, yaw = 0, x = 0, z = 0 } = {}) {
-  const parts = partsOf(kind), prefabId = parts.prefabId;
-  // A work's piece stands on its floor (js/city-targets.js standCityBuildingMesh); a prefab at nought, over its ground.
-  const lift = typeof kind === 'number' ? ground : 0;
+// `floor` is where it stands (a waterfront's at the sea's level), `ground` what lies under it.
+function prepared(type, { ground = 0, floor = ground, yaw = 0, x = 0, z = 0 } = {}) {
+  const parts = partsOf(type), prefabId = parts.prefabId;
   const cos = Math.cos(yaw), sin = Math.sin(yaw), vertices = new Float32Array(parts.vertices);
   for (let v = 0; v < vertices.length; v += 8) {
     const px = vertices[v], pz = vertices[v + 2];
     vertices[v] = x + px * cos + pz * sin;
-    vertices[v + 1] += lift;
+    vertices[v + 1] += floor;
     vertices[v + 2] = z - px * sin + pz * cos;
     const nx = vertices[v + 3], nz = vertices[v + 5];
     vertices[v + 3] = nx * cos + nz * sin;
     vertices[v + 5] = -nx * sin + nz * cos;
   }
-  const instance = { prefabId, x, z, y: ground, baseY: ground, yaw, ...parts.dimensions };
+  const instance = { prefabId, x, z, y: floor, baseY: floor, yaw, ...parts.dimensions };
   return {
     parts, instance, vertices,
     ...prepareBuildingFracture({ vertices, indices: parts.indices, catalog: parts.partAssembly, instanceIndex: 0, instance, materialClass: classifyBuildingMaterial(prefabId), groundAt: () => ground }),
@@ -49,9 +46,12 @@ function prepared(kind, { ground = 0, yaw = 0, x = 0, z = 0 } = {}) {
 }
 const shot = (x, y, z, extra = {}) => ({ kind: 'stone-crater', x, y, z, nx: 0, ny: 0, nz: -1, stepDepth: 0.44, severity: 1.1, ...extra });
 
+// Every type a builder of its own draws (the waterfront and the pinned buildings), and the works' pieces.
+const BUILT = CITY_FAMILIES.filter((family) => CITY_BUILDING_TYPES[family.canonical].builder).map((family) => family.canonical);
 test('every building, however it is built, stands intact and is within its budget', () => {
-  for (const prefabId of Object.keys(PORT_PREFABS)) {
-    const { fracture, vertices, indices, initial } = prepared(prefabId);
+  assert.deepEqual(BUILT.sort((a, b) => a - b), [QUAY, PIER, SLIPWAY, CAREENING_SHED, CUSTOMHOUSE, ARSENAL, WAREHOUSE].sort((a, b) => a - b));
+  for (const type of [...BUILT, BATTERY, BASTION, CORNER_BASTION, WATCHTOWER, CURTAIN]) {
+    const { fracture, vertices, indices, initial } = prepared(type), prefabId = `${cityTypeTarget(type).prefabId} (${type})`;
     assert.ok(fracture.shardCount > 1, `${prefabId} has pieces to lose`);
     assert.ok(fracture.shardCount < 5000, `${prefabId}: ${fracture.shardCount} shards`);
     assert.equal(fracture.vertexShards.length, vertices.length / 8);
@@ -99,7 +99,7 @@ test('the faces inside a wall draw nothing until a break exposes them', () => {
 });
 
 test('the same work in pieces gives the same building', () => {
-  const parts = getBuildingParts('royal_warehouse'), instance = { prefabId: 'royal_warehouse', x: 0, z: 0, yaw: 0 };
+  const parts = partsOf(WAREHOUSE), instance = { prefabId: parts.prefabId, x: 0, z: 0, yaw: 0 };
   const options = { vertices: parts.vertices, indices: parts.indices, catalog: parts.partAssembly, instanceIndex: 0, instance, materialClass: 'masonry', groundAt: () => 0 };
   const steps = prepareBuildingFractureSteps(options);
   let yields = 0, step = steps.next();
@@ -148,14 +148,15 @@ test('rubble settles on the ground, not the sea, and stays', () => {
 });
 
 test('over deep water stone sinks to the seabed, and timber floats off and is gone', () => {
-  const stone = prepared('stone_quay_seawall', { ground: -9 }), stoneDamage = {};
+  // The waterfront stands at the sea's level, over its bed.
+  const stone = prepared(QUAY, { ground: -9, floor: 0 }), stoneDamage = {};
   // Nothing above the bed here is rooted, so strike the wall above the water.
   applyBuildingFractureEvents(stone.fracture, stoneDamage, [shot(0, 1, -stone.parts.dimensions.length / 2)], 0);
   const sunk = stoneDamage.fracture.broken.indexOf(1);
   assert.ok(sunk > 0);
   const stoneAt = evaluateShardFlight(recordOf(stoneDamage.fracture, sunk), NOWHERE, stone.fracture.shards[sunk].centroid, [1, 1, 1]);
   assert.ok(stoneAt[1] < -7 && stoneAt[1] > -9.05, `stone on the seabed, ${stoneAt[1]}`);
-  const pier = prepared('timber_mole_pier', { ground: -6 }), pierDamage = {};
+  const pier = prepared(PIER, { ground: -6, floor: 0 }), pierDamage = {};
   applyBuildingFractureEvents(pier.fracture, pierDamage, [shot(0, 2, 10, { kind: 'timber-splinter', stepDepth: 0.52 })], 0);
   const plank = pierDamage.fracture.broken.indexOf(1);
   assert.ok(plank > 0 && pier.fracture.shards[plank].timber);
@@ -163,9 +164,9 @@ test('over deep water stone sinks to the seabed, and timber floats off and is go
 });
 
 test('a small hole stands as an arch, and a wide breach brings down the wall above it', () => {
-  const { fracture } = prepared('curtain_wall_and_gate'), shards = fracture.shards;
+  const { fracture } = prepared(CURTAIN), shards = fracture.shards;
   // One long face, its blocks by height. The wall runs along z.
-  const onFace = (s) => s?.partKey === 'curtain_wall' && s.normal[0] > 0.9;
+  const onFace = (s) => s?.partKey === 'curtain' && s.normal[0] > 0.9;
   const face = shards.filter((s) => onFace(s) && s.below.length && s.above.length);
   assert.ok(face.length > 20, `${face.length} blocks of wall with others above and below`);
   const broken = new Uint8Array(fracture.shardCount), middle = face.sort((a, b) => a.centroid[1] - b.centroid[1] || Math.abs(a.centroid[2]) - Math.abs(b.centroid[2]))[0];
@@ -249,7 +250,7 @@ function shotAt(fracture, shard, along = 40) {
 }
 
 test('a shot goes through a breach to whatever still stands behind it', () => {
-  const { fracture } = prepared('royal_warehouse'), damage = {};
+  const { fracture } = prepared(WAREHOUSE), damage = {};
   const state = buildingFractureStateOf(damage, fracture);
   const front = midWall(fracture);
   assert.ok(front, 'there is wall to shoot');
@@ -300,7 +301,7 @@ test('a ball stops in the earth behind a fort\'s facing', () => {
 });
 
 test('the sweep lets a ball through a breach, and strikes what stands behind', () => {
-  const { fracture, instance } = prepared('royal_warehouse'), port = { instances: [instance] };
+  const { fracture, instance } = prepared(WAREHOUSE), port = { instances: [instance] };
   createBuildingDamageState(instance);
   const state = buildingFractureStateOf(instance.damageState, fracture);
   const front = midWall(fracture);
@@ -333,7 +334,7 @@ test('a ball strikes down soldiers ashore on its way, and stops at the first thi
 });
 
 test('a building\'s damage replays exactly from its log, with nothing left in the air', () => {
-  const live = prepared('royal_warehouse'), half = live.parts.dimensions.length / 2;
+  const live = prepared(WAREHOUSE), half = live.parts.dimensions.length / 2;
   const damage = {};
   const hits = [];
   for (let i = 0; i < 10; i++) hits.push(shot((i - 5) * 1.3 + 0.123, 2 + (i % 4) * 0.77, -half - 0.017));
@@ -343,7 +344,7 @@ test('a building\'s damage replays exactly from its log, with nothing left in th
   const state = damage.fracture;
   assert.ok(state.brokenCount > 20, `${state.brokenCount} pieces`);
   assert.ok(damage.fractureLog.length === hits.length * 16, `${damage.fractureLog.length} characters of log`);
-  const again = prepared('royal_warehouse'), restored = {};
+  const again = prepared(WAREHOUSE), restored = {};
   assert.equal(replayBuildingFracture(again.fracture, restored, damage.fractureLog, 500), state.brokenCount, 'as many pieces are gone');
   const back = restored.fracture;
   assert.deepEqual([...back.broken], [...state.broken], 'the same ones');
@@ -366,8 +367,8 @@ test('a port\'s saved damage comes back on the same port, unless the town has re
   const makePort = () => ({
     regionId: 'lisbon',
     instances: [
-      { id: 'arsenal', prefabId: 'royal_atarazanas_arsenal', x: 10, z: 20, baseY: 0, y: 0, yaw: 0, width: 28, length: 34, depth: 34, height: 11.5 },
-      { id: 'shed', prefabId: 'careening_shed', x: 90, z: 20, baseY: 0, y: 0, yaw: 0, width: 11, length: 22, depth: 22, height: 5.6 },
+      { id: 'arsenal', prefabId: 'city_arsenal', x: 10, z: 20, baseY: 0, y: 0, yaw: 0, width: 28, length: 34, depth: 34, height: 11.5 },
+      { id: 'shed', prefabId: 'city_careening_shed', x: 90, z: 20, baseY: 0, y: 0, yaw: 0, width: 11, length: 22, depth: 22, height: 5.6 },
     ],
   });
   const port = makePort(), arsenal = port.instances[0];
@@ -397,7 +398,7 @@ test('a port\'s saved damage comes back on the same port, unless the town has re
   other.regionId = 'havana';
   assert.equal(createPortDamageStore(saved).restore(other), 0, 'another port takes nothing from it');
   const moved = makePort();
-  moved.instances[0].prefabId = 'torreon_atalaya_farol';
+  moved.instances[0].prefabId = 'city_watchtower';
   assert.equal(createPortDamageStore(saved).restore(moved), 0, 'nor a different building on the spot');
 
   const rebuilt = createPortDamageStore(saved, { dateMs: start + 400 * day }), returned = makePort();
@@ -421,7 +422,7 @@ test('a port with no record costs one lookup', () => {
   const store = createPortDamageStore(), port = { regionId: 'lisbon', get instances() { throw Error('it read the buildings'); } };
   assert.equal(createPortDamageStore().restore({ regionId: 'lisbon' }), 0);
   assert.throws(() => store.restore(port), /read the buildings/, 'the getter is real');
-  const untouched = { regionId: 'lisbon', instances: [{ id: 'a', prefabId: 'careening_shed', x: 0, z: 0 }] };
+  const untouched = { regionId: 'lisbon', instances: [{ id: 'a', prefabId: 'city_careening_shed', x: 0, z: 0 }] };
   assert.equal(store.restore(untouched), 0);
   assert.equal(untouched.instances[0].damageState, undefined);
 });
@@ -430,7 +431,7 @@ test('a share link keeps the worst of a port, within its room', () => {
   const store = createPortDamageStore();
   const port = { regionId: 'lisbon', instances: [] };
   for (let i = 0; i < 12; i++) {
-    const building = { id: `b${i}`, prefabId: 'careening_shed', x: i, z: 0, baseY: 0, yaw: 0 };
+    const building = { id: `b${i}`, prefabId: 'city_careening_shed', x: i, z: 0, baseY: 0, yaw: 0 };
     const d = createBuildingDamageState(building);
     d.hits = 40; d.integrity = i / 20; d.state = 'breached';
     d.fractureLog = 'A'.repeat(16 * 90);
@@ -444,8 +445,8 @@ test('a share link keeps the worst of a port, within its room', () => {
 });
 
 test('a roof comes down when the walls under it have gone', () => {
-  for (const prefabId of ['royal_warehouse', 'casa_de_contratacion']) {
-    const { fracture } = prepared(prefabId), shards = fracture.shards.filter(Boolean);
+  for (const type of [WAREHOUSE, CUSTOMHOUSE]) {
+    const { fracture } = prepared(type), shards = fracture.shards.filter(Boolean), prefabId = cityTypeTarget(type).prefabId;
     const roof = shards.filter((s) => /^roof_/.test(s.partKey));
     assert.ok(roof.length > 3, `${prefabId} has a roof`);
     const fixed = roof.filter((s) => s.anchored);
@@ -458,74 +459,8 @@ test('a roof comes down when the walls under it have gone', () => {
   }
 });
 
-function garrisoned(prefabId, ground = 0) {
-  const built = prepared(prefabId, { ground }), { fracture, instance } = built;
-  instance.id = 'held';
-  const port = { regionId: 'test', instances: [instance], center: { x: 0, z: 0 } };
-  const garrison = createFortGarrison(port);
-  createBuildingDamageState(instance);
-  const state = buildingFractureStateOf(instance.damageState, fracture);
-  return { ...built, port, garrison, state, soldiers: garrison.soldiers };
-}
-// Knock out whatever stands under a point, as if a shot had taken it. The paving of a deck is the floor itself,
-// not something standing on it, and goes only when asked for.
-function breakUnder(state, x, y, z, reach = 0.2, { paving = false } = {}) {
-  let broken = 0;
-  for (const shard of state.fracture.shards) {
-    if (!shard || state.broken[shard.index] || (shard.floorSlab && !paving)) continue;
-    const lo = shard.localMin, hi = shard.localMax;
-    if (lo[1] > y + 0.2 || hi[1] < y - 1.1 || x < lo[0] - reach || x > hi[0] + reach || z < lo[2] - reach || z > hi[2] + reach) continue;
-    state.broken[shard.index] = 1;
-    state.brokenCount++;
-    broken++;
-  }
-  return broken;
-}
-const onlyOnPieces = (state, soldiers) => soldiers.filter((s) => {
-  const footing = footingUnder(state, s.lx, s.ly, s.lz);
-  return footing.stood && footing.stands && footing.floor === null;
-});
-
-test('a man comes down with the stretch he stands on, and the rest stay at their posts', () => {
-  const { state, garrison, soldiers } = garrisoned('curtain_wall_and_gate');
-  assert.ok(soldiers.length >= 2, `${soldiers.length} men on the wall`);
-  stepFortGarrison(garrison, 0.016);
-  assert.ok(soldiers.every((s) => s.casualtyState !== 'fallen'), 'with nothing broken, nobody falls');
-  const standing = onlyOnPieces(state, soldiers);
-  assert.ok(standing.length >= 2, `${standing.length} men stand on pieces that can go`);
-  const doomed = standing[0], from = doomed.baseLy, others = soldiers.filter((s) => s !== doomed && Math.hypot(s.lx - doomed.lx, s.lz - doomed.lz) > 3);
-  assert.ok(others.length, 'there is someone away from him');
-  assert.ok(breakUnder(state, doomed.lx, doomed.ly, doomed.lz) > 0);
-  state.flying.add(1);
-  stepFortGarrison(garrison, 0.016);
-  assert.equal(doomed.casualtyState, 'fallen', 'he goes down');
-  assert.ok(doomed.garrisonFall, 'and falls, it is not a jump cut');
-  assert.ok(doomed.baseLy > 0.5, 'he has only just started');
-  for (let i = 0; i < 200 && doomed.garrisonFall; i++) stepFortGarrison(garrison, 0.05);
-  assert.equal(doomed.garrisonFall, null);
-  assert.ok(doomed.baseLy < from - 1 && doomed.baseLy >= 0 && doomed.baseLy < 1.5, `he lies at the foot of the wall (${doomed.baseLy.toFixed(2)} from ${from.toFixed(2)})`);
-  for (const s of others) assert.notEqual(s.casualtyState, 'fallen', 'the others stay at their posts');
-});
-
-test('a man walking a rampart keeps to what is left of his beat', () => {
-  const { state, garrison, soldiers } = garrisoned('curtain_wall_and_gate');
-  const walker = onlyOnPieces(state, soldiers).find((s) => s.routeZ && Math.abs(s.routeZ[1] - s.routeZ[0]) > 4);
-  assert.ok(walker, 'someone walks the wall');
-  const [a, b] = walker.routeZ, far = Math.abs(a - walker.lz) > Math.abs(b - walker.lz) ? a : b;
-  const gapAt = walker.lz + (far - walker.lz) * 0.7;
-  assert.ok(breakUnder(state, walker.lx, walker.ly, gapAt) > 0);
-  stepFortGarrison(garrison, 0.016);
-  assert.notEqual(walker.casualtyState, 'fallen', 'the gap is not under him');
-  const [lo, hi] = [Math.min(...walker.routeZ), Math.max(...walker.routeZ)];
-  assert.ok(gapAt < lo || gapAt > hi, `his beat now stops short of the gap at ${gapAt.toFixed(1)} (${lo.toFixed(1)} to ${hi.toFixed(1)})`);
-  assert.ok(walker.lz >= lo - 1e-6 && walker.lz <= hi + 1e-6, 'and he is still on it');
-  assert.ok(walker.targetZ >= lo - 1e-6 && walker.targetZ <= hi + 1e-6, 'walking only where he can');
-  for (let i = 0; i < 400; i++) stepFortGarrison(garrison, 0.05);
-  assert.ok(walker.lz >= lo - 1e-6 && walker.lz <= hi + 1e-6, `he never walks off the edge (${walker.lz.toFixed(2)})`);
-});
-
 test('rubble shoved by a later ball comes to rest where it was shoved to, and its heap goes with it', () => {
-  const { fracture, instance } = prepared('royal_warehouse'), half = instance.length / 2;
+  const { fracture, instance } = prepared(WAREHOUSE), half = instance.length / 2;
   const damage = {};
   applyBuildingFractureEvents(fracture, damage, [shot(0.1, 2.2, -half - 0.017)], 0);
   const state = damage.fracture;
@@ -580,40 +515,8 @@ test('what a breach shows is laid along the wall: raw stone and earth carry the 
   assert.ok(Math.abs(decoded - (yaw % Math.PI)) < 1e-6);
 });
 
-test('a saved ruin has its men already down, and a rebuilt one has them back at their posts', () => {
-  const live = garrisoned('curtain_wall_and_gate'), half = live.instance.width / 2;
-  const doomed = onlyOnPieces(live.state, live.soldiers)[0];
-  const events = [];
-  for (let i = -2; i <= 2; i++) for (const height of [1.5, 3, 4.5]) events.push({ kind: 'stone-crater', x: half, y: height, z: doomed.lz + i * 1.2, nx: 1, ny: 0, nz: 0, stepDepth: 0.44, severity: 1.2 }, { kind: 'stone-crater', x: -half, y: height, z: doomed.lz + i * 1.2, nx: -1, ny: 0, nz: 0, stepDepth: 0.44, severity: 1.2 });
-  applyBuildingFractureEvents(live.state.fracture, live.instance.damageState, events, 0);
-  assert.ok(live.state.brokenCount > 10);
-  stepFortGarrison(live.garrison, 0.016);
-  for (let i = 0; i < 200; i++) stepFortGarrison(live.garrison, 0.05);
-  const fell = live.soldiers.filter((s) => s.casualtyState === 'fallen').map((s) => s.crewIndex);
-  assert.ok(fell.length > 0, 'somebody came down');
-  const levels = live.soldiers.map((s) => s.baseLy);
-
-  const back = garrisoned('curtain_wall_and_gate');
-  replayBuildingFracture(back.state.fracture, back.instance.damageState, live.instance.damageState.fractureLog, 900);
-  const state = back.instance.damageState.fracture;
-  assert.equal(state.flying.size, 0);
-  stepFortGarrison(back.garrison, 0.016);
-  assert.deepEqual(back.soldiers.filter((s) => s.casualtyState === 'fallen').map((s) => s.crewIndex), fell, 'the same men are down');
-  assert.ok(back.soldiers.every((s) => !s.garrisonFall), 'none of them is seen to fall');
-  back.soldiers.forEach((s, i) => assert.ok(Math.abs(s.baseLy - levels[i]) < 1e-3, `${s.role} lies where he lay: ${s.baseLy} ${levels[i]}`));
-
-  const homes = garrisoned('curtain_wall_and_gate').soldiers.map((s) => [s.baseLy, [...s.routeZ]]);
-  createPortDamageStore().rebuilt(back.port, back.instance);
-  stepFortGarrison(back.garrison, 0.016);
-  back.soldiers.forEach((s, i) => {
-    assert.notEqual(s.casualtyState, 'fallen', 'back on his feet');
-    assert.equal(s.baseLy, homes[i][0], 'at his post');
-    assert.deepEqual(s.routeZ, homes[i][1], 'on his old beat');
-  });
-});
-
 test('what stays of a building faces up, so it reads as ground once the walls have gone', () => {
-  const { fracture, vertices } = prepared('curtain_wall_and_gate');
+  const { fracture, vertices } = prepared(CURTAIN);
   let flat = 0, facingDown = 0;
   for (let v = 0; v < fracture.vertexShards.length; v++) {
     if (fracture.vertexShards[v]) continue;
@@ -627,9 +530,9 @@ test('what stays of a building faces up, so it reads as ground once the walls ha
 });
 
 test('a broad floor comes down in slabs, not as one sheet', () => {
-  const { fracture } = prepared('curtain_wall_and_gate');
-  const walk = fracture.shards.filter((s) => s?.partKey === 'terreplein_adarve_walk');
-  assert.ok(walk.length > 2, `${walk.length} pieces of wall walk`);
+  const { fracture } = prepared(BASTION);
+  const walk = fracture.shards.filter((s) => s?.floorSlab);
+  assert.ok(walk.length > 2, `${walk.length} slabs of terreplein`);
   for (const shard of walk) assert.ok(Math.max(shard.localMax[0] - shard.localMin[0], shard.localMax[2] - shard.localMin[2]) < 14, `one is ${shard.localMax[2] - shard.localMin[2]} m long`);
 });
 
@@ -707,16 +610,16 @@ test('a breach in a fort goes on widening after the ball reaches the earth behin
   assert.deepEqual([...damage.fracture.broken], [...state.broken]);
 });
 
-test('a ball meets a triangular fort\'s walls, not the air in the corners of its box', () => {
-  const { fracture, instance } = prepared('english_triangular_palisade_fort'), port = { instances: [instance] };
+test('a ball meets a bastion\'s faces, not the air in the corners of its box', () => {
+  const { fracture, instance } = prepared(BASTION), port = { instances: [instance] };
   createBuildingDamageState(instance);
   buildingFractureStateOf(instance.damageState, fracture);
-  // Across the corner of the box, where there is no wall.
-  const x = instance.width * 0.42, z = instance.length * 0.42;
+  // Across the corner of the box beside its salient (-x), where there is no wall.
+  const x = -instance.width * 0.42, z = instance.length * 0.42;
   assert.equal(sweepBuildingSegment([x, 3, z + 40], [x, 3, z - 4], 0.07, port), null);
   // And when it does strike, it strikes something: there is a piece where it lands.
   const hit = sweepBuildingSegment([0, 3, 200], [0, 3, -200], 0.07, port);
-  assert.ok(hit, 'the fort has walls');
+  assert.ok(hit, 'the bastion has walls');
   const l = hit.localPosition;
   const gap = Math.min(...fracture.strikable.map((s) => {
     const { localMin: lo, localMax: hi } = fracture.shards[s];
@@ -727,8 +630,9 @@ test('a ball meets a triangular fort\'s walls, not the air in the corners of its
 
 test('a turned building reaches as far as a square one, and a ball meets only what is drawn', () => {
   // Every real port turns its buildings. Boxes laid square to the world used to balloon when turned.
-  for (const prefabId of ['stone_quay_seawall', BATTERY, CORNER_BASTION]) {
-    const square = prepared(prefabId).fracture.reach, { fracture, instance } = prepared(prefabId, { yaw: 2.1, x: 300, z: -150 });
+  for (const type of [QUAY, BATTERY, CORNER_BASTION]) {
+    const prefabId = cityTypeTarget(type).prefabId;
+    const square = prepared(type).fracture.reach, { fracture, instance } = prepared(type, { yaw: 2.1, x: 300, z: -150 });
     for (let c = 0; c < 3; c++) {
       assert.ok(Math.abs(fracture.reach.min[c] - square.min[c]) < 0.5 && Math.abs(fracture.reach.max[c] - square.max[c]) < 0.5,
         `${prefabId}, axis ${c}: ${fracture.reach.min[c].toFixed(1)}..${fracture.reach.max[c].toFixed(1)} turned, ${square.min[c].toFixed(1)}..${square.max[c].toFixed(1)} square`);
@@ -743,7 +647,7 @@ test('a turned building reaches as far as a square one, and a ball meets only wh
 });
 
 test('a direct cannonball hit hurls blocks outward on high ballistic arcs while undermined courses drop into the breach', () => {
-  const { fracture, parts } = prepared('curtain_wall_and_gate');
+  const { fracture, parts } = prepared(CURTAIN);
   const directDamage = {};
   const w = parts.dimensions.width / 2;
   // Strike one face directly with a heavy shot, then trigger a wide breach so upper courses collapse by gravity.
@@ -795,7 +699,7 @@ test('a direct cannonball hit hurls blocks outward on high ballistic arcs while 
   assert.ok(maxDirectVertSpeed > maxDropVertSpeed * 2.5, `direct hit lofts debris much higher than gravity collapse (${maxDirectVertSpeed.toFixed(2)} vs ${maxDropVertSpeed.toFixed(2)} m/s)`);
 
   // A single 24-pdr hit does not ruin a building at once.
-  const singleHitHouse = { id: 'house', prefabId: 'casa_de_contratacion', x: 0, z: 0, y: 0, baseY: 0, yaw: 0, width: 30, depth: 20, height: 12, damageState: null };
+  const singleHitHouse = { id: 'house', prefabId: 'city_customhouse', x: 0, z: 0, y: 0, baseY: 0, yaw: 0, width: 30, depth: 20, height: 12, damageState: null };
   applyBuildingImpactDamage(singleHitHouse, { ammo: 'round', localPosition: [0, 3, -10], position: [0, 3, -10], surfacePosition: [0, 3, -10], normal: [0, 0, -1], velocity: [0, 0, 470], mass: 10.89, energy: 1202800 });
   assert.equal(singleHitHouse.damageState.pendingBakes.length, 1, 'a single 24-pdr shot emits only the localized impact crater bake');
   assert.notEqual(singleHitHouse.damageState.state, 'ruined', 'a single 24-pdr shot does not ruin an entire building');

@@ -27,10 +27,14 @@ const rounds=page=>page.evaluate(()=>window.oceanFreeCannon.state.guns[0].rounds
 
 test('in the free camera, holding F shells what the sight is on',async()=>{
   let {page,errors}=await open({});
-  await page.waitForFunction(()=>window.oceanProps?.port?.instances?.length>0,null,{timeout:60000,polling:200});
-  const hall=await page.evaluate(()=>{
-    const all=window.oceanProps.port.instances,best=[...all].sort((a,b)=>(b.height??0)*(b.width??0)-(a.height??0)*(a.width??0))[0];
-    return {x:best.x,z:best.z,y:best.baseY??best.y??0,height:best.height??10,id:best.id};
+  // The city's biggest building ashore, which joins the port's own at the first ball that meets it (js/city-targets.js).
+  await page.waitForFunction(()=>window.oceanProps?.port&&window.oceanLand?.pack?.city?.typedCount>0,null,{timeout:60000,polling:200});
+  const hall=await page.evaluate(async()=>{
+    const {CITY_BUILDING_TYPES,CITY_TYPED_FLOATS:F,CITY_TYPES_WATERSIDE}=await import('/js/old-world-buildings.js');
+    const {typed,typedTypes,typedCount}=window.oceanLand.pack.city,area=i=>(CITY_BUILDING_TYPES[typedTypes[i]].height??0)*(CITY_BUILDING_TYPES[typedTypes[i]].width??0);
+    let best=-1;
+    for(let i=0;i<typedCount;i++)if(!CITY_TYPES_WATERSIDE.has(typedTypes[i])&&(best<0||area(i)>area(best)))best=i;
+    return {x:typed[best*F],z:typed[best*F+2],y:typed[best*F+1],height:CITY_BUILDING_TYPES[typedTypes[best]].height,id:`city_${best}`};
   });
   await page.close();
   const from={x:hall.x+60,z:hall.z+60,y:hall.y+hall.height*.5+.8};

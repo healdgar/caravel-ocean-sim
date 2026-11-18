@@ -4,14 +4,14 @@
 // the Cairn language gained for them; and the mix of heights a sixteenth-century Iberian port stood at.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildPortPrefabGeometry } from '../js/coastal-world.js';
+import { buildCityTypeGeometry } from '../js/coastal-world.js';
 import { CITY_BAY_M, CITY_BUILDING_TYPES, CITY_HOUSE_STOREYS, CITY_HOUSE_TYPES, CITY_STOREY_M, CITY_TYPE, cityFamilyOf, cityHousePick, cityHouseType, cityTypeTarget, compileCityBuildingTypes } from '../js/old-world-buildings.js';
 import { oldWorldCountry } from '../js/old-world.js';
 
 const houses = CITY_BUILDING_TYPES.slice(0, CITY_HOUSE_TYPES);
 const storeysOf = (spec) => Math.round(spec.height / CITY_STOREY_M);
 const named = (spec, name) => spec.primitives.filter((p) => typeof p.name === 'string' && p.name.startsWith(name));
-const build = (spec) => buildPortPrefabGeometry({ singleBuildingPrefab: true, instances: [{ prefabId: 'test', id: 'test', x: 0, y: 0, z: 0, yaw: 0, width: spec.width, length: spec.length, depth: spec.length, height: spec.height, foundationDepth: 1, materialKind: 12, roofPitch: 2, cairnSpec: spec }] }, null);
+const build = (spec) => buildCityTypeGeometry({ width: spec.width, length: spec.length, height: spec.height, foundationDepth: 1, materialKind: 12, roofPitch: 2, cairnSpec: spec });
 
 test('every height of house is built in several manners, each a type of its own, and none asked is the plain house', () => {
   assert.ok(CITY_HOUSE_TYPES >= 2 * CITY_HOUSE_STOREYS + 16, `house types: ${CITY_HOUSE_TYPES}`);
@@ -76,7 +76,7 @@ test('each manner is built by its rule: timber only above stone, jetties steppin
 });
 
 test('every house compiles to a mesh within its budget, stands on its plot, and is the same house made again', async () => {
-  const types = compileCityBuildingTypes(buildPortPrefabGeometry);
+  const types = compileCityBuildingTypes(buildCityTypeGeometry);
   for (let id = 0; id < CITY_HOUSE_TYPES; id++) {
     const type = types[id], spec = CITY_BUILDING_TYPES[id], { min, max } = type.source, kinds = new Set();
     for (let k = 6; k < type.source.vertices.length; k += 8) kinds.add(Math.floor(type.source.vertices[k] + 0.01));

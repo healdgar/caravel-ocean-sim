@@ -9,7 +9,7 @@ const BORE={axis:1.07,muzzle:1.74,breech:1.26,calibre:12};
 const gun=(x,z,nz,piece)=>({x,y:7,z,nx:0,nz,wall:0,on:0,piece});
 const FORT={kind:'fort',form:'bastioned',name:'Fort',x:0,y:2,z:0,turn:0,w:40,d:40,outline:[[-20,-20],[20,-20],[20,20],[-20,20]],
   guns:[gun(-10,-19,-1,1),gun(0,-19,-1,2),gun(10,-19,-1,3),gun(-6,19,1,4),gun(6,19,1,5)],salients:[],gate:null,types:[0,6],bore:BORE};
-const CHURCH={id:'church',prefabId:'casa_de_contratacion',x:0,z:-60,y:2,baseY:2,yaw:0,width:30,depth:20,height:16,damageState:null,magazine:null};
+const CHURCH={id:'church',prefabId:'city_church',x:0,z:-60,y:2,baseY:2,yaw:0,width:30,depth:20,height:16,damageState:null,magazine:null};
 const SHIP={id:'ship',x:0,z:-400,heave:0,length:50,beam:14,heading:0,roll:0,pitch:0};
 
 function volley(instances,ship=SHIP){

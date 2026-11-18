@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Automated gate test ensuring every 3D model asset (.glb on disk, PROP_MODELS, PLAYABLE_SHIP_MODELS,
-// PORT_PREFABS, crew skeletons, and forest tree species) is wired into a destructible cannonfire pipeline.
+// the city's building types, crew skeletons, and forest tree species) is wired into a destructible cannonfire pipeline.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -26,7 +26,8 @@ import {
 import { SHIP_MODELS } from '../js/ship-models.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
 import { applyFractureEvents } from '../js/ship-fracture.js';
-import { PORT_PREFABS, getBuildingParts } from '../js/coastal-world.js';
+import { buildCityTypeGeometry } from '../js/coastal-world.js';
+import { CITY_FAMILIES, CITY_TYPES_SLIGHT, cityTypeTarget, compileCityBuildingType } from '../js/old-world-buildings.js';
 import { applyBuildingFractureEvents, prepareBuildingFracture } from '../js/building-fracture.js';
 import { loadCrewGLB, readGLB } from '../js/gltf.js';
 import { CREW_SLOT } from '../js/crew-skeleton.js';
@@ -114,16 +115,9 @@ test('every .glb asset on disk and in build.mjs is registered in a destructible 
       );
       continue;
     }
-    if (glb.startsWith('assets/ports/1550/')) {
-      const prefabId = path.basename(glb, '.glb');
-      assert.ok(
-        prefabId in PORT_PREFABS,
-        `Port building GLB ${glb} must correspond to a destructible prefab in PORT_PREFABS (js/coastal-world.js)`,
-      );
-      continue;
-    }
     if (KNOWN_WILDLIFE_GLBS.has(glb)) continue;
 
+    // A port's buildings are city types drawn from their builders (js/old-world-buildings.js), never imported.
     assert.fail(
       `Unclassified 3D model ${glb}: every imported .glb must be wired into PROP_MODELS, crew-wounds, or another destructible pipeline!`,
     );
@@ -240,23 +234,25 @@ test('every playable ship model in SHIP_MODELS fractures into rigid shards under
   }
 });
 
-test('every coastal building and fort prefab in PORT_PREFABS fractures into flying rigid blocks under cannonfire', () => {
-  const prefabIds = Object.keys(PORT_PREFABS);
-  assert.ok(prefabIds.length >= 15);
-  for (const prefabId of prefabIds) {
-    const parts = getBuildingParts(prefabId);
-    const instance = { prefabId, x: 0, y: 0, z: 0, baseY: 0, yaw: 0, ...parts.dimensions };
+// Every type the guns are laid on (all but what is too slight to be a target: CITY_TYPES_SLIGHT), stood as
+// js/city-targets.js stands a building shot comes near.
+test('every coastal building and fort type of the city fractures into flying rigid blocks under cannonfire', () => {
+  const types = CITY_FAMILIES.map((family) => family.canonical).filter((type) => !CITY_TYPES_SLIGHT.has(type));
+  assert.ok(types.length >= 15);
+  for (const type of types) {
+    const T = compileCityBuildingType(type, buildCityTypeGeometry), source = T.source, prefabId = cityTypeTarget(type).prefabId;
+    const instance = { prefabId, x: 0, y: 0, z: 0, baseY: 0, yaw: 0, width: T.width, length: T.length, depth: T.length, height: T.height };
     const { fracture } = prepareBuildingFracture({
-      vertices: new Float32Array(parts.vertices),
-      indices: parts.indices,
-      catalog: parts.partAssembly,
+      vertices: new Float32Array(source.vertices),
+      indices: source.indices,
+      catalog: source.partAssembly,
       instanceIndex: 0,
       instance,
       materialClass: classifyBuildingMaterial(prefabId),
       groundAt: () => 0,
     });
-    assert.ok(fracture.shardCount > 1, `${prefabId} has ${fracture.shardCount} shards`);
-    assert.ok(fracture.strikable.length > 0, `${prefabId} has strikable shards`);
+    assert.ok(fracture.shardCount > 1, `${prefabId} (${type}) has ${fracture.shardCount} shards`);
+    assert.ok(fracture.strikable.length > 0, `${prefabId} (${type}) has strikable shards`);
 
     const target = fracture.shards[fracture.strikable.find((s) => !fracture.shards[s].earth) ?? fracture.strikable[0]];
     const [tx, ty, tz] = target.centroid;
@@ -277,8 +273,8 @@ test('every coastal building and fort prefab in PORT_PREFABS fractures into flyi
       }],
       0,
     );
-    assert.ok(released >= 1, `${prefabId}: cannonball impact releases ${released} building shards`);
-    assert.ok(damage.fracture.flying.size >= 1, `${prefabId}: released building shards fly through the air`);
+    assert.ok(released >= 1, `${prefabId} (${type}): cannonball impact releases ${released} building shards`);
+    assert.ok(damage.fracture.flying.size >= 1, `${prefabId} (${type}): released building shards fly through the air`);
   }
 });
 

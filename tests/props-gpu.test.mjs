@@ -315,8 +315,13 @@ test('a ruined pier takes its cleats with it, a broken one too',{timeout:300000}
   await page.evaluate(()=>propFrames(4));
   const broken=await held(page,hit.index);
   assert.equal(broken.flags,CONTINUUM_BROKEN,'broken, it is still drawn on its pier');
-  // The game's own damage state is what the renderer watches.
-  await page.evaluate(()=>{const {port,placed}=oceanProps;for(const owner of new Set(placed.filter(p=>p.owner>=0).map(p=>p.owner)))(port.instances[owner].damageState??={}).state='ruined';});
+  // The game's own damage state is what the renderer watches. A mole is a piece of the city, the port's own once it is
+  // struck (js/city-targets.js): each is stood as the port's, then ruined.
+  await page.evaluate(()=>{
+    const {port,placed}=oceanProps,owners=[...new Set(placed.filter(p=>p.owner>=0).map(p=>p.owner))];
+    oceanFleet.terrain.cityTargets.revive(owners.map(owner=>`city_${owner}`));
+    for(const owner of owners)(port.instances.find(i=>i.city?.index===owner).damageState??={}).state='ruined';
+  });
   // Owners are asked every 30 frames, so wait in frames: a loaded machine may not draw 30 in a second.
   await page.evaluate(()=>propFrames(45));
   const cleats=await page.evaluate(()=>oceanProps.placed.map((p,i)=>p.model===0&&p.owner>=0?i:-1).filter(i=>i>=0));

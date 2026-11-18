@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {generateProceduralCoastalPack} from '../js/coastal-world.js';
 import {terrainSurfaceSample} from '../js/terrain-model.js';
+import {BAKED_BOARDS} from '../js/board-model.js';
+import {registerBakedBoard} from '../js/old-world.js';
+import {CITY_TYPE} from '../js/old-world-buildings.js';
 import {
   PROP_MODELS,
   applyJettyImpactDamage,
@@ -27,14 +30,27 @@ import {
   sweepBuildingSegment,
 } from '../js/gunnery-control.js';
 
-const GRID={size:513,biomeSize:128,albedoSize:256};
+// A record of the waterfront as js/board-waterfront.js lays one: a mole or a shed of the city's types, piece `piece`.
+const pierRecord=(piece,x,z,yaw,length,width)=>({kind:'pier',type:CITY_TYPE.PIER,piece,x,y:0,z,yaw,width,length,deck:2.15});
 
-// A small port: one pier running out from a straight beach, with water to the west.
+// A small port: one mole running out from a straight beach, with water to the west, and a careening shed inland.
 function bay(extra={}){
   const groundAt=(x)=>x*.05;
-  const pier={prefabId:'timber_mole_pier',x:-20,z:0,y:.4,yaw:Math.PI/2,length:68,width:7.5,height:2.8};
-  const hall={prefabId:'casa_de_contratacion',x:60,z:0,y:3,yaw:0,length:30,width:20,height:9};
-  return {port:{center:{x:40,z:0},instances:[pier,hall],indigenousSettlement:{hasIndigenousSettlement:false},...extra},groundAt,pier};
+  const pier=pierRecord(0,-20,0,Math.PI/2,68,7.5);
+  const shed={kind:'careening',type:CITY_TYPE.CAREENING_SHED,piece:1,x:60,y:0,z:0,yaw:0,width:20,length:30,deck:null};
+  return {port:{center:{x:40,z:0},instances:[],waterfront:[pier,shed],indigenousSettlement:{hasIndigenousSettlement:false},...extra},groundAt,pier};
+}
+function upsampleSurvey(survey,n){
+  const sN=Math.round(Math.sqrt(survey.length)),out=new Float32Array(n*n);
+  for(let j=0;j<n;j++){
+    const sy=j/(n-1)*(sN-1),y0=Math.min(sN-2,Math.floor(sy)),ty=sy-y0;
+    for(let i=0;i<n;i++){
+      const sx=i/(n-1)*(sN-1),x0=Math.min(sN-2,Math.floor(sx)),tx=sx-x0;
+      const a=survey[y0*sN+x0],b=survey[y0*sN+x0+1],c=survey[(y0+1)*sN+x0],d=survey[(y0+1)*sN+x0+1];
+      out[j*n+i]=(a*(1-tx)+b*tx)*(1-ty)+(c*(1-tx)+d*tx)*ty;
+    }
+  }
+  return out;
 }
 
 test('every model reads as real metres, standing on the ground, centred, with its own texture',()=>{
@@ -57,8 +73,8 @@ test('cleats line both edges of a pier at deck height, and stay on it',()=>{
   const {port,groundAt,pier}=bay(),cleats=layPortProps(port,groundAt).filter(p=>p.model===0),c=Math.cos(pier.yaw),s=Math.sin(pier.yaw);
   assert.ok(cleats.length>=12,`${cleats.length} cleats`);
   for(const cleat of cleats){
-    assert.equal(cleat.y,pier.y+pier.height);
-    assert.equal(cleat.owner,0);
+    assert.equal(cleat.y,pier.y+pier.deck);
+    assert.equal(cleat.owner,pier.piece,'it goes with its mole');
     const dx=cleat.x-pier.x,dz=cleat.z-pier.z,lx=dx*c-dz*s,lz=dx*s+dz*c;
     assert.ok(Math.abs(lx)<pier.width/2&&Math.abs(lx)>pier.width/2-1,`across the deck ${lx}`);
     assert.ok(Math.abs(lz)<pier.length/2,`along it ${lz}`);
@@ -66,14 +82,12 @@ test('cleats line both edges of a pier at deck height, and stay on it',()=>{
   assert.ok(cleats.some(p=>(p.x-pier.x)*c-(p.z-pier.z)*s>0)&&cleats.some(p=>(p.x-pier.x)*c-(p.z-pier.z)*s<0));
 });
 
-test('a quay has cleats only on its sea side',()=>{
-  const quay={prefabId:'stone_quay_seawall',x:0,z:0,y:1,yaw:0,length:40,width:6,height:2};
-  const cleats=layPortProps({center:{x:40,z:0},instances:[quay]},x=>x*.05).filter(p=>p.model===0);
-  assert.ok(cleats.length>0);
-  assert.ok(cleats.every(p=>p.x<0),'the sea is to the west');
+test('a stone quay is laid no cleats: its bollards and cleats are its own type\'s, built with it',()=>{
+  const quay={kind:'quay',type:CITY_TYPE.QUAY,piece:0,x:0,y:0,z:0,yaw:Math.PI/2,width:40,length:12,deck:2.15};
+  assert.equal(layPortProps({center:{x:40,z:0},waterfront:[quay]},x=>x*.05).filter(p=>p.model===0).length,0);
 });
 
-test('a jetty stands on the shore, root on the beach and head in the water, clear of buildings',()=>{
+test('a jetty stands on the shore, root on the beach and head in the water, clear of the waterfront',()=>{
   const {port,groundAt}=bay(),jetties=layPortProps(port,groundAt).filter(p=>p.model>0);
   assert.ok(jetties.length>0&&jetties.length<=2,`${jetties.length} jetties`);
   for(const j of jetties){
@@ -82,7 +96,7 @@ test('a jetty stands on the shore, root on the beach and head in the water, clea
     assert.ok(groundAt(j.x+seaX*5)<0,'its head is in water');
     assert.equal(j.y,null,'its height comes from the model');
     assert.equal(j.owner,-1);
-    for(const inst of port.instances)assert.ok(Math.hypot(inst.x-j.x,inst.z-j.z)>Math.hypot(inst.length,inst.width)/2,inst.prefabId);
+    for(const w of port.waterfront)assert.ok(Math.hypot(w.x-j.x,w.z-j.z)>Math.hypot(w.length,w.width)/2,w.kind);
   }
   if(jetties.length===2)assert.notEqual(jetties[0].model,jetties[1].model);
 });
@@ -91,16 +105,23 @@ test('a sovereign Indigenous town gets no plank jetty, and a place with no port 
   const {port,groundAt}=bay({indigenousSettlement:{hasIndigenousSettlement:true,isSovereignPolity:true}});
   assert.equal(layPortProps(port,groundAt).filter(p=>p.model>0).length,0);
   assert.deepEqual(layPortProps(null,groundAt),[]);
-  assert.deepEqual(layPortProps({center:{x:0,z:0},instances:[]},groundAt),[]);
+  assert.deepEqual(layPortProps({center:{x:0,z:0},waterfront:[]},groundAt),[]);
 });
 
-test('the same port lays the same props, and a real port gets them',()=>{
+test('the same port lays the same props, and a real port gets them on its moles',{timeout:300000},()=>{
   const {port,groundAt}=bay();
   assert.deepEqual(layPortProps(port,groundAt),layPortProps(port,groundAt));
-  const pack=generateProceduralCoastalPack('lisbon',GRID);
+  // Lisbon laid on its board, whose waterfront (js/board-waterfront.js) its cleats stand on.
+  const baked=JSON.parse(readFileSync(new URL('../'+BAKED_BOARDS['lisbon:1550'],import.meta.url),'utf8'));
+  const region={...baked.region,size:257,biomeSize:64,albedoSize:64,vegetationCandidates:100,year:1550};
+  registerBakedBoard(baked);
+  const pack=generateProceduralCoastalPack(region,{},upsampleSurvey(baked.survey,region.size));
   const ground=(x,z)=>terrainSurfaceSample(pack.heights,x,z,pack.region);
+  assert.ok(pack.port.waterfront.length>0,'Lisbon lays its waterfront');
   assert.deepEqual(pack.port.props,layPortProps(pack.port,ground));
-  assert.ok(pack.port.props.some(p=>p.model===0),'Lisbon has cleats on its piers');
+  const moles=pack.port.waterfront.filter(w=>w.kind==='pier');
+  assert.equal(pack.port.props.some(p=>p.model===0),moles.length>0,'cleats stand where moles do');
+  for(const p of pack.port.props.filter(p=>p.model===0))assert.ok(moles.some(w=>w.piece===p.owner),'each cleat goes with its mole');
 });
 
 test('a cannonball strikes a rustic jetty\'s drawn timbers, breaks off flying shards that fall under gravity, and lets follow-up shots pass through the gap',()=>{
@@ -222,8 +243,8 @@ test('laying props leaves the port as it was given',()=>{
 
 test('pier cleats stand midway between bents, clear of the bollard posts, the crane and the boarding brow',()=>{
   for(const length of [38,52,68,74]){
-    const pier={prefabId:'timber_mole_pier',x:0,z:0,y:.4,yaw:0,length,width:8,height:2};
-    const cleats=layPortProps({center:{x:40,z:0},instances:[pier]},()=>-2).filter(p=>p.model===0),bents=pierBentStations(length);
+    const pier=pierRecord(0,0,0,0,length,8);
+    const cleats=layPortProps({center:{x:40,z:0},waterfront:[pier]},()=>-2).filter(p=>p.model===0),bents=pierBentStations(length);
     assert.ok(cleats.length>=4,`${length} m pier: ${cleats.length} cleats`);
     assert.ok(Math.abs(bents[0]+length/2-1.2)<1e-9&&Math.abs(bents.at(-1)-length/2+1.2)<1e-9,'bents run end to end');
     const [browFrom,browTo]=pierBrowStations(length);
@@ -240,8 +261,8 @@ test('pier cleats stand midway between bents, clear of the bollard posts, the cr
 // A jetty across a shoreline: beach where x < 0, water beyond. Its length runs out along x.
 const SHORE_GROUND=(x)=>x<0?0.5:-1.5;
 function shorePort(){
-  const pier={prefabId:'timber_mole_pier',x:40,z:60,y:.4,yaw:0,length:68,width:7.5,height:2.8};
-  return {regionId:'shore-port',center:{x:0,z:0},instances:[pier],groundAt:SHORE_GROUND,props:[
+  const pier=pierRecord(0,40,60,0,68,7.5);
+  return {regionId:'shore-port',center:{x:0,z:0},instances:[],waterfront:[pier],groundAt:SHORE_GROUND,props:[
     {model:1,x:0,y:null,z:0,yaw:Math.PI/2,owner:-1},
     {model:0,x:40-3.2,y:3.2,z:60,yaw:0,owner:0},
   ]};

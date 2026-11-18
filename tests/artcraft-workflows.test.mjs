@@ -15,7 +15,7 @@ import { VOICE_ASSETS } from '../js/voice-assets.js';
 import { GUNNERY_AUDIO_ASSETS } from '../js/gunnery-audio-assets.js';
 import { WORLD_AUDIO_ASSETS } from '../js/world-audio-assets.js';
 import { VECTORCRAFT_FLEUR_DE_LIS_PATH } from '../js/voyage/chart-drawer.js';
-import { CADCRAFT_TRACE_ITALIENNE_RATIOS, squareFortPlan } from '../js/fort-plan.js';
+import { CADCRAFT_TRACE_ITALIENNE_RATIOS } from '../js/fort-plan.js';
 
 // Each authoring tool leaves a record beside its source file. These tests hold the game's own numbers to those
 // records: a mass, a loudness, a wall, a colour. A record that only exists proves nothing, so none is tested for
@@ -108,42 +108,19 @@ test('Workflow 6 (VectorCraft + CADCraft): 1550 compass rose SVG & trace italien
   const svgContent = fs.readFileSync(path.resolve('assets/artcraft/compass-rose-1550.svg'), 'utf8');
   assert.ok(svgContent.includes(VECTORCRAFT_FLEUR_DE_LIS_PATH), 'the chart draws the fleur-de-lis that was drawn for it');
 
-  // The CAD drawing is of a fort fifty metres square. The plan the game lays for that size is the same fort.
+  // The CAD drawing is of a fort fifty metres square, drawn to the ratios the game keeps for a trace.
   const drawing = readJson('assets/artcraft/fort-trace-italienne-inspect.json');
   const drawn = (layer, type) => drawing.entities.filter(e => e.layer === layer && e.type === type).map(e => e.geometry);
-  const plan = squareFortPlan(50, 50);
   const near = (a, b) => Math.abs(a - b) < 1e-6;
-  const samePoint = (p, [x, z]) => near(p.x, x) && near(p.y, z);
-  const circles = drawn('BASTION', 'Circle');
-  assert.equal(circles.length, plan.bastions.length);
-  for (const bastion of plan.bastions) {
-    const circle = circles.find(c => samePoint(c.center, bastion));
-    assert.ok(circle, `the drawing has a bastion at ${bastion}`);
-    assert.ok(near(circle.radius, plan.bastionRadius), `of radius ${plan.bastionRadius}`);
-  }
-  const walls = drawn('CURTAIN', 'Line');
-  // Every span of wall, the gate curtain broken where the gate stands.
-  for (const [from, to] of plan.wallSpans) {
-    assert.ok(walls.some(l => (samePoint(l.a, from) && samePoint(l.b, to)) || (samePoint(l.a, to) && samePoint(l.b, from))), `the drawing has the wall ${from} to ${to}`);
-  }
-  for (const post of drawn('GATE', 'Line')) assert.ok(near(Math.abs(post.a.x), plan.gateHalfWidth), 'the gate is as wide as the gap left for it');
-  const apron = drawn('GATE', 'Polyline')[0].vertices.map(v => v.p);
-  assert.equal(apron.length, plan.gateApron.length);
-  for (const corner of plan.gateApron) assert.ok(apron.some(p => samePoint(p, corner)), `the drawing has the gate apron corner ${corner}`);
   const corner = 25 * CADCRAFT_TRACE_ITALIENNE_RATIOS.cornerInsetRatio;
-  assert.ok(plan.bastions.every(([x, z]) => near(Math.abs(x), corner) && near(Math.abs(z), corner)), 'bastions stand at the inset corners');
-
-  // A compact fort keeps its cottages inside the curtain wall.
-  for (const [cx, cz] of plan.cottageSlots) {
-    assert.ok(
-      Math.abs(cx) <= corner - CADCRAFT_TRACE_ITALIENNE_RATIOS.wallClearanceM,
-      `Cottage x=${cx} must sit inside curtain wall ${corner}`
-    );
-    assert.ok(
-      Math.abs(cz) <= corner - CADCRAFT_TRACE_ITALIENNE_RATIOS.wallClearanceM,
-      `Cottage z=${cz} must sit inside curtain wall ${corner}`
-    );
+  const radius = Math.min(CADCRAFT_TRACE_ITALIENNE_RATIOS.maxBastionRadiusM, 25 * CADCRAFT_TRACE_ITALIENNE_RATIOS.bastionRadiusRatio);
+  const circles = drawn('BASTION', 'Circle');
+  assert.equal(circles.length, 4, 'a bastion at each corner');
+  for (const c of circles) {
+    assert.ok(near(Math.abs(c.center.x), corner) && near(Math.abs(c.center.y), corner), 'bastions stand at the inset corners');
+    assert.ok(near(c.radius, radius), `of radius ${radius}`);
   }
+  for (const post of drawn('GATE', 'Line')) assert.ok(near(Math.abs(post.a.x), CADCRAFT_TRACE_ITALIENNE_RATIOS.gateHalfWidthM), 'the gate is as wide as the gap left for it');
 });
 
 test('Workflow 7 (FigCraft): the page declares each design token with the value the design gives it', () => {

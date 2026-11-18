@@ -42,7 +42,9 @@ test('hull and masts stand on the GPU where the audit measures them, and a live 
     assertSparsStandWhereDrawn(id, live.ships[id]);
   }
   const [port] = live.world;
-  assert.ok(port.instances > 0, 'a port with buildings');
+  // A port is founded, but no building of its city is its own till a shot meets it (js/city-targets.js, struck in
+  // tests/city-targets-gpu.test.mjs); whatever is must be known to the shot by its mesh.
+  assert.ok(port.ports > 0, 'a port is founded');
   assert.equal(port.meshed, port.instances, 'every building is known by its mesh');
   assert.equal(port.traced, port.instances, 'every building traces its mesh');
   // The forest's own roots are what a ball meets. Streaming may have added more since its grid was last built.

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {buildPortPrefabGeometry,generateProceduralCoastalPack} from '../js/coastal-world.js';
+import {buildCityTypeGeometry,generateProceduralCoastalPack} from '../js/coastal-world.js';
 import {OLD_WORLD_CITIES,inIberia,oldWorldPeople,oldWorldCityNear,oldWorldCountry} from '../js/old-world.js';
 import {CITY_BLOCK_FLOATS,CITY_GROUND,CITY_ROOF,CITY_TREES,CITY_WALL,cityFootprintsOverlap} from '../js/old-world-city.js';
 import {streetEdgeAt} from '../js/town-streets.js';
@@ -69,7 +69,7 @@ test('every building type is written in Cairn and compiles to a mesh of the size
     assert.deepEqual(JSON.parse(JSON.stringify(spec)),spec,spec.name);
     assert.ok(spec.primitives.some(p=>p.partGroup==='foundation_plinth'),`${spec.name} stands on its own footing`);
   }
-  const types=compileCityBuildingTypes(buildPortPrefabGeometry);
+  const types=compileCityBuildingTypes(buildCityTypeGeometry);
   assert.equal(types.length,CITY_BUILDING_TYPES.length);
   types.forEach((type,id)=>{
     assert.equal(type.vertices.length,type.count*8);assert.equal(type.count%3,0);

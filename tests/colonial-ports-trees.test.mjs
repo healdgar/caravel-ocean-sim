@@ -4,14 +4,11 @@ import fs from 'node:fs';
 
 import {
   generateProceduralCoastalPack,
-  planUngrownFrontierParcels,
-  growFrontierParcel,
   portClearanceEnvelope,
   PLANT_STREET_GAP_M,
   terrainSurfaceSample,
 } from '../js/coastal-world.js';
 import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
-import { cityFamilyOf } from '../js/old-world-buildings.js';
 import { streetEdgeAt } from '../js/town-streets.js';
 import { COLONIAL_TOWNS } from '../js/colonial-towns.js';
 import { BAKED_BOARDS } from '../js/board-model.js';
@@ -62,46 +59,10 @@ test('Deliverable 1: every town Spain and Portugal planted by 1550 is a board fo
   const gridOpts = { size: 65, biomeSize: 32, albedoSize: 32, vegetationCandidates: 900 };
   for (const id of ['santo-domingo', 'havana', 'salvador-da-bahia']) {
     const pack = generateProceduralCoastalPack({ id, year: 1550, ...gridOpts });
-    const prefabIds = pack.port.instances.map((i) => i.prefabId);
-    assert.equal(prefabIds.includes('colonial_town_block'), false, `${id} stamps no colonial_town_block`);
-    assert.equal(prefabIds.includes('curtain_wall_and_gate'), false, `${id} stamps no floating curtain_wall_and_gate`);
+    // Its town, works and waterfront are its board's; the port holds only buildings a shot has struck.
+    assert.deepEqual(pack.port.instances, [], `${id} stamps no building of its own`);
     assert.equal(pack.port.plannedStreets, undefined, `${id} traces no streets of its own`);
   }
-
-  // 3. Biogeographically accurate tropical colonial hinterlands (estancias, ingenios, cattle/horses, conucos; zero windmills/sheep/longhouses)
-  const tropicalHinterlandPack = generateProceduralCoastalPack({
-    id: 'santo-domingo',
-    year: 1580,
-    span: 8192,
-    size: 65,
-    biomeSize: 32,
-    albedoSize: 32,
-    vegetationCandidates: 600,
-  });
-  const parcels = planUngrownFrontierParcels(tropicalHinterlandPack, tropicalHinterlandPack.heights);
-  const mocked = parcels.filter((p) => p.state === 'mocked');
-  assert.ok(mocked.length >= 1, '8192m colonial coast plans hinterland frontier parcels');
-
-  let grownCount = 0;
-  let totalCattle = 0;
-  let totalHorses = 0;
-  for (const parcel of mocked.slice(0, 4)) {
-    if (!growFrontierParcel(tropicalHinterlandPack, parcel, tropicalHinterlandPack.heights)) continue;
-    grownCount++;
-    const kinds = Array.from(parcel.grownCity.typedTypes, (t) => cityFamilyOf(t).key);
-    assert.equal(kinds.includes('WINDMILL'), false, 'Tropical Caribbean hinterland must not place European windmills');
-    assert.equal(kinds.includes('THATCH_LONGHOUSE'), false, 'Tropical Caribbean hinterland must not place European thatch longhouses');
-    if (parcel.grownHerds?.length) {
-      for (let k = 6; k < parcel.grownHerds.length; k += 8) {
-        const sp = parcel.grownHerds[k];
-        assert.notEqual(sp, 0, 'Tropical Caribbean estancia must not graze European sheep flocks (species 0)');
-        if (sp === 1) totalCattle++;
-        if (sp === 3) totalHorses++;
-      }
-    }
-  }
-  assert.ok(grownCount >= 1, 'Grew at least one tropical colonial frontier parcel');
-  assert.ok(totalCattle > 0 && totalHorses > 0, 'Tropical colonial estancias graze Criollo cattle (1) and horses/mules (3)');
 });
 
 test('Deliverable 2: WGSL root grounding plunges horizontal root webs smoothly downward with subRoot=0, pinned collar wind, and strict town/water tree clearance', async () => {

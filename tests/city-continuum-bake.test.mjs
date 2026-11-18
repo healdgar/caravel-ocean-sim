@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { test } from 'node:test';
 import zlib from 'node:zlib';
-import { buildPortPrefabGeometry } from '../js/coastal-world.js';
+import { buildCityTypeGeometry } from '../js/coastal-world.js';
 import { CITY_BUILDING_TYPES, compileCityBuildingTypes } from '../js/old-world-buildings.js';
 import { CONTINUUM_HOPS, CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
 import {
@@ -27,7 +27,7 @@ const field = (type, f) => words[words[H.typesAt] + type * CONTINUUM_TYPE_WORDS 
 const streamsAt = Math.min(words.length, ...CONTINUUM_STREAMS.filter(({ bit }) => words[H.streams] & bit).map(({ name }) => words[H[name]]));
 
 test('every type is baked from its builder as it stands now', () => {
-  const types = compileCityBuildingTypes(buildPortPrefabGeometry);
+  const types = compileCityBuildingTypes(buildCityTypeGeometry);
   assert.equal(types.length, CITY_BUILDING_TYPES.length);
   assert.equal(manifest.types.length, types.length, 'one baked record a type');
   const stale = types.filter((type) => manifest.types[type.id]?.fingerprint !== sha256(continuumSourceBytes(type))).map((type) => type.name);

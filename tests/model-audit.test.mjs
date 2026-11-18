@@ -14,7 +14,7 @@ const lib = await loadAuditModules();
 test('no model has drifted further from its hand-written numbers', { timeout: 300000 }, async (t) => {
   const results = await runAudit({ fast: true });
   assert.equal(results.ships.length, SHIP_IDS.length);
-  assert.equal(results.buildings.length, Object.keys(lib.PORT_PREFABS).length, 'every prefab is audited');
+  assert.equal(results.buildings.length, lib.CITY_FAMILIES.length, 'every city family is audited');
   const fresh = [], worse = [], seen = new Set();
   for (const flag of results.flags) {
     seen.add(flag.key);

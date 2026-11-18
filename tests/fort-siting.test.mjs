@@ -1,24 +1,14 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Forts stand where the harbour needs them. The real coasts here are kept in tests/data/harbours by
-// scripts/harbour-coasts.mjs, so this needs no network. All of these fail on forts set out against a straight shore.
+// Forts stand where the harbour needs them: the record's works against the harbour read from its real coast. The
+// coasts here are kept in tests/data/harbours by scripts/harbour-coasts.mjs, so this needs no network.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-import {HISTORICAL_COLONIAL_PORTS,buildPortPrefabGeometry,generateProceduralCoastalPack,placeCoastalPort,resolveGlobalCoastalRegion,smoothCoastlineAndForeshoreBeaches,synthesizeCoastalTerrain} from '../js/coastal-world.js';
+import {HISTORICAL_COLONIAL_PORTS,generateProceduralCoastalPack,placeCoastalPort,resolveGlobalCoastalRegion,smoothCoastlineAndForeshoreBeaches} from '../js/coastal-world.js';
 import {FORT_RECORDS,fortRecordsFor} from '../js/fort-records.js';
-import {depthInOutline,enclosurePlan,fortLocalToWorld,traceWalls,triangularFortPlan,squareFortPlan} from '../js/fort-plan.js';
-import {buildingGunBears,buildingGunMuzzlePose,classifyBuildingMaterial,createBuildingGunDefinitions,createBuildingGunnery,sweepBuildingSegment} from '../js/gunnery-control.js';
-import {createFortGarrison} from '../js/crew.js';
-import {noteBuildingMeshes,prepareBuildingFracture,applyBuildingFractureEvents} from '../js/building-fracture.js';
-import {createPortDamageStore} from '../js/port-damage.js';
 import {worldOfPosition} from '../js/harbour-defences.js';
-import {readHarbourGeography} from '../js/harbour-geography.js';
-import {applyBuildingImpactDamage} from '../js/gunnery-control.js';
-import {terrainSurfaceSample} from '../js/terrain-model.js';
 
-// The one fort still a prefab of its port: James Fort's palisade. Every other is a work of its board.
-const FORT_PREFABS=new Set(['english_triangular_palisade_fort']);
 const fixtures=new URL('./data/harbours/',import.meta.url);
 function coastOf(id){
   const all=zlib.gunzipSync(fs.readFileSync(new URL(`${id}.bin.gz`,fixtures))),length=all.readUInt32LE(0),header=JSON.parse(all.subarray(4,4+length).toString());
@@ -39,28 +29,17 @@ function portOn(id,year){
   placed.set(key,value);
   return value;
 }
-const fortsOf=(port)=>port.instances.filter(i=>FORT_PREFABS.has(i.prefabId));
-const named=(port,piece)=>{
-  const fort=port.instances.find(i=>i.label.includes(piece));
-  assert.ok(fort,`no ${piece} among ${fortsOf(port).map(f=>f.label).join(', ')}`);
-  return fort;
+// Where the record stands a work on this coast, in its region's frame (the board's model sets each there).
+const recorded=(id,year,region,piece)=>{
+  const fort=fortRecordsFor(id,year).forts.find(f=>f.name.includes(piece));
+  assert.ok(fort,`no ${piece} among ${fortRecordsFor(id,year).forts.map(f=>f.name).join(', ')}`);
+  return {...worldOfPosition(region,fort.lat,fort.lon),name:fort.name};
 };
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
-const lookOf=(fort)=>[-Math.sin(fort.yaw),-Math.cos(fort.yaw)];
-const nearestWater=(fort,heights,region)=>{
-  const n=region.size;
-  let best=null;
-  for(let j=0;j<n;j+=2)for(let i=0;i<n;i+=2){
-    if(heights[j*n+i]>=0)continue;
-    const x=region.x+(i/(n-1)-.5)*region.span,z=region.z+(j/(n-1)-.5)*region.span,d=Math.hypot(x-fort.x,z-fort.z);
-    if(!best||d<best.d)best={x,z,d};
-  }
-  return best;
-};
 
-test('El Morro and La Punta face each other across a harbour mouth, as at Havana and San Juan',()=>{
-  const {port}=portOn('havana',1650);
-  const morro=named(port,'Morro'),punta=named(port,'Punta'),mouth=port.harbour.mouth;
+test('El Morro and La Punta face each other across the harbour mouth read from the coast, as at Havana and San Juan',()=>{
+  const {port,region}=portOn('havana',1650);
+  const morro=recorded('havana',1650,region,'Morro'),punta=recorded('havana',1650,region,'Punta'),mouth=port.harbour.mouth;
   assert.equal(port.harbour.kind,'mouth');
   assert.ok(mouth.width<600,`Havana's mouth reads ${mouth.width} m wide`);
   assert.ok(distance(morro,mouth)<700,`Morro ${distance(morro,mouth).toFixed(0)} m from the mouth`);
@@ -68,72 +47,17 @@ test('El Morro and La Punta face each other across a harbour mouth, as at Havana
   // On opposite sides of the way in.
   const across=(f)=>(f.x-mouth.x)*(mouth.right.x-mouth.left.x)+(f.z-mouth.z)*(mouth.right.z-mouth.left.z);
   assert.ok(across(morro)*across(punta)<0,'one on each hand');
-  const sj=portOn('san-juan',1650).port;
-  const elMorro=named(sj,'Morro'),canuelo=named(sj,'Canuelo'),sjMouth=sj.harbour.mouth;
+  const {port:sj,region:sjRegion}=portOn('san-juan',1650);
+  const elMorro=recorded('san-juan',1650,sjRegion,'Morro'),canuelo=recorded('san-juan',1650,sjRegion,'Canuelo'),sjMouth=sj.harbour.mouth;
   assert.ok(distance(elMorro,sjMouth)<1000&&distance(canuelo,sjMouth)<1000,'San Juan closes its mouth from both sides');
-});
-
-test("James Fort's main gate opens to the river, as Strachey says it did, and the way to it stays dry",()=>{
-  const {port,heights,region}=portOn('jamestown',1650);
-  const fort=fortsOf(port).find(f=>f.gateSide===0);
-  assert.ok(fort,'the fort that holds the settlement has its gate in the river curtain');
-  assert.match(fort.label,/James Fort/);
-  const plan=enclosurePlan(fort),water=nearestWater(fort,heights,region),c=Math.cos(fort.yaw),s=Math.sin(fort.yaw);
-  const gx=plan.gate.nx*c+plan.gate.nz*s,gz=-plan.gate.nx*s+plan.gate.nz*c,dx=water.x-fort.x,dz=water.z-fort.z;
-  assert.ok((gx*dx+gz*dz)/(Math.hypot(dx,dz)||1)>.5,'it looks at the water');
-  const out=fortLocalToWorld(fort,plan.gate.x+plan.gate.nx*6,plan.gate.z+plan.gate.nz*6);
-  assert.ok(terrainSurfaceSample(heights,out.x,out.z,region)>0,'and there is bank to stand on outside it');
-});
-
-test('Jamestown, New Amsterdam and Boston: gate and river guns no longer point arbitrary ways',()=>{
-  for(const id of ['jamestown','new-amsterdam','boston']){
-    const {port}=portOn(id,1650),fort=port.instances.find(i=>enclosurePlan(i));
-    const {heights,region}=portOn(id,1650),[lx,lz]=lookOf(fort),water=nearestWater(fort,heights,region),dx=water.x-fort.x,dz=water.z-fort.z,length=Math.hypot(dx,dz);
-    assert.ok((lx*dx+lz*dz)/length>.6,`${id}: the river guns look at the water (cos ${((lx*dx+lz*dz)/length).toFixed(2)})`);
-  }
 });
 
 test('a sovereign Indigenous town keeps its own works, and a palisade town gets no European fort',()=>{
   const pack=generateProceduralCoastalPack({latitude:41.2,longitude:-72,year:1650,size:65,biomeSize:64,albedoSize:64,vegetationCandidates:100,hasColonialPort:false});
-  for(const inst of pack.port.instances){
-    assert.equal(inst.trace,undefined,`${inst.prefabId} was not drawn as a European trace`);
-    if(!inst.indigenous)continue;
-    assert.ok(inst.prefabId!=='english_triangular_palisade_fort');
-  }
+  // A port's works are its board's alone, and none stands a European trace here.
+  assert.deepEqual(pack.port.works??[],[],'no European work is stood');
+  assert.deepEqual(pack.port.instances,[],'and the port stamps no building of its own');
   assert.equal(pack.port.harbour,null,'and no one reads its harbour for forts');
-});
-
-test('an old save whose fort has moved does not crash: the fort stands whole and the record just waits',()=>{
-  const {port}=portOn('havana',1650),fort=named(port,'Morro'),index=port.instances.indexOf(fort);
-  const name=`${fort.prefabId}_${index}`;
-  // As an older game saved a fort: the same building, somewhere else, with no plan key.
-  const moved={p:fort.prefabId,x:fort.x+900,z:fort.z-400,s:'damaged',i:.6,j:900000,h:9,b:1,t:0,g:1,c:0,f:0,a:null,l:'AAAAAAAAAAAAAAAA',d:[0,1,99]};
-  const samePlace={...moved,x:Math.round(fort.x),z:Math.round(fort.z)};
-  for(const record of [moved,samePlace]){
-    const copy={...port,instances:port.instances.map(i=>({...i,damageState:null,magazine:null}))};
-    const store=createPortDamageStore({[copy.regionId]:{[name]:record}},{dateMs:0});
-    assert.equal(store.restore(copy),0,'nothing is applied');
-    assert.equal(copy.instances[index].damageState,null,'it stands whole');
-    assert.doesNotThrow(()=>store.snapshot([copy]));
-  }
-  // A save made with this plan comes back on it.
-  const live={...port,instances:port.instances.map(i=>({...i,damageState:null,magazine:null}))},target=live.instances[index];
-  const first=createPortDamageStore(null,{dateMs:0});
-  applyBuildingImpactDamage(target,{position:[target.x,target.y+2,target.z],surfacePosition:[target.x,target.y+2,target.z],localPosition:[0,2,0],normal:[0,0,-1],velocity:[0,0,300],mass:14.5,ammo:'round',energy:900000});
-  const saved=first.snapshot([live]),record=saved[live.regionId][name];
-  assert.ok(record.k,'the record says which plan');
-  const again={...port,instances:port.instances.map(i=>({...i,damageState:null,magazine:null}))};
-  assert.equal(createPortDamageStore(JSON.parse(JSON.stringify(saved)),{dateMs:0}).restore(again),1,'and matches');
-});
-
-test('enclosure plans keep their houses clear whichever side their gate is on',()=>{
-  for(const plan of [triangularFortPlan(118,90,-1),triangularFortPlan(118,90,1),squareFortPlan(96,86)]){
-    assert.ok(plan.gate,'it has a gate');
-    assert.ok(plan.gate.nz>0,'it looks inland');
-    assert.equal(plan.gateEdges.length,2);
-    assert.ok(plan.wallSpans.length>=plan.curtains.length+1,'its curtain is cut for it');
-    for(const [x,z] of [plan.hallSlot,...plan.cottageSlots])assert.ok(depthInOutline(plan.outline,x,z)>6,`a house at ${x},${z} is inside`);
-  }
 });
 
 test('the record has what the game needs: every fort a place, a job and a date',()=>{

@@ -7,7 +7,6 @@ import {
   COLONIAL_ERAS,
   resolveColonialEra,
   HISTORICAL_1550_PORTS,
-  HISTORICAL_COLONIAL_PORTS,
   findHistoricalColonialPort,
   hasHistorical1550ColonialPort,
   computeColonyGrowthProfile,
@@ -24,7 +23,6 @@ import {
   restoreIndigenousSovereignty,
   resolveRegionSovereigntyRecord,
   applyIndigenousSupportAction,
-  PORT_PREFABS,
   COCONUT_PALM_GENOME_SPEC,
   coastalUberNoise2D,
   resolveGlobalCoastalRegion,
@@ -35,8 +33,8 @@ import {
   synthesizeCoastalAlbedo,
   placeCoastalPort,
   portClearanceEnvelope,
-  decode1550BuildingLRMBundle,
-  buildPortPrefabGeometry,
+  buildCityTypeGeometry,
+  settlePortOnWaterfront,
   seedCoastalVegetation,
   buildCoastalMesh,
   generateProceduralCoastalPack,
@@ -57,8 +55,10 @@ import {
   settleDockBerth,
   drownDemCoastalRinging,
 } from '../js/coastal-world.js';
-import { OLD_WORLD_NO_TREES, oldWorldCountry } from '../js/old-world.js';
+import { OLD_WORLD_NO_TREES, oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
+import { BAKED_BOARDS } from '../js/board-model.js';
 import { CITY_GROUND, CITY_TREES } from '../js/old-world-city.js';
+import { CITY_BUILDING_TYPES, CITY_TYPE, cityFamilyOf, cityGunType } from '../js/old-world-buildings.js';
 import zlib from 'node:zlib';
 import { findNearestPier, MOORING_LINE_REACH_M } from '../js/boarding-docking.js';
 import {
@@ -76,6 +76,43 @@ import {
 } from '../js/terrain-model.js';
 import { coastalRegionStageURL, coastalSeaForRegion } from '../js/landfall.js';
 import { vegetationProbability } from '../js/vegetation.js';
+
+// One city type's building as its builder draws it, as js/old-world-buildings.js compileCityBuildingType asks for it.
+const buildType = (type) => {
+  const spec = CITY_BUILDING_TYPES[type];
+  return buildCityTypeGeometry({ id: type, kind: spec.builder ?? null, width: spec.width, length: spec.length, height: spec.height, foundationDepth: spec.foundationDepth, materialKind: spec.materialKind, roofPitch: spec.roofPitch, cairnSpec: spec.builder ? null : spec });
+};
+// Every vertex finite, every normal of unit length.
+const assertSoundMesh = (geom, what) => {
+  for (let i = 0; i < geom.vertices.length; i += 8) {
+    assert.ok(geom.vertices.subarray(i, i + 8).every(Number.isFinite), `${what}: finite vertex`);
+    const nLen = Math.hypot(geom.vertices[i + 3], geom.vertices[i + 4], geom.vertices[i + 5]);
+    assert.ok(Math.abs(nLen - 1) < 1e-4, `${what}: unit normal`);
+  }
+};
+
+// A board's survey, bilinearly brought up to an n x n grid.
+function upsampleSurvey(survey, n) {
+  const sN = Math.round(Math.sqrt(survey.length)), out = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) {
+    const sy = (j / (n - 1)) * (sN - 1), y0 = Math.min(sN - 2, Math.floor(sy)), ty = sy - y0;
+    for (let i = 0; i < n; i++) {
+      const sx = (i / (n - 1)) * (sN - 1), x0 = Math.min(sN - 2, Math.floor(sx)), tx = sx - x0;
+      const a = survey[y0 * sN + x0], b = survey[y0 * sN + x0 + 1], c = survey[(y0 + 1) * sN + x0], d = survey[(y0 + 1) * sN + x0 + 1];
+      out[j * n + i] = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+    }
+  }
+  return out;
+}
+const readBoard = (key) => JSON.parse(fs.readFileSync(new URL(`../${BAKED_BOARDS[key]}`, import.meta.url), 'utf8'));
+// A port laid on its board ('lisbon:1550'), on the ground the board was founded on. Only a registered board lays a
+// town, works and waterfront, and a registration stands for the rest of the file, so tests that lay one come late.
+function boardPack(key) {
+  const baked = readBoard(key);
+  const region = { ...baked.region, size: 257, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100, year: baked.year };
+  registerBakedBoard(baked);
+  return generateProceduralCoastalPack(region, {}, upsampleSurvey(baked.survey, region.size));
+}
 
 test('Spanish Main ~1550 gazetteer resolves all curated ports with deterministic metadata', () => {
   const expectedIds = [
@@ -103,7 +140,7 @@ test('Spanish Main ~1550 gazetteer resolves all curated ports with deterministic
   assert.throws(() => resolveGlobalCoastalRegion({ latitude: 10, longitude: 195 }), /longitude/);
 });
 
-test('1550 Lisbon departure dock (Ribeira das Naus & Cais da Índia) models L-head embarkation pier, crane, arsenal, and safe dock berth', () => {
+test('1550 Lisbon departure dock faces down the Tagus, in water the caravel floats in', () => {
   const pack = generateProceduralCoastalPack('lisbon', {
     size: 129,
     biomeSize: 128,
@@ -116,24 +153,6 @@ test('1550 Lisbon departure dock (Ribeira das Naus & Cais da Índia) models L-he
   assert.equal(pack.views.dock.heading, 255, 'Lisbon dock berth faces 255° WSW down the Tagus channel past Ribeira das Naus and Torre de Belém');
   assert.ok(pack.views.dock.depth >= 5.5, `Lisbon dock berth has deep navigable water (${pack.views.dock.depth.toFixed(1)}m)`);
   assert.equal(pack.views.dock.moved, false, 'Lisbon dock berth clears the caravel draft without displacement');
-
-  const labels = pack.port.instances.map((i) => i.label);
-  assert.ok(labels.some((l) => l.includes('Ponte da Casa da Índia')), 'includes Royal Embarkation Pier');
-  assert.ok(labels.some((l) => l.includes('Cais da Ribeira')), 'includes L-head Departure Mole & Crane Wharf');
-  assert.ok(labels.some((l) => l.includes('Paço da Ribeira & Casa da Índia')), 'includes Casa da Índia');
-  assert.ok(labels.some((l) => l.includes('Ribeira das Naus')), 'includes Ribeira das Naus Royal Shipyard');
-  assert.ok(labels.some((l) => l.includes('Torre de Belém')), 'includes Torre de Belém / Baluarte river bastion');
-  assert.ok(labels.some((l) => l.includes('Mosteiro dos Jerónimos')), 'includes Mosteiro dos Jerónimos at Belém');
-  assert.ok(labels.some((l) => l.includes('Sé Patriarcal de Lisboa')), 'includes Sé Patriarcal de Lisboa');
-  assert.ok(labels.some((l) => l.includes('Torreão do Paço da Ribeira')), 'includes Torreão do Paço da Ribeira');
-  assert.ok(labels.some((l) => l.includes('Aqueduto Real')), 'includes Aqueduto Real & Arcos da Água Livre');
-  const cairnLandmarks = pack.port.instances.filter((i) => Boolean(i.cairnSpec));
-  assert.ok(cairnLandmarks.length >= 5, `Lisbon harbor places >= 5 Cairn declarative JSON landmarks (got ${cairnLandmarks.length})`);
-
-  const piers = pack.port.instances.filter((i) => i.prefabId === 'timber_mole_pier');
-  assert.equal(piers.length, 3, 'Lisbon harbor has main pier, L-head mole, and shipyard fitting-out pier');
-  const distToMole = Math.min(...piers.map((p) => Math.hypot(pack.views.dock.x - p.x, pack.views.dock.z - p.z)));
-  assert.ok(distToMole >= 16 && distToMole <= 46, `dock start sits right alongside the departure mole (${distToMole.toFixed(1)}m)`);
 });
 
 test('global coastal resolver generates deterministic region descriptors for any coordinate worldwide', () => {
@@ -209,38 +228,36 @@ test('coastal beaches and procedural RGBA albedo distinguish swash zones, dry sa
   }
 });
 
-test('16th-century port prefabs place grounded waterfront piers, sea bastions and colonial buildings with valid 3D geometry', () => {
-  assert.ok(Object.keys(PORT_PREFABS).length >= 7);
+test('a port\'s anchor builds nothing; a mole of its waterfront keeps a hull off, the berth stays clear, and a mole is a sound mesh of parts', () => {
   const region = resolveGlobalCoastalRegion({ ...SPANISH_MAIN_1550_REGIONS['santo-domingo'], size: 65, biomeSize: 64, albedoSize: 64 });
   const heights = synthesizeCoastalTerrain(region);
   const port = placeCoastalPort(region, heights);
 
   assert.equal(port.regionId, 'santo-domingo');
   assert.equal(port.era, 1550);
-  assert.ok(port.instances.length >= 7);
   assert.ok(port.berth.depth >= 4.5, 'mooring berth clears deep-draft vessels');
+  // Its town, works and waterfront are its board's (js/old-world-board.js, js/board-waterfront.js).
+  assert.deepEqual(port.instances, []);
+  assert.deepEqual(port.waterfront, []);
+  assert.equal(port.reach, 0);
+  assert.equal(portClearanceEnvelope(port, port.berth.x, port.berth.z, 4), true, 'nothing laid, nothing in the way');
 
-  const prefabIds = new Set(port.instances.map((i) => i.prefabId));
-  for (const required of ['timber_mole_pier', 'casa_de_contratacion', 'royal_warehouse', 'mission_chapel']) {
-    assert.ok(prefabIds.has(required), `port includes ${required}`);
-  }
-  // Its forts are its board's works (js/old-world-board.js), not prefabs of the port.
-  assert.ok(![...prefabIds].some((id) => /bastion|fortress/.test(id)), 'no prefab fort stands in the port');
-
-  // Pier center blocks hull clearance, while open berth clears hull envelope
-  const pier = port.instances.find((i) => i.prefabId === 'timber_mole_pier');
-  assert.equal(portClearanceEnvelope(port, pier.x, pier.z, 4), false);
+  // A mole along the shore from the berth: its middle keeps a hull off, the open berth does not, and the port reaches it.
+  const T = CITY_BUILDING_TYPES[CITY_TYPE.PIER];
+  const mole = { kind: 'pier', type: CITY_TYPE.PIER, x: port.berth.x + 140, y: 0, z: port.berth.z, yaw: 0.4, width: T.width, length: T.length, deck: 2.15, seat: true };
+  settlePortOnWaterfront(port, heights, region, [mole]);
+  assert.deepEqual(port.waterfront, [mole]);
+  assert.equal(portClearanceEnvelope(port, mole.x, mole.z, 4), false);
   assert.equal(portClearanceEnvelope(port, port.berth.x, port.berth.z, 4), true);
+  assert.ok(port.reach >= Math.hypot(mole.x - port.center.x, mole.z - port.center.z), `the port reaches its mole (${port.reach.toFixed(0)} m)`);
 
-  const geom = buildPortPrefabGeometry(port);
-  assert.equal(geom.instanceCount, port.instances.length);
-  assert.ok(geom.triangleCount >= port.instances.length * 10);
+  // The mole's own mesh, as its type is drawn and struck: whole triangles, finite, and built of its parts.
+  const geom = buildType(CITY_TYPE.PIER);
   assert.equal(geom.indices.length, geom.triangleCount * 3);
-  for (let i = 0; i < geom.vertices.length; i += 8) {
-    assert.ok(geom.vertices.subarray(i, i + 8).every(Number.isFinite));
-    const nLen = Math.hypot(geom.vertices[i + 3], geom.vertices[i + 4], geom.vertices[i + 5]);
-    assert.ok(Math.abs(nLen - 1) < 1e-4);
-  }
+  assert.ok(geom.triangleCount >= 100);
+  assert.ok(geom.partAssembly.parts.length >= 2, 'a mole decomposes into its structural parts');
+  for (const part of geom.partAssembly.parts) assert.ok(part.totalTriangleCount > 0, `${part.id} has its triangles`);
+  assertSoundMesh(geom, 'timber mole');
 });
 
 test('coastal vegetation seeds palms, scrub and upland forest while clearing beaches and port footprints', () => {
@@ -299,7 +316,7 @@ test('generateProceduralCoastalPack produces complete landfall packs and safe ve
     assert.ok(pack.biome instanceof Uint8Array);
     assert.ok(pack.albedo instanceof Uint8Array);
     assert.ok(pack.vegetation.trees instanceof Float32Array);
-    assert.ok(pack.portGeometry.vertices instanceof Float32Array);
+    assert.ok(Array.isArray(pack.port.waterfront), 'the port carries its waterfront as its board laid it');
 
     const caravel = { length: 20, beam: 6, hydrodynamics: { draft: 2.1 } };
     for (const [stageName, view] of Object.entries(pack.views)) {
@@ -329,15 +346,16 @@ test('architectural port materials, foreshore palm places, beach sand vertex wei
     vegetationCandidates: 6000,
   });
 
-  // Verify port geometry emits architectural materials (10=timber, 11=masonry, 12=stucco, 13=terracotta, 14=recess).
-  // The forest draws palms, so the port only records where they stand.
+  // A port's buildings are city types, drawn in the architectural materials (10=timber, 11=masonry, 12=stucco,
+  // 13=terracotta, 14=recess). The forest draws palms, so the port only records where they stand.
   assert.ok(pack.port.palms instanceof Float32Array && pack.port.palms.length >= 8, 'port records foreshore palm places');
   const kinds = new Set();
-  for (let i = 0; i < pack.portGeometry.vertices.length; i += 8) {
-    kinds.add(Math.round(pack.portGeometry.vertices[i + 6]));
+  for (const type of [CITY_TYPE.QUAY, CITY_TYPE.PIER, CITY_TYPE.CUSTOMHOUSE, CITY_TYPE.WAREHOUSE, CITY_TYPE.HOUSE_EAVES]) {
+    const { vertices } = buildType(type);
+    for (let i = 0; i < vertices.length; i += 8) kinds.add(Math.round(vertices[i + 6]));
   }
   for (const k of [10, 11, 12, 13, 14]) {
-    assert.ok(kinds.has(k), `port geometry includes material kind ${k}`);
+    assert.ok(kinds.has(k), `the port's types include material kind ${k}`);
   }
 
   // Verify Uber-Noise is bounded, deterministic, and derivative-damped
@@ -346,8 +364,7 @@ test('architectural port materials, foreshore palm places, beach sand vertex wei
   assert.equal(u0, u1);
   assert.ok(u0 >= 0 && u0 <= 1);
 
-  // Verify stone_quay_seawall (Malecón) is placed and adaptive near-shore subdivision refines shoreline cells
-  assert.ok(pack.port.instances.some((inst) => inst.prefabId === 'stone_quay_seawall'), 'port includes stone_quay_seawall Malecón');
+  // Adaptive near-shore subdivision refines shoreline cells
   assert.ok(pack.mesh.vertices.length > pack.region.size * pack.region.size * 8, 'adaptive 3x3 near-shore subdivision adds shoreline sub-vertices');
 
   // Verify coastal mesh encodes beach sand weight in vertex.kind.y in [0.02, 1]
@@ -403,7 +420,7 @@ test('architectural port materials, foreshore palm places, beach sand vertex wei
   assert.equal(upgraded.demSource.satelliteOverlay, true);
   assert.equal(upgraded.demSource.zoom, 13);
   assert.equal(upgraded.demSource.nearshoreZoom, 14);
-  assert.ok(upgraded.portGeometry.triangleCount > 200);
+  assert.ok(Array.isArray(upgraded.port.waterfront));
   assert.ok(upgraded.vegetation.stats.totalTrees > 50, 'satellite + DEM upgrade seeds coastal palms and forest');
 
   // Verify canonical cell snapping, 1550 territory reconstruction, binary cache encoding, and First Explorer discovery workflow
@@ -490,125 +507,29 @@ test('architectural port materials, foreshore palm places, beach sand vertex wei
   assert.ok(forestPackRoots(retargeted).length >= 12);
 });
 
-test('decode1550BuildingLRMBundle decodes plumb-rectified WW3D building bundle and stamps into port geometry', () => {
-  const raw = fs.readFileSync(new URL('../assets/ports/1550/buildings-1550-lrm.bin', import.meta.url));
-  const templates = decode1550BuildingLRMBundle(raw);
-  assert.ok(templates, 'Expected WW3D bundle to decode');
-  for (const id of ['casa_de_contratacion', 'mission_chapel', 'colonial_town_block']) {
-    assert.ok(templates[id], `Missing LRM template ${id}`);
-    assert.ok(templates[id].vertexCount >= 6000, `Expected >=6,000 unshared flat-normal vertices for high-detail ${id}, got ${templates[id].vertexCount}`);
-    assert.ok(templates[id].indexCount >= 6000, `Expected >=2,000 plumb-rectified triangles for high-detail ${id}, got ${templates[id].indexCount}`);
-    assert.equal(templates[id].vertexCount, templates[id].indexCount, `Expected unshared per-face vertices for ${id} to prevent GPU material interpolation`);
-  }
-  const pack = generateProceduralCoastalPack('san-juan', { size: 65 });
-  const geom = buildPortPrefabGeometry(pack.port, null, templates);
-  assert.ok(geom.triangleCount > 12000, `Expected high-detail plumb port geometry to exceed 12,000 triangles, got ${geom.triangleCount}`);
-
-  // Verify top-down map footprints in WW15 payload validate the AI 1550 orthophoto physical scale
-  // and place 1 single 3D building per footprint rectangle (1:1, zero city-block pellet subdivision)
-  const packWithFootprints = build1550HistoricalTerritoryPack(pack);
-  packWithFootprints.territory1550.clusterU = 0.42;
-  packWithFootprints.territory1550.clusterV = 0.48;
-  packWithFootprints.territory1550.footprints = [
-    { u: 0.41, v: 0.44, width: 128, length: 144, yaw: -0.22, prefabId: 'royal_warehouse', inlandM: 48 },
-    { u: 0.38, v: 0.50, width: 96, length: 120, yaw: -0.22, prefabId: 'casa_de_contratacion', inlandM: 88 },
-    { u: 0.35, v: 0.47, width: 64, length: 112, yaw: -0.22, prefabId: 'mission_chapel', inlandM: 104 },
-    { u: 0.40, v: 0.52, width: 84, length: 96, yaw: -0.22, prefabId: 'colonial_town_block', inlandM: 112 },
-  ];
-  const encodedFp = encode1550TerritoryCachePayload(packWithFootprints);
-  const appliedFp = apply1550TerritoryCachePayload(pack, encodedFp);
-  assert.equal(appliedFp.port.hasOrthophotoFootprints, true);
-  assert.ok(appliedFp.region.span >= 1350 && appliedFp.region.span <= 2300, `Expected AI 1550 orthophoto scale validation to adjust span into 1350..2300m, got ${appliedFp.region.span}`);
-  const orthoInstances = appliedFp.port.instances.filter((inst) => inst.fromOrthophotoFootprint);
-  assert.equal(orthoInstances.length, 4, `Expected 1:1 single building per footprint rectangle (zero pellet subdivision), got ${orthoInstances.length}`);
-  const warehouseInst = orthoInstances.find((inst) => inst.prefabId === 'royal_warehouse');
-  assert.ok(warehouseInst, 'Expected royal_warehouse placed from top-down footprint');
-  assert.equal(warehouseInst.yaw, -0.22, 'Footprint yaw must match top-down map orientation');
-  for (const inst of orthoInstances) {
-    assert.ok(inst.height >= 7.5 && inst.height <= 11.0, `Expected true human/tree scale eave height (7.5m–11.0m vs 18m–22m trees), got ${inst.height} for ${inst.prefabId}`);
-    assert.ok(inst.width <= 44 && inst.length <= 48, `Expected individual building footprint <=44m×48m, got ${inst.width}×${inst.length} for ${inst.prefabId}`);
-  }
-
-  // Verify 513x513 full-resolution mesh has zero inner-square subdivision seam on any arbitrary port coordinate
+test('a full-resolution 513 grid is one uniform mesh with no inner-square seam, and a subtropical canopy has its palms', () => {
   const fullPack = generateProceduralCoastalPack({ latitude: 29.894, longitude: -81.312 }, { size: 513, biomeSize: 128, albedoSize: 128, vegetationCandidates: 4000 });
   assert.equal(fullPack.mesh.vertices.length, 513 * 513 * 8, 'Expected single uniform 513x513 vertex grid with zero inner-square subdivision seam');
   assert.ok(fullPack.vegetation.palms.length / 8 >= 200, `Expected abundant 3D palms across subtropical canopy, got ${fullPack.vegetation.palms.length / 8}`);
 });
 
-test('bay-iterated 1550 port primitives iterate horizontal bays without stretching cross-sections or roof pitch', () => {
-  const newPrimitives = [
-    'single_nave_solar',
-    'l_wing_u_wing_solar',
-    'modular_patio_cloister',
-    'royal_atarazanas_arsenal',
-    'open_lonja_loggia',
-    'walled_mule_corral',
-    'torreon_atalaya_farol',
-    'curtain_wall_and_gate',
-    'stone_arch_bridge',
-    'thatched_bohio_palafito',
-    'astillero_and_moored_hull',
-  ];
-  for (const id of newPrimitives) {
-    assert.ok(PORT_PREFABS[id], `Expected PORT_PREFABS to register ${id}`);
-  }
+// A family's sizes are whole bays and bents of one cross-section: never a stretched one (js/old-world-buildings.js).
+test('a waterfront type\'s larger sizes add bents, bays and naves without stretching, and every waterfront type is a sound mesh', () => {
+  const ends = (key) => {
+    const family = cityFamilyOf(CITY_TYPE[key]);
+    return [buildType(family.from), buildType(family.from + family.count - 1)];
+  };
+  const [shortMole, longMole] = ends('PIER');
+  assert.ok(longMole.triangleCount > shortMole.triangleCount + 180, 'a longer mole stands on more bents');
+  assert.ok(Math.abs(longMole.bounds.max[1] - shortMole.bounds.max[1]) < 1e-4, 'and its deck stands no higher');
+  const [shortQuay, longQuay] = ends('QUAY');
+  assert.ok(longQuay.triangleCount > shortQuay.triangleCount, 'a longer quay has more bollards and landing stairs');
 
-  // Verify horizontal bay iteration: lengthening a building adds discrete architectural bays (triangles)
-  // while keeping wing roof ridge height constant (never stretching roof pitch vertically)
-  const buildSingleInstance = (prefabId, width, length, height = 8.0) =>
-    buildPortPrefabGeometry({
-      instances: [
-        {
-          prefabId,
-          x: 0,
-          y: 3.0,
-          z: 0,
-          yaw: 0,
-          width,
-          length,
-          height,
-          foundationDepth: 4.0,
-          materialKind: PORT_PREFABS[prefabId].materialKind,
-          roofPitch: PORT_PREFABS[prefabId].roofPitch,
-          waterfront: PORT_PREFABS[prefabId].waterfront,
-          fromOrthophotoFootprint: true,
-        },
-      ],
-    });
+  // The arsenal's builder lays as many parallel naves as its breadth takes.
+  const arsenal = (width) => buildCityTypeGeometry({ kind: 'royal_atarazanas_arsenal', width, length: 28, height: 8.4, foundationDepth: 4.5, materialKind: 11, roofPitch: 2.5 });
+  assert.ok(arsenal(38).triangleCount > arsenal(16).triangleCount + 250, 'a broader arsenal iterates more parallel gabled halls');
 
-  const shortHall = buildSingleInstance('single_nave_solar', 9.5, 15.0, 7.8);
-  const longHall = buildSingleInstance('single_nave_solar', 9.5, 34.0, 7.8);
-  assert.ok(longHall.triangleCount > shortHall.triangleCount + 180, 'Lengthening single_nave_solar iterates additional window & rafter bays');
-  assert.ok(Math.abs(longHall.bounds.max[1] - shortHall.bounds.max[1]) < 1e-4, 'Roof ridge elevation remains constant when iterating horizontal bays');
-
-  const smallCloister = buildSingleInstance('modular_patio_cloister', 22.0, 24.0, 8.2);
-  const largeCloister = buildSingleInstance('modular_patio_cloister', 36.0, 42.0, 8.2);
-  assert.ok(largeCloister.triangleCount > smallCloister.triangleCount + 400, 'Expanding modular_patio_cloister iterates additional courtyard arch bays');
-  assert.ok(Math.abs(largeCloister.bounds.max[1] - smallCloister.bounds.max[1]) < 1e-4, 'Cloister wing depth (5.8m) and roof ridge height stay constant across footprint sizes');
-
-  const narrowArsenal = buildSingleInstance('royal_atarazanas_arsenal', 16.0, 28.0, 8.4);
-  const wideArsenal = buildSingleInstance('royal_atarazanas_arsenal', 38.0, 38.0, 8.4);
-  assert.ok(wideArsenal.triangleCount > narrowArsenal.triangleCount + 250, 'Widening royal_atarazanas_arsenal iterates additional parallel gabled halls');
-
-  const shortBridge = buildSingleInstance('stone_arch_bridge', 7.2, 18.0, 4.6);
-  const longBridge = buildSingleInstance('stone_arch_bridge', 7.2, 38.0, 4.6);
-  assert.ok(longBridge.triangleCount > shortBridge.triangleCount + 180, 'Lengthening stone_arch_bridge iterates additional cutwater piers and stone arches');
-
-  // Verify all 12 new primitives emit finite unit-normal geometry and include new material kinds 15 (palm thatch) and 16 (cobbled/terreplein)
-  const region = resolveGlobalCoastalRegion({ ...SPANISH_MAIN_1550_REGIONS.cartagena, size: 65, biomeSize: 64, albedoSize: 64 });
-  const heights = synthesizeCoastalTerrain(region);
-  const port = placeCoastalPort(region, heights);
-  const geom = buildPortPrefabGeometry(port);
-  const emittedKinds = new Set();
-  for (let i = 0; i < geom.vertices.length; i += 8) {
-    assert.ok(geom.vertices.subarray(i, i + 8).every(Number.isFinite));
-    const nLen = Math.hypot(geom.vertices[i + 3], geom.vertices[i + 4], geom.vertices[i + 5]);
-    assert.ok(Math.abs(nLen - 1) < 1e-4, 'unit normal on bay-iterated port vertex');
-    emittedKinds.add(Math.round(geom.vertices[i + 6]));
-  }
-  for (const k of [10, 11, 12, 13, 14, 15, 16]) {
-    assert.ok(emittedKinds.has(k), `Expected bay-iterated port geometry to emit material kind ${k}`);
-  }
+  for (const key of ['QUAY', 'PIER', 'SLIPWAY', 'CAREENING_SHED', 'CUSTOMHOUSE', 'ARSENAL', 'WAREHOUSE']) assertSoundMesh(buildType(CITY_TYPE[key]), key);
 });
 
 test('coastline smoothing removes beach potholes, aligns regional swells, and stitches section-by-section maps seamlessly', async () => {
@@ -1010,14 +931,9 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
   assert.equal(bostonPack.region.portType, 'wilderness-anchorage');
   assert.equal(bostonPack.port.hasColonialPort, false);
   assert.equal(bostonPack.port.settlementKind, 'wilderness-anchorage');
-  assert.equal(bostonPack.port.colonialInstanceCount, 0, 'no Spanish bastions, piers, or colonial buildings placed in 1550 Boston');
   assert.equal(bostonPack.port.hasIndigenousSettlement, true, '1550 Boston has a pre-epidemic New England Abenaki/Algonquian village');
   assert.equal(bostonPack.port.indigenousSettlement.cultureId, 'abenaki-algonquian');
-  assert.ok(bostonPack.port.indigenousInstanceCount >= 5, '1550 Boston places birchbark wigwams, longhouses, and canoe landing');
-  assert.ok(bostonPack.port.instances.some(inst => inst.prefabId === 'abenaki_birchbark_wigwam'));
   assert.equal(bostonPack.port.clearRadius, 0, 'no circular cobblestone plaza or colonial forest clearing around 1550 Boston');
-  assert.ok(bostonPack.portGeometry.instanceCount >= 5);
-  assert.ok(bostonPack.portGeometry.triangleCount > 100);
   assert.ok(bostonPack.port.berth.depth >= 4.5, 'wilderness coast still locates a safe natural anchorage berth');
   assert.ok(Number.isFinite(bostonPack.views.coast.x) && Number.isFinite(bostonPack.views.coast.z));
 
@@ -1034,7 +950,7 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
   assert.equal(bermudaPack.port.hasColonialPort, false);
   assert.equal(bermudaPack.port.hasIndigenousSettlement, false, 'Bermuda was uninhabited before 1609');
   assert.equal(bermudaPack.port.instances.length, 0);
-  assert.equal(bermudaPack.portGeometry.instanceCount, 0);
+  assert.deepEqual(bermudaPack.port.waterfront, [], 'nobody built at the water');
 
   // Verify 1550 territory cache roundtrip preserves schemaVersion 2 & wilderness-anchorage metadata,
   // while legacy v1 cached payloads (from before wilderness gating) are rejected so flattened Plaza Mayor pads are not reused.
@@ -1042,13 +958,13 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
   assert.equal(upgradedBoston.territory1550.schemaVersion, 2);
   assert.equal(upgradedBoston.territory1550.hasColonialPort, false);
   assert.equal(upgradedBoston.territory1550.settlementKind, 'wilderness-anchorage');
-  assert.equal(upgradedBoston.port.colonialInstanceCount, 0);
+  assert.equal(upgradedBoston.port.hasColonialPort, false);
   assert.equal(upgradedBoston.port.hasIndigenousSettlement, true);
 
   const v2Bytes = encode1550TerritoryCachePayload(upgradedBoston);
   const decodedV2 = apply1550TerritoryCachePayload(bostonPack, v2Bytes);
   assert.ok(decodedV2, 'schemaVersion 2 wilderness cache payload is accepted');
-  assert.equal(decodedV2.port.colonialInstanceCount, 0);
+  assert.equal(decodedV2.port.hasColonialPort, false);
   assert.equal(decodedV2.port.hasIndigenousSettlement, true);
 
   const legacyPack = {
@@ -1071,7 +987,6 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
   });
   assert.equal(lisbonPack.region.hasColonialPort, true);
   assert.equal(lisbonPack.region.settlementKind, 'colonial-port');
-  assert.ok(lisbonPack.port.instances.length >= 7, 'historical 1550 port coordinate places full 16th-century waterfront');
 });
 
 test('scenery pass: beach wet sand, stratified stone, baked distant canopy domes, and multi-tier tree LOD shaders', async () => {
@@ -1114,7 +1029,6 @@ test('colony growth year-by-year and era-by-era (1550–1689): founding dates, s
   const boston1550 = generateProceduralCoastalPack({ ...bostonCoord, year: 1550, ...gridOpts });
   assert.equal(boston1550.region.hasColonialPort, false);
   assert.equal(boston1550.region.colonyGrowth.stage, 'wilderness');
-  assert.equal(boston1550.port.colonialInstanceCount, 0);
   assert.equal(boston1550.port.hasIndigenousSettlement, true);
   assert.equal(boston1550.port.fortificationTier, 0);
 
@@ -1122,18 +1036,14 @@ test('colony growth year-by-year and era-by-era (1550–1689): founding dates, s
   assert.equal(boston1632.region.hasColonialPort, true);
   assert.equal(boston1632.region.colonyGrowth.stage, 'outpost');
   assert.equal(boston1632.port.fortificationTier, 1);
-  assert.ok(boston1632.port.instances.length >= 6 && boston1632.port.instances.length <= 12);
 
   const boston1655 = generateProceduralCoastalPack({ ...bostonCoord, year: 1655, ...gridOpts });
   assert.equal(boston1655.region.colonyGrowth.stage, 'settlement');
   assert.equal(boston1655.port.fortificationTier, 2);
-  assert.ok(boston1655.port.instances.length > boston1632.port.instances.length);
 
   const boston1680 = generateProceduralCoastalPack({ ...bostonCoord, year: 1680, ...gridOpts });
   assert.equal(boston1680.region.colonyGrowth.stage, 'citadel-metropolis');
   assert.equal(boston1680.port.fortificationTier, 4);
-  assert.ok(boston1680.port.instances.length > boston1655.port.instances.length);
-  assert.ok(boston1680.portGeometry.vertices.length > boston1632.portGeometry.vertices.length);
 
   // 3. Port Royal, Jamaica (founded 1655) is wilderness in 1600, outpost in 1658, and buccaneer metropolis by 1680
   const portRoyal1600 = resolveGlobalCoastalRegion({ id: 'port-royal', year: 1600 });
@@ -1148,7 +1058,6 @@ test('colony growth year-by-year and era-by-era (1550–1689): founding dates, s
   assert.equal(portRoyal1680.region.hasColonialPort, true);
   assert.equal(portRoyal1680.region.colonyGrowth.stage, 'citadel-metropolis');
   assert.equal(portRoyal1680.port.fortificationTier, 4);
-  assert.ok(portRoyal1680.port.instances.length >= 20);
 
   // 4. Historical port supersession: Nombre de Dios (1510–1596) vs Portobelo (founded 1597)
   const nombre1550 = resolveGlobalCoastalRegion({ latitude: 9.58, longitude: -79.47, year: 1550 });
@@ -1172,8 +1081,6 @@ test('colony growth year-by-year and era-by-era (1550–1689): founding dates, s
   assert.equal(cartagena1605.port.fortificationTier, 3);
   assert.equal(cartagena1680.port.stage, 'citadel-metropolis');
   assert.equal(cartagena1680.port.fortificationTier, 4);
-  assert.ok(cartagena1605.port.instances.length > cartagena1550.port.instances.length);
-  assert.ok(cartagena1680.port.instances.length > cartagena1605.port.instances.length);
 
   // 6. Chart knowledge progresses from 1550 to 1680 (Manila 1565+, Cape Horn 1616+, New Holland 1644+)
   assert.equal(classify1550Knowledge(14.6, 120.98, 1550), 'rumoured');
@@ -1197,28 +1104,10 @@ test('colony growth year-by-year and era-by-era (1550–1689): founding dates, s
 });
 
 test('Native American settlements, regional structures, demographic collapse timelines (1492–1689), and 3D male/female models', async () => {
-  const { getBuildingParts } = await import('../js/coastal-world.js');
   const { loadCrewGLB } = await import('../js/gltf.js');
-  const {
-    INDIGENOUS_VILLAGE_PREFAB_IDS,
-    buildIndigenousCrewModel,
-    createIndigenousCrewModels,
-    createFortGarrison,
-    createCompany,
-  } = await import('../js/crew.js');
+  const { createIndigenousCrewModels, createCompany } = await import('../js/crew.js');
 
   assert.equal(INDIGENOUS_CULTURE_REGIONS.length, 9, 'all 9 regional Native American culture zones defined');
-  assert.equal(INDIGENOUS_VILLAGE_PREFAB_IDS.length, 11, 'all 11 Native American architectural prefabs registered');
-
-  // 1. Verify all 11 Native American 3D architectural prefabs build non-empty geometry and part decompositions
-  for (const prefabId of INDIGENOUS_VILLAGE_PREFAB_IDS) {
-    assert.ok(PORT_PREFABS[prefabId], `PORT_PREFABS includes ${prefabId}`);
-    const bparts = getBuildingParts(prefabId);
-    assert.ok(bparts.groups.length >= 2, `${prefabId} decomposes into multiple structural parts`);
-    for (const part of bparts.partAssembly.parts) {
-      assert.ok(part.totalTriangleCount > 0, `${prefabId}/${part.id} has valid 3D mesh geometry`);
-    }
-  }
 
   // 2. Taíno Greater Antilles demographic trajectory: dense cacicazgos in 1492 vs rapid post-conquest collapse by 1550
   const xaragua1492 = computeIndigenousSettlementProfile({ latitude: 18.52, longitude: -72.34 }, 1492);
@@ -1293,23 +1182,6 @@ test('Native American settlements, regional structures, demographic collapse tim
   assert.ok(indigFemale.accessoryTriangleCount >= 80);
   assert.equal(indigFemale.lods, undefined, 'drawn whole: the continuum is the only simplification');
 
-  // Verify shore villagers populate Native American settlements with both male and female models
-  const boston1550Pack = generateProceduralCoastalPack({
-    name: 'Shawmut Peninsula',
-    latitude: 42.3601,
-    longitude: -71.0589,
-    year: 1550,
-    size: 65,
-    biomeSize: 64,
-    albedoSize: 64,
-    vegetationCandidates: 900,
-  });
-  const villageGarrison = createFortGarrison(boston1550Pack.port);
-  assert.ok(villageGarrison.soldiers.length >= 10, 'Native American village spawns shore villagers around wigwams and longhouses');
-  assert.ok(villageGarrison.soldiers.every(s => s.indigenous === true));
-  assert.ok(villageGarrison.soldiers.some(s => s.sex === 'male' && s.modelVariant === 'indigenous-male'));
-  assert.ok(villageGarrison.soldiers.some(s => s.sex === 'female' && s.modelVariant === 'indigenous-female'));
-
   // Verify Taíno dugout canoe company uses indigenous crew appearance and equal strength
   const canoeCompany = createCompany(undefined, 'taino-canoe');
   assert.equal(canoeCompany.indigenousAttire, true);
@@ -1318,7 +1190,6 @@ test('Native American settlements, regional structures, demographic collapse tim
 
 test('rogue liberator path strengthens Native American settlements through trade, medicine, arms & defense into Sovereign Indigenous Polities', async () => {
   const { SHIP_COLORS } = await import('../js/ship-colors.js');
-  const { createFortGarrison } = await import('../js/crew.js');
   assert.ok(SHIP_COLORS['indigenous-confederacy'], 'Expected indigenous-confederacy ship colors');
   assert.equal(SHIP_COLORS['indigenous-confederacy'].code, 9);
 
@@ -1378,9 +1249,8 @@ test('rogue liberator path strengthens Native American settlements through trade
     });
     assert.equal(sovPack.port.sovereignPolity, true);
     assert.equal(sovPack.port.stage, 'sovereign-polity');
-    assert.ok(sovPack.port.indigenousInstanceCount >= 11, 'Sovereign Indigenous Polity places an expanded village');
-    // Its works are the board's to found in its own manner: no prefab fort stands in for them.
-    assert.equal(sovPack.port.instances.some(i => i.indigenous === true && /bastion|fortress/.test(i.prefabId)), false);
+    // Its village and its works are its board's to found in its own manner: the port stamps none of its own.
+    assert.deepEqual(sovPack.port.instances, []);
 
     // 5. Verify Taíno Cacicazgo in Greater Antilles persists in 1550 when strengthened via quarantine & trade
     applyIndigenousSupportAction('taino-greater-antilles', 'share-medicine', sovState);
@@ -1463,11 +1333,8 @@ test('Santa María stern colors clear rear mizzen-lateen sail across all wind an
   assert.ok(TERRAIN.includes('let courseWave=landFilteredCourse('), 'Kind 13 terracotta roof courses use landFilteredCourse');
   assert.ok(!TERRAIN.includes('if(in.kind.x<2.5){n=landFilteredBump'), 'All terrain and building kinds use landFilteredBump');
 
-  // 6. Verify buildPortPrefabGeometry separates arch_vault (kind 14) and roof_eaves_fascia (kind 10) from outer walls (kind 12)
-  const region = resolveGlobalCoastalRegion({ latitude: 10.423, longitude: -75.548, size: 65, biomeSize: 64, albedoSize: 64 });
-  const heights = synthesizeCoastalTerrain(region);
-  const port = placeCoastalPort(region, heights);
-  const geom = buildPortPrefabGeometry(port);
+  // 6. Verify the customhouse's builder steps its arch_vault (kind 14) proud of its outer walls (kind 12)
+  const geom = buildType(CITY_TYPE.CUSTOMHOUSE);
   const v = geom.vertices;
   const idx = geom.indices;
   let coplanarArchWallCount = 0;
@@ -1513,89 +1380,7 @@ test('Landfall dropdown exposes curated scenarios, Native American villages, and
   }
 });
 
-test('village and port buildings grade terrain pads, sync post-smoothing elevations, slant with the earth, and ground villagers', async () => {
-  const { terrainSurfaceSample, syncPortInstancesToTerrain } = await import('../js/coastal-world.js');
-  const { createFortGarrison } = await import('../js/crew.js');
-
-  // 1. Generate an Abenaki/Algonquian coastal village (Saco Bay / Shawmut Peninsula 1550)
-  const pack = generateProceduralCoastalPack({
-    name: 'Saco Bay Abenaki Village',
-    latitude: 43.48,
-    longitude: -70.38,
-    year: 1550,
-    size: 129,
-    biomeSize: 64,
-    albedoSize: 64,
-    vegetationCandidates: 900,
-  });
-
-  assert.equal(pack.port.hasIndigenousSettlement, true);
-  assert.ok(pack.port.instances.length >= 6);
-
-  for (const inst of pack.port.instances) {
-    if (inst.prefabId === 'indigenous_canoe_landing') continue;
-    const groundY = terrainSurfaceSample(pack.heights, inst.x, inst.z, pack.region);
-    assert.ok(
-      Math.abs(inst.y - groundY) < 0.25,
-      `${inst.prefabId} center y (${inst.y.toFixed(2)}) matches post-smoothed terrain (${groundY.toFixed(2)})`
-    );
-    assert.ok(Number.isFinite(inst.slopeX) && Number.isFinite(inst.slopeZ), `${inst.prefabId} computes finite local terrain slope`);
-    assert.ok(Math.hypot(inst.slopeX, inst.slopeZ) <= 0.22, `${inst.prefabId} pad slope is bounded`);
-  }
-
-  // 2. Verify buildPortPrefabGeometry slants vertices with (slopeX, slopeZ) when placed on a sloped hillside
-  const slopedLonghouse = {
-    prefabId: 'algonquian_longhouse',
-    x: 0,
-    y: 4.0,
-    z: 0,
-    yaw: 0,
-    width: 6.2,
-    length: 18.5,
-    depth: 18.5,
-    height: 4.8,
-    baseY: 4.0,
-    slopeX: 0.08,
-    slopeZ: -0.12,
-  };
-  const flatLonghouse = { ...slopedLonghouse, slopeX: 0, slopeZ: 0 };
-  const geomSloped = buildPortPrefabGeometry({ instances: [slopedLonghouse] });
-  const geomFlat = buildPortPrefabGeometry({ instances: [flatLonghouse] });
-  assert.equal(geomSloped.vertices.length, geomFlat.vertices.length);
-
-  let verifiedSlantedVerts = 0;
-  for (let i = 0; i < geomSloped.vertices.length; i += 8) {
-    const wx = geomSloped.vertices[i];
-    const wySloped = geomSloped.vertices[i + 1];
-    const wz = geomSloped.vertices[i + 2];
-    const wyFlat = geomFlat.vertices[i + 1];
-    const expectedShear = wx * slopedLonghouse.slopeX + wz * slopedLonghouse.slopeZ;
-    assert.ok(
-      Math.abs((wySloped - wyFlat) - expectedShear) < 1e-4,
-      `Vertex at (${wx.toFixed(2)}, ${wz.toFixed(2)}) shears vertically by lx*slopeX + lz*slopeZ`
-    );
-    if (Math.abs(expectedShear) > 0.25) verifiedSlantedVerts++;
-  }
-  assert.ok(verifiedSlantedVerts > 20, 'Longhouse vertices follow the earth slope across its 18.5m length');
-
-  // 3. Verify shore villagers stand grounded on the sloped terrain
-  const garrison = createFortGarrison(pack.port);
-  assert.ok(garrison.soldiers.length >= 10);
-  for (const s of garrison.soldiers) {
-    const groundAtVillager = terrainSurfaceSample(pack.heights, s.position[0], s.position[2], pack.region);
-    const heightAboveEarth = s.position[1] - groundAtVillager;
-    assert.ok(
-      heightAboveEarth >= -0.35 && heightAboveEarth <= 0.65,
-      `Villager ${s.id} (${s.buildingPrefabId}) stands flush on earth (y=${s.position[1].toFixed(2)}, ground=${groundAtVillager.toFixed(2)})`
-    );
-  }
-
-  // 4. Verify syncPortInstancesToTerrain resamples and grades cleanly
-  syncPortInstancesToTerrain(pack.port, pack.heights, pack.region, { gradePads: false });
-  assert.ok(pack.port.instances.every(i => Number.isFinite(i.y) && Number.isFinite(i.slopeX) && Number.isFinite(i.slopeZ)));
-});
-
-test('Jamestown (1610 & 1650) and Plymouth generate triangular timber palisade fort, half-timbered halls & cottages, temperate forest, and zero palm trees', async () => {
+test('Jamestown (1610 & 1650) stands in temperate broadleaf forest with zero palm trees', () => {
   const jamestown1610 = generateProceduralCoastalPack({
     id: 'jamestown',
     year: 1610,
@@ -1605,43 +1390,13 @@ test('Jamestown (1610 & 1650) and Plymouth generate triangular timber palisade f
     vegetationCandidates: 1800,
   });
 
-  // 1. Climate & vegetation: Virginia (37.208°N) must be temperate broadleaf forest with zero palm trees
+  // Virginia (37.208°N) is temperate broadleaf forest with zero palm trees. Its town and fort are its board's.
   assert.equal(jamestown1610.region.climate, 'temperate');
   assert.equal(jamestown1610.climateProfile.forestPackKind, 'temperate');
   assert.equal(jamestown1610.vegetation.stats.palmCount, 0, 'Jamestown Virginia must have 0 palm trees');
   assert.equal(jamestown1610.vegetation.palms.length, 0);
 
-  // 2. Architecture: James Fort triangular palisade, half-timbered church/storehouse, and clapboard cottages
-  const prefabs1610 = new Set(jamestown1610.port.instances.map((i) => i.prefabId));
-  assert.ok(prefabs1610.has('english_triangular_palisade_fort'), 'Jamestown has James Fort triangular timber palisade');
-  assert.ok(prefabs1610.has('english_half_timber_hall'), 'Jamestown has English half-timbered church & storehouse');
-  assert.ok(prefabs1610.has('english_timber_cottage'), 'Jamestown has English clapboard & wattle-and-daub cottages');
-
-  // Must NOT contain Spanish Caribbean stucco/terracotta buildings
-  for (const spanishId of [
-    'casa_de_contratacion',
-    'mission_chapel',
-    'modular_patio_cloister',
-    'thatched_bohio_palafito',
-  ]) {
-    assert.equal(
-      prefabs1610.has(spanishId),
-      false,
-      `Jamestown must not place Spanish Caribbean prefab ${spanishId}`
-    );
-  }
-
-  // 3. Verify 3D geometry & garrison for James Fort
-  assert.ok(jamestown1610.portGeometry.vertices.length > 800);
-  assert.ok(jamestown1610.portGeometry.indices.length > 300);
-  const { createFortGarrison } = await import('../js/crew.js');
-  const garrison = createFortGarrison(jamestown1610.port);
-  assert.ok(
-    garrison.soldiers.some((s) => s.buildingPrefabId === 'english_triangular_palisade_fort'),
-    'James Fort bulwarks are manned by gunners & sentries'
-  );
-
-  // 4. Verify mature Jamestown (1650 New Towne) and Plymouth Colony (1625) also use English timber architecture & zero palms
+  // Mature Jamestown (1650 New Towne) keeps the same forest.
   const jamestown1650 = generateProceduralCoastalPack({
     id: 'jamestown',
     year: 1650,
@@ -1650,10 +1405,6 @@ test('Jamestown (1610 & 1650) and Plymouth generate triangular timber palisade f
     albedoSize: 32,
     vegetationCandidates: 1200,
   });
-  const prefabs1650 = new Set(jamestown1650.port.instances.map((i) => i.prefabId));
-  assert.ok(prefabs1650.has('english_triangular_palisade_fort'));
-  assert.ok(prefabs1650.has('english_half_timber_hall'));
-  assert.ok(prefabs1650.has('english_timber_cottage'));
   assert.equal(jamestown1650.vegetation.stats.palmCount, 0);
 });
 
@@ -1728,11 +1479,10 @@ test('all LANDFALL_SCENARIOS, INDIGENOUS_VILLAGE_PRESETS, and post-smooth coastl
   }
 });
 
-test('Jamestown triangular fort encloses buildings with connected curtain walls, indigenous palisades connect posts, beaches are pocket-constrained, and fort soldiers/villagers walk smoothly', async () => {
+test('coastal provinces keep Jamestown\'s shore to marsh and bank, a work\'s garrison walks smoothly, and ship shaders keep parity', async () => {
   const { createFortGarrison, stepFortGarrison } = await import('../js/crew.js');
   const { CARAVEL } = await import('../js/wgsl/caravel.js');
 
-  // 1. Jamestown's triangular fort encloses the core buildings and emits connected curtain walls
   const jamestown = generateProceduralCoastalPack({
     id: 'jamestown',
     year: 1609,
@@ -1741,48 +1491,8 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
     albedoSize: 64,
     vegetationCandidates: 900,
   });
-  const fort = jamestown.port.instances.find((i) => i.prefabId === 'english_triangular_palisade_fort');
-  assert.ok(fort, 'Jamestown places english_triangular_palisade_fort');
-  assert.ok(fort.width >= 110 && fort.length >= 85, 'James Fort is large enough to surround the settlement');
 
-  const cosY = Math.cos(fort.yaw ?? 0);
-  const sinY = Math.sin(fort.yaw ?? 0);
-  const enclosedBuildings = jamestown.port.instances.filter((inst) => {
-    if (inst === fort || !['english_half_timber_hall', 'english_timber_cottage'].includes(inst.prefabId)) return false;
-    const dx = inst.x - fort.x;
-    const dz = inst.z - fort.z;
-    const lx = dx * cosY - dz * sinY;
-    const lz = dx * sinY + dz * cosY;
-    return Math.abs(lx) < fort.width * 0.42 && Math.abs(lz) < fort.length * 0.42;
-  });
-  assert.ok(enclosedBuildings.length >= 5, `James Fort encloses >= 5 settlement buildings (got ${enclosedBuildings.length})`);
-
-  const fortGeom = buildPortPrefabGeometry({ instances: [fort] });
-  const curtainGroup = fortGeom.groups.find((g) => g.partKey === 'triangular_palisade_curtains');
-  assert.ok(curtainGroup && curtainGroup.indexCount > 2400, 'Triangular fort emits solid curtain walls + banquette + closely spaced logs');
-
-  // 2. Indigenous palisade ring connects perimeter posts with solid timber walls and has zero grey cobble (kind 16) floor wedges
-  const palisadeRing = {
-    prefabId: 'indigenous_palisade_ring',
-    x: 0,
-    y: 3.0,
-    z: 0,
-    yaw: 0,
-    width: 24,
-    length: 24,
-    depth: 24,
-    height: 4.2,
-  };
-  const ringGeom = buildPortPrefabGeometry({ instances: [palisadeRing] });
-  let kind16Verts = 0;
-  for (let i = 0; i < ringGeom.vertices.length; i += 8) {
-    if (Math.round(ringGeom.vertices[i + 6]) === 16) kind16Verts++;
-  }
-  assert.equal(kind16Verts, 0, 'Indigenous palisade ring has no exposed grey stone/cobble wedge');
-  const ringStockade = ringGeom.groups.find((g) => g.partKey === 'palisade_stockade_posts');
-  assert.ok(ringStockade && ringStockade.indexCount > 1200, 'Indigenous palisade ring connects posts with continuous stockade walls');
-
-  // 3. Geographic coastal province & DEM wave-exposure beach synthesis (plus zero fake sand circles under graded building pads)
+  // 1. Geographic coastal province & DEM wave-exposure beach synthesis
   assert.equal(resolveGeographicCoastalProvince({ id: 'palos-huelva', latitude: 37.23, longitude: -6.89 }).province, 'barrier-strandplain');
   assert.equal(resolveGeographicCoastalProvince({ id: 'guanahani', latitude: 24.05, longitude: -74.53 }).province, 'carbonate-strand');
   assert.equal(resolveGeographicCoastalProvince({ id: 'jamestown', latitude: 37.21, longitude: -76.78 }).province, 'estuarine-riverine');
@@ -1792,7 +1502,6 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
   let gentleShoreCells = 0;
   let nonSandyShoreCells = 0;
   const m = jamestown.region.biomeSize;
-  const n = jamestown.region.size;
   for (let j = 0; j < m; j++) {
     const v = (j + 0.5) / m;
     const z = jamestown.region.z + (v - 0.5) * jamestown.region.span;
@@ -1811,38 +1520,16 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
     'Estuarine/riverine Jamestown shoreline is predominantly vegetated bank/marsh rather than continuous beach'
   );
 
-  // Verify graded building pads under terrestrial structures never receive fake beach sand in mesh vertices
-  for (const inst of jamestown.port.instances) {
-    if (inst.y <= 1.05 || inst.prefabId.includes('pier') || inst.prefabId.includes('landing')) continue;
-    const u = Math.max(0, Math.min(1, (inst.x - jamestown.region.x) / jamestown.region.span + 0.5));
-    const v = Math.max(0, Math.min(1, (inst.z - jamestown.region.z) / jamestown.region.span + 0.5));
-    const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
-    const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
-    const encodedSand = jamestown.mesh.vertices[(gj * n + gi) * 8 + 7];
-    assert.ok(encodedSand <= 0.05, `Building pad under ${inst.prefabId} must not turn into a circle of beach sand`);
-  }
-
-  // 4. Fort soldiers & villagers stand above parapets and walk smoothly with aligned world yaw
-  const cartagena = generateProceduralCoastalPack({
-    id: 'cartagena',
-    year: 1550,
-    size: 65,
-    biomeSize: 32,
-    albedoSize: 32,
-    vegetationCandidates: 300,
-  });
-  const garrison = createFortGarrison(cartagena.port);
-  const tower = cartagena.port.instances.find((i) => i.prefabId === 'torreon_atalaya_farol');
-  if (tower) {
-    const towerSoldiers = garrison.soldiers.filter((s) => s.building === tower);
-    assert.ok(towerSoldiers.length >= 1, 'the watchtower is manned');
-  }
+  // 2. The garrison of the works its board stands walks smoothly with aligned world yaw. Havana's board of 1600 stands
+  // armed works; this registers it for the rest of the file.
+  const garrison = createFortGarrison(boardPack('havana:1600').port);
+  assert.ok(garrison.soldiers.length > 0, 'Havana\'s works are manned');
   // Step garrison forward until patrol wait expires and verify smooth turning and walk distance progression
   for (const s of garrison.soldiers) s.wait = 0;
   stepFortGarrison(garrison, 0.05);
   assert.ok(garrison.soldiers.some((s) => s.walk > 0 && s.walkDistance > 0), 'Garrison soldiers advance walk cycle smoothly');
 
-  // 5. Ship WGSL shader parity for Pinta, Santa Maria, and procedural fleet
+  // 3. Ship WGSL shader parity for Pinta, Santa Maria, and procedural fleet
   assert.ok(CARAVEL.includes('let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;'));
   assert.ok(CARAVEL.includes('fn vesselPainted(material:u32)->bool {return material==20u || material==21u || material==23u || material==24u || material==26u;}'));
 });
@@ -1916,7 +1603,6 @@ test('Crow’s nest, masthead pennant, stern outlicker, yard parrels, and rear m
 
 test('Blender-audited architectural models feature per-vertex 3D AO gradients, smooth curved normals, PBR reflections, and multi-tier LOD', async () => {
   const { TERRAIN } = await import('../js/wgsl/terrain.js');
-  const { getBuildingParts } = await import('../js/coastal-world.js');
   // 1. Verify WGSL shader includes directional sky-hemisphere + bounce GI, mipmapped envCube reflections, GGX specular, leaded glass, and slope-aligned tejas
   assert.ok(TERRAIN.includes('reflect(-v,n)'), 'landFinish computes environment reflection vector');
   assert.ok(TERRAIN.includes('let specBRDF=(D*G*fresnelSun)'), 'landFinish computes physical GGX microfacet specular BRDF');
@@ -1929,9 +1615,9 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
   const branchBlock = TERRAIN.slice(TERRAIN.indexOf('var canopyBackscatter=0.0;'), TERRAIN.indexOf('let reliefX=dpdx(relief);'));
   assert.ok(!/dpdx|dpdy|fwidth/.test(branchBlock), 'No WGSL screen-space derivative calls inside non-uniform kind branches');
 
-  // 2. Verify Lisbon & colonial prefabs emit continuous per-vertex AO gradients and smooth curved normals on cylinders/domes
-  for (const prefab of ['torre_de_belem_manuelina', 'mosteiro_dos_jeronimos', 'se_patriarcal_de_lisboa', 'catedral_basilica', 'colonial_town_block']) {
-    const geom = getBuildingParts(prefab);
+  // 2. Verify the city's types emit continuous per-vertex AO gradients, and smooth curved normals on a round tower
+  for (const key of ['GUN_TOWER_ROUND', 'CHURCH_GREAT', 'CUSTOMHOUSE', 'HOUSE_EAVES']) {
+    const geom = buildType(CITY_TYPE[key]);
     const v = geom.vertices;
     const idx = geom.indices;
     let aoGradTris = 0;
@@ -1945,17 +1631,17 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
       if (Math.min(dot01, dot12) < 0.998) smoothNormTris++;
     }
     const totalTris = idx.length / 3;
-    assert.ok(aoGradTris > totalTris * 0.75, `${prefab} has per-vertex AO/shadow gradients on >75% of triangles (${aoGradTris}/${totalTris})`);
-    if (prefab !== 'colonial_town_block') {
-      assert.ok(smoothNormTris > 20, `${prefab} has smooth radial vertex normals on domes/turrets (${smoothNormTris} smooth tris)`);
+    assert.ok(aoGradTris > totalTris * 0.75, `${key} has per-vertex AO/shadow gradients on >75% of triangles (${aoGradTris}/${totalTris})`);
+    if (key === 'GUN_TOWER_ROUND') {
+      assert.ok(smoothNormTris > 20, `${key} has smooth radial vertex normals on its round shaft (${smoothNormTris} smooth tris)`);
     }
   }
 
-  // 3. Verify fort prefabs emit multi-faceted lathe-turned cast-iron cannons (kind 18) with smooth radial normals and dark hollow bores
+  // 3. Verify a work's iron gun emits lathe-turned cast-iron barrel and trunnions (kind 18) with smooth radial normals
   assert.ok(TERRAIN.includes('let bareIron=clamp('), 'landOpaque shades kind 18 as dark sand-cast ordnance iron');
   assert.ok(TERRAIN.includes('let isMetal=wet<-0.01;'), 'landFinish applies conductor Fresnel reflectance for cast-iron ordnance');
-  for (const fortPrefab of ['english_triangular_palisade_fort', 'torre_de_belem_manuelina']) {
-    const geom = getBuildingParts(fortPrefab);
+  {
+    const geom = buildType(cityGunType(1650));
     const v = geom.vertices;
     const idx = geom.indices;
     let castIronTris = 0;
@@ -1969,8 +1655,8 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
         if (Math.min(dot01, dot12) < 0.995) smoothCastIronTris++;
       }
     }
-    assert.ok(castIronTris >= 400, `${fortPrefab} emits lathe-turned cast-iron cannon barrels, trunnions & truck wheels (${castIronTris} tris)`);
-    assert.ok(smoothCastIronTris >= 250, `${fortPrefab} cannon barrels use smooth radial lathe normals (${smoothCastIronTris} smooth tris)`);
+    assert.ok(castIronTris >= 50, `the iron gun emits its lathe-turned barrel and trunnions (${castIronTris} tris)`);
+    assert.ok(smoothCastIronTris >= 30, `its barrel uses smooth radial lathe normals (${smoothCastIronTris} smooth tris)`);
   }
 });
 
@@ -2047,56 +1733,65 @@ test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototype
 
 // A port call is "Moor and go ashore" only where the ship that starts at the dock can get a line to a pier. Both
 // halves have failed apart: a berth too shoal is moved off by safeLandfallStart, and then the pier is out of reach.
+// The moles and quays are the port's waterfront, as its board laid it (js/board-waterfront.js).
 const DOCK_CARAVEL = { length: 20, beam: 6, hydrodynamics: { draft: 2.1 } };
 function dockBerthFault(label, port, views, heights, region) {
-  if (!port.instances.some((inst) => /jetty|pier|wharf|dock|quay|mole|slip/i.test(inst.prefabId))) return null;
+  if (!port.waterfront.some((w) => w.kind === 'pier' || w.kind === 'quay')) return null;
   const dock = views.dock;
   if (dock.moved) return `${label}: the dock start was moved off its berth (${port.dockBerth.x.toFixed(0)}, ${port.dockBerth.z.toFixed(0)})`;
   if (dock.depth < 3.1) return `${label}: ${dock.depth.toFixed(1)} m of water at the berth`;
   const again = safeLandfallStart(heights, { x: dock.x, z: dock.z, heading: dock.heading }, DOCK_CARAVEL, region);
   if (again.moved) return `${label}: the caravel does not float at her berth`;
-  const pier = findNearestPier({ x: dock.x, z: dock.z, heading: dock.heading, beam: 6 }, { portInstances: port.instances });
+  const pier = findNearestPier({ x: dock.x, z: dock.z, heading: dock.heading, beam: 6 }, { portWaterfront: port.waterfront });
   if (!pier) return `${label}: no pier within ${MOORING_LINE_REACH_M} m of the berth`;
   return null;
 }
 
-test('every shipped port berths the caravel afloat within a line of a pier, on its made-up coast', () => {
-  const ids = [...new Set([...Object.keys(SPANISH_MAIN_1550_REGIONS), ...HISTORICAL_COLONIAL_PORTS.map((p) => p.id)])];
+test('every port founded on its board berths the caravel afloat within a line of its waterfront', () => {
+  const familyOfKind = { quay: 'QUAY', pier: 'PIER', slipway: 'SLIPWAY', careening: 'CAREENING_SHED' };
   const faults = [];
-  let berthed = 0;
-  for (const id of ids) {
-    const known = Object.hasOwn(SPANISH_MAIN_1550_REGIONS, id);
-    const preset = known ? SPANISH_MAIN_1550_REGIONS[id] : HISTORICAL_COLONIAL_PORTS.find((p) => p.id === id);
-    // The year the game opens each at, and the mobile grid; the desktop one is twice as fine.
-    const year = known ? 1550 : preset.foundedYear > 1550 ? Math.min(1685, preset.foundedYear + 15) : 1550;
-    const pack = generateProceduralCoastalPack(known ? id : { ...preset, id, year }, { size: 257, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100 });
-    const fault = dockBerthFault(`${id} in ${year}`, pack.port, pack.views, pack.heights, pack.region);
+  let berthed = 0, lisbon = null;
+  for (const key of Object.keys(BAKED_BOARDS)) {
+    const pack = boardPack(key);
+    // Each waterfront record is drawn as the type of its kind.
+    for (const w of pack.port.waterfront) assert.equal(cityFamilyOf(w.type).key, familyOfKind[w.kind], `${key}: a ${w.kind} is drawn as its type`);
+    const fault = dockBerthFault(key, pack.port, pack.views, pack.heights, pack.region);
     if (fault) faults.push(fault);
-    if (pack.port.instances.some((inst) => inst.prefabId === 'timber_mole_pier')) berthed++;
+    if (pack.port.waterfront.some((w) => w.kind === 'pier' || w.kind === 'quay')) berthed++;
+    if (key === 'lisbon:1550') lisbon = pack;
   }
   assert.deepEqual(faults, []);
-  assert.ok(berthed >= 45, `only ${berthed} of ${ids.length} ports have a pier to berth at`);
+  assert.ok(berthed > 0, 'some board lays a quay or a mole to berth at');
+  // Lisbon's seat lays its quay along the river.
+  assert.ok(lisbon.port.waterfront.some((w) => w.seat && w.kind === 'quay'), 'Lisbon lays its quay');
 });
 
-test('the same holds on the real coasts kept for the forts, early and late', () => {
+test('the same holds on the real coasts kept for the forts, each on its board of 1550', () => {
   const folder = new URL('./data/harbours/', import.meta.url), faults = [];
+  let laid = 0;
   for (const file of fs.readdirSync(folder)) {
-    const id = file.replace('.bin.gz', '');
+    const id = file.replace('.bin.gz', ''), key = `${id}:1550`;
+    if (!BAKED_BOARDS[key]) continue;
+    registerBakedBoard(readBoard(key));
     const all = zlib.gunzipSync(fs.readFileSync(new URL(file, folder))), length = all.readUInt32LE(0), header = JSON.parse(all.subarray(4, 4 + length).toString());
     const words = new Int16Array(all.buffer.slice(all.byteOffset + 4 + length, all.byteOffset + all.length));
-    for (const year of [1550, 1650]) {
-      const region = resolveGlobalCoastalRegion({ id, year, size: header.size, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100, latitude: header.latitude, longitude: header.longitude, shoreBearing: header.shoreBearing });
-      const heights = new Float32Array(words.length);
-      for (let i = 0; i < words.length; i++) heights[i] = words[i] / 10;
-      // As finalizeProceduralCoastalPack does it.
-      smoothCoastlineAndForeshoreBeaches(heights, region, {});
-      const port = placeCoastalPort(region, heights, { preserveRealCoast: true, coastIsReal: true });
-      smoothCoastlineAndForeshoreBeaches(heights, region, { preservePortCore: port });
-      const fault = dockBerthFault(`${id} in ${year}`, port, createCoastalViews(region, heights, port), heights, region);
-      if (fault) faults.push(fault);
-    }
+    const region = resolveGlobalCoastalRegion({ id, year: 1550, size: header.size, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100, latitude: header.latitude, longitude: header.longitude, shoreBearing: header.shoreBearing });
+    const heights = new Float32Array(words.length);
+    for (let i = 0; i < words.length; i++) heights[i] = words[i] / 10;
+    // As finalizeProceduralCoastalPack does it.
+    smoothCoastlineAndForeshoreBeaches(heights, region, {});
+    const port = placeCoastalPort(region, heights, { coastIsReal: true });
+    smoothCoastlineAndForeshoreBeaches(heights, region, { preservePortCore: port });
+    // As dressProceduralCoastalPack does it: the board's country, then the port on its waterfront.
+    const country = oldWorldCountry(region, heights, port);
+    port.works = country?.works ?? [];
+    settlePortOnWaterfront(port, heights, region, country?.waterfront ?? []);
+    if (port.waterfront.length) laid++;
+    const fault = dockBerthFault(key, port, createCoastalViews(region, heights, port), heights, region);
+    if (fault) faults.push(fault);
   }
   assert.deepEqual(faults, []);
+  assert.ok(laid > 0, 'some harbour lays its waterfront');
 });
 
 // A straight shore with a pier, on the desktop grid's 16 m cells. `shape` raises or lowers the sea floor.
@@ -2109,7 +1804,7 @@ function pierOnAShore(shape) {
     heights[j * n + i] = shape(x - region.x, off, off <= 0 ? 2 : -Math.min(12, 1 + off * 0.2));
   }
   // The pier runs 68 m out from the shore; yaw 0 lays its length along z.
-  const pier = { prefabId: 'timber_mole_pier', x: region.x, z: region.z + 30, yaw: 0, width: 7.5, length: 68 };
+  const pier = { kind: 'pier', x: region.x, y: 0, z: region.z + 30, yaw: 0, width: 7.5, length: 68, deck: 2.15 };
   return { region, heights, pier, wanted: { x: region.x - 6, z: region.z + 90 } };
 }
 const dockStart = (heights, region, at) => safeLandfallStart(heights, { x: at.x, z: at.z, heading: 270 }, DOCK_CARAVEL, region);
@@ -2127,7 +1822,7 @@ test('a dock berth keeps its place in clear water, and leaves a spit or a shoal 
   const moved = settleDockBerth(spit.heights, spit.region, [spit.pier], spit.wanted);
   assert.notDeepEqual(moved, spit.wanted);
   assert.equal(dockStart(spit.heights, spit.region, moved).moved, false, 'she floats where the berth went');
-  assert.ok(findNearestPier({ ...moved, heading: 270, beam: 6 }, { portInstances: [spit.pier] }), 'with a line to the pier');
+  assert.ok(findNearestPier({ ...moved, heading: 270, beam: 6 }, { portWaterfront: [spit.pier] }), 'with a line to the pier');
   assert.deepEqual(spit.heights, before, 'and no ground was moved to do it');
 
   // A pier in the shallows: nowhere in reach floats her, so the mud is dredged and the land is left alone.
@@ -2135,7 +1830,7 @@ test('a dock berth keeps its place in clear water, and leaves a spit or a shoal 
   const untouched = new Float32Array(shoal.heights);
   const dredged = settleDockBerth(shoal.heights, shoal.region, [shoal.pier], shoal.wanted);
   assert.equal(dockStart(shoal.heights, shoal.region, dredged).moved, false, 'she floats in the dredged berth');
-  assert.ok(findNearestPier({ ...dredged, heading: 270, beam: 6 }, { portInstances: [shoal.pier] }));
+  assert.ok(findNearestPier({ ...dredged, heading: 270, beam: 6 }, { portWaterfront: [shoal.pier] }));
   let deepened = 0;
   for (let k = 0; k < untouched.length; k++) {
     if (untouched[k] > 0.25) assert.equal(shoal.heights[k], untouched[k], 'land is never dredged');
@@ -2215,7 +1910,7 @@ test('damage shading reads a building kind as a whole number, whatever turn or w
   const source = names.map((name) => `const ${name}=${TERRAIN.match(new RegExp(`let ${name}=([^;]+);`))[1]};`).join('').replace(/in\.kind\.x/g, 'k').replace(/\babs\(/g, 'Math.abs(');
   const shadedAs = new Function('k', `${source}return isAperture?'opening':isCastIron?'iron':isStoneRubble?'stone':'timber';`);
   const wanted = { 10: 'timber', 11: 'stone', 12: 'stone', 13: 'stone', 14: 'opening', 15: 'timber', 16: 'stone', 17: 'timber', 18: 'iron' };
-  // buildPortPrefabGeometry writes kind + 0.02 + (turn / pi) * 0.46, and across a glazed window 14.02 to 14.46.
+  // buildCityTypeGeometry writes kind + 0.02 + (turn / pi) * 0.46, and across a glazed window 14.02 to 14.46.
   for (const [kind, as] of Object.entries(wanted)) for (let step = 0; step <= 46; step++) {
     const k = Number(kind) + 0.02 + step * 0.01;
     assert.equal(shadedAs(k), as, `kind ${k.toFixed(2)}, a building turned ${Math.round((step / 46) * 180)} degrees`);
@@ -2226,9 +1921,9 @@ test('damage shading reads a building kind as a whole number, whatever turn or w
   assert.equal(new Set(offsets).size, 3);
 });
 
-test('an opening is one thing on every face: a fort gate is dark all round, and a window glazed all round', () => {
-  const pack = generateProceduralCoastalPack('lisbon', { size: 257, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100 });
-  const geometry = pack.portGeometry ?? buildPortPrefabGeometry(pack.port);
+test('an opening is one thing on every face: an arched portal is dark all round, and a window glazed all round', () => {
+  // The customhouse's builder draws both: its arcade's arches (dark portals) and its facade bays' windows.
+  const geometry = buildType(CITY_TYPE.CUSTOMHOUSE);
   const openings = (group) => {
     const shades = [];
     for (let i = group.firstIndex; i < group.firstIndex + group.indexCount; i++) {
@@ -2237,15 +1932,15 @@ test('an opening is one thing on every face: a fort gate is dark all round, and 
     }
     return shades;
   };
-  const gates = geometry.groups.filter((group) => group.partKey === 'fort_gate');
-  assert.ok(gates.length >= 2, `${gates.length} fort gates at Lisbon`);
-  for (const gate of gates) {
-    const shades = openings(gate);
-    assert.ok(shades.length >= 20, 'the gate has its opening');
+  const portals = geometry.groups.filter((group) => group.partKey === 'arch_vault');
+  assert.ok(portals.length >= 2, `${portals.length} arched portals in the customhouse`);
+  for (const portal of portals) {
+    const shades = openings(portal);
+    assert.ok(shades.length >= 20, 'the arch has its opening');
     // The terrain shader glazes whatever of kind 14 is lit above a quarter.
-    assert.deepEqual(shades.filter((shade) => shade > 0.25), [], `${gate.id}: no face of the gateway is glass`);
+    assert.deepEqual(shades.filter((shade) => shade > 0.25), [], `${portal.id}: no face of the portal is glass`);
   }
   const windows = geometry.groups.filter((group) => /window/.test(group.partKey)).map(openings).filter((shades) => shades.length);
-  assert.ok(windows.length > 10, `${windows.length} window parts`);
+  assert.ok(windows.length >= 4, `${windows.length} window parts`);
   for (const shades of windows) assert.ok(shades.every((shade) => shade > 0.25), 'every face of a window is glazed');
 });

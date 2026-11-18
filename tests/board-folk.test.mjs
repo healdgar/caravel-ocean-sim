@@ -117,33 +117,34 @@ test('the model\'s plan becomes ways and walkers the GPU walks, each one a soul'
 });
 
 test('a way the model laid through one of the port\'s own buildings is walked only in the open', () => {
-  // A hall across the first street, forty to fifty-six metres along it, and a pier, which is walked on.
-  const port = { instances: [
-    { prefabId: 'great_hall', x: 1048, z: 2000, width: 16, length: 30, yaw: 0 },
-    { prefabId: 'timber_mole_pier', x: 1010, z: 2000, y: 0, height: 2, width: 8, length: 40, yaw: 0 },
+  // A careening shed of the waterfront across the first street, forty to fifty-six metres along it, and a mole, which
+  // is walked on (records as js/board-waterfront.js lays them).
+  const port = { waterfront: [
+    { kind: 'careening', x: 1048, y: 0, z: 2000, width: 16, length: 30, yaw: 0, deck: null },
+    { kind: 'pier', x: 1010, y: 0, z: 2000, width: 8, length: 40, yaw: 0, deck: 2.15 },
   ] };
   const blocked = townSolids(port);
   assert.equal(blocked(1048, 2000), true); assert.equal(blocked(1048, 2014), true); assert.equal(blocked(1048, 2017), false);
   assert.equal(blocked(1039, 2000), false, 'clear of its wall'); assert.equal(blocked(1010, 2000), false, 'a pier is no wall');
   assert.equal(blocked(3000, 3000), false);
   // Turned a quarter, its long side lies along the street.
-  const turned = townSolids({ instances: [{ ...port.instances[0], yaw: Math.PI / 2 }] });
+  const turned = townSolids({ waterfront: [{ ...port.waterfront[0], yaw: Math.PI / 2 }] });
   assert.equal(turned(1062, 2000), true); assert.equal(turned(1048, 2014), false);
 
   const heightAt = () => 2, origin = { x: 1000, z: 2000 };
   const walk = (route, more = {}) => boardFolkStreets({ plan: plan([person(21, { route, ...more })]), origin, heightAt, blocked });
-  // Door to hall: thirty-nine metres in the open, then in at its wall. They do not stand about in the open there.
+  // Door to shed: thirty-nine metres in the open, then in at its wall. They do not stand about in the open there.
   const near = walk([0, 0, 80, 0], { open: true });
   assert.equal(near.folk.cut, 1); assert.equal(near.people, 1);
   const count = new Uint32Array(near.walkers.buffer)[1], last = near.samples[(count - 1) * 4];
   assert.ok(last < 1039.3 && last > 1037.9, `the walk ends at ${last}`); assert.equal(near.samples[0], 1000);
   assert.equal(near.walkers[8], (count - 1) * ROUTE_STEP_M); assert.equal(new Uint32Array(near.walkers.buffer)[11] & 4, 0);
   for (let k = 0; k < count; k++) assert.equal(blocked(near.samples[k * 4], near.samples[k * 4 + 2]), false);
-  // A long way beyond it: the far side is the longer walk, so they come out of the hall and go on.
+  // A long way beyond it: the far side is the longer walk, so they come out of the shed and go on.
   const far = walk([0, 0, 300, 0], { open: true }), farWords = new Uint32Array(far.walkers.buffer);
   assert.ok(far.samples[0] > 1056.7 && far.samples[0] < 1058.1, `the walk begins at ${far.samples[0]}`);
   assert.equal(far.samples[(farWords[1] - 1) * 4], 1300); assert.equal(farWords[11] & 4, 4, 'and it reaches the open work');
-  // A child whose door is behind the hall is not left standing at its wall.
+  // A child whose door is behind the shed is not left standing at its wall.
   const child = walk([0, 0, 300, 0], { goal: 'play', age: 8 });
   assert.equal(new Uint32Array(child.walkers.buffer)[11] & 6, 4);
   // A way wholly within it is not walked at all, and is counted.

@@ -7,7 +7,7 @@ import vm from 'node:vm';
 
 import { BAKED_BOARDS, BAKED_WORLDS, boardGroundFits, boardPrefix } from '../js/board-model.js';
 import { oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
-import { buildPortPrefabGeometry } from '../js/coastal-world.js';
+import { buildCityTypeGeometry } from '../js/coastal-world.js';
 import { layTownStreets } from '../js/town-streets.js';
 import { terrainSurfaceSample } from '../js/terrain-model.js';
 import { CITY_TYPED_FLOATS, compileCityBuildingTypes } from '../js/old-world-buildings.js';
@@ -255,7 +255,7 @@ test('stone and timber bridges are cannon-destructible, let walkers cross, float
     assert.ok(Array.isArray(b.cityIndices) && b.cityIndices.length > 0, `bridge carries cityIndices`);
   }
 
-  const compiledTypes = compileCityBuildingTypes(buildPortPrefabGeometry);
+  const compiledTypes = compileCityBuildingTypes(buildCityTypeGeometry);
   const targets = createCityTargets({ city: country.plan, types: (id) => compiledTypes[id], port });
 
   const b0 = country.bridges.find((b) => !b.isStone) ?? country.bridges[0];

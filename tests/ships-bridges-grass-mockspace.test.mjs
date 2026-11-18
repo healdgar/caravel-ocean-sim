@@ -3,7 +3,7 @@
 // 1. Ship quality parity across all playable ships and trade-vessel archetypes
 // 2. Road-aligned bridges, level multi-arch STONE_BRIDGE_SPAN decks, approach paving & street parapet/portal rules
 // 3. Meadow grass on the one continuum (4 m patches cut by projected error, a 4–6 triangle core, terrain bindings)
-// 4. Lightweight physical GPU mocked space (8192 m sections & 1024 m frontier parcels) and first-time generation on entry
+// 4. Lightweight physical GPU mocked space: a neighbour section stays a mock shell until it is entered
 
 import assert from 'node:assert/strict';
 import { SHIP_CONTINUUM_BODIES } from '../js/ship-continuum.js';
@@ -13,9 +13,7 @@ import { test } from 'node:test';
 import { BAKED_BOARDS } from '../js/board-model.js';
 import {
   buildMockCoastalSection,
-  buildPortPrefabGeometry,
   generateProceduralCoastalPack,
-  growFrontierParcel,
 } from '../js/coastal-world.js';
 import { MEADOW_CONTINUUM_SPEC, meadowContinuumStandWGSL } from '../js/wgsl/meadow-continuum.js';
 import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
@@ -29,15 +27,12 @@ import {
 import {
   CITY_TYPE,
   CITY_TYPED_FLOATS,
-  CITY_TYPED_ROOF,
   CITY_TYPES_BRIDGES,
   cityFamilyOf,
   cityTypeTarget,
 } from '../js/old-world-buildings.js';
-import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
 import { SHIP_MODELS } from '../js/ship-models.js';
-import { layTownStreets } from '../js/town-streets.js';
 import { inspectTradeVesselArchetypes } from '../js/trade-vessels.js';
 
 function upsampleSurvey(survey, targetN = 129) {
@@ -96,7 +91,7 @@ test('ship quality parity across all playable ship hulls and trade-vessel archet
   }
 });
 
-test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp approach paving, and respect street portals', () => {
+test('bridges align with road direction, use level STONE_BRIDGE_SPAN, and stamp approach paving', () => {
   assert.ok(CITY_TYPES_BRIDGES.has(CITY_TYPE.STONE_BRIDGE_SPAN), 'STONE_BRIDGE_SPAN must be registered in CITY_TYPES_BRIDGES');
   assert.equal(cityTypeTarget(CITY_TYPE.STONE_BRIDGE_SPAN)?.prefabId, 'city_stone_bridge');
   // The span is baked into the city continuum like every type, so it is drawn as itself at every distance.
@@ -178,54 +173,6 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp appr
   }
   assert.ok(country.plan.paving.length >= 2, 'expected bridge approach paving stretches at both ends');
 
-  // Verify layTownStreets uses axial end portals on stone_arch_bridge and blocks side parapets
-  const brYaw = 0.35;
-  const ax = Math.sin(brYaw), az = Math.cos(brYaw);
-  const brLen = 28, brWidth = 8.8, brDeckHalfW = brWidth * 0.5 - 1.05;
-  const streetPort = {
-    center: { x: 0, z: 0 },
-    clearRadius: 80,
-    instances: [
-      { prefabId: 'stone_arch_bridge', x: 0, y: 8.4, z: 0, yaw: brYaw, width: brWidth, length: brLen, deckHalfWidth: brDeckHalfW },
-      { prefabId: 'merchant_house', x: ax * 26, y: 8, z: az * 26, yaw: brYaw, width: 10, length: 10 },
-      { prefabId: 'tavern_inn', x: -ax * 26, y: 8, z: -az * 26, yaw: brYaw, width: 10, length: 10 },
-    ],
-  };
-  const streets = layTownStreets(streetPort, () => 8, { suppressSyntheticCountryRoads: true });
-  assert.ok(streets && streets.stats.stranded === 0, 'both bridge bank buildings must connect cleanly');
-  const c = Math.cos(brYaw), s = Math.sin(brYaw);
-  let onDeckCount = 0;
-  for (let i = 0; i + 3 < streets.samples.length; i += 4) {
-    const sx = streets.samples[i], sz = streets.samples[i + 2];
-    const lx = sx * c - sz * s;
-    const lz = sx * s + sz * c;
-    if (Math.abs(lz) <= brLen * 0.5 - 2.0 && Math.abs(lx) <= brWidth * 0.5) {
-      assert.ok(Math.abs(lx) <= brDeckHalfW + 0.65, `street route walked onto bridge parapet (lx=${lx.toFixed(2)})`);
-      onDeckCount++;
-    }
-  }
-  assert.ok(onDeckCount > 0, 'expected street routes to cross over the stone_arch_bridge deck');
-
-  // Verify stone_arch_bridge emits sloped brick/cobble abutment ramps at both ends
-  const brGeom = buildPortPrefabGeometry({
-    instances: [{
-      prefabId: 'stone_arch_bridge',
-      x: 0,
-      y: 2.2,
-      z: 0,
-      yaw: 0,
-      width: 9.6,
-      length: 30,
-      height: 4.5,
-      foundationDepth: 6.5,
-      bankYNeg: 2.3,
-      bankYPos: 2.4,
-    }],
-  });
-  assert.ok(
-    brGeom.groups.some((g) => g.partKey === 'bridge_approach_ramp'),
-    'stone_arch_bridge must emit bridge_approach_ramp groups at both ends'
-  );
   assert.match(fs.readFileSync('js/forest-groves.js', 'utf8'), /export function forestGroveStamp[\s\S]*?region\.size/, 'a grove is planted again when its section is resized');
 });
 
@@ -258,52 +205,16 @@ test('meadow grass is one continuum atlas cut on the GPU: clusters, the box of i
   assert.equal(reqBlock.includes('Promise.all'), false, 'requestMeadowStand must compile pipelines sequentially to avoid D3D12 PSO OOM');
 });
 
-test('ungrown frontier parcels & neighbor sections stay mocked until player entry, then grow once on first entry', () => {
+test('neighbour sections stay mocked until player entry, as light physical GPU shells', () => {
   const baked = JSON.parse(fs.readFileSync(BAKED_BOARDS['lisbon:1550'], 'utf8'));
   const region = { ...baked.region, size: 129, biomeSize: 128, albedoSize: 256, year: 1550 };
   const heights = upsampleSurvey(baked.survey, region.size);
   registerBakedBoard(baked);
 
   const pack = generateProceduralCoastalPack(region, {}, heights);
-  assert.ok(Array.isArray(pack.frontierParcels) && pack.frontierParcels.length === 64, 'expected 8x8 = 64 frontier parcels');
-
-  const mockedParcels = pack.frontierParcels.filter((p) => p.state === 'mocked');
-  const grownParcels = pack.frontierParcels.filter((p) => p.state === 'grown');
-  assert.ok(mockedParcels.length > 0 && grownParcels.length > 0, 'expected both mocked outer parcels and grown settlement parcels');
-
-  const target = mockedParcels[0];
-  assert.equal(target.generationCount, 0);
-  assert.ok(target.mockCity && target.mockCity.typedTypes.length > 0, 'mocked parcel must carry physical Cairn marker geometry');
-  assertAllFinite(pack.city.blocks, 'mocked pack.city.blocks');
-  assertAllFinite(pack.city.typed, 'mocked pack.city.typed');
-  assert.ok(pack.city.typedTypes instanceof Uint32Array, 'mocked pack.city.typedTypes must be Uint32Array for the city continuum cut groups');
-  const prevTypedCount = pack.city.typedCount;
-
-  // First entry triggers generation ('mocked' -> 'grown', generationCount === 1)
-  const firstGrow = growFrontierParcel(pack, target, pack.heights);
-  assert.equal(firstGrow, true);
-  assert.equal(target.state, 'grown');
-  assert.equal(target.generationCount, 1);
-  assert.equal(target.mockCity, null);
-  assert.ok(target.grownCity?.typedTypes?.length > 0, 'grown parcel must populate physical rural structures');
-  assert.ok(pack.city.typedCount >= prevTypedCount, 'pack.city typedCount must include grown parcel geometry');
-  assertAllFinite(pack.city.blocks, 'grown pack.city.blocks');
-  assertAllFinite(pack.city.typed, 'grown pack.city.typed');
-  assert.ok(pack.city.typedTypes instanceof Uint32Array, 'grown pack.city.typedTypes must be Uint32Array');
-  assert.ok(target.grownCity.typedTypes instanceof Uint32Array, 'target.grownCity.typedTypes must be Uint32Array');
-  assertAllFinite(target.grownCity.blocks, 'target.grownCity.blocks');
-  for (let b = 0; b < target.grownCity.blocks.length; b += CITY_BLOCK_FLOATS) {
-    assert.equal(
-      Math.round(target.grownCity.blocks[b + 8]) & CITY_TYPED_ROOF,
-      CITY_TYPED_ROOF,
-      `grown block at ${b} missing CITY_TYPED_ROOF`
-    );
-  }
-
-  // Re-entry must be idempotent (never regenerates)
-  const secondGrow = growFrontierParcel(pack, target, pack.heights);
-  assert.equal(secondGrow, false);
-  assert.equal(target.generationCount, 1);
+  assertAllFinite(pack.city.blocks, 'pack.city.blocks');
+  assertAllFinite(pack.city.typed, 'pack.city.typed');
+  assert.ok(pack.city.typedTypes instanceof Uint32Array, 'pack.city.typedTypes must be Uint32Array for the city continuum cut groups');
 
   // Neighbor section mock shell uses lightweight physical GPU geometry & zero-count mock state (inland north of Lisbon)
   const mockSec = buildMockCoastalSection(pack, 0, -1);

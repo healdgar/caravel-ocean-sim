@@ -163,8 +163,9 @@ test('a ball among people strikes those it reaches and frightens those near, and
     const out=placed.map(reachOf).filter(beyond=>beyond>4);
     assert.deepEqual(out,[],'each who reacted was in reach of what they reacted to, give or take the width of their way');
 
-    // Sampled while it settles: nobody who runs stands in the sea or deep in a building.
-    const solid=await page.evaluate(()=>oceanProps.port.instances.filter(i=>!['timber_mole_pier','stone_quay_seawall','stone_arch_bridge','indigenous_palisade_ring','english_triangular_palisade_fort'].includes(i.prefabId)).map(i=>({x:i.x,z:i.z,yaw:i.yaw??0,w:i.width,l:i.length,id:i.prefabId})));
+    // Sampled while it settles: nobody who runs stands in the sea or deep in a building of the waterfront that is no
+    // deck to walk (js/town-streets.js townSolids: a slipway or careening shed, not a mole or quay).
+    const solid=await page.evaluate(()=>(oceanProps.port.waterfront??[]).filter(w=>w.deck==null).map(w=>({x:w.x,z:w.z,yaw:w.yaw??0,w:w.width,l:w.length,id:w.kind})));
     const inside=({x,z})=>solid.find(i=>{const dx=x-i.x,dz=z-i.z,c=Math.cos(i.yaw),s=Math.sin(i.yaw),lx=dx*c-dz*s,lz=dx*s+dz*c;return Math.abs(lx)<i.w/2-3&&Math.abs(lz)<i.l/2-3;});
     let runnersSeen=0;
     for(let second=0;second<40;second++){
@@ -218,18 +219,29 @@ test('a ball among people strikes those it reaches and frightens those near, and
     assert.equal(dayOn.records,1,'the same record of them');
     for(const was of struck)assert.equal(dayOn.fates[was.i].mode,TOWN_ABOUT,'a day on, no longer lying there');
 
-    // A building hit often enough comes down, and the people get word of it from where it falls.
+    // A building hit often enough comes down, and the people get word of it from where it falls. It is the house of the
+    // city nearest the street, which joins the port at the first ball that meets it (js/city-targets.js).
     const fell=await page.evaluate(async({eye,spot})=>{
-      const port=oceanProps.port,target=[...port.instances].filter(i=>!/pier|quay|bridge/.test(i.prefabId)).sort((a,b)=>Math.hypot(a.x-spot.x,a.z-spot.z)-Math.hypot(b.x-spot.x,b.z-spot.z))[0];
+      const {CITY_BUILDING_TYPES,CITY_TYPED_FLOATS:F,cityTypeTarget}=await import('/js/old-world-buildings.js');
+      const port=oceanProps.port,{typed,typedTypes,typedCount}=oceanLand.pack.city;
+      let house=-1,nearest=Infinity;
+      for(let i=0;i<typedCount;i++){
+        if(cityTypeTarget(typedTypes[i]).prefabId!=='city_house'||CITY_BUILDING_TYPES[typedTypes[i]].height<6)continue;
+        const d=Math.hypot(typed[i*F]-spot.x,typed[i*F+2]-spot.z);
+        if(d<nearest){nearest=d;house=i;}
+      }
+      if(house<0)return {hits:undefined,broken:undefined,shots:[]};
+      const o=house*F,target={x:typed[o],y:typed[o+1],z:typed[o+2],height:CITY_BUILDING_TYPES[typedTypes[house]].height};
+      const damage=()=>port.instances.find(i=>i.city?.index===house)?.damageState;
       const from=[target.x+(eye[0]-target.x)*.7,eye[1],target.z+(eye[2]-target.z)*.7];
       townShots.length=0;
       for(let round=0;round<40;round++){
-        const aim=[target.x-from[0],(target.baseY??target.y??spot.y)+Math.min(4,(target.height??8)*.4)-from[1],target.z-from[2]],n=Math.hypot(...aim);
+        const aim=[target.x-from[0],target.y+Math.min(4,target.height*.4)-from[1],target.z-from[2]],n=Math.hypot(...aim);
         oceanFreeCannon.update(1/60,{firing:true,eye:from,forward:aim.map(v=>v/n),wind:[0,0,0]});
         await new Promise(resolve=>setTimeout(resolve,1100));
-        if(townShots.some(s=>s.strike===0&&s.blast>=3&&s.reach>=28))return {hits:target.damageState?.hits,broken:target.damageState?.fracture?.brokenCount,shots:townShots.filter(s=>s.strike===0&&s.blast>=3)};
+        if(townShots.some(s=>s.strike===0&&s.blast>=3&&s.reach>=28))return {hits:damage()?.hits,broken:damage()?.fracture?.brokenCount,shots:townShots.filter(s=>s.strike===0&&s.blast>=3)};
       }
-      return {hits:target.damageState?.hits,broken:target.damageState?.fracture?.brokenCount,shots:[]};
+      return {hits:damage()?.hits,broken:damage()?.fracture?.brokenCount,shots:[]};
     },{eye,spot:street});
     assert.ok(fell.shots.length>=1,`nothing came down in ${JSON.stringify(fell)}`);
     assert.deepEqual(errors,[]);

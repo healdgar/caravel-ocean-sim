@@ -16,6 +16,7 @@ import { generateProceduralCoastalPack } from '../js/coastal-world.js';
 import { registerBakedBoard } from '../js/old-world.js';
 import { createInlandWaterSampler } from '../js/inland-water.js';
 import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
+import { CITY_TYPED_FLOATS, CITY_TYPES_WATERSIDE, cityFamilyOf } from '../js/old-world-buildings.js';
 import { terrainSurfaceSample } from '../js/terrain-model.js';
 import { GROUND_DETAIL_RENDER } from '../js/wgsl/ground-detail.js';
 import { buildMeadowCoverMap } from '../js/meadow-grass.js';
@@ -28,7 +29,6 @@ import {
   inspectTradeVesselArchetypes,
 } from '../js/trade-vessels.js';
 import { SHIP_CONTINUUM_BODIES } from '../js/ship-continuum.js';
-import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
 
 function upsampleSurvey(survey, targetN = 257) {
   const sN = Math.round(Math.sqrt(survey.length));
@@ -119,7 +119,8 @@ test('Lisbon waterfront is procedurally derived with zero isLisbonRoyalDock and 
 
   const pack = generateProceduralCoastalPack(region, {}, heights);
   assert.ok(pack.port?.country?.board, 'Lisbon pack missing canonical board');
-  assert.ok(pack.port.instances.length >= 16, `expected >=16 derived metropole port buildings, got ${pack.port.instances.length}`);
+  // Its waterfront and works are its board's, stood as types of the city (js/board-waterfront.js, js/fort-plan.js).
+  assert.ok(pack.port.waterfront.length > 0, 'Lisbon lays its waterfront from its board');
   assert.ok((pack.port.country.bridges?.length ?? 0) >= 1, 'expected >=1 derived stone_arch_bridge across rivers');
 
   // Verify bridges stay perpendicular to river tangent
@@ -127,16 +128,18 @@ test('Lisbon waterfront is procedurally derived with zero isLisbonRoyalDock and 
     assert.ok(Number.isFinite(br.ux) && Number.isFinite(br.uz));
   }
 
-  // Zero port buildings inside inland river channels (excluding bridges/quays/piers)
+  // Zero port buildings inside inland river channels (excluding the waterside types: bridges, quays, piers, wharves, mills)
   const riverWater = createInlandWaterSampler(pack.port.country, { margin: 1.5 });
   assert.ok(riverWater, 'expected inland river sampler on Lisbon country');
-  const exemptKinds = new Set(['stone_arch_bridge', 'harbor_quay', 'quay_wall', 'timber_pier', 'stone_jetty', 'crane']);
-  const portHits = [];
-  for (const inst of pack.port.instances) {
-    if (exemptKinds.has(inst.prefabId)) continue;
-    if (riverWater(inst.x, inst.z)) portHits.push(`${inst.prefabId}@(${inst.x.toFixed(1)},${inst.z.toFixed(1)})`);
+  const PORT_FAMILIES = new Set(['SLIPWAY', 'CAREENING_SHED', 'CUSTOMHOUSE', 'ARSENAL', 'WAREHOUSE', 'BATTERY', 'CORNER_BASTION', 'GUN_TOWER_ROUND', 'GUN_TOWER_SQUARE', 'WATCHTOWER']);
+  const typed = pack.city.typed, typedTypes = pack.city.typedTypes, portHits = [];
+  for (let i = 0; i < typedTypes.length; i++) {
+    const type = typedTypes[i], key = cityFamilyOf(type).key;
+    if (CITY_TYPES_WATERSIDE.has(type) || !PORT_FAMILIES.has(key)) continue;
+    const x = typed[i * CITY_TYPED_FLOATS], z = typed[i * CITY_TYPED_FLOATS + 2];
+    if (riverWater(x, z)) portHits.push(`${key}@(${x.toFixed(1)},${z.toFixed(1)})`);
   }
-  assert.deepEqual(portHits, [], `port prefabs inside river channels: ${portHits.join(', ')}`);
+  assert.deepEqual(portHits, [], `port buildings inside river channels: ${portHits.join(', ')}`);
 
   // Zero city building blocks inside river channels
   const cityHits = [];
