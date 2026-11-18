@@ -6,6 +6,7 @@
 // A type's local frame is the plan's: x along the street, z away from it, the street front at
 // -z, the floor at y = 0. Its width, length and height are what an instance is scaled from.
 import { CITY_WORKS, CITY_WORKS_BUILT } from './old-world-works.js';
+import { NATIVE_WORKS_TARGETS } from './native-works.js';
 
 export const CITY_STOREY_M = 2.9;
 const FOOTING_M = 6.5; // Walls run this far below the floor, so a house on a slope has no gap under it.
@@ -419,7 +420,7 @@ export const CITY_BUILDING_TYPES = Object.freeze([
 const H = CITY_HOUSE_STOREYS, AFTER_HOUSES = CITY_HOUSE_TYPES;
 export const CITY_TYPE = Object.freeze({ HOUSE_EAVES: 0, HOUSE_GABLE: H, CHURCH_LEFT: AFTER_HOUSES, CHURCH_RIGHT: AFTER_HOUSES + 1, CHURCH_GREAT: AFTER_HOUSES + 2, WALL_TOWER: AFTER_HOUSES + 3, KEEP: AFTER_HOUSES + 4, GATE: AFTER_HOUSES + 5, CURTAIN_SHORT: AFTER_HOUSES + 6, CURTAIN_LONG: AFTER_HOUSES + 7, HALL: AFTER_HOUSES + 8,
   PENTICE: AFTER_HOUSES + 9, SIGN: AFTER_HOUSES + 10, ALE_STAKE: AFTER_HOUSES + 11, STALL: AFTER_HOUSES + 12, MARKET_CROSS: AFTER_HOUSES + 13, WELL: AFTER_HOUSES + 14,
-  // The model's other works, by their names there: WINDMILL to RUBBLE stand on footings; FENCE_RAIL and after are the slighter things.
+  // The model's other works, by their names there: WINDMILL to RUBBLE, then the native houses BARK_LONGHOUSE to SWEAT_LODGE, stand on footings; FENCE_RAIL and after (to PALISADE) are the slighter things.
   ...Object.fromEntries(CITY_WORKS.map(([key], k) => [key, AFTER_HOUSES + 15 + k])) });
 // The first of the slighter works: from here on a type is written as large as it is, and asked for no footing.
 export const CITY_TYPE_SLIGHT_FROM = AFTER_HOUSES + 15 + CITY_WORKS_BUILT;
@@ -443,6 +444,7 @@ const CITY_WORKS_TARGETS = Object.freeze({
   RUIN: { prefabId: 'city_ruin', label: 'Ruin' }, RUBBLE: { prefabId: 'city_rubble', label: 'Rubble' }, FENCE_RAIL: { prefabId: 'city_fence', label: 'Fence' }, FENCE_STONE: { prefabId: 'city_fence', label: 'Dry-stone wall' },
   FOOTBRIDGE: { prefabId: 'city_timber_bridge', label: 'Timber bridge' }, STONE_BRIDGE: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, STONE_BRIDGE_SPAN: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, GRAVES: { prefabId: 'city_graves', label: 'Graves' },
   CAIRN: { prefabId: 'city_cairn', label: 'Cairn' }, TENT: { prefabId: 'city_tent', label: 'Tent' }, STANDARD: { prefabId: 'city_standard', label: 'Standard' }, SCAFFOLD: { prefabId: 'city_scaffold', label: 'Scaffold' },
+  ...NATIVE_WORKS_TARGETS,
 });
 export function cityTypeTarget(type) {
   if (type < AFTER_HOUSES) return { prefabId: 'city_house', label: 'Town house' };

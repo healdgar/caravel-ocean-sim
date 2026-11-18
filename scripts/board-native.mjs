@@ -44,6 +44,7 @@ const AMERICAS = String.raw`
               Old World's; hair: weights of dark, brown, fair and red
      womenTill  women work the fields in spring and summer; beasts, fences, mills, castle, church, strips: false where
               its people keep no herds, hedge no fields, raise no mill, castle or church, and plough no strips;
+              farPorts: false where no far port's ships call at its harbours (its trade goes by its own boats);
               emblems: the charges (CHARGES) its great houses bear
      titles   {monarch:[his, hers], head:[his, hers]} the words for a paramount and for the head of a great house
      court    the words for the court's priest and for its other councillors; trades: the work of its people, by weight
@@ -110,7 +111,7 @@ const AMERICAS_PEOPLES={
 for(const[k,c]of Object.entries(AMERICAS_PEOPLES)){ // what every tongue has: those the record does not give are their people's own customs
   // drawn:false: spoken where a real map's region speaks it, never drawn by lot for a made-up realm (CULT_DRAWN)
   Object.assign(c,{drawn:false,neu:['*'],house:p=>p,castle:p=>p,saints:[],church:(S,p)=>p,inns:[],trade:{}});
-  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false,
+  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false,farPorts:false,
     emblems:['stag','wave','oak','wolf','comet','sun','crescent','fish','raven','flame']}); // no tower, key, crown, sword, rose or anchor
   CULT[k]=c;KIN[k]={pre:/^(?!)/,suf:null,man:g=>g};
   // no surnames: a household is known by its clan where the record names the clans, else by its town; a man by his kin
@@ -269,6 +270,8 @@ export const BOARD_NATIVE = Object.freeze([
     "crossing:['carter','boatman']}[s.role];if(role&&!waysOf(s))t.push("),
   after('No hedge or fence round its fields.', 'const fenceWorked=f=>f&&f.dom>=0&&', 'waysOf(W.settlements[f.dom])?.fences!==false&&'),
   before('No herds.', "herdSync(s); // the month's calves, losses, sales and slaughter shared among the owners", 'if(waysOf(s)?.beasts===false)return;'),
+  instead('No far port\'s ships call where its people\'s ways have none.', 'for(let si=0;si<W.settlements.length;si++){const s=W.settlements[si];if(!s.harbor||closedToTrade(s))continue;',
+    'for(let si=0;si<W.settlements.length;si++){const s=W.settlements[si];if(!s.harbor||closedToTrade(s)||waysOf(s)?.farPorts===false)continue;'),
   after('No castle is founded among them.', 'function castleFoundationAuthority(s,hi=s.owner){', 'if(waysOf(s)?.castle===false)return false;'),
   after('No parish church or friary.', "function institutionParishProposal(s,kind='parish'){", 'if(waysOf(s)?.church===false)return null;'),
   instead('The women work the fields in spring and summer, as among these peoples.', "(p.sx==='f'&&s.kind==='village'&&(season===1||season===2))",

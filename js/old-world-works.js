@@ -8,6 +8,8 @@
 // x along the street, z back from it, the street front at -z, the floor at y = 0. What is 'stucco' in a type takes
 // the instance's wash or paint (js/wgsl/terrain.js). The builder lays a plinth of its own under any type that names
 // none, so each names what it stands on.
+import { NATIVE_SLIGHT_WORKS, NATIVE_WORKS } from './native-works.js';
+
 const WORKS_FOOT_M = 6.5;
 const worksSpec = (name, width, length, height, materialKind, primitives, foundationDepth = WORKS_FOOT_M) => ({ schemaVersion: '0.4', name, width, length, height, foundationDepth, materialKind, roofPitch: 2, waterfront: false, primitives });
 const worksBox = (name, from, to, material, more = {}) => ({ primitive: 'box', name, from, to, material, ...more });
@@ -415,11 +417,16 @@ const WORKS_SCAFFOLD = worksSpec('Andaime (a work in hand: scaffold, stone and t
 ], 0.8);
 
 // The works in the order their numbers follow the street's: what stands on a footing as a house does, then the
-// slighter things. `key` is each one's name in CITY_TYPE.
-export const CITY_WORKS = Object.freeze([
+// slighter things. `key` is each one's name in CITY_TYPE. The houses and palisade of the peoples of the Americas
+// (js/native-works.js) follow the Old World's own of each.
+const CITY_WORKS_OLD_BUILT = [
   ['WINDMILL', WORKS_WINDMILL], ['WATERMILL', WORKS_WATERMILL], ['GRANARY', WORKS_GRANARY], ['SHED', WORKS_SHED], ['BARN', WORKS_BARN], ['DOVECOTE', WORKS_DOVECOTE], ['TOLL', WORKS_TOLL], ['COT', WORKS_COT], ['THATCH_HOUSE', WORKS_THATCH_HOUSE], ['THATCH_LONGHOUSE', WORKS_THATCH_LONGHOUSE],
   ['WINEPRESS', WORKS_WINEPRESS], ['VATS', WORKS_VATS], ['STONE_HALL', WORKS_STONE_HALL], ['CLOISTER', WORKS_CLOISTER], ['COURT', WORKS_COURT], ['WHARF', WORKS_WHARF], ['QUARRY', WORKS_QUARRY], ['RUIN', WORKS_RUIN], ['RUBBLE', WORKS_RUBBLE],
+];
+export const CITY_WORKS = Object.freeze([
+  ...CITY_WORKS_OLD_BUILT, ...NATIVE_WORKS,
   ['FENCE_RAIL', WORKS_FENCE_RAIL], ['FENCE_STONE', WORKS_FENCE_STONE], ['FOOTBRIDGE', WORKS_FOOTBRIDGE], ['STONE_BRIDGE', WORKS_STONE_BRIDGE], ['STONE_BRIDGE_SPAN', WORKS_STONE_BRIDGE_SPAN], ['GRAVES', WORKS_GRAVES], ['CAIRN', WORKS_CAIRN], ['TENT', WORKS_TENT], ['STANDARD', WORKS_STANDARD], ['SCAFFOLD', WORKS_SCAFFOLD],
+  ...NATIVE_SLIGHT_WORKS,
 ]);
 // How many of them stand on a footing as a house does; the rest are the slighter works.
-export const CITY_WORKS_BUILT = 19;
+export const CITY_WORKS_BUILT = CITY_WORKS_OLD_BUILT.length + NATIVE_WORKS.length;

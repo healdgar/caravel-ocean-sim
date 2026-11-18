@@ -80,7 +80,7 @@ order.splice(order.indexOf('js/terrain.js'),0,'js/ground-detail.js','js/neural-p
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/ground-detail.js');
 wgslModules.push('js/wgsl/ground-detail.js');
 // The Old World: building types ahead of the land shader, which reads their constants, then the town plan and its country.
-order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/old-world-works.js','js/old-world-buildings.js');
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/native-works.js','js/old-world-works.js','js/old-world-buildings.js');
 // The one cut (its pose kinds, then its select, lists and pipeline family, js/wgsl/continuum-cut.js), then the city
 // continuum: its bodies' packing, then its material, which reads the buildings' own constants.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/continuum-kinds.js','js/wgsl/ship-kinds.js','js/wgsl/continuum-cut.js','js/city-continuum.js','js/wgsl/city-continuum.js');
@@ -90,7 +90,7 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/animal-continuum.js','js/
 wgslModules.push('js/wgsl/skinned-pose.js');
 // A port's country as Castle and Commons' model founded it: what is asked of the model, how it stands here, and the GPU's stamp of it.
 // The herds go first: board-folk.js reads herds.js's STREET_MOUNT_FLAG as it loads.
-order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
+order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/old-world-board.js','js/native-towns.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');

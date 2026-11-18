@@ -1893,6 +1893,9 @@ globalThis.BOARD_MODEL = (() => {
       radius: r1(s.radius || 0), reach: r1(s.extentR || 0), paved: r1(s.paveR || 0), harbour: Boolean(s.harbor), river: Boolean(s.river),
       founded: s.origin ? { kind: s.origin.kind, year: s.origin.foundedAD, layout: s.origin.layout } : null, layout: s.mode || null,
       walls: s.walls || 0,
+      // A place of a people with ways of its own (scripts/board-native.mjs) builds in earth and timber: its ways are
+      // trodden, its open places bare ground, its wall a palisade of stakes.
+      ...(typeof waysOf === 'function' && waysOf(s) ? { earthen: true } : {}),
       wall: s.wallRad ? { rad: list(s.wallRad), kind: list(s.wallKind, Number), gates: list(fortGateAngles(s, s), r3), bastions: Boolean(s.bastions), roman: Boolean(s.romanWall),
         // A circuit still going up: which of its stretches stand so far.
         ...(s.wallBuild ? { built: list(s.wallRad, (_, k) => wallBuilt(s, k / s.wallRad.length * 2 * Math.PI) ? 1 : 0) } : {}) } : null,

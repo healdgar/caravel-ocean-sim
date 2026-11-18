@@ -8,6 +8,7 @@
 import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist, segRectDist } from './old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 import { WORKS_FENCE_M, WORKS_WHEEL } from './old-world-works.js';
+import { NATIVE_PALISADE_M } from './native-works.js';
 
 // The board's furlongs are drawn into a square of cells this many to a side, each cell holding the furlong it
 // lies in (plus one; none is 0). The same square answers the land's questions here and is the GPU's to stamp from.
@@ -37,6 +38,13 @@ export const BOARD_WORKS = Object.freeze({
   chapter: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true], refectory: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true], bath: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true],
   hospital: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true], guildhall: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true],
   cloister: ['CLOISTER', CITY_ROOF.FLAT, 11, 0, false, false], court: ['COURT', CITY_ROOF.GABLE, 19, 1.5, true, false], wharf: ['WHARF', CITY_ROOF.FLAT, 10, 0, false, false], quarry: ['QUARRY', CITY_ROOF.FLAT, 11, 0, false, false],
+  // The houses of the peoples of the Americas (js/native-works.js): far off, a vault is a gable and a dome or a cone a
+  // pyramid, each roofed in straw (their seventh word), its walls of bark (17), mats and thatch (15) or cane (10).
+  barkLonghouse: ['BARK_LONGHOUSE', CITY_ROOF.GABLE, 17, 3.7, true, false, true], wetu: ['WETU', CITY_ROOF.PYRAMID, 17, 2, false, false, true],
+  arbourHouse: ['ARBOUR_HOUSE', CITY_ROOF.GABLE, 15, 3.6, true, false, true], bohio: ['BOHIO', CITY_ROOF.PYRAMID, 10, 5.2, false, false, true],
+  caney: ['CANEY', CITY_ROOF.GABLE, 10, 5, true, false, true], maloca: ['MALOCA', CITY_ROOF.GABLE, 15, 3, true, false, true],
+  chiefHouse: ['CHIEF_HOUSE', CITY_ROOF.GABLE, 17, 3.6, true, false, true], charnelHouse: ['CHARNEL_HOUSE', CITY_ROOF.GABLE, 15, 3.3, true, false, true],
+  sweatLodge: ['SWEAT_LODGE', CITY_ROOF.PYRAMID, 17, 1.1, false, false, true],
 });
 // The model roofs its poorest building (its tier 0) in thatch across villages, suburbs and poorer town quarters alike:
 // by the model's kind of house or trade-house, what it is stood as at tier 0, in the terms of BOARD_WORKS.
@@ -346,6 +354,8 @@ export function alignWaterfrontWharves(wharfItems, { inlandAt, heightAt = null, 
 const BOARD_PENTICE_M = 2.75, BOARD_SIGN_M = 3.7, BOARD_STAKE_M = 3.4;
 // A stone curtain stands CITY_CURTAIN.height; a palisade this high.
 const BOARD_PALISADE_M = 5.5;
+// How paved the trodden ways of a place built of earth and timber are (a road of the country is 0.48, a lane 0.35).
+const BOARD_EARTH_PAVED = 0.3;
 const BOARD_HOUSE_TINTS = [0, 0, 0, 0, 0, 0, 1, 1, 2, 3, 4];
 const BOARD_DRY_M = 1.0;
 
@@ -426,7 +436,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         pts.push([sx, sz]);
         maxR = Math.max(maxR, Math.hypot(sx - place.x, sz - place.z) + Math.max(1.2, street.half));
       }
-      const lane = street.kind === 'lane' || street.kind === 'alley', st = { pts, hw: Math.max(1.2, street.half), kind: street.kind, place: at, paved: lane ? 0.5 : 1 };
+      const lane = street.kind === 'lane' || street.kind === 'alley', st = { pts, hw: Math.max(1.2, street.half), kind: street.kind, place: at, paved: place.earthen ? BOARD_EARTH_PAVED : lane ? 0.5 : 1 };
       streets.push(st);
       for (let i = 1; i < pts.length; i++) {
         const [ax, az] = pts[i - 1], [bx, bz] = pts[i];
@@ -439,7 +449,9 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     placeStreetR[at] = maxR > 0 ? Math.max(18, maxR) : 0;
     for (const sq of place.squares) {
       const rad = sq.rad, mean = rad.reduce((a, b) => a + b, 0) / rad.length, R = Math.max(...rad);
-      const square = { x: ox + sq.x, z: oz + sq.z, rad, R, mean, kind: sq.kind === 'green' ? 'park' : 'square', place: at };
+      // A market is paved and a green grassed; any other open place of the model (a dance ground, a plaza, an ocara) is
+      // bare trodden ground.
+      const square = { x: ox + sq.x, z: oz + sq.z, rad, R, mean, kind: sq.kind === 'green' ? 'park' : sq.kind === 'market' ? 'square' : 'ground', place: at };
       squares.push(square);
       if (square.kind === 'square' && inside(square.x, square.z, 4)) paving.push({ points: [[square.x - 0.5, square.z, mean * 2, 1], [square.x + 0.5, square.z, mean * 2, 1]] });
     }
@@ -589,8 +601,35 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       gate(q, (b.x - a.x) / L, (b.z - a.z) / L);
     }
   };
+  // A place built of earth and timber is ringed by a palisade of stakes (js/native-works.js), stood a length at a time
+  // along the model's circuit, each on its own ground; open where the model has a gate, where a way runs through it,
+  // over water and where the cliff is the wall.
+  let palisadeLengths = 0;
+  const stakes = (cx, cz, rad, kind, gateAngles, standing = null) => {
+    const n = rad.length, corner = (k) => { const a = (k % n) / n * 2 * Math.PI; return [cx + Math.cos(a) * rad[k % n], cz + Math.sin(a) * rad[k % n]]; };
+    const openings = gateAngles.map((angle) => { const at = ((angle / (2 * Math.PI) * n) % n + n) % n, k = Math.floor(at), f = at - k, [ax, az] = corner(k), [bx, bz] = corner(k + 1); return [ax + (bx - ax) * f, az + (bz - az) * f]; });
+    const T = CITY_BUILDING_TYPES[CITY_TYPE.PALISADE];
+    for (let k = 0; k < n; k++) {
+      if ((kind && kind[k] === BOARD_WALL_CLIFF) || (standing && !standing[k])) continue;
+      const [ax, az] = corner(k), [bx, bz] = corner(k + 1), L = Math.hypot(bx - ax, bz - az);
+      if (L < 0.5) continue;
+      const m = Math.max(1, Math.round(L / NATIVE_PALISADE_M)), len = L / m, yaw = Math.atan2(bx - ax, bz - az);
+      for (let i = 0; i < m; i++) {
+        const x0 = ax + (bx - ax) * i / m, z0 = az + (bz - az) * i / m, x1 = ax + (bx - ax) * (i + 1) / m, z1 = az + (bz - az) * (i + 1) / m, x = (x0 + x1) / 2, z = (z0 + z1) / 2;
+        if (!inside(x, z, 20) || heightAt(x, z) <= BOARD_DRY_M || hitsRiverCorridor(footprint(x, z, 1.2, len, yaw), 0)) continue;
+        if (openings.some(([gx, gz]) => Math.hypot(gx - x, gz - z) < 3.4 + len / 2)) continue;
+        if ([[x0, z0], [x, z], [x1, z1]].some(([px, pz]) => streetEdge(px, pz, 3) < 0.6)) continue;
+        const f = footprint(x, z, T.width, len, yaw);
+        if (taken(f, 0.3)) continue;
+        const h0 = heightAt(x0, z0), h1 = heightAt(x1, z1), seatY = Math.max(0.5 * (h0 + h1), heightAt(x, z) - 0.22);
+        pushTyped(CITY_TYPE.PALISADE, x, seatY, z, yaw, T.width, T.height, len, -100.0 + Math.max(-0.85, Math.min(0.85, (h1 - h0) / Math.max(0.5, len))), 0);
+        keep(f); palisadeLengths++;
+      }
+    }
+  };
   for (const place of places) {
-    if (place.wall) ring(place.x, place.z, place.wall.rad, place.wall.kind, place.wall.gates, CITY_CURTAIN.height, 56, place.walls >= 2 || place.wall.bastions, place.wall.built ?? null);
+    if (place.wall && place.earthen) stakes(place.x, place.z, place.wall.rad, place.wall.kind, place.wall.gates, place.wall.built ?? null);
+    else if (place.wall) ring(place.x, place.z, place.wall.rad, place.wall.kind, place.wall.gates, CITY_CURTAIN.height, 56, place.walls >= 2 || place.wall.bastions, place.wall.built ?? null);
     const hill = place.castle?.hill, citadel = place.castle?.citadel;
     if (hill?.rad?.length) ring(ox + hill.x, oz + hill.z, hill.rad, hill.kind, [hill.gate], Math.max(7.5, hill.height || 0) + 2, 40, hill.walls >= 2 && !hill.timber);
     if (citadel?.rad?.length) ring(ox + citadel.x, oz + citadel.z, citadel.rad, null, [citadel.gate], 9.5, 48);
@@ -602,7 +641,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   let houses = 0, fronts = 0, stalls = 0;
   const works = board.works ?? {}, stateOf = board.buildings.state ?? null, wheelOf = new Map();
   for (let w = 0; w + 2 < (works.wheels?.length ?? 0); w += 3) wheelOf.set(works.wheels[w], [ox + works.wheels[w + 1], oz + works.wheels[w + 2]]);
-  const built = { thatched: 0, roadBridges: 0, dams: 0, windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
+  const built = { thatched: 0, native: 0, palisade: palisadeLengths, roadBridges: 0, dams: 0, windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
   // The wash of a house, its own from where it stands in the model's list.
   const washOf = (k) => { const hue = form[k * 3 + 2]; return BOARD_HOUSE_TINTS[Math.floor(boardHashUnit(k, 23) * BOARD_HOUSE_TINTS.length)] + 0.2 + 0.75 * (hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31)); };
   const fit = (v, of) => Math.max(BOARD_FIT[0] * of, Math.min(BOARD_FIT[1] * of, v));
@@ -685,7 +724,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   // One of the model's works that is no house: its own type, fitted to the plot the model gave it.
   const standWork = (k, f, arch, toStreet, as = BOARD_WORKS[arch], wharfOverride = null) => {
     const [key, roof, wall, rise, ridgeAlong, fronted] = as, type = CITY_TYPE[key], T = CITY_BUILDING_TYPES[type];
-    const thatch = key === 'COT' || as === BOARD_THATCHED[arch] ? CITY_THATCH_ROOF : 0;
+    const thatch = key === 'COT' || as === BOARD_THATCHED[arch] || as[6] ? CITY_THATCH_ROOF : 0;
     const g = footprint(f.x, f.z, fit(f.w, T.width), fit(f.d, T.length), f.yaw), up = T.height * (0.95 + 0.1 * boardHashUnit(k, 11));
     if (key === 'WHARF') g.isWharf = true;
     const base = key === 'WHARF' ? { floor: wharfOverride?.floor ?? Math.max(BOARD_WHARF_M, heightAt(g.x, g.z)), plinth: 0.3, range: 0 }
@@ -702,7 +741,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const stood = typedTypes.length - 1;
     if (fronted && toStreet) standFront(k, g, base.floor, up);
     if (typedTypes.length - 1 > stood) attached.set(stood, typedTypes.length - 1 - stood);
-    if (key === 'WINDMILL') built.windmills++; else if (key === 'WATERMILL') built.watermills++; else if (key === 'GRANARY' || key === 'BARN') built.stores++; else if (key === 'SHED') built.sheds++; else if (key === 'STONE_HALL') built.halls++; else if (thatch && key !== 'COT') { built.thatched++; houses++; } else built.others++;
+    if (key === 'WINDMILL') built.windmills++; else if (key === 'WATERMILL') built.watermills++; else if (key === 'GRANARY' || key === 'BARN') built.stores++; else if (key === 'SHED') built.sheds++; else if (key === 'STONE_HALL') built.halls++; else if (as[6]) { built.native++; houses++; } else if (thatch && key !== 'COT') { built.thatched++; houses++; } else built.others++;
   };
   // What is left of a building the model has burnt to its walls (a ruin) or thrown down (a heap).
   const standLeft = (k, f, heap) => {
@@ -912,6 +951,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   /* ---- the open places: a well on a green; on a market place its cross, and stalls round it ---- */
   const open = (x, z, reach) => inside(x, z, 8) && heightAt(x, z) > BOARD_DRY_M && !hitsRiverCorridor(footprint(x, z, reach, reach, 0), -1.0) && !taken(footprint(x, z, reach, reach, 0), 0.5) && !placed.some(x, z, reach, (o) => rectDist(o, x, z) <= reach * 0.5);
   squares.forEach((p, at) => {
+    if (p.kind === 'ground') return;
     if (p.kind === 'park') { if (open(p.x, p.z, 4.2)) furnish(CITY_TYPE.WELL, p.x, heightAt(p.x, p.z), p.z, boardHashUnit(at, 79) * Math.PI, 0, 0.5); return; }
     if (open(p.x, p.z, 3.2)) furnish(CITY_TYPE.MARKET_CROSS, p.x, heightAt(p.x, p.z), p.z, 0, 0, 0.5);
     const place = places[p.place], n = place.kind === 'capital' ? 12 : 7;
@@ -1310,7 +1350,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   const cityTreesAt = (x, z) => {
     const p = inSquare(x, z, 0);
     if (p) {
-      if (streetEdge(x, z, 5) < 4) return CITY_TREES.NONE;
+      if (p.kind === 'ground' || streetEdge(x, z, 5) < 4) return CITY_TREES.NONE;
       if (p.kind === 'park') return houseNear(x, z, 3) ? CITY_TREES.NONE : CITY_TREES.PARK;
       const at = Math.hypot(x - p.x, z - p.z) / squareRadius(p, x, z);
       return at > 0.66 && at < 0.92 ? CITY_TREES.SQUARE : CITY_TREES.NONE;

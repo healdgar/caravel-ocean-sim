@@ -5889,6 +5889,7 @@ function tickTongues(){ // yearly: the court's speech seeps into a town its lord
               Old World's; hair: weights of dark, brown, fair and red
      womenTill  women work the fields in spring and summer; beasts, fences, mills, castle, church, strips: false where
               its people keep no herds, hedge no fields, raise no mill, castle or church, and plough no strips;
+              farPorts: false where no far port's ships call at its harbours (its trade goes by its own boats);
               emblems: the charges (CHARGES) its great houses bear
      titles   {monarch:[his, hers], head:[his, hers]} the words for a paramount and for the head of a great house
      court    the words for the court's priest and for its other councillors; trades: the work of its people, by weight
@@ -5955,7 +5956,7 @@ const AMERICAS_PEOPLES={
 for(const[k,c]of Object.entries(AMERICAS_PEOPLES)){ // what every tongue has: those the record does not give are their people's own customs
   // drawn:false: spoken where a real map's region speaks it, never drawn by lot for a made-up realm (CULT_DRAWN)
   Object.assign(c,{drawn:false,neu:['*'],house:p=>p,castle:p=>p,saints:[],church:(S,p)=>p,inns:[],trade:{}});
-  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false,
+  Object.assign(c.ways,{hair:[1,0,0,0],womenTill:true,beasts:false,fences:false,mills:false,castle:false,church:false,strips:false,farPorts:false,
     emblems:['stag','wave','oak','wolf','comet','sun','crescent','fish','raven','flame']}); // no tower, key, crown, sword, rose or anchor
   CULT[k]=c;KIN[k]={pre:/^(?!)/,suf:null,man:g=>g};
   // no surnames: a household is known by its clan where the record names the clans, else by its town; a man by his kin
@@ -13437,7 +13438,7 @@ function tickShips(){
   W.ships=W.ships||[];const now=day(),ad=AD();
   const seaCap=W.settlements.reduce((t2,s)=>t2+(s.harbor?berthsOf(s).length*2:0),0); // as many ships as the realm's quays can work
   if(ad>=900&&W.ships.length<seaCap)
-    for(let si=0;si<W.settlements.length;si++){const s=W.settlements[si];if(!s.harbor||closedToTrade(s))continue;
+    for(let si=0;si<W.settlements.length;si++){const s=W.settlements[si];if(!s.harbor||closedToTrade(s)||waysOf(s)?.farPorts===false)continue;
       const era=ad<1000?0.15:ad<1150?0.35:ad<1300?0.7:1,wh=berthsOf(s).length;
       const fp=FARPORTS.filter(f=>ad>=f.from&&ad<(f.to||9999));if(!fp.length)continue;
       const pay=F=>{let v=0,b=0;for(const g in F.g){v+=price(s,g)*F.g[g];b+=GOODBASE[g]*F.g[g];}return v/Math.max(1e-6,b);}; // what the port pays for a far port's cargo, against its usual worth
