@@ -109,6 +109,86 @@ export function packCityContinuumCluster({ lod, parentLod, cull, error, parentEr
   u[15] = (triangles | (Math.min(level, 255) << 8) | ((part & 65535) << 16)) >>> 0;
   return u;
 }
+// One baked body (js/continuum-bake.js bakeContinuumBody) as the words it adds to an atlas: a short head, its type
+// record, its clusters, their vertices and indices, and its far body; every place in them counted from the body's own
+// start, so that an atlas is assembled from bodies baked anywhere (offline, or in the page's worker) by moving them.
+// `triangles` is the body's source triangle count, `slight` whether it never stands as a target in its own right.
+export const CITY_CONTINUUM_BODY_MAGIC = 0x5944_4243;
+export const CITY_CONTINUUM_BODY_HEAD = 8;
+export function packCityContinuumBody({ triangles, slight = false }, { welded, clusters, far }) {
+  const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+  for (const P of [welded.position, far.position]) for (let v = 0; v < P.length / 3; v++) for (let k = 0; k < 3; k++) { low[k] = Math.min(low[k], P[v * 3 + k]); high[k] = Math.max(high[k], P[v * 3 + k]); }
+  const span = Math.max(...high.map((v, k) => v - low[k])), quant = { low, span };
+  // Every point it can draw, grown by the far body's largest inflation, within one sphere.
+  const centre = low.map((v, k) => (v + high[k]) / 2);
+  let radius = 0;
+  for (const P of [welded.position, far.position]) for (let v = 0; v < P.length / 3; v++) radius = Math.max(radius, Math.hypot(P[v * 3] - centre[0], P[v * 3 + 1] - centre[1], P[v * 3 + 2] - centre[2]));
+  radius += far.stats.inflateMax + 0.01;
+  const V = far.position.length / 3, T = far.index.length / 3, S = far.chain.steps.length;
+  const chainWords = V * (CITY_CONTINUUM_VERTEX_WORDS + 1) + T * CITY_CONTINUUM_TRIANGLE_WORDS + far.steps.length;
+  const typeAt = CITY_CONTINUUM_BODY_HEAD, clustersAt = typeAt + CITY_CONTINUUM_TYPE_WORDS, verticesAt = clustersAt + clusters.count * CITY_CONTINUUM_CLUSTER_WORDS;
+  const indicesAt = verticesAt + clusters.order.length * CITY_CONTINUUM_VERTEX_WORDS, chainAt = indicesAt + clusters.indices.length;
+  const words = new Uint32Array(chainAt + chainWords), floats = new Float32Array(words.buffer);
+  words.set([CITY_CONTINUUM_BODY_MAGIC, CITY_CONTINUUM_VERSION, clusters.count, clusters.order.length, clusters.indices.length, chainWords, triangles, 0], 0);
+  clusters.records.forEach((record, k) => words.set(packCityContinuumCluster(record), clustersAt + k * CITY_CONTINUUM_CLUSTER_WORDS));
+  clusters.order.forEach((v, i) => words.set(packCityContinuumVertex({ position: welded.position.subarray(v * 3, v * 3 + 3), normal: welded.normal.subarray(v * 3, v * 3 + 3), kind: welded.kind.subarray(v * 2, v * 2 + 2) }, quant), verticesAt + i * CITY_CONTINUUM_VERTEX_WORDS));
+  words.set(clusters.indices, indicesAt);
+  // The far body: vertices, each vertex's collapse (the step it goes at, and where), triangles in order of death
+  // with their kinds, and steps.
+  const recordsAt = V * CITY_CONTINUUM_VERTEX_WORDS, trianglesAt = recordsAt + V, stepsAt = trianglesAt + T * CITY_CONTINUUM_TRIANGLE_WORDS;
+  for (let i = 0; i < V; i++) {
+    words.set(packCityContinuumVertex({ position: far.position.subarray(i * 3, i * 3 + 3), normal: far.normal.subarray(i * 3, i * 3 + 3) }, quant), chainAt + i * CITY_CONTINUUM_VERTEX_WORDS);
+    words[chainAt + recordsAt + i] = ((far.chain.dieStep[i] < 0 ? CITY_CONTINUUM_NEVER : far.chain.dieStep[i]) | ((far.chain.target[i] < 0 ? i : far.chain.target[i]) << 16)) >>> 0;
+  }
+  far.order.forEach((t, k) => {
+    for (let c = 0; c < 3; c++) words[chainAt + trianglesAt + k * CITY_CONTINUUM_TRIANGLE_WORDS + c] = far.index[t * 3 + c];
+    words[chainAt + trianglesAt + k * CITY_CONTINUUM_TRIANGLE_WORDS + 3] = packCityContinuumKind([far.kinds[t * 2], far.kinds[t * 2 + 1]]);
+  });
+  words.set(far.steps, chainAt + stepsAt);
+  // The type's record, its places counted from the body's own clusters and far body.
+  const F = CITY_CONTINUUM_TYPE;
+  floats.set([...low, span], typeAt + F.low);
+  floats.set([...centre, radius], typeAt + F.sphere);
+  words.set([0, clusters.count, 0, S, V, recordsAt, trianglesAt, stepsAt], typeAt + F.clusterFirst);
+  floats.set([far.baseError, clusters.rootError, far.splat.rx, far.splat.ry, ...far.splat.centre, far.splat.roofShare, ...far.splat.wallKind, ...far.splat.roofKind], typeAt + F.baseError);
+  words.set([T, slight ? CITY_CONTINUUM_SLIGHT : 0, triangles, far.farFirst], typeAt + F.chainTriangleCount);
+  return { words, low, span, centre, radius };
+}
+// The parts of a packed body, checked.
+export function cityContinuumBodyParts(words) {
+  if (words[0] !== CITY_CONTINUUM_BODY_MAGIC || words[1] !== CITY_CONTINUUM_VERSION) throw Error('A continuum body of another format');
+  const [clusters, vertices, indices, chain] = words.subarray(2, 6), typeAt = CITY_CONTINUUM_BODY_HEAD, clustersAt = typeAt + CITY_CONTINUUM_TYPE_WORDS;
+  const verticesAt = clustersAt + clusters * CITY_CONTINUUM_CLUSTER_WORDS, indicesAt = verticesAt + vertices * CITY_CONTINUUM_VERTEX_WORDS, chainAt = indicesAt + indices;
+  if (chainAt + chain !== words.length) throw Error('A continuum body does not add up');
+  return { clusters, vertices, indices, chain, sourceTriangles: words[6], typeAt, clustersAt, verticesAt, indicesAt, chainAt };
+}
+// An atlas of packed bodies, type i being bodies[i]: header, type records, every body's clusters, vertices and
+// indices, then every far body, each body's places moved to where it now lies.
+export function assembleCityContinuumAtlas(bodies) {
+  const parts = bodies.map(cityContinuumBodyParts), sum = (key) => parts.reduce((n, p) => n + p[key], 0);
+  const typesAt = CITY_CONTINUUM_HEADER_WORDS, clustersAt = typesAt + bodies.length * CITY_CONTINUUM_TYPE_WORDS, totalClusters = sum('clusters');
+  const verticesAt = clustersAt + totalClusters * CITY_CONTINUUM_CLUSTER_WORDS, totalVertices = sum('vertices'), indicesAt = verticesAt + totalVertices * CITY_CONTINUUM_VERTEX_WORDS;
+  const totalIndices = sum('indices'), chainsAt = indicesAt + totalIndices, words = chainsAt + sum('chain');
+  const atlas = new Uint32Array(words), F = CITY_CONTINUUM_TYPE;
+  atlas.set([CITY_CONTINUUM_MAGIC, CITY_CONTINUUM_VERSION, bodies.length, typesAt, clustersAt, totalClusters, verticesAt, totalVertices, indicesAt, totalIndices, chainsAt, words], 0);
+  let clusterAt = 0, vertexAt = 0, indexAt = 0, chainAt = chainsAt;
+  bodies.forEach((body, id) => {
+    const p = parts[id], at = typesAt + id * CITY_CONTINUUM_TYPE_WORDS;
+    atlas.set(body.subarray(p.typeAt, p.typeAt + CITY_CONTINUUM_TYPE_WORDS), at);
+    atlas[at + F.clusterFirst] = clusterAt;
+    atlas[at + F.chainVertices] = chainAt;
+    for (const field of [F.records, F.triangles, F.steps]) atlas[at + field] += chainAt;
+    const clusterWords = clustersAt + clusterAt * CITY_CONTINUUM_CLUSTER_WORDS;
+    atlas.set(body.subarray(p.clustersAt, p.verticesAt), clusterWords);
+    for (let k = 0; k < p.clusters; k++) atlas[clusterWords + k * CITY_CONTINUUM_CLUSTER_WORDS + 14] += indexAt;
+    atlas.set(body.subarray(p.verticesAt, p.indicesAt), verticesAt + vertexAt * CITY_CONTINUUM_VERTEX_WORDS);
+    for (let i = 0; i < p.indices; i++) atlas[indicesAt + indexAt + i] = body[p.indicesAt + i] + vertexAt;
+    atlas.set(body.subarray(p.chainAt), chainAt);
+    clusterAt += p.clusters; vertexAt += p.vertices; indexAt += p.indices; chainAt += p.chain;
+  });
+  if (chainAt !== words) throw Error('The atlas layout does not add up');
+  return atlas;
+}
 // What the bake read of a type, byte for byte: its drawn triangles and their parts. The manifest keeps each type's
 // digest of these, so a builder changed since the bake is caught (tests/city-continuum-bake.test.mjs).
 export function cityContinuumSourceBytes(type) {

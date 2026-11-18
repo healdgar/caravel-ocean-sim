@@ -499,6 +499,17 @@ export function compileCityBuildingTypes(buildGeometry) {
       singleBuildingPrefab: true,
       instances: [{ prefabId: `city_type_${id}`, id: `city_type_${id}`, x: 0, y: 0, z: 0, yaw: 0, width: spec.width, length: spec.length, depth: spec.length, height: spec.height, foundationDepth: spec.foundationDepth, materialKind: spec.materialKind, roofPitch: spec.roofPitch, cairnSpec: spec }],
     }, null);
+    return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, ...compileContinuumBody(built, spec) };
+  });
+}
+
+// One building as its builder made it (buildPortPrefabGeometry, a single instance at the origin, unturned), as the
+// continuum bakes and draws it (js/continuum-bake.js): every drawn corner in triangles, outermost first, a roof sheet
+// drawn from both sides, a timber's grain riding its shade, and each triangle's part; with `source`, what the builder
+// made, for shot and fracture. `box` is the plot it was built on ({ width, length, height }).
+export function compileContinuumBody(built, box) {
+  const spec = box;
+  {
     const from = built.vertices, faces = [];
     let out = null;
     // A timber's grain runs its length. Which way that is (1 upright, 2 across the plot, 3 along it; 0 where it has
@@ -553,6 +564,6 @@ export function compileCityBuildingTypes(buildGeometry) {
       if (from[at + axis] > max[axis]) max[axis] = from[at + axis];
     }
     const source = { vertices: from, indices: built.indices, partAssembly: built.partAssembly, min, max };
-    return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, vertices, parts, count: vertices.length / 8, triangles: vertices.length / 24, source };
-  });
+    return { vertices, parts, count: vertices.length / 8, triangles: vertices.length / 24, source };
+  }
 }
