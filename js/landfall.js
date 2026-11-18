@@ -69,7 +69,7 @@ export function coastalRegionStageURL(href,regionSpec='cartagena',stage='coast',
   url.searchParams.set('region',region.id);
   url.searchParams.set('lat',String(region.latitude));
   url.searchParams.set('lon',String(region.longitude));
-  if(effectiveYear!==undefined&&Number(effectiveYear)!==1550){
+  if(effectiveYear!==undefined&&(Number(effectiveYear)!==1550||POST_1550_FEATURED_PORTS.includes(region.id))){
     url.searchParams.set('year',String(region.year));
   }else if(effectiveYear===1550){
     url.searchParams.delete('year');

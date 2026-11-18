@@ -147,7 +147,7 @@ const request = boardRequest({
   site: { name: city.name, culture: city.culture, ...(city.native || city.colonial ? onFoundingGround(Math.round(east(city.longitude)), Math.round(south(city.latitude))) : { x: land.centre.x - region.x, z: land.centre.z - region.z }) },
   places: (OLD_WORLD_PLACES[city.id] || city.places || []).map(([name, latitude, longitude, weight]) => ({ name, x: east(longitude), z: south(latitude), weight })),
   lived: livedArg,
-  ...(city.manner ? { manner: city.manner, founded: city.founded, settled: city.settled } : {}),
+  ...(city.manner ? { manner: city.manner, founded: city.founded, settled: city.settled } : city.founded != null ? { founded: city.founded, settled: city.settled } : {}),
   works,
   rivers: { catchment: number('catchment', BOARD_RIVERS.catchment), width: number('width', BOARD_RIVERS.width), least: number('least', BOARD_RIVERS.least), carve: number('carve', BOARD_RIVERS.carve) },
 });
@@ -176,7 +176,7 @@ writeFileSync(out, JSON.stringify({
   // The whole world as founded, kept beside this board: the model's own save, taken up only by the same program.
   world: { bytes: world.length, sha256: createHash('sha256').update(world).digest('hex'), program: open.program, day: board.day, year: board.year, holds: held },
   request: { span: request.span, size: request.size, seed: request.seed, fate: request.fate, era: request.era, seat: request.seat, walls: request.walls, site: request.site, places: request.places, rivers: request.rivers, lived: request.lived,
-    ...(request.manner ? { manner: request.manner, founded: request.founded, settled: request.settled } : {}), ...(request.works ? { works: request.works } : {}) },
+    ...(request.manner ? { manner: request.manner, founded: request.founded, settled: request.settled } : request.founded != null ? { founded: request.founded, settled: request.settled } : {}), ...(request.works ? { works: request.works } : {}) },
   board,
 }) + '\n');
 say(`wrote ${out}`);

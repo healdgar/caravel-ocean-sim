@@ -16,12 +16,18 @@ export const NATIVE_TOWNS = Object.freeze([
   { id: 'patuxet', name: 'Patuxet', port: 'plymouth-colony', latitude: 41.957, longitude: -70.666, culture: 'massachusett', people: [[1550, 450]], seat: 0.6, walls: { capital: 0, town: 0, village: 0 } },
   { id: 'werpoes', name: 'Werpoes', port: 'new-amsterdam', latitude: 40.716, longitude: -74.002, culture: 'lenape', people: [[1550, 300]], seat: 0.4, walls: { capital: 0, town: 0, village: 0 } },
   { id: 'shackamaxon', name: 'Shackamaxon', port: 'philadelphia', latitude: 39.969, longitude: -75.128, culture: 'lenape', people: [[1550, 300]], seat: 0.4, walls: { capital: 0, town: 0, village: 0 } },
-  { id: 'paspahegh', name: 'Paspahegh', port: 'jamestown', latitude: 37.226, longitude: -76.800, culture: 'powhatan', people: [[1550, 300]], seat: 0.4, walls: { capital: 1, town: 0, village: 0 } },
+  { id: 'paspahegh', name: 'Paspahegh', port: 'jamestown', latitude: 37.248, longitude: -76.856, shoreBearing: 25, ownGround: true, culture: 'powhatan', people: [[1550, 300]], seat: 0.4, walls: { capital: 1, town: 0, village: 0 } },
   { id: 'urucumirim', name: 'Uruçumirim', port: 'rio-de-janeiro', latitude: -22.925, longitude: -43.176, culture: 'tupi', people: [[1550, 600]], seat: 0.5, walls: { capital: 1, town: 1, village: 1 } },
 ].map((town) => Object.freeze({ ...town, native: true, people: Object.freeze(town.people.map(Object.freeze)), walls: Object.freeze(town.walls) })));
 // The last year each stands as its own: from the colony's founding the ground is the colony's.
 const NATIVE_TOWN_UNTIL = 1550;
 const NATIVE_METRES_PER_DEGREE = 111195;
+
+// A native town whose archaeological site stands beyond the later colony's ground, so its coast in 1550 takes its own ground.
+export function nativeOwnGroundFor(portId, year = 1550) {
+  if (!portId || year > NATIVE_TOWN_UNTIL) return null;
+  return NATIVE_TOWNS.find((t) => t.ownGround && (t.port === portId || t.id === portId)) ?? null;
+}
 
 // The native town whose recorded site lies on a region's own ground in its year, or none: the town its board founds there.
 export function nativeTownHeld(region) {

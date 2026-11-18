@@ -304,6 +304,11 @@
     "bytes": 12102450,
     "sha256": "a075ba18119c93c60b26803b064ae228452ed1ce5132e6f53bd648e656597052"
   },
+  "assets/boards/lisbon-1650.world": {
+    "url": "assets/boards/lisbon-1650.fc8f69bc536c229e.world",
+    "bytes": 12167870,
+    "sha256": "fc8f69bc536c229e104d5285484de20abf4a1ab0853904bd78d2d00a54c6c654"
+  },
   "assets/boards/cadiz-1550.world": {
     "url": "assets/boards/cadiz-1550.bc98d0e58c06faef.world",
     "bytes": 3687141,
@@ -375,9 +380,14 @@
     "sha256": "039ffb83d79af73a2cd17b03db79191fa11ee7340c11bba3481c727a45494d48"
   },
   "assets/boards/jamestown-1550.world": {
-    "url": "assets/boards/jamestown-1550.3621789d34e0afed.world",
-    "bytes": 4203823,
-    "sha256": "3621789d34e0afedcc2c1f890562a9747a75b300d7e2ef2feb3b71829aa49d3c"
+    "url": "assets/boards/jamestown-1550.88efb5ed422f40f9.world",
+    "bytes": 4045458,
+    "sha256": "88efb5ed422f40f9e6cf8fb50d9636f471a49ae263469edaebad200b4d9bf551"
+  },
+  "assets/boards/jamestown-1607.world": {
+    "url": "assets/boards/jamestown-1607.b6c55ade0da3d0b7.world",
+    "bytes": 3118683,
+    "sha256": "b6c55ade0da3d0b7094dd1e0dc6180e449f6adfccccf996d6cc0edadf8744e3d"
   },
   "assets/boards/rio-de-janeiro-1550.world": {
     "url": "assets/boards/rio-de-janeiro-1550.464102dcc886c9b1.world",
@@ -513,6 +523,11 @@
     "url": "assets/boards/malacca-1550.d28cd12f806aefd0.world",
     "bytes": 5185129,
     "sha256": "d28cd12f806aefd036e1721bd5d95b91b66b63ce7395b9620a32933ee2e5c83e"
+  },
+  "assets/boards/malacca-1600.world": {
+    "url": "assets/boards/malacca-1600.8f0c1881afe3427e.world",
+    "bytes": 5222725,
+    "sha256": "8f0c1881afe3427ee68647e0a0d1d6a24a122e65ba8df699155551ac5a437fa4"
   },
   "assets/board/game.js": {
     "url": "assets/board/game.bedab35f7c445a2b.js",
@@ -744,6 +759,11 @@
     "bytes": 1574467,
     "sha256": "5e59beb65a2e17d0ac1e27850c7e2c333ac8cc2c368ba20d0b95e202ca7ea838"
   },
+  "assets/boards/lisbon-1650.json": {
+    "url": "assets/boards/lisbon-1650.50d23a365e7cfd2e.json",
+    "bytes": 1455484,
+    "sha256": "50d23a365e7cfd2edecf5094fd3c13db024bd979d97026aa0f806ab5360fe44f"
+  },
   "assets/boards/cadiz-1550.json": {
     "url": "assets/boards/cadiz-1550.62e62e4bb73ba058.json",
     "bytes": 707081,
@@ -815,9 +835,14 @@
     "sha256": "09e0ebb8d058f796fcaa452deb7b92cb9e8f0893e83f92529b8b103f831493a2"
   },
   "assets/boards/jamestown-1550.json": {
-    "url": "assets/boards/jamestown-1550.c61da878c92a2777.json",
-    "bytes": 692440,
-    "sha256": "c61da878c92a27772212cfab139be85e4a7f76a3a06a3a9ca9a7d83d45b42340"
+    "url": "assets/boards/jamestown-1550.290b5cb9771e53e6.json",
+    "bytes": 674785,
+    "sha256": "290b5cb9771e53e607b40cdf2ce639fd2ddbffc4d81691d9c63612ee5ea0dfeb"
+  },
+  "assets/boards/jamestown-1607.json": {
+    "url": "assets/boards/jamestown-1607.8b51a480c8611907.json",
+    "bytes": 587616,
+    "sha256": "8b51a480c86119076c89559752a1fc8cd4f8bea0390c5005386038ef3abcca0d"
   },
   "assets/boards/rio-de-janeiro-1550.json": {
     "url": "assets/boards/rio-de-janeiro-1550.eb685f2aa5f77720.json",
@@ -953,6 +978,11 @@
     "url": "assets/boards/malacca-1550.2ec81f7dee6efdb2.json",
     "bytes": 830497,
     "sha256": "2ec81f7dee6efdb2f6d595df6db9775b5501a5322a08426a5a5322c53600f92c"
+  },
+  "assets/boards/malacca-1600.json": {
+    "url": "assets/boards/malacca-1600.311bedc8bd7a831b.json",
+    "bytes": 861185,
+    "sha256": "311bedc8bd7a831b6295b2d2cc77a4f9a6a7c71ce6f67a2d466729968c6e98ee"
   },
   "assets/world/land.json": {
     "url": "assets/world/land.171586c7917a28dc.json",

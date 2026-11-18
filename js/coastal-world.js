@@ -17,6 +17,7 @@ import {
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
 import { readCrossingRiver } from './river-water.js';
+import { nativeOwnGroundFor } from './native-towns.js';
 import { boardTownHeld, oldWorldCountry, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
 import { CITY_BLOCK_FLOATS } from './old-world-city.js';
 import { createInlandWaterSampler } from './inland-water.js';
@@ -1932,20 +1933,24 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
       spec = { ...preset, ...spec, portType: undefined };
     }
   }
+  const rawYr = Number(spec.year ?? spec.era);
+  const simYear = Number.isFinite(rawYr) && rawYr >= 1490 && rawYr <= 1850 ? Math.round(rawYr) : 1550;
+  const ownNative =
+    typeof spec.id === 'string' && spec.latitude === undefined && spec.longitude === undefined
+      ? nativeOwnGroundFor(spec.id, simYear)
+      : null;
   const colPortById =
     typeof spec.id === 'string'
-      ? HISTORICAL_COLONIAL_PORTS.find((p) => p.id === spec.id) ?? null
+      ? HISTORICAL_COLONIAL_PORTS.find((p) => p.id === (ownNative ? ownNative.port : spec.id)) ?? null
       : null;
-  const latitude = Number(spec.latitude ?? colPortById?.latitude);
-  const longitude = Number(spec.longitude ?? colPortById?.longitude);
+  const latitude = Number(spec.latitude ?? ownNative?.latitude ?? colPortById?.latitude);
+  const longitude = Number(spec.longitude ?? ownNative?.longitude ?? colPortById?.longitude);
   if (!Number.isFinite(latitude) || latitude < -85 || latitude > 85) {
     throw new RangeError('Coastal region latitude must be finite within [-85, 85]');
   }
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
     throw new RangeError('Coastal region longitude must be finite within [-180, 180]');
   }
-  const rawYr = Number(spec.year ?? spec.era);
-  const simYear = Number.isFinite(rawYr) && rawYr >= 1490 && rawYr <= 1850 ? Math.round(rawYr) : 1550;
   const seed = (spec.vegetationSeed ?? coastalHashCoords(latitude, longitude)) >>> 0;
   const rand = coastalMulberry32(seed);
   const absLat = Math.abs(latitude);
@@ -2017,6 +2022,7 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
     (candidateId && OLD_WORLD_SEA_BEARINGS[candidateId] !== undefined ? OLD_WORLD_SEA_BEARINGS[candidateId] : null) ??
     (oldCityKey && OLD_WORLD_SEA_BEARINGS[oldCityKey] !== undefined ? OLD_WORLD_SEA_BEARINGS[oldCityKey] : null);
   const presetBearing =
+    ownNative?.shoreBearing ??
     colPortById?.shoreBearing ??
     matchedHistoricalPort?.shoreBearing ??
     (recordedSeaward !== null ? (recordedSeaward + 180) % 360 : null) ??
@@ -2039,8 +2045,8 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const biomeSize = spec.biomeSize ?? (size - 1);
   const albedoSize = spec.albedoSize ?? (size - 1);
   const span = spec.span ?? 8192;
-  const id = spec.id ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.id : `coastal-${latitude.toFixed(3)}_${longitude.toFixed(3)}`);
-  const name = spec.name ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.name : `Coastal Landfall (${Math.abs(latitude).toFixed(2)}°${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(2)}°${longitude >= 0 ? 'E' : 'W'})`);
+  const id = ownNative ? ownNative.port : (spec.id ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.id : `coastal-${latitude.toFixed(3)}_${longitude.toFixed(3)}`));
+  const name = spec.name ?? (ownNative ? `${ownNative.name} · Chickahominy` : matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.name : `Coastal Landfall (${Math.abs(latitude).toFixed(2)}°${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(2)}°${longitude >= 0 ? 'E' : 'W'})`);
   const rawColonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(
     { ...spec, id, name, latitude, longitude, hasColonialPort, settlementKind },
     simYear

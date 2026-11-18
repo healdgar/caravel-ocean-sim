@@ -12,6 +12,7 @@ import {foreshorePalmPlacement} from './forest-trunks.js';
 import {createPortFractures} from './building-fracture.js';
 import {paveCityStreets,streetEdgeAt} from './town-streets.js';
 import {oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard} from './old-world.js';
+import {nativeOwnGroundFor} from './native-towns.js';
 import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
@@ -1042,13 +1043,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     :astroYear!=null
       ?resolveColonialEra(astroYear).year
       :(colonialPortPreset?.foundedYear>1550?Math.min(1685,colonialPortPreset.foundedYear+15):1550);
+  const ownNativePreset=regionParam?nativeOwnGroundFor(regionParam,resolvedYear):null;
+  const effectivePreset=ownNativePreset
+    ?{...(presetMatch||{}),id:ownNativePreset.port,name:`${ownNativePreset.name} · Chickahominy`,latitude:ownNativePreset.latitude,longitude:ownNativePreset.longitude,shoreBearing:ownNativePreset.shoreBearing??presetMatch?.shoreBearing}
+    :presetMatch;
   const isKnownSpanishMain=Boolean(spanishMainPreset&&(!hasCustomCoords||(Math.abs(rawLat-spanishMainPreset.latitude)<0.05&&Math.abs(rawLon-spanishMainPreset.longitude)<0.05)));
-  const isKnownColonialPreset=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(rawLat-presetMatch.latitude)<0.05&&Math.abs(rawLon-presetMatch.longitude)<0.05)));
-  const isCustomSabaOverride=forceProcedural||(hasCustomCoords&&regionParam==='saba'&&(Math.abs(rawLat-ISLAND.latitude)>0.05||Math.abs(rawLat-ISLAND.longitude)>0.05));
+  const isKnownColonialPreset=Boolean(effectivePreset&&(!hasCustomCoords||(Math.abs(rawLat-effectivePreset.latitude)<0.05&&Math.abs(rawLon-effectivePreset.longitude)<0.05)));
+  const isCustomSabaOverride=forceProcedural||(hasCustomCoords&&regionParam==='saba'&&(Math.abs(rawLat-ISLAND.latitude)>0.05||Math.abs(rawLon-ISLAND.longitude)>0.05));
   const useProcedural=forceProcedural||isKnownColonialPreset||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
-  const targetLat=presetMatch?presetMatch.latitude:(Number.isFinite(rawLat)?rawLat:ISLAND.latitude);
-  const targetLon=presetMatch?presetMatch.longitude:(Number.isFinite(rawLon)?rawLon:ISLAND.longitude);
-  let activeClimate=estimateLocalClimateProfile(targetLat,targetLon,presetMatch);
+  const targetLat=effectivePreset?effectivePreset.latitude:(Number.isFinite(rawLat)?rawLat:ISLAND.latitude);
+  const targetLon=effectivePreset?effectivePreset.longitude:(Number.isFinite(rawLon)?rawLon:ISLAND.longitude);
+  let activeClimate=estimateLocalClimateProfile(targetLat,targetLon,effectivePreset);
   const forestMixParam=search.get('forestMix');
   const useSubtropicalForest=forestMixParam
     ?(forestMixParam==='subtropical'||forestMixParam==='tropical')
@@ -1127,9 +1132,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const proceduralSpec=isKnownSpanishMain&&!hasPlacementOverride&&resolvedYear===1550
     ?regionParam
     :{
-      ...(presetMatch||{}),
+      ...(effectivePreset||{}),
       id:regionParam||undefined,
-      name:explicitObj?.name||(!ignoreSearchLocation?search.get('regionName'):null)||presetMatch?.name||undefined,
+      name:explicitObj?.name||(!ignoreSearchLocation?search.get('regionName'):null)||effectivePreset?.name||undefined,
       latitude:targetLat,
       longitude:targetLon,
       year:resolvedYear,

@@ -51,7 +51,7 @@ export function boardRequest({ heights, span, site, seed, era = 1550, seat = 1, 
       .map((p) => ({ name: String(p.name), x: Math.round(p.x), z: Math.round(p.z), weight: Math.max(1, Math.min(9, p.weight | 0 || 1)) })),
     rivers: { catchment: Math.round(rivers.catchment), width: +rivers.width, least: +rivers.least, carve: +rivers.carve },
     lived: typeof lived === 'number' && Number.isFinite(lived) && lived > 0 ? Math.round(lived) : Boolean(lived),
-    ...(manner ? { manner: String(manner), founded: Math.round(founded ?? era), settled: Math.max(0, Math.min(1, settled ?? 1)) } : {}),
+    ...(manner ? { manner: String(manner), founded: Math.round(founded ?? era), settled: Math.max(0, Math.min(1, settled ?? 1)) } : founded != null ? { founded: Math.round(founded), settled: Math.max(0, Math.min(1, settled ?? 1)) } : {}),
     ...((kept) => (kept.length ? { works: kept } : {}))(boardWorks(works, span)),
   };
 }
@@ -74,7 +74,7 @@ export function boardKey(request) {
   const mix = (v) => { a = Math.imul(a ^ v, 0x01000193) >>> 0; b = (Math.imul(b ^ (v + 0x7f4a7c15), 0x85ebca6b) + (b << 13 | b >>> 19)) >>> 0; };
   for (let k = 0; k < request.heights.length; k++) mix(Math.round(request.heights[k] * 100) | 0);
   const rest = JSON.stringify([request.version, request.span, request.size, request.seed, request.fate, request.era, request.seat, request.walls, request.site, request.places, request.rivers, request.lived,
-    ...(request.manner ? [request.manner, request.founded, request.settled] : []), ...(request.works?.length ? [request.works] : [])]);
+    ...(request.manner ? [request.manner, request.founded, request.settled] : request.founded != null ? [null, request.founded, request.settled] : []), ...(request.works?.length ? [request.works] : [])]);
   for (let k = 0; k < rest.length; k++) mix(rest.charCodeAt(k));
   return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
 }
@@ -121,6 +121,7 @@ export function boardGroundFits(survey, heights, withinMetres = 1.5) {
 // since the build publishes the files named here.
 export const BAKED_BOARDS = Object.freeze({
   'lisbon:1550': 'assets/boards/lisbon-1550.json',
+  'lisbon:1650': 'assets/boards/lisbon-1650.json',
   'cadiz:1550': 'assets/boards/cadiz-1550.json',
   'sanlucar:1550': 'assets/boards/sanlucar-1550.json',
   'palos-huelva:1550': 'assets/boards/palos-huelva-1550.json',
@@ -137,6 +138,7 @@ export const BAKED_BOARDS = Object.freeze({
   'new-amsterdam:1550': 'assets/boards/new-amsterdam-1550.json',
   'philadelphia:1550': 'assets/boards/philadelphia-1550.json',
   'jamestown:1550': 'assets/boards/jamestown-1550.json',
+  'jamestown:1607': 'assets/boards/jamestown-1607.json',
   'rio-de-janeiro:1550': 'assets/boards/rio-de-janeiro-1550.json',
   // The towns Spain and Portugal had planted by 1550 (js/colonial-towns.js), by their ports.
   'santo-domingo:1550': 'assets/boards/santo-domingo-1550.json',
@@ -166,12 +168,14 @@ export const BAKED_BOARDS = Object.freeze({
   'olinda:1550': 'assets/boards/olinda-1550.json',
   'goa:1550': 'assets/boards/goa-1550.json',
   'malacca:1550': 'assets/boards/malacca-1550.json',
+  'malacca:1600': 'assets/boards/malacca-1600.json',
 });
 export function bakedBoardAsset(port, year) { return BAKED_BOARDS[`${port}:${year}`] ?? null; }
 // And the whole world each was founded as: the model's own save of everything it holds, frozen on its first day.
 // The game takes it up in a worker and lets it live; nothing of it was chosen or left out.
 export const BAKED_WORLDS = Object.freeze({
   'lisbon:1550': 'assets/boards/lisbon-1550.world',
+  'lisbon:1650': 'assets/boards/lisbon-1650.world',
   'cadiz:1550': 'assets/boards/cadiz-1550.world',
   'sanlucar:1550': 'assets/boards/sanlucar-1550.world',
   'palos-huelva:1550': 'assets/boards/palos-huelva-1550.world',
@@ -187,6 +191,7 @@ export const BAKED_WORLDS = Object.freeze({
   'new-amsterdam:1550': 'assets/boards/new-amsterdam-1550.world',
   'philadelphia:1550': 'assets/boards/philadelphia-1550.world',
   'jamestown:1550': 'assets/boards/jamestown-1550.world',
+  'jamestown:1607': 'assets/boards/jamestown-1607.world',
   'rio-de-janeiro:1550': 'assets/boards/rio-de-janeiro-1550.world',
   'santo-domingo:1550': 'assets/boards/santo-domingo-1550.world',
   'havana:1550': 'assets/boards/havana-1550.world',
@@ -214,6 +219,7 @@ export const BAKED_WORLDS = Object.freeze({
   'olinda:1550': 'assets/boards/olinda-1550.world',
   'goa:1550': 'assets/boards/goa-1550.world',
   'malacca:1550': 'assets/boards/malacca-1550.world',
+  'malacca:1600': 'assets/boards/malacca-1600.world',
 });
 export function bakedWorldAsset(port, year) { return BAKED_WORLDS[`${port}:${year}`] ?? null; }
 
@@ -240,6 +246,6 @@ export function boardPrefix(request, program = null) {
   return 'globalThis.FURLONG_HEADLESS=true;globalThis.FURLONG_OPTIONS=' + JSON.stringify(options) + ';' + placeEdgeShim +
     `globalThis.KA_MAPS={board:{w:${request.size},h:${request.size},hgt:${heights},` +
     `vscale:1,crown:${JSON.stringify(request.site.culture)},sites:${JSON.stringify(sites)},title:${JSON.stringify(request.site.name)}` +
-    (request.manner ? `,manners:${JSON.stringify({ [request.site.culture]: request.manner })},founded:${request.founded},settled:${request.settled}` : '') +
+    (request.manner ? `,manners:${JSON.stringify({ [request.site.culture]: request.manner })},founded:${request.founded},settled:${request.settled}` : request.founded != null ? `,founded:${request.founded},settled:${request.settled}` : '') +
     (request.works?.length ? `,works:${JSON.stringify(request.works.map((w) => ({ kind: w.kind, form: w.form, name: w.name, u: w.x / request.span, v: w.z / request.span, w: w.size[0], d: w.size[1], from: w.from, until: w.until, role: w.role, side: w.side, ...(w.round ? { round: true } : {}), ...(w.battery ? { battery: true } : {}), ...(w.earth ? { earth: true } : {}), ...(w.rough ? { rough: true } : {}), ...(w.landmark ? { landmark: w.landmark } : {}), ...(w.encloses ? { encloses: w.encloses } : {}), ...(w.gate ? { gate: w.gate } : {}) })))}` : '') + '}};\n';
 }

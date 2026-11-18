@@ -44,7 +44,8 @@ export const COLONIAL_TOWNS = Object.freeze([
   { id: 'sao-vicente', name: 'São Vicente', port: 'sao-vicente', latitude: -23.9636, longitude: -46.3919, ...COLONIAL_PORTUGAL, founded: 1532, people: [[1550, 600]], seat: 0.13, settled: 0.25 },
   { id: 'olinda', name: 'Olinda', port: 'olinda', latitude: -8.0170, longitude: -34.8530, ...COLONIAL_PORTUGAL, founded: 1535, people: [[1550, 2500]], seat: 0.56, settled: 0.3 },
   { id: 'pangim', name: 'Pangim', port: 'goa', latitude: 15.4990, longitude: 73.8270, ...COLONIAL_PORTUGAL, founded: 1510, people: [[1550, 600]], seat: 0.13, settled: 0.6 },
-  { id: 'malaca', name: 'Malaca', port: 'malacca', latitude: 2.1948, longitude: 102.2480, ...COLONIAL_PORTUGAL, founded: 1511, people: [[1550, 6000]], seat: 1.33, settled: 0.5, walls: { capital: 1, town: 0, village: 0 } },
+  { id: 'malaca', name: 'Malaca', port: 'malacca', latitude: 2.1948, longitude: 102.2480, ...COLONIAL_PORTUGAL, founded: 1511, people: [[1550, 6000], [1600, 8000]], seat: 1.33, settled: 0.5, walls: { capital: 1, town: 0, village: 0 } },
+  { id: 'jamestown', name: 'Jamestown', port: 'jamestown', latitude: 37.2088, longitude: -76.7778, culture: 'anglo', founded: 1607, people: [[1607, 104], [1620, 400], [1690, 800]], seat: 0.05, settled: 0.08 },
 ].map((town) => Object.freeze({ walls: COLONIAL_OPEN, places: [], ...town, colonial: true, people: Object.freeze(town.people.map(Object.freeze)) })));
 const COLONIAL_METRES_PER_DEGREE = 111195;
 

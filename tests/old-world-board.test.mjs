@@ -277,7 +277,8 @@ test('a founded board stands in the game as its own buildings, land and woods, a
 
 test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and its real places', () => {
   assert.equal(bakedBoardAsset('lisbon', 1550), BAKED_BOARDS['lisbon:1550']);
-  assert.equal(bakedBoardAsset('lisbon', 1650), null);
+  assert.equal(bakedBoardAsset('lisbon', 1650), BAKED_BOARDS['lisbon:1650']);
+  assert.equal(bakedBoardAsset('lisbon', 1750), null);
   const path = new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url);
   assert.ok(existsSync(path));
   const baked = JSON.parse(readFileSync(path, 'utf8')), board = baked.board;
@@ -318,7 +319,8 @@ test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and
 
 test('Lisbon\'s whole founded world is frozen beside its board, by the program that is here', () => {
   assert.equal(bakedWorldAsset('lisbon', 1550), BAKED_WORLDS['lisbon:1550']);
-  assert.equal(bakedWorldAsset('lisbon', 1650), null);
+  assert.equal(bakedWorldAsset('lisbon', 1650), BAKED_WORLDS['lisbon:1650']);
+  assert.equal(bakedWorldAsset('lisbon', 1750), null);
   const baked = JSON.parse(readFileSync(new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url), 'utf8')), world = baked.world;
   const bytes = readFileSync(new URL('../' + BAKED_WORLDS['lisbon:1550'], import.meta.url));
   assert.equal(bytes.length, world.bytes);
