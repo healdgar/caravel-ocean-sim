@@ -1,7 +1,7 @@
 {
  "format": "waterworld.prefab-continuum",
  "generator": "scripts/prepare-prefab-continuum.mjs",
- "version": "ab18be33cf1673bc4cfac505f4e899137bf2883f95ce7f6cc125dc35fac5fde9",
+ "version": "1d0ac0795abea7d5e72cea2ba81d7d9d47c9a3a3b47cf733181c06b1737f3b2c",
  "ground": {
   "size": 513,
   "biomeSize": 512,
@@ -16,7 +16,7 @@
   "sourceTriangles": 3202978,
   "bytes": 229995316,
   "gzipBytes": 81848075,
-  "bakeSeconds": 5671,
+  "bakeSeconds": 5364.6,
   "threads": 14
  },
  "ports": {
@@ -36,7 +36,7 @@
      "at": 0,
      "words": 43187,
      "sourceTriangles": 1468,
-     "bakeMs": 6366
+     "bakeMs": 7755
     },
     {
      "fingerprint": "3cae1c70c6008c19e61c5b1a77eb48b674fb42fc0f4907bed05da9a56555f1a9",
@@ -44,7 +44,7 @@
      "at": 43187,
      "words": 43585,
      "sourceTriangles": 1468,
-     "bakeMs": 4240
+     "bakeMs": 4109
     },
     {
      "fingerprint": "3fa71ecce185e95e531effac19081165557b2036bdfbe5eecba39114d727b645",
@@ -52,7 +52,7 @@
      "at": 86772,
      "words": 51314,
      "sourceTriangles": 1868,
-     "bakeMs": 5311
+     "bakeMs": 5050
     },
     {
      "fingerprint": "77a488a614b392c4d7744119db53d6925a7c2af88052a7d4da23bb7a1b2505b3",
@@ -60,7 +60,7 @@
      "at": 138086,
      "words": 69179,
      "sourceTriangles": 4002,
-     "bakeMs": 7037
+     "bakeMs": 4642
     },
     {
      "fingerprint": "833a1006ce42a799d98ead67adf9b1176ab83e25fea4c736eae260da8b9d7ccc",
@@ -68,7 +68,7 @@
      "at": 207265,
      "words": 75648,
      "sourceTriangles": 4746,
-     "bakeMs": 4359
+     "bakeMs": 4860
     },
     {
      "fingerprint": "922bcb353cbe56cf482e425f475a60d5e01d1baf1db1eb412243e86e1d5729b3",
@@ -76,7 +76,7 @@
      "at": 282913,
      "words": 56911,
      "sourceTriangles": 2778,
-     "bakeMs": 4083
+     "bakeMs": 3825
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -84,7 +84,7 @@
      "at": 339824,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9d3f7cb6e08093e8e368c133c7c4598a12a57b99dab3d9ba7b23f95448e88d82",
@@ -92,7 +92,7 @@
      "at": 380994,
      "words": 85372,
      "sourceTriangles": 4942,
-     "bakeMs": 8415
+     "bakeMs": 7975
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -100,7 +100,7 @@
      "at": 466366,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "ed1a51e585169a9d75a3bc03e1fe9c3bb3db01db87434c5fa8588dd6d247ca14",
@@ -108,7 +108,7 @@
      "at": 551774,
      "words": 67713,
      "sourceTriangles": 4002,
-     "bakeMs": 8708
+     "bakeMs": 4452
     },
     {
      "fingerprint": "fc1801087892a68e729cc07248c83d0af0250447e2607c79de7487e3c8d56663",
@@ -116,7 +116,7 @@
      "at": 619487,
      "words": 104008,
      "sourceTriangles": 6416,
-     "bakeMs": 12272
+     "bakeMs": 10548
     }
    ]
   },
@@ -136,7 +136,7 @@
      "at": 0,
      "words": 99890,
      "sourceTriangles": 7520,
-     "bakeMs": 5968
+     "bakeMs": 8355
     },
     {
      "fingerprint": "173ff9d08fb861f9f86a56a7a3c74ae66d8cb6493c615bbbb6346ac4b4e29375",
@@ -144,7 +144,7 @@
      "at": 99890,
      "words": 40892,
      "sourceTriangles": 2246,
-     "bakeMs": 4106
+     "bakeMs": 5132
     },
     {
      "fingerprint": "18a7fd4d5ce93cf57deefe0b7cac50b8539dbc7eac211bceafd083fccec89138",
@@ -152,7 +152,7 @@
      "at": 140782,
      "words": 40300,
      "sourceTriangles": 2246,
-     "bakeMs": 3395
+     "bakeMs": 5015
     },
     {
      "fingerprint": "21f56b853f1d629037ecdff42b902e4d19c5e49c84e6329d920dc89c6080b55b",
@@ -160,7 +160,7 @@
      "at": 181082,
      "words": 84992,
      "sourceTriangles": 4942,
-     "bakeMs": 13151
+     "bakeMs": 21937
     },
     {
      "fingerprint": "23244aeb6c8558cabfb397a5955766327ded2f75004dc60ee0609cf859dbc6f8",
@@ -168,7 +168,7 @@
      "at": 266074,
      "words": 56899,
      "sourceTriangles": 2778,
-     "bakeMs": 5660
+     "bakeMs": 8006
     },
     {
      "fingerprint": "27bd005f7f9c436048fd155ee667fc54051cf47c3003d7b2ceee52a63f89bdf4",
@@ -176,7 +176,7 @@
      "at": 322973,
      "words": 92034,
      "sourceTriangles": 5356,
-     "bakeMs": 9610
+     "bakeMs": 15837
     },
     {
      "fingerprint": "3c9cc34673decf31d2babfce615ccda13332a86c9284e4f4a386fa1d47073401",
@@ -184,7 +184,7 @@
      "at": 415007,
      "words": 76955,
      "sourceTriangles": 4746,
-     "bakeMs": 3196
+     "bakeMs": 3408
     },
     {
      "fingerprint": "4240d6c072f8885588098615f78c953930dc318e4790b768906c4fd0fff899b1",
@@ -192,7 +192,7 @@
      "at": 491962,
      "words": 92745,
      "sourceTriangles": 5969,
-     "bakeMs": 4928
+     "bakeMs": 4761
     },
     {
      "fingerprint": "4cb54f6536d28f1bb4ec8932ce5d9ebb2c91e2c70139b16f21f89897686afcbe",
@@ -200,7 +200,7 @@
      "at": 584707,
      "words": 166140,
      "sourceTriangles": 12034,
-     "bakeMs": 14343
+     "bakeMs": 12569
     },
     {
      "fingerprint": "5f44fa1accbd7ccf63b2d8352817b904a25918655772415ce7ba98e4174b8e59",
@@ -208,7 +208,7 @@
      "at": 750847,
      "words": 43864,
      "sourceTriangles": 1468,
-     "bakeMs": 4684
+     "bakeMs": 4017
     },
     {
      "fingerprint": "61ce817e1e8e0102316c329a453de34ea92e128cffbc56271fd3efa814e09861",
@@ -216,7 +216,7 @@
      "at": 794711,
      "words": 89183,
      "sourceTriangles": 5356,
-     "bakeMs": 7753
+     "bakeMs": 7236
     },
     {
      "fingerprint": "7931f337c27406e9462bf6d55d9d14cae63dbce7023d9f36cd9450ddbe50fd44",
@@ -224,7 +224,7 @@
      "at": 883894,
      "words": 68299,
      "sourceTriangles": 4002,
-     "bakeMs": 7101
+     "bakeMs": 4909
     },
     {
      "fingerprint": "8c247997aa10a88eb0380f6d226a943acbe8b325dc77421e80910e57cad6db8e",
@@ -232,7 +232,7 @@
      "at": 952193,
      "words": 41235,
      "sourceTriangles": 2246,
-     "bakeMs": 2623
+     "bakeMs": 2988
     },
     {
      "fingerprint": "9482a528f1d7dda1b42a3f3d92dc8f6f0eb33579a092eec8b00f2c4ed76a3532",
@@ -240,7 +240,7 @@
      "at": 993428,
      "words": 52656,
      "sourceTriangles": 1868,
-     "bakeMs": 5600
+     "bakeMs": 5201
     },
     {
      "fingerprint": "97ab54f8ac4e2bc67c656cac415b834151fa0705e3f256e5191d23f75a03eedd",
@@ -248,7 +248,7 @@
      "at": 1046084,
      "words": 63747,
      "sourceTriangles": 2992,
-     "bakeMs": 8222
+     "bakeMs": 8609
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -256,7 +256,7 @@
      "at": 1109831,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a370757f28a249bce0ceecdb599ad41d7011ba42dc1d045477ef8517e9635818",
@@ -264,7 +264,7 @@
      "at": 1151001,
      "words": 111409,
      "sourceTriangles": 6758,
-     "bakeMs": 13950
+     "bakeMs": 12271
     },
     {
      "fingerprint": "a91c3422f2064026d98f153debe1d0385429a10bddf899ddf0f87cc3daeec5bf",
@@ -272,7 +272,7 @@
      "at": 1262410,
      "words": 39645,
      "sourceTriangles": 2246,
-     "bakeMs": 2124
+     "bakeMs": 1888
     },
     {
      "fingerprint": "b5cb9a99f594c2231d8a557906a28c19152534afcc76ad16c3602cb2d2997bd5",
@@ -280,7 +280,7 @@
      "at": 1302055,
      "words": 72726,
      "sourceTriangles": 4090,
-     "bakeMs": 3811
+     "bakeMs": 3661
     },
     {
      "fingerprint": "bca728881f4b2695cc6407638b45d43071c71d75ddb091bee64eeae1519c050f",
@@ -288,7 +288,7 @@
      "at": 1374781,
      "words": 40491,
      "sourceTriangles": 2246,
-     "bakeMs": 2524
+     "bakeMs": 2076
     },
     {
      "fingerprint": "be356b994ebca972aa5c5599f706dabefd127a1d8182b9b90c31706b3d81a8f7",
@@ -296,7 +296,7 @@
      "at": 1415272,
      "words": 159143,
      "sourceTriangles": 12492,
-     "bakeMs": 4612
+     "bakeMs": 4353
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -304,7 +304,7 @@
      "at": 1574415,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "d1af1c26f6679c662bbb5e6b302449f83872a34f083e4eb9888af31502741cdd",
@@ -312,7 +312,7 @@
      "at": 1659823,
      "words": 40803,
      "sourceTriangles": 2246,
-     "bakeMs": 2598
+     "bakeMs": 1951
     },
     {
      "fingerprint": "df14835b3c652113e81232bee4f846c6149913bd0a8ccd4c484e1bce1a777a11",
@@ -320,7 +320,7 @@
      "at": 1700626,
      "words": 191033,
      "sourceTriangles": 14382,
-     "bakeMs": 31438
+     "bakeMs": 19391
     },
     {
      "fingerprint": "f9257e50e98cfd273cbb17b49bfe2b56e109307a1667bfa9e036293dab4aa598",
@@ -328,7 +328,7 @@
      "at": 1891659,
      "words": 100633,
      "sourceTriangles": 6190,
-     "bakeMs": 9206
+     "bakeMs": 5767
     },
     {
      "fingerprint": "fe2a61a91d71c16b2d141d351c56f73ce104f7ff97065ab2ff559bce6df0e091",
@@ -336,7 +336,7 @@
      "at": 1992292,
      "words": 104174,
      "sourceTriangles": 6416,
-     "bakeMs": 12976
+     "bakeMs": 9436
     }
    ]
   },
@@ -356,7 +356,7 @@
      "at": 0,
      "words": 36954,
      "sourceTriangles": 1968,
-     "bakeMs": 6073
+     "bakeMs": 4816
     },
     {
      "fingerprint": "0658ac2b69a04020249b4e238ec6b56e021f626f031e0f9b4de09be48bb2fe00",
@@ -364,7 +364,7 @@
      "at": 36954,
      "words": 100636,
      "sourceTriangles": 6190,
-     "bakeMs": 12188
+     "bakeMs": 12024
     },
     {
      "fingerprint": "09bb54473911c7f5cf42bffdbe0d15e47995227836ba142cd0927cc84080a270",
@@ -372,7 +372,7 @@
      "at": 137590,
      "words": 88942,
      "sourceTriangles": 5356,
-     "bakeMs": 10930
+     "bakeMs": 15045
     },
     {
      "fingerprint": "227c8b92cbab1e16885de1eb83462b755248a846caaff7541cc5be2843f2961e",
@@ -380,7 +380,7 @@
      "at": 226532,
      "words": 37150,
      "sourceTriangles": 1968,
-     "bakeMs": 3273
+     "bakeMs": 4672
     },
     {
      "fingerprint": "2f5a873b0c942e30c53c457b699fb13a95e3d35c46027d543927f3295f45605c",
@@ -388,7 +388,7 @@
      "at": 263682,
      "words": 57751,
      "sourceTriangles": 2778,
-     "bakeMs": 3792
+     "bakeMs": 4660
     },
     {
      "fingerprint": "33ea4d2c83c89a11f56ea76807fd51c8d2191eaabb5713e261a729e8e250f3d4",
@@ -396,7 +396,7 @@
      "at": 321433,
      "words": 108718,
      "sourceTriangles": 6664,
-     "bakeMs": 7756
+     "bakeMs": 9002
     },
     {
      "fingerprint": "39e30826b05fa1b38921c3f2c4ffee57d63cf7dd1042162ba71d2dfe748e9dcb",
@@ -404,7 +404,7 @@
      "at": 430151,
      "words": 165291,
      "sourceTriangles": 12034,
-     "bakeMs": 11531
+     "bakeMs": 11368
     },
     {
      "fingerprint": "3a12ed523788e206a2f2ef8258a767aab1042f1e09c4c80ce565941d6d8b51aa",
@@ -412,7 +412,7 @@
      "at": 595442,
      "words": 36220,
      "sourceTriangles": 1968,
-     "bakeMs": 2098
+     "bakeMs": 2132
     },
     {
      "fingerprint": "54d44297ab4dd9911a5dbfe30902e511ab589dd99abfc29c85dafed99c8c557a",
@@ -420,7 +420,7 @@
      "at": 631662,
      "words": 161274,
      "sourceTriangles": 12492,
-     "bakeMs": 4849
+     "bakeMs": 4414
     },
     {
      "fingerprint": "62310e42e3172b619ed3526ebf36b56dda3e633f44997b90ad4dcc21e2649ab9",
@@ -428,7 +428,7 @@
      "at": 792936,
      "words": 86339,
      "sourceTriangles": 4942,
-     "bakeMs": 8090
+     "bakeMs": 7192
     },
     {
      "fingerprint": "7f6d1a821bde3bf7a28a92d97ac173952ab66a957010eb17c257a8597e5dfcaa",
@@ -436,7 +436,7 @@
      "at": 879275,
      "words": 36896,
      "sourceTriangles": 1968,
-     "bakeMs": 3870
+     "bakeMs": 2544
     },
     {
      "fingerprint": "833822f57b82b31c8bb3a1899594eeb41ea570e8b066e9eb95e90c6b0077a53c",
@@ -444,7 +444,7 @@
      "at": 916171,
      "words": 71881,
      "sourceTriangles": 4090,
-     "bakeMs": 5540
+     "bakeMs": 5783
     },
     {
      "fingerprint": "8836847ceeeeafd503ecb1243173eeaa0cf91360cf41682b444917b3ad9939e8",
@@ -452,7 +452,7 @@
      "at": 988052,
      "words": 105933,
      "sourceTriangles": 6416,
-     "bakeMs": 14282
+     "bakeMs": 15553
     },
     {
      "fingerprint": "8934f3b6a110817670a8b3db537b37d0989d427939edca40557961dde1daf544",
@@ -460,7 +460,7 @@
      "at": 1093985,
      "words": 111260,
      "sourceTriangles": 6758,
-     "bakeMs": 16858
+     "bakeMs": 17027
     },
     {
      "fingerprint": "93840fab172118d2bae4d7437ad298c914dd06270441d2a3ddbe89802e1b2f18",
@@ -468,7 +468,7 @@
      "at": 1205245,
      "words": 99300,
      "sourceTriangles": 7520,
-     "bakeMs": 4324
+     "bakeMs": 4089
     },
     {
      "fingerprint": "93f08bb51825b4209434213ffd8c3408e02683e3671ad50d759c2d45df48b7c5",
@@ -476,7 +476,7 @@
      "at": 1304545,
      "words": 50013,
      "sourceTriangles": 1868,
-     "bakeMs": 6026
+     "bakeMs": 5766
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -484,7 +484,7 @@
      "at": 1354558,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9f3a1f678c1988903a38687b33aeff9a50a75701acff8ea2e41c84cf70ca9daf",
@@ -492,7 +492,7 @@
      "at": 1395728,
      "words": 77762,
      "sourceTriangles": 4746,
-     "bakeMs": 3465
+     "bakeMs": 3205
     },
     {
      "fingerprint": "a3849cd41f775e9c913c9bdcbdcecc6c85a6bfdb202840847c57f5c34f6990e2",
@@ -500,7 +500,7 @@
      "at": 1473490,
      "words": 41704,
      "sourceTriangles": 1468,
-     "bakeMs": 4263
+     "bakeMs": 4230
     },
     {
      "fingerprint": "bc013e806608c57559b588cc068f74beba40746c86a55dd22837b94566dad401",
@@ -508,7 +508,7 @@
      "at": 1515194,
      "words": 170566,
      "sourceTriangles": 12083,
-     "bakeMs": 20199
+     "bakeMs": 18444
     },
     {
      "fingerprint": "bc59088812f7f147f66c9678264052b2e107601e964f7c5aa769a5582add605f",
@@ -516,7 +516,7 @@
      "at": 1685760,
      "words": 61799,
      "sourceTriangles": 2992,
-     "bakeMs": 8900
+     "bakeMs": 7502
     },
     {
      "fingerprint": "c014a8c0a74ecc62d4bd7b9377aa13a198a67dc19edea5cf88f3662d952afd62",
@@ -524,7 +524,7 @@
      "at": 1747559,
      "words": 92091,
      "sourceTriangles": 5356,
-     "bakeMs": 6693
+     "bakeMs": 7382
     },
     {
      "fingerprint": "c682dfaac546605da1817a10d09258f5163567f4cffeeb13484262a6a3060ef0",
@@ -532,7 +532,7 @@
      "at": 1839650,
      "words": 68827,
      "sourceTriangles": 4002,
-     "bakeMs": 4602
+     "bakeMs": 4393
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -540,7 +540,7 @@
      "at": 1908477,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "e6568bbef05e8ef38af09878ed52c278909b41d6b3de9023e2ec87e30eb41b4a",
@@ -548,7 +548,7 @@
      "at": 1993885,
      "words": 36612,
      "sourceTriangles": 1968,
-     "bakeMs": 3428
+     "bakeMs": 2341
     }
    ]
   },
@@ -568,7 +568,7 @@
      "at": 0,
      "words": 71605,
      "sourceTriangles": 4090,
-     "bakeMs": 7190
+     "bakeMs": 6814
     },
     {
      "fingerprint": "0fc93be598913c92e740c03f4ea88933b38fed3499dd3a84fc704c2ec27881a9",
@@ -576,7 +576,7 @@
      "at": 71605,
      "words": 57909,
      "sourceTriangles": 2778,
-     "bakeMs": 5377
+     "bakeMs": 8306
     },
     {
      "fingerprint": "141a4285210a968b96ab52373ba405572820266afc33c8920e54920f0dffef21",
@@ -584,7 +584,7 @@
      "at": 129514,
      "words": 31213,
      "sourceTriangles": 2246,
-     "bakeMs": 1974
+     "bakeMs": 2390
     },
     {
      "fingerprint": "193c34e3ba2d3265fc6d279a4d6a9ce9359d9c8a3b4d872c3f525f5267e99f2d",
@@ -592,7 +592,7 @@
      "at": 160727,
      "words": 63137,
      "sourceTriangles": 2992,
-     "bakeMs": 12695
+     "bakeMs": 19033
     },
     {
      "fingerprint": "267249cd20ee0fe06c33964a154ae1e41bb2d66de9e7be9d33870d088905649a",
@@ -600,7 +600,7 @@
      "at": 223864,
      "words": 190234,
      "sourceTriangles": 14382,
-     "bakeMs": 20732
+     "bakeMs": 36193
     },
     {
      "fingerprint": "28a738cd5c5a4a3cecfe0f41156344f561d85a566cbf91f2da5a07bb8aad8d3c",
@@ -608,7 +608,7 @@
      "at": 414098,
      "words": 91394,
      "sourceTriangles": 5356,
-     "bakeMs": 9076
+     "bakeMs": 13616
     },
     {
      "fingerprint": "2a78aabd28018142c0406557d95695b524eaf8ebddf65b34a6e30e9d2f7b5b5e",
@@ -616,7 +616,7 @@
      "at": 505492,
      "words": 40316,
      "sourceTriangles": 2246,
-     "bakeMs": 3024
+     "bakeMs": 3016
     },
     {
      "fingerprint": "33fecf0ebe34add36d5c2e8a03a0329268361af0d7a6727a28e94c7f396ccce0",
@@ -624,7 +624,7 @@
      "at": 545808,
      "words": 169144,
      "sourceTriangles": 12034,
-     "bakeMs": 11756
+     "bakeMs": 12266
     },
     {
      "fingerprint": "38c7d12e4109b464fe0a4ed94171226d8ba796a733bce734d8038155682049d1",
@@ -632,7 +632,7 @@
      "at": 714952,
      "words": 39144,
      "sourceTriangles": 2246,
-     "bakeMs": 2176
+     "bakeMs": 1974
     },
     {
      "fingerprint": "463058ba67f10623efbb20e4868e28ac14702eda841235842cafa8c37b7b9b68",
@@ -640,7 +640,7 @@
      "at": 754096,
      "words": 89678,
      "sourceTriangles": 5356,
-     "bakeMs": 6903
+     "bakeMs": 9169
     },
     {
      "fingerprint": "55e260353bc8be6764b9377bf01ff1f6bfa4dffda2070f9d9d57ca7684237add",
@@ -648,7 +648,7 @@
      "at": 843774,
      "words": 237504,
      "sourceTriangles": 15553,
-     "bakeMs": 61039
+     "bakeMs": 48066
     },
     {
      "fingerprint": "6f46f1144cb5a033bfe9441ec9d225af5e8c7840217c45739536c909105c3e98",
@@ -656,7 +656,7 @@
      "at": 1081278,
      "words": 40375,
      "sourceTriangles": 2246,
-     "bakeMs": 2515
+     "bakeMs": 1743
     },
     {
      "fingerprint": "74320e4b2ab096169fc5ff1d92df671ca267634255b3e0afd560140d4033f545",
@@ -664,7 +664,7 @@
      "at": 1121653,
      "words": 100219,
      "sourceTriangles": 6190,
-     "bakeMs": 9220
+     "bakeMs": 6498
     },
     {
      "fingerprint": "74c77e7af96cb1e625ff46c9cbc9729793ebcc95fdc85e568fa0186f8b2e26b5",
@@ -672,7 +672,7 @@
      "at": 1221872,
      "words": 40373,
      "sourceTriangles": 2246,
-     "bakeMs": 3359
+     "bakeMs": 2210
     },
     {
      "fingerprint": "7d45dab6db97b9a44c3c1f7dc570bf1921edd49cb2ab6e0981ce4d5c26e77f8d",
@@ -680,7 +680,7 @@
      "at": 1262245,
      "words": 75513,
      "sourceTriangles": 4746,
-     "bakeMs": 6477
+     "bakeMs": 3813
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -688,7 +688,7 @@
      "at": 1337758,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9fae1c3afa2b62c6bea5d03ea20c014372f4f28095fccb12aac314f9d341a368",
@@ -696,7 +696,7 @@
      "at": 1378928,
      "words": 50258,
      "sourceTriangles": 1868,
-     "bakeMs": 5538
+     "bakeMs": 4948
     },
     {
      "fingerprint": "b82732be02d5f96cc214cf79c337942c322acae98833f08e2fcd167935548669",
@@ -704,7 +704,7 @@
      "at": 1429186,
      "words": 40556,
      "sourceTriangles": 2246,
-     "bakeMs": 1968
+     "bakeMs": 1664
     },
     {
      "fingerprint": "bff7a54c3f47508ae301bc744eccb01026a93a6d61426ba5e382817fe4760f2e",
@@ -712,7 +712,7 @@
      "at": 1469742,
      "words": 158933,
      "sourceTriangles": 12492,
-     "bakeMs": 4345
+     "bakeMs": 4383
     },
     {
      "fingerprint": "c06922cb2d5c69ba01ce64fad2c825f501676e81796bec897720207dddb577e5",
@@ -720,7 +720,7 @@
      "at": 1628675,
      "words": 41935,
      "sourceTriangles": 1468,
-     "bakeMs": 4142
+     "bakeMs": 4137
     },
     {
      "fingerprint": "c50f79b69d78416f49aac0cc27f59ae436991c8d8c76094b28efb71b57ef4541",
@@ -728,7 +728,7 @@
      "at": 1670610,
      "words": 110924,
      "sourceTriangles": 6758,
-     "bakeMs": 18035
+     "bakeMs": 12889
     },
     {
      "fingerprint": "c5c06aefc4b91a4fb60cee066444c38747267a207c487967d89fcf10719a6994",
@@ -736,7 +736,7 @@
      "at": 1781534,
      "words": 86791,
      "sourceTriangles": 4942,
-     "bakeMs": 10507
+     "bakeMs": 8770
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -744,7 +744,7 @@
      "at": 1868325,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "cf8abf8ff478314691c59ec4332736fef928bac8c3e27911d7a632aa547af7d3",
@@ -752,7 +752,7 @@
      "at": 1953733,
      "words": 105550,
      "sourceTriangles": 6416,
-     "bakeMs": 17520
+     "bakeMs": 11102
     },
     {
      "fingerprint": "d1617a290b19a6fa355b8ef5893545886186654ebc95033d21e19b0038c51c90",
@@ -760,7 +760,7 @@
      "at": 2059283,
      "words": 66482,
      "sourceTriangles": 4002,
-     "bakeMs": 6893
+     "bakeMs": 4137
     },
     {
      "fingerprint": "f5cd082e4bedafc908cb18449f6aa43e2fe88ea11311a7b62310f2e870b42c49",
@@ -768,7 +768,7 @@
      "at": 2125765,
      "words": 99726,
      "sourceTriangles": 7520,
-     "bakeMs": 7425
+     "bakeMs": 3818
     }
    ]
   },
@@ -788,7 +788,7 @@
      "at": 0,
      "words": 167523,
      "sourceTriangles": 12034,
-     "bakeMs": 11181
+     "bakeMs": 12099
     },
     {
      "fingerprint": "4e42cfaef90ed8e119cb31e7ecdc7421f36b761cdb8f407928613cb2f3904c6e",
@@ -796,7 +796,7 @@
      "at": 167523,
      "words": 41248,
      "sourceTriangles": 2246,
-     "bakeMs": 2581
+     "bakeMs": 2354
     },
     {
      "fingerprint": "5158f2fda8faced253cf4f36468acfd9e78de2d5fba36e4bff42bea335ed4cee",
@@ -804,7 +804,7 @@
      "at": 208771,
      "words": 76149,
      "sourceTriangles": 4746,
-     "bakeMs": 3721
+     "bakeMs": 3458
     },
     {
      "fingerprint": "655589e84a44a5cd570d8e5c8a9f265993cd476901fea17f9937be7ba9dcc7c7",
@@ -812,7 +812,7 @@
      "at": 284920,
      "words": 39634,
      "sourceTriangles": 2246,
-     "bakeMs": 1872
+     "bakeMs": 1920
     },
     {
      "fingerprint": "68a63a5a664984b3eaaeff0673a106438fa40d745188f9c7ba828851dda4d940",
@@ -820,7 +820,7 @@
      "at": 324554,
      "words": 101264,
      "sourceTriangles": 6416,
-     "bakeMs": 14348
+     "bakeMs": 10988
     },
     {
      "fingerprint": "7654dc5fd3b484d35f360cd4a6e820474083fe4330953c125e6c8d09e3ee8ea7",
@@ -828,7 +828,7 @@
      "at": 425818,
      "words": 67584,
      "sourceTriangles": 4002,
-     "bakeMs": 6517
+     "bakeMs": 4831
     },
     {
      "fingerprint": "790747ff89517d47ff9dc7991bae0f766c0dd679484ab59052f41224c49528eb",
@@ -836,7 +836,7 @@
      "at": 493402,
      "words": 95759,
      "sourceTriangles": 6317,
-     "bakeMs": 12543
+     "bakeMs": 8921
     },
     {
      "fingerprint": "7b711e8f8fe0d9ef13d7036717eaff1095a57b9a77d129bcef8f5f0302cb8b8f",
@@ -844,7 +844,7 @@
      "at": 589161,
      "words": 87206,
      "sourceTriangles": 4942,
-     "bakeMs": 15793
+     "bakeMs": 10261
     },
     {
      "fingerprint": "7d90410360e21fed364e5d536eec395197f147b1b6922a0fd59452a330ca4468",
@@ -852,7 +852,7 @@
      "at": 676367,
      "words": 41152,
      "sourceTriangles": 2246,
-     "bakeMs": 3269
+     "bakeMs": 1711
     },
     {
      "fingerprint": "823c6769966588c13dd5e1b2e6336e21729df6444026095304a276bf56e974cb",
@@ -860,7 +860,7 @@
      "at": 717519,
      "words": 41087,
      "sourceTriangles": 2246,
-     "bakeMs": 2746
+     "bakeMs": 2491
     },
     {
      "fingerprint": "8ae6f1b5fe22981bcee57f6c06a025648ac67cc076951de0fdc19d6f78f22544",
@@ -868,7 +868,7 @@
      "at": 758606,
      "words": 98602,
      "sourceTriangles": 7520,
-     "bakeMs": 5236
+     "bakeMs": 5610
     },
     {
      "fingerprint": "925bb191167b4fd007b578792e98e33e6d1db59a9d86a3bcd1397dd1c3b0dcb3",
@@ -876,7 +876,7 @@
      "at": 857208,
      "words": 44086,
      "sourceTriangles": 1468,
-     "bakeMs": 4811
+     "bakeMs": 4285
     },
     {
      "fingerprint": "960b0fc6425d71917c79a114ebceffe5d07f83766b03227ff66912fcf37ac542",
@@ -884,7 +884,7 @@
      "at": 901294,
      "words": 90019,
      "sourceTriangles": 5356,
-     "bakeMs": 7316
+     "bakeMs": 8429
     },
     {
      "fingerprint": "9705718a5a3048148a09dd2330d168b9cefed1e003b004631dae30e77762ad5e",
@@ -892,7 +892,7 @@
      "at": 991313,
      "words": 41183,
      "sourceTriangles": 2246,
-     "bakeMs": 2059
+     "bakeMs": 2057
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -900,7 +900,7 @@
      "at": 1032496,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "b30f8621137eff476c6e8f97e4062d162697837c29163b95e674ac69aa246b88",
@@ -908,7 +908,7 @@
      "at": 1073666,
      "words": 99844,
      "sourceTriangles": 6190,
-     "bakeMs": 5804
+     "bakeMs": 5288
     },
     {
      "fingerprint": "b52514fc6bfc916de1e4ee256f96c676ac701c6502c7d9aac1f019856bcf325e",
@@ -916,7 +916,7 @@
      "at": 1173510,
      "words": 90881,
      "sourceTriangles": 5356,
-     "bakeMs": 7059
+     "bakeMs": 6700
     },
     {
      "fingerprint": "bae687fed03860bb2418d026d1ee50ef4b892d60a5efd8d2101ee3b100dfc056",
@@ -924,7 +924,7 @@
      "at": 1264391,
      "words": 41344,
      "sourceTriangles": 2246,
-     "bakeMs": 1716
+     "bakeMs": 1670
     },
     {
      "fingerprint": "bf3140aaeda51055592fb469542d0708bc4c3688fafcc4f01273e28a6dc5243f",
@@ -932,7 +932,7 @@
      "at": 1305735,
      "words": 110511,
      "sourceTriangles": 6758,
-     "bakeMs": 13917
+     "bakeMs": 12705
     },
     {
      "fingerprint": "bfb3d45e4205829a9036f5e2bed6a919724f4adfe6a85ed23f458af9f6569eb4",
@@ -940,7 +940,7 @@
      "at": 1416246,
      "words": 73549,
      "sourceTriangles": 4090,
-     "bakeMs": 3908
+     "bakeMs": 3896
     },
     {
      "fingerprint": "c5f31c6bbe20b9de72b2cce998888a0a8a1962a27317f3f5d10d7acaad641468",
@@ -948,7 +948,7 @@
      "at": 1489795,
      "words": 57006,
      "sourceTriangles": 2778,
-     "bakeMs": 4351
+     "bakeMs": 3718
     },
     {
      "fingerprint": "c8f81dda2593e3cd4935bfbd4ea22084d86b5a0a57a554b35c66b1b2ed8437eb",
@@ -956,7 +956,7 @@
      "at": 1546801,
      "words": 159315,
      "sourceTriangles": 12492,
-     "bakeMs": 6094
+     "bakeMs": 4279
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -964,7 +964,7 @@
      "at": 1706116,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "d9a5823c5124d1f03f390a84484b95a861e4052ae0361ff7b7160ec87c9315e9",
@@ -972,7 +972,7 @@
      "at": 1791524,
      "words": 51308,
      "sourceTriangles": 1868,
-     "bakeMs": 7860
+     "bakeMs": 4757
     },
     {
      "fingerprint": "e9cee280986f5480be38d742c8aa4880898a541b15231c0065249e53507eb4b6",
@@ -980,7 +980,7 @@
      "at": 1842832,
      "words": 188472,
      "sourceTriangles": 14332,
-     "bakeMs": 35547
+     "bakeMs": 19031
     },
     {
      "fingerprint": "f819cf8f8e6a0a788b70b7112c75a53ec840b242327e2a797f98c4ca99c06d04",
@@ -988,7 +988,7 @@
      "at": 2031304,
      "words": 63319,
      "sourceTriangles": 2992,
-     "bakeMs": 12187
+     "bakeMs": 8122
     }
    ]
   },
@@ -1008,7 +1008,7 @@
      "at": 0,
      "words": 66461,
      "sourceTriangles": 4002,
-     "bakeMs": 11508
+     "bakeMs": 8795
     },
     {
      "fingerprint": "147305a77bee42f3735cf4156a5e7168146ef31b484508bf4e3485da79cbd18b",
@@ -1016,7 +1016,7 @@
      "at": 66461,
      "words": 40774,
      "sourceTriangles": 2246,
-     "bakeMs": 3637
+     "bakeMs": 5515
     },
     {
      "fingerprint": "2940baad721cb120957ebfeadd9f4047f508067d48e633be6f9b54203b4becd2",
@@ -1024,7 +1024,7 @@
      "at": 107235,
      "words": 78784,
      "sourceTriangles": 4746,
-     "bakeMs": 4383
+     "bakeMs": 6505
     },
     {
      "fingerprint": "42a3b86af258bf0b9538ba182217eae0d042cc176e787c88aecb66de9f2d9218",
@@ -1032,7 +1032,7 @@
      "at": 186019,
      "words": 86337,
      "sourceTriangles": 4942,
-     "bakeMs": 8889
+     "bakeMs": 11438
     },
     {
      "fingerprint": "477b06823b88df2007331e65b57f58a1d46b92707b151cb531d0402a8405c5d6",
@@ -1040,7 +1040,7 @@
      "at": 272356,
      "words": 160352,
      "sourceTriangles": 12492,
-     "bakeMs": 4282
+     "bakeMs": 5923
     },
     {
      "fingerprint": "54d110eb5719837fc5f3763d272552a3e78f7ffd1589b0b5b299502198c77d35",
@@ -1048,7 +1048,7 @@
      "at": 432708,
      "words": 39115,
      "sourceTriangles": 2246,
-     "bakeMs": 2343
+     "bakeMs": 2187
     },
     {
      "fingerprint": "5863e3fe2816f728775ba32073dd42bfcb0c3bd9dd98cc734b119996e87aeba6",
@@ -1056,7 +1056,7 @@
      "at": 471823,
      "words": 40259,
      "sourceTriangles": 2246,
-     "bakeMs": 2586
+     "bakeMs": 2123
     },
     {
      "fingerprint": "644c6dc0c5bb5114f16568b5afab9d20624da7dd0a46ba8989dcc7cc9696fd45",
@@ -1064,7 +1064,7 @@
      "at": 512082,
      "words": 82958,
      "sourceTriangles": 5762,
-     "bakeMs": 6558
+     "bakeMs": 5974
     },
     {
      "fingerprint": "7657fd56cc1bea3537f224930d113a3588f52442c7d465218e92f1643ab29bd7",
@@ -1072,7 +1072,7 @@
      "at": 595040,
      "words": 229229,
      "sourceTriangles": 15635,
-     "bakeMs": 58052
+     "bakeMs": 51040
     },
     {
      "fingerprint": "7764eea402129fb1c0a7c1d014f59996e464a3c0c7e17193dcd4cdc4c009f6c4",
@@ -1080,7 +1080,7 @@
      "at": 824269,
      "words": 39798,
      "sourceTriangles": 2246,
-     "bakeMs": 3327
+     "bakeMs": 2327
     },
     {
      "fingerprint": "863b3e4a62c8948a2e294f6c558edcc5fb0b1dfb88b8e02099a65d79ef840ffe",
@@ -1088,7 +1088,7 @@
      "at": 864067,
      "words": 51641,
      "sourceTriangles": 1868,
-     "bakeMs": 8232
+     "bakeMs": 7908
     },
     {
      "fingerprint": "87d9856ca7e0011499feb1fac681c48149197a4af2b7e2d7fc20b800a49d604f",
@@ -1096,7 +1096,7 @@
      "at": 915708,
      "words": 97540,
      "sourceTriangles": 7520,
-     "bakeMs": 6568
+     "bakeMs": 5651
     },
     {
      "fingerprint": "8b18cb26b2f48319386ccd7ea39a586f214051a5549ea0856b5303d1fa7c5d8e",
@@ -1104,7 +1104,7 @@
      "at": 1013248,
      "words": 43595,
      "sourceTriangles": 1468,
-     "bakeMs": 5506
+     "bakeMs": 5656
     },
     {
      "fingerprint": "9011e5b654a6d267b80c17a021ca763dc9e93d3acbc52a612cdb13f878f9da42",
@@ -1112,7 +1112,7 @@
      "at": 1056843,
      "words": 101478,
      "sourceTriangles": 6190,
-     "bakeMs": 6459
+     "bakeMs": 6331
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -1120,7 +1120,7 @@
      "at": 1158321,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "b783b05dfb283e1e7de874cf5ac401c30de08c03f47e8a87c942066803994b39",
@@ -1128,7 +1128,7 @@
      "at": 1199491,
      "words": 63703,
      "sourceTriangles": 2992,
-     "bakeMs": 7630
+     "bakeMs": 7394
     },
     {
      "fingerprint": "b9b1831b1bffeee34ea49dd52b88a9bc199b5d1f32d1803ae93203ecc05bb9f0",
@@ -1136,7 +1136,7 @@
      "at": 1263194,
      "words": 111891,
      "sourceTriangles": 6758,
-     "bakeMs": 14667
+     "bakeMs": 11982
     },
     {
      "fingerprint": "bdd3d12faae7ab4408832703a29b68a5c41cdcfa415087b65323f35045688023",
@@ -1144,7 +1144,7 @@
      "at": 1375085,
      "words": 104033,
      "sourceTriangles": 6416,
-     "bakeMs": 11028
+     "bakeMs": 10329
     },
     {
      "fingerprint": "c19a7040f794acb3e7975968e7932477254c4888e69b43a0a0e311bf879aee9d",
@@ -1152,7 +1152,7 @@
      "at": 1479118,
      "words": 55907,
      "sourceTriangles": 2778,
-     "bakeMs": 3760
+     "bakeMs": 3799
     },
     {
      "fingerprint": "c4bbf78091701bbdfc563ab7996aaa2635c83be3ae72e4267ee424738c4ccc27",
@@ -1160,7 +1160,7 @@
      "at": 1535025,
      "words": 90653,
      "sourceTriangles": 5356,
-     "bakeMs": 8190
+     "bakeMs": 7155
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -1168,7 +1168,7 @@
      "at": 1625678,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "cce04caa34747ab899b17070ba41487077e9619e77648e6fd0185184d6644ca3",
@@ -1176,7 +1176,7 @@
      "at": 1711086,
      "words": 39989,
      "sourceTriangles": 2246,
-     "bakeMs": 3023
+     "bakeMs": 2092
     },
     {
      "fingerprint": "e1058239fe06d82fb519b986885967c1a4d96d4136b4cbbf897d0a8ea988b6d9",
@@ -1184,7 +1184,7 @@
      "at": 1751075,
      "words": 72509,
      "sourceTriangles": 4090,
-     "bakeMs": 6960
+     "bakeMs": 4129
     },
     {
      "fingerprint": "ecaf83ab366980a927f642190ef3c1ceba8a83942041d08abb5608ba58ae8de4",
@@ -1192,7 +1192,7 @@
      "at": 1823584,
      "words": 90132,
      "sourceTriangles": 5356,
-     "bakeMs": 12935
+     "bakeMs": 7175
     },
     {
      "fingerprint": "f26a6efe0c2cf53aa7ec2242b6480d7ea77b422fbce7731f9b9ea4f555abe279",
@@ -1200,7 +1200,7 @@
      "at": 1913716,
      "words": 169348,
      "sourceTriangles": 12034,
-     "bakeMs": 21064
+     "bakeMs": 11117
     },
     {
      "fingerprint": "f8d447658d44fc0869a54d03126a10b9b023bf8db4940e4b3094cb30490ea822",
@@ -1208,7 +1208,7 @@
      "at": 2083064,
      "words": 40160,
      "sourceTriangles": 2246,
-     "bakeMs": 4098
+     "bakeMs": 2148
     }
    ]
   },
@@ -1228,7 +1228,7 @@
      "at": 0,
      "words": 98466,
      "sourceTriangles": 7520,
-     "bakeMs": 10675
+     "bakeMs": 8193
     },
     {
      "fingerprint": "061840813f5566ffca72ff476d7fd657272c4039fa369251f0c9f2a5d625bb7b",
@@ -1236,7 +1236,7 @@
      "at": 98466,
      "words": 39204,
      "sourceTriangles": 2246,
-     "bakeMs": 5327
+     "bakeMs": 3915
     },
     {
      "fingerprint": "0698c95f2a0475b70ec91e81e68dfe3feb84a476f70f9d49780a34878f54fa91",
@@ -1244,7 +1244,7 @@
      "at": 137670,
      "words": 73657,
      "sourceTriangles": 4090,
-     "bakeMs": 8869
+     "bakeMs": 7821
     },
     {
      "fingerprint": "22578e93943ca250498f50334a1fb135500584b0a14ba3d0219b94edf6d586ae",
@@ -1252,7 +1252,7 @@
      "at": 211327,
      "words": 163077,
      "sourceTriangles": 12492,
-     "bakeMs": 6526
+     "bakeMs": 8754
     },
     {
      "fingerprint": "2a51d2aec8498f0624d1ddd9a2a642bb9b7dee488671fdc6779e4242b20a3ea0",
@@ -1260,7 +1260,7 @@
      "at": 374404,
      "words": 68345,
      "sourceTriangles": 4002,
-     "bakeMs": 5876
+     "bakeMs": 6878
     },
     {
      "fingerprint": "41c51d7f3d65c6c4a874b5e0cf6fb195e427a9fae31c9f8894652442e3a1ff3b",
@@ -1268,7 +1268,7 @@
      "at": 442749,
      "words": 90211,
      "sourceTriangles": 5356,
-     "bakeMs": 7439
+     "bakeMs": 8163
     },
     {
      "fingerprint": "52b69ff241d0d4314ba891aa87ee84dfcd3a11a63434bf287abd6172ee727762",
@@ -1276,7 +1276,7 @@
      "at": 532960,
      "words": 89733,
      "sourceTriangles": 5356,
-     "bakeMs": 7711
+     "bakeMs": 7101
     },
     {
      "fingerprint": "590db6eee7d46414c735c3fb1e26336569523277e7b083478130dec22d85c8a7",
@@ -1284,7 +1284,7 @@
      "at": 622693,
      "words": 40000,
      "sourceTriangles": 2246,
-     "bakeMs": 2391
+     "bakeMs": 2007
     },
     {
      "fingerprint": "6f427151669fd2331bddce962043d70c46ad521f7e04e44e88a7e69399111ada",
@@ -1292,7 +1292,7 @@
      "at": 662693,
      "words": 41108,
      "sourceTriangles": 2246,
-     "bakeMs": 2224
+     "bakeMs": 1662
     },
     {
      "fingerprint": "7b62dd7db9816d9400838f67fd4151d0eabb03c82445b43927aefa1f65c8b1b0",
@@ -1300,7 +1300,7 @@
      "at": 703801,
      "words": 166833,
      "sourceTriangles": 12034,
-     "bakeMs": 19259
+     "bakeMs": 13926
     },
     {
      "fingerprint": "7c08a7a76a5ecc91ad89f4e306a86e03976b4513587f8be9acfbd22d3008ae43",
@@ -1308,7 +1308,7 @@
      "at": 870634,
      "words": 62301,
      "sourceTriangles": 2992,
-     "bakeMs": 12667
+     "bakeMs": 7795
     },
     {
      "fingerprint": "8154e2867224cf0e66fb4492592bf41dda79a80d586f2d43b2043b683e309471",
@@ -1316,7 +1316,7 @@
      "at": 932935,
      "words": 84884,
      "sourceTriangles": 4942,
-     "bakeMs": 11198
+     "bakeMs": 12247
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -1324,7 +1324,7 @@
      "at": 1017819,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9fcdeb70373890ef3d3be19c562f7ec59529d294a542a41dd52983fb848d2161",
@@ -1332,7 +1332,7 @@
      "at": 1058989,
      "words": 51094,
      "sourceTriangles": 1868,
-     "bakeMs": 5189
+     "bakeMs": 4750
     },
     {
      "fingerprint": "a17b3ba5090e9fdc1d3607d5bed9b90fe7f8939c9b00932b7dc24ef605d4d6da",
@@ -1340,7 +1340,7 @@
      "at": 1110083,
      "words": 111435,
      "sourceTriangles": 6758,
-     "bakeMs": 13180
+     "bakeMs": 12922
     },
     {
      "fingerprint": "a6b68b27d24633ca973780c548ccef19ee23f230b3d7205e3bc30e83a8e35c67",
@@ -1348,7 +1348,7 @@
      "at": 1221518,
      "words": 105810,
      "sourceTriangles": 6416,
-     "bakeMs": 12124
+     "bakeMs": 11710
     },
     {
      "fingerprint": "b0818f07d4107237422d86f7f4f421d6bf9a1085bf4c80161e9783f27ee7e909",
@@ -1356,7 +1356,7 @@
      "at": 1327328,
      "words": 122020,
      "sourceTriangles": 8035,
-     "bakeMs": 11909
+     "bakeMs": 11287
     },
     {
      "fingerprint": "c3215ee11d949e97370778c166a90533c1efcd7b1ab892e28035e76f5c596e69",
@@ -1364,7 +1364,7 @@
      "at": 1449348,
      "words": 75958,
      "sourceTriangles": 4746,
-     "bakeMs": 3428
+     "bakeMs": 3087
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -1372,7 +1372,7 @@
      "at": 1525306,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "d033e357b145fe43a26698fde6e8f404ecc1b426b3c6ef8d7bf520aa35dca672",
@@ -1380,7 +1380,7 @@
      "at": 1610714,
      "words": 57530,
      "sourceTriangles": 2778,
-     "bakeMs": 5467
+     "bakeMs": 3691
     },
     {
      "fingerprint": "d9c4d0cc8fd644427619718f492930336b476e5efb5bc05c689553681031e482",
@@ -1388,7 +1388,7 @@
      "at": 1668244,
      "words": 102750,
      "sourceTriangles": 6190,
-     "bakeMs": 8938
+     "bakeMs": 5873
     },
     {
      "fingerprint": "f2335bcdb2463abfe9774346781988a7ea26b43d517de33a683495c14e8c7ea1",
@@ -1396,7 +1396,7 @@
      "at": 1770994,
      "words": 39124,
      "sourceTriangles": 2246,
-     "bakeMs": 3778
+     "bakeMs": 1847
     },
     {
      "fingerprint": "fa8562c83e1e72ed77edf129c512a25b262c0c48d5b5fc95576f745d4321b9b9",
@@ -1404,7 +1404,7 @@
      "at": 1810118,
      "words": 40413,
      "sourceTriangles": 2246,
-     "bakeMs": 3113
+     "bakeMs": 2137
     },
     {
      "fingerprint": "fbea29eeaf35c04b75903b341bd55028c0b67457aaff951ff2d223713e5888d5",
@@ -1412,7 +1412,7 @@
      "at": 1850531,
      "words": 38863,
      "sourceTriangles": 2246,
-     "bakeMs": 2796
+     "bakeMs": 2061
     },
     {
      "fingerprint": "fd2970ed7d05fa0d687aa09aa6d22c4b0869c92f14a505f4016453944f2ea454",
@@ -1420,7 +1420,7 @@
      "at": 1889394,
      "words": 41694,
      "sourceTriangles": 1468,
-     "bakeMs": 5027
+     "bakeMs": 4474
     }
    ]
   },
@@ -1440,7 +1440,7 @@
      "at": 0,
      "words": 69148,
      "sourceTriangles": 4002,
-     "bakeMs": 7418
+     "bakeMs": 8246
     },
     {
      "fingerprint": "691be17c161aaf0feef4d88bad1770cf4ea30dea519c3540ebe8f53cdbf11dcc",
@@ -1448,7 +1448,7 @@
      "at": 69148,
      "words": 76186,
      "sourceTriangles": 4746,
-     "bakeMs": 3416
+     "bakeMs": 3172
     },
     {
      "fingerprint": "746bfeb7c3862811a4c0c2a02d3f045f2838fb820a1dd5638e0b3f0acb83af82",
@@ -1456,7 +1456,7 @@
      "at": 145334,
      "words": 51270,
      "sourceTriangles": 1868,
-     "bakeMs": 7903
+     "bakeMs": 5835
     },
     {
      "fingerprint": "76250a3fb4876ce03fd49f204789c43d353ab65f091958c606b91bee8d1cd498",
@@ -1464,7 +1464,7 @@
      "at": 196604,
      "words": 85842,
      "sourceTriangles": 4942,
-     "bakeMs": 12876
+     "bakeMs": 8603
     },
     {
      "fingerprint": "7b5fe027d8398480be6e50e4bc4ef1f8db15798f1b662d73b50540d5f8c243e5",
@@ -1472,7 +1472,7 @@
      "at": 282446,
      "words": 56297,
      "sourceTriangles": 2778,
-     "bakeMs": 6524
+     "bakeMs": 4097
     },
     {
      "fingerprint": "95057352582e4e96ac7d3059b21970b4de9452c864ba45c60852c28fad9d41b5",
@@ -1480,7 +1480,7 @@
      "at": 338743,
      "words": 43798,
      "sourceTriangles": 1468,
-     "bakeMs": 4579
+     "bakeMs": 4528
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -1488,7 +1488,7 @@
      "at": 382541,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a1eadb382da7641fb1daec961d7e6f13b2da0b3b8a49a9ce6ecb99a5951161b5",
@@ -1496,7 +1496,7 @@
      "at": 423711,
      "words": 67757,
      "sourceTriangles": 4002,
-     "bakeMs": 4454
+     "bakeMs": 4385
     },
     {
      "fingerprint": "c87b7c03f8ea707413f13cb58fd9415738ab640917f67909bb4558c192e5e8f9",
@@ -1504,7 +1504,7 @@
      "at": 491468,
      "words": 104174,
      "sourceTriangles": 6416,
-     "bakeMs": 17106
+     "bakeMs": 11420
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -1512,7 +1512,7 @@
      "at": 595642,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "ed6aeb22c353cfe7ee99bd86edcc133c593e4d69c6a6ebf9910fa06553195de2",
@@ -1520,7 +1520,7 @@
      "at": 681050,
      "words": 43598,
      "sourceTriangles": 1468,
-     "bakeMs": 8152
+     "bakeMs": 3980
     }
    ]
   },
@@ -1540,7 +1540,7 @@
      "at": 0,
      "words": 77172,
      "sourceTriangles": 4746,
-     "bakeMs": 8976
+     "bakeMs": 7109
     },
     {
      "fingerprint": "236c802d6a07097ade15ce39f2b6aa54706c1496fdbe4a1e3879b7ce6bb705ce",
@@ -1548,7 +1548,7 @@
      "at": 77172,
      "words": 162395,
      "sourceTriangles": 12492,
-     "bakeMs": 6259
+     "bakeMs": 9369
     },
     {
      "fingerprint": "26c305fef32e20e37714bd60f2a9ffa13b6032e6790770ea3cff44b9bee6652a",
@@ -1556,7 +1556,7 @@
      "at": 239567,
      "words": 51728,
      "sourceTriangles": 1868,
-     "bakeMs": 6090
+     "bakeMs": 16832
     },
     {
      "fingerprint": "2820204809fb453accf60f638d58b92ae9e048c44814c8e18f150470c011211b",
@@ -1564,7 +1564,7 @@
      "at": 291295,
      "words": 39104,
      "sourceTriangles": 2234,
-     "bakeMs": 2308
+     "bakeMs": 5734
     },
     {
      "fingerprint": "290846cfcff3ccb0d68c376808f44c7605feb7f770ea9a2bf3ccc524c069e20a",
@@ -1572,7 +1572,7 @@
      "at": 330399,
      "words": 70984,
      "sourceTriangles": 4090,
-     "bakeMs": 5259
+     "bakeMs": 7815
     },
     {
      "fingerprint": "469a82f1821dcc8d26d6079b359d746ab1abe0d2e141cc693e477fb50d391c7f",
@@ -1580,7 +1580,7 @@
      "at": 401383,
      "words": 57449,
      "sourceTriangles": 2778,
-     "bakeMs": 3486
+     "bakeMs": 5471
     },
     {
      "fingerprint": "50ccea6370e9e7a19adecd31152ac6206a1b9ecb237fae7120431fed78068006",
@@ -1588,7 +1588,7 @@
      "at": 458832,
      "words": 69297,
      "sourceTriangles": 4002,
-     "bakeMs": 5444
+     "bakeMs": 4774
     },
     {
      "fingerprint": "60b8266d21f9b95fb7ea28ee1147e54ea7c6235ef18faeccff1468f6924ef547",
@@ -1596,7 +1596,7 @@
      "at": 528129,
      "words": 69505,
      "sourceTriangles": 4002,
-     "bakeMs": 4881
+     "bakeMs": 4450
     },
     {
      "fingerprint": "7d48c61a234318595d89b73ccebf6d35abd981d71cb89ad92422609684529579",
@@ -1604,7 +1604,7 @@
      "at": 597634,
      "words": 39674,
      "sourceTriangles": 2234,
-     "bakeMs": 3741
+     "bakeMs": 2055
     },
     {
      "fingerprint": "7e0a8578dc29024cc90a8ecc4aaf7edbb8686c42549e6e7501475a9aeb604f13",
@@ -1612,7 +1612,7 @@
      "at": 637308,
      "words": 39556,
      "sourceTriangles": 2234,
-     "bakeMs": 3935
+     "bakeMs": 1997
     },
     {
      "fingerprint": "82a03fb74b7b1f473b05a965f360590ffd86fe8b6d56a0e4bca8b2e9432eff72",
@@ -1620,7 +1620,7 @@
      "at": 676864,
      "words": 92420,
      "sourceTriangles": 5356,
-     "bakeMs": 10751
+     "bakeMs": 10875
     },
     {
      "fingerprint": "968f3eb8ea57464c59e47c1371012c5ba0ac342394144fa5bde5be38ba6b4978",
@@ -1628,7 +1628,7 @@
      "at": 769284,
      "words": 43884,
      "sourceTriangles": 1468,
-     "bakeMs": 4106
+     "bakeMs": 5107
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -1636,7 +1636,7 @@
      "at": 813168,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9d6e23577be9a2062890c7988897e2eb029e3860cb06cea6c19c4fc145ca7d9f",
@@ -1644,7 +1644,7 @@
      "at": 854338,
      "words": 104597,
      "sourceTriangles": 6416,
-     "bakeMs": 12262
+     "bakeMs": 11556
     },
     {
      "fingerprint": "bc26bd65896806fdd8946337ee84fc7c62b7f762b98e1b7de225e68eedf55ce0",
@@ -1652,7 +1652,7 @@
      "at": 958935,
      "words": 100846,
      "sourceTriangles": 6190,
-     "bakeMs": 6822
+     "bakeMs": 5991
     },
     {
      "fingerprint": "c12d900790be9589ef179bdf0a27a177c11ee1cfb54fdd5aa4336c0290898e78",
@@ -1660,7 +1660,7 @@
      "at": 1059781,
      "words": 86386,
      "sourceTriangles": 4942,
-     "bakeMs": 9787
+     "bakeMs": 8822
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -1668,7 +1668,7 @@
      "at": 1146167,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "d468ec23ab0120e30b74acbd0e19d96ed4bc9befc678db7ebf671c738c3c8980",
@@ -1676,7 +1676,7 @@
      "at": 1231575,
      "words": 88734,
      "sourceTriangles": 6324,
-     "bakeMs": 7342
+     "bakeMs": 4672
     },
     {
      "fingerprint": "d4ca1ce01537938e7a2dc478d375c455bb2325fd147e8b663b93cf0d8a999921",
@@ -1684,7 +1684,7 @@
      "at": 1320309,
      "words": 40102,
      "sourceTriangles": 2246,
-     "bakeMs": 2683
+     "bakeMs": 1694
     },
     {
      "fingerprint": "e78d76f44edc04b40d243d9fcd3855efaa9f1c5a334acbf1b26f25a1203acc59",
@@ -1692,7 +1692,7 @@
      "at": 1360411,
      "words": 39536,
      "sourceTriangles": 2234,
-     "bakeMs": 2550
+     "bakeMs": 1753
     },
     {
      "fingerprint": "f6d480fdfefe8c62ecee87395f41e963cb6cf90677196882e64905958e7a54bf",
@@ -1700,7 +1700,7 @@
      "at": 1399947,
      "words": 88686,
      "sourceTriangles": 5356,
-     "bakeMs": 12032
+     "bakeMs": 7613
     }
    ]
   },
@@ -1720,7 +1720,7 @@
      "at": 0,
      "words": 61974,
      "sourceTriangles": 2992,
-     "bakeMs": 12624
+     "bakeMs": 19647
     },
     {
      "fingerprint": "19193e182cbef59f980d52db0648645c7faf04f8f525efb7e7dd896015e6ca8f",
@@ -1728,7 +1728,7 @@
      "at": 61974,
      "words": 104505,
      "sourceTriangles": 6776,
-     "bakeMs": 13063
+     "bakeMs": 19485
     },
     {
      "fingerprint": "205239764ef08557853742f40d54e3ef91605c860d60b832460b1d7f07eae853",
@@ -1736,7 +1736,7 @@
      "at": 166479,
      "words": 165335,
      "sourceTriangles": 12034,
-     "bakeMs": 16897
+     "bakeMs": 26837
     },
     {
      "fingerprint": "2897ac8eb4584d909e152224c48c3adc62e86c9187a26064aa7d80a9a5763526",
@@ -1744,7 +1744,7 @@
      "at": 331814,
      "words": 187537,
      "sourceTriangles": 14304,
-     "bakeMs": 20726
+     "bakeMs": 27482
     },
     {
      "fingerprint": "28ee83934259e401169981da7c58acc306d4c774d2d10d4aeacf16f7ed12efb1",
@@ -1752,7 +1752,7 @@
      "at": 519351,
      "words": 110762,
      "sourceTriangles": 6758,
-     "bakeMs": 15177
+     "bakeMs": 20592
     },
     {
      "fingerprint": "5c12d02b896cbd7ffe2cb009a2004c22c80d75fe359a47f67d387606e99ff890",
@@ -1760,7 +1760,7 @@
      "at": 630113,
      "words": 158964,
      "sourceTriangles": 12492,
-     "bakeMs": 6106
+     "bakeMs": 4131
     },
     {
      "fingerprint": "5d883e525f28fb20c934d595800f069604c6ea9641f194909e06be46efc48eb1",
@@ -1768,7 +1768,7 @@
      "at": 789077,
      "words": 39366,
      "sourceTriangles": 2246,
-     "bakeMs": 2538
+     "bakeMs": 1607
     },
     {
      "fingerprint": "63c9ed064136141f0a438f1db7fd0e340095d054662942ad8cef01a7732f4958",
@@ -1776,7 +1776,7 @@
      "at": 828443,
      "words": 76019,
      "sourceTriangles": 4746,
-     "bakeMs": 3911
+     "bakeMs": 3330
     },
     {
      "fingerprint": "6516e1f1fc4371c36bfc449dbe69ac7afcaa659d90eaf0e30403bc24656b10b7",
@@ -1784,7 +1784,7 @@
      "at": 904462,
      "words": 40514,
      "sourceTriangles": 2246,
-     "bakeMs": 1861
+     "bakeMs": 1599
     },
     {
      "fingerprint": "671bb2afae02b29b8318c7f09952427d3f5ebeff9e597c883f87fc9d49876da2",
@@ -1792,7 +1792,7 @@
      "at": 944976,
      "words": 90462,
      "sourceTriangles": 5356,
-     "bakeMs": 8934
+     "bakeMs": 7026
     },
     {
      "fingerprint": "6c5f25bb96cc608362f7d874ea27b20232332f2f65f61621f9a10d2200646a00",
@@ -1800,7 +1800,7 @@
      "at": 1035438,
      "words": 50183,
      "sourceTriangles": 1868,
-     "bakeMs": 6255
+     "bakeMs": 5185
     },
     {
      "fingerprint": "7a9db4aaadb2ea7395edb6a5de0774814f6d24a8066d4844e13fc79c6ca51463",
@@ -1808,7 +1808,7 @@
      "at": 1085621,
      "words": 66306,
      "sourceTriangles": 4002,
-     "bakeMs": 6773
+     "bakeMs": 5005
     },
     {
      "fingerprint": "81e4a9cc0b9e08b2787ef1ca0e95aa10d74f73236c19651c3398023403a35db2",
@@ -1816,7 +1816,7 @@
      "at": 1151927,
      "words": 73195,
      "sourceTriangles": 4090,
-     "bakeMs": 5877
+     "bakeMs": 5434
     },
     {
      "fingerprint": "87f0d335fa58dca46b82b6081c8367b639a6fa4eb1afafc2756361e36cb908f0",
@@ -1824,7 +1824,7 @@
      "at": 1225122,
      "words": 40874,
      "sourceTriangles": 2246,
-     "bakeMs": 3120
+     "bakeMs": 2278
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -1832,7 +1832,7 @@
      "at": 1265996,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a0fbb5ff282bc3f60369149bf09d646139b2ba88cde0dbf29f09c9fdbf07be64",
@@ -1840,7 +1840,7 @@
      "at": 1307166,
      "words": 40270,
      "sourceTriangles": 2246,
-     "bakeMs": 2153
+     "bakeMs": 1721
     },
     {
      "fingerprint": "a4c9276e92c946b9c2b9359805317da5d2bf24888d0964cb06e88fddc1893a34",
@@ -1848,7 +1848,7 @@
      "at": 1347436,
      "words": 96943,
      "sourceTriangles": 7520,
-     "bakeMs": 4016
+     "bakeMs": 3758
     },
     {
      "fingerprint": "a6a288d4f868d0d04fc4701bc651ec1fa5f0a3c1a8dd1048713d5d9b9f9ba5ed",
@@ -1856,7 +1856,7 @@
      "at": 1444379,
      "words": 104788,
      "sourceTriangles": 6416,
-     "bakeMs": 11832
+     "bakeMs": 9881
     },
     {
      "fingerprint": "a8fc48abe9e4e9e327ca263c2ce93f5ebde559fde2272ed3f2f4ab6e4300fbe4",
@@ -1864,7 +1864,7 @@
      "at": 1549167,
      "words": 97394,
      "sourceTriangles": 6190,
-     "bakeMs": 6012
+     "bakeMs": 5446
     },
     {
      "fingerprint": "bf3352a95883680548cfa0858e7fff78659706bceaad2d3040f6cb3929c20cd7",
@@ -1872,7 +1872,7 @@
      "at": 1646561,
      "words": 40906,
      "sourceTriangles": 2246,
-     "bakeMs": 1689
+     "bakeMs": 1610
     },
     {
      "fingerprint": "c4fd6f6868f5623f97d3e96b9e7428079dc304a304ebf5e504b3538e44099be6",
@@ -1880,7 +1880,7 @@
      "at": 1687467,
      "words": 57038,
      "sourceTriangles": 2778,
-     "bakeMs": 4360
+     "bakeMs": 3446
     },
     {
      "fingerprint": "ca16796eb366ad1ea932784cdf42a57d6a10334ce45f4ceab1ff302364b797e9",
@@ -1888,7 +1888,7 @@
      "at": 1744505,
      "words": 90612,
      "sourceTriangles": 5356,
-     "bakeMs": 10799
+     "bakeMs": 6963
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -1896,7 +1896,7 @@
      "at": 1835117,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "cfdc52068b6d5c54a27aff3ae7912564e4a12267f18b51a5b0d43adc26dfe5c0",
@@ -1904,7 +1904,7 @@
      "at": 1920525,
      "words": 86292,
      "sourceTriangles": 4942,
-     "bakeMs": 12845
+     "bakeMs": 8706
     },
     {
      "fingerprint": "d6105b73dea444330aa9ba7b90bebd7ee63501e9696e7c5063e4c36fb8a683f6",
@@ -1912,7 +1912,7 @@
      "at": 2006817,
      "words": 43053,
      "sourceTriangles": 1468,
-     "bakeMs": 5800
+     "bakeMs": 3720
     },
     {
      "fingerprint": "d9d5e95ba6ae984a6db23cc94dc6f728b9351e2e3cc96450e5e993fe8b3a52f0",
@@ -1920,7 +1920,7 @@
      "at": 2049870,
      "words": 40825,
      "sourceTriangles": 2246,
-     "bakeMs": 2928
+     "bakeMs": 1694
     }
    ]
   },
@@ -1940,7 +1940,7 @@
      "at": 0,
      "words": 51029,
      "sourceTriangles": 1868,
-     "bakeMs": 7572
+     "bakeMs": 10270
     },
     {
      "fingerprint": "3c60be3cbb3c399dbd9b9ea9c55deef4f82e3a6f55fe82ef3d7ce47661a17c11",
@@ -1948,7 +1948,7 @@
      "at": 51029,
      "words": 40694,
      "sourceTriangles": 2234,
-     "bakeMs": 2073
+     "bakeMs": 2116
     },
     {
      "fingerprint": "48f45f811470f192e6f09ec44efc43b4b08f3ccdc196bc6d6269415ccb39a6ea",
@@ -1956,7 +1956,7 @@
      "at": 91723,
      "words": 160179,
      "sourceTriangles": 12492,
-     "bakeMs": 4160
+     "bakeMs": 5167
     },
     {
      "fingerprint": "54a2eaea8793b94af8057d4c90ec8e743d153b39e9ab8f5c41e78b4b7ff13491",
@@ -1964,7 +1964,7 @@
      "at": 251902,
      "words": 66377,
      "sourceTriangles": 4002,
-     "bakeMs": 4964
+     "bakeMs": 4910
     },
     {
      "fingerprint": "5fe379c625b5532f4e6fd25c0f1ec5ac3d1b0591c5f5146fd03df765eb8676d7",
@@ -1972,7 +1972,7 @@
      "at": 318279,
      "words": 90861,
      "sourceTriangles": 5356,
-     "bakeMs": 8109
+     "bakeMs": 7113
     },
     {
      "fingerprint": "653e0f74089cd8416135be17f3d0499103f6a045384c0355eb6fb43e484e11d3",
@@ -1980,7 +1980,7 @@
      "at": 409140,
      "words": 95410,
      "sourceTriangles": 6407,
-     "bakeMs": 8195
+     "bakeMs": 6939
     },
     {
      "fingerprint": "6587a918044672c740db8444c3984c4b483b8fb3648622e6206a3bf365910f39",
@@ -1988,7 +1988,7 @@
      "at": 504550,
      "words": 40185,
      "sourceTriangles": 2234,
-     "bakeMs": 1797
+     "bakeMs": 1983
     },
     {
      "fingerprint": "6a6baa834e96cc74252afac6324fb973467d79870bcaef3f889f2d0bb00a851c",
@@ -1996,7 +1996,7 @@
      "at": 544735,
      "words": 87346,
      "sourceTriangles": 4942,
-     "bakeMs": 11148
+     "bakeMs": 8074
     },
     {
      "fingerprint": "77434b0d7d9f58509c83c2b59d2d3b660553b38c0b6b163ce2cea86ec212cf60",
@@ -2004,7 +2004,7 @@
      "at": 632081,
      "words": 40477,
      "sourceTriangles": 2234,
-     "bakeMs": 3171
+     "bakeMs": 2331
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -2012,7 +2012,7 @@
      "at": 672558,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9a0400de8955f87c4c75a5ca5f2e90e5cc902692c03311be04a427e81f80c5be",
@@ -2020,7 +2020,7 @@
      "at": 713728,
      "words": 40402,
      "sourceTriangles": 2234,
-     "bakeMs": 1916
+     "bakeMs": 2447
     },
     {
      "fingerprint": "a271138517b722b81291bd6e370750a15032f06169728443429d8e8e7e105228",
@@ -2028,7 +2028,7 @@
      "at": 754130,
      "words": 96677,
      "sourceTriangles": 6190,
-     "bakeMs": 5812
+     "bakeMs": 5251
     },
     {
      "fingerprint": "a2e1617afe564cc5755edb57497c6ca114bb0b355d0cbed21f38b408e8dcaedc",
@@ -2036,7 +2036,7 @@
      "at": 850807,
      "words": 68106,
      "sourceTriangles": 4002,
-     "bakeMs": 4218
+     "bakeMs": 4384
     },
     {
      "fingerprint": "cbbc06ae62f8cc6be1ecf4eaa951533650ba9d321a36160edbc12d279eb0357f",
@@ -2044,7 +2044,7 @@
      "at": 918913,
      "words": 43684,
      "sourceTriangles": 1468,
-     "bakeMs": 5519
+     "bakeMs": 3895
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -2052,7 +2052,7 @@
      "at": 962597,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "e9ec55e09e811b3accc7c7b7fac0d0331ed06d8d966318fe72d1c2ae48b550bb",
@@ -2060,7 +2060,7 @@
      "at": 1048005,
      "words": 76799,
      "sourceTriangles": 4746,
-     "bakeMs": 5244
+     "bakeMs": 3474
     },
     {
      "fingerprint": "eafb884e299b39d5a38fbcb1c27d689595dd45fb07cc3dd69ea5336a2848b9e0",
@@ -2068,7 +2068,7 @@
      "at": 1124804,
      "words": 72770,
      "sourceTriangles": 4090,
-     "bakeMs": 6455
+     "bakeMs": 3956
     },
     {
      "fingerprint": "eda110fe5b30f99c79f5b0822681bab3aa500046e7189c2c67292c36554e9ae4",
@@ -2076,7 +2076,7 @@
      "at": 1197574,
      "words": 39151,
      "sourceTriangles": 2234,
-     "bakeMs": 3901
+     "bakeMs": 1935
     },
     {
      "fingerprint": "f3e0ea646edc352de5c7dca68a16ea8de1a5386a884f8e817b763e7ab896fac0",
@@ -2084,7 +2084,7 @@
      "at": 1236725,
      "words": 91839,
      "sourceTriangles": 5356,
-     "bakeMs": 12630
+     "bakeMs": 7137
     },
     {
      "fingerprint": "f4099b7f833207ef5b3d8c3209b90fc55c854474ca878baa467c77a31178f6cc",
@@ -2092,7 +2092,7 @@
      "at": 1328564,
      "words": 55823,
      "sourceTriangles": 2778,
-     "bakeMs": 6734
+     "bakeMs": 3589
     },
     {
      "fingerprint": "f52e5415eadfe0c0fdf48a08a16d1e4cb8722966fe7d9a667a66862536ccc7f3",
@@ -2100,7 +2100,7 @@
      "at": 1384387,
      "words": 103589,
      "sourceTriangles": 6416,
-     "bakeMs": 18508
+     "bakeMs": 12114
     }
    ]
   },
@@ -2120,7 +2120,7 @@
      "at": 0,
      "words": 50599,
      "sourceTriangles": 1868,
-     "bakeMs": 9355
+     "bakeMs": 16121
     },
     {
      "fingerprint": "4320f7ff19f94cac3dc94084e493a08996ac776e023144d020b85905a64ec1ff",
@@ -2128,7 +2128,7 @@
      "at": 50599,
      "words": 92011,
      "sourceTriangles": 5356,
-     "bakeMs": 7169
+     "bakeMs": 8470
     },
     {
      "fingerprint": "443752824e601d101477d35c20f3b0c300751663f2a5ac0a2ef84634c1cce02c",
@@ -2136,7 +2136,7 @@
      "at": 142610,
      "words": 40514,
      "sourceTriangles": 2246,
-     "bakeMs": 2127
+     "bakeMs": 2541
     },
     {
      "fingerprint": "46e6e1ab148bf64f66a4c922d0967e83271fc3763256fbfd326249458d42aac7",
@@ -2144,7 +2144,7 @@
      "at": 183124,
      "words": 41346,
      "sourceTriangles": 2246,
-     "bakeMs": 1967
+     "bakeMs": 3461
     },
     {
      "fingerprint": "49b48686ecc647499bb76d0f61fe2afecf60d5637d13831bbed53c95087c2b98",
@@ -2152,7 +2152,7 @@
      "at": 224470,
      "words": 87364,
      "sourceTriangles": 4942,
-     "bakeMs": 10294
+     "bakeMs": 8893
     },
     {
      "fingerprint": "4c70d6591b93c97ba2f466926aec2b70c518f8f94b66e33bfdc706bce7c47747",
@@ -2160,7 +2160,7 @@
      "at": 311834,
      "words": 187599,
      "sourceTriangles": 14382,
-     "bakeMs": 22090
+     "bakeMs": 20387
     },
     {
      "fingerprint": "5491b71e924c5acacc791e76b0695d0713b54717f0cd1603efec3d0f3de15a68",
@@ -2168,7 +2168,7 @@
      "at": 499433,
      "words": 72043,
      "sourceTriangles": 4090,
-     "bakeMs": 4151
+     "bakeMs": 4220
     },
     {
      "fingerprint": "5cce58aaf2555d6a26c33bd3ff2923fc0eefd65bbeac1b6e9d4944be3efcfd1c",
@@ -2176,7 +2176,7 @@
      "at": 571476,
      "words": 103403,
      "sourceTriangles": 6416,
-     "bakeMs": 13681
+     "bakeMs": 11267
     },
     {
      "fingerprint": "5f7c767e73426a9482f3bc9ebb1c5535c34c04b0cd364ae99820f47fa11b7351",
@@ -2184,7 +2184,7 @@
      "at": 674879,
      "words": 165182,
      "sourceTriangles": 12034,
-     "bakeMs": 12685
+     "bakeMs": 10505
     },
     {
      "fingerprint": "7b968d69b45732d30014972ab61c431c3430891296b90c581be3d6eff994b9d3",
@@ -2192,7 +2192,7 @@
      "at": 840061,
      "words": 161240,
      "sourceTriangles": 12492,
-     "bakeMs": 7013
+     "bakeMs": 5119
     },
     {
      "fingerprint": "8da84df23fc8ff16f59f92fd99223c084f8c4ec382e2154d3a354d761dacd92a",
@@ -2200,7 +2200,7 @@
      "at": 1001301,
      "words": 76071,
      "sourceTriangles": 4746,
-     "bakeMs": 3759
+     "bakeMs": 4656
     },
     {
      "fingerprint": "8e192d7ea213679012b4fbf676196d40769c9501a8649d355f8f77c24a26ab17",
@@ -2208,7 +2208,7 @@
      "at": 1077372,
      "words": 87768,
      "sourceTriangles": 5356,
-     "bakeMs": 7892
+     "bakeMs": 8178
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -2216,7 +2216,7 @@
      "at": 1165140,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "986ee09ee245dd163a963d88ce4ad9f1272c0ece6cdbde51ccb291c4de7ebbe4",
@@ -2224,7 +2224,7 @@
      "at": 1206310,
      "words": 100945,
      "sourceTriangles": 7520,
-     "bakeMs": 3813
+     "bakeMs": 4812
     },
     {
      "fingerprint": "a27608fe2e30c2f41e3c5405c0030622d08ddbe876f6dcd6b8ebc362275774bc",
@@ -2232,7 +2232,7 @@
      "at": 1307255,
      "words": 39650,
      "sourceTriangles": 2246,
-     "bakeMs": 2168
+     "bakeMs": 2264
     },
     {
      "fingerprint": "a2fe2a7309dafe1647d8f1985d7560419acdd48c89c0a2688cf2aba52eb281a7",
@@ -2240,7 +2240,7 @@
      "at": 1346905,
      "words": 57016,
      "sourceTriangles": 2778,
-     "bakeMs": 4078
+     "bakeMs": 3566
     },
     {
      "fingerprint": "a454f9c8dde18cf97f5b1da30142ee2e4982e8832cddb4afc3906291e9bec488",
@@ -2248,7 +2248,7 @@
      "at": 1403921,
      "words": 43533,
      "sourceTriangles": 1468,
-     "bakeMs": 4692
+     "bakeMs": 3953
     },
     {
      "fingerprint": "a91b67a62f3e8bc45e6299648733bf535928e8798173e483d29462b4a6308d4c",
@@ -2256,7 +2256,7 @@
      "at": 1447454,
      "words": 40914,
      "sourceTriangles": 2246,
-     "bakeMs": 2384
+     "bakeMs": 1930
     },
     {
      "fingerprint": "ae227e26e693c04957449dc3167b58d8e669a8367b4035bb793d356d852739dc",
@@ -2264,7 +2264,7 @@
      "at": 1488368,
      "words": 39989,
      "sourceTriangles": 2246,
-     "bakeMs": 2398
+     "bakeMs": 2271
     },
     {
      "fingerprint": "bcae2f49f7a01fc2b863792561c751acdf530e093025da6a51da1419c5189e42",
@@ -2272,7 +2272,7 @@
      "at": 1528357,
      "words": 100213,
      "sourceTriangles": 6596,
-     "bakeMs": 8996
+     "bakeMs": 7208
     },
     {
      "fingerprint": "caf4fb79f435b91efcaf84aa2e8cd5b06edc0882b89d58fa4c6c029b818e4f1a",
@@ -2280,7 +2280,7 @@
      "at": 1628570,
      "words": 67927,
      "sourceTriangles": 4002,
-     "bakeMs": 6829
+     "bakeMs": 3999
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -2288,7 +2288,7 @@
      "at": 1696497,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "d32c34181142b23a89a7b031afc772c70134e33c4744929db228d22a95904783",
@@ -2296,7 +2296,7 @@
      "at": 1781905,
      "words": 39553,
      "sourceTriangles": 2246,
-     "bakeMs": 2661
+     "bakeMs": 1791
     },
     {
      "fingerprint": "e2180ee70c7291ac44fc1545de4b0bebb5ed17ec2babf10ed77f8458ff1b2e2f",
@@ -2304,7 +2304,7 @@
      "at": 1821458,
      "words": 61777,
      "sourceTriangles": 2992,
-     "bakeMs": 10959
+     "bakeMs": 7652
     },
     {
      "fingerprint": "ec19bd5d78de9a21669b09f4165a06d78ef8b2c6dfb32fc53f05fb899d0850ad",
@@ -2312,7 +2312,7 @@
      "at": 1883235,
      "words": 101006,
      "sourceTriangles": 6190,
-     "bakeMs": 11331
+     "bakeMs": 5813
     },
     {
      "fingerprint": "ff1952df6bd6686b8cc324dfd7ffe2df8632b92edacc50923fafe4b36dcae2c3",
@@ -2320,7 +2320,7 @@
      "at": 1984241,
      "words": 111416,
      "sourceTriangles": 6758,
-     "bakeMs": 12958
+     "bakeMs": 10976
     }
    ]
   },
@@ -2340,7 +2340,7 @@
      "at": 0,
      "words": 51344,
      "sourceTriangles": 1868,
-     "bakeMs": 12887
+     "bakeMs": 10659
     },
     {
      "fingerprint": "18e6a13caed2b5836d4d75414e313bfd82ccb4c06319fda8305c24b8b4aef9b3",
@@ -2348,7 +2348,7 @@
      "at": 51344,
      "words": 56664,
      "sourceTriangles": 2778,
-     "bakeMs": 5973
+     "bakeMs": 12922
     },
     {
      "fingerprint": "1a29b627faa5b6dc32fb12c840b6ce1fbd1d617c42ccf8bd0a5c461fc49152c8",
@@ -2356,7 +2356,7 @@
      "at": 108008,
      "words": 67202,
      "sourceTriangles": 4002,
-     "bakeMs": 7907
+     "bakeMs": 12393
     },
     {
      "fingerprint": "25ddd6cc367d787bce91a81f9a5af017baaf0b5daa656cc870e1781dfc1e106b",
@@ -2364,7 +2364,7 @@
      "at": 175210,
      "words": 109103,
      "sourceTriangles": 6692,
-     "bakeMs": 12868
+     "bakeMs": 26411
     },
     {
      "fingerprint": "518e28a53d2f2f99d4f58508fe1796fd5adc7fb04bac24c26b9a3fa039e577eb",
@@ -2372,7 +2372,7 @@
      "at": 284313,
      "words": 43138,
      "sourceTriangles": 1468,
-     "bakeMs": 4585
+     "bakeMs": 4790
     },
     {
      "fingerprint": "52edd713cc9ada33758c9a8628c1db6a5ff21aab7616a18a5f48bdf6bb79df02",
@@ -2380,7 +2380,7 @@
      "at": 327451,
      "words": 103036,
      "sourceTriangles": 6416,
-     "bakeMs": 13100
+     "bakeMs": 12436
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -2388,7 +2388,7 @@
      "at": 430487,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -2396,7 +2396,7 @@
      "at": 471657,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "ff0635977427b8f99ee78b9e463365c3beb340033cda3ed3e65d2664ccc8b0b6",
@@ -2404,7 +2404,7 @@
      "at": 557065,
      "words": 43772,
      "sourceTriangles": 1468,
-     "bakeMs": 5320
+     "bakeMs": 4316
     }
    ]
   },
@@ -2424,7 +2424,7 @@
      "at": 0,
      "words": 80661,
      "sourceTriangles": 6844,
-     "bakeMs": 12155
+     "bakeMs": 9205
     },
     {
      "fingerprint": "1fd1f2e8b295f1e7ae8788c6cd0b6bc0b3ca2644dea8dd76ce2fd4cc10ec4567",
@@ -2432,7 +2432,7 @@
      "at": 80661,
      "words": 90450,
      "sourceTriangles": 5356,
-     "bakeMs": 11093
+     "bakeMs": 13229
     },
     {
      "fingerprint": "1fdaadc4301c143973ef891a198e501f8b095de899aa31f9cf15b182ffe0fc7f",
@@ -2440,7 +2440,7 @@
      "at": 171111,
      "words": 98793,
      "sourceTriangles": 7520,
-     "bakeMs": 7451
+     "bakeMs": 6459
     },
     {
      "fingerprint": "33b06110f510910f3d69d19ea7387f2284b6f863d14f88b7ac09964f471cfec3",
@@ -2448,7 +2448,7 @@
      "at": 269904,
      "words": 68421,
      "sourceTriangles": 4002,
-     "bakeMs": 4615
+     "bakeMs": 5193
     },
     {
      "fingerprint": "34165c2ff2ea759ef66d588929568aef053db087ed54bd2c53bf13c2c23cae93",
@@ -2456,7 +2456,7 @@
      "at": 338325,
      "words": 88594,
      "sourceTriangles": 5356,
-     "bakeMs": 6694
+     "bakeMs": 7161
     },
     {
      "fingerprint": "3ac303d8cefcfd32fea4534cf30d482bcea9a4d0a0aa15e9830aec19fd33fc34",
@@ -2464,7 +2464,7 @@
      "at": 426919,
      "words": 110975,
      "sourceTriangles": 6758,
-     "bakeMs": 13381
+     "bakeMs": 13564
     },
     {
      "fingerprint": "3cc12e46b6d9809448fdf410c4ae0d7468e23503fb5d0f5cc5ba1e3a5cb63a92",
@@ -2472,7 +2472,7 @@
      "at": 537894,
      "words": 103900,
      "sourceTriangles": 6416,
-     "bakeMs": 10744
+     "bakeMs": 12069
     },
     {
      "fingerprint": "43622ad28f24b732b1bab017ba3196e20d99303b62d8cd35aa5067ba240f231c",
@@ -2480,7 +2480,7 @@
      "at": 641794,
      "words": 39475,
      "sourceTriangles": 2246,
-     "bakeMs": 1875
+     "bakeMs": 1999
     },
     {
      "fingerprint": "4c87809df4e19de1e94672e439835ae38af79d49b3ccc54a9a553d433096784b",
@@ -2488,7 +2488,7 @@
      "at": 681269,
      "words": 38657,
      "sourceTriangles": 2246,
-     "bakeMs": 1769
+     "bakeMs": 1932
     },
     {
      "fingerprint": "5754ed668d61c8bc8dc06b4280b8de01d640d4b28b5ab964248b1aafbc2b64cd",
@@ -2496,7 +2496,7 @@
      "at": 719926,
      "words": 86815,
      "sourceTriangles": 4942,
-     "bakeMs": 11003
+     "bakeMs": 8338
     },
     {
      "fingerprint": "6145b808ca9fb4bd8f027e358285a08f6a7e36289977174285b8a3583d5e667e",
@@ -2504,7 +2504,7 @@
      "at": 806741,
      "words": 63326,
      "sourceTriangles": 2992,
-     "bakeMs": 8263
+     "bakeMs": 7617
     },
     {
      "fingerprint": "6a93f5b2fc97a2c9d57f19e82f6ce0f1b512ef177a503e30054e61bf01a7834f",
@@ -2512,7 +2512,7 @@
      "at": 870067,
      "words": 56301,
      "sourceTriangles": 2778,
-     "bakeMs": 4640
+     "bakeMs": 3501
     },
     {
      "fingerprint": "716200f9a77fdd3ea2339e65942beba114d02c86cf3028c991faa33e4a8d2302",
@@ -2520,7 +2520,7 @@
      "at": 926368,
      "words": 40633,
      "sourceTriangles": 2246,
-     "bakeMs": 3201
+     "bakeMs": 1784
     },
     {
      "fingerprint": "88666102598175de1788a701da0d9d4dbc3ba3b9c67369cf7069f1583a245b99",
@@ -2528,7 +2528,7 @@
      "at": 967001,
      "words": 51824,
      "sourceTriangles": 1868,
-     "bakeMs": 7383
+     "bakeMs": 7738
     },
     {
      "fingerprint": "8a71aaee41633f542380abd95e01ecd11868927d8301eb70d0a10e13c38760a1",
@@ -2536,7 +2536,7 @@
      "at": 1018825,
      "words": 43424,
      "sourceTriangles": 1468,
-     "bakeMs": 6186
+     "bakeMs": 5638
     },
     {
      "fingerprint": "8a7be2e60abca723ac0a76de31f61deb34fbbc15b8472e3b88a3adbdbb2e97ad",
@@ -2544,7 +2544,7 @@
      "at": 1062249,
      "words": 72573,
      "sourceTriangles": 4090,
-     "bakeMs": 5912
+     "bakeMs": 6214
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -2552,7 +2552,7 @@
      "at": 1134822,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a463e4a69b6ff5bbc3dbaf7b58bfb6cbd900310e46647b6549a99f2d381e578b",
@@ -2560,7 +2560,7 @@
      "at": 1175992,
      "words": 194718,
      "sourceTriangles": 14332,
-     "bakeMs": 18830
+     "bakeMs": 17533
     },
     {
      "fingerprint": "bafa4f229517c07b3e2d7667856508b08b47edac00858ec34510dd286864c4c8",
@@ -2568,7 +2568,7 @@
      "at": 1370710,
      "words": 169764,
      "sourceTriangles": 12034,
-     "bakeMs": 12450
+     "bakeMs": 11366
     },
     {
      "fingerprint": "c75a05de5f085ab3a89317fefcb70e5bc66e0ddf1610ef174dd386ad1a957354",
@@ -2576,7 +2576,7 @@
      "at": 1540474,
      "words": 38630,
      "sourceTriangles": 2246,
-     "bakeMs": 1816
+     "bakeMs": 1558
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -2584,7 +2584,7 @@
      "at": 1579104,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "d1124dbbe116addc85cc793970534dba5d428e7bc9e5ea9178055b97ef37b8b8",
@@ -2592,7 +2592,7 @@
      "at": 1664512,
      "words": 75266,
      "sourceTriangles": 4746,
-     "bakeMs": 4664
+     "bakeMs": 3112
     },
     {
      "fingerprint": "d88381bd3edbe30629b9d3364f89f413a8b8e82a0e1cdb246ba915878f387c53",
@@ -2600,7 +2600,7 @@
      "at": 1739778,
      "words": 99653,
      "sourceTriangles": 6190,
-     "bakeMs": 9514
+     "bakeMs": 6053
     },
     {
      "fingerprint": "d8bded360444db2a0c21d9ee8ea9a7c0b7f9d8656d7e1dd406dd5ffe244db876",
@@ -2608,7 +2608,7 @@
      "at": 1839431,
      "words": 39158,
      "sourceTriangles": 2246,
-     "bakeMs": 2714
+     "bakeMs": 1640
     },
     {
      "fingerprint": "e8d78cb2bebd679cca48dd32c41f3ee6c67cf25f4a49c04f921767de8aa72994",
@@ -2616,7 +2616,7 @@
      "at": 1878589,
      "words": 164635,
      "sourceTriangles": 12492,
-     "bakeMs": 6679
+     "bakeMs": 4395
     },
     {
      "fingerprint": "ff6947f9e3d5edcb084f05cc9b574eed97d2735a3d59065bd0c2b387c91a0be7",
@@ -2624,7 +2624,7 @@
      "at": 2043224,
      "words": 39456,
      "sourceTriangles": 2246,
-     "bakeMs": 2060
+     "bakeMs": 1690
     }
    ]
   },
@@ -2644,7 +2644,7 @@
      "at": 0,
      "words": 70980,
      "sourceTriangles": 4090,
-     "bakeMs": 10251
+     "bakeMs": 8310
     },
     {
      "fingerprint": "0c27d29eae8fa925a0c6862ea04101f5c08169458a5fd8f3de413b5932850126",
@@ -2652,7 +2652,7 @@
      "at": 70980,
      "words": 92560,
      "sourceTriangles": 6770,
-     "bakeMs": 6466
+     "bakeMs": 10129
     },
     {
      "fingerprint": "265e5541c714edeedcf67cdf0456e32a876cbbb66023e527cb5e370a7085347d",
@@ -2660,7 +2660,7 @@
      "at": 163540,
      "words": 43708,
      "sourceTriangles": 1468,
-     "bakeMs": 4802
+     "bakeMs": 15458
     },
     {
      "fingerprint": "299e8f6ec8c0b8ee6a0954b2f89dd50afcf36cb7589555c9782206285e3e700e",
@@ -2668,7 +2668,7 @@
      "at": 207248,
      "words": 159432,
      "sourceTriangles": 12492,
-     "bakeMs": 5746
+     "bakeMs": 7198
     },
     {
      "fingerprint": "2f921a9be9e2a956debc8d501df000f66298280363a13e14abfdcd2781f6c02a",
@@ -2676,7 +2676,7 @@
      "at": 366680,
      "words": 102244,
      "sourceTriangles": 6416,
-     "bakeMs": 10847
+     "bakeMs": 12685
     },
     {
      "fingerprint": "3f810aa19bf471e569e970381f9ffd145e58e40b6e91b13df977d1cd1627a63e",
@@ -2684,7 +2684,7 @@
      "at": 468924,
      "words": 40511,
      "sourceTriangles": 2234,
-     "bakeMs": 2151
+     "bakeMs": 2188
     },
     {
      "fingerprint": "6072a7e706725529ab3691a81900bf97043a12e8181daffefd874c86dc6cd9c8",
@@ -2692,7 +2692,7 @@
      "at": 509435,
      "words": 87747,
      "sourceTriangles": 4942,
-     "bakeMs": 9673
+     "bakeMs": 8753
     },
     {
      "fingerprint": "657e76bbf1a5cc826c61e9d0372e9948c21f54f3f0268565d996e6dc4cacafc9",
@@ -2700,7 +2700,7 @@
      "at": 597182,
      "words": 66727,
      "sourceTriangles": 4002,
-     "bakeMs": 4274
+     "bakeMs": 3905
     },
     {
      "fingerprint": "6927fc914a3c5635826848486d0b9a5222a53178f9fb809b05024eb7cba4667f",
@@ -2708,7 +2708,7 @@
      "at": 663909,
      "words": 90259,
      "sourceTriangles": 5356,
-     "bakeMs": 8791
+     "bakeMs": 7120
     },
     {
      "fingerprint": "7859356ae4dc7bcb75f137f560c4e2b280b7a9870cda19f22356510f6f29c087",
@@ -2716,7 +2716,7 @@
      "at": 754168,
      "words": 41249,
      "sourceTriangles": 2234,
-     "bakeMs": 2669
+     "bakeMs": 2247
     },
     {
      "fingerprint": "7c6d1e3758b66f6eadd29d01f6a0cf853b6028648009a6d604212e6445eff406",
@@ -2724,7 +2724,7 @@
      "at": 795417,
      "words": 57075,
      "sourceTriangles": 2778,
-     "bakeMs": 5904
+     "bakeMs": 4354
     },
     {
      "fingerprint": "7fb559bd6fb7e80d35608c515fc14da5f40b20bd1a3e505be541499a6a258874",
@@ -2732,7 +2732,7 @@
      "at": 852492,
      "words": 100254,
      "sourceTriangles": 6190,
-     "bakeMs": 9493
+     "bakeMs": 8268
     },
     {
      "fingerprint": "8eda86bd1302be48e2d4e4745c208addea4023f481a0fd49f3e54eb971245636",
@@ -2740,7 +2740,7 @@
      "at": 952746,
      "words": 90286,
      "sourceTriangles": 5356,
-     "bakeMs": 7776
+     "bakeMs": 8918
     },
     {
      "fingerprint": "91102dd886a598b61fc35aec8485fd1f4b66fef5c652fe154ee00ae66b1cb237",
@@ -2748,7 +2748,7 @@
      "at": 1043032,
      "words": 68093,
      "sourceTriangles": 4002,
-     "bakeMs": 4318
+     "bakeMs": 4243
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -2756,7 +2756,7 @@
      "at": 1111125,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "ad3cb95d0ae2aa8798f5fc8e428219e4cf566adb1fb3d9ce6a7c03bd0127a23b",
@@ -2764,7 +2764,7 @@
      "at": 1152295,
      "words": 77142,
      "sourceTriangles": 4746,
-     "bakeMs": 3712
+     "bakeMs": 3310
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -2772,7 +2772,7 @@
      "at": 1229437,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "e25792ca4e604cbc704d6541bd213848ec1100bc89fb697b8545c799209865b9",
@@ -2780,7 +2780,7 @@
      "at": 1314845,
      "words": 40842,
      "sourceTriangles": 2234,
-     "bakeMs": 3310
+     "bakeMs": 2205
     },
     {
      "fingerprint": "f50d79585b223981598761f5b458472ed93c15d02b74fe7f77ed9c27da74c064",
@@ -2788,7 +2788,7 @@
      "at": 1355687,
      "words": 39262,
      "sourceTriangles": 2234,
-     "bakeMs": 3707
+     "bakeMs": 1979
     },
     {
      "fingerprint": "fa89d8ce1d8ef88dfb5688539af24b910cdaa779e8b7fcdc41c14209f0c5525b",
@@ -2796,7 +2796,7 @@
      "at": 1394949,
      "words": 50156,
      "sourceTriangles": 1868,
-     "bakeMs": 7362
+     "bakeMs": 5285
     },
     {
      "fingerprint": "faafae37c9655b49e5cc2dfe4f3cdb1b8cca31fab5b44564a2b9a146f2cf6c7d",
@@ -2804,7 +2804,7 @@
      "at": 1445105,
      "words": 40467,
      "sourceTriangles": 2234,
-     "bakeMs": 2893
+     "bakeMs": 1799
     }
    ]
   },
@@ -2824,7 +2824,7 @@
      "at": 0,
      "words": 94329,
      "sourceTriangles": 6793,
-     "bakeMs": 6480
+     "bakeMs": 9895
     },
     {
      "fingerprint": "0fbed8c7bfb09eab8e96a6d552ae8e5b1de69d9b39175eab82691e3e4ad13e3c",
@@ -2832,7 +2832,7 @@
      "at": 94329,
      "words": 69275,
      "sourceTriangles": 4002,
-     "bakeMs": 5686
+     "bakeMs": 9260
     },
     {
      "fingerprint": "196a841b63e0c5ba36c96175a5882dfabbcd98047b1a99c02d9fee9fc492340c",
@@ -2840,7 +2840,7 @@
      "at": 163604,
      "words": 68359,
      "sourceTriangles": 4002,
-     "bakeMs": 6812
+     "bakeMs": 12360
     },
     {
      "fingerprint": "746bfeb7c3862811a4c0c2a02d3f045f2838fb820a1dd5638e0b3f0acb83af82",
@@ -2848,7 +2848,7 @@
      "at": 231963,
      "words": 51270,
      "sourceTriangles": 1868,
-     "bakeMs": 7903
+     "bakeMs": 5835
     },
     {
      "fingerprint": "8be5a51a79298b35f20a41073f94ff3666494daee09bfa16afd0220d74e32058",
@@ -2856,7 +2856,7 @@
      "at": 283233,
      "words": 86740,
      "sourceTriangles": 4942,
-     "bakeMs": 9417
+     "bakeMs": 10909
     },
     {
      "fingerprint": "95057352582e4e96ac7d3059b21970b4de9452c864ba45c60852c28fad9d41b5",
@@ -2864,7 +2864,7 @@
      "at": 369973,
      "words": 43798,
      "sourceTriangles": 1468,
-     "bakeMs": 4579
+     "bakeMs": 4528
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -2872,7 +2872,7 @@
      "at": 413771,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -2880,7 +2880,7 @@
      "at": 454941,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "d3ba2336a4a1a5128621b209d2a5b141816b2073779dd8c5b9161f23fafd8ae0",
@@ -2888,7 +2888,7 @@
      "at": 540349,
      "words": 43557,
      "sourceTriangles": 1468,
-     "bakeMs": 6393
+     "bakeMs": 3897
     },
     {
      "fingerprint": "dfd49e71e611361cbfb9f4a132203fa684ab96e082d8723c34d9496bc455609d",
@@ -2896,7 +2896,7 @@
      "at": 583906,
      "words": 77513,
      "sourceTriangles": 4746,
-     "bakeMs": 5867
+     "bakeMs": 3740
     },
     {
      "fingerprint": "ed1df063764e170905149f04464b728c941db889f429e912ccb30aa298aca4e7",
@@ -2904,7 +2904,7 @@
      "at": 661419,
      "words": 57121,
      "sourceTriangles": 2778,
-     "bakeMs": 7811
+     "bakeMs": 3566
     },
     {
      "fingerprint": "ee1607d85da13c560f959b4ee6c3fb594a57900bf993017836245e09e80cbac6",
@@ -2912,7 +2912,7 @@
      "at": 718540,
      "words": 102951,
      "sourceTriangles": 6416,
-     "bakeMs": 21291
+     "bakeMs": 11859
     }
    ]
   },
@@ -2932,7 +2932,7 @@
      "at": 0,
      "words": 94432,
      "sourceTriangles": 6227,
-     "bakeMs": 8988
+     "bakeMs": 10374
     },
     {
      "fingerprint": "53c6ae8dda1e482ffbaf0bfda95526b58d79ac928f150e6f7d265fa3eea708fe",
@@ -2940,7 +2940,7 @@
      "at": 94432,
      "words": 104649,
      "sourceTriangles": 6416,
-     "bakeMs": 13627
+     "bakeMs": 12696
     },
     {
      "fingerprint": "746bfeb7c3862811a4c0c2a02d3f045f2838fb820a1dd5638e0b3f0acb83af82",
@@ -2948,7 +2948,7 @@
      "at": 199081,
      "words": 51270,
      "sourceTriangles": 1868,
-     "bakeMs": 7903
+     "bakeMs": 5835
     },
     {
      "fingerprint": "95057352582e4e96ac7d3059b21970b4de9452c864ba45c60852c28fad9d41b5",
@@ -2956,7 +2956,7 @@
      "at": 250351,
      "words": 43798,
      "sourceTriangles": 1468,
-     "bakeMs": 4579
+     "bakeMs": 4528
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -2964,7 +2964,7 @@
      "at": 294149,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "af589b40d9b6b9facef42dfd089acde711cb69cd62115c4f5c9f57e9b8992889",
@@ -2972,7 +2972,7 @@
      "at": 335319,
      "words": 66902,
      "sourceTriangles": 4002,
-     "bakeMs": 4433
+     "bakeMs": 4488
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -2980,7 +2980,7 @@
      "at": 402221,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "db1ded53c53bde1270ef8db4fc891e5aaec91495fa4c7a8cdfead66c8d965eaa",
@@ -2988,7 +2988,7 @@
      "at": 487629,
      "words": 57602,
      "sourceTriangles": 2778,
-     "bakeMs": 5668
+     "bakeMs": 3882
     }
    ]
   },
@@ -3008,7 +3008,7 @@
      "at": 0,
      "words": 40799,
      "sourceTriangles": 2234,
-     "bakeMs": 5494
+     "bakeMs": 4188
     },
     {
      "fingerprint": "49a440930469efb9c98ba977916874f24be214bb9e0275b851ea9fb20da499de",
@@ -3016,7 +3016,7 @@
      "at": 40799,
      "words": 73272,
      "sourceTriangles": 4090,
-     "bakeMs": 3928
+     "bakeMs": 4613
     },
     {
      "fingerprint": "50c61b46f9d603e88c29acd0bc59005569a4090bc6f5a92ef058a031db90f56a",
@@ -3024,7 +3024,7 @@
      "at": 114071,
      "words": 107174,
      "sourceTriangles": 6416,
-     "bakeMs": 13132
+     "bakeMs": 12062
     },
     {
      "fingerprint": "539bec086930fe3516d9ef0343b625a56c643fa26aeed7bc297e40cf0b897995",
@@ -3032,7 +3032,7 @@
      "at": 221245,
      "words": 39383,
      "sourceTriangles": 2234,
-     "bakeMs": 2097
+     "bakeMs": 2208
     },
     {
      "fingerprint": "716913e94606d60e0336e02e4717f59583b4f51c4c883d109096862194ebe3dd",
@@ -3040,7 +3040,7 @@
      "at": 260628,
      "words": 57024,
      "sourceTriangles": 2778,
-     "bakeMs": 6002
+     "bakeMs": 3935
     },
     {
      "fingerprint": "7e29729d0131a53819cce1768e73b1de8f03d1e89e4c5702d0e0316ac5d36819",
@@ -3048,7 +3048,7 @@
      "at": 317652,
      "words": 87381,
      "sourceTriangles": 5356,
-     "bakeMs": 10942
+     "bakeMs": 9226
     },
     {
      "fingerprint": "7f084ef0878447477c9a064027b61b764e5dd97cad693fe70cbc2f7abeded99d",
@@ -3056,7 +3056,7 @@
      "at": 405033,
      "words": 95948,
      "sourceTriangles": 6423,
-     "bakeMs": 9881
+     "bakeMs": 9127
     },
     {
      "fingerprint": "87b44456f657f3ad559c36ccac5ef0ae4297ff387adb753c1353bfae633b01b1",
@@ -3064,7 +3064,7 @@
      "at": 500981,
      "words": 38752,
      "sourceTriangles": 2234,
-     "bakeMs": 3245
+     "bakeMs": 2995
     },
     {
      "fingerprint": "8f13520902ad0fd0ccba75a6682d4ccacf2f91adff1c78dbd344019a9c4932f7",
@@ -3072,7 +3072,7 @@
      "at": 539733,
      "words": 68503,
      "sourceTriangles": 4002,
-     "bakeMs": 4281
+     "bakeMs": 5654
     },
     {
      "fingerprint": "936cd0c73b05a338ab70221e993b1be5be7bead406110fd71abe4fb16f93a8d0",
@@ -3080,7 +3080,7 @@
      "at": 608236,
      "words": 40217,
      "sourceTriangles": 2234,
-     "bakeMs": 2310
+     "bakeMs": 2098
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -3088,7 +3088,7 @@
      "at": 648453,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a3d05585672241b2bde4dd613f144139876ece13301546c9279311641d16d0d6",
@@ -3096,7 +3096,7 @@
      "at": 689623,
      "words": 43584,
      "sourceTriangles": 1468,
-     "bakeMs": 4223
+     "bakeMs": 4125
     },
     {
      "fingerprint": "a98796c17ed4e8415eaad4e9cb48891e291dec0a869565287e5c2a0b56ac1506",
@@ -3104,7 +3104,7 @@
      "at": 733207,
      "words": 77971,
      "sourceTriangles": 4746,
-     "bakeMs": 3921
+     "bakeMs": 3141
     },
     {
      "fingerprint": "bb3073b26d0ae3138a8af0b99d64729e5036901b8eba2ab66070dcee98110c82",
@@ -3112,7 +3112,7 @@
      "at": 811178,
      "words": 49975,
      "sourceTriangles": 1868,
-     "bakeMs": 5742
+     "bakeMs": 5171
     },
     {
      "fingerprint": "bf27956cd5e8e76f5c7162a5167fc363978ecaaabe233221f8425922c9dfd031",
@@ -3120,7 +3120,7 @@
      "at": 861153,
      "words": 84677,
      "sourceTriangles": 4942,
-     "bakeMs": 8586
+     "bakeMs": 8228
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -3128,7 +3128,7 @@
      "at": 945830,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "cdcfe0b016c58afcb43c745e83c2ec482ea587e6d03c2a8c7dee7f283a237a8b",
@@ -3136,7 +3136,7 @@
      "at": 1031238,
      "words": 40857,
      "sourceTriangles": 2234,
-     "bakeMs": 3312
+     "bakeMs": 2120
     },
     {
      "fingerprint": "d7549220743ba661de5ae37a2b38db66cfa3db6141344fbab10ec55a6a795e94",
@@ -3144,7 +3144,7 @@
      "at": 1072095,
      "words": 98424,
      "sourceTriangles": 6190,
-     "bakeMs": 8934
+     "bakeMs": 5811
     },
     {
      "fingerprint": "ff886ae1ed0dee5436dae2f72cb00a73b666d5f40b06efb6d424334741984992",
@@ -3152,7 +3152,7 @@
      "at": 1170519,
      "words": 162887,
      "sourceTriangles": 12492,
-     "bakeMs": 4315
+     "bakeMs": 3737
     }
    ]
   },
@@ -3172,7 +3172,7 @@
      "at": 0,
      "words": 158784,
      "sourceTriangles": 12492,
-     "bakeMs": 11621
+     "bakeMs": 9007
     },
     {
      "fingerprint": "21c00ca6c0b9e9ecc0a0769659d812699472b5e4633f311b21778fe1afbb6109",
@@ -3180,7 +3180,7 @@
      "at": 158784,
      "words": 84688,
      "sourceTriangles": 4942,
-     "bakeMs": 12781
+     "bakeMs": 16507
     },
     {
      "fingerprint": "32d8ceeaab50b9d1a7be4cc5568779f259732615e2ab21e99d5910216fc6d392",
@@ -3188,7 +3188,7 @@
      "at": 243472,
      "words": 30845,
      "sourceTriangles": 1586,
-     "bakeMs": 1486
+     "bakeMs": 1500
     },
     {
      "fingerprint": "3353d099ea219e0add65fdff5d33d00e72587b71cf5dcd2c4d5ae22b9c01c662",
@@ -3196,7 +3196,7 @@
      "at": 274317,
      "words": 31019,
      "sourceTriangles": 1586,
-     "bakeMs": 1468
+     "bakeMs": 1632
     },
     {
      "fingerprint": "342f02bfdef139fb2fdb562b52f5b058af2c7aaf0665b92107574f9989b7db90",
@@ -3204,7 +3204,7 @@
      "at": 305336,
      "words": 57539,
      "sourceTriangles": 2778,
-     "bakeMs": 3576
+     "bakeMs": 3918
     },
     {
      "fingerprint": "3490731345fdffd016e665276df2b861943119de20f2d7e83261f7bfba28aaff",
@@ -3212,7 +3212,7 @@
      "at": 362875,
      "words": 163331,
      "sourceTriangles": 12034,
-     "bakeMs": 11070
+     "bakeMs": 11456
     },
     {
      "fingerprint": "349581a61ec26efd8da5ae7c087d78bdc010feebc4fb51e90ed6d0d9dce38d39",
@@ -3220,7 +3220,7 @@
      "at": 526206,
      "words": 30825,
      "sourceTriangles": 1586,
-     "bakeMs": 1533
+     "bakeMs": 1821
     },
     {
      "fingerprint": "4c062276a612bb992338d4094eb4e1836a916cd471ef4662febd0d30f524dd36",
@@ -3228,7 +3228,7 @@
      "at": 557031,
      "words": 63261,
      "sourceTriangles": 2992,
-     "bakeMs": 9238
+     "bakeMs": 7495
     },
     {
      "fingerprint": "4dfc01594634bf01ff19c8256038feb84151e8bd4cfa9e5c1050774d2812ac8f",
@@ -3236,7 +3236,7 @@
      "at": 620292,
      "words": 30988,
      "sourceTriangles": 1586,
-     "bakeMs": 1975
+     "bakeMs": 1609
     },
     {
      "fingerprint": "5e8f3fe0dbeaa2e733698f6959a5606a4a32326e21fcacacfc4989c5cfd70cc0",
@@ -3244,7 +3244,7 @@
      "at": 651280,
      "words": 50803,
      "sourceTriangles": 1868,
-     "bakeMs": 6010
+     "bakeMs": 4763
     },
     {
      "fingerprint": "73d10502f3d9906752fd0a68eb398c391908d027cc7108cff50e767953413c1f",
@@ -3252,7 +3252,7 @@
      "at": 702083,
      "words": 30777,
      "sourceTriangles": 1586,
-     "bakeMs": 2815
+     "bakeMs": 2004
     },
     {
      "fingerprint": "849a7848cc54146557e3fffb6851e643f8c299a21cbba4b2a9b1eb5058a3e089",
@@ -3260,7 +3260,7 @@
      "at": 732860,
      "words": 100796,
      "sourceTriangles": 6746,
-     "bakeMs": 8964
+     "bakeMs": 9195
     },
     {
      "fingerprint": "85d264ef26aa2458217e45b5e5d892ade52e25a01e0e2ff65f697fc5d08d0fa6",
@@ -3268,7 +3268,7 @@
      "at": 833656,
      "words": 144224,
      "sourceTriangles": 10897,
-     "bakeMs": 13396
+     "bakeMs": 13534
     },
     {
      "fingerprint": "8639764d7ed851510aabbcc7d3a181fb0e6f1ba3482c57183334a59f20027110",
@@ -3276,7 +3276,7 @@
      "at": 977880,
      "words": 71723,
      "sourceTriangles": 4090,
-     "bakeMs": 5595
+     "bakeMs": 5734
     },
     {
      "fingerprint": "89aea3666844f92140d3c2684156334d63c08752bad471ffb0fa53c2a764e581",
@@ -3284,7 +3284,7 @@
      "at": 1049603,
      "words": 102521,
      "sourceTriangles": 6416,
-     "bakeMs": 14666
+     "bakeMs": 16236
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -3292,7 +3292,7 @@
      "at": 1152124,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a312fd9376b7bd03bd3af1036cec70c808fa330b0d1d85553c8d598d60fc392f",
@@ -3300,7 +3300,7 @@
      "at": 1193294,
      "words": 41851,
      "sourceTriangles": 1468,
-     "bakeMs": 4037
+     "bakeMs": 3896
     },
     {
      "fingerprint": "a5ecc762df431377b4200b4958ecb789c6dcfbe5f7550c0f38019609efdc99e1",
@@ -3308,7 +3308,7 @@
      "at": 1235145,
      "words": 86851,
      "sourceTriangles": 5356,
-     "bakeMs": 8655
+     "bakeMs": 6950
     },
     {
      "fingerprint": "b8b46f206bbb9e1bf9dd171699175a1fd46c4e0e42ce22abc95a4e488d9ae518",
@@ -3316,7 +3316,7 @@
      "at": 1321996,
      "words": 89425,
      "sourceTriangles": 5356,
-     "bakeMs": 6437
+     "bakeMs": 6760
     },
     {
      "fingerprint": "c54aed819f239f5381d925a9b1b3d91463d370bd4724199377db9130c9896fa0",
@@ -3324,7 +3324,7 @@
      "at": 1411421,
      "words": 67779,
      "sourceTriangles": 4002,
-     "bakeMs": 4958
+     "bakeMs": 4598
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -3332,7 +3332,7 @@
      "at": 1479200,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "d133d54d30c340feb777cf3620ea3995b2af893d84ca0ea119edde47301a3610",
@@ -3340,7 +3340,7 @@
      "at": 1564608,
      "words": 110622,
      "sourceTriangles": 6758,
-     "bakeMs": 19960
+     "bakeMs": 13109
     },
     {
      "fingerprint": "e83b51993cc4627f8bc3c2f5681e7495554446958ca649723ee5596f524863fc",
@@ -3348,7 +3348,7 @@
      "at": 1675230,
      "words": 99499,
      "sourceTriangles": 6190,
-     "bakeMs": 10291
+     "bakeMs": 5796
     },
     {
      "fingerprint": "f7579fdd787210e5388e625350c83e4bd40bd22086e416ca0e95ccba29909f63",
@@ -3356,7 +3356,7 @@
      "at": 1774729,
      "words": 75367,
      "sourceTriangles": 4746,
-     "bakeMs": 6888
+     "bakeMs": 3505
     },
     {
      "fingerprint": "fa30e93df77e1316a8d9a5c6f8ddaa48f603184bc02dc66e6765deed6a55f725",
@@ -3364,7 +3364,7 @@
      "at": 1850096,
      "words": 96768,
      "sourceTriangles": 7520,
-     "bakeMs": 5703
+     "bakeMs": 3905
     }
    ]
   },
@@ -3384,7 +3384,7 @@
      "at": 0,
      "words": 170363,
      "sourceTriangles": 12513,
-     "bakeMs": 26290
+     "bakeMs": 33518
     },
     {
      "fingerprint": "09b76e4edb2368e79f4b8b83841bfec65974c66e3a968dfde74bf29057898752",
@@ -3392,7 +3392,7 @@
      "at": 170363,
      "words": 97674,
      "sourceTriangles": 7520,
-     "bakeMs": 5873
+     "bakeMs": 7885
     },
     {
      "fingerprint": "16acbf882267127a35e7c168d571f0780819abc434933ce1a98669cdffd30613",
@@ -3400,7 +3400,7 @@
      "at": 268037,
      "words": 40235,
      "sourceTriangles": 2234,
-     "bakeMs": 3450
+     "bakeMs": 3635
     },
     {
      "fingerprint": "211309e27fd3ed8a1a0121af03b3457652f5f32f7c1e11f08a969c2d06be04c2",
@@ -3408,7 +3408,7 @@
      "at": 308272,
      "words": 167755,
      "sourceTriangles": 12034,
-     "bakeMs": 16263
+     "bakeMs": 20121
     },
     {
      "fingerprint": "319e97f53be07f7bd5ac2f23921ca34de07b883aa01a694635b8c033a078d4e9",
@@ -3416,7 +3416,7 @@
      "at": 476027,
      "words": 91078,
      "sourceTriangles": 5356,
-     "bakeMs": 7310
+     "bakeMs": 7253
     },
     {
      "fingerprint": "3201410e1f39b2639eea2104091142c9f1205993064e3d2412e9755172c21de1",
@@ -3424,7 +3424,7 @@
      "at": 567105,
      "words": 72791,
      "sourceTriangles": 4090,
-     "bakeMs": 4033
+     "bakeMs": 4145
     },
     {
      "fingerprint": "3f328494e78411d3885555558a631e9a08c79ce540aa055f33ac034c5110568c",
@@ -3432,7 +3432,7 @@
      "at": 639896,
      "words": 111023,
      "sourceTriangles": 6758,
-     "bakeMs": 12328
+     "bakeMs": 14485
     },
     {
      "fingerprint": "53e4f67d665c9b48ba37483adf6932940df3dc932cf6a15466b4ead45cfaadfe",
@@ -3440,7 +3440,7 @@
      "at": 750919,
      "words": 104646,
      "sourceTriangles": 6416,
-     "bakeMs": 12285
+     "bakeMs": 10850
     },
     {
      "fingerprint": "62c2a7755e5e207cf339e7a726534fd8612ce06a2f8897be05f29dab3c908da2",
@@ -3448,7 +3448,7 @@
      "at": 855565,
      "words": 39392,
      "sourceTriangles": 2246,
-     "bakeMs": 2102
+     "bakeMs": 1965
     },
     {
      "fingerprint": "652db89ed7215288c192f5833c031887801e030cd5b258f406bd249c8d87c704",
@@ -3456,7 +3456,7 @@
      "at": 894957,
      "words": 39701,
      "sourceTriangles": 2246,
-     "bakeMs": 1903
+     "bakeMs": 1819
     },
     {
      "fingerprint": "8283704eb8f51908234cb36602751b49c9c9f8fa05341727db132dfdff8875ec",
@@ -3464,7 +3464,7 @@
      "at": 934658,
      "words": 40333,
      "sourceTriangles": 2246,
-     "bakeMs": 2905
+     "bakeMs": 2904
     },
     {
      "fingerprint": "8292d260cffd1d55cf8922cb73aed515473f53bd2d5c3abd6b162277a261d7d1",
@@ -3472,7 +3472,7 @@
      "at": 974991,
      "words": 39772,
      "sourceTriangles": 2246,
-     "bakeMs": 2545
+     "bakeMs": 2997
     },
     {
      "fingerprint": "8c10b0addd8637e13bb5800eaec9d7f6b572f7d0e34fb0022d9adf13b010131b",
@@ -3480,7 +3480,7 @@
      "at": 1014763,
      "words": 40294,
      "sourceTriangles": 2246,
-     "bakeMs": 2319
+     "bakeMs": 2802
     },
     {
      "fingerprint": "8ff1ec90da19d03b0062c51f1094832571c8b9e7584794dbbd41d7d8dc2964b4",
@@ -3488,7 +3488,7 @@
      "at": 1055057,
      "words": 99925,
      "sourceTriangles": 6190,
-     "bakeMs": 6224
+     "bakeMs": 6727
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -3496,7 +3496,7 @@
      "at": 1154982,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9967947d235a9905ac993f2fcfeab02d1dea44002c8551fe4553591fdf63b36a",
@@ -3504,7 +3504,7 @@
      "at": 1196152,
      "words": 42289,
      "sourceTriangles": 1468,
-     "bakeMs": 4051
+     "bakeMs": 4848
     },
     {
      "fingerprint": "a4c3f1a96bd0f1f433573bcbac5d71e2852670cb677a8fc0e65ac2416d9c3c3d",
@@ -3512,7 +3512,7 @@
      "at": 1238441,
      "words": 163209,
      "sourceTriangles": 12492,
-     "bakeMs": 4696
+     "bakeMs": 4254
     },
     {
      "fingerprint": "c086d16fe4e7c86936c68f0cd109aa351110f71412c319c6fc0ae75a3014f8bb",
@@ -3520,7 +3520,7 @@
      "at": 1401650,
      "words": 56131,
      "sourceTriangles": 2778,
-     "bakeMs": 3814
+     "bakeMs": 3962
     },
     {
      "fingerprint": "c4784d0c3562ee008793af8ed01bffc227f3eb920eb3301eccad02237c11c7cb",
@@ -3528,7 +3528,7 @@
      "at": 1457781,
      "words": 68947,
      "sourceTriangles": 4002,
-     "bakeMs": 4526
+     "bakeMs": 4044
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -3536,7 +3536,7 @@
      "at": 1526728,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "e1c1ad95aed06ee59fdf9b1d2e8a1bbd8c0a8b273441409d1057631a18d47c6d",
@@ -3544,7 +3544,7 @@
      "at": 1612136,
      "words": 86902,
      "sourceTriangles": 4942,
-     "bakeMs": 13107
+     "bakeMs": 8921
     },
     {
      "fingerprint": "f08e208d65b8066efe946d2216a713959531aceaa787f25858621c68786ee95e",
@@ -3552,7 +3552,7 @@
      "at": 1699038,
      "words": 61946,
      "sourceTriangles": 2992,
-     "bakeMs": 13320
+     "bakeMs": 6931
     },
     {
      "fingerprint": "f424e36140f80c565a1fe95b5bfc31cf83c7a17e2877cf2e4180e835d5a13f20",
@@ -3560,7 +3560,7 @@
      "at": 1760984,
      "words": 51832,
      "sourceTriangles": 1868,
-     "bakeMs": 8352
+     "bakeMs": 5009
     },
     {
      "fingerprint": "f48f60525d4bcbd90d8f338195bbde56e84073dd0d9b0aa20e025f2a8f6c18ee",
@@ -3568,7 +3568,7 @@
      "at": 1812816,
      "words": 76187,
      "sourceTriangles": 4746,
-     "bakeMs": 6023
+     "bakeMs": 3100
     },
     {
      "fingerprint": "f7ddaa8b1b04e3849f76a8ba640c5855dcb1f5d6609943c63f91cfc963fa0313",
@@ -3576,7 +3576,7 @@
      "at": 1889003,
      "words": 89193,
      "sourceTriangles": 5356,
-     "bakeMs": 11570
+     "bakeMs": 7537
     }
    ]
   },
@@ -3596,7 +3596,7 @@
      "at": 0,
      "words": 99000,
      "sourceTriangles": 5522,
-     "bakeMs": 16503
+     "bakeMs": 24710
     },
     {
      "fingerprint": "108dfdbb409fb7b97a5f6ebab4bdc78df72c23c3e2b37064f249637de3f59a3d",
@@ -3604,7 +3604,7 @@
      "at": 99000,
      "words": 40346,
      "sourceTriangles": 2246,
-     "bakeMs": 2253
+     "bakeMs": 4203
     },
     {
      "fingerprint": "1606dcf56b9ec95b3b6ecbe24427c97c60d309729b7ad3f4f2f9967d820b3e2e",
@@ -3612,7 +3612,7 @@
      "at": 139346,
      "words": 72980,
      "sourceTriangles": 4090,
-     "bakeMs": 7316
+     "bakeMs": 10073
     },
     {
      "fingerprint": "22a492e1d652ebb57cf08350d0bc73d0cee6d5d513e21776fa1072eb8dc6d481",
@@ -3620,7 +3620,7 @@
      "at": 212326,
      "words": 86115,
      "sourceTriangles": 4942,
-     "bakeMs": 10975
+     "bakeMs": 22221
     },
     {
      "fingerprint": "23e2700fa6155fe74ac528095d327d0b192c83f8c735637fa7da13053c25c0df",
@@ -3628,7 +3628,7 @@
      "at": 298441,
      "words": 50891,
      "sourceTriangles": 1868,
-     "bakeMs": 7363
+     "bakeMs": 16318
     },
     {
      "fingerprint": "2bc1cd5f2fa9bd639c7df84b2a442eabdb6fe9aa4b800e05ed38a9cf8032642a",
@@ -3636,7 +3636,7 @@
      "at": 349332,
      "words": 96341,
      "sourceTriangles": 7520,
-     "bakeMs": 4694
+     "bakeMs": 5215
     },
     {
      "fingerprint": "37b99fddcfe36b88743ec19fed9f5dd5ba771c68a42e5af3bc7b6d18d93a3332",
@@ -3644,7 +3644,7 @@
      "at": 445673,
      "words": 67797,
      "sourceTriangles": 4002,
-     "bakeMs": 4388
+     "bakeMs": 4559
     },
     {
      "fingerprint": "4edf36a99d1e425b630c11245f6ac7fd1038ba88e92af3a502ba14b8ecb7cbc3",
@@ -3652,7 +3652,7 @@
      "at": 513470,
      "words": 38658,
      "sourceTriangles": 2246,
-     "bakeMs": 2109
+     "bakeMs": 1766
     },
     {
      "fingerprint": "527329f94d21c9d7f84e0838debae27c9213a58bf3a955adcfdfdad68109b1ab",
@@ -3660,7 +3660,7 @@
      "at": 552128,
      "words": 40422,
      "sourceTriangles": 2246,
-     "bakeMs": 2247
+     "bakeMs": 2033
     },
     {
      "fingerprint": "6be0fc91ce213703ae85183dfc4c65d7fe1b7182310ef60b1a6d14cd18b7aa93",
@@ -3668,7 +3668,7 @@
      "at": 592550,
      "words": 75651,
      "sourceTriangles": 4746,
-     "bakeMs": 4403
+     "bakeMs": 3217
     },
     {
      "fingerprint": "71d2c903c18403e32e9202e9ab00e0b14dad6014e862b9a03e36035239a1d915",
@@ -3676,7 +3676,7 @@
      "at": 668201,
      "words": 90550,
      "sourceTriangles": 5356,
-     "bakeMs": 11365
+     "bakeMs": 7917
     },
     {
      "fingerprint": "7c840da82eb527bfe3a959451e71717986ad5a6fd9d8cd053f742f5a24be1d85",
@@ -3684,7 +3684,7 @@
      "at": 758751,
      "words": 40351,
      "sourceTriangles": 2246,
-     "bakeMs": 2625
+     "bakeMs": 2086
     },
     {
      "fingerprint": "7ebabf0631505e182a0584c2f8100456a15c5cc6a74e65b4c987cd4a78949064",
@@ -3692,7 +3692,7 @@
      "at": 799102,
      "words": 166195,
      "sourceTriangles": 12034,
-     "bakeMs": 18309
+     "bakeMs": 15739
     },
     {
      "fingerprint": "88406496609da780a9e98344a20822cb2725846cfa70192a91667569fc061016",
@@ -3700,7 +3700,7 @@
      "at": 965297,
      "words": 105825,
      "sourceTriangles": 6416,
-     "bakeMs": 15180
+     "bakeMs": 15531
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -3708,7 +3708,7 @@
      "at": 1071122,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9be1f13c230bf0e58371cb10fd54a4b0cde2f9f58e1c6bc01e7b0e118799fa30",
@@ -3716,7 +3716,7 @@
      "at": 1112292,
      "words": 100219,
      "sourceTriangles": 6190,
-     "bakeMs": 5978
+     "bakeMs": 6332
     },
     {
      "fingerprint": "a08d0ea76d88aefa3732688cb64eb8c1d503ada2f4018d468d2228cc45dc118a",
@@ -3724,7 +3724,7 @@
      "at": 1212511,
      "words": 90168,
      "sourceTriangles": 5356,
-     "bakeMs": 8022
+     "bakeMs": 7214
     },
     {
      "fingerprint": "a46ba27b6f005810a6099f7faae786bc79c2aaa711f602dddbe104fc2962b392",
@@ -3732,7 +3732,7 @@
      "at": 1302679,
      "words": 61237,
      "sourceTriangles": 2992,
-     "bakeMs": 7853
+     "bakeMs": 6820
     },
     {
      "fingerprint": "b616cc73854cfd09e4ab2a1690f0c32d016856ea70bae4f9ca1bc4637f7dcc47",
@@ -3740,7 +3740,7 @@
      "at": 1363916,
      "words": 185550,
      "sourceTriangles": 13193,
-     "bakeMs": 23570
+     "bakeMs": 22326
     },
     {
      "fingerprint": "bd995752806d03de4e4c6bbf30edaf0ca3727c896c6deab95ba06f13ee01132d",
@@ -3748,7 +3748,7 @@
      "at": 1549466,
      "words": 161368,
      "sourceTriangles": 12492,
-     "bakeMs": 5423
+     "bakeMs": 4328
     },
     {
      "fingerprint": "c3bc527dc700031a91c39657460f72dc0e2fcad03c79a9463de0bfc973e200f6",
@@ -3756,7 +3756,7 @@
      "at": 1710834,
      "words": 112123,
      "sourceTriangles": 6758,
-     "bakeMs": 16134
+     "bakeMs": 12434
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -3764,7 +3764,7 @@
      "at": 1822957,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "ccb78bd2f1bb9cf68c9c5a2cb9c820c328c653094b62b1d4d8b4aab69757a62a",
@@ -3772,7 +3772,7 @@
      "at": 1908365,
      "words": 42425,
      "sourceTriangles": 1468,
-     "bakeMs": 6077
+     "bakeMs": 3801
     },
     {
      "fingerprint": "db9d216e665850267a2170f6699d21207bcd82cb164ff5a8934a84d1e0ffc1c4",
@@ -3780,7 +3780,7 @@
      "at": 1950790,
      "words": 40272,
      "sourceTriangles": 2246,
-     "bakeMs": 2565
+     "bakeMs": 2041
     },
     {
      "fingerprint": "e28954cc420ebe0c0b116920b452b2b2b9e589f014961ad2c3fcd13850bc9664",
@@ -3788,7 +3788,7 @@
      "at": 1991062,
      "words": 56954,
      "sourceTriangles": 2778,
-     "bakeMs": 5239
+     "bakeMs": 3790
     },
     {
      "fingerprint": "fd1793c9666a61f68cc4fba0fe2d2fd5e4c0ae2383d82a53e92f607ad740634c",
@@ -3796,7 +3796,7 @@
      "at": 2048016,
      "words": 40432,
      "sourceTriangles": 2246,
-     "bakeMs": 2661
+     "bakeMs": 1992
     }
    ]
   },
@@ -3816,7 +3816,7 @@
      "at": 0,
      "words": 88307,
      "sourceTriangles": 5356,
-     "bakeMs": 17128
+     "bakeMs": 14265
     },
     {
      "fingerprint": "065293258127f50248b8aa8c298307b8fd50c1364ad70be056f9c5bf1645d41c",
@@ -3824,7 +3824,7 @@
      "at": 88307,
      "words": 100750,
      "sourceTriangles": 6190,
-     "bakeMs": 13552
+     "bakeMs": 11667
     },
     {
      "fingerprint": "24ed6edf9c9e04bb10cf9ad762a78660a97b50011406d6134ffc34e33ef4b307",
@@ -3832,7 +3832,7 @@
      "at": 189057,
      "words": 31023,
      "sourceTriangles": 1586,
-     "bakeMs": 3210
+     "bakeMs": 4985
     },
     {
      "fingerprint": "277a3fb33aa06b5007d9a39866cfed1b8ec3fc5cb99579cf41932d5b21d7c9c1",
@@ -3840,7 +3840,7 @@
      "at": 220080,
      "words": 79323,
      "sourceTriangles": 4746,
-     "bakeMs": 3879
+     "bakeMs": 10574
     },
     {
      "fingerprint": "2b100aca7bf4a1125dc29f0791742b4452aec00a93b453001c43a5e3a2ce1145",
@@ -3848,7 +3848,7 @@
      "at": 299403,
      "words": 88869,
      "sourceTriangles": 5356,
-     "bakeMs": 8597
+     "bakeMs": 9886
     },
     {
      "fingerprint": "2c09d1428928645b35d652bcd5c1f88c23cda9777ee284de016dd5a4494088cb",
@@ -3856,7 +3856,7 @@
      "at": 388272,
      "words": 136311,
      "sourceTriangles": 10280,
-     "bakeMs": 7964
+     "bakeMs": 9558
     },
     {
      "fingerprint": "2ca70892ec49e68622823cc7da4f418f9c02a882af3d199a6c966a7cc8b9c4f8",
@@ -3864,7 +3864,7 @@
      "at": 524583,
      "words": 159917,
      "sourceTriangles": 12492,
-     "bakeMs": 4896
+     "bakeMs": 6068
     },
     {
      "fingerprint": "2fd59be3558b45d1201f462fb1dcd9ac56333e9e054f544b9db897377ae1eda6",
@@ -3872,7 +3872,7 @@
      "at": 684500,
      "words": 171289,
      "sourceTriangles": 12485,
-     "bakeMs": 16013
+     "bakeMs": 17722
     },
     {
      "fingerprint": "36d13394388927237b616bd839131bed7c5c6a61cd0efe92beb6ccd226d6cea2",
@@ -3880,7 +3880,7 @@
      "at": 855789,
      "words": 161964,
      "sourceTriangles": 12492,
-     "bakeMs": 4388
+     "bakeMs": 4370
     },
     {
      "fingerprint": "4a5beef3ca90e79ce4ee7b76e0691e1519188d4c7eb9a75f3bcd0387b8573816",
@@ -3888,7 +3888,7 @@
      "at": 1017753,
      "words": 95630,
      "sourceTriangles": 6298,
-     "bakeMs": 6582
+     "bakeMs": 7026
     },
     {
      "fingerprint": "4b881c68bdf554b644de7f82ae562a8bea5758760f52f59be6ab0ead2df2e310",
@@ -3896,7 +3896,7 @@
      "at": 1113383,
      "words": 57419,
      "sourceTriangles": 2778,
-     "bakeMs": 4378
+     "bakeMs": 4000
     },
     {
      "fingerprint": "4ba0d6b65e9b2b8cb528c11184b05fa22799e8938c81f5d6d92b532c443fb55c",
@@ -3904,7 +3904,7 @@
      "at": 1170802,
      "words": 63724,
      "sourceTriangles": 2992,
-     "bakeMs": 9921
+     "bakeMs": 8345
     },
     {
      "fingerprint": "4c92a18d1f600ac5df3b0aa92eaf1123c9f941092877832f0ed4f72dab4bcce7",
@@ -3912,7 +3912,7 @@
      "at": 1234526,
      "words": 163025,
      "sourceTriangles": 12492,
-     "bakeMs": 5599
+     "bakeMs": 4614
     },
     {
      "fingerprint": "4d5f055b155937a21e673001ab39981f4df7c52920b989f45e62ec63e540aa30",
@@ -3920,7 +3920,7 @@
      "at": 1397551,
      "words": 79663,
      "sourceTriangles": 4570,
-     "bakeMs": 9225
+     "bakeMs": 8440
     },
     {
      "fingerprint": "4dfe0f2b70b66f8e8a49b3bb15578c1290c012bdc2774f06e72114a55b0a88b7",
@@ -3928,7 +3928,7 @@
      "at": 1477214,
      "words": 68171,
      "sourceTriangles": 4002,
-     "bakeMs": 5460
+     "bakeMs": 4397
     },
     {
      "fingerprint": "516fba657751d399335b8a1f977d22e81fc7d7b8f9d202ef9afbfcc39e357ddd",
@@ -3936,7 +3936,7 @@
      "at": 1545385,
      "words": 152257,
      "sourceTriangles": 10946,
-     "bakeMs": 12557
+     "bakeMs": 11872
     },
     {
      "fingerprint": "55bb48e8a2aa9130240ad0db7d4b51d44adff01e6056a128ac36fd0819ebd2fe",
@@ -3944,7 +3944,7 @@
      "at": 1697642,
      "words": 30773,
      "sourceTriangles": 1586,
-     "bakeMs": 2513
+     "bakeMs": 2281
     },
     {
      "fingerprint": "608b6b9fe310bb5a69ef1c2f87bc224662b8ea58d1d60a2b27bf862fa982744f",
@@ -3952,7 +3952,7 @@
      "at": 1728415,
      "words": 125534,
      "sourceTriangles": 9408,
-     "bakeMs": 4524
+     "bakeMs": 4165
     },
     {
      "fingerprint": "6db62621e150f25375465e24a98a0034553056bd03cdf0d9ad000da68d08edcd",
@@ -3960,7 +3960,7 @@
      "at": 1853949,
      "words": 29625,
      "sourceTriangles": 1586,
-     "bakeMs": 1916
+     "bakeMs": 1899
     },
     {
      "fingerprint": "778671d49c1e56d09b7e0dcdfca56eba51b948ae050e0c2683b9edf92e0a38d7",
@@ -3968,7 +3968,7 @@
      "at": 1883574,
      "words": 85342,
      "sourceTriangles": 6096,
-     "bakeMs": 9785
+     "bakeMs": 7084
     },
     {
      "fingerprint": "86fb52b8c69bcb52017ddd7e8b8c8a1b3af0138a14510fe8343b060e81c9be87",
@@ -3976,7 +3976,7 @@
      "at": 1968916,
      "words": 30635,
      "sourceTriangles": 1586,
-     "bakeMs": 2334
+     "bakeMs": 3379
     },
     {
      "fingerprint": "9891abeaa846d708d8450acb35dc6d62faff4f07f71c137b30c034446283c754",
@@ -3984,7 +3984,7 @@
      "at": 1999551,
      "words": 30063,
      "sourceTriangles": 1586,
-     "bakeMs": 1838
+     "bakeMs": 2480
     },
     {
      "fingerprint": "9cde642cb45501de3c63d9496cac5705eb35a471f9aeb23d69fe92a066582887",
@@ -3992,7 +3992,7 @@
      "at": 2029614,
      "words": 29620,
      "sourceTriangles": 1586,
-     "bakeMs": 1979
+     "bakeMs": 2197
     },
     {
      "fingerprint": "acb437351fe54911d3eb12e50f987db9a415247aa2004cc51e0daf5cdb6dec80",
@@ -4000,7 +4000,7 @@
      "at": 2059234,
      "words": 96018,
      "sourceTriangles": 6357,
-     "bakeMs": 8324
+     "bakeMs": 8053
     },
     {
      "fingerprint": "b418121230899e5466189022dbd8d6326c6036112605ca858a992f72e6d1649f",
@@ -4008,7 +4008,7 @@
      "at": 2155252,
      "words": 104684,
      "sourceTriangles": 6416,
-     "bakeMs": 11466
+     "bakeMs": 10866
     },
     {
      "fingerprint": "c2e308c68a94c0a8c79c989d38b2d7524af79df7a7ad94d0e9c105357fd09dbf",
@@ -4016,7 +4016,7 @@
      "at": 2259936,
      "words": 29617,
      "sourceTriangles": 1586,
-     "bakeMs": 1907
+     "bakeMs": 2012
     },
     {
      "fingerprint": "c7668f64c4f798efef6252406c1c1b7149f9d442da42f51871982b0ea1b13e0f",
@@ -4024,7 +4024,7 @@
      "at": 2289553,
      "words": 198834,
      "sourceTriangles": 15880,
-     "bakeMs": 13460
+     "bakeMs": 8916
     },
     {
      "fingerprint": "ccfa5eb00ef037baac18bd9479fb3edf7b14941c98c86048c59955b9d204adc0",
@@ -4032,7 +4032,7 @@
      "at": 2488387,
      "words": 50002,
      "sourceTriangles": 1868,
-     "bakeMs": 7922
+     "bakeMs": 4642
     },
     {
      "fingerprint": "cf85d473c245f1451fcde32b0c2b6f24c7df067c9a8f0bf0229b954e5bbdee2d",
@@ -4040,7 +4040,7 @@
      "at": 2538389,
      "words": 78588,
      "sourceTriangles": 4076,
-     "bakeMs": 13488
+     "bakeMs": 8666
     },
     {
      "fingerprint": "d7c28e925addca1d86446ecf3a94d36c9126c2ac9cb1af8d4da9022bd6a5c7f5",
@@ -4048,7 +4048,7 @@
      "at": 2616977,
      "words": 77349,
      "sourceTriangles": 4474,
-     "bakeMs": 11293
+     "bakeMs": 7282
     },
     {
      "fingerprint": "da1d28d64f09ff9fab5086b46aa41bcf5fb7d03b6de5ae18e9f4553ddfb5505a",
@@ -4056,7 +4056,7 @@
      "at": 2694326,
      "words": 86533,
      "sourceTriangles": 4664,
-     "bakeMs": 16023
+     "bakeMs": 10404
     },
     {
      "fingerprint": "e6c8451bcaa667360b72fe7bb6c3fca3bf4a2d81d574cc45243fe8496e71bf6b",
@@ -4064,7 +4064,7 @@
      "at": 2780859,
      "words": 56712,
      "sourceTriangles": 2778,
-     "bakeMs": 5843
+     "bakeMs": 3743
     },
     {
      "fingerprint": "ef508dba471808f54b0ae35614b46a670a1fce1a2a6e21b5372c82992c077eb7",
@@ -4072,7 +4072,7 @@
      "at": 2837571,
      "words": 95787,
      "sourceTriangles": 6356,
-     "bakeMs": 11021
+     "bakeMs": 6422
     }
    ]
   },
@@ -4092,7 +4092,7 @@
      "at": 0,
      "words": 40905,
      "sourceTriangles": 2246,
-     "bakeMs": 1992
+     "bakeMs": 4140
     },
     {
      "fingerprint": "0eb4366e4de46c04e2ff7a39a2c88dab4d3d0efa16156be4b64ba9b4b46e3148",
@@ -4100,7 +4100,7 @@
      "at": 40905,
      "words": 160569,
      "sourceTriangles": 12492,
-     "bakeMs": 6390
+     "bakeMs": 9534
     },
     {
      "fingerprint": "1aea0a5dd5c0b078742438aedb761d2861f9758e90b5aae967f67cbb6b1bc486",
@@ -4108,7 +4108,7 @@
      "at": 201474,
      "words": 50742,
      "sourceTriangles": 1868,
-     "bakeMs": 8102
+     "bakeMs": 10106
     },
     {
      "fingerprint": "2059b992ea171a511441ce7e9285b31b0efd6eb375d14f9528b089da3c40ada2",
@@ -4116,7 +4116,7 @@
      "at": 252216,
      "words": 40080,
      "sourceTriangles": 2246,
-     "bakeMs": 2571
+     "bakeMs": 3083
     },
     {
      "fingerprint": "2098563b1be782fec34f218177a29d8b6aaa77cf9718c6714e39d2168879d782",
@@ -4124,7 +4124,7 @@
      "at": 292296,
      "words": 40812,
      "sourceTriangles": 2246,
-     "bakeMs": 2805
+     "bakeMs": 2852
     },
     {
      "fingerprint": "22814fed4869d6481eb0f7c88538686f950dd2bad870227025764addd42317d2",
@@ -4132,7 +4132,7 @@
      "at": 333108,
      "words": 42884,
      "sourceTriangles": 1468,
-     "bakeMs": 5744
+     "bakeMs": 8482
     },
     {
      "fingerprint": "25be13f49d32e008f4106b336523b9ef5ecefada7ba723e3b2e753647f19e1b2",
@@ -4140,7 +4140,7 @@
      "at": 375992,
      "words": 68298,
      "sourceTriangles": 4002,
-     "bakeMs": 5407
+     "bakeMs": 15660
     },
     {
      "fingerprint": "33f30b114a597cf01fd4c2b3a498b0546e7f2a9702d480c7c4752dfe6c477c30",
@@ -4148,7 +4148,7 @@
      "at": 444290,
      "words": 71881,
      "sourceTriangles": 4090,
-     "bakeMs": 4011
+     "bakeMs": 4616
     },
     {
      "fingerprint": "647bd747f148828cac5c1e9ab7a579f1bc919e92b1e5adca4ac49a179c685874",
@@ -4156,7 +4156,7 @@
      "at": 516171,
      "words": 56204,
      "sourceTriangles": 2778,
-     "bakeMs": 4022
+     "bakeMs": 3496
     },
     {
      "fingerprint": "6510d398a623950f44c50a7a9282dcc43e1451bd8ef2b8ee288d842a3c58756c",
@@ -4164,7 +4164,7 @@
      "at": 572375,
      "words": 105376,
      "sourceTriangles": 6416,
-     "bakeMs": 13143
+     "bakeMs": 10901
     },
     {
      "fingerprint": "6c9ac7c53c39a6205fd15e5ebf19afab965f7c1f05bc6215068c13644bd96255",
@@ -4172,7 +4172,7 @@
      "at": 677751,
      "words": 77979,
      "sourceTriangles": 4746,
-     "bakeMs": 3816
+     "bakeMs": 3090
     },
     {
      "fingerprint": "79b4e8c4f631efb57b5c0757fe4f152c78633e28dcc68e5d3112ddbc35187a24",
@@ -4180,7 +4180,7 @@
      "at": 755730,
      "words": 111210,
      "sourceTriangles": 6758,
-     "bakeMs": 21788
+     "bakeMs": 14087
     },
     {
      "fingerprint": "9082e9a00b1bcdb7af725c14094f9f8a01b81697caa26e0f7703f3cd09726030",
@@ -4188,7 +4188,7 @@
      "at": 866940,
      "words": 89632,
      "sourceTriangles": 5356,
-     "bakeMs": 7353
+     "bakeMs": 7911
     },
     {
      "fingerprint": "925526df730d9f2fa75882f2c3b2e09c82f4f3637b75fbef3d1403d9ae21dcfe",
@@ -4196,7 +4196,7 @@
      "at": 956572,
      "words": 40513,
      "sourceTriangles": 2246,
-     "bakeMs": 1696
+     "bakeMs": 1623
     },
     {
      "fingerprint": "948727364a27f8a4cbc373ba3a3454b2633a01ecb81d10263b1284c0da2616d0",
@@ -4204,7 +4204,7 @@
      "at": 997085,
      "words": 167849,
      "sourceTriangles": 12034,
-     "bakeMs": 11883
+     "bakeMs": 12809
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -4212,7 +4212,7 @@
      "at": 1164934,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9ff71d2bd852b1838a02d284fc81e7a79b4d28dc97afbb2a65d132acee8a0249",
@@ -4220,7 +4220,7 @@
      "at": 1206104,
      "words": 40690,
      "sourceTriangles": 2246,
-     "bakeMs": 1726
+     "bakeMs": 1591
     },
     {
      "fingerprint": "a803a06527bc5ba2487b18b53ccaac5a2d206bf546446e9d6192b5a83611ceef",
@@ -4228,7 +4228,7 @@
      "at": 1246794,
      "words": 40108,
      "sourceTriangles": 2246,
-     "bakeMs": 1789
+     "bakeMs": 1689
     },
     {
      "fingerprint": "c440266ba11e7b1c8bbe5bdb9a05c30a49d91892a53e5aa59ebbe59859e6f1f4",
@@ -4236,7 +4236,7 @@
      "at": 1286902,
      "words": 98690,
      "sourceTriangles": 7520,
-     "bakeMs": 4043
+     "bakeMs": 3745
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -4244,7 +4244,7 @@
      "at": 1385592,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "cdcaada179e279a1c0addfe95dbb8cfd792cbc620f0d45b3223e9c4111fd2c8c",
@@ -4252,7 +4252,7 @@
      "at": 1471000,
      "words": 96833,
      "sourceTriangles": 6851,
-     "bakeMs": 8390
+     "bakeMs": 5398
     },
     {
      "fingerprint": "d08e5c7d075a3b17da4064158576e1aa088f68a845af5d16023bc9b2adc6af8a",
@@ -4260,7 +4260,7 @@
      "at": 1567833,
      "words": 101647,
      "sourceTriangles": 6190,
-     "bakeMs": 8316
+     "bakeMs": 5718
     },
     {
      "fingerprint": "d7b5eff51c992e43ac349d5d2be30cc93b886ed3485209d2b9bd0a15942dcad2",
@@ -4268,7 +4268,7 @@
      "at": 1669480,
      "words": 149272,
      "sourceTriangles": 12509,
-     "bakeMs": 17120
+     "bakeMs": 11271
     },
     {
      "fingerprint": "de8c1278a06c0b33cb0328d3ec99d6cb0067eb692905da8bacb1783fc8b8ee9c",
@@ -4276,7 +4276,7 @@
      "at": 1818752,
      "words": 63168,
      "sourceTriangles": 2992,
-     "bakeMs": 11458
+     "bakeMs": 8025
     },
     {
      "fingerprint": "deb20c494234152ad02eb01e494245cb3bd2a6faf32a7d18ac9a540df2ae1e14",
@@ -4284,7 +4284,7 @@
      "at": 1881920,
      "words": 87691,
      "sourceTriangles": 4942,
-     "bakeMs": 13185
+     "bakeMs": 8685
     },
     {
      "fingerprint": "ffa39e46f142ab63fdd470b5b677478d06f58995b1f5dd856208e0b661442fa1",
@@ -4292,7 +4292,7 @@
      "at": 1969611,
      "words": 92924,
      "sourceTriangles": 5356,
-     "bakeMs": 7729
+     "bakeMs": 6198
     }
    ]
   },
@@ -4312,7 +4312,7 @@
      "at": 0,
      "words": 40458,
      "sourceTriangles": 2246,
-     "bakeMs": 2690
+     "bakeMs": 2500
     },
     {
      "fingerprint": "0da5996b8fa78bf454a1526b2c841aead40a83d2cf26e9cf760a4af009ece9d3",
@@ -4320,7 +4320,7 @@
      "at": 40458,
      "words": 76401,
      "sourceTriangles": 4746,
-     "bakeMs": 4542
+     "bakeMs": 7305
     },
     {
      "fingerprint": "1add9c19f3181cd438a77de2f0db397124fa02277f0556f0091c61bd35dc1b71",
@@ -4328,7 +4328,7 @@
      "at": 116859,
      "words": 56581,
      "sourceTriangles": 2778,
-     "bakeMs": 6350
+     "bakeMs": 7136
     },
     {
      "fingerprint": "1daa34720d39854e241e9ef73fb6e9219734475180255c94c6f9ac247947618e",
@@ -4336,7 +4336,7 @@
      "at": 173440,
      "words": 99201,
      "sourceTriangles": 6190,
-     "bakeMs": 9702
+     "bakeMs": 10806
     },
     {
      "fingerprint": "1ddd31d2c5211c47470fe1ef8ccc33f2d87d4f5dbce6a11bdc0b76521e70f5e9",
@@ -4344,7 +4344,7 @@
      "at": 272641,
      "words": 40234,
      "sourceTriangles": 2246,
-     "bakeMs": 3180
+     "bakeMs": 3760
     },
     {
      "fingerprint": "48cfebaf4d1ebae4cc4270aea7f84cb9a92dfad5afc7a14b8e9583b72c055e85",
@@ -4352,7 +4352,7 @@
      "at": 312875,
      "words": 98891,
      "sourceTriangles": 7520,
-     "bakeMs": 3642
+     "bakeMs": 5110
     },
     {
      "fingerprint": "5755f4166e2fdddabfdd26eab107cfaad5be5d7bc88dc2711de973db443d17ec",
@@ -4360,7 +4360,7 @@
      "at": 411766,
      "words": 40802,
      "sourceTriangles": 2246,
-     "bakeMs": 2192
+     "bakeMs": 1705
     },
     {
      "fingerprint": "64ba0eda7de68b540a9b8628ea215478f2f8f9b36f603d767f86bc2f2326e17d",
@@ -4368,7 +4368,7 @@
      "at": 452568,
      "words": 92614,
      "sourceTriangles": 5356,
-     "bakeMs": 7467
+     "bakeMs": 6841
     },
     {
      "fingerprint": "6b882923dc7609aa4767a98d94667f7963be42e879420fe00f992b85497e21eb",
@@ -4376,7 +4376,7 @@
      "at": 545182,
      "words": 61734,
      "sourceTriangles": 2992,
-     "bakeMs": 8851
+     "bakeMs": 7526
     },
     {
      "fingerprint": "702e7dc09a2176bef4839f832e862454f1ebe7428ce0465e8692bbbe0e8ec35b",
@@ -4384,7 +4384,7 @@
      "at": 606916,
      "words": 42988,
      "sourceTriangles": 1468,
-     "bakeMs": 6207
+     "bakeMs": 4401
     },
     {
      "fingerprint": "77f41234abecfb4391d159fdcb2df25131f4887342e2f7cb28b6075027ab72a8",
@@ -4392,7 +4392,7 @@
      "at": 649904,
      "words": 73137,
      "sourceTriangles": 4090,
-     "bakeMs": 6200
+     "bakeMs": 4071
     },
     {
      "fingerprint": "8e36d3d1b0e581b4b7591865cf336f5fde15d774945e264edb539b11798a95f2",
@@ -4400,7 +4400,7 @@
      "at": 723041,
      "words": 51116,
      "sourceTriangles": 1868,
-     "bakeMs": 5727
+     "bakeMs": 6339
     },
     {
      "fingerprint": "90cdb063230e5261ad89b7155dbacd0e92389e5aed0edfa8b60abf4ad4756344",
@@ -4408,7 +4408,7 @@
      "at": 774157,
      "words": 232228,
      "sourceTriangles": 15495,
-     "bakeMs": 50066
+     "bakeMs": 48695
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -4416,7 +4416,7 @@
      "at": 1006385,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "b10d6e93f50de63f6cae2ba9e3694d501a42159733573d3ca44b2687e27feb88",
@@ -4424,7 +4424,7 @@
      "at": 1047555,
      "words": 105370,
      "sourceTriangles": 6416,
-     "bakeMs": 10446
+     "bakeMs": 11334
     },
     {
      "fingerprint": "bd73079a7fc849ff3654c3eb1fd9a159fccba7149f110ed1fcfef15f42cd2921",
@@ -4432,7 +4432,7 @@
      "at": 1152925,
      "words": 110466,
      "sourceTriangles": 6758,
-     "bakeMs": 14261
+     "bakeMs": 13160
     },
     {
      "fingerprint": "bdc1e793277d246b90c3324d6cbb833a7a8166d394b2616bd18d9b406b461663",
@@ -4440,7 +4440,7 @@
      "at": 1263391,
      "words": 39839,
      "sourceTriangles": 2246,
-     "bakeMs": 2444
+     "bakeMs": 1842
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -4448,7 +4448,7 @@
      "at": 1303230,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "dab0d0592aea7ab17a1160319e6b7362af76434b9c4f6a2fa436a779e1a8fa68",
@@ -4456,7 +4456,7 @@
      "at": 1388638,
      "words": 165316,
      "sourceTriangles": 12034,
-     "bakeMs": 17908
+     "bakeMs": 12053
     },
     {
      "fingerprint": "e89e10ae888dc337d440c7f730edff98940fd978ddccee6c63d8e3b892fd5ed6",
@@ -4464,7 +4464,7 @@
      "at": 1553954,
      "words": 40137,
      "sourceTriangles": 2246,
-     "bakeMs": 3254
+     "bakeMs": 1761
     },
     {
      "fingerprint": "eabbc06a87a0b8d34ebdb574cce93343777a04f19610d17b5756bd68e398dcae",
@@ -4472,7 +4472,7 @@
      "at": 1594091,
      "words": 84883,
      "sourceTriangles": 4942,
-     "bakeMs": 15920
+     "bakeMs": 8638
     },
     {
      "fingerprint": "f0e9a8eba9288496aaa6d075f8ab655dae154cdea754d80ca350e12fdbe5f8f0",
@@ -4480,7 +4480,7 @@
      "at": 1678974,
      "words": 67954,
      "sourceTriangles": 4002,
-     "bakeMs": 7821
+     "bakeMs": 3981
     },
     {
      "fingerprint": "f1f49a7f7d21f756ee6a960c7292050f11e5bc55f9eaebe98fdcb21f5756772b",
@@ -4488,7 +4488,7 @@
      "at": 1746928,
      "words": 91150,
      "sourceTriangles": 5356,
-     "bakeMs": 13126
+     "bakeMs": 7023
     },
     {
      "fingerprint": "f582c7460cf2a634c92231d7cb1f63f649ee2fab5e08afe60077104bbbb0824f",
@@ -4496,7 +4496,7 @@
      "at": 1838078,
      "words": 160736,
      "sourceTriangles": 12492,
-     "bakeMs": 7955
+     "bakeMs": 4444
     },
     {
      "fingerprint": "f5e8664795f3a52557282acb9f1505c2f08a55e12b2bf4a784b8b2b4e2b2c427",
@@ -4504,7 +4504,7 @@
      "at": 1998814,
      "words": 40408,
      "sourceTriangles": 2246,
-     "bakeMs": 3728
+     "bakeMs": 1841
     }
    ]
   },
@@ -4524,7 +4524,7 @@
      "at": 0,
      "words": 87320,
      "sourceTriangles": 4942,
-     "bakeMs": 14298
+     "bakeMs": 20199
     },
     {
      "fingerprint": "143b8e5a718ee407bad4e87bd89b2ebb32317dd4659467b03526eb9807873e5a",
@@ -4532,7 +4532,7 @@
      "at": 87320,
      "words": 98133,
      "sourceTriangles": 6190,
-     "bakeMs": 10365
+     "bakeMs": 14537
     },
     {
      "fingerprint": "17308613f3184345a766d360daeedbfd6a0bbf671d01f31348d67d5c3cfe6a81",
@@ -4540,7 +4540,7 @@
      "at": 185453,
      "words": 88360,
      "sourceTriangles": 5356,
-     "bakeMs": 13449
+     "bakeMs": 19292
     },
     {
      "fingerprint": "2cc56112321bbfd894deb6c808594efc544e42d55b46ca2979e4a0fc3a7f027e",
@@ -4548,7 +4548,7 @@
      "at": 273813,
      "words": 68639,
      "sourceTriangles": 4002,
-     "bakeMs": 5314
+     "bakeMs": 6029
     },
     {
      "fingerprint": "2e6f291cc9ce1334bcabb32452f347d2ce2af6b5bf8b37206e101ee08840cf8d",
@@ -4556,7 +4556,7 @@
      "at": 342452,
      "words": 165588,
      "sourceTriangles": 12493,
-     "bakeMs": 19468
+     "bakeMs": 21405
     },
     {
      "fingerprint": "2f628f17e7c0847859423b178393748f2d618026292558fdd5b532c6a8c7acbd",
@@ -4564,7 +4564,7 @@
      "at": 508040,
      "words": 101930,
      "sourceTriangles": 6416,
-     "bakeMs": 11580
+     "bakeMs": 13147
     },
     {
      "fingerprint": "42af4aea56b72035d8be4f5590c769ece0e329c7db39f858a0e235c59e75e4e0",
@@ -4572,7 +4572,7 @@
      "at": 609970,
      "words": 70972,
      "sourceTriangles": 4090,
-     "bakeMs": 3790
+     "bakeMs": 3620
     },
     {
      "fingerprint": "44b3cdd04a490ca9f7ba99e5280cd5b4e6d5985d5683b2ae824276c89ff0dfed",
@@ -4580,7 +4580,7 @@
      "at": 680942,
      "words": 165940,
      "sourceTriangles": 12034,
-     "bakeMs": 12383
+     "bakeMs": 14478
     },
     {
      "fingerprint": "4b8c13279316c7ea94b513e158b80f224d2c32a5fbb17e1e8b05705cc6f8d6b0",
@@ -4588,7 +4588,7 @@
      "at": 846882,
      "words": 157293,
      "sourceTriangles": 12492,
-     "bakeMs": 5922
+     "bakeMs": 5831
     },
     {
      "fingerprint": "6356b862bfd9ecfa627045dd740e371fc125281d4374e8ac7e7c65aff9c1c9da",
@@ -4596,7 +4596,7 @@
      "at": 1004175,
      "words": 31007,
      "sourceTriangles": 1586,
-     "bakeMs": 1811
+     "bakeMs": 1692
     },
     {
      "fingerprint": "6d5bfad94a4c865e64e5e8410d6520bfb9774f87b200169873e076b6ef232697",
@@ -4604,7 +4604,7 @@
      "at": 1035182,
      "words": 30057,
      "sourceTriangles": 1586,
-     "bakeMs": 2000
+     "bakeMs": 1653
     },
     {
      "fingerprint": "776b3f3be470cf526336e9e65f100e5d198a95b7e1ac7b55815c4880c3a0fbd5",
@@ -4612,7 +4612,7 @@
      "at": 1065239,
      "words": 89114,
      "sourceTriangles": 5356,
-     "bakeMs": 11512
+     "bakeMs": 7781
     },
     {
      "fingerprint": "7d3ae7c61a3ef2712b42a079804d4d0b0ea63753aae2d472a6c5f64679de4956",
@@ -4620,7 +4620,7 @@
      "at": 1154353,
      "words": 30049,
      "sourceTriangles": 1586,
-     "bakeMs": 2727
+     "bakeMs": 2478
     },
     {
      "fingerprint": "8745cf132bd2f4c32cb0832e36af33ab1b686e4a43decfa39b9574232170b88d",
@@ -4628,7 +4628,7 @@
      "at": 1184402,
      "words": 100100,
      "sourceTriangles": 7520,
-     "bakeMs": 6430
+     "bakeMs": 5647
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -4636,7 +4636,7 @@
      "at": 1284502,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a14934106812c675371388f2f4ffe10b6f86c3e67dda7e83131cc3591f3cddfd",
@@ -4644,7 +4644,7 @@
      "at": 1325672,
      "words": 77389,
      "sourceTriangles": 4746,
-     "bakeMs": 3376
+     "bakeMs": 3191
     },
     {
      "fingerprint": "c2e221fea0226c158b728a568d9c3303a79e11e6ed283445491730b65eb3a864",
@@ -4652,7 +4652,7 @@
      "at": 1403061,
      "words": 92022,
      "sourceTriangles": 6336,
-     "bakeMs": 4980
+     "bakeMs": 4286
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -4660,7 +4660,7 @@
      "at": 1495083,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "cfed322692e1e76ff3bc92cd1bb0ec2eed27a862212c10429acfb0ee8757143f",
@@ -4668,7 +4668,7 @@
      "at": 1580491,
      "words": 30804,
      "sourceTriangles": 1586,
-     "bakeMs": 2453
+     "bakeMs": 1540
     },
     {
      "fingerprint": "d7a49007df11c1e56d46cf45a2beab2526b052853e80daa4b0baf7c6d1ba19ef",
@@ -4676,7 +4676,7 @@
      "at": 1611295,
      "words": 30104,
      "sourceTriangles": 1586,
-     "bakeMs": 2412
+     "bakeMs": 1326
     },
     {
      "fingerprint": "db74197c05ea5ace80eb669984eb5d1f65d4947074985e8fa6ddacf88856d99b",
@@ -4684,7 +4684,7 @@
      "at": 1641399,
      "words": 50266,
      "sourceTriangles": 1868,
-     "bakeMs": 8165
+     "bakeMs": 5635
     },
     {
      "fingerprint": "df2ee5d1009142b2c65f53f48edee879303b39a8b467c2820c48f949666cc775",
@@ -4692,7 +4692,7 @@
      "at": 1691665,
      "words": 109653,
      "sourceTriangles": 6758,
-     "bakeMs": 23973
+     "bakeMs": 14951
     },
     {
      "fingerprint": "e18aa52a9093793b0b0343c812c7f43da5ff5ae536312f1101e446e0e739696d",
@@ -4700,7 +4700,7 @@
      "at": 1801318,
      "words": 58020,
      "sourceTriangles": 2778,
-     "bakeMs": 5996
+     "bakeMs": 3681
     },
     {
      "fingerprint": "f2e33f118894d8826c016efe0a609b34888f96a630c9ef8979794187dc2777e7",
@@ -4708,7 +4708,7 @@
      "at": 1859338,
      "words": 63493,
      "sourceTriangles": 2992,
-     "bakeMs": 13975
+     "bakeMs": 7658
     },
     {
      "fingerprint": "f5523a9932d9adee8deba1815bb932bc95947f27d5363570f7332af44d1be0f9",
@@ -4716,7 +4716,7 @@
      "at": 1922831,
      "words": 44146,
      "sourceTriangles": 1468,
-     "bakeMs": 7004
+     "bakeMs": 4137
     }
    ]
   },
@@ -4736,7 +4736,7 @@
      "at": 0,
      "words": 90399,
      "sourceTriangles": 5356,
-     "bakeMs": 15964
+     "bakeMs": 12707
     },
     {
      "fingerprint": "0855ac6ecc523f4a8bef7baf53849772b7404de08fcfc7b71884c9c022610f2a",
@@ -4744,7 +4744,7 @@
      "at": 90399,
      "words": 40144,
      "sourceTriangles": 2246,
-     "bakeMs": 3958
+     "bakeMs": 3362
     },
     {
      "fingerprint": "0b5d92721cda27f8ab50bbe7f4192233378ffdfad159903ee8f08b0ca10e993c",
@@ -4752,7 +4752,7 @@
      "at": 130543,
      "words": 87169,
      "sourceTriangles": 4942,
-     "bakeMs": 14290
+     "bakeMs": 21418
     },
     {
      "fingerprint": "0fdc6ca9c9952ef021027d0a90a334d5ffb20f68f4cce871a52a2770e5aaf22e",
@@ -4760,7 +4760,7 @@
      "at": 217712,
      "words": 105991,
      "sourceTriangles": 6416,
-     "bakeMs": 18969
+     "bakeMs": 30150
     },
     {
      "fingerprint": "12f65240c246dabc2f2e70ba95bb31a14588addbd742273764cc587f48587a58",
@@ -4768,7 +4768,7 @@
      "at": 323703,
      "words": 52260,
      "sourceTriangles": 1868,
-     "bakeMs": 9101
+     "bakeMs": 12718
     },
     {
      "fingerprint": "132dce0f9771d40ea5c14a172763a0ad6a7784e11c30af574474f019c8aaea1c",
@@ -4776,7 +4776,7 @@
      "at": 375963,
      "words": 99655,
      "sourceTriangles": 7520,
-     "bakeMs": 7125
+     "bakeMs": 9534
     },
     {
      "fingerprint": "1adb51a21a81c915f93ca3450728683dbaff97b346f7a1f6ed6972583563b6e7",
@@ -4784,7 +4784,7 @@
      "at": 475618,
      "words": 40112,
      "sourceTriangles": 2246,
-     "bakeMs": 3385
+     "bakeMs": 3213
     },
     {
      "fingerprint": "1ea40b4fd9bce654ede70ae5f3c091da1f0aac0cdbab2bf5bd842aff48e61e27",
@@ -4792,7 +4792,7 @@
      "at": 515730,
      "words": 110774,
      "sourceTriangles": 6758,
-     "bakeMs": 21887
+     "bakeMs": 38196
     },
     {
      "fingerprint": "24b7ea8ce6520ef8429d8e268a8f78fc0121923115c64a7e7c8e61bd359d646b",
@@ -4800,7 +4800,7 @@
      "at": 626504,
      "words": 87831,
      "sourceTriangles": 5356,
-     "bakeMs": 9713
+     "bakeMs": 21796
     },
     {
      "fingerprint": "3664a1ad941a7bd112783f30b9f56ea850dce992b473fdb79b6f8fa679fbadcd",
@@ -4808,7 +4808,7 @@
      "at": 714335,
      "words": 68534,
      "sourceTriangles": 4002,
-     "bakeMs": 4384
+     "bakeMs": 4377
     },
     {
      "fingerprint": "38aff2f40c6102ceaeb5a2b1a150086aa7a331f4d95c44aa65d0375b272b12e4",
@@ -4816,7 +4816,7 @@
      "at": 782869,
      "words": 194179,
      "sourceTriangles": 14332,
-     "bakeMs": 22541
+     "bakeMs": 24961
     },
     {
      "fingerprint": "413a6fe99afb7f90d7789a92244da682a4ba750ee3cb65f85fb775da6dbd345f",
@@ -4824,7 +4824,7 @@
      "at": 977048,
      "words": 38909,
      "sourceTriangles": 2246,
-     "bakeMs": 1924
+     "bakeMs": 1855
     },
     {
      "fingerprint": "49d9b8c543ab4d98d6313c840c38bdd888aa716015397adec4223c3ad830bef7",
@@ -4832,7 +4832,7 @@
      "at": 1015957,
      "words": 162962,
      "sourceTriangles": 12492,
-     "bakeMs": 4338
+     "bakeMs": 5014
     },
     {
      "fingerprint": "54f4aa20a2c408957418d8c3cf413dd3ff55a4f980ecd865b2f52a3cf4eeafc8",
@@ -4840,7 +4840,7 @@
      "at": 1178919,
      "words": 57653,
      "sourceTriangles": 2778,
-     "bakeMs": 4237
+     "bakeMs": 3829
     },
     {
      "fingerprint": "958f85e61294e29c2eb69734ff3ad639ac061e7c873d313af4dedb26de816969",
@@ -4848,7 +4848,7 @@
      "at": 1236572,
      "words": 39773,
      "sourceTriangles": 2246,
-     "bakeMs": 1723
+     "bakeMs": 2069
     },
     {
      "fingerprint": "a995788acfebbe891ff2a9cb604447e88a02ef576fa5e1ba74112ff484cb7e88",
@@ -4856,7 +4856,7 @@
      "at": 1276345,
      "words": 40234,
      "sourceTriangles": 2246,
-     "bakeMs": 2027
+     "bakeMs": 1793
     },
     {
      "fingerprint": "aeec1a1441effe708757849c1850c9444033ff774172eeaf44139bf99133aaf9",
@@ -4864,7 +4864,7 @@
      "at": 1316579,
      "words": 77774,
      "sourceTriangles": 4746,
-     "bakeMs": 3472
+     "bakeMs": 3274
     },
     {
      "fingerprint": "b6b317a26b652a8dc0f810b24769d67789a143054047d201fec18e6552cd3b6e",
@@ -4872,7 +4872,7 @@
      "at": 1394353,
      "words": 38942,
      "sourceTriangles": 2246,
-     "bakeMs": 1816
+     "bakeMs": 1731
     },
     {
      "fingerprint": "b9d853d377090ea627f6a5299337310df20dac54301f42468ab1d6dc65a85231",
@@ -4880,7 +4880,7 @@
      "at": 1433295,
      "words": 40867,
      "sourceTriangles": 698,
-     "bakeMs": 12099
+     "bakeMs": 9445
     },
     {
      "fingerprint": "c0286fdff39eb5c14106a03fd4f67cd478f53bab780ed66a63cb0a66e0dbba1b",
@@ -4888,7 +4888,7 @@
      "at": 1474162,
      "words": 73044,
      "sourceTriangles": 4090,
-     "bakeMs": 3916
+     "bakeMs": 3953
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -4896,7 +4896,7 @@
      "at": 1547206,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "cc4473db188a5744e79262021cdcdda92150b542a248d200303af3956709c051",
@@ -4904,7 +4904,7 @@
      "at": 1632614,
      "words": 43477,
      "sourceTriangles": 1468,
-     "bakeMs": 6018
+     "bakeMs": 3807
     },
     {
      "fingerprint": "d99e9965fbf07a636588b0b2c32d244c6581e1c4450406db115bdb7e17a12d37",
@@ -4912,7 +4912,7 @@
      "at": 1676091,
      "words": 62131,
      "sourceTriangles": 2992,
-     "bakeMs": 11658
+     "bakeMs": 7368
     },
     {
      "fingerprint": "ea5843a9d1d74772be5ae543da51d8bd167a880cee6e64c3f00902823be843f8",
@@ -4920,7 +4920,7 @@
      "at": 1738222,
      "words": 98825,
      "sourceTriangles": 6190,
-     "bakeMs": 10742
+     "bakeMs": 5990
     },
     {
      "fingerprint": "edaea578bf9c0982a221b93cc5ed43742e4870501574dc26157cb765b647cad7",
@@ -4928,7 +4928,7 @@
      "at": 1837047,
      "words": 167179,
      "sourceTriangles": 12034,
-     "bakeMs": 19518
+     "bakeMs": 10241
     }
    ]
   },
@@ -4948,7 +4948,7 @@
      "at": 0,
      "words": 63354,
      "sourceTriangles": 2992,
-     "bakeMs": 17488
+     "bakeMs": 14466
     },
     {
      "fingerprint": "059eaf089c9d6b466d91c29a889feff8fffe53fc45fc56b5ccbc939c3324d159",
@@ -4956,7 +4956,7 @@
      "at": 63354,
      "words": 40256,
      "sourceTriangles": 2246,
-     "bakeMs": 5411
+     "bakeMs": 3806
     },
     {
      "fingerprint": "1a8d4247097fdafadb8fe5686c08ea05354908908aabda03e6d7494c1cd6f445",
@@ -4964,7 +4964,7 @@
      "at": 103610,
      "words": 163626,
      "sourceTriangles": 12492,
-     "bakeMs": 7136
+     "bakeMs": 8300
     },
     {
      "fingerprint": "2a52671fa10f163c12bc55247dd6de74f5355e6cac4f09cc74666e6a91385f76",
@@ -4972,7 +4972,7 @@
      "at": 267236,
      "words": 89311,
      "sourceTriangles": 5356,
-     "bakeMs": 8969
+     "bakeMs": 10395
     },
     {
      "fingerprint": "3775f517edf4819266668db3dfffd31f2b6c28707493328c9c045ae7a310dd69",
@@ -4980,7 +4980,7 @@
      "at": 356547,
      "words": 97725,
      "sourceTriangles": 7520,
-     "bakeMs": 3707
+     "bakeMs": 3770
     },
     {
      "fingerprint": "558284a6a16037e21261dadcf8151badfc4db95618926bb24bef6f4f45e3384b",
@@ -4988,7 +4988,7 @@
      "at": 454272,
      "words": 100170,
      "sourceTriangles": 6190,
-     "bakeMs": 8150
+     "bakeMs": 6863
     },
     {
      "fingerprint": "62576c697a43c800ba8013f2a4e24b3c0b8d489ed6a0dd819d0fd4f0f8cff2da",
@@ -4996,7 +4996,7 @@
      "at": 554442,
      "words": 51078,
      "sourceTriangles": 1868,
-     "bakeMs": 6008
+     "bakeMs": 5034
     },
     {
      "fingerprint": "71e1c386c0c54621a674cc7448aa19bf867ebfcf6b5c304b75e4b1d0f4df00bb",
@@ -5004,7 +5004,7 @@
      "at": 605520,
      "words": 43822,
      "sourceTriangles": 1468,
-     "bakeMs": 6636
+     "bakeMs": 4359
     },
     {
      "fingerprint": "778da7fdb66f79ff1ac2fdb43666255cf8db74b27d8b86327973dcdb04b494c2",
@@ -5012,7 +5012,7 @@
      "at": 649342,
      "words": 56663,
      "sourceTriangles": 2778,
-     "bakeMs": 5677
+     "bakeMs": 3674
     },
     {
      "fingerprint": "7ca8b196f6b3ed480c64a852539b3bb8a6e98ff23337013f91071338c04bd7bc",
@@ -5020,7 +5020,7 @@
      "at": 706005,
      "words": 66953,
      "sourceTriangles": 4002,
-     "bakeMs": 7530
+     "bakeMs": 5215
     },
     {
      "fingerprint": "889dfb17c8be542502e68f9bb8be60a91fe1536db8f15f4e795f33dbe2f55975",
@@ -5028,7 +5028,7 @@
      "at": 772958,
      "words": 100490,
      "sourceTriangles": 6033,
-     "bakeMs": 11849
+     "bakeMs": 12020
     },
     {
      "fingerprint": "9607b36f32e6d178d12c4b2c508c8c670c9f29dd43fa5de4e83de3c6e72ba93c",
@@ -5036,7 +5036,7 @@
      "at": 873448,
      "words": 76104,
      "sourceTriangles": 4746,
-     "bakeMs": 3462
+     "bakeMs": 3742
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -5044,7 +5044,7 @@
      "at": 949552,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a262434e859025ea7b14c3070ab0a90bf727b7bda5bbe66b0c7feb9393936598",
@@ -5052,7 +5052,7 @@
      "at": 990722,
      "words": 194127,
      "sourceTriangles": 13055,
-     "bakeMs": 38711
+     "bakeMs": 35907
     },
     {
      "fingerprint": "a29702fc759616175abb16b2b9d47d42375c3e0b661b4f600b344bd2dd8328b0",
@@ -5060,7 +5060,7 @@
      "at": 1184849,
      "words": 88367,
      "sourceTriangles": 5356,
-     "bakeMs": 7736
+     "bakeMs": 7089
     },
     {
      "fingerprint": "b24245474b0124e9b9f5c078a3f3d2c87f71d1ab36c870e52f7c79e6f15feb4f",
@@ -5068,7 +5068,7 @@
      "at": 1273216,
      "words": 40459,
      "sourceTriangles": 2246,
-     "bakeMs": 1615
+     "bakeMs": 1491
     },
     {
      "fingerprint": "b3f05ff5bc66f5417bd15d2c814939c343dd44dc44ef956be84c7466a489fe3b",
@@ -5076,7 +5076,7 @@
      "at": 1313675,
      "words": 168394,
      "sourceTriangles": 12034,
-     "bakeMs": 9488
+     "bakeMs": 9286
     },
     {
      "fingerprint": "bd73ba496e8b15ec980d35b9eafb9a155b9f5ae7be277c60d5c0e2da1b526a41",
@@ -5084,7 +5084,7 @@
      "at": 1482069,
      "words": 85130,
      "sourceTriangles": 4942,
-     "bakeMs": 10203
+     "bakeMs": 8957
     },
     {
      "fingerprint": "cb8abe6881b35601fe0378cbeef48b130e999a3f5e8755b7c65c0fc23ecce61f",
@@ -5092,7 +5092,7 @@
      "at": 1567199,
      "words": 40147,
      "sourceTriangles": 2246,
-     "bakeMs": 2888
+     "bakeMs": 1687
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -5100,7 +5100,7 @@
      "at": 1607346,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "ce0e60c2ebfc3729bc481b3d7bbc04555a9f520dcc7099fc8cac5e28ee897e30",
@@ -5108,7 +5108,7 @@
      "at": 1692754,
      "words": 72543,
      "sourceTriangles": 4090,
-     "bakeMs": 6092
+     "bakeMs": 3971
     },
     {
      "fingerprint": "da8f1bb595cdffebca839642ce382bfb9a7a912f1672bc77625ae6ac361a0442",
@@ -5116,7 +5116,7 @@
      "at": 1765297,
      "words": 40299,
      "sourceTriangles": 2246,
-     "bakeMs": 2987
+     "bakeMs": 1684
     },
     {
      "fingerprint": "dac54f65f57c94d781dd017dbb032e0c79efb6a77340567753a4caf64e51ed3b",
@@ -5124,7 +5124,7 @@
      "at": 1805596,
      "words": 106531,
      "sourceTriangles": 6416,
-     "bakeMs": 20931
+     "bakeMs": 13889
     },
     {
      "fingerprint": "e57c6c0dfa21216917bc5b6f15965691491aa83ebb23753ce921c71e2bfc22ba",
@@ -5132,7 +5132,7 @@
      "at": 1912127,
      "words": 109701,
      "sourceTriangles": 6758,
-     "bakeMs": 19818
+     "bakeMs": 11784
     },
     {
      "fingerprint": "e8779d997829c9a06cec74b050225078ae2f77b81fcef12baf5ce5521d54f031",
@@ -5140,7 +5140,7 @@
      "at": 2021828,
      "words": 40286,
      "sourceTriangles": 2246,
-     "bakeMs": 2953
+     "bakeMs": 1808
     },
     {
      "fingerprint": "f43280ca87fdc81d02677df94790689a27e08bbbb4bb7947b336654aafe940c5",
@@ -5148,7 +5148,7 @@
      "at": 2062114,
      "words": 39884,
      "sourceTriangles": 2246,
-     "bakeMs": 2541
+     "bakeMs": 1790
     }
    ]
   },
@@ -5168,7 +5168,7 @@
      "at": 0,
      "words": 40710,
      "sourceTriangles": 2246,
-     "bakeMs": 4099
+     "bakeMs": 3849
     },
     {
      "fingerprint": "11b313530613318a9bd1417f9ec74cae01dc7b47d3a6993cf54f17f0f6704f9e",
@@ -5176,7 +5176,7 @@
      "at": 40710,
      "words": 39874,
      "sourceTriangles": 2246,
-     "bakeMs": 4532
+     "bakeMs": 5312
     },
     {
      "fingerprint": "159b4531484a81a51ab9a94d991e89e174f47ddc8de30057e2e4f775c19df7a4",
@@ -5184,7 +5184,7 @@
      "at": 80584,
      "words": 84579,
      "sourceTriangles": 4926,
-     "bakeMs": 13514
+     "bakeMs": 22998
     },
     {
      "fingerprint": "1672b2f1333099c577d25fa34b097d9075ff69d0138d6e31359d84fe3e35da95",
@@ -5192,7 +5192,7 @@
      "at": 165163,
      "words": 101269,
      "sourceTriangles": 6190,
-     "bakeMs": 11255
+     "bakeMs": 18818
     },
     {
      "fingerprint": "2f1af2aa65fef7bf36ca3e4ff8dcaf93bd47d0111500fee965fbc214d4a7b7ab",
@@ -5200,7 +5200,7 @@
      "at": 266432,
      "words": 99285,
      "sourceTriangles": 7520,
-     "bakeMs": 3931
+     "bakeMs": 5380
     },
     {
      "fingerprint": "30f315aaaa18d8e17e7a12d012e6676a780ce510ecbd44ae1c00d70de15b3bc5",
@@ -5208,7 +5208,7 @@
      "at": 365717,
      "words": 111660,
      "sourceTriangles": 6758,
-     "bakeMs": 13417
+     "bakeMs": 14096
     },
     {
      "fingerprint": "3da8da0eae8980fbafb23487e3ab11f25c084e7a55303ab083fc61eb9b888d24",
@@ -5216,7 +5216,7 @@
      "at": 477377,
      "words": 62549,
      "sourceTriangles": 2992,
-     "bakeMs": 6561
+     "bakeMs": 6783
     },
     {
      "fingerprint": "4832ec6194d66b392bb711ed3fcc8af82891bfbdf4beef0608cedcc215e01ec6",
@@ -5224,7 +5224,7 @@
      "at": 539926,
      "words": 39822,
      "sourceTriangles": 2246,
-     "bakeMs": 2037
+     "bakeMs": 2704
     },
     {
      "fingerprint": "5555130829aaa5802d01ed9a31128634cefd5a12d5ae9120186d780d1719d25b",
@@ -5232,7 +5232,7 @@
      "at": 579748,
      "words": 40286,
      "sourceTriangles": 2246,
-     "bakeMs": 2227
+     "bakeMs": 2559
     },
     {
      "fingerprint": "59eda8cce480195e8a68cd4384ad235974b824e91c6710c1bc2b53b448887ec5",
@@ -5240,7 +5240,7 @@
      "at": 620034,
      "words": 51429,
      "sourceTriangles": 1868,
-     "bakeMs": 6650
+     "bakeMs": 4852
     },
     {
      "fingerprint": "693e31450f70ac7afb34eeb37f42d6e23de9ab36407d704cd189d699932a82b8",
@@ -5248,7 +5248,7 @@
      "at": 671463,
      "words": 182310,
      "sourceTriangles": 12103,
-     "bakeMs": 50370
+     "bakeMs": 38630
     },
     {
      "fingerprint": "74d24b9190cbd31a718c50c9edb6397e863c7da479f13b88e37620a39a8bf565",
@@ -5256,7 +5256,7 @@
      "at": 853773,
      "words": 40170,
      "sourceTriangles": 2246,
-     "bakeMs": 3465
+     "bakeMs": 2517
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -5264,7 +5264,7 @@
      "at": 893943,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "b2244244d2e92a10ca0d7ed10277487722ec3cbe1e4fdda2556fa5976e541026",
@@ -5272,7 +5272,7 @@
      "at": 935113,
      "words": 42739,
      "sourceTriangles": 1468,
-     "bakeMs": 3832
+     "bakeMs": 3917
     },
     {
      "fingerprint": "b8dd7882a9754cbce95f2f758fbe8dd2e6b2a2383898344ac6a33e8cc592f13a",
@@ -5280,7 +5280,7 @@
      "at": 977852,
      "words": 78407,
      "sourceTriangles": 4746,
-     "bakeMs": 3533
+     "bakeMs": 3166
     },
     {
      "fingerprint": "bd201a9e423649b6c9f47138f26bff3abb90957673bea88f525ee299b6900ae8",
@@ -5288,7 +5288,7 @@
      "at": 1056259,
      "words": 72727,
      "sourceTriangles": 4090,
-     "bakeMs": 4849
+     "bakeMs": 4060
     },
     {
      "fingerprint": "c112f3fcc59464d005fdbbd2de8e1d34183520b19c6225060f39d7a14e541a63",
@@ -5296,7 +5296,7 @@
      "at": 1128986,
      "words": 167929,
      "sourceTriangles": 12034,
-     "bakeMs": 11617
+     "bakeMs": 9831
     },
     {
      "fingerprint": "c208c45bdd50340a59034a6abd3f8528bca31e6f7ddb316138f23e688cb64e71",
@@ -5304,7 +5304,7 @@
      "at": 1296915,
      "words": 40562,
      "sourceTriangles": 2246,
-     "bakeMs": 1899
+     "bakeMs": 1846
     },
     {
      "fingerprint": "c85bc792fe54a77fdaa36fcd752585be66ce15830f7d773a81820296e4f32629",
@@ -5312,7 +5312,7 @@
      "at": 1337477,
      "words": 56484,
      "sourceTriangles": 2778,
-     "bakeMs": 5157
+     "bakeMs": 3544
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -5320,7 +5320,7 @@
      "at": 1393961,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "e17de4fbb4a3c213e0652ce944a3691cae91d4bd975849aa6a0e2ef7476dcde6",
@@ -5328,7 +5328,7 @@
      "at": 1479369,
      "words": 107427,
      "sourceTriangles": 6687,
-     "bakeMs": 15092
+     "bakeMs": 9666
     }
    ]
   },
@@ -5348,7 +5348,7 @@
      "at": 0,
      "words": 100775,
      "sourceTriangles": 6190,
-     "bakeMs": 8757
+     "bakeMs": 11552
     },
     {
      "fingerprint": "2310df1368996e9613bda6ab22d2574264e7151b8adf0c97c11fa997ee3df3f5",
@@ -5356,7 +5356,7 @@
      "at": 100775,
      "words": 91172,
      "sourceTriangles": 5356,
-     "bakeMs": 10132
+     "bakeMs": 21067
     },
     {
      "fingerprint": "2b357713f85f557cdc35e9b842a7725a9666295c25022256e83012408f3e116d",
@@ -5364,7 +5364,7 @@
      "at": 191947,
      "words": 105185,
      "sourceTriangles": 6416,
-     "bakeMs": 13276
+     "bakeMs": 14431
     },
     {
      "fingerprint": "3c03969582fa6472810e37bfddc9c9d276cd7ccefc50129109d4e5daf81b2de1",
@@ -5372,7 +5372,7 @@
      "at": 297132,
      "words": 40584,
      "sourceTriangles": 2246,
-     "bakeMs": 2058
+     "bakeMs": 2043
     },
     {
      "fingerprint": "42e008559774f96f6d3270829324575a4027785e362e694b6bd43d760580f368",
@@ -5380,7 +5380,7 @@
      "at": 337716,
      "words": 76919,
      "sourceTriangles": 4746,
-     "bakeMs": 3372
+     "bakeMs": 3596
     },
     {
      "fingerprint": "56de22661b2e68087a353320ff3a9fd15577dffd0ed227671ed68af8c0290670",
@@ -5388,7 +5388,7 @@
      "at": 414635,
      "words": 63498,
      "sourceTriangles": 2992,
-     "bakeMs": 9124
+     "bakeMs": 7720
     },
     {
      "fingerprint": "5ad811cbb674ea48bc0985d705157cdb11c27b8b5cf2129ebcd8eb62d6b0f990",
@@ -5396,7 +5396,7 @@
      "at": 478133,
      "words": 66961,
      "sourceTriangles": 4002,
-     "bakeMs": 6040
+     "bakeMs": 4472
     },
     {
      "fingerprint": "5be6041269828aac5624a7c4ac750c2a6390ee440a822871793c4fc3644c11b3",
@@ -5404,7 +5404,7 @@
      "at": 545094,
      "words": 72852,
      "sourceTriangles": 4090,
-     "bakeMs": 5227
+     "bakeMs": 3597
     },
     {
      "fingerprint": "5e7b6ab12fd9f0438c38c5dd56272def48e4a340ccc94cc2dbee79cf28e578a1",
@@ -5412,7 +5412,7 @@
      "at": 617946,
      "words": 164450,
      "sourceTriangles": 12034,
-     "bakeMs": 12010
+     "bakeMs": 11341
     },
     {
      "fingerprint": "627c065f2e3ab1a29be3686e927ca65ff91ca9653255e6ef6d57f8c1e3ef30e8",
@@ -5420,7 +5420,7 @@
      "at": 782396,
      "words": 40506,
      "sourceTriangles": 2246,
-     "bakeMs": 2154
+     "bakeMs": 2087
     },
     {
      "fingerprint": "63e3a34e3dadefaba6604b22d0067fb64700258569c9f09658a7daf2477dcb05",
@@ -5428,7 +5428,7 @@
      "at": 822902,
      "words": 39152,
      "sourceTriangles": 2246,
-     "bakeMs": 2428
+     "bakeMs": 2066
     },
     {
      "fingerprint": "8bbf2a45bad34cfa53a71ec8a284ee5757fb07bafdb8fe75582acdc614436541",
@@ -5436,7 +5436,7 @@
      "at": 862054,
      "words": 109630,
      "sourceTriangles": 6758,
-     "bakeMs": 14807
+     "bakeMs": 16052
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -5444,7 +5444,7 @@
      "at": 971684,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "a1676d31befc8472c704005d2ac2eb58e981d66980d29f4d524a3f65e577eec5",
@@ -5452,7 +5452,7 @@
      "at": 1012854,
      "words": 52262,
      "sourceTriangles": 1868,
-     "bakeMs": 5444
+     "bakeMs": 5180
     },
     {
      "fingerprint": "aee083b8bf404073ceec69d5c1c7ffa309c83195e15ec103774524eecc9cef75",
@@ -5460,7 +5460,7 @@
      "at": 1065116,
      "words": 87776,
      "sourceTriangles": 4942,
-     "bakeMs": 8868
+     "bakeMs": 8752
     },
     {
      "fingerprint": "bb0419fd7ddec3a2d9981e4c2da98ec0a04dd34233d1baeabecacda6138039f1",
@@ -5468,7 +5468,7 @@
      "at": 1152892,
      "words": 220640,
      "sourceTriangles": 14643,
-     "bakeMs": 57009
+     "bakeMs": 44090
     },
     {
      "fingerprint": "c9243678db5a957c0421f26daf24251bafd23bf7039105c444f266cb6dc1a2a7",
@@ -5476,7 +5476,7 @@
      "at": 1373532,
      "words": 159261,
      "sourceTriangles": 12492,
-     "bakeMs": 6433
+     "bakeMs": 4196
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -5484,7 +5484,7 @@
      "at": 1532793,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "ccda627c48e4709670f344e10006c61782caddae0d8154bb959ea513c9d27111",
@@ -5492,7 +5492,7 @@
      "at": 1618201,
      "words": 42466,
      "sourceTriangles": 1468,
-     "bakeMs": 5653
+     "bakeMs": 3847
     },
     {
      "fingerprint": "cfcb6e3e71021339f8a78d41145f625054e8197bc36401329824f87dd9b730f0",
@@ -5500,7 +5500,7 @@
      "at": 1660667,
      "words": 56675,
      "sourceTriangles": 2778,
-     "bakeMs": 5843
+     "bakeMs": 3471
     },
     {
      "fingerprint": "d70e4890ca3981b05a8e515f2fd05016c0af7d26a7da70c875c8dff2780c2a72",
@@ -5508,7 +5508,7 @@
      "at": 1717342,
      "words": 40203,
      "sourceTriangles": 2246,
-     "bakeMs": 3220
+     "bakeMs": 1967
     },
     {
      "fingerprint": "dc963f801ab8ea5335c46d8a7104c0b8a40a3fd5b0f4d79fa0c581628c6b133c",
@@ -5516,7 +5516,7 @@
      "at": 1757545,
      "words": 89266,
      "sourceTriangles": 5356,
-     "bakeMs": 10498
+     "bakeMs": 6765
     },
     {
      "fingerprint": "ed11f235fb80825e736e1de85f529fc052513d1dafac22e8114e9067e2c8d45e",
@@ -5524,7 +5524,7 @@
      "at": 1846811,
      "words": 99100,
      "sourceTriangles": 7520,
-     "bakeMs": 7246
+     "bakeMs": 3655
     },
     {
      "fingerprint": "ed79c05e655aadc770874ac4409a91290beabfce73f4a30ec533896b431bd055",
@@ -5532,7 +5532,7 @@
      "at": 1945911,
      "words": 39251,
      "sourceTriangles": 2246,
-     "bakeMs": 4807
+     "bakeMs": 2082
     },
     {
      "fingerprint": "fe44472d37e75c1d6d57674598fc51dcd06e456293f257f0f045d59d02019b2f",
@@ -5540,7 +5540,7 @@
      "at": 1985162,
      "words": 40329,
      "sourceTriangles": 2246,
-     "bakeMs": 2894
+     "bakeMs": 2229
     }
    ]
   },
@@ -5560,7 +5560,7 @@
      "at": 0,
      "words": 41015,
      "sourceTriangles": 2246,
-     "bakeMs": 2774
+     "bakeMs": 5046
     },
     {
      "fingerprint": "13448e3671aeff5d497782d01bbdd418e3c4f429ade1671ef119cdc450966173",
@@ -5568,7 +5568,7 @@
      "at": 41015,
      "words": 40607,
      "sourceTriangles": 2246,
-     "bakeMs": 4012
+     "bakeMs": 5579
     },
     {
      "fingerprint": "1f593335b30a38df1105accb7158eb44273bcaaa3161933d3fb97e9ec8a9caa5",
@@ -5576,7 +5576,7 @@
      "at": 81622,
      "words": 98094,
      "sourceTriangles": 7520,
-     "bakeMs": 5420
+     "bakeMs": 6867
     },
     {
      "fingerprint": "2274d17829c5c33cf203394c9a460410d3edab2c57f4e8f6bb5311fb2f7fa065",
@@ -5584,7 +5584,7 @@
      "at": 179716,
      "words": 101352,
      "sourceTriangles": 6190,
-     "bakeMs": 8892
+     "bakeMs": 12761
     },
     {
      "fingerprint": "2cd5194a73143448750d0b5a8e38e97defaa9a2b6f0e7132aa748ede2e3bfba3",
@@ -5592,7 +5592,7 @@
      "at": 281068,
      "words": 43069,
      "sourceTriangles": 1468,
-     "bakeMs": 4688
+     "bakeMs": 5558
     },
     {
      "fingerprint": "31c1738438797c9dec76356d3557381fb9bde427a633d9fb3dd47736d6eed741",
@@ -5600,7 +5600,7 @@
      "at": 324137,
      "words": 39471,
      "sourceTriangles": 2246,
-     "bakeMs": 2083
+     "bakeMs": 2158
     },
     {
      "fingerprint": "33ac9cb5a664c3c4a7965611321208d562e1d50e8096ca6853fa2760048ae789",
@@ -5608,7 +5608,7 @@
      "at": 363608,
      "words": 62667,
      "sourceTriangles": 2992,
-     "bakeMs": 7877
+     "bakeMs": 8710
     },
     {
      "fingerprint": "33e436dc170cb62a35c461855633a7159a3d296c017edc7d0979e366ca61bdbf",
@@ -5616,7 +5616,7 @@
      "at": 426275,
      "words": 90599,
      "sourceTriangles": 5356,
-     "bakeMs": 7608
+     "bakeMs": 8023
     },
     {
      "fingerprint": "3fa5dc845bd1bb9ea39e846453ce1a452f8107fcdaec3e64a35dbc89cf701650",
@@ -5624,7 +5624,7 @@
      "at": 516874,
      "words": 51707,
      "sourceTriangles": 1868,
-     "bakeMs": 5263
+     "bakeMs": 5117
     },
     {
      "fingerprint": "48f6c8048d86d9770ff6640705977d1c56abd87813d186e9c25206e79a8e593c",
@@ -5632,7 +5632,7 @@
      "at": 568581,
      "words": 67503,
      "sourceTriangles": 4002,
-     "bakeMs": 5068
+     "bakeMs": 5400
     },
     {
      "fingerprint": "50816c046e1fa12c35cb5cff108767cf900e1e5339863aef0f294cb7286b1e01",
@@ -5640,7 +5640,7 @@
      "at": 636084,
      "words": 163348,
      "sourceTriangles": 12492,
-     "bakeMs": 5225
+     "bakeMs": 4692
     },
     {
      "fingerprint": "541b6b4b0b4467837d45ffa510e7b2034ad0ee4319da6bfdf314a7d359a8b70c",
@@ -5648,7 +5648,7 @@
      "at": 799432,
      "words": 73645,
      "sourceTriangles": 4090,
-     "bakeMs": 4344
+     "bakeMs": 4175
     },
     {
      "fingerprint": "5b59b3f82cc26c9ff3bfecbc311fc59139edbeea248c84c8e6bdbb26d74daf12",
@@ -5656,7 +5656,7 @@
      "at": 873077,
      "words": 57038,
      "sourceTriangles": 2778,
-     "bakeMs": 5335
+     "bakeMs": 3602
     },
     {
      "fingerprint": "62df7574324ad7823b23a97db262abeaf79a3bb17c45b59ab3dbb6908945f96c",
@@ -5664,7 +5664,7 @@
      "at": 930115,
      "words": 108973,
      "sourceTriangles": 6758,
-     "bakeMs": 12882
+     "bakeMs": 12441
     },
     {
      "fingerprint": "67eaa243092c77f294df688d888a206bd09cf9ebba439e2285e577638ad0c839",
@@ -5672,7 +5672,7 @@
      "at": 1039088,
      "words": 167982,
      "sourceTriangles": 12034,
-     "bakeMs": 13591
+     "bakeMs": 11137
     },
     {
      "fingerprint": "6e2aaefab6c161a5abbdedf153f45cd887d910319e41b4a7ef7e99745510c3d5",
@@ -5680,7 +5680,7 @@
      "at": 1207070,
      "words": 77717,
      "sourceTriangles": 4746,
-     "bakeMs": 5004
+     "bakeMs": 3328
     },
     {
      "fingerprint": "875f4422b8a264418c205c6bddc31e40fce253c19fc6efd49db84ae1b8c04a7a",
@@ -5688,7 +5688,7 @@
      "at": 1284787,
      "words": 40275,
      "sourceTriangles": 2246,
-     "bakeMs": 2772
+     "bakeMs": 2708
     },
     {
      "fingerprint": "881a197033a24be780727a315a4a9cbe69069e7de43882417b695388a17fe770",
@@ -5696,7 +5696,7 @@
      "at": 1325062,
      "words": 158083,
      "sourceTriangles": 12146,
-     "bakeMs": 13905
+     "bakeMs": 14435
     },
     {
      "fingerprint": "8a920861ee91c545a786cad2b695889e2d9f65d0d4679fbe05ee42123c7aac1e",
@@ -5704,7 +5704,7 @@
      "at": 1483145,
      "words": 40859,
      "sourceTriangles": 2246,
-     "bakeMs": 3065
+     "bakeMs": 2653
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -5712,7 +5712,7 @@
      "at": 1524004,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "c71eb574a12e47fb49ebc5558871b2d96de193bebb3140234d7b869a7dcf5bf9",
@@ -5720,7 +5720,7 @@
      "at": 1565174,
      "words": 40935,
      "sourceTriangles": 2246,
-     "bakeMs": 2217
+     "bakeMs": 2018
     },
     {
      "fingerprint": "c9dffc8e67a9bed0c5bb811f755deb5be86b326200b6a6a0f8cf872e25813d40",
@@ -5728,7 +5728,7 @@
      "at": 1606109,
      "words": 102747,
      "sourceTriangles": 6416,
-     "bakeMs": 15328
+     "bakeMs": 11074
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -5736,7 +5736,7 @@
      "at": 1708856,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "ed167ea894464fb976a66bf4aef76cb07d5e40d35bb86be1a4f62d5719dd0617",
@@ -5744,7 +5744,7 @@
      "at": 1794264,
      "words": 84592,
      "sourceTriangles": 4942,
-     "bakeMs": 16008
+     "bakeMs": 8417
     },
     {
      "fingerprint": "f90ce5a776394a142b4a4164e815a14636c1f9b63f59851f3ccefe7a6e8dd2fd",
@@ -5752,7 +5752,7 @@
      "at": 1878856,
      "words": 86723,
      "sourceTriangles": 5356,
-     "bakeMs": 10002
+     "bakeMs": 7604
     }
    ]
   },
@@ -5772,7 +5772,7 @@
      "at": 0,
      "words": 51270,
      "sourceTriangles": 1868,
-     "bakeMs": 7903
+     "bakeMs": 5835
     },
     {
      "fingerprint": "87176f253b3ca12cc7493b88ba934a9e65680ae25dfd6a22377a2762df3aef91",
@@ -5780,7 +5780,7 @@
      "at": 51270,
      "words": 57976,
      "sourceTriangles": 2778,
-     "bakeMs": 6356
+     "bakeMs": 5695
     },
     {
      "fingerprint": "95057352582e4e96ac7d3059b21970b4de9452c864ba45c60852c28fad9d41b5",
@@ -5788,7 +5788,7 @@
      "at": 109246,
      "words": 43798,
      "sourceTriangles": 1468,
-     "bakeMs": 4579
+     "bakeMs": 4528
     },
     {
      "fingerprint": "95aaf9741d55798a9b45226be51d20576df0a37a2677c022bfa973ed0d820547",
@@ -5796,7 +5796,7 @@
      "at": 153044,
      "words": 97520,
      "sourceTriangles": 6472,
-     "bakeMs": 5757
+     "bakeMs": 6657
     },
     {
      "fingerprint": "985c1830e440b9149910fdcfa65042df4ccc46134c1a19db3ed42323428f7ee2",
@@ -5804,7 +5804,7 @@
      "at": 250564,
      "words": 41170,
      "sourceTriangles": 698,
-     "bakeMs": 10128
+     "bakeMs": 11003
     },
     {
      "fingerprint": "9ef0a1252485ff7fb1bf821d3c1787d8454903b0230389512c1adad5f4e15389",
@@ -5812,7 +5812,7 @@
      "at": 291734,
      "words": 42575,
      "sourceTriangles": 1468,
-     "bakeMs": 3992
+     "bakeMs": 4068
     },
     {
      "fingerprint": "a3d0e1eb9ddfea31318a15dcea0d2f23b985a827dec014cdf210d7cfff350993",
@@ -5820,7 +5820,7 @@
      "at": 334309,
      "words": 104539,
      "sourceTriangles": 6416,
-     "bakeMs": 12130
+     "bakeMs": 10930
     },
     {
      "fingerprint": "c77c023d3d8e4ad3b24453ba70c5573144d8da4a78990cbec56f5f0789c9f919",
@@ -5828,7 +5828,7 @@
      "at": 438848,
      "words": 88198,
      "sourceTriangles": 4942,
-     "bakeMs": 12163
+     "bakeMs": 8067
     },
     {
      "fingerprint": "cc29b2ffefdb575215ef4a6e9a00c2f16b010d094adab0ae2927d73968e7cfcc",
@@ -5836,7 +5836,7 @@
      "at": 527046,
      "words": 85408,
      "sourceTriangles": 5356,
-     "bakeMs": 8982
+     "bakeMs": 5747
     },
     {
      "fingerprint": "e9ca0637fdef4cc3f81431c819f4e32eeaa94eeb98fbbe0328a9c3f09b39eae1",
@@ -5844,7 +5844,7 @@
      "at": 612454,
      "words": 67135,
      "sourceTriangles": 4002,
-     "bakeMs": 7364
+     "bakeMs": 4499
     }
    ]
   },
@@ -5864,7 +5864,7 @@
      "at": 0,
      "words": 25740,
      "sourceTriangles": 680,
-     "bakeMs": 3929
+     "bakeMs": 4319
     },
     {
      "fingerprint": "439de8a8fb3848aefd120fd3e063295627d3f30a9db46f22cda06394e9870676",
@@ -5872,7 +5872,7 @@
      "at": 25740,
      "words": 38070,
      "sourceTriangles": 1232,
-     "bakeMs": 5005
+     "bakeMs": 7371
     },
     {
      "fingerprint": "5986e420b04740b4326d4e3f4c09e2b6ba900e8dc0ba9669fdf99685430ce74f",
@@ -5880,7 +5880,7 @@
      "at": 63810,
      "words": 36360,
      "sourceTriangles": 376,
-     "bakeMs": 13058
+     "bakeMs": 10406
     },
     {
      "fingerprint": "7364d7a8e1a857ed23e77926fc93639aea66028321124742ebc21307b5957795",
@@ -5888,7 +5888,7 @@
      "at": 100170,
      "words": 12026,
      "sourceTriangles": 501,
-     "bakeMs": 1515
+     "bakeMs": 928
     },
     {
      "fingerprint": "8ac9c49f3e77cfaa4d158ab39db893958623d72c533b437087bc0aa084ca1903",
@@ -5896,7 +5896,7 @@
      "at": 112196,
      "words": 40744,
      "sourceTriangles": 1284,
-     "bakeMs": 4511
+     "bakeMs": 4281
     },
     {
      "fingerprint": "9b9684886433b7e8f6ad7f33c12cd610f0acf164bc4375b1f4ee0edb5b62179e",
@@ -5904,7 +5904,7 @@
      "at": 152940,
      "words": 36360,
      "sourceTriangles": 376,
-     "bakeMs": 9925
+     "bakeMs": 9528
     },
     {
      "fingerprint": "9f1a0a12fe5d03ddae032e0b6b0e9463ecff56d353bf99da29b66284875d017f",
@@ -5912,7 +5912,7 @@
      "at": 189300,
      "words": 36638,
      "sourceTriangles": 376,
-     "bakeMs": 11779
+     "bakeMs": 10942
     },
     {
      "fingerprint": "a5d51a54719d58dddec2842d9eee7947e2f6f285cdc8cc79d262487064fd36fd",
@@ -5920,7 +5920,7 @@
      "at": 225938,
      "words": 9636,
      "sourceTriangles": 376,
-     "bakeMs": 3184
+     "bakeMs": 2802
     },
     {
      "fingerprint": "ab5ea76335a6d178fca569d24a68e6dd2f8b63703d8fac34187de5720fea2522",
@@ -5928,7 +5928,7 @@
      "at": 235574,
      "words": 49088,
      "sourceTriangles": 1632,
-     "bakeMs": 6149
+     "bakeMs": 5825
     }
    ]
   },
@@ -5948,7 +5948,7 @@
      "at": 0,
      "words": 36365,
      "sourceTriangles": 376,
-     "bakeMs": 18566
+     "bakeMs": 27140
     },
     {
      "fingerprint": "1eb5447f7e1f5c62036f97248a4689f16b864cad3f91b6b10edb50c7fc88d358",
@@ -5956,7 +5956,7 @@
      "at": 36365,
      "words": 41897,
      "sourceTriangles": 1284,
-     "bakeMs": 4473
+     "bakeMs": 5936
     },
     {
      "fingerprint": "3e3cd4dea22d01721d597dccbd95f4190cfa952aa89057591b7673c0402c99c9",
@@ -5964,7 +5964,7 @@
      "at": 78262,
      "words": 22301,
      "sourceTriangles": 2110,
-     "bakeMs": 841
+     "bakeMs": 888
     },
     {
      "fingerprint": "46cb8555a7b64903039effe3fbad77af75db3080c244be206da59af1d27aeb23",
@@ -5972,7 +5972,7 @@
      "at": 100563,
      "words": 11669,
      "sourceTriangles": 501,
-     "bakeMs": 695
+     "bakeMs": 853
     },
     {
      "fingerprint": "514321da99bcaa83e69ac34791b4606897246c8c63c252f38c9d9a08d73eda29",
@@ -5980,7 +5980,7 @@
      "at": 112232,
      "words": 16068,
      "sourceTriangles": 2110,
-     "bakeMs": 916
+     "bakeMs": 962
     },
     {
      "fingerprint": "99093374673ccc2917fd9aa52099bd148a07ea768b543b0bbed04fb4c21c3955",
@@ -5988,7 +5988,7 @@
      "at": 128300,
      "words": 17358,
      "sourceTriangles": 2110,
-     "bakeMs": 788
+     "bakeMs": 990
     },
     {
      "fingerprint": "d97227e0adc022a4a8bd353cf30b35a1422adf3071367b4daf7969bc6393a716",
@@ -5996,7 +5996,7 @@
      "at": 145658,
      "words": 21323,
      "sourceTriangles": 2110,
-     "bakeMs": 1940
+     "bakeMs": 1087
     },
     {
      "fingerprint": "e6c420b98d9b33a43bf686ca542b6556fd7d41380201c43bb86426941ba887fa",
@@ -6004,7 +6004,7 @@
      "at": 166981,
      "words": 36638,
      "sourceTriangles": 376,
-     "bakeMs": 19163
+     "bakeMs": 11318
     }
    ]
   },
@@ -6024,7 +6024,7 @@
      "at": 0,
      "words": 9662,
      "sourceTriangles": 376,
-     "bakeMs": 3419
+     "bakeMs": 4219
     },
     {
      "fingerprint": "5b8bf715c3379ba1203ac0ab8922fbe12fc2620eb3960ffc7ec4a75706b02618",
@@ -6032,7 +6032,7 @@
      "at": 9662,
      "words": 38915,
      "sourceTriangles": 1232,
-     "bakeMs": 6929
+     "bakeMs": 4934
     },
     {
      "fingerprint": "782b55c20371614ed9c22cc74ece9531c489674f63b6c5bd27a07faa02dd2f74",
@@ -6040,7 +6040,7 @@
      "at": 48577,
      "words": 48836,
      "sourceTriangles": 1632,
-     "bakeMs": 9060
+     "bakeMs": 5976
     },
     {
      "fingerprint": "87048ed07a18e528da9fa797d81c560e8c21b61b9c044b00df7beef30b24e2ba",
@@ -6048,7 +6048,7 @@
      "at": 97413,
      "words": 13556,
      "sourceTriangles": 501,
-     "bakeMs": 1072
+     "bakeMs": 1122
     },
     {
      "fingerprint": "9903bd4db5a00bf790ab2775bac91214a1d8fa15f8f453d3c895d78ee4b1d619",
@@ -6056,7 +6056,7 @@
      "at": 110969,
      "words": 36632,
      "sourceTriangles": 376,
-     "bakeMs": 10578
+     "bakeMs": 10846
     },
     {
      "fingerprint": "a4ea34771969518d5cc48d9087a7009a551bf04fbbe2cfc6f8df69147574127a",
@@ -6064,7 +6064,7 @@
      "at": 147601,
      "words": 46967,
      "sourceTriangles": 1632,
-     "bakeMs": 6325
+     "bakeMs": 5818
     },
     {
      "fingerprint": "cf292a106b54c5fb6eee4262c6d177a97df8f5351c55af94a7ca7ec8d27a73b6",
@@ -6072,7 +6072,7 @@
      "at": 194568,
      "words": 47915,
      "sourceTriangles": 1632,
-     "bakeMs": 8769
+     "bakeMs": 5766
     },
     {
      "fingerprint": "ff5080fd1e00c2bdfbe543631b56962dbd7ad66aa7dfb45c50b91b852b70fb2b",
@@ -6080,7 +6080,7 @@
      "at": 242483,
      "words": 37102,
      "sourceTriangles": 376,
-     "bakeMs": 13353
+     "bakeMs": 11078
     }
    ]
   },
@@ -6100,7 +6100,7 @@
      "at": 0,
      "words": 27089,
      "sourceTriangles": 418,
-     "bakeMs": 7057
+     "bakeMs": 11080
     },
     {
      "fingerprint": "11aaf240212557cd009b3a4d54a86883dc1691fa3ef97ae2bd25542621b48c72",
@@ -6108,7 +6108,7 @@
      "at": 27089,
      "words": 29226,
      "sourceTriangles": 1776,
-     "bakeMs": 2866
+     "bakeMs": 3296
     },
     {
      "fingerprint": "1b09540bb6c9ca87aea7a2518bfacce612e973c35e40413249544e837b08f315",
@@ -6116,7 +6116,7 @@
      "at": 56315,
      "words": 27174,
      "sourceTriangles": 418,
-     "bakeMs": 7917
+     "bakeMs": 9708
     },
     {
      "fingerprint": "3e78e29ce00dfa86a90d01335e47511cd6594274f4bee0779851f717cc19a615",
@@ -6124,7 +6124,7 @@
      "at": 83489,
      "words": 41799,
      "sourceTriangles": 1284,
-     "bakeMs": 3077
+     "bakeMs": 3001
     },
     {
      "fingerprint": "44da68808a1ea05e62d8d4033dc83affa88956bbc3fb387b0d7cd84953c56a9b",
@@ -6132,7 +6132,7 @@
      "at": 125288,
      "words": 13148,
      "sourceTriangles": 501,
-     "bakeMs": 972
+     "bakeMs": 1129
     },
     {
      "fingerprint": "5e748015d370a17eb42704d69d1fd227c1fe1c87231b21138f3f6badddbeaf0d",
@@ -6140,7 +6140,7 @@
      "at": 138436,
      "words": 26566,
      "sourceTriangles": 1776,
-     "bakeMs": 1887
+     "bakeMs": 1079
     },
     {
      "fingerprint": "ab10d6aa5ad848d7e7bcfe7af78aa7eb8a371224600e6bf0206310f4997fdd39",
@@ -6148,7 +6148,7 @@
      "at": 165002,
      "words": 30091,
      "sourceTriangles": 1776,
-     "bakeMs": 1682
+     "bakeMs": 1334
     },
     {
      "fingerprint": "b1eae26465e109785d2773efc22343d7f52657ea9e320f65431fa76f9c4cb714",
@@ -6156,7 +6156,7 @@
      "at": 195093,
      "words": 27185,
      "sourceTriangles": 418,
-     "bakeMs": 4889
+     "bakeMs": 4832
     },
     {
      "fingerprint": "e31ac82088830b15b8b75dc5fdc5697acf8905b78303dcb8dad4e06ec4a0e126",
@@ -6164,7 +6164,7 @@
      "at": 222278,
      "words": 27062,
      "sourceTriangles": 418,
-     "bakeMs": 6004
+     "bakeMs": 4300
     }
    ]
   },
@@ -6184,7 +6184,7 @@
      "at": 0,
      "words": 27174,
      "sourceTriangles": 418,
-     "bakeMs": 8152
+     "bakeMs": 9968
     },
     {
      "fingerprint": "203db7464c4dcc41b68f7de3d835e07a171ff327d683f8281ee6357722aa5cd4",
@@ -6192,7 +6192,7 @@
      "at": 27174,
      "words": 12519,
      "sourceTriangles": 501,
-     "bakeMs": 1263
+     "bakeMs": 1320
     },
     {
      "fingerprint": "29482f74622060d1de372527e655615bde319b23a26347374ef1a508bfa926dd",
@@ -6200,7 +6200,7 @@
      "at": 39693,
      "words": 29226,
      "sourceTriangles": 1776,
-     "bakeMs": 2119
+     "bakeMs": 3458
     },
     {
      "fingerprint": "6443d15d6af607a529a66fcaef0752c0cd3c415653a2b7550411507b6b4df406",
@@ -6208,7 +6208,7 @@
      "at": 68919,
      "words": 27170,
      "sourceTriangles": 418,
-     "bakeMs": 5643
+     "bakeMs": 4701
     },
     {
      "fingerprint": "6a31c4697452238c625eff0dad78b17806ee8a21fccd2062ba7acbbe69d6a94b",
@@ -6216,7 +6216,7 @@
      "at": 96089,
      "words": 27153,
      "sourceTriangles": 418,
-     "bakeMs": 6530
+     "bakeMs": 5223
     },
     {
      "fingerprint": "6daeb135beda16e33a8316b4caaa290247d012b035cd5478afd0fc06651bdbdf",
@@ -6224,7 +6224,7 @@
      "at": 123242,
      "words": 27191,
      "sourceTriangles": 418,
-     "bakeMs": 7218
+     "bakeMs": 4831
     },
     {
      "fingerprint": "95776620f3e565d0efd253a999d13db70105ea450da4a1f2da7ee7acd5e3bfc4",
@@ -6232,7 +6232,7 @@
      "at": 150433,
      "words": 41814,
      "sourceTriangles": 1284,
-     "bakeMs": 3289
+     "bakeMs": 3388
     },
     {
      "fingerprint": "95a0e393f1552ea8fd0c6bb8d23e2222b6facbb6c473a3f45e78f022c459bd9f",
@@ -6240,7 +6240,7 @@
      "at": 192247,
      "words": 27319,
      "sourceTriangles": 1776,
-     "bakeMs": 1325
+     "bakeMs": 1390
     },
     {
      "fingerprint": "c60971c238ebffaa193928c2b32a361d929288c3be41e8be6d2993dbef3ed7b8",
@@ -6248,7 +6248,7 @@
      "at": 219566,
      "words": 27083,
      "sourceTriangles": 418,
-     "bakeMs": 4472
+     "bakeMs": 4483
     },
     {
      "fingerprint": "d5ff8abd1c56611474030c35e668aeef66d6d8141bbce812d67453741850046a",
@@ -6256,7 +6256,7 @@
      "at": 246649,
      "words": 27096,
      "sourceTriangles": 418,
-     "bakeMs": 7176
+     "bakeMs": 4152
     }
    ]
   },
@@ -6276,7 +6276,7 @@
      "at": 0,
      "words": 27174,
      "sourceTriangles": 418,
-     "bakeMs": 8151
+     "bakeMs": 11135
     },
     {
      "fingerprint": "226b25dc7162eae53d88d6d3c2f52300936874b1e69dc08643f7292397f186e1",
@@ -6284,7 +6284,7 @@
      "at": 27174,
      "words": 42337,
      "sourceTriangles": 1284,
-     "bakeMs": 4940
+     "bakeMs": 6678
     },
     {
      "fingerprint": "4d5fbe16c629dc24e072d28dc5031c446eea5d5a78172cb198f2b5be9620481d",
@@ -6292,7 +6292,7 @@
      "at": 69511,
      "words": 27096,
      "sourceTriangles": 418,
-     "bakeMs": 5388
+     "bakeMs": 5133
     },
     {
      "fingerprint": "4dd131994e4b3de29e05a117a934d1aeac01d5398e83855363111bb727723fc9",
@@ -6300,7 +6300,7 @@
      "at": 96607,
      "words": 28645,
      "sourceTriangles": 1776,
-     "bakeMs": 2036
+     "bakeMs": 1499
     },
     {
      "fingerprint": "5d9ad59c444c7ba0a4845777897c81f0caf31e0252b2feae61ef95e9bb0ef3a1",
@@ -6308,7 +6308,7 @@
      "at": 125252,
      "words": 27080,
      "sourceTriangles": 418,
-     "bakeMs": 6098
+     "bakeMs": 4380
     },
     {
      "fingerprint": "605150e5c72b44401eee328d4092f540c829d442dc152e61c145e631c0d06421",
@@ -6316,7 +6316,7 @@
      "at": 152332,
      "words": 27062,
      "sourceTriangles": 418,
-     "bakeMs": 4646
+     "bakeMs": 4419
     },
     {
      "fingerprint": "83ae4db8b85e39bfeb639e129d9164034ca725a47ef37a5ff32e8f13a491fa6c",
@@ -6324,7 +6324,7 @@
      "at": 179394,
      "words": 28746,
      "sourceTriangles": 1776,
-     "bakeMs": 2224
+     "bakeMs": 2018
     },
     {
      "fingerprint": "b308bb542f9d061d66a5e9c3eb1479a246d5878815d6aef66f40503fafe13f7c",
@@ -6332,7 +6332,7 @@
      "at": 208140,
      "words": 27165,
      "sourceTriangles": 418,
-     "bakeMs": 4744
+     "bakeMs": 4686
     },
     {
      "fingerprint": "ce76a522b4f94392cfe0659d5e698953787594e46391d7f9d9abd299f2f6acbe",
@@ -6340,7 +6340,7 @@
      "at": 235305,
      "words": 13913,
      "sourceTriangles": 501,
-     "bakeMs": 1593
+     "bakeMs": 963
     },
     {
      "fingerprint": "f49ac7a2b2157da60cd7d3cd6521eb8d96681d23620dc719eaecc090522b1765",
@@ -6348,7 +6348,7 @@
      "at": 249218,
      "words": 27159,
      "sourceTriangles": 418,
-     "bakeMs": 9719
+     "bakeMs": 5097
     }
    ]
   },
@@ -6368,7 +6368,7 @@
      "at": 0,
      "words": 13726,
      "sourceTriangles": 501,
-     "bakeMs": 1117
+     "bakeMs": 1681
     },
     {
      "fingerprint": "416480e2318ae8e3d877c7e1177a496ad79ab4fe173254a7ca43ec940226736c",
@@ -6376,7 +6376,7 @@
      "at": 13726,
      "words": 27089,
      "sourceTriangles": 418,
-     "bakeMs": 4732
+     "bakeMs": 4439
     },
     {
      "fingerprint": "4d0fc4114a20c8f6ad7cdefef2f4d7e3d6a18327f348cc64aa39566fe8d1cc49",
@@ -6384,7 +6384,7 @@
      "at": 40815,
      "words": 29882,
      "sourceTriangles": 1776,
-     "bakeMs": 2121
+     "bakeMs": 1798
     },
     {
      "fingerprint": "5c1347b2b1b6c1595bfcc5f7a67e0090f96233d7bc6573adeb0ca435afb03743",
@@ -6392,7 +6392,7 @@
      "at": 70697,
      "words": 41756,
      "sourceTriangles": 1284,
-     "bakeMs": 4310
+     "bakeMs": 3050
     },
     {
      "fingerprint": "799cf7a834561106b7dcdb29b281afa32968e925a5f093b1eccd07498ede2187",
@@ -6400,7 +6400,7 @@
      "at": 112453,
      "words": 27114,
      "sourceTriangles": 418,
-     "bakeMs": 7091
+     "bakeMs": 4858
     },
     {
      "fingerprint": "8a5818c8c98923f429dbb8bf1b1791a0199098d3d10b6ff63cef552b5528fd2d",
@@ -6408,7 +6408,7 @@
      "at": 139567,
      "words": 28755,
      "sourceTriangles": 1776,
-     "bakeMs": 2572
+     "bakeMs": 2659
     },
     {
      "fingerprint": "8f9d9607a96cd03d49dabac92d8e143856e35ceab30108b44cac1195c7f36f05",
@@ -6416,7 +6416,7 @@
      "at": 168322,
      "words": 27174,
      "sourceTriangles": 418,
-     "bakeMs": 4943
+     "bakeMs": 6484
     },
     {
      "fingerprint": "94a83821119189475fb3fd079c50dbae4527210e29dde308dbd57973f4e80c70",
@@ -6424,7 +6424,7 @@
      "at": 195496,
      "words": 27123,
      "sourceTriangles": 418,
-     "bakeMs": 4723
+     "bakeMs": 4615
     },
     {
      "fingerprint": "9e5069ccae513259145b5be3804a6018d8bed74fd60307223c3b849c6b2b0e49",
@@ -6432,7 +6432,7 @@
      "at": 222619,
      "words": 27176,
      "sourceTriangles": 418,
-     "bakeMs": 4991
+     "bakeMs": 4986
     },
     {
      "fingerprint": "e2e0d8887fd85757b139addf7e18007c74a34c1c629ad0cace1ea4fe9245efed",
@@ -6440,7 +6440,7 @@
      "at": 249795,
      "words": 27123,
      "sourceTriangles": 418,
-     "bakeMs": 6185
+     "bakeMs": 4511
     }
    ]
   },
@@ -6460,7 +6460,7 @@
      "at": 0,
      "words": 36632,
      "sourceTriangles": 376,
-     "bakeMs": 18957
+     "bakeMs": 23523
     },
     {
      "fingerprint": "310de2a9fa9aea491a9ca71552907925ea1d8a4bacce1082c9a5d4ec1611940e",
@@ -6468,7 +6468,7 @@
      "at": 36632,
      "words": 36355,
      "sourceTriangles": 376,
-     "bakeMs": 12848
+     "bakeMs": 14325
     },
     {
      "fingerprint": "37984354b79e4a72f8ec4df62d43e6c3430fe390315c63c5ba34ceaf1dcc48b0",
@@ -6476,7 +6476,7 @@
      "at": 72987,
      "words": 36644,
      "sourceTriangles": 376,
-     "bakeMs": 11129
+     "bakeMs": 10493
     },
     {
      "fingerprint": "8ca11471855c34ce4cd0605ecd046f2a8acffea01bcb39dcfd12be6daff743a9",
@@ -6484,7 +6484,7 @@
      "at": 109631,
      "words": 36341,
      "sourceTriangles": 376,
-     "bakeMs": 11642
+     "bakeMs": 12598
     },
     {
      "fingerprint": "9676e2c2b325c6f2658dfc504871480ade1cfadd76100101e4674d0e4f3e685c",
@@ -6492,7 +6492,7 @@
      "at": 145972,
      "words": 37290,
      "sourceTriangles": 1480,
-     "bakeMs": 4900
+     "bakeMs": 5690
     },
     {
      "fingerprint": "ca201f00a9b105aed2126bcd22b294359f8f070044715bd032a9fc37a9b1aac6",
@@ -6500,7 +6500,7 @@
      "at": 183262,
      "words": 9653,
      "sourceTriangles": 376,
-     "bakeMs": 3591
+     "bakeMs": 2691
     },
     {
      "fingerprint": "f4cec6dd1abc33620a36ddb03ebb07ad029a8fb4bb63a05022f3569983b22d76",
@@ -6508,7 +6508,7 @@
      "at": 192915,
      "words": 13250,
      "sourceTriangles": 501,
-     "bakeMs": 2195
+     "bakeMs": 973
     },
     {
      "fingerprint": "fd6f2255157df10e2810f1d9aaf670d08d25a74d8081e09643836fb014e35c29",
@@ -6516,7 +6516,7 @@
      "at": 206165,
      "words": 37324,
      "sourceTriangles": 1480,
-     "bakeMs": 5877
+     "bakeMs": 4757
     }
    ]
   },
@@ -6536,7 +6536,7 @@
      "at": 0,
      "words": 36644,
      "sourceTriangles": 376,
-     "bakeMs": 21385
+     "bakeMs": 21600
     },
     {
      "fingerprint": "15b1e51056b9366c0be0027bbe75958d33249c35c0b2708fb780a947cec5a669",
@@ -6544,7 +6544,7 @@
      "at": 36644,
      "words": 9625,
      "sourceTriangles": 376,
-     "bakeMs": 4269
+     "bakeMs": 6719
     },
     {
      "fingerprint": "4017a2f40d0b379663bed486367520fc9335659e8586556cb4edbf60c9e7cade",
@@ -6552,7 +6552,7 @@
      "at": 46269,
      "words": 12264,
      "sourceTriangles": 501,
-     "bakeMs": 636
+     "bakeMs": 705
     },
     {
      "fingerprint": "4d8f3cf61197764d7cb067f0b86bb557e7a4a426b294c0ed40992994de3d5636",
@@ -6560,7 +6560,7 @@
      "at": 58533,
      "words": 37131,
      "sourceTriangles": 376,
-     "bakeMs": 12470
+     "bakeMs": 11471
     },
     {
      "fingerprint": "656ae04f32e1ea62eeb55b4d93051c889b4654cdc33142153d977cd135dac5b8",
@@ -6568,7 +6568,7 @@
      "at": 95664,
      "words": 9579,
      "sourceTriangles": 376,
-     "bakeMs": 2650
+     "bakeMs": 2686
     },
     {
      "fingerprint": "864afaf21327dd437f4ef9f7b602193006aa15cadf035263412c8b31e4f05f36",
@@ -6576,7 +6576,7 @@
      "at": 105243,
      "words": 36638,
      "sourceTriangles": 376,
-     "bakeMs": 16605
+     "bakeMs": 16266
     },
     {
      "fingerprint": "922db1057c74522530ea7d8afdafed2ccf9cbac0ee6f92150752ce1b645d85d0",
@@ -6584,7 +6584,7 @@
      "at": 141881,
      "words": 37038,
      "sourceTriangles": 1480,
-     "bakeMs": 5655
+     "bakeMs": 5382
     },
     {
      "fingerprint": "a71b366f9a275080afb9da0fb441884f6eba15560d4ba093eb046603fe3c809f",
@@ -6592,7 +6592,7 @@
      "at": 178919,
      "words": 37035,
      "sourceTriangles": 1480,
-     "bakeMs": 4918
+     "bakeMs": 4803
     }
    ]
   },
@@ -6612,7 +6612,7 @@
      "at": 0,
      "words": 27179,
      "sourceTriangles": 418,
-     "bakeMs": 9311
+     "bakeMs": 9126
     },
     {
      "fingerprint": "268dbf213962206a13d0409a6cc8aa54545d457524565781f814e884be603966",
@@ -6620,7 +6620,7 @@
      "at": 27179,
      "words": 27062,
      "sourceTriangles": 418,
-     "bakeMs": 5505
+     "bakeMs": 17080
     },
     {
      "fingerprint": "6513faf8663b10442d5cc7209e77077cde70b37a77584b7256f863265d8dd00d",
@@ -6628,7 +6628,7 @@
      "at": 54241,
      "words": 27180,
      "sourceTriangles": 418,
-     "bakeMs": 5282
+     "bakeMs": 5006
     },
     {
      "fingerprint": "68eead1095bb1151a468c5834c8e0d243951ba28a5ff3a00ad2178145baa5c52",
@@ -6636,7 +6636,7 @@
      "at": 81421,
      "words": 12451,
      "sourceTriangles": 501,
-     "bakeMs": 753
+     "bakeMs": 779
     },
     {
      "fingerprint": "7bb7713174ccdd54ab6d069319936458ec2a4806e217efc36f102c9248879881",
@@ -6644,7 +6644,7 @@
      "at": 93872,
      "words": 27191,
      "sourceTriangles": 418,
-     "bakeMs": 9367
+     "bakeMs": 5404
     },
     {
      "fingerprint": "923a55d98b79b6487c2012140e20d646934355f2cdc3b21929ad3dda40778f68",
@@ -6652,7 +6652,7 @@
      "at": 121063,
      "words": 27114,
      "sourceTriangles": 418,
-     "bakeMs": 5230
+     "bakeMs": 4645
     },
     {
      "fingerprint": "ac741f648bfe31f7f11f97b161027f12a21eaa50c37a2f663c8eea9fd1f383d7",
@@ -6660,7 +6660,7 @@
      "at": 148177,
      "words": 28726,
      "sourceTriangles": 1776,
-     "bakeMs": 1884
+     "bakeMs": 1486
     },
     {
      "fingerprint": "c805979ef83976cf96f8e6ab9992150ba0f858013348ac29ec386b1cc8ab3385",
@@ -6668,7 +6668,7 @@
      "at": 176903,
      "words": 42290,
      "sourceTriangles": 1284,
-     "bakeMs": 4157
+     "bakeMs": 3041
     },
     {
      "fingerprint": "d0f8d88c56271c619279dac1d011351f056fb63a031cd5ce46d737531cb53a32",
@@ -6676,7 +6676,7 @@
      "at": 219193,
      "words": 27191,
      "sourceTriangles": 418,
-     "bakeMs": 7821
+     "bakeMs": 4868
     },
     {
      "fingerprint": "d1c7bfe1837f6d26eec52350f8b76165f5c2030cb83fd79c075ed80fe31a55a1",
@@ -6684,7 +6684,7 @@
      "at": 246384,
      "words": 28094,
      "sourceTriangles": 1776,
-     "bakeMs": 1964
+     "bakeMs": 1334
     }
    ]
   },
@@ -6704,7 +6704,7 @@
      "at": 0,
      "words": 48447,
      "sourceTriangles": 1632,
-     "bakeMs": 8818
+     "bakeMs": 12035
     },
     {
      "fingerprint": "49f0b23a18cba2ccbb512310e580c93e20585fcb68bdd05719d2bdf53e1705a0",
@@ -6712,7 +6712,7 @@
      "at": 48447,
      "words": 38641,
      "sourceTriangles": 1232,
-     "bakeMs": 5757
+     "bakeMs": 6330
     },
     {
      "fingerprint": "4c10a7aefc142f31a023ccddbde44b5440c1892a176fcb96f28cc96f56c20791",
@@ -6720,7 +6720,7 @@
      "at": 87088,
      "words": 47823,
      "sourceTriangles": 1632,
-     "bakeMs": 7729
+     "bakeMs": 6422
     },
     {
      "fingerprint": "4d866a3ce4cc9c54c5485e08d76df5800b063233543062513f424bf52fe39bcb",
@@ -6728,7 +6728,7 @@
      "at": 134911,
      "words": 48448,
      "sourceTriangles": 1632,
-     "bakeMs": 7799
+     "bakeMs": 6422
     },
     {
      "fingerprint": "a0cd578ce54b087ee33b5501da08972685e8e77fbcb17fc459a319644887e89e",
@@ -6736,7 +6736,7 @@
      "at": 183359,
      "words": 9664,
      "sourceTriangles": 376,
-     "bakeMs": 3033
+     "bakeMs": 2432
     },
     {
      "fingerprint": "b313c97698a7be6aace3b1a18937d4b761e83566d0cda127de90d7994786def1",
@@ -6744,7 +6744,7 @@
      "at": 193023,
      "words": 9892,
      "sourceTriangles": 376,
-     "bakeMs": 2604
+     "bakeMs": 2542
     },
     {
      "fingerprint": "d82d67ccb032325da0ac428ca8361062ea17763d7d262ea1a8393b4760fc7655",
@@ -6752,7 +6752,7 @@
      "at": 202915,
      "words": 36326,
      "sourceTriangles": 376,
-     "bakeMs": 16604
+     "bakeMs": 10348
     },
     {
      "fingerprint": "eb97de92437d7b44784fff3e8c622f6cdc3873d5d84efff3e681d1dcbf7b80dd",
@@ -6760,7 +6760,7 @@
      "at": 239241,
      "words": 13148,
      "sourceTriangles": 501,
-     "bakeMs": 1020
+     "bakeMs": 772
     }
    ]
   },
@@ -6780,7 +6780,7 @@
      "at": 0,
      "words": 36632,
      "sourceTriangles": 376,
-     "bakeMs": 12521
+     "bakeMs": 26506
     },
     {
      "fingerprint": "48e40796266523b87e2f4e6c9c2ebb09039f5c26b7c03fafe42c21721fe8b85f",
@@ -6788,7 +6788,7 @@
      "at": 36632,
      "words": 36388,
      "sourceTriangles": 376,
-     "bakeMs": 12923
+     "bakeMs": 12506
     },
     {
      "fingerprint": "651f3fa8ce5c0d96bcb0e27fb166cc986faf253cf9cf437fbdaaf189bf803f4d",
@@ -6796,7 +6796,7 @@
      "at": 73020,
      "words": 37375,
      "sourceTriangles": 1480,
-     "bakeMs": 4411
+     "bakeMs": 4205
     },
     {
      "fingerprint": "6cd170c589fef9b910e773c5f714a1e03f5f6f8b93102482c3f3c56943d2cbdb",
@@ -6804,7 +6804,7 @@
      "at": 110395,
      "words": 36606,
      "sourceTriangles": 376,
-     "bakeMs": 14811
+     "bakeMs": 10229
     },
     {
      "fingerprint": "6df60db4193c3ef4856e4b775c6abc91e12648cbaf9c6b614b4df4050a057647",
@@ -6812,7 +6812,7 @@
      "at": 147001,
      "words": 9648,
      "sourceTriangles": 376,
-     "bakeMs": 3172
+     "bakeMs": 2552
     },
     {
      "fingerprint": "999c96c8f7701039f6f828b72383d651513134394bc4f8b2e5a848f426f8ad87",
@@ -6820,7 +6820,7 @@
      "at": 156649,
      "words": 13879,
      "sourceTriangles": 501,
-     "bakeMs": 814
+     "bakeMs": 1300
     },
     {
      "fingerprint": "c05cd024a34fcf3ae48db51e37646fde7317bee6c464997669f827dcfb01e3fa",
@@ -6828,7 +6828,7 @@
      "at": 170528,
      "words": 36388,
      "sourceTriangles": 376,
-     "bakeMs": 13869
+     "bakeMs": 12949
     },
     {
      "fingerprint": "dfb6daf83e1421286226b8a7d2f48ce4a7100f591d5510ae1bfb3f573650c4df",
@@ -6836,7 +6836,7 @@
      "at": 206916,
      "words": 36933,
      "sourceTriangles": 1480,
-     "bakeMs": 7806
+     "bakeMs": 4819
     }
    ]
   },
@@ -6856,7 +6856,7 @@
      "at": 0,
      "words": 29349,
      "sourceTriangles": 1776,
-     "bakeMs": 1538
+     "bakeMs": 5591
     },
     {
      "fingerprint": "459011c76faa0b69ce487f25e471ece7932b451a6a9daaa93a0832140479137a",
@@ -6864,7 +6864,7 @@
      "at": 29349,
      "words": 27120,
      "sourceTriangles": 418,
-     "bakeMs": 4119
+     "bakeMs": 6055
     },
     {
      "fingerprint": "54bb603d2fbebed2f44c2bbff94ade29d0aba3b888dbd7e26e4c934ed87fcacf",
@@ -6872,7 +6872,7 @@
      "at": 56469,
      "words": 27153,
      "sourceTriangles": 418,
-     "bakeMs": 5656
+     "bakeMs": 5794
     },
     {
      "fingerprint": "55e1b1750d3d9a2bedd34eb9b9daaa23c2cf5803704906f5e3580ea17cb3f497",
@@ -6880,7 +6880,7 @@
      "at": 83622,
      "words": 27185,
      "sourceTriangles": 418,
-     "bakeMs": 6201
+     "bakeMs": 5027
     },
     {
      "fingerprint": "6a966a5aee074209d0d28bb38e44d9ce9f4aa2fb4acb63551e3351a8c6903918",
@@ -6888,7 +6888,7 @@
      "at": 110807,
      "words": 28642,
      "sourceTriangles": 1776,
-     "bakeMs": 1717
+     "bakeMs": 1376
     },
     {
      "fingerprint": "6bf22dd59232f0e63c467ab051a63cd064ed7c97edfd62c27390d99a6de20596",
@@ -6896,7 +6896,7 @@
      "at": 139449,
      "words": 12026,
      "sourceTriangles": 501,
-     "bakeMs": 1057
+     "bakeMs": 725
     },
     {
      "fingerprint": "715c8983a5118387dad537520e00852859b5bd2e268c0b7a68edf25ec4f1310b",
@@ -6904,7 +6904,7 @@
      "at": 151475,
      "words": 42318,
      "sourceTriangles": 1284,
-     "bakeMs": 5765
+     "bakeMs": 3450
     },
     {
      "fingerprint": "8589e3d9a40368bf527645e2eeddc36cf0836278c8ae9cb4bde5663757c8b3f3",
@@ -6912,7 +6912,7 @@
      "at": 193793,
      "words": 27128,
      "sourceTriangles": 418,
-     "bakeMs": 6313
+     "bakeMs": 6480
     },
     {
      "fingerprint": "f30f2cd405456f443fa768fbdf9876a8f4d2439629dfc41dd294706520b9f381",
@@ -6920,7 +6920,7 @@
      "at": 220921,
      "words": 27239,
      "sourceTriangles": 1776,
-     "bakeMs": 2192
+     "bakeMs": 1208
     }
    ]
   },
@@ -6940,7 +6940,7 @@
      "at": 0,
      "words": 27153,
      "sourceTriangles": 418,
-     "bakeMs": 8638
+     "bakeMs": 14314
     },
     {
      "fingerprint": "20693bda74530993aea70e3e94ecaeb18b5f7481635c00b77580d0e823ff7b09",
@@ -6948,7 +6948,7 @@
      "at": 27153,
      "words": 27245,
      "sourceTriangles": 418,
-     "bakeMs": 6194
+     "bakeMs": 7525
     },
     {
      "fingerprint": "40a551ccbbfd4fd8886909568abb07e6c22ebaca1ad9c6494f62ab68a701fee6",
@@ -6956,7 +6956,7 @@
      "at": 54398,
      "words": 27153,
      "sourceTriangles": 418,
-     "bakeMs": 5650
+     "bakeMs": 5044
     },
     {
      "fingerprint": "61f03519f2c5f281dfcbf7b7c807232d6961c939e49f162d25bb5a8a7db2fdf1",
@@ -6964,7 +6964,7 @@
      "at": 81551,
      "words": 28636,
      "sourceTriangles": 1776,
-     "bakeMs": 1529
+     "bakeMs": 1589
     },
     {
      "fingerprint": "7291723b93ad4aeaea6d1a6ccdb8c6c6169dbc247957f6254f3e41daaff6b19b",
@@ -6972,7 +6972,7 @@
      "at": 110187,
      "words": 27351,
      "sourceTriangles": 1776,
-     "bakeMs": 2351
+     "bakeMs": 1365
     },
     {
      "fingerprint": "8b8144499617fd4f2106d1ee406fedbb4420320ad748992297f13a561d0bcc27",
@@ -6980,7 +6980,7 @@
      "at": 137538,
      "words": 42324,
      "sourceTriangles": 1284,
-     "bakeMs": 3890
+     "bakeMs": 4751
     },
     {
      "fingerprint": "8fce118f05fb623d1dcc6795bdab904ead767c617744d82ac6f84c8f8b9ce4a8",
@@ -6988,7 +6988,7 @@
      "at": 179862,
      "words": 27091,
      "sourceTriangles": 1776,
-     "bakeMs": 1427
+     "bakeMs": 1878
     },
     {
      "fingerprint": "99db8c40ee70ca5ce50067309fec429da2fa37df536530651fb6be30a54d96cd",
@@ -6996,7 +6996,7 @@
      "at": 206953,
      "words": 13216,
      "sourceTriangles": 501,
-     "bakeMs": 661
+     "bakeMs": 1144
     },
     {
      "fingerprint": "a4f472d36b7e2a8c83fa3c24ada17c2a281007741631cb4acb0bbeb9a3c589d6",
@@ -7004,7 +7004,7 @@
      "at": 220169,
      "words": 27174,
      "sourceTriangles": 418,
-     "bakeMs": 5602
+     "bakeMs": 5145
     }
    ]
   },
@@ -7024,7 +7024,7 @@
      "at": 0,
      "words": 278080,
      "sourceTriangles": 23094,
-     "bakeMs": 26515
+     "bakeMs": 36603
     },
     {
      "fingerprint": "51aa16987b0154e0e98337d86e7595bd034f98544e6982c997aee65d258ae34c",
@@ -7032,10 +7032,10 @@
      "at": 278080,
      "words": 289852,
      "sourceTriangles": 23094,
-     "bakeMs": 16712
+     "bakeMs": 15682
     }
    ]
   }
  },
- "wallSeconds": 483.3
+ "wallSeconds": 466.2
 }
