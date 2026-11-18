@@ -12,7 +12,7 @@ import { requestOnce } from './gpu-program-cache.js';
 import { CONTINUUM_TRIANGLE_BUDGET, continuumPixelError } from './continuum-core.js';
 import {
   CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, CREW_CONTINUUM_CLUSTER_WORDS, CREW_CONTINUUM_REGIONS, CREW_CONTINUUM_VERTEX_WORDS,
-  validateCrewContinuumManifest,
+  crewContinuumMissingMessage, validateCrewContinuumManifest,
 } from './crew-continuum.js';
 import {
   CREW_CONTINUUM_ENTRY_LAYOUT, CREW_CONTINUUM_INSTANCE_VERTICES, CREW_CONTINUUM_LISTS,
@@ -77,14 +77,36 @@ function crewContinuumBodyUniform(manifest, full) {
   return bytes;
 }
 
+// A load that found bodies unbaked: the message names every missing file and how it is made; `missing` lists them.
+const crewContinuumMissingError = (missing, cause) => Object.assign(Error(crewContinuumMissingMessage(missing), cause ? { cause } : undefined), { missing });
+// Which of the files a body is drawn from are not there: those of its first step, and the full mesh and the picture
+// this device reads. Asked beside the first step, so a body missing any of them fails at load, naming every one.
+function crewContinuumAbsent(id, codec, fetchAsset) {
+  const paths = CREW_CONTINUUM_ASSETS[id];
+  const wanted = ['manifest.json', 'body.glb', 'clusters.bin.gz', 'chain.bin.gz', ...(codec ? ['vertices.bin.gz', 'indices.bin.gz', `${codec.stream}.gz`] : [])].map((name) => paths[name]);
+  return Promise.all(wanted.map((path) => Promise.resolve().then(() => fetchAsset(path, { method: 'HEAD' })).then((r) => r.ok, () => false)))
+    .then((present) => wanted.filter((_, i) => !present[i]));
+}
+
 async function openCrewContinuumBody(device, id, fetchAsset) {
   if (!CREW_CONTINUUM_BODIES.some((b) => b.id === id)) throw Error(`Unknown crew continuum body: ${id}`);
   const B = GPUBufferUsage, paths = CREW_CONTINUUM_ASSETS[id];
-  const manifest = validateCrewContinuumManifest(await (await crewContinuumFetch(paths['manifest.json'], fetchAsset)).json());
-  const [clusters, chain, standIn] = await Promise.all([
-    crewContinuumStream(manifest, 'clusters.bin', fetchAsset), crewContinuumStream(manifest, 'chain.bin', fetchAsset),
-    crewContinuumFetch(paths['body.glb'], fetchAsset).then((r) => r.arrayBuffer()).then(loadCrewGLB),
-  ]);
+  // A device with neither texture codec keeps the far body near, and fetches no full mesh or picture.
+  const codec = crewContinuumCodecs.find((c) => device.features.has(c.feature));
+  const absent = crewContinuumAbsent(id, codec, fetchAsset);
+  let manifest, clusters, chain, standIn;
+  try {
+    manifest = validateCrewContinuumManifest(await (await crewContinuumFetch(paths['manifest.json'], fetchAsset)).json());
+    [clusters, chain, standIn] = await Promise.all([
+      crewContinuumStream(manifest, 'clusters.bin', fetchAsset), crewContinuumStream(manifest, 'chain.bin', fetchAsset),
+      crewContinuumFetch(paths['body.glb'], fetchAsset).then((r) => r.arrayBuffer()).then(loadCrewGLB),
+    ]);
+  } catch (error) {
+    const missing = await absent;
+    throw missing.length ? crewContinuumMissingError(missing, error) : error;
+  }
+  const missing = await absent;
+  if (missing.length) throw crewContinuumMissingError(missing);
   const made = (label, size, usage) => device.createBuffer({ label, size: Math.max(16, size), usage: usage | B.COPY_DST });
   const shape = made(`crew continuum ${id} cut and far body`, clusters.byteLength + chain.byteLength, B.STORAGE);
   device.queue.writeBuffer(shape, 0, clusters);
@@ -100,8 +122,7 @@ async function openCrewContinuumBody(device, id, fetchAsset) {
     chunks: Math.ceil(manifest.chain.triangleCount / 128),
     triangles: manifest.source.triangles,
   };
-  // The full mesh and picture, behind the far body. A device with neither texture codec keeps the far body near too.
-  const codec = crewContinuumCodecs.find((c) => device.features.has(c.feature));
+  // The full mesh and picture, behind the far body.
   body.loaded = !codec ? Promise.resolve(body) : Promise.all(['vertices.bin', 'indices.bin', codec.stream].map((name) => crewContinuumStream(manifest, name, fetchAsset))).then(([vertices, indices, picture]) => {
     const mesh = made(`crew continuum ${id} mesh`, vertices.byteLength + indices.byteLength, B.STORAGE);
     device.queue.writeBuffer(mesh, 0, vertices);
@@ -120,12 +141,13 @@ async function openCrewContinuumBody(device, id, fetchAsset) {
     device.queue.onSubmittedWorkDone().then(() => { for (const resource of waiting) resource.destroy(); });
     return body;
   });
-  body.loaded.catch((error) => console.warn(`Crew continuum ${id}: the far body stands in near too`, error));
+  body.loaded.catch((error) => console.error(`Crew continuum ${id}: the full mesh failed to load; the far body is drawn near too`, error));
   return body;
 }
 
 const crewContinuumBodyCache = new WeakMap();
-// A body on this device, fetched once. Resolves when it can be drawn; `body.loaded` when it is drawn in full.
+// A body on this device, fetched once. Resolves when it can be drawn; `body.loaded` when it is drawn in full. A body
+// that is not baked rejects, naming its missing files: nothing stands in for it.
 export function loadCrewContinuumBody(device, id, { fetchAsset = fetch } = {}) {
   let bodies = crewContinuumBodyCache.get(device);
   if (!bodies) crewContinuumBodyCache.set(device, (bodies = new Map()));
@@ -135,6 +157,15 @@ export function loadCrewContinuumBody(device, id, { fetchAsset = fetch } = {}) {
     bodies.set(id, pending);
   }
   return bodies.get(id);
+}
+// Several bodies on this device. Those not baked fail the load together, in one error that names every missing file.
+export async function loadCrewContinuumBodies(device, ids, options) {
+  const settled = await Promise.allSettled(ids.map((id) => loadCrewContinuumBody(device, id, options)));
+  const failed = settled.filter((r) => r.status === 'rejected').map((r) => r.reason);
+  if (!failed.length) return settled.map((r) => r.value);
+  const other = failed.find((error) => !error?.missing);
+  if (other) throw other;
+  throw crewContinuumMissingError([...new Set(failed.flatMap((error) => error.missing))]);
 }
 
 let crewContinuumRenderSource = null;

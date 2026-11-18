@@ -174,6 +174,15 @@ export const CREW_CONTINUUM_ASSETS = Object.freeze({
     'albedo.astc.bin.gz': 'assets/crew/continuum/andean-female/albedo.astc.bin.gz',
   }),
 });
+// People are drawn through the continuum alone: there are no old bodies to stand in. A body that is not baked is an
+// error, for the build (build.mjs) and at load (js/crew-continuum-draw.js), and this says which files are missing,
+// by body, and how they are made. `missing` holds paths from CREW_CONTINUUM_ASSETS.
+export function crewContinuumMissingMessage(missing) {
+  const ids = Object.keys(CREW_CONTINUUM_ASSETS).filter((id) => Object.values(CREW_CONTINUUM_ASSETS[id]).some((file) => missing.includes(file)));
+  return `Crew continuum bodies not baked (${ids.join(', ')}); people are drawn through the continuum alone. Missing:\n  ${missing.join('\n  ')}\n`
+    + `Bake each with \`node scripts/prepare-crew-continuum.mjs --only=<body>\` from its fit (scripts/fit-crew-body.py --textured --full-texture,`
+    + ` in .tripo/1550-hd/fit-regions), or copy a baked assets/crew/continuum/ into this checkout.`;
+}
 
 const crewUnit16 = (v) => Math.max(0, Math.min(65535, Math.round(v * 65535)));
 const crewUnit8 = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));

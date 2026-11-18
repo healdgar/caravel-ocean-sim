@@ -18,7 +18,7 @@ import { FOREST_CROWN_ASSETS, SUBTROPICAL_FOREST_CROWN_ASSETS, PORTUGAL_FOREST_C
 import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
 import { PORTUGAL_MEADOW_GRASS_ASSETS } from './js/meadow-continuum.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
-import { CREW_CONTINUUM_ASSETS } from './js/crew-continuum.js';
+import { CREW_CONTINUUM_ASSETS, crewContinuumMissingMessage } from './js/crew-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
 import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
 import { SHIP_CONTINUUM_ASSETS } from './js/ship-continuum.js';
@@ -191,11 +191,12 @@ for(const file of Object.values(CITY_CONTINUUM_ASSETS))runtimeAssetTypes.set(fil
 for(const file of Object.values(PROP_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The animal continuum's atlas (scripts/prepare-animal-continuum.mjs), kept in git: every animal is drawn from nothing else.
 for(const file of Object.values(ANIMAL_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
-// The people continuum's bodies, each where it has been baked (scripts/prepare-crew-continuum.mjs). Their streams are
-// not committed; a checkout without them draws the old bodies.
-for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files)){
-  if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.glb')?'model/gltf-binary':'application/octet-stream');
-}
+// The people continuum's bodies (scripts/prepare-crew-continuum.mjs). Their streams are not committed, and people are
+// drawn through nothing else: a checkout without every one of them does not build.
+const missingCrewContinuum=Object.values(CREW_CONTINUUM_ASSETS).flatMap(files=>Object.values(files)).filter(file=>!fs.existsSync(path.join(root,file)));
+if(missingCrewContinuum.length)throw Error(crewContinuumMissingMessage(missingCrewContinuum));
+for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))
+  runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.glb')?'model/gltf-binary':'application/octet-stream');
 // The ships' continuum bodies (scripts/prepare-ship-continuum.mjs), committed and embedded: no ship is drawn without them.
 for(const files of Object.values(SHIP_CONTINUUM_ASSETS))for(const file of Object.values(files)){
   runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
