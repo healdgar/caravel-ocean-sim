@@ -640,6 +640,17 @@ const CITY_STREET_FURNITURE = [
   ])],
 ];
 
+/* ---- the waterfront and the pinned buildings: types a builder of their own draws, never stretched ---- */
+// A stone quay is laid in bays along the water, its face on the waterline and its deck `deck` metres above the sea,
+// `depth` back to the land; a run of shore takes as many whole bays as it is long (js/board-waterfront.js).
+export const CITY_QUAY = Object.freeze({ bay: 4, bays: Object.freeze([3, 4, 5, 6, 7]), depth: 12, deck: 2.15 });
+// A timber mole runs out from the quay on bents 4.8 m apart (js/port-props.js pierBentStations), its deck as high.
+export const CITY_PIER = Object.freeze({ width: 7.5, bays: Object.freeze([5, 7, 9, 11, 13]), deck: CITY_QUAY.deck, bent: 4.8, inset: 1.2 });
+export const cityPierLength = (bays) => cityMetres(bays * CITY_PIER.bent + 2 * CITY_PIER.inset);
+// A type its builder makes by name (`builder`, a kind js/coastal-world.js buildCityTypeGeometry knows) at this size.
+const builtSpec = (builder, name, width, length, height, foundationDepth, materialKind, roofPitch, waterfront) =>
+  Object.freeze({ schemaVersion: '0.4', builder, name, width, length, height, foundationDepth, materialKind, roofPitch, waterfront });
+
 /* ---- the catalogue: every family of types, in the order their numbers are used by the plan and the renderer ---- */
 // A family is one building at each of its sizes: `from` its first type, `count` of them, `canonical` the one its name
 // stands for (the size the plan asks for when it has no plot to fit).
@@ -723,6 +734,19 @@ const CITY_TYPE_NAMED = {
   HALL: cityFamily('HALL', CITY_HALL.widths.flatMap((width) => CITY_HALL.bays.map((bays) => hallSpec({ width, bays }))), CITY_HALL.bays.length + 3),
   PENTICE: cityFamily('PENTICE', CITY_PENTICES, 1),
   ...Object.fromEntries(CITY_STREET_FURNITURE.map(([key, spec]) => [key, cityFamily(key, spec)])),
+  // The waterfront a port lays along its town's shore (js/board-waterfront.js) and the buildings a place's record pins
+  // at their sites (js/place-landmarks.js): each drawn by its own builder (js/coastal-world.js buildCityTypeGeometry).
+  QUAY: cityFamily('QUAY', CITY_QUAY.bays.map((bays) => builtSpec('stone_quay_seawall', `Cais de pedra (stone quay wall, ${bays} bays of ${CITY_QUAY.bay} m)`, bays * CITY_QUAY.bay, CITY_QUAY.depth, CITY_QUAY.deck, 6.5, 11, 0, true)), 2),
+  PIER: cityFamily('PIER', CITY_PIER.bays.map((bays) => builtSpec('timber_mole_pier', `Ponte de madeira (timber mole, ${bays} bays of bents)`, CITY_PIER.width, cityPierLength(bays), CITY_PIER.deck, 8.5, 10, 0, true)), 2),
+  SLIPWAY: cityFamily('SLIPWAY', builtSpec('astillero_and_moored_hull', 'Estaleiro (slipway, a hull on the stocks)', 8.2, 23, 5.2, 3.5, 10, 0, true)),
+  CAREENING_SHED: cityFamily('CAREENING_SHED', builtSpec('careening_shed', 'Querena (careening shed and pitch works)', 11, 22, 5.6, 2.5, 10, 2, true)),
+  CUSTOMHOUSE: cityFamily('CUSTOMHOUSE', builtSpec('casa_de_contratacion', 'Casa da Índia / Casa de la Contratación (royal customhouse)', 16, 26, 8.5, 3.5, 12, 2.6, false)),
+  ARSENAL: cityFamily('ARSENAL', builtSpec('royal_atarazanas_arsenal', 'Atarazanas (royal arsenal, parallel naves)', 26, 36, 8.2, 4.5, 11, 2.5, true)),
+  WAREHOUSE: cityFamily('WAREHOUSE', builtSpec('royal_warehouse', 'Armazéns reais (royal storehouses)', 14, 30, 7.2, 3, 12, 2.2, false)),
+  LONJA: cityFamily('LONJA', builtSpec('open_lonja_loggia', 'Lonja de mercaderes (merchants\' exchange, an open arcade)', 13.5, 26, 7.4, 3.5, 11, 2.3, false)),
+  // Cairn templates (js/cairn-primitives.js CAIRN_ARCHITECTURAL_TEMPLATES), at the size each is written at.
+  JERONIMOS: cityFamily('JERONIMOS', builtSpec('mosteiro_dos_jeronimos', 'Mosteiro dos Jerónimos (Santa Maria de Belém)', 38, 34, 19.5, 4.5, 12, 3.4, false)),
+  AQUEDUCT: cityFamily('AQUEDUCT', builtSpec('acueducto_de_piedra', 'Acueducto de sillería (stone aqueduct, a span of arches)', 32, 6.5, 13.2, 4.5, 11, 0.8, false)),
 };
 // Whatever else Castle and Commons' model builds (js/old-world-works.js), each family by its name there: WINDMILL to
 // RUBBLE, then the native houses BARK_LONGHOUSE to SWEAT_LODGE, stand on footings; FENCE_RAIL and after (to PALISADE)
@@ -775,7 +799,7 @@ export const CITY_TYPES_OVERHEAD = Object.freeze(new Set(cityFamilyTypes('PENTIC
 // Bridges are destructible gunnery targets whose intact spans let walkers and caravans cross rivers cleanly.
 export const CITY_TYPES_BRIDGES = Object.freeze(new Set(cityFamilyTypes('FOOTBRIDGE', 'STONE_BRIDGE', 'STONE_BRIDGE_SPAN')));
 // What stands in or over the water, never on the ground the land draws.
-export const CITY_TYPES_WATERSIDE = Object.freeze(new Set([...cityFamilyTypes('WHARF', 'WATERMILL'), ...CITY_TYPES_BRIDGES]));
+export const CITY_TYPES_WATERSIDE = Object.freeze(new Set([...cityFamilyTypes('WHARF', 'WATERMILL', 'QUAY', 'PIER'), ...CITY_TYPES_BRIDGES]));
 // What is too slight to be laid as a gun's target or to stop anyone walking: what hangs overhead, a fence,
 // graves, a cairn, a standard, a work's guns (silenced with their work, js/port-damage.js).
 export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, ...cityFamilyTypes('FENCE_RAIL', 'FENCE_POST', 'FENCE_STONE', 'GRAVES', 'CAIRN', 'STANDARD', 'GUN')]));
@@ -802,6 +826,10 @@ const CITY_TARGETS = Object.freeze({
   RUIN: { prefabId: 'city_ruin', label: 'Ruin' }, RUBBLE: { prefabId: 'city_rubble', label: 'Rubble' }, FENCE_RAIL: { prefabId: 'city_fence', label: 'Fence' }, FENCE_POST: { prefabId: 'city_fence', label: 'Fence' }, FENCE_STONE: { prefabId: 'city_fence', label: 'Dry-stone wall' },
   FOOTBRIDGE: { prefabId: 'city_timber_bridge', label: 'Timber bridge' }, STONE_BRIDGE: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, STONE_BRIDGE_SPAN: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, GRAVES: { prefabId: 'city_graves', label: 'Graves' },
   CAIRN: { prefabId: 'city_cairn', label: 'Cairn' }, TENT: { prefabId: 'city_tent', label: 'Tent' }, STANDARD: { prefabId: 'city_standard', label: 'Standard' }, SCAFFOLD: { prefabId: 'city_scaffold', label: 'Scaffold' },
+  QUAY: { prefabId: 'city_quay', label: 'Stone quay' }, PIER: { prefabId: 'city_pier', label: 'Timber mole' }, SLIPWAY: { prefabId: 'city_slipway', label: 'Slipway' },
+  CAREENING_SHED: { prefabId: 'city_careening_shed', label: 'Careening shed' }, CUSTOMHOUSE: { prefabId: 'city_customhouse', label: 'Customhouse' },
+  ARSENAL: { prefabId: 'city_arsenal', label: 'Arsenal' }, WAREHOUSE: { prefabId: 'city_warehouse', label: 'Royal storehouses' },
+  LONJA: { prefabId: 'city_exchange', label: 'Exchange' }, JERONIMOS: { prefabId: 'city_monastery', label: 'Monastery' }, AQUEDUCT: { prefabId: 'city_aqueduct', label: 'Aqueduct' },
   ...NATIVE_WORKS_TARGETS,
 });
 for (const family of cityFamilies) if (!CITY_TARGETS[family.key]) throw Error(`The city's ${family.key} is no target the guns know`);
@@ -831,7 +859,7 @@ export function cityHousePick(x, z) {
   return (h >>> 0) / 4294967296;
 }
 
-// Compile every type with the port's own Cairn builder, each standing at the origin unturned,
+// Compile every type with its builder (js/coastal-world.js buildCityTypeGeometry), each standing at the origin unturned,
 // into a plain list of vertices (position, normal, kind) the renderer can instance. Every
 // triangle is wound to face the way its normals point, so the renderer may leave out the faces
 // turned away: the insides of walls, footings and party walls, half of all there is to shade.
@@ -843,17 +871,14 @@ export function cityHousePick(x, z) {
 // One type alone, as the bake and a struck building need it.
 export function compileCityBuildingType(id, buildGeometry) {
   const spec = CITY_BUILDING_TYPES[id];
-  const built = buildGeometry({
-    singleBuildingPrefab: true,
-    instances: [{ prefabId: `city_type_${id}`, id: `city_type_${id}`, x: 0, y: 0, z: 0, yaw: 0, width: spec.width, length: spec.length, depth: spec.length, height: spec.height, foundationDepth: spec.foundationDepth, materialKind: spec.materialKind, roofPitch: spec.roofPitch, cairnSpec: spec }],
-  }, null);
+  const built = buildGeometry({ id, kind: spec.builder ?? null, width: spec.width, length: spec.length, height: spec.height, foundationDepth: spec.foundationDepth, materialKind: spec.materialKind, roofPitch: spec.roofPitch, cairnSpec: spec.builder ? null : spec });
   return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, ...compileContinuumBody(built, spec) };
 }
 export function compileCityBuildingTypes(buildGeometry) {
   return CITY_BUILDING_TYPES.map((_, id) => compileCityBuildingType(id, buildGeometry));
 }
 
-// One building as its builder made it (buildPortPrefabGeometry, a single instance at the origin, unturned), as the
+// One building as its builder made it (buildCityTypeGeometry, at the origin, unturned), as the
 // continuum bakes and draws it (js/continuum-bake.js): every drawn corner in triangles, outermost first, a roof sheet
 // drawn from both sides, a timber's grain riding its shade, and each triangle's part; with `source`, what the builder
 // made, for shot and fracture. `box` is the plot it was built on ({ width, length, height }).

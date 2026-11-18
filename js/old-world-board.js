@@ -9,6 +9,8 @@ import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityF
 import { CITY_ARTILLERY_TOWER, CITY_BASTION, CITY_BATTERY, CITY_BUILDING_TYPES, CITY_CORNER_BASTION, CITY_CHURCH, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_HOUSE_STOREYS, CITY_KEEP, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TOWER, CITY_TYPE, CITY_TYPED_ROOF, cityBatteryGuns, cityCornerBastionPlan, cityCornerBastionType, cityGunType, cityHouseType, cityVariant } from './old-world-buildings.js';
 import { WORKS_BRIDGE, WORKS_WHEEL } from './old-world-works.js';
 import { NATIVE_PALISADE } from './native-works.js';
+import { layBoardWaterfront } from './board-waterfront.js';
+import { layPlaceLandmarks } from './place-landmarks.js';
 
 // The board's furlongs are drawn into a square of cells this many to a side, each cell holding the furlong it
 // lies in (plus one; none is 0). The same square answers the land's questions here and is the GPU's to stamp from.
@@ -409,11 +411,6 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     (g) => segRectDist(fp, g.ax, g.az, g.bx, g.bz) < g.hw + pad
   );
   const { seatBlock, pushBlock, pushTyped, fit, sections, seatRun, fence: layFence, curtain, tower, bastion, gate } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr });
-  // The port's own buildings stand where they stand; the board builds round them.
-  for (const inst of port.instances || []) {
-    const f = { x: inst.x, z: inst.z, w: (inst.width ?? 12) + 2, d: (inst.depth ?? inst.length ?? 20) + 2, c: inst._cosNegYaw ?? Math.cos(inst.yaw ?? 0), s: inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0) };
-    keep(f);
-  }
   const taken = (f, gap) => solids.some(f.x, f.z, Math.hypot(f.w, f.d) / 2 + 34, (o) => cityFootprintsOverlap(f, o, gap));
   const occupy = (f) => { const r = Math.hypot(f.w, f.d) / 2; placed.add(f, f.x - r, f.z - r, f.x + r, f.z + r); lots.push(f); };
 
@@ -817,6 +814,19 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (!work.castle) workRecords.push(standWorkOf(place, work));
   }
 
+  /* ---- the waterfront: the seat's quay, its moles, slipway and careening shed, and a quay to each other harbour ---- */
+  // Laid along the shore nearest each (js/board-waterfront.js) after the works, which hold their ground, and before the
+  // model's buildings, which stand clear of it.
+  const shoreField = distanceTo(wet, grid.n, grid.step), shoreAt = (x, z) => fieldAt(shoreField, grid, x, z);
+  const waterfront = [];
+  places.forEach((place, at) => {
+    if (at > 0 && !place.harbour) return;
+    for (const record of layBoardWaterfront({ place, seat: at === 0, heightAt, inlandAt: shoreAt, inside, taken, keep, occupy, pushBlock, pushTyped, typedTypes, rr })) waterfront.push({ ...record, place: place.name, seat: at === 0 });
+  });
+  // The buildings the place's record pins at their sites (js/place-landmarks.js), clear of the waterfront and before
+  // the model's own, which stand clear of them.
+  const landmarks = layPlaceLandmarks({ port: baked.port, year: baked.year ?? region.year ?? 1550, region, heightAt, inlandAt: shoreAt, inside, taken, keep, occupy, seatBlock, pushBlock, pushTyped, typedTypes, rr });
+
   /* ---- buildings: each one the model stood, as this game's type of that size, turned to its street ---- */
   const { count, stand, form, kinds } = board.buildings, arches = board.arches;
   const market = board.quarters?.indexOf('market') ?? -1, quarter = board.buildings.quarter ?? null;
@@ -838,11 +848,6 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   const royalAnchors = [];
   for (const pl of places) {
     if (pl?.castle?.keep) royalAnchors.push({ x: ox + pl.castle.keep.x, z: oz + pl.castle.keep.z });
-  }
-  for (const inst of port.instances ?? []) {
-    if (/Royal Palace|Waterfront Palace/i.test(inst?.label || '')) {
-      royalAnchors.push({ x: inst.x, z: inst.z });
-    }
   }
   if (seat?.kind === 'capital') royalAnchors.push({ x: seat.x, z: seat.z });
   const nearRoyalOrKeep = (wx, wz) => {
@@ -1154,7 +1159,6 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   // stands or a street runs through.
   const spans = works.trackBridges ?? [];
   const roadCrossings = boardRoadCrossings(board.roads, rivers, board.places);
-  const portBridges = (port.instances ?? []).filter((inst) => inst?.prefabId === 'stone_arch_bridge');
   const measureRiverCrossingAt = (bx, bz, ux, uz) => {
     const lx = bx - ox, lz = bz - oz;
     let bestD = 32, best = null;
@@ -1200,10 +1204,6 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     for (const q of roadCrossings) {
       const reach = Math.max(4.5, q.span / 2 + 2.6);
       if (inBridgeStrip(x, z, ox + q.x, oz + q.z, q.ux, q.uz, reach + 6, 4.8)) return true;
-    }
-    for (const pb of portBridges) {
-      const ux = Math.sin(pb.yaw ?? 0), uz = Math.cos(pb.yaw ?? 0);
-      if (inBridgeStrip(x, z, pb.x, pb.z, ux, uz, (pb.length ?? 24) * 0.5 + 6, (pb.width ?? 9.6) * 0.5 + 2)) return true;
     }
     return false;
   };
@@ -1418,18 +1418,11 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (!inside(x, z, 12)) continue;
     // Deduplicate track crossings that collide with a primary road crossing (which builds the aligned wide bridge).
     if (roadCrossings.some((q) => Math.hypot(ox + q.x - x, oz + q.z - z) < 18)) continue;
-    const nearPort = portBridges.find((pb) => Math.hypot(pb.x - x, pb.z - z) < 24);
     const hA = heightAt(x - ux * (half + 2.5), z - uz * (half + 2.5));
     const hB = heightAt(x + ux * (half + 2.5), z + uz * (half + 2.5));
     if (Math.max(hA, hB) <= 0.12) continue;
     const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + 2.75) : -Infinity;
     const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + 0.55, minNavDeck);
-    if (nearPort) {
-      const pux = Math.sin(nearPort.yaw ?? 0), puz = Math.cos(nearPort.yaw ?? 0), pLen = nearPort.length ?? (span + 4.0), pW = nearPort.width ?? 9.6;
-      bridges.push({ x: nearPort.x, z: nearPort.z, ux: pux, uz: puz, length: pLen, halfWidth: pW * 0.5, deckY: Math.max(nearPort.y ?? deck, minNavDeck), span, isStone: true, cityIndices: [], collapsed: false });
-      stampBridgeApproach(nearPort.x, nearPort.z, pux, puz, pLen, pW);
-      continue;
-    }
     const width = isStone ? WORKS_BRIDGE.widths[0] : CITY_BUILDING_TYPES[CITY_TYPE.FOOTBRIDGE].width;
     const { length: totalLen, cityIndices } = layBridge(x, z, ux, uz, span + 4.0, deck, isStone, width);
     bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices, collapsed: false });
@@ -1446,13 +1439,6 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const crossing = measureRiverCrossingAt(x, z, q.ux, q.uz);
     const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + 2.75) : -Infinity;
     const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise, minNavDeck);
-    const nearPort = portBridges.find((pb) => Math.hypot(pb.x - x, pb.z - z) < 24);
-    if (nearPort) {
-      const pux = Math.sin(nearPort.yaw ?? 0), puz = Math.cos(nearPort.yaw ?? 0), pLen = nearPort.length ?? (reach * 2), pW = nearPort.width ?? 9.6;
-      bridges.push({ x: nearPort.x, z: nearPort.z, ux: pux, uz: puz, length: pLen, halfWidth: pW * 0.5, deckY: Math.max(nearPort.y ?? deck, minNavDeck), span: q.span, isStone: true, cityIndices: [], collapsed: false });
-      stampBridgeApproach(nearPort.x, nearPort.z, pux, puz, pLen, pW);
-      continue;
-    }
     const isStone = q.stone !== false;
     const bridgeWidth = isStone ? BOARD_ROAD_BRIDGE.width : CITY_BUILDING_TYPES[CITY_TYPE.FOOTBRIDGE].width;
     const { length, cityIndices } = layBridge(x, z, q.ux, q.uz, reach * 2, deck, isStone, bridgeWidth);
@@ -2793,6 +2779,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     watch: seat.watch ? { ...seat.watch, place: seat.name, day: board.day ?? 0 } : null,
     // The forts, batteries and watchtowers the record names, as built: their lines, guns and gates (js/fort-plan.js portWorkBuildings).
     works: workRecords,
+    // The quays, moles, slipways and careening sheds laid along the shore, as built: the port's berths, ways and footing.
+    waterfront,
+    // The landmarks its record pins, as stood.
+    landmarks,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each
     // furlong's use, and every way that runs across it.
     stamp: {
