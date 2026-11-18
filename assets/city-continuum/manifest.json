@@ -35,12 +35,12 @@
   "streams": 0
  },
  "totals": {
-  "types": 76,
-  "clusters": 5095,
-  "vertices": 286645,
-  "indices": 664377,
-  "sourceTriangles": 140423,
-  "farTriangles": 133358
+  "types": 86,
+  "clusters": 5602,
+  "vertices": 311813,
+  "indices": 727773,
+  "sourceTriangles": 153716,
+  "farTriangles": 145520
  },
  "types": [
   {
@@ -116,7 +116,7 @@
      0.90351
     ]
    },
-   "bakeMs": 2845
+   "bakeMs": 2602
   },
   {
    "id": 1,
@@ -191,7 +191,7 @@
      0.93601
     ]
    },
-   "bakeMs": 2110
+   "bakeMs": 2145
   },
   {
    "id": 2,
@@ -266,7 +266,7 @@
      1
     ]
    },
-   "bakeMs": 1700
+   "bakeMs": 1737
   },
   {
    "id": 3,
@@ -341,7 +341,7 @@
      0.99604
     ]
    },
-   "bakeMs": 1711
+   "bakeMs": 1749
   },
   {
    "id": 4,
@@ -416,7 +416,7 @@
      0.91314
     ]
    },
-   "bakeMs": 1816
+   "bakeMs": 1865
   },
   {
    "id": 5,
@@ -491,7 +491,7 @@
      1
     ]
    },
-   "bakeMs": 2793
+   "bakeMs": 2903
   },
   {
    "id": 6,
@@ -566,7 +566,7 @@
      0.92982
     ]
    },
-   "bakeMs": 2720
+   "bakeMs": 2767
   },
   {
    "id": 7,
@@ -641,7 +641,7 @@
      1
     ]
    },
-   "bakeMs": 1591
+   "bakeMs": 1646
   },
   {
    "id": 8,
@@ -716,7 +716,7 @@
      0.98995
     ]
    },
-   "bakeMs": 934
+   "bakeMs": 1102
   },
   {
    "id": 9,
@@ -791,7 +791,7 @@
      0.98665
     ]
    },
-   "bakeMs": 1477
+   "bakeMs": 5424
   },
   {
    "id": 10,
@@ -866,7 +866,7 @@
      0.87646
     ]
    },
-   "bakeMs": 2842
+   "bakeMs": 3066
   },
   {
    "id": 11,
@@ -941,7 +941,7 @@
      0.87876
     ]
    },
-   "bakeMs": 1757
+   "bakeMs": 1833
   },
   {
    "id": 12,
@@ -1016,7 +1016,7 @@
      0.93742
     ]
    },
-   "bakeMs": 2588
+   "bakeMs": 2655
   },
   {
    "id": 13,
@@ -1091,7 +1091,7 @@
      0.9712
     ]
    },
-   "bakeMs": 4398
+   "bakeMs": 4455
   },
   {
    "id": 14,
@@ -1166,7 +1166,7 @@
      0.96945
     ]
    },
-   "bakeMs": 5726
+   "bakeMs": 5811
   },
   {
    "id": 15,
@@ -1241,7 +1241,7 @@
      0.9495
     ]
    },
-   "bakeMs": 2260
+   "bakeMs": 2296
   },
   {
    "id": 16,
@@ -1316,7 +1316,7 @@
      0.91008
     ]
    },
-   "bakeMs": 1516
+   "bakeMs": 1545
   },
   {
    "id": 17,
@@ -1391,7 +1391,7 @@
      0.90947
     ]
    },
-   "bakeMs": 2897
+   "bakeMs": 3860
   },
   {
    "id": 18,
@@ -1466,7 +1466,7 @@
      0.94449
     ]
    },
-   "bakeMs": 1954
+   "bakeMs": 2444
   },
   {
    "id": 19,
@@ -1541,7 +1541,7 @@
      0.94113
     ]
    },
-   "bakeMs": 2543
+   "bakeMs": 2692
   },
   {
    "id": 20,
@@ -1616,7 +1616,7 @@
      0.97791
     ]
    },
-   "bakeMs": 2958
+   "bakeMs": 3544
   },
   {
    "id": 21,
@@ -1691,7 +1691,7 @@
      0.89143
     ]
    },
-   "bakeMs": 3726
+   "bakeMs": 10367
   },
   {
    "id": 22,
@@ -1766,7 +1766,7 @@
      0.91149
     ]
    },
-   "bakeMs": 2272
+   "bakeMs": 2379
   },
   {
    "id": 23,
@@ -1841,7 +1841,7 @@
      0.92008
     ]
    },
-   "bakeMs": 2773
+   "bakeMs": 2737
   },
   {
    "id": 24,
@@ -1916,7 +1916,7 @@
      0.96272
     ]
    },
-   "bakeMs": 2846
+   "bakeMs": 2761
   },
   {
    "id": 25,
@@ -1991,7 +1991,7 @@
      0.95033
     ]
    },
-   "bakeMs": 2505
+   "bakeMs": 2460
   },
   {
    "id": 26,
@@ -2066,7 +2066,7 @@
      0.91418
     ]
    },
-   "bakeMs": 3146
+   "bakeMs": 1820
   },
   {
    "id": 27,
@@ -2141,7 +2141,7 @@
      0.92041
     ]
    },
-   "bakeMs": 1816
+   "bakeMs": 1059
   },
   {
    "id": 28,
@@ -2216,7 +2216,7 @@
      1
     ]
    },
-   "bakeMs": 4958
+   "bakeMs": 2906
   },
   {
    "id": 29,
@@ -2291,7 +2291,7 @@
      1
     ]
    },
-   "bakeMs": 2539
+   "bakeMs": 1644
   },
   {
    "id": 30,
@@ -2366,7 +2366,7 @@
      0.93375
     ]
    },
-   "bakeMs": 4351
+   "bakeMs": 2468
   },
   {
    "id": 31,
@@ -2441,7 +2441,7 @@
      0.94172
     ]
    },
-   "bakeMs": 6261
+   "bakeMs": 3293
   },
   {
    "id": 32,
@@ -2516,7 +2516,7 @@
      0.99111
     ]
    },
-   "bakeMs": 3788
+   "bakeMs": 2284
   },
   {
    "id": 33,
@@ -2591,7 +2591,7 @@
      0.91816
     ]
    },
-   "bakeMs": 3723
+   "bakeMs": 2079
   },
   {
    "id": 34,
@@ -2666,7 +2666,7 @@
      0.94438
     ]
    },
-   "bakeMs": 10762
+   "bakeMs": 5739
   },
   {
    "id": 35,
@@ -2741,7 +2741,7 @@
      0.50536
     ]
    },
-   "bakeMs": 1392
+   "bakeMs": 937
   },
   {
    "id": 36,
@@ -2816,7 +2816,7 @@
      0.52356
     ]
    },
-   "bakeMs": 2140
+   "bakeMs": 1469
   },
   {
    "id": 37,
@@ -2891,7 +2891,7 @@
      0.67959
     ]
    },
-   "bakeMs": 893
+   "bakeMs": 665
   },
   {
    "id": 38,
@@ -2966,7 +2966,7 @@
      0.5854
     ]
    },
-   "bakeMs": 491
+   "bakeMs": 330
   },
   {
    "id": 39,
@@ -3041,7 +3041,7 @@
      0.87294
     ]
    },
-   "bakeMs": 710
+   "bakeMs": 582
   },
   {
    "id": 40,
@@ -3116,7 +3116,7 @@
      0.91544
     ]
    },
-   "bakeMs": 1940
+   "bakeMs": 1743
   },
   {
    "id": 41,
@@ -3191,7 +3191,7 @@
      0.92375
     ]
    },
-   "bakeMs": 201
+   "bakeMs": 135
   },
   {
    "id": 42,
@@ -3266,7 +3266,7 @@
      6.4796
     ]
    },
-   "bakeMs": 242
+   "bakeMs": 183
   },
   {
    "id": 43,
@@ -3341,7 +3341,7 @@
      6.74619
     ]
    },
-   "bakeMs": 3024
+   "bakeMs": 2440
   },
   {
    "id": 44,
@@ -3416,7 +3416,7 @@
      6.75113
     ]
    },
-   "bakeMs": 1486
+   "bakeMs": 1124
   },
   {
    "id": 45,
@@ -3491,7 +3491,7 @@
      0.90383
     ]
    },
-   "bakeMs": 710
+   "bakeMs": 485
   },
   {
    "id": 46,
@@ -3566,7 +3566,7 @@
      0.89675
     ]
    },
-   "bakeMs": 7039
+   "bakeMs": 4967
   },
   {
    "id": 47,
@@ -3641,7 +3641,7 @@
      0.6715
     ]
    },
-   "bakeMs": 3379
+   "bakeMs": 2391
   },
   {
    "id": 48,
@@ -3716,7 +3716,7 @@
      0.99648
     ]
    },
-   "bakeMs": 5256
+   "bakeMs": 4224
   },
   {
    "id": 49,
@@ -3791,7 +3791,7 @@
      0.89858
     ]
    },
-   "bakeMs": 2849
+   "bakeMs": 2031
   },
   {
    "id": 50,
@@ -3866,7 +3866,7 @@
      0.83814
     ]
    },
-   "bakeMs": 3480
+   "bakeMs": 2822
   },
   {
    "id": 51,
@@ -3941,7 +3941,7 @@
      0.8917
     ]
    },
-   "bakeMs": 7779
+   "bakeMs": 5768
   },
   {
    "id": 52,
@@ -4016,7 +4016,7 @@
      0.90489
     ]
    },
-   "bakeMs": 5171
+   "bakeMs": 4453
   },
   {
    "id": 53,
@@ -4091,7 +4091,7 @@
      1
     ]
    },
-   "bakeMs": 2893
+   "bakeMs": 4236
   },
   {
    "id": 54,
@@ -4166,7 +4166,7 @@
      0.92412
     ]
    },
-   "bakeMs": 5276
+   "bakeMs": 4334
   },
   {
    "id": 55,
@@ -4241,7 +4241,7 @@
      0.90037
     ]
    },
-   "bakeMs": 8635
+   "bakeMs": 8155
   },
   {
    "id": 56,
@@ -4316,7 +4316,7 @@
      0.89774
     ]
    },
-   "bakeMs": 6588
+   "bakeMs": 6725
   },
   {
    "id": 57,
@@ -4391,7 +4391,7 @@
      0.96882
     ]
    },
-   "bakeMs": 7914
+   "bakeMs": 7353
   },
   {
    "id": 58,
@@ -4466,7 +4466,7 @@
      0.88441
     ]
    },
-   "bakeMs": 5988
+   "bakeMs": 5027
   },
   {
    "id": 59,
@@ -4541,7 +4541,7 @@
      1
     ]
    },
-   "bakeMs": 8011
+   "bakeMs": 10687
   },
   {
    "id": 60,
@@ -4616,7 +4616,7 @@
      0.98573
     ]
    },
-   "bakeMs": 3273
+   "bakeMs": 2681
   },
   {
    "id": 61,
@@ -4691,7 +4691,7 @@
      1
     ]
    },
-   "bakeMs": 10425
+   "bakeMs": 6156
   },
   {
    "id": 62,
@@ -4766,7 +4766,7 @@
      6.8042
     ]
    },
-   "bakeMs": 3367
+   "bakeMs": 1896
   },
   {
    "id": 63,
@@ -4841,7 +4841,7 @@
      0.6058
     ]
    },
-   "bakeMs": 4315
+   "bakeMs": 2397
   },
   {
    "id": 64,
@@ -4916,7 +4916,7 @@
      0.61322
     ]
    },
-   "bakeMs": 9062
+   "bakeMs": 6811
   },
   {
    "id": 65,
@@ -4991,10 +4991,685 @@
      0.59936
     ]
    },
-   "bakeMs": 9513
+   "bakeMs": 4971
   },
   {
    "id": 66,
+   "name": "Bark longhouse (Iroquoian: a vault of elm bark, a door at each end, a hearth to each two families)",
+   "fingerprint": "d4e9a56e4e0f8d01629b381777cd81f5361febf97ac9d69ca492652cb778e289",
+   "sourceTriangles": 1986,
+   "parts": 38,
+   "quantization": {
+    "low": [
+     -15.15,
+     -4.5,
+     -3.50371
+    ],
+    "span": 30.3
+   },
+   "sphere": [
+    0,
+    1.65,
+    0.0963,
+    19.476
+   ],
+   "clusters": {
+    "count": 81,
+    "levels": 2,
+    "roots": 41,
+    "finestTriangles": 1986,
+    "rootError": 0.8924
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     112,
+     52,
+     35
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 37340,
+    "baseTriangles": 554,
+    "baseVertices": 279,
+    "baseError": 0.72,
+    "outward": 0.72,
+    "inward": 0.3563,
+    "simplifyError": 0.0258,
+    "steps": 274,
+    "coreTriangles": 6,
+    "depth": 6,
+    "errorRange": [
+     0.72,
+     8.4994
+    ],
+    "inflateMax": 2.7237,
+    "rootTriangles": 1394,
+    "farFirst": 0,
+    "farFirstTriangles": 554,
+    "handoffError": 0.72
+   },
+   "splat": {
+    "centre": [
+     0,
+     3.9,
+     0.0963
+    ],
+    "ry": 3.9,
+    "rx": 11.9533,
+    "roofShare": 0,
+    "wallKind": [
+     17.02,
+     0.55127
+    ],
+    "roofKind": [
+     17.02,
+     0.55127
+    ]
+   },
+   "bakeMs": 865
+  },
+  {
+   "id": 67,
+   "name": "Wetu (Massachusett: an oval dome of bark over bent saplings)",
+   "fingerprint": "e36d9876194372ec6da42ff80566d37b5410f85a855343cac947d3207761e9bb",
+   "sourceTriangles": 394,
+   "parts": 8,
+   "quantization": {
+    "low": [
+     -2.75,
+     -4.5,
+     -2.54
+    ],
+    "span": 8.1405
+   },
+   "sphere": [
+    0.0766,
+    -0.4297,
+    0.0604,
+    6.42
+   ],
+   "clusters": {
+    "count": 16,
+    "levels": 2,
+    "roots": 8,
+    "finestTriangles": 394,
+    "rootError": 2.2945
+   },
+   "chain": {
+    "cell": 0.2261,
+    "cells": [
+     36,
+     47,
+     34
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 12008,
+    "baseTriangles": 332,
+    "baseVertices": 168,
+    "baseError": 0.4871,
+    "outward": 0.4523,
+    "inward": 0.4871,
+    "simplifyError": 0.2261,
+    "steps": 163,
+    "coreTriangles": 6,
+    "depth": 6,
+    "errorRange": [
+     0.4871,
+     5.2358
+    ],
+    "inflateMax": 0.8137,
+    "rootTriangles": 293,
+    "farFirst": 20,
+    "farFirstTriangles": 292,
+    "handoffError": 0.6022
+   },
+   "splat": {
+    "centre": [
+     0.0766,
+     1.8203,
+     0.0604
+    ],
+    "ry": 1.8203,
+    "rx": 2.6417,
+    "roofShare": 0,
+    "wallKind": [
+     17.02,
+     0.65769
+    ],
+    "roofKind": [
+     17.02,
+     0.65769
+    ]
+   },
+   "bakeMs": 1185
+  },
+  {
+   "id": 68,
+   "name": "Arbour house (Lenape and Powhatan: a long low vault of reed mats, \"like garden arbors\")",
+   "fingerprint": "80e6b6b104317b7906f7168b4d6f61a138f3f86521c5f8eb696da51191aa12e0",
+   "sourceTriangles": 2338,
+   "parts": 34,
+   "quantization": {
+    "low": [
+     -7.1,
+     -4.5,
+     -3.00251
+    ],
+    "span": 14.3775
+   },
+   "sphere": [
+    0.0887,
+    0.6475,
+    0.015,
+    10.7894
+   ],
+   "clusters": {
+    "count": 59,
+    "levels": 2,
+    "roots": 35,
+    "finestTriangles": 2338,
+    "rootError": 0.6396
+   },
+   "chain": {
+    "cell": 0.1775,
+    "cells": [
+     91,
+     69,
+     45
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 47780,
+    "baseTriangles": 460,
+    "baseVertices": 232,
+    "baseError": 0.36,
+    "outward": 0.36,
+    "inward": 0.22,
+    "simplifyError": 0.0465,
+    "steps": 227,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.36,
+     7.3021
+    ],
+    "inflateMax": 1.437,
+    "rootTriangles": 1804,
+    "farFirst": 0,
+    "farFirstTriangles": 460,
+    "handoffError": 0.36
+   },
+   "splat": {
+    "centre": [
+     0.0887,
+     2.8975,
+     0.015
+    ],
+    "ry": 2.8975,
+    "rx": 5.9063,
+    "roofShare": 0.9592,
+    "wallKind": [
+     10.02,
+     4.76687
+    ],
+    "roofKind": [
+     15.02,
+     0.6278
+    ]
+   },
+   "bakeMs": 890
+  },
+  {
+   "id": 69,
+   "name": "Bohío (Taíno: a round wall of canes under a cone of palm thatch)",
+   "fingerprint": "7ec7a65472ef753d55fc54636b0a56200c712de23ebc656bc6aa4a0e76304065",
+   "sourceTriangles": 470,
+   "parts": 13,
+   "quantization": {
+    "low": [
+     -4.15,
+     -4.5,
+     -4.08695
+    ],
+    "span": 12.15
+   },
+   "sphere": [
+    0.0687,
+    1.575,
+    0.1318,
+    9.7392
+   ],
+   "clusters": {
+    "count": 26,
+    "levels": 3,
+    "roots": 10,
+    "finestTriangles": 470,
+    "rootError": 18.1206
+   },
+   "chain": {
+    "cell": 0.3375,
+    "cells": [
+     36,
+     47,
+     36
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 10548,
+    "baseTriangles": 2372,
+    "baseVertices": 1188,
+    "baseError": 0.8995,
+    "outward": 0.8995,
+    "inward": 0.4968,
+    "simplifyError": 0.0885,
+    "steps": 1183,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.8995,
+     5.5773
+    ],
+    "inflateMax": 1.2144,
+    "rootTriangles": 215,
+    "farFirst": 1079,
+    "farFirstTriangles": 214,
+    "handoffError": 1.7355
+   },
+   "splat": {
+    "centre": [
+     0.0687,
+     3.825,
+     0.1318
+    ],
+    "ry": 3.825,
+    "rx": 3.4303,
+    "roofShare": 0.6197,
+    "wallKind": [
+     10.02,
+     2.44891
+    ],
+    "roofKind": [
+     15.02,
+     0.68405
+    ]
+   },
+   "bakeMs": 3849
+  },
+  {
+   "id": 70,
+   "name": "Caney (Taíno: the cacique's house, walls of cane under a high gable of palm thatch, a porch before it)",
+   "fingerprint": "fb840fec76b0a1cb9bf73273ba0414952a2d1408d184d967a5f0293aa051ea46",
+   "sourceTriangles": 1116,
+   "parts": 14,
+   "quantization": {
+    "low": [
+     -6.74375,
+     -4.74375,
+     -5.15868
+    ],
+    "span": 13.40625
+   },
+   "sphere": [
+    -0.0406,
+    1.8375,
+    -0.5274,
+    11.8235
+   ],
+   "clusters": {
+    "count": 40,
+    "levels": 2,
+    "roots": 18,
+    "finestTriangles": 1116,
+    "rootError": 2.568
+   },
+   "chain": {
+    "cell": 0.2438,
+    "cells": [
+     65,
+     64,
+     48
+    ],
+    "wellComposedCells": 22,
+    "wrapTriangles": 35964,
+    "baseTriangles": 2658,
+    "baseVertices": 1323,
+    "baseError": 3.0824,
+    "outward": 0.5687,
+    "inward": 3.0824,
+    "simplifyError": 0.0511,
+    "steps": 1318,
+    "coreTriangles": 6,
+    "depth": 10,
+    "errorRange": [
+     3.0824,
+     11.1118
+    ],
+    "inflateMax": 1.34,
+    "rootTriangles": 769,
+    "farFirst": 945,
+    "farFirstTriangles": 768,
+    "handoffError": 3.4565
+   },
+   "splat": {
+    "centre": [
+     -0.0406,
+     4.2094,
+     -0.5274
+    ],
+    "ry": 4.2094,
+    "rx": 5.5984,
+    "roofShare": 0.5847,
+    "wallKind": [
+     10.02,
+     4.53505
+    ],
+    "roofKind": [
+     15.02,
+     0.94381
+    ]
+   },
+   "bakeMs": 4753
+  },
+  {
+   "id": 71,
+   "name": "Maloca (Tupinambá: a long house of many families, palm thatch vaulted from the ground, a door at each end)",
+   "fingerprint": "f45182b62c816ce2ab8ee32ac267b472f73a8a3197f830f85cb914a92514f244",
+   "sourceTriangles": 2744,
+   "parts": 31,
+   "quantization": {
+    "low": [
+     -23.4,
+     -4.5,
+     -2.80214
+    ],
+    "span": 46.8
+   },
+   "sphere": [
+    0,
+    0.15,
+    -0.1021,
+    28.4829
+   ],
+   "clusters": {
+    "count": 69,
+    "levels": 2,
+    "roots": 45,
+    "finestTriangles": 2744,
+    "rootError": 1.1674
+   },
+   "chain": {
+    "cell": 0.3,
+    "cells": [
+     166,
+     42,
+     28
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 41724,
+    "baseTriangles": 730,
+    "baseVertices": 367,
+    "baseError": 0.72,
+    "outward": 0.72,
+    "inward": 0.3627,
+    "simplifyError": 0.0258,
+    "steps": 362,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.72,
+     6.8463
+    ],
+    "inflateMax": 4.6777,
+    "rootTriangles": 2268,
+    "farFirst": 0,
+    "farFirstTriangles": 730,
+    "handoffError": 0.72
+   },
+   "splat": {
+    "centre": [
+     0,
+     2.4,
+     -0.1021
+    ],
+    "ry": 2.4,
+    "rx": 16.0756,
+    "roofShare": 0.9897,
+    "wallKind": [
+     10.02,
+     4.81755
+    ],
+    "roofKind": [
+     15.02,
+     0.61028
+    ]
+   },
+   "bakeMs": 19061
+  },
+  {
+   "id": 72,
+   "name": "Long house of a chief (a vault of bark, his kin and his guard within)",
+   "fingerprint": "2f5ebcf74e59005ac0d9c2f54960ee6bbc514df156173ee87d6dfb40fa2c3103",
+   "sourceTriangles": 1308,
+   "parts": 35,
+   "quantization": {
+    "low": [
+     -6.273,
+     -4.5,
+     -3.50287
+    ],
+    "span": 12.546
+   },
+   "sphere": [
+    0,
+    0.9315,
+    0.0161,
+    10.1712
+   ],
+   "clusters": {
+    "count": 73,
+    "levels": 2,
+    "roots": 36,
+    "finestTriangles": 1308,
+    "rootError": 0.6155
+   },
+   "chain": {
+    "cell": 0.153,
+    "cells": [
+     91,
+     82,
+     57
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 63868,
+    "baseTriangles": 688,
+    "baseVertices": 346,
+    "baseError": 0.3031,
+    "outward": 0.3031,
+    "inward": 0.2187,
+    "simplifyError": 0.0205,
+    "steps": 341,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0.3031,
+     7.7622
+    ],
+    "inflateMax": 1.254,
+    "rootTriangles": 871,
+    "farFirst": 0,
+    "farFirstTriangles": 688,
+    "handoffError": 0.3031
+   },
+   "splat": {
+    "centre": [
+     0,
+     3.1815,
+     0.0161
+    ],
+    "ry": 3.1815,
+    "rx": 5.7455,
+    "roofShare": 0,
+    "wallKind": [
+     17.02,
+     0.57712
+    ],
+    "roofKind": [
+     17.02,
+     0.57712
+    ]
+   },
+   "bakeMs": 9490
+  },
+  {
+   "id": 73,
+   "name": "Charnel house (Powhatan: a vault of mats on a scaffold of poles, the dead of the chiefs within; carved posts before it)",
+   "fingerprint": "3ebc0fed472887b53f465ef76f3d4a6ab608017abe7ed70f185a5400b5f78ad7",
+   "sourceTriangles": 2022,
+   "parts": 32,
+   "quantization": {
+    "low": [
+     -6.76217,
+     -4.5,
+     -2.50224
+    ],
+    "span": 12.9217
+   },
+   "sphere": [
+    -0.3013,
+    0.6049,
+    0.0502,
+    9.9222
+   ],
+   "clusters": {
+    "count": 61,
+    "levels": 2,
+    "roots": 37,
+    "finestTriangles": 2022,
+    "rootError": 1.4
+   },
+   "chain": {
+    "cell": 0.1595,
+    "cells": [
+     91,
+     75,
+     43
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 49772,
+    "baseTriangles": 180,
+    "baseVertices": 92,
+    "baseError": 0.4925,
+    "outward": 0.317,
+    "inward": 0.4925,
+    "simplifyError": 0.1595,
+    "steps": 87,
+    "coreTriangles": 6,
+    "depth": 5,
+    "errorRange": [
+     0.4925,
+     6.0694
+    ],
+    "inflateMax": 1.2915,
+    "rootTriangles": 1738,
+    "farFirst": 0,
+    "farFirstTriangles": 180,
+    "handoffError": 0.4925
+   },
+   "splat": {
+    "centre": [
+     -0.3013,
+     2.8549,
+     0.0502
+    ],
+    "ry": 2.8549,
+    "rx": 5.4652,
+    "roofShare": 0.9332,
+    "wallKind": [
+     10.02,
+     2.44758
+    ],
+    "roofKind": [
+     15.02,
+     0.71015
+    ]
+   },
+   "bakeMs": 1261
+  },
+  {
+   "id": 74,
+   "name": "Sweat lodge (a small dome of bark, its stones heated at the door)",
+   "fingerprint": "21a70898947a1f2f3ef04c1e3ffced175ca35cd02b925aec27cb8f0d78c8cb40",
+   "sourceTriangles": 324,
+   "parts": 8,
+   "quantization": {
+    "low": [
+     -1.25,
+     -4.5,
+     -2.04641
+    ],
+    "span": 6.62175
+   },
+   "sphere": [
+    0.0376,
+    -1.1891,
+    -0.391,
+    4.5911
+   ],
+   "clusters": {
+    "count": 15,
+    "levels": 2,
+    "roots": 7,
+    "finestTriangles": 324,
+    "rootError": 1.5907
+   },
+   "chain": {
+    "cell": 0.1226,
+    "cells": [
+     32,
+     65,
+     38
+    ],
+    "wellComposedCells": 5,
+    "wrapTriangles": 16072,
+    "baseTriangles": 1874,
+    "baseVertices": 939,
+    "baseError": 0.3315,
+    "outward": 0.3315,
+    "inward": 0.1638,
+    "simplifyError": 0.0257,
+    "steps": 934,
+    "coreTriangles": 6,
+    "depth": 8,
+    "errorRange": [
+     0.3315,
+     4.9913
+    ],
+    "inflateMax": 0.6619,
+    "rootTriangles": 195,
+    "farFirst": 840,
+    "farFirstTriangles": 194,
+    "handoffError": 0.6135
+   },
+   "splat": {
+    "centre": [
+     0.0376,
+     1.0609,
+     -0.391
+    ],
+    "ry": 1.0609,
+    "rx": 1.2566,
+    "roofShare": 0,
+    "wallKind": [
+     17.02,
+     0.64402
+    ],
+    "roofKind": [
+     17.02,
+     0.64402
+    ]
+   },
+   "bakeMs": 2542
+  },
+  {
+   "id": 75,
    "name": "Cerca (post-and-rail fence, a length)",
    "fingerprint": "d51ad1154a2c6092c0370b16605db99ab955bc8fb03e7d03559a373a58b82dee",
    "sourceTriangles": 118,
@@ -5066,10 +5741,10 @@
      2.52996
     ]
    },
-   "bakeMs": 362
+   "bakeMs": 169
   },
   {
-   "id": 67,
+   "id": 76,
    "name": "Muro de pedra solta (dry-stone wall, a length)",
    "fingerprint": "48a7a4d2cba810d7541f3e91270cfe36256311584cd68b24243e3b167aa60985",
    "sourceTriangles": 124,
@@ -5141,10 +5816,10 @@
      0.63846
     ]
    },
-   "bakeMs": 637
+   "bakeMs": 452
   },
   {
-   "id": 68,
+   "id": 77,
    "name": "Pontão (timber bridge of a track)",
    "fingerprint": "60925434e7935386a0c682c1303aa126de90a0afea6e55a7f7fec7ad718571ca",
    "sourceTriangles": 556,
@@ -5216,10 +5891,10 @@
      6.80411
     ]
    },
-   "bakeMs": 7584
+   "bakeMs": 5001
   },
   {
-   "id": 69,
+   "id": 78,
    "name": "Ponte de pedra (stone bridge of a track, arched with cutwaters)",
    "fingerprint": "be47754064b0af6fb601ff4474280b34dd687e2dbccbc4f405d754de4051acfd",
    "sourceTriangles": 880,
@@ -5291,10 +5966,10 @@
      0.63038
     ]
    },
-   "bakeMs": 6510
+   "bakeMs": 11435
   },
   {
-   "id": 70,
+   "id": 79,
    "name": "Ponte de pedra — level interior arch span without mid-river ramp dips",
    "fingerprint": "ceb638fb60ca622c3a3a4cd013dbc109c69805b74d3b7b7e8ae5cabc34d636ec",
    "sourceTriangles": 856,
@@ -5366,10 +6041,10 @@
      0.92517
     ]
    },
-   "bakeMs": 6116
+   "bakeMs": 8841
   },
   {
-   "id": 71,
+   "id": 80,
    "name": "Campas (graves of a churchyard)",
    "fingerprint": "326b050e0605daa960cbf330b8dfa1129536eb4e937b4f4f9ef14b2b43b4ceaf",
    "sourceTriangles": 150,
@@ -5441,10 +6116,10 @@
      0.89663
     ]
    },
-   "bakeMs": 7149
+   "bakeMs": 10073
   },
   {
-   "id": 72,
+   "id": 81,
    "name": "Moledro (memorial cairn)",
    "fingerprint": "e098a3c697879677b88e5b0c47076139a293d8e180cc6f512e014801acf8f568",
    "sourceTriangles": 41,
@@ -5516,10 +6191,10 @@
      0.60524
     ]
    },
-   "bakeMs": 3918
+   "bakeMs": 4614
   },
   {
-   "id": 73,
+   "id": 82,
    "name": "Tenda (a tent of a camp)",
    "fingerprint": "39893df25491991d8cadf65f70c1bcfad31550da0fb0c06caff1e3184e2c5d17",
    "sourceTriangles": 44,
@@ -5591,10 +6266,10 @@
      0.62379
     ]
    },
-   "bakeMs": 12089
+   "bakeMs": 13887
   },
   {
-   "id": 74,
+   "id": 83,
    "name": "Estandarte (the standard of a host)",
    "fingerprint": "74e965d9c6a8897870befa4541a5509c910987b584ca1e11d015a01c72ed2506",
    "sourceTriangles": 52,
@@ -5666,10 +6341,10 @@
      0.88115
     ]
    },
-   "bakeMs": 80
+   "bakeMs": 177
   },
   {
-   "id": 75,
+   "id": 84,
    "name": "Andaime (a work in hand: scaffold, stone and timber stacked by it)",
    "fingerprint": "a4c2e35d7fb072a8c5f08f3c9f2262552b1f1d8f24730d106496a5c0a63a8e85",
    "sourceTriangles": 458,
@@ -5741,18 +6416,93 @@
      4.80962
     ]
    },
-   "bakeMs": 5607
+   "bakeMs": 7294
+  },
+  {
+   "id": 85,
+   "name": "Palisade (stakes set in a bank of earth, pointed, bound with two rails; a length)",
+   "fingerprint": "f3d57e25592f0eb7fbdfbfdbbcfc27f7ec804457733df1c121f0712470c765f0",
+   "sourceTriangles": 591,
+   "parts": 33,
+   "quantization": {
+    "low": [
+     -0.66062,
+     -1.3,
+     -2.63063
+    ],
+    "span": 5.97375
+   },
+   "sphere": [
+    -0.0522,
+    1.6869,
+    -0.0309,
+    4.6133
+   ],
+   "clusters": {
+    "count": 67,
+    "levels": 3,
+    "roots": 33,
+    "finestTriangles": 591,
+    "rootError": 1.5976
+   },
+   "chain": {
+    "cell": 0.1106,
+    "cells": [
+     21,
+     65,
+     57
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 15896,
+    "baseTriangles": 2314,
+    "baseVertices": 1159,
+    "baseError": 0.2387,
+    "outward": 0.2387,
+    "inward": 0.2157,
+    "simplifyError": 0.0232,
+    "steps": 1154,
+    "coreTriangles": 6,
+    "depth": 9,
+    "errorRange": [
+     0.2387,
+     2.9519
+    ],
+    "inflateMax": 0.5971,
+    "rootTriangles": 323,
+    "farFirst": 996,
+    "farFirstTriangles": 322,
+    "handoffError": 0.5935
+   },
+   "splat": {
+    "centre": [
+     -0.0522,
+     2.3369,
+     -0.0309
+    ],
+    "ry": 2.3369,
+    "rx": 1.6777,
+    "roofShare": 0,
+    "wallKind": [
+     10.02,
+     2.50857
+    ],
+    "roofKind": [
+     10.02,
+     2.50857
+    ]
+   },
+   "bakeMs": 7836
   }
  ],
  "atlas": {
-  "words": 2760808,
-  "bytes": 11043232,
-  "sha256": "dba878ac9ab34dcc8573d14bc1f4923eaeea075c96e232deb7ad7bedba483c5f",
+  "words": 3012261,
+  "bytes": 12049044,
+  "sha256": "34baa858db5cd6b36f27d8ec1a7a7087959f9e435316eda6f0bb7435c7016ac8",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 3847071,
-   "sha256": "927d95824d7b80dbfec3aa383b9ac36375e9fb12da8bdc11d4c7e9fe9b4069e0"
+   "bytes": 4182391,
+   "sha256": "9b8688b6ee01a668c851cefeadf29aca1624a9eb4d0b4f1e42b997975f217bf1"
   }
  },
- "bakeSeconds": 292.6
+ "bakeSeconds": 329.8
 }
