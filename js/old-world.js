@@ -2,16 +2,14 @@
 // Old World country. A port of Portugal or Spain is no clearing in a forest. It is a city grown
 // over centuries on its own shore, with walled gardens under it, olives and vines on the slopes,
 // corn on the easy ground, rough grazing and scrub on the heights, and a wood only here and there.
-// Nothing here is traced from a map: the town is grown over the real ground from its waterfront,
-// and the country is a lattice of holdings, each put to the use its own ground suits. The
-// procedures are those of Castle and Commons (a town grown by the cost of the ground, a lattice of
-// furlongs), re-hosted on this game's elevation and scaled to a city of a hundred thousand.
-// Where Castle and Commons' own model has founded a port's country ahead of time (a baked board:
-// js/board-model.js), that board is what stands, and the rules here only colour and plant it.
+// Every city here is its board: Castle and Commons' own generator (assets/board/game.js), fitted
+// to this game's ground and founded on it ahead of time (scripts/bake-board.mjs, js/board-model.js).
+// The board decides what stands where; js/old-world-board.js stands it as this game's Cairn types,
+// forests and water, and the rules here only colour and plant it. Ground that holds no city is a
+// lattice of holdings, each put to the use its own ground suits.
 
-import { CITY_GROUND, CITY_TREES, layOldWorldCity } from './old-world-city.js';
+import { CITY_TREES } from './old-world-city.js';
 import { layBoardCountry } from './old-world-board.js';
-import { boardGroundFits } from './board-model.js';
 
 const DEG = Math.PI / 180;
 const OLD_WORLD_METRES_PER_DEGREE = 111195;
@@ -31,23 +29,27 @@ const HOLDING_LIE = Object.freeze([0.31, 1.28].map((a) => Object.freeze([Math.co
 const HOLDING_BEND_METRES = 80;
 
 // People by year, read from period counts and later estimates, to the nearest few thousand; where
-// the record is thin the figure is a judgement. A city's ground follows from its people.
+// the record is thin the figure is a judgement. A city's ground follows from its people. `port` is the
+// coast (js/coastal-world.js) whose ground holds the city and under whose name its board is baked; a
+// city with none has no ground of this game's making to stand on yet (see `unboarded`).
 export const OLD_WORLD_CITIES = Object.freeze([
-  { id: 'lisbon', name: 'Lisboa', latitude: 38.7075, longitude: -9.1365, people: [[1500, 65000], [1550, 100000], [1620, 150000], [1690, 180000]] },
-  { id: 'seville', name: 'Sevilla', latitude: 37.3826, longitude: -5.9963, people: [[1500, 60000], [1550, 100000], [1600, 130000], [1650, 70000], [1690, 80000]] },
-  { id: 'porto', name: 'Porto', latitude: 41.1406, longitude: -8.6110, people: [[1500, 12000], [1620, 20000], [1690, 25000]] },
-  { id: 'cadiz', name: 'Cádiz', latitude: 36.5297, longitude: -6.2927, people: [[1500, 3000], [1600, 7000], [1650, 22000], [1690, 40000]] },
-  { id: 'sanlucar', name: 'Sanlúcar de Barrameda', latitude: 36.7783, longitude: -6.3515, people: [[1500, 6000], [1580, 10000], [1690, 9000]] },
-  { id: 'palos', name: 'Palos de la Frontera', latitude: 37.2289, longitude: -6.8936, people: [[1500, 2700], [1550, 1500], [1690, 600]] },
-  { id: 'huelva', name: 'Huelva', latitude: 37.2583, longitude: -6.9508, people: [[1500, 3500], [1690, 5000]] },
-  { id: 'la-coruna', name: 'La Coruña', latitude: 43.3709, longitude: -8.3959, people: [[1500, 3000], [1600, 5000], [1690, 7000]] },
-  { id: 'setubal', name: 'Setúbal', latitude: 38.5244, longitude: -8.8926, people: [[1500, 6000], [1690, 12000]] },
+  { id: 'lisbon', name: 'Lisboa', latitude: 38.7075, longitude: -9.1365, port: 'lisbon', people: [[1500, 65000], [1550, 100000], [1620, 150000], [1690, 180000]] },
+  // Both stand on rivers whose water the elevation survey reads metres above the sea: the land is made where the
+  // coast is found instead (Seville's 50 km down the Guadalquivir, Porto's at the Douro bar), never round the city.
+  { id: 'seville', name: 'Sevilla', latitude: 37.3826, longitude: -5.9963, port: null, unboarded: 'the Guadalquivir at the Arenal reads above sea level; its coast is 50 km downriver', people: [[1500, 60000], [1550, 100000], [1600, 130000], [1650, 70000], [1690, 80000]] },
+  { id: 'porto', name: 'Porto', latitude: 41.1406, longitude: -8.6110, port: null, unboarded: 'the Douro at the Ribeira reads above sea level; its coast is the bar, 4 km downriver', people: [[1500, 12000], [1620, 20000], [1690, 25000]] },
+  { id: 'cadiz', name: 'Cádiz', latitude: 36.5297, longitude: -6.2927, port: 'cadiz', people: [[1500, 3000], [1600, 7000], [1650, 22000], [1690, 40000]] },
+  { id: 'sanlucar', name: 'Sanlúcar de Barrameda', latitude: 36.7783, longitude: -6.3515, port: 'sanlucar', people: [[1500, 6000], [1580, 10000], [1690, 9000]] },
+  { id: 'palos', name: 'Palos de la Frontera', latitude: 37.2289, longitude: -6.8936, port: 'palos-huelva', people: [[1500, 2700], [1550, 1500], [1690, 600]] },
+  { id: 'huelva', name: 'Huelva', latitude: 37.2583, longitude: -6.9508, port: 'huelva', people: [[1500, 3500], [1690, 5000]] },
+  { id: 'la-coruna', name: 'La Coruña', latitude: 43.3709, longitude: -8.3959, port: 'la-coruna', people: [[1500, 3000], [1600, 5000], [1690, 7000]] },
+  { id: 'setubal', name: 'Setúbal', latitude: 38.5244, longitude: -8.8926, port: 'setubal', people: [[1500, 6000], [1690, 12000]] },
 ].map((city) => Object.freeze({ ...city, people: Object.freeze(city.people.map(Object.freeze)) })));
 
 // The towns, villages and religious houses that stood round a city by the middle of the sixteenth century: name,
 // latitude, longitude, and weight (9 a town that must stand, 6 a hamlet that should). The board's founders favour
 // these spots over any other and its places take these names (js/board-model.js). Positions are to a few hundred
-// metres.
+// metres; a place beyond the city's ground (some 3.8 km from its middle) is left to the ground that holds it.
 export const OLD_WORLD_PLACES = Object.freeze({
   lisbon: Object.freeze([
     ['Alcântara', 38.7052, -9.1745, 8], ['Santos', 38.7068, -9.1552, 6], ['Xabregas', 38.7262, -9.1127, 7],
@@ -55,6 +57,16 @@ export const OLD_WORLD_PLACES = Object.freeze({
     ['Campolide', 38.7307, -9.1668, 6], ['São Sebastião da Pedreira', 38.7345, -9.1525, 6], ['Beato', 38.7335, -9.1050, 6],
     ['Marvila', 38.7415, -9.1040, 6],
   ].map(Object.freeze)),
+  // The Franciscan friary on the bluff over the meeting of the Tinto and the Odiel.
+  palos: Object.freeze([['La Rábida', 37.2085, -6.9256, 7]].map(Object.freeze)),
+  // The hermitage of the Virgin of La Cinta on the cabezo north-east of the town.
+  huelva: Object.freeze([['Nuestra Señora de la Cinta', 37.2747, -6.9361, 6]].map(Object.freeze)),
+  // The fishermen's quarter below the walls, and the parishes of the isthmus.
+  'la-coruna': Object.freeze([
+    ['A Pescadería', 43.3685, -8.4040, 7], ['Monelos', 43.3560, -8.4100, 6], ['Elviña', 43.3430, -8.4200, 6],
+  ].map(Object.freeze)),
+  // The river beach the fleets sailed from, and the anchorage of Bonanza up the Guadalquivir.
+  sanlucar: Object.freeze([['Bajo de Guía', 36.7841, -6.3584, 6], ['Bonanza', 36.8025, -6.3355, 6]].map(Object.freeze)),
 });
 
 // How far a city shapes the use of the land around it, beyond its own edge.
@@ -88,6 +100,21 @@ export function oldWorldPeople(city, year = 1550) {
     }
   }
   return counts[counts.length - 1][1];
+}
+
+// The city whose recorded site lies on a region's own ground, or none: the city its board founds there.
+export function oldWorldCityHeld(region) {
+  if (!region || !Number.isFinite(region.latitude) || !Number.isFinite(region.longitude) || !inIberia(region.latitude, region.longitude)) return null;
+  const geoSpan = region.demGeoSpan || (region.span < 4000 ? 6800 : region.span), scale = region.span / geoSpan, half = region.span / 2;
+  const cos = Math.max(0.1, Math.cos(region.latitude * DEG));
+  let best = null, least = Infinity;
+  for (const city of OLD_WORLD_CITIES) {
+    const x = (city.longitude - region.longitude) * OLD_WORLD_METRES_PER_DEGREE * cos * scale;
+    const z = (region.latitude - city.latitude) * OLD_WORLD_METRES_PER_DEGREE * scale;
+    if (Math.abs(x) >= half || Math.abs(z) >= half) continue;
+    if (Math.hypot(x, z) < least) { least = Math.hypot(x, z); best = city; }
+  }
+  return best;
 }
 
 // The city whose country this spot lies in, or none.
@@ -190,184 +217,6 @@ function distanceTo(marked, n, step) {
   return d;
 }
 
-const DRY_GROUND_METRES = 0.9;
-
-// Grow a town over the ground from its waterfront until it covers the area its people need. Each
-// step outward costs its length, more uphill and less along the water, so the town spreads along
-// its shore and climbs the easier slopes first, as a real one did. What comes back is where the
-// town stands (0 to 1), how far beyond its edge each point lies, and how early each part was
-// taken up (0 at the waterfront, 1 at the last ground to fill), which later tells the old walled
-// core from the suburbs.
-export function growOldWorldTown(heights, region, seat, areaSquareMetres) {
-  const grid = sampler(heights, region), { n, step } = grid, count = n * n;
-  const dry = new Uint8Array(count), wet = new Uint8Array(count);
-  for (let k = 0; k < count; k++) { dry[k] = heights[k] > DRY_GROUND_METRES ? 1 : 0; wet[k] = heights[k] <= 0.25 ? 1 : 0; }
-  const inland = distanceTo(wet, n, step);
-  const effort = new Float32Array(count);
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-    const k = j * n + i;
-    const gx = (heights[j * n + Math.min(n - 1, i + 1)] - heights[j * n + Math.max(0, i - 1)]) / (2 * step);
-    const gz = (heights[Math.min(n - 1, j + 1) * n + i] - heights[Math.max(0, j - 1) * n + i]) / (2 * step);
-    const slope = Math.hypot(gx, gz);
-    effort[k] = (1 + (slope / 0.24) ** 2) * (0.5 + 0.5 * smooth(150, 1300, inland[k])) * (heights[k] < 1.6 ? 2.5 : 1);
-  }
-  // The seat itself may sit on a quay over water: start from the nearest dry ground.
-  let start = -1, least = Infinity;
-  const si = Math.round((seat.x - grid.x0) / step), sj = Math.round((seat.z - grid.z0) / step), reach = Math.ceil(600 / step);
-  for (let j = Math.max(0, sj - reach); j <= Math.min(n - 1, sj + reach); j++) for (let i = Math.max(0, si - reach); i <= Math.min(n - 1, si + reach); i++) {
-    const d = (i - si) * (i - si) + (j - sj) * (j - sj);
-    if (dry[j * n + i] && d < least) { least = d; start = j * n + i; }
-  }
-  const taken = new Float32Array(count).fill(-1);
-  if (start < 0) return { grid, urban: new Float32Array(count), beyond: new Float32Array(count).fill(1e9), early: taken, area: 0, inland };
-  const wanted = Math.max(1, Math.round(areaSquareMetres / (step * step)));
-  const cost = new Float32Array(count).fill(Infinity), heap = [], done = new Uint8Array(count);
-  const push = (k, c) => { let i = heap.length; heap.push([c, k]); while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= c) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
-  const pop = () => {
-    const first = heap[0], last = heap.pop();
-    if (heap.length) {
-      heap[0] = last;
-      for (let i = 0; ;) {
-        const l = i * 2 + 1, r = l + 1; let m = i;
-        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-        if (m === i) break;
-        [heap[m], heap[i]] = [heap[i], heap[m]]; i = m;
-      }
-    }
-    return first;
-  };
-  cost[start] = 0; push(start, 0);
-  let filled = 0;
-  while (heap.length && filled < wanted) {
-    const [c, k] = pop();
-    if (done[k]) continue;
-    done[k] = 1; taken[k] = filled++ / wanted;
-    const i = k % n, j = (k - i) / n;
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      if (!di && !dj) continue;
-      const ni = i + di, nj = j + dj;
-      if (ni < 1 || nj < 1 || ni >= n - 1 || nj >= n - 1) continue;
-      const q = nj * n + ni;
-      if (done[q] || !dry[q]) continue;
-      const next = c + step * (di && dj ? Math.SQRT2 : 1) * 0.5 * (effort[k] + effort[q]);
-      if (next < cost[q]) { cost[q] = next; push(q, next); }
-    }
-  }
-  // Round the ragged front the growth leaves, then measure outward from the rounded edge.
-  let soft = new Float32Array(count);
-  for (let k = 0; k < count; k++) soft[k] = done[k];
-  for (let pass = 0; pass < 2; pass++) {
-    const out = new Float32Array(count);
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-      let sum = 0, w = 0;
-      for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) {
-        const ni = i + di, nj = j + dj;
-        if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
-        sum += soft[nj * n + ni]; w++;
-      }
-      out[j * n + i] = sum / w;
-    }
-    soft = out;
-  }
-  const urban = new Float32Array(count), inside = new Uint8Array(count);
-  let area = 0;
-  for (let k = 0; k < count; k++) {
-    urban[k] = dry[k] ? smooth(0.32, 0.68, soft[k]) : 0;
-    if (urban[k] >= 0.5) { inside[k] = 1; area += step * step; }
-  }
-  // Ground the rounding added takes the age of the last ground grown.
-  for (let k = 0; k < count; k++) if (inside[k] && taken[k] < 0) taken[k] = 1;
-  return { grid, urban, beyond: distanceTo(inside, n, step), early: taken, area, inland };
-}
-
-// Roads out of a town: from its waterfront to wherever dry land leaves the region, each by the
-// least toil over the ground, so they keep to valley floors and easy spurs. One search from the
-// waterfront reaches everywhere; each road is traced back from the border until it meets a road
-// already laid, so they share a trunk until their ways part.
-export function layOldWorldRoads(heights, region, seat) {
-  const full = sampler(heights, region), skip = Math.max(1, Math.round(32 / full.step));
-  const n = Math.floor((full.n - 1) / skip) + 1, step = full.step * skip, count = n * n;
-  const h = new Float32Array(count);
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) h[j * n + i] = heights[j * skip * full.n + i * skip];
-  const effort = new Float32Array(count);
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-    const k = j * n + i;
-    if (h[k] <= DRY_GROUND_METRES) { effort[k] = Infinity; continue; }
-    const gx = (h[j * n + Math.min(n - 1, i + 1)] - h[j * n + Math.max(0, i - 1)]) / (2 * step);
-    const gz = (h[Math.min(n - 1, j + 1) * n + i] - h[Math.max(0, j - 1) * n + i]) / (2 * step);
-    effort[k] = (1 + (Math.hypot(gx, gz) / 0.13) ** 2) * (h[k] < 1.8 ? 2.5 : 1);
-  }
-  const si = Math.round((seat.x - full.x0) / step), sj = Math.round((seat.z - full.z0) / step), reach = Math.ceil(600 / step);
-  let start = -1, least = Infinity;
-  for (let j = Math.max(0, sj - reach); j <= Math.min(n - 1, sj + reach); j++) for (let i = Math.max(0, si - reach); i <= Math.min(n - 1, si + reach); i++) {
-    const d = (i - si) * (i - si) + (j - sj) * (j - sj);
-    if (effort[j * n + i] < Infinity && d < least) { least = d; start = j * n + i; }
-  }
-  if (start < 0) return [];
-  const cost = new Float32Array(count).fill(Infinity), from = new Int32Array(count).fill(-1), done = new Uint8Array(count), heap = [];
-  const push = (k, c) => { let i = heap.length; heap.push([c, k]); while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= c) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
-  const pop = () => {
-    const first = heap[0], last = heap.pop();
-    if (heap.length) {
-      heap[0] = last;
-      for (let i = 0; ;) {
-        const l = i * 2 + 1, r = l + 1; let m = i;
-        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-        if (m === i) break;
-        [heap[m], heap[i]] = [heap[i], heap[m]]; i = m;
-      }
-    }
-    return first;
-  };
-  cost[start] = 0; push(start, 0);
-  while (heap.length) {
-    const [c, k] = pop();
-    if (done[k]) continue;
-    done[k] = 1;
-    const i = k % n, j = (k - i) / n;
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      if (!di && !dj) continue;
-      const ni = i + di, nj = j + dj;
-      if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
-      const q = nj * n + ni;
-      if (done[q] || effort[q] === Infinity) continue;
-      const next = c + step * (di && dj ? Math.SQRT2 : 1) * 0.5 * (effort[k] + effort[q]);
-      if (next < cost[q]) { cost[q] = next; from[q] = k; push(q, next); }
-    }
-  }
-  // Where the roads leave: the border of the region on each of sixteen bearings, if dry land.
-  const ends = [], ci = start % n, cj = (start - ci) / n;
-  for (let b = 0; b < 16; b++) {
-    const dx = Math.cos(b * Math.PI / 8), dz = Math.sin(b * Math.PI / 8);
-    const far = Math.min(dx > 0 ? (n - 2 - ci) / dx : dx < 0 ? (1 - ci) / dx : Infinity, dz > 0 ? (n - 2 - cj) / dz : dz < 0 ? (1 - cj) / dz : Infinity);
-    const k = Math.round(cj + dz * far) * n + Math.round(ci + dx * far);
-    if (!(cost[k] < Infinity)) continue;
-    if (ends.every((e) => Math.hypot(e % n - k % n, Math.floor(e / n) - Math.floor(k / n)) * step > 1100)) ends.push(k);
-  }
-  ends.sort((a, b) => cost[a] - cost[b]);
-  const laid = new Uint8Array(count), roads = [];
-  for (const end of ends) {
-    const cells = [];
-    for (let k = end; k >= 0; k = from[k]) { cells.push(k); if (laid[k]) break; }
-    if (cells.length < 3) continue;
-    for (const k of cells) laid[k] = 1;
-    let line = cells.filter((_, at) => at % 3 === 0 || at === cells.length - 1).map((k) => [full.x0 + (k % n) * step, full.z0 + Math.floor(k / n) * step]);
-    for (let pass = 0; pass < 2 && line.length > 2; pass++) {
-      const eased = [line[0]];
-      for (let at = 0; at < line.length - 1; at++) {
-        const [ax, az] = line[at], [bx, bz] = line[at + 1];
-        eased.push([ax * 0.75 + bx * 0.25, az * 0.75 + bz * 0.25], [ax * 0.25 + bx * 0.75, az * 0.25 + bz * 0.75]);
-      }
-      eased.push(line[line.length - 1]);
-      line = eased;
-    }
-    roads.push(line);
-  }
-  return roads;
-}
-
 // Every stretch of road sorted into a coarse grid, so the nearest one to a point is quick to find.
 function indexRoads(roads, region) {
   const cell = 96, x0 = region.x - region.span / 2, z0 = region.z - region.span / 2, w = Math.ceil(region.span / cell) + 1;
@@ -417,6 +266,16 @@ export function registerBakedBoard(baked) {
 export function bakedBoardFor(region) {
   return bakedBoards.get(`${region.id}:${region.year ?? 1550}`) || null;
 }
+// A city on ground that holds it, with no board founded there: it stands as open country, and says why once.
+const unbakedSaid = new Set();
+function unbakedCity(city, region, baked) {
+  const key = `${region.id}:${region.year ?? 1550}`;
+  if (unbakedSaid.has(key)) return;
+  unbakedSaid.add(key);
+  console.error(baked
+    ? `${city.name}: its board of ${region.year ?? 1550} was founded on ${baked.board?.span} m of ground, not this ${region.span}; bake it again (node scripts/bake-board.mjs ${region.id})`
+    : `${city.name} has no board for ${region.id} in ${region.year ?? 1550}: bake one (node scripts/bake-board.mjs ${region.id})`);
+}
 
 // The country a region's ground belongs to, or null where the old rules of a wild shore hold.
 // One is made per elevation field and kept, since land cover, ground colour and planting all ask.
@@ -451,48 +310,32 @@ function makeCountry(region, heights, port, explicitBaked = null) {
   const grid = sampler(heights, region), heightAt = grid.at;
   const geoSpan = region.demGeoSpan || (region.span < 4000 ? 6800 : region.span), scale = region.span / geoSpan;
   const cos = Math.max(0.1, Math.cos(region.latitude * DEG));
-  const city = oldWorldCityNear(region.latitude, region.longitude);
+  // The city whose site lies on this ground is its board's; one beyond it only shapes the use of the country.
+  const held = oldWorldCityHeld(region), city = held ?? oldWorldCityNear(region.latitude, region.longitude);
   const year = region.year ?? 1550;
   const people = city ? oldWorldPeople(city, year) : 0;
   const cityArea = city ? (people / cityDensityPerHectare(people)) * 10000 : 0;
   const cityX = city ? region.x + (city.longitude - region.longitude) * OLD_WORLD_METRES_PER_DEGREE * cos * scale : 0;
   const cityZ = city ? region.z - (city.latitude - region.latitude) * OLD_WORLD_METRES_PER_DEGREE * scale : 0;
   const cityRadius = Math.sqrt(cityArea / Math.PI) * 1.15;
-  const half = region.span / 2;
-  const holdsCity = Boolean(city && port && port.clearRadius > 0 && port.center &&
-    Math.abs(cityX - region.x) < half && Math.abs(cityZ - region.z) < half);
+  const holdsCity = Boolean(held && port && port.clearRadius > 0 && port.center);
   const marked = () => { const w = new Uint8Array(heights.length); for (let k = 0; k < w.length; k++) w[k] = heights[k] <= 0.25 ? 1 : 0; return w; };
-  // A board founded for this port on this ground stands in place of the town and country made here. One founded
-  // on other ground (the same port on a coast made by other rules) is left aside, and the rules here make it.
+  // The city is its board, founded for this port on the ground the game makes for it (scripts/bake-board.mjs). A
+  // city with no board founded for this ground has no town: it is baked, never grown here.
   const baked = explicitBaked ?? (holdsCity ? bakedBoardFor(region) : null);
+  const standsBoard = Boolean(baked && baked.board?.span === region.span);
+  if (holdsCity && !standsBoard) unbakedCity(city, region, baked);
   if (uncarvedSurveys.has(heights)) heights.set(uncarvedSurveys.get(heights));
-  const fitsBoard = Boolean(baked && baked.board?.span === region.span && (explicitBaked || boardGroundFits(baked.survey, heights)));
-  if (fitsBoard && !uncarvedSurveys.has(heights)) uncarvedSurveys.set(heights, heights.slice());
-  const stood = fitsBoard
+  if (standsBoard && !uncarvedSurveys.has(heights)) uncarvedSurveys.set(heights, heights.slice());
+  const stood = standsBoard
     ? layBoardCountry({ baked, region, grid, heights, heightAt, port, wet: marked(), LAND: OLD_WORLD_LAND, fieldAt, distanceTo }) : null;
-  const town = stood ? stood.town : holdsCity ? growOldWorldTown(heights, region, port.center, cityArea) : null;
-  const wet = town ? null : marked();
-  const inland = town ? town.inland : distanceTo(wet, grid.n, grid.step);
+  const town = stood ? stood.town : null;
+  const inland = town ? town.inland : distanceTo(marked(), grid.n, grid.step);
   const beyondTown = (x, z) => town ? fieldAt(town.beyond, grid, x, z) : city ? Math.max(0, Math.hypot(x - cityX, z - cityZ) - cityRadius) : 1e9;
-  const roads = stood ? stood.roads : town ? layOldWorldRoads(heights, region, port.center) : [];
+  const roads = stood ? stood.roads : [];
   const roadNear = roads.length ? indexRoads(roads, region) : null;
-  // The city itself: streets, lots, wall, castle, churches and squares on the grown ground.
-  const plan = stood ? stood.plan : town ? layOldWorldCity({
-    heightAt,
-    urbanAt: (x, z) => fieldAt(town.urban, grid, x, z),
-    earlyAt: (x, z) => {
-      const i = Math.round((x - grid.x0) / grid.step), j = Math.round((z - grid.z0) / grid.step);
-      return i < 0 || j < 0 || i >= grid.n || j >= grid.n ? -1 : town.early[j * grid.n + i];
-    },
-    inlandAt: (x, z) => fieldAt(inland, grid, x, z),
-    seat: port.center, roads, people,
-    obstacles: (port.instances || []).map((inst) => ({
-      x: inst.x, z: inst.z, w: inst.width ?? 12, d: inst.depth ?? inst.length ?? 20,
-      c: inst._cosNegYaw ?? Math.cos(inst.yaw ?? 0), s: inst._sinNegYaw ?? Math.sin(inst.yaw ?? 0),
-    })),
-    ways: port.streets?.ways || [],
-    bounds: { x0: region.x - half, z0: region.z - half, x1: region.x + half, z1: region.z + half },
-  }) : null;
+  // The city itself: its streets, lots, walls, castle, churches and squares, as the board laid them.
+  const plan = stood ? stood.plan : null;
   // Trees line a road near the town and by stretches beyond it.
   const roadLined = (way, x, z) => beyondTown(x, z) < 600 || unit(oldWorldHash(way.id, Math.floor(way.arc / 260), 0x2ffd72db)) < 0.5;
   const holdings = new Map();
@@ -599,26 +442,11 @@ function makeCountry(region, heights, port, explicitBaked = null) {
       if (way && way.distance < 14 && roadLined(way, x, z)) vegetation = Math.max(vegetation, SOME_TREES);
       return { kind, vegetation };
     }
+    // Ground that holds no board is open country: no town stands on it, and its holdings are coloured here.
     const base = COLOUR[kind], fine = drift(x, z, 22, 0x38d01377) - 0.5, broad = drift(x, z, 140, 0xbe5466cf) - 0.5;
-    const tone = 1 + (use.shade - 0.5) * (kind === OLD_WORLD_LAND.CITY ? 0 : 0.22) + fine * 0.16 + broad * 0.12;
+    const tone = 1 + (use.shade - 0.5) * 0.22 + fine * 0.16 + broad * 0.12;
     let r = base[0] * tone, g = base[1] * tone, b = base[2] * tone;
-    if (kind === OLD_WORLD_LAND.CITY) {
-      // The town's ground as its plan has it: roofs where houses stand (the houses themselves
-      // are drawn on top), streets, paved squares, walled gardens, and yards behind the rows.
-      const what = plan ? plan.groundAt(x, z) : CITY_GROUND.YARD;
-      const lit = 0.84 + 0.3 * unit(oldWorldHash(Math.floor(x / 7), Math.floor(z / 7), 0xfc2bc9d7));
-      if (what === CITY_GROUND.HOUSE) { r = 158 * lit; g = 94 * lit; b = 66 * lit; }
-      else if (what === CITY_GROUND.STREET) { r = 134; g = 124; b = 108; }
-      else if (what === CITY_GROUND.SQUARE) { r = 170; g = 160; b = 140; }
-      else if (what === CITY_GROUND.PARK) { r = 90; g = 108; b = 58; }
-      else if (what === CITY_GROUND.CASTLE) { r = 148; g = 138; b = 116; }
-      else {
-        const k = Math.round((z - grid.z0) / grid.step) * grid.n + Math.round((x - grid.x0) / grid.step);
-        const green = smooth(0.4, 0.95, Math.max(0, town.early[k] ?? 1));
-        r = 140 - 30 * green; g = 128 - 10 * green; b = 100 - 28 * green;
-      }
-      r *= 1 + fine * 0.1; g *= 1 + fine * 0.1; b *= 1 + fine * 0.1;
-    } else if (kind === OLD_WORLD_LAND.GARDEN) {
+    if (kind === OLD_WORLD_LAND.GARDEN) {
       // Beds a few paces wide: green crops and turned earth by turns.
       const bed = unit(oldWorldHash(Math.floor(x / 9), Math.floor(z / 9), hold.i * 31 + hold.j));
       if (bed > 0.6) { r = 98 * tone; g = 78 * tone; b = 56 * tone; }
@@ -633,25 +461,11 @@ function makeCountry(region, heights, port, explicitBaked = null) {
       r = 132 * tone; g = 128 * tone; b = 78 * tone;
     }
     let vegetation = kind === OLD_WORLD_LAND.PASTURE && use.wooded ? SOME_TREES : VEGETATION[kind];
-    if (kind === OLD_WORLD_LAND.CITY && plan && plan.treesAt(x, z) !== CITY_TREES.NONE) vegetation = SOME_TREES;
     const line = BOUNDARY[kind];
     if (line) {
       const hedge = use.hedged, w = (1 - smooth(1.5, 6.5, hold.edge)) * (hedge ? 0.85 : line[3]);
       r += ((hedge ? 58 : line[0]) - r) * w; g += ((hedge ? 76 : line[1]) - g) * w; b += ((hedge ? 44 : line[2]) - b) * w;
       if (hedge && hold.edge < 10) vegetation = Math.max(vegetation, SOME_TREES);
-    }
-    if (urban > 0 && urban < 0.5) {
-      // The last gardens thin out into the town's edge.
-      const w = urban * 2, city = COLOUR[0];
-      r += (city[0] - r) * w * 0.6; g += (city[1] - g) * w * 0.6; b += (city[2] - b) * w * 0.6;
-      vegetation *= 1 - w;
-    }
-    const way = roadNear ? roadNear(x, z) : null;
-    if (way && way.distance < 14) {
-      // A road of beaten earth, and the line of trees beside it.
-      const w = 1 - smooth(2.2, 6.5, way.distance);
-      r += (176 - r) * w; g += (160 - g) * w; b += (130 - b) * w;
-      if (kind !== OLD_WORLD_LAND.CITY && kind !== OLD_WORLD_LAND.WOOD && roadLined(way, x, z)) vegetation = Math.max(vegetation, SOME_TREES);
     }
     return { kind, vegetation, r, g, b };
   };

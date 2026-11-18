@@ -1087,8 +1087,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     requestLandCraterPipelines({computePipe}),requestLandContinuumPipelines({device,shader}),
     useProcedural?requestInlandWaterPipeline({device,shader,format,samples}):null,
     useProcedural?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
-  // A port whose country Castle and Commons' model founded ahead of time: the board is fetched while the rest
-  // loads, and handed over before the land is made. Without it the country is made by this game's own rules.
+  // An Old World city is the board Castle and Commons' model founded for its port ahead of time: the board is fetched
+  // while the rest loads, and handed over before the land is made. A city whose board is missing has no town.
   const bakedBoardPath=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?bakedBoardAsset(regionParam,resolvedYear):null;
   // If the model has lived here since (js/board-keep.js), the land is laid from the board as the traveller left it:
   // whatever was built, burnt or thrown down while they were away is there on their return, never changed in sight.

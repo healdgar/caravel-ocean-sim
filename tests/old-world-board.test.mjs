@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // A board Castle and Commons' model founded, stood up in this game: its buildings this game's Cairn types on dry
 // ground, its furlongs the land's uses, its woods the forest's, its ground the colour of its geography with the
-// board's parcels left to the GPU; and a board founded on other ground refused, so the rules here make the town.
+// board's parcels left to the GPU; and a city with no board founded for it has no town, never one grown in its place.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -267,15 +267,11 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   stamp.uses.forEach((use, k) => { if (tables.parcels[(k + 1) * 8 + 3] > 0) tinted++; else wild++; });
   assert.ok(tinted > 50 && wild > 0, `furlongs tinted ${tinted}, left to the ground's own colour ${wild}`);
 
-  // The same port on other ground: the board is left aside and the rules here make the town.
-  const other = ground(SAMPLES, (x, z) => bayHeight(x, z - 400)), made = oldWorldCountry(region(), other, port());
-  assert.equal(made.board, null);
-  assert.ok(made.plan && made.plan.houses > 0, 'a town is made all the same');
-  let coloured = 0;
-  for (let x = -1500; x < 1500; x += 90) { const land = made.landAt(x, -900, 0); if (land.r !== undefined) coloured++; }
-  assert.ok(coloured > 20, 'and its land is coloured by the rules here');
-  // And in another year.
-  assert.equal(oldWorldCountry(region({ year: 1650 }), ground(), port()).board, null);
+  // A year with no board founded for it: the city has no town, and none is grown in its place.
+  const unbaked = oldWorldCountry(region({ year: 1650 }), ground(), port());
+  assert.equal(unbaked.board, null);
+  assert.equal(unbaked.plan, null, 'no town is grown here');
+  assert.equal(unbaked.town, null);
 });
 
 test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and its real places', () => {

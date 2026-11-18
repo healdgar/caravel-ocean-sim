@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Founds a home port's board ahead of time, so the port is there the moment its land is. The ground is the game's
-// own: the page is run headless (no window is opened), its land read as made, and Castle and Commons' model founded
-// on it here. The same request founded in play gives the same board; a baked one only saves the wait.
+// Founds an Old World city's board ahead of time: the city is its board, there the moment its land is. The ground is
+// the game's own: the page is run headless (no window is opened), its land read as made, and Castle and Commons' model
+// founded on it here; once written, the land is made again with the board standing and checked to be the same ground. The same request founded in play gives the same board; a baked one only saves the wait.
 // With the board goes the whole world as founded (the .world file beside it): the model's own save of everything it
 // holds, which the game takes up and lets live. Nothing of it is chosen or left out.
-//   node scripts/bake-board.mjs lisbon [--year 1550] [--seat n] [--seed n] [--out assets/boards/lisbon-1550.json] [--ground file]
+//   node scripts/bake-board.mjs lisbon [--year 1550] [--seat n] [--seed n] [--out assets/boards/lisbon-1550.json] [--ground file] [--no-check]
+// The port is the coast whose ground holds the city (js/old-world.js OLD_WORLD_CITIES, its `port`).
 // --lived founds the realm in 850 and lets it live every day to the year: its cities are then grown by their own
 // history. That is hours or days of one core for a great city; the progress is written as the years pass.
 // The model founds another country for every seed; a home port is baked with the one whose seat best matches the record.
@@ -19,9 +20,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
-import { BOARD_RIVERS, boardGroundDigest, boardGroundSurvey, boardKey, boardRequest, boardSeat, bakedBoardAsset, bakedWorldAsset } from '../js/board-model.js';
+import { BOARD_RIVERS, boardGroundDigest, boardGroundOff, boardGroundSurvey, boardKey, boardRequest, boardSeat, bakedBoardAsset, bakedWorldAsset } from '../js/board-model.js';
 import { coastalRegionStageURL } from '../js/landfall.js';
-import { OLD_WORLD_PLACES, oldWorldCityNear, oldWorldPeople } from '../js/old-world.js';
+import { OLD_WORLD_PLACES, oldWorldCityHeld, oldWorldPeople } from '../js/old-world.js';
 import { openBoard } from './board-host.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,7 +31,9 @@ const option = (name, fallback) => { const k = args.indexOf('--' + name); return
 const year = Number(option('year', 1550));
 const say = (text) => process.stderr.write(text + '\n');
 
-// The land as the game makes it for a player arriving at this port in this year.
+// The land as the game makes it for a player arriving at this port in this year: the page's own pipeline, read the
+// moment the land is made (window.oceanLand), before anything is drawn. With a board already baked for the port the
+// page stands it, and the ground read is the one it was laid on (surveyHeights, before its rivers are cut).
 async function groundOf(portId) {
   const server = createDevServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: process.env.WEBGPU_BACKEND === 'metal'
@@ -40,17 +43,17 @@ async function groundOf(portId) {
     const url = coastalRegionStageURL('http://127.0.0.1:' + server.address().port + '/', portId, 'dock', 'clear', year);
     for (const [key, value] of Object.entries({ w: 640, h: 360, clouds: '0', follower: '0', hud: '0', ui: '0' })) url.searchParams.set(key, value);
     await page.goto(url.toString());
-    await page.waitForFunction(() => window.oceanStartup?.state === 'ready' || window.oceanStartup?.state === 'failed', undefined, { timeout: 300000, polling: 250 });
+    await page.waitForFunction(() => window.oceanLand?.pack?.heights || window.oceanStartup?.state === 'failed', undefined, { timeout: 300000, polling: 250 });
     const land = await page.evaluate(() => {
       const { region, pack } = window.oceanLand, src = pack.surveyHeights || pack.heights, bytes = new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
       let text = ''; for (let k = 0; k < bytes.length; k += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
       return {
-        state: window.oceanStartup.state, source: pack.elevationSource,
-        region: { id: region.id, name: region.name, x: region.x, z: region.z, span: region.span, size: region.size, year: region.year, latitude: region.latitude, longitude: region.longitude, seed: region.vegetationSeed },
+        state: window.oceanStartup?.state, source: pack.elevationSource, stood: Boolean(pack.board),
+        region: { id: region.id, name: region.name, x: region.x, z: region.z, span: region.span, size: region.size, year: region.year, latitude: region.latitude, longitude: region.longitude, seed: region.vegetationSeed, demGeoSpan: region.demGeoSpan },
         centre: { x: pack.port.center.x, z: pack.port.center.z }, heights: btoa(text),
       };
     });
-    if (land.state !== 'ready') throw new Error('The game did not load');
+    if (land.state === 'failed' || !land.heights) throw new Error('The game did not make the land');
     return { ...land, heights: new Float32Array(Uint8Array.from(Buffer.from(land.heights, 'base64')).buffer) };
   } finally { await browser.close(); server.close(); }
 }
@@ -66,8 +69,8 @@ if (kept && existsSync(kept)) {
 }
 const { region } = land;
 say(`${region.name}: ${region.size} by ${region.size} heights over ${region.span} m, from ${land.source}; port at ${Math.round(land.centre.x - region.x)}, ${Math.round(land.centre.z - region.z)}`);
-const city = oldWorldCityNear(region.latitude, region.longitude);
-if (!city) throw new Error(`${port} is not an Old World city`);
+const city = oldWorldCityHeld(region);
+if (!city) throw new Error(`${port}'s ground holds no Old World city`);
 const people = oldWorldPeople(city, year), seat = Number(option('seat', boardSeat(people)));
 // Where a spot of the globe lies on this ground: metres east and south of its middle.
 const east = (longitude) => (longitude - region.longitude) * Math.cos(region.latitude * Math.PI / 180) * 111195;
@@ -111,3 +114,9 @@ writeFileSync(out, JSON.stringify({
   board,
 }) + '\n');
 say(`wrote ${out}`);
+// The land made again, now with this board standing: it must be the ground the board was founded on.
+if (!args.includes('--no-check') && !option('out', null)) {
+  const again = await groundOf(port), off = boardGroundOff(boardGroundSurvey(land.heights), again.heights);
+  say(`made again with the board standing (${again.stood ? 'stood' : 'NOT STOOD'}): ${off.toFixed(2)} m from the ground it was founded on`);
+  if (!again.stood || !(off < 1.5)) process.exitCode = 1;
+}

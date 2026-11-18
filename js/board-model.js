@@ -70,8 +70,9 @@ export function boardGroundDigest(heights) {
 }
 
 // A ground in brief: its heights at a lattice of 33 by 33, to the decimetre. A baked board carries the survey of the
-// ground it was founded on, and stands only on ground that agrees with it: the same coast made again, to a little
-// more than a metre on the mean, whatever its lattice; never a coast made by other rules.
+// ground it was founded on. The board is the city: it stands on its port's ground whenever the game makes it, and
+// the bake reads that ground back from the game and checks it agrees (scripts/bake-board.mjs): the same coast made
+// again, to a little more than a metre on the mean, whatever its lattice.
 export const BOARD_SURVEY_SIZE = 33;
 export function boardGroundSurvey(heights) {
   const n = Math.round(Math.sqrt(heights.length)), out = [];
@@ -81,20 +82,42 @@ export function boardGroundSurvey(heights) {
   }
   return out;
 }
-export function boardGroundFits(survey, heights, withinMetres = 1.5) {
-  if (!survey || survey.length !== BOARD_SURVEY_SIZE * BOARD_SURVEY_SIZE) return false;
+// How far a ground lies from a survey, in metres on the mean; Infinity for no survey.
+export function boardGroundOff(survey, heights) {
+  if (!survey || survey.length !== BOARD_SURVEY_SIZE * BOARD_SURVEY_SIZE) return Infinity;
   const now = boardGroundSurvey(heights);
   let off = 0;
   for (let k = 0; k < now.length; k++) off += Math.abs(now[k] - survey[k]);
-  return off / now.length < withinMetres;
+  return off / now.length;
+}
+export function boardGroundFits(survey, heights, withinMetres = 1.5) {
+  return boardGroundOff(survey, heights) < withinMetres;
 }
 
-// The boards founded ahead of time (scripts/bake-board.mjs), by port and year, and where each is kept.
-export const BAKED_BOARDS = Object.freeze({ 'lisbon:1550': 'assets/boards/lisbon-1550.json' });
+// The boards founded ahead of time (scripts/bake-board.mjs), by port and year, and where each is kept: one for every
+// Old World city with ground of the game's making (js/old-world.js OLD_WORLD_CITIES, by its `port`). Spelled out,
+// since the build publishes the files named here.
+export const BAKED_BOARDS = Object.freeze({
+  'lisbon:1550': 'assets/boards/lisbon-1550.json',
+  'cadiz:1550': 'assets/boards/cadiz-1550.json',
+  'sanlucar:1550': 'assets/boards/sanlucar-1550.json',
+  'palos-huelva:1550': 'assets/boards/palos-huelva-1550.json',
+  'huelva:1550': 'assets/boards/huelva-1550.json',
+  'la-coruna:1550': 'assets/boards/la-coruna-1550.json',
+  'setubal:1550': 'assets/boards/setubal-1550.json',
+});
 export function bakedBoardAsset(port, year) { return BAKED_BOARDS[`${port}:${year}`] ?? null; }
 // And the whole world each was founded as: the model's own save of everything it holds, frozen on its first day.
 // The game takes it up in a worker and lets it live; nothing of it was chosen or left out.
-export const BAKED_WORLDS = Object.freeze({ 'lisbon:1550': 'assets/boards/lisbon-1550.world' });
+export const BAKED_WORLDS = Object.freeze({
+  'lisbon:1550': 'assets/boards/lisbon-1550.world',
+  'cadiz:1550': 'assets/boards/cadiz-1550.world',
+  'sanlucar:1550': 'assets/boards/sanlucar-1550.world',
+  'palos-huelva:1550': 'assets/boards/palos-huelva-1550.world',
+  'huelva:1550': 'assets/boards/huelva-1550.world',
+  'la-coruna:1550': 'assets/boards/la-coruna-1550.world',
+  'setubal:1550': 'assets/boards/setubal-1550.world',
+});
 export function bakedWorldAsset(port, year) { return BAKED_WORLDS[`${port}:${year}`] ?? null; }
 
 function boardBase64(bytes) {

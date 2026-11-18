@@ -35,7 +35,7 @@ import {
   safeLandfallStart,
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
-import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityNear, oldWorldPeople } from './old-world.js';
+import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityHeld, oldWorldCityNear, oldWorldPeople } from './old-world.js';
 import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, buildColonialCityFabric, cityMasonry, footprint, planColonialStreets } from './old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 import { boardRoadCrossings, widenBoardRiverHalfWidth, widenBoardRivers } from './old-world-board.js';
@@ -569,6 +569,11 @@ export const HISTORICAL_1550_PORTS = Object.freeze([
   Object.freeze({ id: 'olinda', name: 'Olinda · Recife', latitude: -8.012, longitude: -34.851, shoreBearing: 280, seawardBearing: 100, coastalArchetype: 'headland-bay', foundedYear: 1535, fortProgramYear: 1630, crown: 'portugal', baseTier: 3 }),
   Object.freeze({ id: 'cadiz-sanlucar', name: 'Cádiz · Sanlúcar de Barrameda', latitude: 36.65, longitude: -6.32, shoreBearing: 115, seawardBearing: 265, coastalArchetype: 'estuary-bay', foundedYear: 1264, fortProgramYear: 1596, crown: 'spain', baseTier: 3 }),
   Object.freeze({ id: 'palos-huelva', name: 'Palos de la Frontera · Huelva', latitude: 37.228, longitude: -6.893, shoreBearing: 35, seawardBearing: 215, coastalArchetype: 'river-mouth', foundedYear: 1322, crown: 'spain', baseTier: 2 }),
+  // The Old World towns on their own ground, each the board of its city (js/old-world.js OLD_WORLD_CITIES).
+  Object.freeze({ id: 'cadiz', name: 'Cádiz', latitude: 36.5297, longitude: -6.2927, shoreBearing: 230, seawardBearing: 290, coastalArchetype: 'headland-bay', foundedYear: 1262, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'sanlucar', name: 'Sanlúcar de Barrameda', latitude: 36.7783, longitude: -6.3515, shoreBearing: 150, seawardBearing: 300, coastalArchetype: 'river-mouth', foundedYear: 1297, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'huelva', name: 'Huelva', latitude: 37.2583, longitude: -6.9508, shoreBearing: 35, seawardBearing: 215, coastalArchetype: 'estuary-bay', foundedYear: 1262, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'setubal', name: 'Setúbal', latitude: 38.5244, longitude: -8.8926, shoreBearing: 5, seawardBearing: 235, coastalArchetype: 'estuary-bay', foundedYear: 1249, crown: 'portugal', baseTier: 2 }),
   Object.freeze({ id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136, shoreBearing: 355, seawardBearing: 245, coastalArchetype: 'estuary-bay', foundedYear: 1147, fortProgramYear: 1515, crown: 'portugal', baseTier: 4 }),
   Object.freeze({ id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396, shoreBearing: 220, seawardBearing: 25, coastalArchetype: 'headland-bay', foundedYear: 1208, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
   Object.freeze({ id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43, shoreBearing: 260, seawardBearing: 80, coastalArchetype: 'headland-bay', foundedYear: 1478, crown: 'spain', baseTier: 2 }),
@@ -4056,17 +4061,19 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const allowColonialPort = region.hasColonialPort !== false;
   const simYear = region.year ?? region.era ?? 1550;
   const nearOldWorldCity = oldWorldCityNear(region.latitude, region.longitude);
+  // An Old World city on this ground is its board's (js/old-world.js): the port lays its waterfront, never its town.
+  const heldOldWorldCity = allowColonialPort ? oldWorldCityHeld(region) : null;
   const oldWorldPop = nearOldWorldCity ? oldWorldPeople(nearOldWorldCity, simYear) : 0;
   const isDerivedMetropolePort = Boolean(allowColonialPort && (oldWorldPop >= 18000 || (region.colonyGrowth?.population ?? 0) >= 18000));
   const metropoleScale = isDerivedMetropolePort ? Math.min(1, Math.max(0.5, (oldWorldPop || region.colonyGrowth?.population || 30000) / 85000)) : 0;
   const portRiverCorridor = buildPortRiverCorridor(region);
   const orthoFootprints =
-    allowColonialPort && !isDerivedMetropolePort
+    allowColonialPort && !isDerivedMetropolePort && !heldOldWorldCity
       ? extractOrthophotoBuildingFootprints(region, heights, satelliteData, shoreDist)
       : null;
   const hasOrthoFootprints = Boolean(orthoFootprints?.footprints?.length >= 4);
   const extractedHarborPiers =
-    allowColonialPort && !isDerivedMetropolePort && (hasOrthoFootprints || satelliteData?.is1550Orthophoto)
+    allowColonialPort && !isDerivedMetropolePort && !heldOldWorldCity && (hasOrthoFootprints || satelliteData?.is1550Orthophoto)
       ? extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints)
       : [];
   const clusterFrame = orthoFootprints
@@ -5411,6 +5418,28 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       stage: colonyGrowth.stage,
       fortificationTier: colonyGrowth.fortificationTier,
       expansionTier: colonyGrowth.expansionTier,
+    });
+  } else if (allowColonialPort && heldOldWorldCity) {
+    // An Old World town: its streets, houses, walls, churches and castle are its board's, founded by Castle and
+    // Commons' own generator on this ground (js/old-world-board.js), which builds round what stands here. The port
+    // lays only its waterfront: the quay along the shore, and the shipwrights' ways on the gentler flank.
+    const inPortugueseManner = colonyGrowth.crown === 'portugal';
+    if (colonyGrowth.stage !== 'outpost') {
+      placeContinuousQuayRibbon(-72, 84, inPortugueseManner ? `Cais da Ribeira de ${heldOldWorldCity.name}` : `Muelle de ${heldOldWorldCity.name}`, 12);
+    }
+    const flankScore = (sign) => {
+      const fIn = worldFromCoastalFrame(region, bestShoreAlong + sign * 62, bestShoreInland + 32);
+      const fOut = worldFromCoastalFrame(region, bestShoreAlong + sign * 62, bestShoreInland - 14);
+      const hIn = terrainSample(heights, fIn.x, fIn.z, region), hOut = terrainSample(heights, fOut.x, fOut.z, region);
+      const riverPenalty = portRiverCorridor.pointHits(fIn.x, fIn.z, 18) ? 25 : 0;
+      return ((hIn >= 1.2 && hIn <= 5.5 && hOut <= 0.4 && hOut >= -4.0) ? 10 - Math.abs(hIn - hOut - 3.2) : -10) - riverPenalty;
+    };
+    const shipSide = flankScore(-1) >= flankScore(1) ? -1 : 1;
+    addPrefab('astillero_and_moored_hull', shipSide * 48, 14, 0, 1.6, {
+      label: inPortugueseManner ? 'Estaleiro da Ribeira' : 'Astillero de la Ribera (Shipwright Ways)',
+    });
+    addPrefab('careening_shed', shipSide * 88, 18, shipSide * -6, 2.0, {
+      label: inPortugueseManner ? 'Telheiro de Querenar' : 'Carenero (Careening Shed)',
     });
   } else if (allowColonialPort) {
     // Street-first topography-, shoreline-, hydrology-, and polity-driven Colonial Port Generator:
@@ -10356,7 +10385,8 @@ function finalizeProceduralCoastalPack(
 function dressProceduralCoastalPack(pack, heights, port, elevationSource, satelliteData, climateProfile) {
   const { region } = pack;
   if (!pack.skipPortPlacement) {
-    const suppressSyntheticCountryRoads = Boolean(bakedBoardFor(region));
+    // An Old World city's roads are its board's alone.
+    const suppressSyntheticCountryRoads = Boolean(oldWorldCityHeld(region));
     port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region), {
       suppressSyntheticCountryRoads,
     });

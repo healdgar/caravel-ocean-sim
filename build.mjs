@@ -24,6 +24,7 @@ import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
 import { SHIP_CONTINUUM_ASSETS } from './js/ship-continuum.js';
 import { ANIMAL_CONTINUUM_ASSETS } from './js/animal-continuum.js';
 import { PREFAB_CONTINUUM_ASSETS } from './js/prefab-continuum.js';
+import { BAKED_BOARDS, BAKED_WORLDS } from './js/board-model.js';
 import { PREFAB_CONTINUUM_PORT_BODIES } from './js/prefab-continuum-ports.js';
 import { bundleContinuumBakeWorker } from './scripts/continuum-bake-worker-bundle.mjs';
 
@@ -212,6 +213,9 @@ for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object
 for(const files of Object.values(SHIP_CONTINUUM_ASSETS))for(const file of Object.values(files)){
   runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 }
+// Every Old World city is its board: each one baked, with the world it was founded as, is published (js/board-model.js).
+for(const file of Object.values(BAKED_BOARDS))runtimeAssetTypes.set(file,'application/json');
+for(const file of Object.values(BAKED_WORLDS))runtimeAssetTypes.set(file,'application/octet-stream');
 if(fs.existsSync(path.join(root,'assets/boards/partner-ports-1550.json'))){
   runtimeAssetTypes.set('assets/boards/partner-ports-1550.json','application/json');
 }
@@ -224,6 +228,8 @@ const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','asset
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 // The people continuum's bodies (hundreds of MB) stay out of the downloads, which fetch the published copies.
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))externalDownloadGeometry.add(file);
+// So do the founded worlds of the Old World cities.
+for(const file of Object.values(BAKED_WORLDS))externalDownloadGeometry.add(file);
 // So do the prefab bodies baked for the historical ports.
 for(const file of Object.values(PREFAB_CONTINUUM_PORT_BODIES))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){
