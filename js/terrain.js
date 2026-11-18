@@ -29,6 +29,7 @@ import {continuumPixelError} from './continuum-core.js';
 import {cityContinuumRenderWGSL} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,requestCityContinuumPipelines,cityContinuumViewPipeline,createCityContinuum} from './city-continuum-draw.js';
 import {createCityTargets} from './city-targets.js';
+import {isPrefabContinuumInstance,prefabContinuumAtlas,prefabContinuumPlan,resolvePrefabContinuum} from './prefab-continuum.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize} from './land-craters.js';
 import {sharedGroundDetail} from './ground-detail.js';
 import {sharedNeuralPbrBank} from './neural-pbr.js';
@@ -1179,12 +1180,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices');
   let submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices'):indices;
   let submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
-  let portVertsCpu=proceduralPack?.portGeometry?.vertices??null;
-  let portMesh=proceduralPack?.portGeometry?.indices?.length?{
-    vertices:buffer(proceduralPack.portGeometry.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices'),
-    indices:buffer(proceduralPack.portGeometry.indices,GPUBufferUsage.INDEX,'coastal port prefab indices'),
-    count:proceduralPack.portGeometry.indices.length,
-  }:null;
+  // A port's prefabs are drawn through the one continuum alone (js/prefab-continuum.js); its assembly
+  // (portGeometry) is the physical truth that shot, flooding and fracture work on, and nothing draws it.
   // Buildings under fire draw from their own buffers, made when each is first hit.
   // A port set up for a side game is no part of the career: its damage is neither restored from the store nor kept in it.
   // A city's buildings are drawn through the one continuum (js/city-continuum-draw.js), and are no buildings of the
@@ -1194,7 +1191,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const cityTypeCatalogue=()=>cityCatalogue??=compileCityBuildingTypes(buildPortPrefabGeometry);
   const cityTargetsFor=(city,port)=>city?.typedCount&&city.typedBlocks&&port&&search.get('cityTargets')!=='0'?createCityTargets({city,types:cityTypeCatalogue,port,onStruck:index=>cityBuildingHit(index)}):null;
   let activeCity=proceduralPack?.city??null,cityTargets=cityTargetsFor(activeCity,proceduralPack?.port);
-  let cityStruck=null,cityContinuum=null,cityAim=null;
+  let cityStruck=null,cityContinuum=null,cityAim=null,prefabs=null;
   // Buildings in pieces, and buildings shot has struck (cut finer from the first hit until the town stands them again).
   const cityStruckIndices=new Set(),cityHitIndices=new Set();
   const syncCollapsedBridges=(index,city,struck)=>{
@@ -1237,25 +1234,52 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   };
   // When the port's fractures are let go (another port stands in, or the coast is loaded again), the city stands whole.
   const cityStandsWhole=()=>{for(const index of new Set([...cityStruckIndices,...cityHitIndices]))cityBuildingRebuilt({city:{index}});};
-  const portFracturesFor=(geometry,port,indexBuffer,targets=null)=>{
-    const own=Boolean(port?.instances?.length&&geometry?.partAssembly&&indexBuffer);
+  // A prefab struck is cut finer from its first hit; in pieces, its continuum leaves it out; stood again, it is drawn
+  // whole as before. Kept by instance, so that a continuum that lands later marks them too (prefabMarks).
+  const prefabFelled=new Set(),prefabHit=new Set();
+  const prefabAt=instance=>prefabs?.plan.index.get(instance);
+  const prefabMarks=()=>{
+    for(const instance of prefabFelled){const at=prefabAt(instance);if(at!==undefined)prefabs.hide(at,1,true);}
+    for(const instance of prefabHit){const at=prefabAt(instance);if(at!==undefined)prefabs.strike(at,1,true);}
+  };
+  const portBuildingHit=instance=>{
+    if(instance.city){cityBuildingHit(instance.city.index);return;}
+    if(!isPrefabContinuumInstance(instance))return;
+    prefabHit.add(instance);
+    const at=prefabAt(instance);if(at!==undefined)prefabs.strike(at,1,true);
+  };
+  const portBuildingStruck=instance=>{
+    if(instance.city){cityBuildingStruck(instance);return;}
+    if(!isPrefabContinuumInstance(instance))return;
+    prefabFelled.add(instance);
+    const at=prefabAt(instance);if(at!==undefined)prefabs.hide(at,1,true);
+  };
+  const portBuildingRebuilt=instance=>{
+    if(instance.city){cityBuildingRebuilt(instance);return;}
+    prefabFelled.delete(instance);prefabHit.delete(instance);
+    const at=prefabAt(instance);if(at!==undefined){prefabs.hide(at,1,false);prefabs.strike(at,1,false);}
+  };
+  const portFracturesFor=(geometry,port,targets=null)=>{
+    const own=Boolean(port?.instances?.length&&geometry?.partAssembly);
     if(!port||(!own&&!targets))return null;
     const damageStore=port.transient?null:portDamage;
     // A save names the city's struck buildings; they are stood first, so that their records find them.
     if(targets&&damageStore)targets.revive(damageStore.recorded(port));
     damageStore?.restore(port);
-    return createPortFractures({device,port,geometry:own?geometry:null,portIndices:own?indexBuffer:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,
-      onFractured:targets?cityBuildingStruck:null,onRebuilt:targets?cityBuildingRebuilt:null});
+    return createPortFractures({device,port,geometry:own?geometry:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,
+      onStruck:portBuildingHit,onFractured:portBuildingStruck,onRebuilt:portBuildingRebuilt});
   };
-  let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,portMesh?.indices,cityTargets);
+  let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,cityTargets);
   let transientBoulderPort=null;
   const ensureBoulderFracturePort=()=>{
     const targetPort=proceduralPack?(proceduralPack.port??=(transientBoulderPort={regionId:activeRegion.id??'coast',name:activeRegion.name??'Coast',instances:[],transient:true})):(transientBoulderPort??={regionId:activeRegion.id??'saba',name:activeRegion.name??'Saba',instances:[],transient:true});
-    portFractures??=createPortFractures({device,port:targetPort,geometry:portMesh?proceduralPack?.portGeometry??null:null,portIndices:portMesh?.indices??null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,onFractured:cityTargets?cityBuildingStruck:null,onRebuilt:cityTargets?cityBuildingRebuilt:null});
+    const geometry=proceduralPack?.portGeometry?.partAssembly?proceduralPack.portGeometry:null;
+    portFractures??=createPortFractures({device,port:targetPort,geometry,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,
+      onStruck:portBuildingHit,onFractured:portBuildingStruck,onRebuilt:portBuildingRebuilt});
     buildingFracturePipeline(device).catch(()=>{});
     return targetPort;
   };
-  if(portMesh&&proceduralPack?.port?.instances?.length)buildingFracturePipeline(device).catch(()=>{});
+  if(proceduralPack?.portGeometry?.partAssembly&&proceduralPack?.port?.instances?.length)buildingFracturePipeline(device).catch(()=>{});
   const fine=fineMesh?{vertices:buffer(fineMesh.vertices,GPUBufferUsage.VERTEX,'Wells Bay immutable near vertices'),
     indices:buffer(fineMesh.indices,GPUBufferUsage.INDEX,'Wells Bay near indices'),
     submerged:buffer(fineMesh.submergedIndices,GPUBufferUsage.INDEX,'Wells Bay submerged near indices')}:null;
@@ -1419,7 +1443,37 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     for(const index of cityHitIndices)cityContinuum.strike(index,1+(city.typedAttached?.[index]??0),true);
     cityContinuum.setAim(cityAim);
   };
-  await setCityBuildings(proceduralPack);
+  // A coast's prefabs on the one continuum, cut and drawn by the city's programs from an atlas of their own
+  // (js/prefab-continuum.js). Every body a port needs lands (shipped for the historical ports, kept by this browser,
+  // or baked now in workers, nearest first) before any of it is drawn, and a port lands once.
+  let prefabsMade=0,prefabsPort=null,prefabsLanding=Promise.resolve();
+  const prefabLandings=new WeakMap();
+  const landPrefabs=port=>{
+    if(!port?.instances?.length)return Promise.resolve(null);
+    if(!prefabLandings.has(port))prefabLandings.set(port,(async()=>{
+      const plan=await prefabContinuumPlan(port,{near:lastCamera});
+      if(!plan.instances.length)return null;
+      const [words,programs]=await Promise.all([resolvePrefabContinuum(plan,{portId:port.regionId??activeRegion.id}),requestCityContinuumPipelines({device,shader,shadowFormat:activeLandShadows.format})]);
+      return {plan,atlas:prefabContinuumAtlas(words),programs};
+    })().catch(error=>{prefabLandings.delete(port);throw error;}));
+    return prefabLandings.get(port);
+  };
+  const setPrefabBuildings=port=>prefabsLanding=(async()=>{
+    const made=++prefabsMade;
+    const old=prefabs;prefabs=null;if(old)retireGPU(()=>old.destroy());
+    if(port!==prefabsPort){prefabFelled.clear();prefabHit.clear();prefabsPort=port;}
+    const landing=await landPrefabs(port);
+    if(!landing||made!==prefabsMade||terrainDisposed)return;
+    const atlas=buffer(landing.atlas,GPUBufferUsage.STORAGE,'prefab continuum atlas');
+    const continuum=createCityContinuum({device,atlas:{buffer:atlas},pipelines:landing.programs,view:cityPipe,typed:landing.plan.typed,types:landing.plan.types,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'prefabs'});
+    const release=continuum.destroy;
+    prefabs=Object.assign(continuum,{plan:landing.plan,destroy(){release();atlas.destroy();}});
+    prefabs.setPixelError(currentPixelError);prefabs.setWorldOffset(worldOffset.x,worldOffset.z);prefabs.setAim(cityAim);
+    prefabMarks();
+  })();
+  const prefabsFailed=error=>console.error('prefab continuum',error);
+  // The coast is not presented until its city and its prefabs have landed.
+  await Promise.all([setCityBuildings(proceduralPack),setPrefabBuildings(proceduralPack?.port)]);
   clouds=await cloudsResolvedPromise;waterOptics=await waterOpticsResolvedPromise;
   // Every tree of a coast is a root of its forest pack, drawn through the one continuum; a coast without a pack
   // has no trees, never a stand-in.
@@ -1578,8 +1632,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     rec.vertices?.destroy?.();
     if(rec.submergedIndices&&rec.submergedIndices!==rec.indices)rec.submergedIndices.destroy?.();
     rec.indices?.destroy?.();
-    rec.portMesh?.vertices?.destroy?.();
-    rec.portMesh?.indices?.destroy?.();
     portDamage?.capture(rec.port);
     rec.portFractures?.destroy();
     rec.uniform?.destroy?.();
@@ -1595,12 +1647,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const sIdx=buffer(sMesh.indices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) indices`);
     const sSubIdx=sMesh.submergedIndices?buffer(sMesh.submergedIndices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) submerged`):sIdx;
     const sSubCount=sMesh.submergedIndices?.length??sMesh.indices.length;
-    const needSecPort=Boolean(secPack.portGeometry?.indices?.length&&(!forest||!forestPack||secPack.port?.instances?.length));
-    const sPort=needSecPort?{
-      vertices:buffer(secPack.portGeometry.vertices,GPUBufferUsage.VERTEX,`coastal section (${secPack.secX},${secPack.secZ}) palms`),
-      indices:buffer(secPack.portGeometry.indices,GPUBufferUsage.INDEX,`coastal section (${secPack.secX},${secPack.secZ}) palm indices`),
-      count:secPack.portGeometry.indices.length,
-    }:null;
+    // A section's port is laid out with no prefabs (js/coastal-world.js): only boulders join it, when struck.
+    if(secPack.port?.instances?.some(isPrefabContinuumInstance))throw Error(`Coastal section (${secPack.secX},${secPack.secZ}) has prefabs, which only a coast's own port draws through the continuum`);
     const sUniform=buffer(new Float32Array([sReg.x,sReg.z,sReg.span,0]),GPUBufferUsage.UNIFORM,`coastal section (${secPack.secX},${secPack.secZ}) domain`);
     const sAlbedoMips=1+Math.log2(sReg.albedoSize);
     const sAlbedo=device.createTexture({
@@ -1651,9 +1699,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       indexCount:sMesh.indices.length,
       submergedIndices:sSubIdx,
       submergedCount:sSubCount,
-      portMesh:sPort,
-      portVertsCpu:needSecPort?secPack.portGeometry?.vertices??null:null,
-      portFractures:needSecPort?portFracturesFor(secPack.portGeometry,secPack.port,sPort?.indices):null,
+      portFractures:portFracturesFor(secPack.portGeometry,secPack.port),
       uniform:sUniform,
       albedo:sAlbedo,
       biomeTexture:sBiome,
@@ -1753,7 +1799,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     activeCity=proceduralPack.city??null;
     cityTargets=cityTargetsFor(activeCity,proceduralPack.port);
     if(!savedPortOverride&&!portFractures){
-      portFractures=portFracturesFor(proceduralPack.portGeometry,proceduralPack.port,portMesh?.indices,cityTargets);
+      portFractures=portFracturesFor(proceduralPack.portGeometry,proceduralPack.port,cityTargets);
       portFractures?.restoreNow().catch(()=>{});
     }
     herds?.setHerds?.(proceduralPack.herds??null);
@@ -2115,22 +2161,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         boardStamp=stamp;stamp.stamp(albedo,activeRegion.albedoSize);regenerateAlbedoMips();
       }).catch(()=>{});
     }
-    const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null,oldPort=heldPort?null:portMesh;
+    const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null;
     mesh=upgradedPack.mesh;
     vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices 1550');
     indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices 1550');
     submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices 1550'):indices;
     submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
-    if(!heldPort){
-      portVertsCpu=upgradedPack.portGeometry?.vertices??null;
-      portMesh=upgradedPack.portGeometry?.indices?.length?{
-        vertices:buffer(upgradedPack.portGeometry.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices 1550'),
-        indices:buffer(upgradedPack.portGeometry.indices,GPUBufferUsage.INDEX,'coastal port prefab indices 1550'),
-        count:upgradedPack.portGeometry.indices.length,
-      }:null;
-    }
     oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
-    oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
     // The buildings moved, so their ways did too.
     if(!upgradedPack.frontierParcels?.length){
       planUngrownFrontierParcels(upgradedPack,heights,{playerPos:boat?{x:boat.x,z:boat.z}:null});
@@ -2159,7 +2196,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     activeCity=upgradedPack.city??null;cityTargets=cityTargetsFor(activeCity,upgradedPack.port);
     if(!heldPort){
       portFractures?.destroy();
-      portFractures=portFracturesFor(upgradedPack.portGeometry,upgradedPack.port,portMesh?.indices,cityTargets);
+      setPrefabBuildings(upgradedPack.port).catch(prefabsFailed);
+      portFractures=portFracturesFor(upgradedPack.portGeometry,upgradedPack.port,cityTargets);
       portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
     }
 
@@ -2192,8 +2230,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const standIn=Boolean(customPort&&customPortGeometry);
     if(!standIn&&!savedPortOverride)return false;
     portsDirty=true;
-    // The same stone raised again needs no new buffers: only the indices a struck building had blanked.
-    const sameMesh=standIn&&Boolean(savedPortOverride)&&proceduralPack.portGeometry===customPortGeometry&&Boolean(portMesh);
     if(standIn){
       if(!savedPortOverride){
         // The coast's own port leaves the scene with its damage on record, as any port going out of sight does.
@@ -2210,20 +2246,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     const nextGeo=proceduralPack.portGeometry;
     const nextPort=proceduralPack.port;
-    if(sameMesh){
-      device.queue.writeBuffer(portMesh.indices,0,nextGeo.indices);
-    }else{
-      const oldPort=portMesh;
-      portVertsCpu=nextGeo?.vertices??null;
-      portMesh=nextGeo?.indices?.length?{
-        vertices:buffer(nextGeo.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices custom'),
-        indices:buffer(nextGeo.indices,GPUBufferUsage.INDEX,'coastal port prefab indices custom'),
-        count:nextGeo.indices.length,
-      }:null;
-      oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
-    }
-    portFractures?.destroy();cityStandsWhole();
-    portFractures=portFracturesFor(nextGeo,nextPort,portMesh?.indices,standIn?null:cityTargets);
+    // The same stone raised again stands whole: its continuum is made again from the bodies it landed with.
+    portFractures?.destroy();cityStandsWhole();prefabsPort=null;
+    setPrefabBuildings(nextPort).catch(prefabsFailed);
+    portFractures=portFracturesFor(nextGeo,nextPort,standIn?null:cityTargets);
     // Its own port comes back as it was left: what was shot down is down, on the new buffers.
     if(!standIn)portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
     return true;
@@ -2400,8 +2426,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     groundStats,forestStats,
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
-    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);cityContinuum?.setPixelError(next);}},
+    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['prefabs',prefabs]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);cityContinuum?.setPixelError(next);prefabs?.setPixelError(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
     surfaceHeight:(x,z)=>baseGroundSample(x-worldOffset.x,z-worldOffset.z),
@@ -2613,7 +2639,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       activeCity=proceduralPack.city??null;cityTargets=cityTargetsFor(activeCity,portObj);
       if(!savedPortOverride){
         portFractures?.destroy();
-        portFractures=portFracturesFor(proceduralPack.portGeometry,portObj,portMesh?.indices,cityTargets);
+        portFractures=portFracturesFor(proceduralPack.portGeometry,portObj,cityTargets);
       }
       meadowGrass?.sync?.({
         region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portObj??null,
@@ -2707,13 +2733,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     setSharedCrew(crewAssets){tradeVessels?.setSharedCrew?.(crewAssets);},
     // Where the player's guns would fall now ({x,y,z,radius} in the scene's frame, or null): the city's buildings
     // there are cut finer. Four floats a frame at most, written only when they change.
-    setGunneryAim(fall){cityAim=fall??null;cityContinuum?.setAim(cityAim);},
+    setGunneryAim(fall){cityAim=fall??null;cityContinuum?.setAim(cityAim);prefabs?.setAim(cityAim);},
+    // Once every body of the port standing now has landed and it is drawn (js/prefab-continuum.js).
+    prefabsLanded(){return prefabsLanding;},
+    get prefabContinuum(){return prefabs;},
     get tradeVessels(){return tradeVessels;},
     setWorldOffset(dx=0,dz=0){
       const nx=Number.isFinite(dx)?dx:0,nz=Number.isFinite(dz)?dz:0;
       if(Math.abs(nx-worldOffset.x)<0.05&&Math.abs(nz-worldOffset.z)<0.05)return;
       worldOffset.x=nx;worldOffset.z=nz;
-      cityContinuum?.setWorldOffset(nx,nz);
+      cityContinuum?.setWorldOffset(nx,nz);prefabs?.setWorldOffset(nx,nz);
       boulderContinuum?.setWorldOffset(nx,nz);
       writeNearDomainUniform();
     },
@@ -2732,7 +2761,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       (marineLife?.state??marineLife)?.shift?.(-dx,-dz);
       (dolphins?.state??dolphins)?.shift?.(-dx,-dz);
       worldOffset.x=0;worldOffset.z=0;
-      cityContinuum?.setWorldOffset(0,0);
+      cityContinuum?.setWorldOffset(0,0);prefabs?.setWorldOffset(0,0);
       boulderContinuum?.setWorldOffset(0,0);
       writeNearDomainUniform();
       lastCamera=null;
@@ -2750,7 +2779,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       portDamage?.capture(proceduralPack?.port);
       for(const sec of loadedSections.values())portDamage?.capture(sec.port);
       craters?.dispose();
-      portMesh?.vertices?.destroy?.();portMesh?.indices?.destroy?.();portFractures?.destroy();
+      portFractures?.destroy();
       fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
       elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();groundDetail.dispose();boardStamp?.dispose();
@@ -2759,6 +2788,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       biomeTexture?.destroy?.();
       boulderContinuum?.destroy();
       cityContinuumMade++;cityContinuum?.destroy();cityContinuum=null;cityStruck?.destroy();
+      prefabsMade++;prefabs?.destroy();prefabs=null;
       inlandWater?.destroy?.();
       herds?.destroy?.();
       meadowGrass?.destroy?.();
@@ -2768,26 +2798,19 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     updatePortDamage(now=0){
       let updated=false;
-      // Shot at a building writes flight records, nothing else. Palms still bend in the port's own mesh.
-      const flushPort=(pMesh,pVertsCpu,portObj,fractures)=>{
+      // Shot at a building writes flight records, nothing else. A palm struck is the forest's to bend.
+      const flushPort=(portObj,fractures)=>{
         fractures?.update(now);
         if(!Array.isArray(portObj?.sceneryBakes)||!portObj.sceneryBakes.length)return;
-        for(const bake of portObj.sceneryBakes)if(bake.kind==='scenery-tree')forest?.strike?.(bake.x,bake.z,now,groundSample);
-        const bakes=portObj.sceneryBakes.splice(0,portObj.sceneryBakes.length);
-        if(!pMesh?.vertices||!pVertsCpu)return;
-        const dirty=bakeLandImpactDeformations(pVertsCpu,bakes,8);
-        if(dirty){
-          device.queue.writeBuffer(pMesh.vertices,dirty.byteOffset,pVertsCpu.buffer,pVertsCpu.byteOffset+dirty.byteOffset,dirty.byteLength);
-          updated=true;
-        }
+        for(const bake of portObj.sceneryBakes.splice(0,portObj.sceneryBakes.length))if(bake.kind==='scenery-tree')forest?.strike?.(bake.x,bake.z,now,groundSample);
       };
       if(this.pendingForestStrikes?.length){
         for(const struck of this.pendingForestStrikes.splice(0,this.pendingForestStrikes.length))forest?.strikeTree?.(struck.tree,struck.impact,now,groundSample);
       }
       forest?.settleFalls?.(now);
-      flushPort(portMesh,portVertsCpu,proceduralPack?.port??transientBoulderPort,portFractures);
+      flushPort(proceduralPack?.port??transientBoulderPort,portFractures);
       for(const sec of loadedSections.values()){
-        if(sec.port)flushPort(sec.portMesh,sec.portVertsCpu,sec.port,sec.portFractures);
+        if(sec.port)flushPort(sec.port,sec.portFractures);
       }
       if(Array.isArray(this.pendingLandBakes)&&this.pendingLandBakes.length){
         const landBakes=this.pendingLandBakes.splice(0,this.pendingLandBakes.length);
@@ -2866,6 +2889,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const sec of loadedSections.values())sec.portFractures?.encode(pass);
       boulderContinuum?.prepare(pass);
       cityContinuum?.setPixelError(currentPixelError);cityContinuum?.encode(pass);
+      prefabs?.setPixelError(currentPixelError);prefabs?.encode(pass);
       forest?.encode(pass);
       herds?.encode(pass);
       meadowGrass?.encode(pass);
@@ -2900,11 +2924,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       pass.setPipeline(terrainPipe);pass.setBindGroup(0,groups[0]);pass.setBindGroup(1,cloudGroups[0]);
       pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
       if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
-      if(portMesh&&isSectionVisible(activeRegion,camera,viewProjection,4800)){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);portFractures?.draw(pass);}
-      if(portFractures?.sourced&&isSectionVisible(activeRegion,camera,viewProjection,4800))portFractures.drawSourced(pass,instance=>Boolean(instance.boulder));
-      // Every building is cut on the GPU: one pipeline, four indirect draws. Those shot down are drawn as their pieces.
-      if(cityContinuum||cityStruck){
+      // A prefab in pieces is drawn as its pieces, with the land's own surfaces.
+      if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,4800)){portFractures.draw(pass);if(portFractures.sourced)portFractures.drawSourced(pass,instance=>Boolean(instance.boulder));}
+      // Every building and prefab is cut on the GPU: one pipeline, four indirect draws each. Those shot down are drawn
+      // as their pieces.
+      if(cityContinuum||prefabs||cityStruck){
         cityContinuum?.draw(pass,cityGroup,cityClouds);
+        prefabs?.draw(pass,cityGroup,cityClouds);
         if(cityStruck&&portFractures?.sourced){
           pass.setPipeline(cityStruckPipe);pass.setBindGroup(0,cityStruckGroup);pass.setBindGroup(1,cityStruckClouds);
           portFractures.drawSourced(pass,instance=>{
@@ -2919,7 +2945,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         if(!isSectionVisible(sec.region,camera,viewProjection))continue;
         pass.setBindGroup(0,sec.terrainGroup);
         pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
-        if(sec.portMesh&&isSectionVisible(sec.region,camera,viewProjection,3400)){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);sec.portFractures?.draw(pass);}
+        if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,3400))sec.portFractures.draw(pass);
       }
       // Dug-up ground draws over the land it replaces, with that land's own textures.
       if(craters?.pipeline&&craters.stats.tiles){
@@ -2948,21 +2974,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     drawShadow(pass,camera={x:0,y:6,z:0},viewProjection=null){
       pass.setPipeline(portShadowPipe);pass.setBindGroup(0,portShadowGroup);
-      if(portMesh&&isSectionVisible(activeRegion,camera,null,750)){
-        pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);
-        portFractures?.draw(pass);
-      }
+      if(portFractures&&isSectionVisible(activeRegion,camera,null,750))portFractures.draw(pass);
       for(const sec of loadedSections.values()){
-        if(sec.portMesh&&isSectionVisible(sec.region,camera,null,650)){
-          pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);
-          sec.portFractures?.draw(pass);
-        }
+        if(sec.portFractures&&isSectionVisible(sec.region,camera,null,650))sec.portFractures.draw(pass);
       }
       if(portFractures?.sourced&&isSectionVisible(activeRegion,camera,null,2600)){
         // A struck building's block or cleaved boulder is gone, so its pieces cast its shadow.
         portFractures.drawSourced(pass);
       }
-      cityContinuum?.drawShadow(pass);
+      cityContinuum?.drawShadow(pass);prefabs?.drawShadow(pass);
       if(boulderContinuum&&isSectionVisible(activeRegion,camera,null,750))boulderContinuum.drawShadow(pass);
       forest?.drawShadow?.(pass);
       herds?.drawShadow?.(pass);

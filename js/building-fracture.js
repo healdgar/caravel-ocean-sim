@@ -1495,14 +1495,15 @@ export function createBuildingFractureGPU({ device, pipeline, prepared, state })
 }
 
 /**
- * The fractured buildings of one port. A building joins the first time it is struck. Its mesh is built once,
- * its range of the port's index buffer is cleared once, and from then on a hit only writes flight records.
+ * The fractured buildings of one port. A building joins the first time it is struck (`onStruck`). Its pieces are
+ * cut once from the full assembly, `onFractured` is told so that whoever drew it whole (its continuum) leaves it out,
+ * and from then on a hit only writes flight records. `onRebuilt` hears when the town stands it again.
  *
- * A building with a `fractureSource` is no part of the port's mesh: it brings its own (a city's house, drawn
- * until now as an instance of its type). It is cut from that, `onFractured` is told so that whoever drew it
- * whole stops, and `drawSourced` draws its pieces, since they want their own pipeline.
+ * A prefab is cut from the port's assembly (`geometry`, the CPU's physical truth, drawn by nothing). A building with
+ * a `fractureSource` brings its own (a city's house, or a cleaved boulder), and `drawSourced` draws its pieces, since
+ * they want their own pipeline.
  */
-export function createPortFractures({ device, port, geometry, portIndices, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, onFractured = null, onRebuilt = null }) {
+export function createPortFractures({ device, port, geometry, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, onStruck = null, onFractured = null, onRebuilt = null }) {
   const live = new Map(), building = new Map();
   let pipeline = null, starting = null, frame = 0, lastNow = 0;
   noteBuildingMeshes(port, geometry);
@@ -1516,9 +1517,9 @@ export function createPortFractures({ device, port, geometry, portIndices, groun
     }
     const gpu = createBuildingFractureGPU({ device, pipeline, prepared, state });
     live.set(instance, gpu);
-    // From this frame the building draws from its own buffers. Once only.
-    if (instance.fractureSource) { gpu.sourced = true; onFractured?.(instance); }
-    else device.queue.writeBuffer(portIndices, prepared.fracture.firstIndex * 4, new Uint32Array(prepared.fracture.indexCount));
+    // From this frame the building stands as its pieces, and whoever drew it whole (its continuum) leaves it out.
+    if (instance.fractureSource) gpu.sourced = true;
+    onFractured?.(instance);
   };
   const stepsFor = (instance, instanceIndex) => {
     const source = instance.fractureSource ? instance.fractureSource() : null;
@@ -1540,17 +1541,14 @@ export function createPortFractures({ device, port, geometry, portIndices, groun
       }
     }
   };
-  // A rebuilt building draws from the port's mesh again, as it did before it was struck.
+  // A rebuilt building is drawn whole again by its continuum, as it was before it was struck.
   const rebuild = (instance) => {
     const gpu = live.get(instance);
-    if (gpu) {
-      if (!gpu.sourced) device.queue.writeBuffer(portIndices, gpu.fracture.firstIndex * 4, geometry.indices, gpu.fracture.firstIndex, gpu.fracture.indexCount);
-      gpu.destroy();
-    }
+    gpu?.destroy();
     live.delete(instance);
     building.delete(instance);
     damageStore?.rebuilt(port, instance);
-    if (gpu?.sourced) onRebuilt?.(instance);
+    if (gpu) onRebuilt?.(instance);
   };
   return {
     // Before a port is first seen: anything saved as ruined is a ruin already, with no fall to watch.
@@ -1582,7 +1580,7 @@ export function createPortFractures({ device, port, geometry, portIndices, groun
           continue;
         }
         if (!live.has(instance)) {
-          if (!building.has(instance)) building.set(instance, stepsFor(instance, i));
+          if (!building.has(instance)) { building.set(instance, stepsFor(instance, i)); onStruck?.(instance); }
           continue;
         }
         const gpu = live.get(instance);
