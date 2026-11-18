@@ -211,8 +211,27 @@ function crewContinuumMaterialWGSL() {
 // takes the person's own shirt and trousers, at the shade the picture holds against that region's median, so folds
 // and stitching survive any colour. Where cloth is the colour of this body's skin on a neck or wrist border, it is
 // worn as skin; where white blouse texels bled onto the anatomical neck cylinder, they wear the body's skin.
-fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f)->vec4f {
+// Mirrors crewContinuumHairStand's deterministic groom roll so the scalp under-coat matches each person's exact 3D groom:
+// 0 = shaved dome (no scalp under-coat), 1 = full hair-bearing scalp under-coat, 2 = tonsure fringe (crown dome left bare).
+fn crewScalpMode(actor:CrewActor,identity:u32,slot:u32)->f32 {
   let female=actor.skin.w>0.5&&actor.skin.w<1.5;
+  let indigenous=actor.face.w>1.5;
+  if(female||indigenous){return 1.0;}
+  let hasComp=actor.face.w<0.0;
+  let compMask=select(0u,u32((-actor.face.w)*0.5),hasComp);
+  let hairCode=compMask&7u;
+  if(hairCode>=1u&&hairCode<=5u){return 1.0;}
+  var h=(identity*131u+slot*17u+1u)*0x9e3779b1u+0x85ebca6bu;
+  h=(h^(h>>15u))*0x2c1b3c6du;
+  h=h^(h>>13u);
+  let roll=h&31u;
+  if(roll==0u){return 0.0;}
+  if(roll<=3u){return 2.0;}
+  return 1.0;
+}
+fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scalpMode:f32)->vec4f {
+  let female=actor.skin.w>0.5&&actor.skin.w<1.5;
+  let indigenous=actor.face.w>1.5;
   let skin=crewWear[3u];
   let bright=max(dot(picture,vec3f(0.3333)),1e-3);
   let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
@@ -265,6 +284,38 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f)->ve
     let cleanNeck=skin.xyz*(0.80*mix(1.0,neckShade,0.22));
     baseOut=vec4f(mix(baseOut.rgb,cleanNeck,neckSkinMask),mix(baseOut.w,1.0,neckSkinMask));
   }
+  // Fibrous hair-root scalp under-coat: softly tints & texturizes the hair-bearing cranium inside the 3D strand hairline
+  // with the person's darkened root hair pigment so bare scalp never flashes between locks from any angle or distance.
+  let crownY=select(select(1.768,1.766,indigenous),1.702,female);
+  if(scalpMode>0.5&&bodyPos.y>crownY-0.185&&(effRegion==3u||effRegion==4u||effRegion==0u)){
+    let midZ=select(select(0.026,-0.032,indigenous),-0.025,female);
+    let ax=abs(bodyPos.x);
+    let rz=bodyPos.z-midZ;
+    let wispNoise=sin(bodyPos.x*220.0+bodyPos.z*140.0)*0.0028+sin(bodyPos.x*470.0-bodyPos.y*280.0)*0.0014;
+    // Forehead & temple contour (inset ~8mm inside the 3D follicle line so forehead, brows, and face stay 100% crisp skin).
+    let widowDip=0.005*exp(-((bodyPos.x/0.020)*(bodyPos.x/0.020)));
+    let templeRec=0.011*exp(-(((ax-0.044)/0.020)*((ax-0.044)/0.020)));
+    let foreLine=(crownY-0.044)-widowDip+templeRec+wispNoise;
+    let frontMask=select(1.0,smoothstep(foreLine-0.004,foreLine+0.016,bodyPos.y),rz>0.008);
+    // Cleanly avoid ears and lower face/neck.
+    let earDy=(bodyPos.y-(crownY-0.128))/0.038;
+    let earDz=(rz+0.018)/0.030;
+    let earKeep=smoothstep(0.90,1.25,earDy*earDy+earDz*earDz+select(2.0,0.0,ax>0.050));
+    let napeLine=(crownY-0.165)+0.024*max(0.0,(rz+0.075)*4.0)+wispNoise;
+    let napeMask=smoothstep(napeLine-0.004,napeLine+0.018,bodyPos.y);
+    // Tonsure mode (2.0) keeps the top crown dome bare skin and paints only the lower fringe band.
+    let tonsureR=length(vec2f(bodyPos.x/0.058,(rz+0.004)/0.070));
+    let tonsureKeep=select(1.0,max(smoothstep(0.86,1.10,tonsureR),1.0-smoothstep(crownY-0.072,crownY-0.056,bodyPos.y)),scalpMode>1.5);
+    let scalpCov=frontMask*earKeep*napeMask*tonsureKeep;
+    if(scalpCov>0.002){
+      let hairCol=max(actor.hair.rgb,vec3f(0.010,0.008,0.007));
+      let fiberA=sin(bodyPos.x*520.0+sin(bodyPos.z*190.0)*1.6);
+      let fiberB=sin((bodyPos.x*0.7+bodyPos.z*0.7)*860.0+bodyPos.y*240.0);
+      let rootGrain=0.38+0.14*(0.5+0.5*fiberA)+0.08*(0.5+0.5*fiberB);
+      let scalpTint=hairCol*rootGrain;
+      baseOut=vec4f(mix(baseOut.rgb,scalpTint,scalpCov*0.92),mix(baseOut.w,0.0,scalpCov*0.92));
+    }
+  }
   return baseOut;
 }
 // A word's colour: three bytes, each the square root of its linear channel.
@@ -283,26 +334,27 @@ fn crewContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   var rest=s.local;
   var tone=vec4f(crewContinuumWordColour(s.word),0.0);
   (*v).uv=vec2f(0.5);
+  let scalpMode=crewScalpMode(actor,s.record.tag.z,slot);
   if(s.what==CONTINUUM_SPLAT_ENTRY){
     // Each region's mean, worn, by its share of the outline.
     var colour=vec3f(0.0);var skin=0.0;
     for(var r=0u;r<5u;r++){
       let share=crewWear[5u+r];
       if(share.w<=0.0){continue;}
-      let worn=crewContinuumWorn(r,share.xyz,actor,vec3f(0.0,1.0,0.0));
+      let worn=crewContinuumWorn(r,share.xyz,actor,vec3f(0.0,1.0,0.0),0.0);
       colour+=worn.rgb*share.w;skin+=worn.w*share.w;
     }
     tone=vec4f(colour,skin);region=0u;
   }else{
     rest=continuumPointAt(s.model,s.vertex).position;
     if(s.what==CONTINUUM_CLUSTER_ENTRY){(*v).uv=continuumUV(s.vertex);}
-    else{tone=crewContinuumWorn(region,tone.rgb,actor,rest);}
+    else{tone=crewContinuumWorn(region,tone.rgb,actor,rest,scalpMode);}
   }
   (*v).tone=tone;
   (*v).bodyPos=rest+vec3f(crewContinuumTouch());
   (*v).look=vec4u(s.what,region,slot,crewDressOf(actor.hair.w)>>16u);
   let wound=select(clamp(actor.shirt.w/0.45,0.0,1.0),0.0,actor.shirt.w>0.5);
-  (*v).hurt=vec4f(wound,clamp(fract(actor.trousers.w)/0.42,0.0,1.0),fract(actor.skin.w),0.0);
+  (*v).hurt=vec4f(wound,clamp(fract(actor.trousers.w)/0.42,0.0,1.0),fract(actor.skin.w),scalpMode);
   let base=crewMoistureBase(actor.hair.w);let y=rest.y;
   let lower=mix(moisture[base],moisture[base+1u],smoothstep(.08,.48,y));
   let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.02,1.48,y));
@@ -312,7 +364,7 @@ fn crewContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   // Read in uniform control flow; worn only by the full body.
   let picture=textureSample(crewAlbedo,crewAlbedoSampler,v.uv).rgb;
   var surface=v.tone;
-  if(v.look.x==CONTINUUM_CLUSTER_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actors[v.look.z],v.bodyPos);}
+  if(v.look.x==CONTINUUM_CLUSTER_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actors[v.look.z],v.bodyPos,v.hurt.w);}
   var c:CrewVertex;
   c.position=v.position;c.world=v.world;c.normal=v.normal;c.color=surface.rgb;c.wet=v.wet;c.skin=clamp(surface.w,0.0,1.0);
   c.bodyPos=v.bodyPos;c.damage=v.hurt.xyz;c.paint=v.look.w;c.actor=v.look.z;
@@ -510,15 +562,21 @@ fn hairContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let lockTone=v.strand.z;
   let seedPhase=v.strand.w;
 
-  // Fine individual hair-fiber micro-ridges across each lock ribbon so close-ups read as multi-hair bundles.
+  // Dense multi-frequency individual hair-fiber striations & soft cylindrical lock rounding so broader shingled locks
+  // read as rich bundles of dozens of fine hairs instead of flat ribbons.
   let B=normalize(cross(n,T)+vec3f(1e-5,0.0,0.0));
-  let micro=sin(crossV*21.99+seedPhase*6.2831853);
-  let micro2=sin(crossV*47.12-seedPhase*12.566);
-  n=normalize(n+B*(crossV*0.32+micro*0.18+micro2*0.08));
+  let wobble=sin(along*14.0+seedPhase*6.2831853)*0.22;
+  let uFiber=crossV+wobble;
+  let micro=sin(uFiber*28.27+seedPhase*6.2831853);
+  let micro2=sin(uFiber*62.83-seedPhase*12.566+along*4.0);
+  let micro3=sin(uFiber*113.10+seedPhase*18.85-along*7.5);
+  let edgeFluff=smoothstep(0.55,1.0,abs(crossV));
+  n=normalize(n+B*(crossV*0.38+micro*0.22+micro2*0.12+micro3*0.06));
 
-  // Root-to-tip melanin variation, follicle root AO, and sun-kissed tip warmth.
-  let rootAO=mix(0.42,1.0,smoothstep(0.0,0.26,along));
-  let lockVar=mix(0.70,1.32,lockTone)*(0.90+0.10*micro+0.05*micro2);
+  // Root-to-tip melanin variation, deep follicle root AO, sub-strand striations, and soft sun-kissed tips.
+  let rootAO=mix(0.36,1.0,smoothstep(0.0,0.28,along));
+  let fiberShade=0.84+0.12*micro+0.07*micro2+0.04*micro3-edgeFluff*0.10;
+  let lockVar=mix(0.68,1.34,lockTone)*fiberShade;
   let tipWarm=mix(vec3f(1.0),vec3f(1.16,1.08,0.94),along*along*0.45);
   let wet=clamp(v.wet,vec2f(0.0),vec2f(1.0));
   let albedo=clamp(v.tone*lockVar*tipWarm*mix(1.0,0.62,wet.x),vec3f(0.005),vec3f(0.92));
