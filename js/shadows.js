@@ -199,26 +199,27 @@ export function fitLandShadow(out, camera, groundY, sun, resolution = LAND_SHADO
 
 export const LAND_SHADOW_FORMAT = 'depth32float';
 export const LAND_SHADOW_RESOLUTION = 2048;
-// The land's canvas map packed for its receivers in one texture (js/wgsl/shadows.js LAND_CLOTH_SHADOW): each texel
-// what the canvas there lets through (rgb, unorm8, coverage taken out) and the canvas's depth (f32 bits).
+// The land's canvas map packed for its receivers in one storage buffer, row by row (js/wgsl/shadows.js
+// LAND_CLOTH_SHADOW): each texel what the canvas there lets through (rgb, unorm8, coverage taken out) and the canvas's
+// depth (f32 bits). A buffer, not a texture, so it takes none of a receiver's sixteen sampled textures.
 const LAND_CLOTH_PACK_WGSL = /* wgsl */ `
 @group(0) @binding(0) var clothDepth:texture_depth_2d;
 @group(0) @binding(1) var clothColour:texture_2d<f32>;
-@group(0) @binding(2) var clothPacked:texture_storage_2d<rg32uint,write>;
+@group(0) @binding(2) var<storage,read_write> clothPacked:array<vec2u>;
 @compute @workgroup_size(8,8) fn landClothPack(@builtin(global_invocation_id) id:vec3u) {
-  let size=textureDimensions(clothPacked);
+  let size=textureDimensions(clothDepth);
   if(id.x>=size.x||id.y>=size.y){return;}
   let at=vec2i(id.xy);
   let colour=textureLoad(clothColour,at,0);
   let through=select(vec3f(1.0),clamp(colour.rgb/max(colour.a,0.000001),vec3f(0.0),vec3f(1.0)),colour.a>0.000001);
-  textureStore(clothPacked,at,vec4u(pack4x8unorm(vec4f(through,1.0)),bitcast<u32>(textureLoad(clothDepth,at,0)),0u,0u));
+  clothPacked[id.y*size.x+id.x]=vec2u(pack4x8unorm(vec4f(through,1.0)),bitcast<u32>(textureLoad(clothDepth,at,0)));
 }
 `;
 // The land's shadow: its frame, fitted ahead of the camera each frame, and its maps, as a vessel's are: solid depth,
 // and canvas depth with what the canvas lets through. Everything ashore and every vessel of the fleet casts into the
 // solid map; their canvas, by its material's shadow (js/wgsl/continuum-cut.js, a material's `canvas`), into the canvas
 // map with its colour, half as fine (a sail's shadow is soft, and the map holds only the fleet's canvas). Receivers of
-// the land's own group read the solid map and the canvas map packed in one texture (js/wgsl/shadows.js
+// the land's own group read the solid map and the canvas map packed in one storage buffer (js/wgsl/shadows.js
 // LAND_CLOTH_SHADOW); those lit by its set (bind) read it as a vessel's (vesselShadow).
 export function createLandShadows(device, resolution = LAND_SHADOW_RESOLUTION) {
   const B = GPUBufferUsage, T = GPUTextureUsage;
@@ -234,16 +235,10 @@ export function createLandShadows(device, resolution = LAND_SHADOW_RESOLUTION) {
     format: 'rgba16float',
     usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING,
   });
-  const packed = device.createTexture({
-    label: 'land canvas shadow packed',
-    size: [clothResolution, clothResolution],
-    format: 'rg32uint',
-    usage: T.STORAGE_BINDING | T.TEXTURE_BINDING,
-  });
+  const packed = device.createBuffer({ label: 'land canvas shadow packed', size: clothResolution * clothResolution * 8, usage: B.STORAGE });
   const solidView = solid.createView();
   const canvasView = canvas.createView();
   const transmissionView = transmission.createView();
-  const packedView = packed.createView();
   const compare = device.createSampler({ compare: 'less-equal', minFilter: 'linear', magFilter: 'linear' });
   const linear = device.createSampler({ minFilter: 'linear', magFilter: 'linear' });
   const passDesc = {
@@ -262,7 +257,7 @@ export function createLandShadows(device, resolution = LAND_SHADOW_RESOLUTION) {
   });
   const packGroup = device.createBindGroup({
     label: 'land canvas shadow pack', layout: pack.getBindGroupLayout(0),
-    entries: [{ binding: 0, resource: canvasView }, { binding: 1, resource: transmissionView }, { binding: 2, resource: packedView }],
+    entries: [{ binding: 0, resource: canvasView }, { binding: 1, resource: transmissionView }, { binding: 2, resource: { buffer: packed } }],
   });
   const packDesc = { label: 'land canvas shadow pack' };
   const castCloth = (encoder, profiler, drawCloth) => {
@@ -292,7 +287,7 @@ export function createLandShadows(device, resolution = LAND_SHADOW_RESOLUTION) {
       [19, { buffer: uniform }],
       [20, solidView],
       [21, compare],
-      [24, packedView],
+      [24, { buffer: packed }],
     ],
     // `groundAt(x, z)` gives the ground's height, from which the box takes the relief it must hold.
     update(camera, groundY, sun, radius = 72, enabled = true, groundAt = null) {

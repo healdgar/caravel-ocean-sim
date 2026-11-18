@@ -11,20 +11,22 @@ struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
 `;
 
 // What the land's canvas map lets through to a receiver of the land's map in its group 0 (js/shadows.js
-// createLandShadows: the canvas map packed, each texel what its canvas lets through and that canvas's depth): white
-// where no canvas stands between the receiver and the light, else what the canvas lets through, as a vessel's own map
-// gives it (vesselShadow), its four texels weighed as a bilinear comparison weighs them. `uv` and `depth` are the
-// receiver's place in the map.
+// createLandShadows: the square canvas map packed row by row in a storage buffer, each texel what its canvas lets
+// through and that canvas's depth, so it takes none of a receiver's sampled textures): white where no canvas stands
+// between the receiver and the light, else what the canvas lets through, as a vessel's own map gives it
+// (vesselShadow), its four texels weighed as a bilinear comparison weighs them. `uv` and `depth` are the receiver's
+// place in the map.
 export const LAND_CLOTH_SHADOW = /* wgsl */ `
-@group(0) @binding(24) var landCanvasShadow:texture_2d<u32>;
+@group(0) @binding(24) var<storage,read> landCanvasShadow:array<vec2u>;
 fn landClothShadow(uv:vec2f,depth:f32)->vec3f {
-  let size=vec2i(textureDimensions(landCanvasShadow));
-  let texel=uv*vec2f(size)-0.5;let cell=vec2i(floor(texel));let phase=fract(texel);
+  let side=i32(round(sqrt(f32(arrayLength(&landCanvasShadow)))));
+  let texel=uv*f32(side)-0.5;let cell=vec2i(floor(texel));let phase=fract(texel);
   var light=vec3f(0.0);
   for(var corner=0;corner<4;corner++){
     let step=vec2i(corner&1,corner>>1u);
     let weight=select(1.0-phase.x,phase.x,step.x==1)*select(1.0-phase.y,phase.y,step.y==1);
-    let cloth=textureLoad(landCanvasShadow,clamp(cell+step,vec2i(0),size-1),0);
+    let at=clamp(cell+step,vec2i(0),vec2i(side-1));
+    let cloth=landCanvasShadow[at.y*side+at.x];
     light+=select(vec3f(1.0),unpack4x8unorm(cloth.x).rgb,bitcast<f32>(cloth.y)<depth)*weight;
   }
   return light;

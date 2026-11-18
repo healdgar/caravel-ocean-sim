@@ -153,7 +153,7 @@ export const surfaceArea = (corners, triangles, X) => triangles.reduce((sum, t) 
 // and keeps its genus while it can. Where `region` gives each vertex a class (a ship's wood, canvas, iron and paint), a
 // collapse across a border of class costs `border` times as much, so borders go last.
 export const CHAIN_FOLD = (living) => (living > 400 ? 0.2 : living > 60 ? -0.3 : -0.9);
-export function collapseChain(position, index, least, { region = null, border = 6, fold = CHAIN_FOLD } = {}) {
+export function collapseChain(position, index, least, { region = null, border = 6, fold = CHAIN_FOLD, fixed = null } = {}) {
   const V = position.length / 3, T = index.length / 3, corners = Int32Array.from(index), alive = new Uint8Array(T).fill(1), death = new Int32Array(T).fill(-1);
   const Q = new Float64Array(V * 10), fans = Array.from({ length: V }, () => []);
   for (let t = 0; t < T; t++) {
@@ -171,7 +171,9 @@ export function collapseChain(position, index, least, { region = null, border = 
       fans[v].push(t);
     }
   }
+  // A fixed vertex is never taken into another (others may be taken into it): the chain ends where only they are left.
   const cost = (u, v) => {
+    if (fixed && fixed[u]) return Infinity;
     const x = position[v * 3], y = position[v * 3 + 1], z = position[v * 3 + 2], a = u * 10, b = v * 10, q = (k) => Q[a + k] + Q[b + k];
     const e = q(0) * x * x + 2 * q(1) * x * y + 2 * q(2) * x * z + 2 * q(3) * x + q(4) * y * y + 2 * q(5) * y * z + 2 * q(6) * y + q(7) * z * z + 2 * q(8) * z + q(9);
     const l2 = (position[u * 3] - x) ** 2 + (position[u * 3 + 1] - y) ** 2 + (position[u * 3 + 2] - z) ** 2;
@@ -267,7 +269,7 @@ export function collapseChain(position, index, least, { region = null, border = 
   const offerAllowed = (u, refused) => {
     ring(u, scratch, markA);
     const options = scratch.filter((w) => w !== refused).map((w) => [cost(u, w), w]).sort((p, q) => p[0] - q[0]);
-    for (const [c, w] of options) if (valid(u, w)) { push(c, u, w, stamp[u]); return; }
+    for (const [c, w] of options) if (c < Infinity && valid(u, w)) { push(c, u, w, stamp[u]); return; }
   };
   // u taken into v: u's triangles across the edge die, the rest become v's.
   const collapse = (u, v) => {
@@ -369,7 +371,7 @@ export function collapseChain(position, index, least, { region = null, border = 
             if (turn(corners[f * 3], corners[f * 3 + 1], corners[f * 3 + 2], u, v) < -0.9) flips = true;
           }
           for (const n of counts.values()) dying += n - (n % 2);
-          if (living - dying < 4 || (strict && flips)) continue;
+          if (living - dying < 4 || (strict && flips) || (fixed && fixed[u])) continue;
           const c = cost(u, v);
           if (!pick || c < pick[0]) pick = [c, u, v];
         }

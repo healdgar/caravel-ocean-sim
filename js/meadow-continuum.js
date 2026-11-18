@@ -89,7 +89,8 @@ export function validateMeadowGrass(manifest) {
   types.forEach((type, id) => {
     if (type.id !== id || !(type.mix >= 0 && type.mix < 3)) throw Error(`Meadow continuum variant ${id} is malformed`);
     if (!(type.clusters > 0) || !(type.chain?.baseTriangles >= 4) || !(type.chain.steps >= 1 && type.chain.steps < CONTINUUM_NEVER)) throw Error(`Meadow continuum variant ${id} is incomplete`);
-    if (!(type.chain.coreTriangles >= 4 && type.chain.coreTriangles <= 6)) throw Error(`Meadow continuum variant ${id} ends in ${type.chain.coreTriangles} triangles`);
+    // A patch's body ends in the box of its square's eight corners (scripts/prepare-meadow-grass.mjs), so it tiles.
+    if (type.chain.coreTriangles !== 12) throw Error(`Meadow continuum variant ${id} ends in ${type.chain.coreTriangles} triangles, not its box`);
     if (!(type.coverage > 0 && type.coverage <= 1)) throw Error(`Meadow continuum variant ${id} has no coverage`);
   });
   if (!(manifest.farError > 0)) throw Error('The meadow continuum has no far error');

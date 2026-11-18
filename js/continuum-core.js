@@ -4,7 +4,8 @@
 // scalar, so the continuum is defined once and families supply only data. Loaded early in the bundle, before any
 // family that reads it; nothing here may name a family.
 
-// Below this projected span, in pixels, a body morphs into its single view-facing horizon splat.
+// Below this projected span, in pixels at the base pixel error (and in proportion to the error the cut allows), a
+// body morphs into its single view-facing horizon splat.
 export const CONTINUUM_SPLAT_PIXELS = 3.5;
 // From this span down to CONTINUUM_SPLAT_PIXELS a body's coarsest mesh hands over to its splat, smoothly: by
 // morphing its last step into the splat's shape, or by giving the splat a rising share of each pixel's samples.
@@ -104,9 +105,14 @@ fn continuumAllowedError(pixels: f32, focal: f32, distance: f32) -> f32 { return
 // The coarser side's share of a handoff that begins 'start' metres away, at 'distance': 0 short of it, 1 once
 // the band (CONTINUUM_HANDOFF_BAND of 'start') is crossed.
 fn continuumHandoff(distance: f32, start: f32) -> f32 { return clamp((distance - start) / max(start * CONTINUUM_HANDOFF_BAND, 1e-6), 0.0, 1.0); }
-// The splat's share of a body that spans 'pixels': 0 above CONTINUUM_SPLAT_BAND_PIXELS, 1 at and below
-// CONTINUUM_SPLAT_PIXELS. A family either morphs its last step toward the splat by it or splits samples by it.
-fn continuumSplatShare(pixels: f32) -> f32 { return 1.0 - smoothstep(CONTINUUM_SPLAT_PIXELS, CONTINUUM_SPLAT_BAND_PIXELS, pixels); }
+// The splat's share of a body that spans 'pixels' where the cut allows 'error' pixels: 0 above
+// CONTINUUM_SPLAT_BAND_PIXELS, 1 at and below CONTINUUM_SPLAT_PIXELS, at the base error and in proportion to the
+// error allowed. A body whose whole span is about the error allowed is no more than its splat, so as the one scalar
+// coarsens the scene the splat takes over sooner, as every other step of the cut does, and an important body later.
+// A family either morphs its last step toward the splat by it or splits samples by it.
+fn continuumSplatShare(pixels: f32, error: f32) -> f32 {
+  return 1.0 - smoothstep(CONTINUUM_SPLAT_PIXELS, CONTINUUM_SPLAT_BAND_PIXELS, pixels * CONTINUUM_BASE_PIXEL_ERROR / max(error, 1e-3));
+}
 // The samples of a pixel, of 'samples' (1 to 8), that the coarser side of a handoff takes when it holds 'share'
 // of the pixel. The finer side gives up exactly these (the same call, inverted against the full mask), so each
 // sample is drawn once and the change needs no blending. Every pixel rounds the share its own way, which spreads

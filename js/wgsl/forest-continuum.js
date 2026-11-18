@@ -432,6 +432,16 @@ fn forestWindStep(skeleton:u32,model:u32,toward:vec3f,speed:f32,gust:f32,phase:f
 }
 
 // ---------------------------------------------------------------------------------------------- the material
+// How much fuller a canopy reads far off than its leaves' own coverage, as its many small gaps close at a distance: a
+// leaf card's coverage is raised by as much toward the far body's handoff.
+const FOREST_CROWN_CLOSING = 2.25;
+// The share of its card a leaf map covers (scripts/prepare-forest-continuum.mjs leafMaskCover: a third to a half),
+// which the far body's moments were cast through (continuumFarOptics, each card stopping that share of the light).
+const FOREST_LEAF_CARD_COVER = 0.36;
+// The optical depth a far crown's line of sight meets, as many times what its moments hold as a card's own grows once
+// its coverage is raised by FOREST_CROWN_CLOSING (about four times), so the far body is as full as the clusters it
+// takes over from.
+const FOREST_CROWN_DEPTH_CLOSING = Math.log(1 - Math.min(0.99, FOREST_CROWN_CLOSING * FOREST_LEAF_CARD_COVER)) / Math.log(1 - FOREST_LEAF_CARD_COVER);
 const forestContinuumMaterialWGSL = () => {
   const M = FOREST_CONTINUUM_MATERIAL, F = CONTINUUM_WIND_FORM;
   return /* wgsl */`
@@ -564,6 +574,8 @@ fn forestCrownMottle(world:vec3f)->f32{
 }
 // The surface lies just inside its outermost leaves, which the land's shadow map holds: its shadow is looked up beyond them.
 const FOREST_CROWN_SHADOW_LIFT=.45;
+const FOREST_CROWN_CLOSING=${FOREST_CROWN_CLOSING.toFixed(4)};
+const FOREST_CROWN_DEPTH_CLOSING=${FOREST_CROWN_DEPTH_CLOSING.toFixed(4)};
 // A far triangle's word and a splat's: leaf | layer << 1. What it looks like is its vertices' optical moments.
 struct ForestFarLook {leaf:bool,layer:u32};
 fn forestFarLook(word:u32)->ForestFarLook{
@@ -615,10 +627,19 @@ fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
  colour*=tint;
  (*v).layer=FOREST_UNTEXTURED;
  let sky=clamp(s.optics.x,0.,1.);
+ // What of the line of sight passes clean through the tree here: what its moments let through along its depth, over
+ // the chord a line at this angle cuts through it (a sphere's, as much shorter as it meets the surface aslant), so a
+ // crown thins to its edge as a crown of leaves does and never ends in a cut outline, and a far face of limbs and the
+ // air between them is as open as they are. A splat stands for the whole crown: its line of sight meets it at a
+ // disc's mean slant.
+ let toward=normalize(continuumEye()-s.world);
+ let slant=select(abs(dot(s.normal,toward)),2./3.,s.what==CONTINUUM_SPLAT_ENTRY);
+ let gaps=pow(clamp(s.optics.z,0.,1.),max(slant,.02)*FOREST_CROWN_DEPTH_CLOSING);
  if(!look.leaf){
   let n=s.normal;let reach=continuumOpticLight(n,F.sunDir.xyz,s.optics);
   (*v).colour=colour;
   (*v).crown=vec4f(max(dot(n,F.sunDir.xyz),0.)*reach.x,(.36+max(n.y,0.)*.25)*sky,0.,.95);
+  (*v).surface=vec4f(0.,0.,gaps,0.);
   return;
  }
  var outward=s.normal;
@@ -633,7 +654,7 @@ fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
  // The sun on its leaves as deep as they are seen, and what of it comes clean through the crown from behind.
  let reach=continuumOpticLight(outward,F.sunDir.xyz,s.optics);
  (*v).colour=lit.colour;(*v).normal=lit.normal;(*v).crown=vec4f(lit.light.x*reach.x+reach.y*(.35+.65*material.optics.z),lit.light.y,lit.finish);
- (*v).surface=vec4f(sky,1.0,0.0,0.0);
+ (*v).surface=vec4f(sky,1.0,gaps,0.0);
 }
 fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
  let dx=dpdx(v.world);let dy=dpdy(v.world);let ux=dpdx(v.uv);let uy=dpdy(v.uv);
@@ -703,17 +724,19 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
  return landFinishShadowed(v.world,n,colour,diffuse,ambient,wet,roughness,landShadowVisibility(shadowAt,select(n,normalize(shadowAt-v.world+n*1e-6),v.coverage.x!=CONTINUUM_CLUSTER_ENTRY)));
 }
 // A leaf card's cut: the samples its coverage takes, nearer leaves reading coverage half a level finer, which shows
-// their shapes, and far ones a little fuller, as a canopy's many small gaps close at a distance. Bark, the far body
-// and the splat cover every sample.
+// their shapes, and far ones a little fuller, as a canopy's many small gaps close at a distance (FOREST_CROWN_CLOSING).
+// Bark covers every sample; the far body and its splat what their line of sight does not pass clean through, by a
+// pattern of their own, so trees standing one behind another fill each other's gaps.
 fn forestContinuumCoverage(v:ContinuumVarying,front:bool)->u32{
  let ux=dpdx(v.uv);let uy=dpdy(v.uv);
  let layer=v.layer&0xffffu;
- if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY||(v.layer>>16u)==0u||layer==FOREST_UNTEXTURED){return 0xffffffffu;}
+ if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){return forestLeafSampleMask(1.-clamp(v.surface.z,0.,1.),continuumHash(v.coverage.z^0x2c1b3c6du),v.position.xy,v.coverage.w);}
+ if((v.layer>>16u)==0u||layer==FOREST_UNTEXTURED){return 0xffffffffu;}
  let viewDist=length(continuumEye()-v.world);
  let near=mix(.7,1.,smoothstep(30.,90.,viewDist));
  let rawAlpha=forestNativeAlbedoOnly(forestNativeMaterials[layer],v.uv,ux*near,uy*near).a;
  let crisp=select(rawAlpha,forestBotanicalDetail(v.uv,viewDist,rawAlpha).x,viewDist<38.);
- return forestLeafSampleMask(clamp(crisp*mix(1.,2.25,smoothstep(45.,220.,viewDist)),0.,1.),v.seed,v.position.xy,v.coverage.w);
+ return forestLeafSampleMask(clamp(crisp*mix(1.,FOREST_CROWN_CLOSING,smoothstep(45.,220.,viewDist)),0.,1.),v.seed,v.position.xy,v.coverage.w);
 }
 `;
 };

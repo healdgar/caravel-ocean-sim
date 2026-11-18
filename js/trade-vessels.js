@@ -4112,7 +4112,12 @@ fn tradeVesselContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVa
   let unturned = continuumQuat(vec4f(-s.record.turn.xyz, s.record.turn.w), s.normal);
   (*v).normalLocal = normalize(unturned * designScale + vec3f(0.0, 1e-6, 0.0));
   (*v).uv = select(vec2f(0.5), continuumUV(rides), pointed);
-  (*v).state = vec2f(s.wear, material);
+  // How far off her own surface the coarse cut's shadow of her may stand: where her far body casts in the land's map
+  // (its texels too coarse for her clusters), its step's error and swell at her scale. The map is weighed that much
+  // nearer the sun on her, so the wrap round her canvas and planking never shades the canvas and planking it wraps.
+  let held = continuumState(s.instance).y >> 16u;
+  let slack = select(0.0, (bitcast<f32>(continuumStepWord(s.model, held, 1u)) + bitcast<f32>(continuumStepWord(s.model, held, 2u))) * continuumScale(s.record), continuumShadowShare(s.instance) > 0u);
+  (*v).state = vec3f(s.wear, material, slack);
   let slot = u32(max(bitcast<f32>(s.record.spare.x), 0.0)) >> 16u;
   (*v).ids = vec4u(u32(max(0.0, floor(material))), min(s.model, ${TRADE_VESSEL_ARCHETYPES - 1}u), slot, bitcast<u32>(max(s.record.place.w, 0.25)));
   (*v).turn = s.record.turn;
@@ -4122,17 +4127,22 @@ fn tradeVesselContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVa
 }
 
 // The land's map at a point of her: what the solid casters leave of the sun, coloured by any canvas between, hers or
-// another's (LAND_CLOTH_SHADOW).
-fn tradeShadowVis(world: vec3f, normal: vec3f) -> vec3f {
+// another's (LAND_CLOTH_SHADOW). slack: how far off her surface her own shadow's caster may stand (her varying).
+fn tradeShadowVis(world: vec3f, normal: vec3f, slack: f32) -> vec3f {
   if (landSH.origin.w < 0.5) { return vec3f(1.0); }
   let p = landSH.lightView * vec4f(world - landSH.origin.xyz + normal * 0.04 + landSH.sun.xyz * 0.03, 1.0);
   let at = p.xy * vec2f(0.5, -0.5) + 0.5;
   let edge = min(min(at.x, 1.0 - at.x), min(at.y, 1.0 - at.y));
   let fade = smoothstep(0.0, 0.06, edge) * step(0.0, p.z) * step(p.z, 1.0);
   let uv = clamp(at, vec2f(0.001), vec2f(0.999));
-  let refZ = min(p.z - 0.08 / max(landSH.sun.w, 1.0), 0.99999);
+  let depth = max(landSH.sun.w, 1.0);
+  let refZ = min(p.z - (0.08 + slack) / depth, 0.99999);
   let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, uv, refZ);
-  return mix(vec3f(1.0), s * landClothShadow(uv, refZ), fade);
+  // The canvas map's texels are twice the solid map's, and a sail weighed against its own canvas there would shade
+  // itself in blocks of them; so canvas is weighed at least a texel and a half of it nearer the sun. A sail takes no
+  // shadow of its own, and the deck and hull under it, metres off, take its colour whole.
+  let clothZ = min(p.z - (0.08 + max(slack, 3.0 * max(landSH.texel.x, landSH.texel.y))) / depth, 0.99999);
+  return mix(vec3f(1.0), s * landClothShadow(uv, clothZ), fade);
 }
 
 fn isWoodMat(m: u32) -> bool {
@@ -4468,7 +4478,7 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
 
   let sunDir = normalize(F.sunDir.xyz);
   let viewDir = normalize(tvEye - in.world);
-  let sunVis = solarShadowVisibility(tradeShadowVis(in.world, n));
+  let sunVis = solarShadowVisibility(tradeShadowVis(in.world, n, in.state.z));
   let sunRad = sunIlluminance() * sunVis;
   let nDotL = max(dot(n, sunDir), 0.0);
   let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35)));
@@ -4497,7 +4507,7 @@ fn tvFarShade(in: ContinuumVarying, front: bool) -> vec4f {
   let n = normalize(in.normal) * select(select(-1.0, 1.0, front), 1.0, in.coverage.x == CONTINUUM_SPLAT_ENTRY);
   let farSun = normalize(F.sunDir.xyz);
   let farView = normalize(continuumEye() - in.world);
-  let sunRad = sunIlluminance() * solarShadowVisibility(tradeShadowVis(in.world, n));
+  let sunRad = sunIlluminance() * solarShadowVisibility(tradeShadowVis(in.world, n, in.state.z));
   let nDotL = max(dot(n, farSun), 0.0);
   // The sun and sky her optical moments say reach what is seen of her: her canvas lets some through.
   let reach = continuumOpticLight(n, farSun, in.optics);
@@ -4563,7 +4573,7 @@ fn tradeVesselContinuumShadowTransmit(v:ContinuumShadowVarying)->vec3f {
 });
 export const TRADE_VESSEL_CONTINUUM_MATERIAL = Object.freeze({
   name: 'tradeVesselContinuum', prelude: tradeVesselContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
-  varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['state', 'vec2f'], ['colour', 'vec3f'], ['ids', 'vec4u', true], ['turn', 'vec4f', true]],
+  varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['state', 'vec3f'], ['colour', 'vec3f'], ['ids', 'vec4u', true], ['turn', 'vec4f', true]],
   wgsl: () => (tradeVesselContinuumShading ??= withNeuralPbrTradeVessels(tradeVesselContinuumRawWGSL())),
   salt: 5,
   // Sails, awnings and planking are open shells, lit from whichever side is seen.

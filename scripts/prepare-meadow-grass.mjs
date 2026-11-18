@@ -17,7 +17,8 @@
 //     that view lies below, its error where nine tenths of it lie within. The share of ground the sward hides rides
 //     each body triangle, so the far meadow shows its soil where the near one does. Every variant's body meets the
 //     edge of its patch at one height, colour and cover, so patches of any mix meet without a step. Collapsed one
-//     half-edge at a time (the one simplifier's collapse, js/continuum-bake.js) down to a core of a few triangles, its
+//     half-edge at a time (the one simplifier's collapse, js/continuum-bake.js) down to the box of its square's
+//     corners, which never move, so patches tile the field at every step without a hole where four meet; its
 //     error measured at every step, and given between the steps where it rises a rise of its own, so the morph passes
 //     through every step in turn.
 //   The far body takes over from the first of its steps no finer than the coarsest level, at one error for every
@@ -64,7 +65,10 @@ const BODY_ERROR_QUANTILE = 0.9;
 // A coarser level's error: this share of the mean width its kept organs are grown to, as the forest's leaves
 // (scripts/prepare-forest-continuum.mjs, third_party/threejs-nanites/dag/leaves.ts).
 const ORGAN_ERROR_SHARE = 0.35;
-const CHAIN_LEAST_TRIANGLES = 6;
+// A patch tiles the field with its neighbours, so its body keeps its square to the end: its chain ends in the box of
+// its eight corners, which never move (a corner taken in would open a hole where four patches meet, and every such
+// hole together a lattice across the field).
+const CHAIN_LEAST_TRIANGLES = 12;
 // Between steps whose errors rise by at least this share, the error rises in proportion (on a log scale), and no step
 // ever has less than this over the one before, so each step has its own error and the morph passes through it.
 const KNOT_RISE = 0.01, STEP_RISE = 0.003;
@@ -521,7 +525,10 @@ function bakeBody(sward, rim) {
   if (census.boundary || census.nonManifold) throw Error(`The canopy slab is not closed: ${JSON.stringify(census)}`);
   const position = Float64Array.from(slabPosition), slabN = Float64Array.from(slabNormal), index = Int32Array.from(slabIndex);
   const SV = position.length / 3, ST = index.length / 3;
-  const chain = collapseChain(position, index, CHAIN_LEAST_TRIANGLES), S = chain.steps.length;
+  const fixed = new Uint8Array(SV);
+  for (const layer of [0, 1]) for (const j of [0, G]) for (const i of [0, G]) fixed[vtx(layer, i, j)] = 1;
+  const chain = collapseChain(position, index, CHAIN_LEAST_TRIANGLES, { fixed }), S = chain.steps.length;
+  if (chain.living !== CHAIN_LEAST_TRIANGLES) throw Error(`The canopy slab ends in ${chain.living} triangles, not its box`);
   let depth = 0;
   for (let v = 0; v < SV; v++) { let d = 0; for (let w = v; chain.dieStep[w] >= 0; w = chain.target[w]) d++; depth = Math.max(depth, d); }
   if (depth > CONTINUUM_HOPS) throw Error(`A canopy vertex collapses ${depth} times, past the GPU's ${CONTINUUM_HOPS}`);
@@ -543,11 +550,13 @@ function bakeBody(sward, rim) {
   for (let s = 0; s <= S; s++) {
     const living = allBase.filter((t) => chain.death[t] < 0 || chain.death[t] > s);
     for (const t of living) for (let k = 0; k < 3; k++) stepCorners[t * 3 + k] = ancestor(chain, index[t * 3 + k], s);
-    const fans = new Map(), members = new Map();
-    for (const t of living) for (let k = 0; k < 3; k++) { const a = stepCorners[t * 3 + k]; if (!fans.has(a)) fans.set(a, []); fans.get(a).push(t); }
+    const members = new Map();
     for (let v = 0; v < SV; v++) { const a = ancestor(chain, v, s); if (!members.has(a)) members.set(a, []); members.get(a).push(v); }
+    // Each point of the slab against the nearest face the step keeps. A slab's points end mostly far from the corner
+    // they collapse into, on faces that corner does not touch, so against that corner's own faces alone they would
+    // read the patch's width as error where the surface has not moved.
     let error = 0;
-    for (let v = 0; v < SV; v++) { const list = fans.get(ancestor(chain, v, s)); if (list) error = Math.max(error, near(position[v * 3], position[v * 3 + 1], position[v * 3 + 2], list, stepCorners)); }
+    for (let v = 0; v < SV; v++) error = Math.max(error, near(position[v * 3], position[v * 3 + 1], position[v * 3 + 2], living, stepCorners));
     for (const t of living) {
       const [a, b, c] = [0, 1, 2].map((k) => stepCorners[t * 3 + k]), candidates = new Set();
       for (const corner of [a, b, c]) for (const m of members.get(corner) ?? []) for (const u of baseFans[m]) candidates.add(u);
@@ -587,12 +596,15 @@ function bakeBody(sward, rim) {
   // The far body as the one format takes it (js/continuum-bake.js bakeFar's), the slab lifted clear of the land it
   // covers. Its steps are written once every variant's first error is known (farSteps).
   const lifted = Float32Array.from(position, (v, i) => (i % 3 === 1 ? v + BODY_FLOOR : v));
-  // The splat: the canopy seen from the side, its outline the patch's width by the canopy's height.
-  const ry = Math.max(canopy / 2, 0.03), area = P * Math.max(canopy, 0.06);
+  // The splat: the canopy's height up, and across the circle through the patch's corners. Patches tile, so their
+  // splats must: each is the whole triangle round that circle's ellipse (its area 3√3 rx ry, never shrunk), so it
+  // covers its square seen from any side and overlaps its neighbours' where a triangle of only the square's area would
+  // leave a lattice of the land between them.
+  const rx = P / Math.SQRT2, ry = Math.max(canopy / 2, 0.03);
   const far = {
     position: lifted, normal: Float32Array.from(slabN), index: Uint32Array.from(index), order, chain, farFirst,
     stats: { inflateMax: Math.max(...inflates) },
-    splat: { centre: [P / 2, BODY_FLOOR * 2 + canopy / 2, P / 2], ry, rx: area / (Math.PI * ry), area },
+    splat: { centre: [P / 2, BODY_FLOOR * 2 + canopy / 2, P / 2], ry, rx, area: 3 * Math.sqrt(3) * rx * ry },
   };
   // Its optical moments (js/continuum-bake.js packFarOptics), known without casting for them: a sward is a thin layer
   // of blades at every angle over the ground, seen a little way into where it stands thick, the sky shut out of its
@@ -670,7 +682,8 @@ async function bakePack(name) {
     console.log(`${name} ${jobs[id].mix} ${jobs[id].variantIndex}: body ${b.canopy.toFixed(3)} m, ${b.chain.baseTriangles} -> ${b.chain.coreTriangles} triangles in ${b.chain.steps} steps (${b.chain.knots} knots), from step ${b.chain.farFirst} at ${b.chain.firstError.toFixed(3)} m to ${b.chain.lastError.toFixed(3)} m`);
     return b;
   });
-  const farError = Math.max(...bodies.map((b) => b.chain.firstError)), canopy = bodies.reduce((s, b) => s + b.canopy, 0) / bodies.length;
+  // Every patch hands over at one error, and only once every variant's clusters have reached their coarsest.
+  const farError = Math.max(...bodies.map((b) => b.chain.firstError), ...swards.map((s) => s.rootError)), canopy = bodies.reduce((s, b) => s + b.canopy, 0) / bodies.length;
 
   // One frame every type shares: the box round every variant's sward, at every level, and body, to the centimetre.
   const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];

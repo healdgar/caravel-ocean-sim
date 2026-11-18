@@ -467,7 +467,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
             share=u32(round(continuumHandoff(away,start)*255.0));
             let stretch=continuumStretch(record);
             let span=2.0*max(continuumTypeF(model,${CONTINUUM_TYPE.splatRx}u)*0.5*(stretch.x+stretch.z),continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*stretch.y)*record.place.w*focal/away;
-            splatShare=u32(round(continuumSplatShare(span)*255.0));
+            splatShare=u32(round(continuumSplatShare(span,pixels)*255.0));
             if(share>0u){
               splatScale=continuumThin(span,record.tag.z*0x9e3779b9u+0x85ebca6bu);
               if(splatShare>0u&&splatScale>0.0){

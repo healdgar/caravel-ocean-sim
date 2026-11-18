@@ -229,13 +229,14 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp appr
   assert.match(fs.readFileSync('js/forest-groves.js', 'utf8'), /export function forestGroveStamp[\s\S]*?region\.size/, 'a grove is planted again when its section is resized');
 });
 
-test('meadow grass is one continuum atlas cut on the GPU: clusters, a 4..6 triangle core, ballistic wakes and terrain bindings', () => {
+test('meadow grass is one continuum atlas cut on the GPU: clusters, the box of its square as its core, ballistic wakes and terrain bindings', () => {
   const manifest = validateMeadowGrass(JSON.parse(fs.readFileSync('assets/ground-cover/portugal/meadows-gpu/manifest.json', 'utf8')));
   assert.equal(manifest.patchMetres, 4);
   assert.equal(manifest.levels, 8);
   assert.equal(manifest.types.length, 12);
   for (const variant of manifest.types) {
-    assert.ok(variant.chain.coreTriangles >= 4 && variant.chain.coreTriangles <= 6, `variant ${variant.id} must end in a 4..6 triangle core, got ${variant.chain.coreTriangles}`);
+    // A patch tiles, so its body ends in the 12-triangle box of its square's eight fixed corners.
+    assert.equal(variant.chain.coreTriangles, 12, `variant ${variant.id} must end in the box of its square, got ${variant.chain.coreTriangles}`);
     assert.ok(variant.clusters > 0 && variant.chain.baseTriangles > variant.chain.coreTriangles);
     // Each variant's share of the ground its sward hides, which the error counts when it is lost.
     assert.ok(variant.coverage > 0 && variant.coverage <= 1);
