@@ -1,180 +1,200 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// What a crew works its guns, keeps watch and fights with, and the arrows stuck in its people, drawn through the one
+// continuum (AGENTS.md rule 3) as props and shot are. Every piece (a rammer's staff and head, a spyglass's tube and
+// cell, a swivel's chamber, a cutlass, a fall of tackle, an arrow's shaft and fletching) is a type of the prop atlas at
+// its own size (js/prop-continuum.js PROP_CONTINUUM_TOOLS), cut by the one rigid cut (js/city-continuum-draw.js) and
+// worn by the props' own view. JavaScript writes each piece's two ends a frame in the vessel's frame, as a compact
+// record; the arrow pass fills an arrow's two from the joints its body is drawn with (js/wgsl/crew-solve.js). Then a
+// compute pass stands each record as an instance of its type, turned along it in the world, and the cut does the rest.
 import { requestOnce } from './gpu-program-cache.js';
-import { ANCHOR_RENDER } from './wgsl/anchor.js';
-import { SHADOW_FRAME, SHADOW_SAMPLE, SCENE_SHADOW_SAMPLE } from './wgsl/shadows.js';
 import { crewGunneryTool } from './crew-work.js';
 import { boatRotate } from './boat.js';
+import { sharedNeuralPbrBank } from './neural-pbr.js';
+import { LAND_SHADOW_FORMAT } from './shadows.js';
+import { CITY_CONTINUUM_GONE, CITY_CONTINUUM_INSTANCE_WORDS } from './wgsl/city-continuum.js';
+import { PROP_CONTINUUM_TOOLS, PROP_CONTINUUM_TOOL_FIRST, PROP_CONTINUUM_TYPES, propContinuumTool } from './prop-continuum.js';
+import { requestPropContinuumAtlas, requestPropContinuumPipelines, createPropContinuumScene } from './prop-continuum-draw.js';
 
-// Crew receives this vessel's shadow layer, while the anchor uses the fleet.
-// Replace the exact shared snippet, which remains stable in flattened builds.
-export const GUNNERY_TOOL_GPU_GEOMETRY=/* wgsl */`
-struct GunneryToolShape {a:vec4f,b:vec4f};
-struct GunneryToolVertex {position:vec3f,normal:vec3f,kind:vec2f};
-fn gunneryToolVertex(p:vec3f,n:vec3f,index:u32)->GunneryToolVertex {
-  let shape=gunneryToolShapes[index];
-  let d=normalize(shape.b.xyz-shape.a.xyz);
-  let seed=select(vec3f(0,1,0),vec3f(1,0,0),abs(d.y)>.9);
-  let u=normalize(cross(d,seed));let v=cross(d,u);
-  let point=mix(shape.a.xyz,shape.b.xyz,p.x)+(u*p.y+v*p.z)*shape.a.w;
-  let normal=select(u*n.x+v*n.y,d*n.z,abs(n.z)>.5);
-  return GunneryToolVertex(point,normal,vec2f(shape.b.w,1));
-}
-`;
-export const GUNNERY_TOOL_RENDER=ANCHOR_RENDER.replace(SCENE_SHADOW_SAMPLE,SHADOW_SAMPLE)
-  .replace(/@vertex\s+fn\s+vs\s*\([\s\S]*?\)\s*->\s*AnchorVertex\s*\{/,
-    '@vertex fn vs(@location(0) templatePosition:vec3f,@location(1) templateNormal:vec3f,@location(2) templateKind:vec2f,@builtin(instance_index) toolIndex:u32)->AnchorVertex {\nlet tool=gunneryToolVertex(templatePosition,templateNormal,toolIndex);let position=tool.position;let normal=tool.normal;let kind=tool.kind;')
-  +GUNNERY_TOOL_GPU_GEOMETRY+'\n@group(0) @binding(7) var<storage,read> gunneryToolShapes:array<GunneryToolShape>;';
+// A record: one end and the piece (its place in PROP_CONTINUUM_TOOLS, -1 for none), then the other end. A piece runs
+// from its type's origin at the first end towards the second.
+export const GUNNERY_TOOL_RECORD_FLOATS = 8;
+// How many pieces a company draws at most: the arrows' pairs among them.
+export const GUNNERY_TOOL_RECORDS = 68;
+export const GUNNERY_TOOL_ARROWS = 34;
+export const GUNNERY_TOOL_PIECE = Object.freeze(Object.fromEntries(PROP_CONTINUUM_TOOLS.map((tool) => [tool.name, propContinuumTool(tool.name)])));
 
-export const GUNNERY_TOOL_SHADOW=SHADOW_FRAME+GUNNERY_TOOL_GPU_GEOMETRY+/* wgsl */`
-struct GunneryToolPose {right:vec4f,up:vec4f,aft:vec4f,origin:vec4f};
-@group(0) @binding(0) var<uniform> S:ShadowFrame;
-@group(0) @binding(1) var<uniform> P:GunneryToolPose;
-@group(0) @binding(2) var<storage,read> gunneryToolShapes:array<GunneryToolShape>;
-@vertex fn vs(@location(0) templatePosition:vec3f,@location(1) templateNormal:vec3f,@builtin(instance_index) toolIndex:u32)->@builtin(position) vec4f {
-  let position=gunneryToolVertex(templatePosition,templateNormal,toolIndex).position;
-  return S.lightView*vec4f(P.right.xyz*position.x+P.up.xyz*position.y+P.aft.xyz*position.z,1);
-}
-`;
-
-// Immutable unit tubes. Endpoint/radius/kind records are the only live upload;
-// the visible, submerged and shadow vertex stages expand these same records.
-export function createGunneryToolTemplate(){
-  const values=[],ranges=[];
-  const put=(t,c,s,nc,ns,cap)=>values.push(t,c,s,nc,ns,cap,0,1);
-  for(const sides of [5,6,8]){
-    const first=values.length/8;
-    for(let j=0;j<sides;j++){
-      const a=j*Math.PI*2/sides,b=(j+1)*Math.PI*2/sides,c=Math.cos(a),s=Math.sin(a),cc=Math.cos(b),ss=Math.sin(b);
-      for(const[t,x,y]of[[0,c,s],[0,cc,ss],[1,c,s],[1,c,s],[0,cc,ss],[1,cc,ss]])put(t,x,y,x,y,0);
-      for(const[t,x,y,n]of[[0,0,0,-1],[0,cc,ss,-1],[0,c,s,-1],[1,0,0,1],[1,c,s,1],[1,cc,ss,1]])put(t,x,y,0,0,n);
-    }
-    ranges.push({sides,first,count:values.length/8-first});
+// Each record stood as a turned instance of its piece's type. Its pose: the vessel's axes and where she lies, in the
+// world, and (origin.w) how many records there are.
+export const GUNNERY_TOOL_PLACE_WGSL = /* wgsl */`
+struct GunneryToolRecord { a:vec4f, b:vec4f };
+struct GunneryToolPose { right:vec4f, up:vec4f, aft:vec4f, origin:vec4f };
+struct GunneryToolInstance { root:vec4f, shape:vec4f, tag:vec4u, turn:vec4f };
+@group(0) @binding(0) var<storage,read> gunneryTools:array<GunneryToolRecord>;
+@group(0) @binding(1) var<uniform> gunneryToolPose:GunneryToolPose;
+@group(0) @binding(2) var<storage,read_write> gunneryToolInstances:array<GunneryToolInstance>;
+const GUNNERY_TOOL_LENGTHS=array<f32,${PROP_CONTINUUM_TOOLS.length}>(${PROP_CONTINUUM_TOOLS.map((tool) => tool.length.toFixed(4)).join(',')});
+// The pieces drawn out to the length they are hauled to, one bit each.
+const GUNNERY_TOOL_HAULED:u32=${PROP_CONTINUUM_TOOLS.reduce((bits, tool, i) => bits | (tool.hauled ? 1 << i : 0), 0)}u;
+fn gunneryToolWorld(p:vec3f)->vec3f { let P=gunneryToolPose;return P.origin.xyz+P.right.xyz*p.x+P.up.xyz*p.y+P.aft.xyz*p.z; }
+@compute @workgroup_size(64) fn gunneryToolPlace(@builtin(global_invocation_id) id:vec3u){
+  if(id.x>=u32(gunneryToolPose.origin.w)){return;}
+  let record=gunneryTools[id.x];
+  let a=gunneryToolWorld(record.a.xyz);let d=gunneryToolWorld(record.b.xyz)-a;let reach=length(d);
+  let piece=i32(round(record.a.w));
+  var out:GunneryToolInstance;
+  out.root=vec4f(a,0.0);out.shape=vec4f(1.0,1.0,1.0,0.0);out.turn=vec4f(0.0,0.0,0.0,1.0);
+  // A record with no piece, or one whose ends meet (an arrow whose bone is gone), stands nothing.
+  if(piece<0||piece>=${PROP_CONTINUUM_TOOLS.length}||reach<1e-5){
+    out.tag=vec4u(${PROP_CONTINUUM_TOOL_FIRST}u|${CITY_CONTINUUM_GONE}u,0u,0u,id.x);
+    gunneryToolInstances[id.x]=out;return;
   }
-  return {vertices:new Float32Array(values),ranges};
+  // The shortest turn from the piece's own up (+y) onto its line: about the axis +y x along. Straight down is half a
+  // turn about +x.
+  let along=d/reach;let w=1.0+along.y;
+  out.turn=select(normalize(vec4f(along.z,0.0,-along.x,w)),vec4f(1.0,0.0,0.0,0.0),w<1e-6);
+  if(((GUNNERY_TOOL_HAULED>>u32(piece))&1u)!=0u){out.shape.y=reach/GUNNERY_TOOL_LENGTHS[piece];}
+  out.tag=vec4u(${PROP_CONTINUUM_TOOL_FIRST}u+u32(piece),0u,0u,id.x);
+  gunneryToolInstances[id.x]=out;
+}
+`;
+if (CITY_CONTINUUM_INSTANCE_WORDS !== 16) throw Error('A gunnery tool\'s instance is the one cut\'s record');
+
+// The pose the records are stood by: the vessel's right, up and aft in the world, where she lies, and how many records
+// there are, as sixteen floats.
+export function gunneryToolPose(boat, count, pose = new Float32Array(16)) {
+  const h = ((boat.heading ?? 0) * Math.PI) / 180, axis = [0, 0, 0];
+  for (const [i, vector] of [[0, [1, 0, 0]], [4, [0, 1, 0]], [8, [0, 0, 1]]]) { boatRotate(axis, ...vector, h, boat.pitch ?? 0, boat.roll ?? 0); pose.set(axis, i); pose[i + 3] = 0; }
+  pose.set([boat.x ?? 0, boat.heave ?? 0, boat.z ?? 0, count], 12);
+  return pose;
 }
 
 // 'placed', if given, takes the arrows of bodies posed on the GPU: each is given two records here, a shaft and its
 // fletching, which the arrow pass fills from the body's joints (js/crew-solve.js).
-export function writeGunneryToolInstances(company,boat,target,placed=null){
-  const buckets=[[],[],[]];let vertices=0;
-  const tube=(a,b,radius,kind,sides=6)=>{
-    if(Math.hypot(...b.map((v,i)=>v-a[i]))<1e-5)return;
-    vertices+=sides*12;if(vertices>4096)throw Error('Gunnery tools exceed bounded geometry');
-    buckets[sides===5?0:sides===6?1:2].push(...a,radius,...b,kind);
+export function writeGunneryToolInstances(company, boat, target, placed = null) {
+  const records = Math.floor(target.length / GUNNERY_TOOL_RECORD_FLOATS), P = GUNNERY_TOOL_PIECE;
+  let count = 0;
+  const room = (n = 1) => count + n <= records;
+  const piece = (a, b, which) => {
+    if (!room() || Math.hypot(...b.map((v, i) => v - a[i])) < 1e-5) return;
+    target.set([...a, which, ...b, 0], count * GUNNERY_TOOL_RECORD_FLOATS);
+    count++;
   };
-  const spare=()=>vertices+60<=4096&&buckets.reduce((n,b)=>n+b.length,0)+8<=target.length;
-  for(const sailor of company.crew){
+  // A head on the far end of a staff: its last `length` metres.
+  const end = (a, b, length) => { const d = b.map((x, i) => x - a[i]), n = Math.hypot(...d); return n < 1e-5 ? null : b.map((x, i) => x - (d[i] / n) * length); };
+  let arrows = 0;
+  for (const sailor of company.crew) {
     // Arrows that struck this body, fletched at the tail. They yield to a working crew's tools.
-    if(sailor.stuckArrowPoses)for(const arrow of sailor.stuckArrowPoses){
-      if(spare())tube(arrow.tip,arrow.tail,.011,1,5);
-      const d=arrow.tail.map((v,i)=>v-arrow.tip[i]),n=Math.hypot(...d);
-      if(n>1e-5&&spare())tube(arrow.tail.map((v,i)=>v-d[i]/n*.1),arrow.tail,.02,2,5);
-    }else if(placed)for(const arrow of sailor.stuckArrows??[]){
-      if(vertices+120>4096||buckets.reduce((n,b)=>n+b.length,0)+16>target.length)break;
-      vertices+=120;placed.push({sailor,arrow,record:buckets[0].length/8});
-      buckets[0].push(0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,2);
+    if (sailor.stuckArrowPoses) for (const arrow of sailor.stuckArrowPoses) {
+      if (!room(2)) break;
+      piece(arrow.tip, arrow.tail, P['arrow-shaft']);
+      const from = end(arrow.tip, arrow.tail, PROP_CONTINUUM_TOOLS[P['arrow-fletching']].length);
+      if (from) piece(from, arrow.tail, P['arrow-fletching']);
+    } else if (placed) for (const arrow of sailor.stuckArrows ?? []) {
+      if (!room(2) || arrows >= GUNNERY_TOOL_ARROWS) break;
+      // Nothing until the arrow pass names their pieces.
+      placed.push({ sailor, arrow, record: count });
+      target.set([0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0], count * GUNNERY_TOOL_RECORD_FLOATS);
+      count += 2; arrows++;
     }
-    const tool=crewGunneryTool(sailor,boat);if(!tool?.a||!tool.b)continue;
-    if(tool.kind==='blade'||tool.kind==='club'){
-      // A crowded rail loses a few weapons rather than overflow the tool budget.
-      if(spare())tube(tool.a,tool.b,tool.radius,tool.kind==='blade'?0:1,5);
+    const tool = crewGunneryTool(sailor, boat);
+    if (!tool?.a || !tool.b) continue;
+    if (tool.kind === 'blade' || tool.kind === 'club') { piece(tool.a, tool.b, tool.kind === 'blade' ? P.cutlass : P.macana); continue; }
+    if (tool.kind === 'tackle') { piece(tool.a, tool.b, P['tackle-fall']); continue; }
+    if (tool.kind === 'chamber') { piece(tool.a, tool.b, P['swivel-chamber']); continue; }
+    if (tool.kind === 'spyglass') {
+      piece(tool.a, tool.b, P['spyglass-tube']);
+      const from = end(tool.a, tool.b, PROP_CONTINUUM_TOOLS[P['spyglass-cell']].length);
+      if (from) piece(from, tool.b, P['spyglass-cell']);
       continue;
     }
-    if(tool.kind==='tackle'){tube(tool.a,tool.b,.019,2,5);continue;}
-    if(tool.kind==='chamber'){tube(tool.a,tool.b,.055,0,8);continue;}
-    if(tool.kind==='spyglass'){
-      tube(tool.a,tool.b,.014,1,6);
-      const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d);if(n<1e-5)continue;
-      tube(tool.b.map((x,i)=>x-d[i]/n*.14),tool.b,.022,0,8);
-      continue;
-    }
-    tube(tool.a,tool.b,.021,1);
-    const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d);if(n<1e-5)continue;
-    tube(tool.b.map((x,i)=>x-d[i]/n*.12),tool.b,tool.kind==='sponge'?.065:.044,tool.kind==='sponge'?2:1);
+    piece(tool.a, tool.b, P['rammer-staff']);
+    const head = tool.kind === 'sponge' ? P['sponge-head'] : P['rammer-head'], from = end(tool.a, tool.b, PROP_CONTINUUM_TOOLS[head].length);
+    if (from) piece(from, tool.b, head);
   }
-  let at=0;const ranges=[];
-  for(const bucket of buckets){if(at+bucket.length>target.length)throw Error('Gunnery tool instance budget exceeded');ranges.push({first:at/8,count:bucket.length/8});target.set(bucket,at);at+=bucket.length;}
-  return {ranges,count:at/8,vertices};
+  return { count };
 }
 
-export function buildGunneryToolVertices(company,boat,vertices){
-  let cursor=0;
-  const put=(point,normal,kind)=>{if(cursor+8>vertices.length)throw Error('Gunnery tools exceed bounded geometry');vertices.set([...point,...normal,kind,1],cursor);cursor+=8;};
-  const tube=(a,b,radius,kind,sides=6)=>{
-    const direction=b.map((v,i)=>v-a[i]),length=Math.hypot(...direction);if(length<1e-5)return;
-    for(let i=0;i<3;i++)direction[i]/=length;
-    const seed=Math.abs(direction[1])>.9?[1,0,0]:[0,1,0];
-    const u=[direction[1]*seed[2]-direction[2]*seed[1],direction[2]*seed[0]-direction[0]*seed[2],direction[0]*seed[1]-direction[1]*seed[0]],m=Math.hypot(...u);for(let i=0;i<3;i++)u[i]/=m;
-    const v=[direction[1]*u[2]-direction[2]*u[1],direction[2]*u[0]-direction[0]*u[2],direction[0]*u[1]-direction[1]*u[0]];
-    for(let side=0;side<sides;side++){
-      const normal=t=>u.map((x,i)=>x*Math.cos(t)+v[i]*Math.sin(t));
-      const n0=normal(side*Math.PI*2/sides),n1=normal((side+1)*Math.PI*2/sides);
-      const point=(end,n)=>end.map((x,i)=>x+n[i]*radius),a0=point(a,n0),a1=point(a,n1),b0=point(b,n0),b1=point(b,n1);
-      for(const[p,n]of[[a0,n0],[a1,n1],[b0,n0],[b0,n0],[a1,n1],[b1,n1]])put(p,n,kind);
-      for(const[p,n]of[[a,direction.map(x=>-x)],[a1,direction.map(x=>-x)],[a0,direction.map(x=>-x)],[b,direction],[b0,direction],[b1,direction]])put(p,n,kind);
+// The tools' tessellated surfaces, for checking their bounds and reach offline. Nothing draws them: the continuum
+// draws the baked pieces.
+export function buildGunneryToolVertices(company, boat, vertices) {
+  const records = new Float32Array(GUNNERY_TOOL_RECORDS * GUNNERY_TOOL_RECORD_FLOATS), { count } = writeGunneryToolInstances(company, boat, records);
+  let cursor = 0;
+  const put = (point, normal, kind) => { if (cursor + 8 > vertices.length) throw Error('Gunnery tools exceed bounded geometry'); vertices.set([...point, ...normal, kind, 1], cursor); cursor += 8; };
+  for (let r = 0; r < count; r++) {
+    const at = r * GUNNERY_TOOL_RECORD_FLOATS, a = Array.from(records.subarray(at, at + 3)), b = Array.from(records.subarray(at + 4, at + 7)), tool = PROP_CONTINUUM_TOOLS[records[at + 3]];
+    const direction = b.map((v, i) => v - a[i]), length = Math.hypot(...direction), sides = 6;
+    if (!tool || length < 1e-5) continue;
+    for (let i = 0; i < 3; i++) direction[i] /= length;
+    const seed = Math.abs(direction[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const u = [direction[1] * seed[2] - direction[2] * seed[1], direction[2] * seed[0] - direction[0] * seed[2], direction[0] * seed[1] - direction[1] * seed[0]], m = Math.hypot(...u);
+    for (let i = 0; i < 3; i++) u[i] /= m;
+    const v = [direction[1] * u[2] - direction[2] * u[1], direction[2] * u[0] - direction[0] * u[2], direction[0] * u[1] - direction[1] * u[0]];
+    const reach = tool.hauled ? length : tool.length, tip = a.map((x, i) => x + direction[i] * reach);
+    for (let side = 0; side < sides; side++) {
+      const normal = (t) => u.map((x, i) => x * Math.cos(t) + v[i] * Math.sin(t));
+      const n0 = normal((side * Math.PI * 2) / sides), n1 = normal(((side + 1) * Math.PI * 2) / sides);
+      const point = (e, n) => e.map((x, i) => x + n[i] * tool.radius), a0 = point(a, n0), a1 = point(a, n1), b0 = point(tip, n0), b1 = point(tip, n1);
+      for (const [p, n] of [[a0, n0], [a1, n1], [b0, n0], [b0, n0], [a1, n1], [b1, n1]]) put(p, n, tool.material);
     }
-  };
-  for(const sailor of company.crew){
-    const tool=crewGunneryTool(sailor,boat);if(!tool?.a||!tool.b)continue;
-    if(tool.kind==='blade'||tool.kind==='club'){
-      if(cursor+60*8<=vertices.length)tube(tool.a,tool.b,tool.radius,tool.kind==='blade'?0:1,5);
-      continue;
-    }
-    if(tool.kind==='tackle'){tube(tool.a,tool.b,.019,2,5);continue;}
-    if(tool.kind==='chamber'){tube(tool.a,tool.b,.055,0,8);continue;}
-    if(tool.kind==='spyglass'){
-      tube(tool.a,tool.b,.014,1,6);
-      const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d);if(n<1e-5)continue;
-      tube(tool.b.map((x,i)=>x-d[i]/n*.14),tool.b,.022,0,8);
-      continue;
-    }
-    tube(tool.a,tool.b,.021,1);
-    const d=tool.b.map((x,i)=>x-tool.a[i]),n=Math.hypot(...d),head=tool.b.map((x,i)=>x-d[i]/n*.12);
-    tube(head,tool.b,tool.kind==='sponge'?.065:.044,tool.kind==='sponge'?2:1);
   }
-  return cursor/8;
+  return cursor / 8;
 }
 
-const GUNNERY_TOOL_VERTICES=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}];
-// The programs the gun crews' tools are drawn with, asked for once a device (js/gpu-program-cache.js requestOnce).
-export function requestGunneryToolPipelines({device,shader,format,samples,waterOptics=null}){
-  return requestOnce(device,`gun tools ${format} ${samples}`,async()=>{
-    Promise.resolve(waterOptics).then(optics=>optics?.capture({source:GUNNERY_TOOL_RENDER,vertex:{buffers:GUNNERY_TOOL_VERTICES},groups:2})).catch(()=>{});
-    const [pipeline,shadowPipeline]=await Promise.all([
-      shader(GUNNERY_TOOL_RENDER,'gun tools material').then(module=>device.createRenderPipelineAsync({label:'crew gun tools',layout:'auto',vertex:{module,entryPoint:'vs',buffers:GUNNERY_TOOL_VERTICES},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}})),
-      shader(GUNNERY_TOOL_SHADOW,'gun tool shadows').then(module=>device.createRenderPipelineAsync({label:'crew gun tool shadows',layout:'auto',vertex:{module,entryPoint:'vs',buffers:GUNNERY_TOOL_VERTICES},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})),
+// The pass that stands the records, asked for once a device; and with it the atlas and the props' programs, which
+// the tools are cut and drawn with.
+export function requestGunneryToolPrograms({ device, shader, format, samples }) {
+  return requestOnce(device, `gun tools ${format} ${samples}`, async () => {
+    const [atlas, pipelines, place] = await Promise.all([
+      requestPropContinuumAtlas(device),
+      requestPropContinuumPipelines({ device, shader, format, samples, shadowFormat: LAND_SHADOW_FORMAT }),
+      shader(GUNNERY_TOOL_PLACE_WGSL, 'gun tools placed').then((module) => device.createComputePipelineAsync({ label: 'gun tools placed', layout: 'auto', compute: { module, entryPoint: 'gunneryToolPlace' } })),
     ]);
-    return {pipeline,shadowPipeline};
+    return { atlas, pipelines, place };
   });
 }
-export async function createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared=null}){
-  const B=GPUBufferUsage,template=createGunneryToolTemplate(),instances=new Float32Array(68*8),pose=new Float32Array(16),axis=[0,0,0],placed=[];let count=0,ranges=[];
-  const vertex=device.createBuffer({label:'immutable crew gun tool tubes',size:template.vertices.byteLength,usage:B.VERTEX|B.COPY_DST});
-  device.queue.writeBuffer(vertex,0,template.vertices);
-  const shapeBuffer=device.createBuffer({label:'crew gun tool endpoints',size:instances.byteLength,usage:B.STORAGE|B.COPY_DST});
-  const poseBuffer=device.createBuffer({label:'crew gun tool pose',size:64,usage:B.UNIFORM|B.COPY_DST});
-  const layout=GUNNERY_TOOL_VERTICES,requested=await requestGunneryToolPipelines({device,shader,format,samples,waterOptics});
-  const pipeline=shared?.pipeline??requested.pipeline,shadowPipeline=shared?.shadowPipeline??requested.shadowPipeline;
-  const resources=[{buffer:frameUBO},transView,skyView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer},{buffer:shapeBuffer}];
-  const bind=(pipe,items)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:items.map((resource,binding)=>({binding,resource}))});
-  const group=bind(pipeline,resources),lighting=shadows.bind(pipeline),shadow=bind(shadowPipeline,[{buffer:shadows.uniform},{buffer:poseBuffer},{buffer:shapeBuffer}]);
-  const submerged=waterOptics?await waterOptics.capture({source:GUNNERY_TOOL_RENDER,pipeline,vertex:{buffers:layout},groups:2}):null;
-  const submergedGroup=submerged?.bindGroup(resources),submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
+
+// One company's tools: its records and pose, the pass that stands them, and its scene of the one cut, lit by its own
+// vessel (`hullUBO`, and `shadows`, her shadow set) as her people are.
+export async function createGunneryTools({ device, frameUBO, hullUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format, samples }) {
+  const B = GPUBufferUsage, { atlas, pipelines, place } = await requestGunneryToolPrograms({ device, shader, format, samples });
+  const records = new Float32Array(GUNNERY_TOOL_RECORDS * GUNNERY_TOOL_RECORD_FLOATS), pose = new Float32Array(16), placed = [];
+  const tubes = device.createBuffer({ label: 'crew gun tool records', size: records.byteLength, usage: B.STORAGE | B.COPY_DST });
+  const poseBuffer = device.createBuffer({ label: 'crew gun tool pose', size: 64, usage: B.UNIFORM | B.COPY_DST });
+  // Room for every record to be any piece.
+  const counts = PROP_CONTINUUM_TYPES.map((_, t) => (t >= PROP_CONTINUUM_TOOL_FIRST ? GUNNERY_TOOL_RECORDS : 0));
+  const scene = createPropContinuumScene({ device, atlas, pipelines, counts, frame: frameUBO, shadowUniform: shadows.uniform, samples, label: 'gun tools' });
+  const placeGroup = device.createBindGroup({ label: 'gun tools placed', layout: place.getBindGroupLayout(0), entries: [tubes, poseBuffer, scene.instances].map((buffer, binding) => ({ binding, resource: { buffer } })) });
+  // The props' view, lit by this vessel. Every piece is plain: the pigments are one texel no piece reads.
+  const pigment = device.createTexture({ label: 'gun tool pigments (none)', size: [1, 1, 1], format: 'rgba8unorm-srgb', usage: globalThis.GPUTextureUsage?.TEXTURE_BINDING ?? 4 });
+  const sampler = device.createSampler({ label: 'gun tool pigment', magFilter: 'linear', minFilter: 'linear' });
+  const sceneGroup = device.createBindGroup({
+    label: 'gun tools', layout: pipelines.view.getBindGroupLayout(0),
+    entries: [
+      [0, { buffer: frameUBO }], [1, { buffer: hullUBO }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
+      [11, pigment.createView({ dimension: '2d-array' })], [12, sampler], ...sharedNeuralPbrBank(device).propResources,
+    ].map(([binding, resource]) => ({ binding, resource })),
+  });
+  const lighting = shadows.bind(pipelines.view);
+  let count = 0;
   return {
-    assets:{pipeline,shadowPipeline},
-    // The tube records, and which of them are arrows still to be placed from their bodies' joints this frame.
-    tubes:shapeBuffer,placed,
-    update(company,boat,enabled){
-      placed.length=0;
-      const state=enabled?writeGunneryToolInstances(company,boat,instances,placed):{count:0,ranges:[]};count=state.count;ranges=state.ranges;if(!count)return;
-      const h=(boat.heading??0)*Math.PI/180;
-      for(const[i,vector]of[[0,[1,0,0]],[4,[0,1,0]],[8,[0,0,1]]]){boatRotate(axis,...vector,h,boat.pitch??0,boat.roll??0);pose.set(axis,i);}
-      pose.set([boat.x??0,boat.heave??0,boat.z??0,1],12);
-      device.queue.writeBuffer(shapeBuffer,0,instances,0,count*8);device.queue.writeBuffer(poseBuffer,0,pose);
+    // The records, and which of them are arrows still to be placed from their bodies' joints this frame.
+    tubes, placed,
+    update(company, boat, enabled) {
+      placed.length = 0;
+      count = enabled ? writeGunneryToolInstances(company, boat, records, placed).count : 0;
+      scene.setCount(count);
+      if (!count) return;
+      device.queue.writeBuffer(tubes, 0, records, 0, count * GUNNERY_TOOL_RECORD_FLOATS);
+      device.queue.writeBuffer(poseBuffer, 0, gunneryToolPose(boat, count, pose));
     },
-    draw(pass){if(!count)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,lighting);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
-    drawShadow(pass){if(!count)return;pass.setPipeline(shadowPipeline);pass.setBindGroup(0,shadow);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
-    drawSubmerged(pass,above=false){if(!count||!submerged)return;submerged.bind(pass,above);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedLighting);pass.setVertexBuffer(0,vertex);for(let i=0;i<ranges.length;i++)if(ranges[i].count)pass.draw(template.ranges[i].count,ranges[i].count,template.ranges[i].first,ranges[i].first);},
-    destroy(){vertex.destroy();shapeBuffer.destroy();poseBuffer.destroy();},
+    // After the arrow pass, before anything draws: each record stood, then every piece cut.
+    encode(pass) {
+      if (count) { pass.setPipeline(place); pass.setBindGroup(0, placeGroup); pass.dispatchWorkgroups(Math.ceil(count / 64)); }
+      scene.encode(pass);
+    },
+    draw(pass) { if (count) scene.draw(pass, sceneGroup, lighting); },
+    drawShadow(pass) { if (count) scene.drawShadow(pass); },
+    continuumDraws() { return count ? scene.continuumDraws() : []; },
+    destroy() { scene.destroy(); tubes.destroy(); poseBuffer.destroy(); pigment.destroy(); },
   };
 }

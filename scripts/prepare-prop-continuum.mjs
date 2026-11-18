@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Bakes every port prop and round shot into the prop continuum (AGENTS.md rule 3; js/prop-continuum.js).
+// Bakes every port prop, round shot and the crews' tools into the prop continuum (AGENTS.md rule 3; js/prop-continuum.js).
 //   node scripts/prepare-prop-continuum.mjs [--out=assets/prop-continuum]
 // Each prop is read as its physics reads it (js/port-props.js readPropModel: its triangles cut into the shards a shot
 // breaks it into), and round shot is a cast-iron sphere (roundShotSource). Both are baked by the city's own bake
@@ -22,7 +22,8 @@ import {
 import { PROP_MODELS, readPropModel } from '../js/port-props.js';
 import {
   PROP_CONTINUUM_FORMAT, PROP_CONTINUUM_VERSION, PROP_CONTINUUM_MAGIC, PROP_CONTINUUM_TYPE, PROP_CONTINUUM_TYPES, PROP_CONTINUUM_PLAIN, PROP_CONTINUUM_SHOT_IRON,
-  PROP_CONTINUUM_ASSETS, packPropContinuumVertex, packPropContinuumUV, roundShotSource, propContinuumSource, validatePropContinuumManifest,
+  PROP_CONTINUUM_ASSETS, PROP_CONTINUUM_TOOLS, PROP_CONTINUUM_TOOL_MATERIALS, packPropContinuumVertex, packPropContinuumUV, roundShotSource,
+  toolContinuumSource, propContinuumSource, validatePropContinuumManifest,
 } from '../js/prop-continuum.js';
 
 const args = process.argv.slice(2);
@@ -36,6 +37,10 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 export function propContinuumSources(read = (file) => fs.readFileSync(file)) {
   const sources = PROP_MODELS.map((spec, layer) => ({ type: propContinuumSource(readPropModel(new Uint8Array(read(spec.file)), spec), spec.id), layer, albedo: [0, 0, 0], roughness: 0 }));
   sources.push({ type: roundShotSource(), layer: PROP_CONTINUUM_PLAIN, albedo: [...PROP_CONTINUUM_SHOT_IRON.albedo], roughness: PROP_CONTINUUM_SHOT_IRON.roughness, sphere: true });
+  for (const tool of PROP_CONTINUUM_TOOLS) {
+    const { albedo, roughness } = PROP_CONTINUUM_TOOL_MATERIALS[tool.material];
+    sources.push({ type: toolContinuumSource(tool), layer: PROP_CONTINUUM_PLAIN, albedo: [...albedo], roughness, rod: tool });
+  }
   sources.forEach((source, id) => { source.type.id = id; if (source.type.name !== PROP_CONTINUUM_TYPES[id]) throw Error(`Prop continuum type ${id} is ${source.type.name}`); });
   return sources;
 }
@@ -50,6 +55,9 @@ async function main() {
     // A building stands on its floor, and its splat is what shows above it. A ball has none: its outline is its
     // great circle, all round its centre.
     if (source.sphere) Object.assign(far.splat, { centre: [0, 0, 0], rx: 1, ry: 1, roofShare: 0 });
+    // Nor has a rod: its outline side on is its length by its width, about its middle, held at any angle. The splat
+    // runs along it (its own up, turned as it is) and across it, with that outline's area.
+    if (source.rod) Object.assign(far.splat, { centre: [0, source.rod.length / 2, 0], rx: source.rod.radius, ry: +((2 * source.rod.length) / Math.PI).toFixed(4), roofShare: 0 });
     baked.push({ source, welded, clusters, far, ms: Date.now() - t0 });
     console.log(`${String(type.id).padStart(2)} ${type.name.padEnd(16)} ${String(type.triangles).padStart(5)} tris, ${new Set(type.parts).size} shards · ${String(clusters.count).padStart(3)} clusters ${clusters.levels} levels, root ${clusters.rootError.toFixed(4)} m · wrap ${far.stats.cell} m, ${far.stats.baseTriangles} → ${far.stats.coreTriangles} in ${far.stats.steps} steps (depth ${far.stats.depth}), ${far.stats.errorRange.join('–')} m, handoff at step ${far.farFirst} (${far.stats.farFirstTriangles} ≤ ${rootTriangles}) · ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   }

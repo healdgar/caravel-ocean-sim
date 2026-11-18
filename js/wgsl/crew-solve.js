@@ -549,9 +549,10 @@ struct Placing { solved: u32, slot: u32, beside: u32, spare: u32 }
 `;
 
 // An arrow stays in the bone it struck. Each is kept as a point and a direction on the body at rest, and placed
-// here from that bone's joint as the body is drawn this frame: a shaft and its fletching, two of the tubes the
-// crew's tools are drawn from.
-export const crewArrowWGSL = ({ length }) => /* wgsl */`
+// here from that bone's joint as the body is drawn this frame: a shaft and its fletching, two of the records the
+// crew's tools are stood from (js/gunnery-tools.js), each naming its piece (`shaft`, `fletching`, `fletched` metres
+// long) and running from its first end towards its second.
+export const crewArrowWGSL = ({ length, shaft, fletching, fletched }) => /* wgsl */`
 // The point with the tube record to write, then the direction with which joint of which body.
 struct Arrow { tip: vec4f, along: vec4f }
 struct Actor { transform: mat4x4f, shirt: vec4f, trousers: vec4f, skin: vec4f, hair: vec4f, face: vec4f }
@@ -568,10 +569,10 @@ struct Tube { a: vec4f, b: vec4f }
   let body = actors[which / ${CREW_JOINT_COUNT}u].transform;
   let tip = (joint * vec4f(arrow.tip.xyz, 1.0)).xyz; let along = (joint * vec4f(arrow.along.xyz, 0.0)).xyz; let reach = length(along);
   // A bone lost after the arrow struck takes its arrow with it.
-  if (reach < 0.05) { tubes[record] = Tube(vec4f(0.0), vec4f(0.0)); tubes[record + 1u] = Tube(vec4f(0.0), vec4f(0.0)); return; }
+  if (reach < 0.05) { tubes[record] = Tube(vec4f(0.0, 0.0, 0.0, -1.0), vec4f(0.0)); tubes[record + 1u] = Tube(vec4f(0.0, 0.0, 0.0, -1.0), vec4f(0.0)); return; }
   let a = (body * vec4f(tip, 1.0)).xyz; let b = (body * vec4f(tip - along / reach * ${length.toFixed(3)}, 1.0)).xyz;
   let back = normalize(b - a);
-  tubes[record] = Tube(vec4f(a, 0.011), vec4f(b, 1.0));
-  tubes[record + 1u] = Tube(vec4f(b - back * 0.1, 0.02), vec4f(b, 2.0));
+  tubes[record] = Tube(vec4f(a, ${shaft.toFixed(1)}), vec4f(b, 0.0));
+  tubes[record + 1u] = Tube(vec4f(b - back * ${fletched.toFixed(3)}, ${fletching.toFixed(1)}), vec4f(b, 0.0));
 }
 `;

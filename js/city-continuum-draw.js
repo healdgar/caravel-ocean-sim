@@ -117,16 +117,18 @@ export function createContinuumScene({ device, atlas, pipelines: P, capacity, ro
   const scene = {
     capacity, lists, list, draws, instances, words, floats,
     get count() { return count; },
-    // An instance: where it stands (its type turned by yaw and stood at x, y, z), its stretch, its family's own word
-    // (a building's tint, a prop's glow), its type and flags (CITY_CONTINUUM_GONE, _STRUCK, _BROKEN), its block of
-    // shard records (in vec4f), how far past its type's sphere its pieces may lie, and the seed that thins its splat.
-    place(index, { x, y, z, yaw = 0, scale = [1, 1, 1], word = 0, type, flags = 0, records = 0, reach = 0, seed = index }) {
+    // An instance: where it stands (its type stretched, turned by the unit quaternion `turn`, then by yaw, and stood
+    // at x, y, z), its stretch, its family's own word (a building's tint, a prop's glow), its type and flags
+    // (CITY_CONTINUUM_GONE, _STRUCK, _BROKEN), its block of shard records (in vec4f), how far past its type's sphere
+    // its pieces may lie, and the seed that thins its splat.
+    place(index, { x, y, z, yaw = 0, scale = [1, 1, 1], word = 0, type, flags = 0, records = 0, reach = 0, seed = index, turn = [0, 0, 0, 1] }) {
       const at = index * W;
       floats.set([x, y, z, yaw, scale[0], scale[1], scale[2], word], at);
       words[at + 8] = ((type & 0xffff) | flags) >>> 0;
       words[at + 9] = records;
       floats[at + 10] = reach;
       words[at + 11] = seed >>> 0;
+      floats.set(turn, at + 12);
     },
     // Instances `first`..`first + n` sent as they now stand.
     send(first = 0, n = count) {

@@ -830,8 +830,23 @@ function normalsOf(position, index) {
 // ------------------------------------------------------------------------------------------------ far body
 function bakeFar(type, welded) {
   let wrapped, base;
+  if (type.closed) {
+    // A body closed in itself (a rod, say), its corners joined where they meet whatever their normals, is its own
+    // far base, exactly: nothing is wrapped round it, which at the wrap's finest cells would be coarser than it is.
+    const at = new Map(), position = [], index = new Uint32Array(welded.index.length);
+    welded.index.forEach((v, i) => {
+      const p = welded.position.subarray(v * 3, v * 3 + 3), key = p.join(',');
+      let u = at.get(key);
+      if (u === undefined) { u = position.length / 3; at.set(key, u); position.push(...p); }
+      index[i] = u;
+    });
+    const census = edgeCensus(index);
+    if (census.boundary || census.nonManifold || census.euler !== 2) throw Error(`${type.name}: said to be closed, it is not`);
+    base = { position: Float32Array.from(position), index, error: 0, census };
+    wrapped = { h: 0, cells: [0, 0, 0], added: 0, index, exteriorAt: () => true };
+  }
   // A wrap the simplifier cannot bring down and keep manifold is taken again in coarser cells.
-  for (let coarser = 1; ; coarser *= 1.5) {
+  else for (let coarser = 1; ; coarser *= 1.5) {
     try { wrapped = wrap(type, coarser); base = simplifyWrap(type.name, wrapped); } catch (error) { if (coarser > 5) throw error; continue; }
     if (base.index.length / 3 <= WRAP_MOST_TRIANGLES || coarser > 5) break;
   }

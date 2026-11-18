@@ -22,9 +22,42 @@ export const PROP_CONTINUUM_TYPE = Object.freeze({
   splatCentre: 20, layer: 23, albedo: 24, roughness: 27, chainTriangleCount: 28, flags: 29, sourceTriangles: 30, farFirst: 31,
 });
 export const PROP_CONTINUUM_PLAIN = 0xffffffff;
-// The catalogue: every port prop in PROP_MODELS order, its pigment in the layer of the same number, then round shot.
+// What the crews work their guns, keep watch and fight with, and the arrows that strike them, each piece at its own
+// size (js/crew-work.js crewGunneryTool, js/gunnery-models.js VESSEL_SIDEARMS, js/crew-wounds.js CREW_ARROW_LENGTH):
+// a round rod `length` metres up its own +y from its origin, `radius` across, of `material` (0 iron or brass, 1 wood,
+// 2 fibre: fleece, hemp or feather), turned to lie along whatever holds it. A fall of tackle is the one piece drawn
+// out to the length it is hauled to.
+export const PROP_CONTINUUM_TOOLS = Object.freeze([
+  { name: 'rammer-staff', length: 1.32, radius: 0.021, material: 1 },
+  { name: 'rammer-head', length: 0.12, radius: 0.044, material: 1 },
+  { name: 'sponge-head', length: 0.12, radius: 0.065, material: 2 },
+  { name: 'spyglass-tube', length: 0.38, radius: 0.014, material: 1 },
+  { name: 'spyglass-cell', length: 0.14, radius: 0.022, material: 0 },
+  { name: 'swivel-chamber', length: 0.24, radius: 0.055, material: 0 },
+  { name: 'cutlass', length: 0.72, radius: 0.012, material: 0 },
+  { name: 'macana', length: 0.66, radius: 0.03, material: 1 },
+  { name: 'tackle-fall', length: 1, radius: 0.019, material: 2, hauled: true },
+  { name: 'arrow-shaft', length: 0.66, radius: 0.011, material: 1 },
+  { name: 'arrow-fletching', length: 0.1, radius: 0.02, material: 2 },
+].map((tool) => Object.freeze(tool)));
+// Each material's albedo (linear) and roughness, as the tools were always lit.
+export const PROP_CONTINUUM_TOOL_MATERIALS = Object.freeze([
+  Object.freeze({ albedo: Object.freeze([0.032, 0.035, 0.038]), roughness: 0.38 }),
+  Object.freeze({ albedo: Object.freeze([0.11, 0.075, 0.037]), roughness: 0.8 }),
+  Object.freeze({ albedo: Object.freeze([0.07, 0.055, 0.04]), roughness: 0.8 }),
+]);
+// A round rod's sides.
+export const PROP_CONTINUUM_TOOL_SIDES = 16;
+// The catalogue: every port prop in PROP_MODELS order, its pigment in the layer of the same number, then round shot,
+// then the tools.
 export const PROP_CONTINUUM_SHOT = PROP_MODELS.length;
-export const PROP_CONTINUUM_TYPES = Object.freeze([...PROP_MODELS.map((spec) => spec.id), 'round-shot']);
+export const PROP_CONTINUUM_TOOL_FIRST = PROP_CONTINUUM_SHOT + 1;
+export const PROP_CONTINUUM_TYPES = Object.freeze([...PROP_MODELS.map((spec) => spec.id), 'round-shot', ...PROP_CONTINUUM_TOOLS.map((tool) => tool.name)]);
+export const propContinuumTool = (name) => {
+  const at = PROP_CONTINUUM_TOOLS.findIndex((tool) => tool.name === name);
+  if (at < 0) throw Error(`No such tool: ${name}`);
+  return at;
+};
 // Round shot: a cast-iron sphere of unit radius, placed at each ball's own. Iron dark with its scale and black lead.
 export const PROP_CONTINUUM_SHOT_IRON = Object.freeze({ albedo: Object.freeze([0.038, 0.034, 0.029]), roughness: 0.62 });
 export const PROP_CONTINUUM_SHOT_SUBDIVISIONS = 4;
@@ -71,6 +104,24 @@ export function roundShotSource(subdivisions = PROP_CONTINUUM_SHOT_SUBDIVISIONS)
   const vertices = new Float32Array(faces.length * 24);
   faces.forEach((face, f) => face.forEach((v, k) => vertices.set([...points[v], ...points[v], 0, 0], (f * 3 + k) * 8)));
   return { name: 'round-shot', vertices, triangles: faces.length, parts: new Uint32Array(faces.length) };
+}
+
+// A tool as the bake reads a type: a closed round rod up +y, its ends capped, one part. Its length is its own up, so
+// its splat (which stands along a body's up) runs along it; it is closed, so it is its own far body's base.
+export function toolContinuumSource({ name, length, radius }, sides = PROP_CONTINUUM_TOOL_SIDES) {
+  const corners = [];
+  const put = (position, normal) => corners.push(...position, ...normal, 0, 0);
+  const ring = (k) => { const a = ((k % sides) / sides) * Math.PI * 2; return [Math.cos(a), Math.sin(a)]; };
+  for (let k = 0; k < sides; k++) {
+    const [c0, s0] = ring(k), [c1, s1] = ring(k + 1), p = (c, s, y) => [c * radius, y, -s * radius], n = (c, s) => [c, 0, -s];
+    // The side, wound outward, then each end's fan.
+    put(p(c0, s0, 0), n(c0, s0)); put(p(c1, s1, 0), n(c1, s1)); put(p(c1, s1, length), n(c1, s1));
+    put(p(c0, s0, 0), n(c0, s0)); put(p(c1, s1, length), n(c1, s1)); put(p(c0, s0, length), n(c0, s0));
+    put([0, 0, 0], [0, -1, 0]); put(p(c1, s1, 0), [0, -1, 0]); put(p(c0, s0, 0), [0, -1, 0]);
+    put([0, length, 0], [0, 1, 0]); put(p(c0, s0, length), [0, 1, 0]); put(p(c1, s1, length), [0, 1, 0]);
+  }
+  const vertices = Float32Array.from(corners), triangles = vertices.length / 24;
+  return { name, vertices, triangles, parts: new Uint32Array(triangles), closed: true };
 }
 
 // A prop model as its physics holds it (js/port-props.js readPropModel: cut into shards, every shard's vertices its

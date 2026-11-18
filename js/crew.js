@@ -11,7 +11,7 @@ import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
 import { applyCrewWounds, clearCrewWounds, recordCrewWound } from './crew-wounds.js';
 import { crewClearsRail, crewOpenEdgeInset, crewFeetAwash, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
 import { crewLoseHandsAloft, stepCrewAloftFall } from './crew-aloft.js';
-import { createGunneryTools, requestGunneryToolPipelines } from './gunnery-tools.js';
+import { createGunneryTools, requestGunneryToolPrograms, GUNNERY_TOOL_ARROWS } from './gunnery-tools.js';
 import { requestOnce } from './gpu-program-cache.js';
 import { CREW_POSE_BLEND } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
@@ -563,10 +563,10 @@ function placeholderCaptainTexture(device){
 }
 // Every program a company is posed with, asked for once a device. Startup asks before it waits on anything, so they
 // compile beside the ocean's; the first company to be made finds them compiling or done. People are drawn through the
-// one continuum (js/crew-continuum-draw.js), whose programs are its own.
+// one continuum (js/crew-continuum-draw.js), whose programs are its own; their tools through the props' (js/gunnery-tools.js).
 export function requestCrewPipelines({device,shader,format='rgba16float',samples=4,waterOptics=null}){
   return requestOnce(device,`crew ${format} ${samples}`,async()=>{
-    const tools=requestGunneryToolPipelines({device,shader,format,samples,waterOptics});tools.catch(()=>{});
+    const tools=requestGunneryToolPrograms({device,shader,format,samples});tools.catch(()=>{});
     const [poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline]=await Promise.all([
       shader(CREW_POSE_BLEND,'crew pose blend').then(module=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module,entryPoint:'main'}})),
       createCrewClipPipeline(device,shader),
@@ -646,11 +646,12 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     return {model,people,hands:hands.length,parts,poses,actors,actorsU32,bones,actor,mainResources,solved,blend,blends,poseBlendGroup,clip,captainClip,turn,solve,captainSolve};
   });
   const everyPart=batches.flatMap(b=>b.parts);
-  const gunTools=await createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared:shared?.gunTools});
+  // What their hands hold, and the arrows in them: pieces of the props' atlas, cut and lit as this vessel's people are.
+  const gunTools=await createGunneryTools({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples});
   // An arrow in a body is placed on the GPU from the joints that body is drawn with.
   const placeOf=new Map();
   for(const b of batches){
-    b.arrows=createCrewArrowBatch(device,arrowPipeline,b.bones,b.actor,gunTools.tubes,34);
+    b.arrows=createCrewArrowBatch(device,arrowPipeline,b.bones,b.actor,gunTools.tubes,GUNNERY_TOOL_ARROWS);
     b.people.forEach((s,i)=>placeOf.set(s,{b,i,animator:(i<b.hands?b.model:captainModel).animator}));
   }
   let enabled=true,drawEnabled=false,posed=false,poseFrame=0,anyCut=false;
@@ -661,7 +662,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     anyCut=false;
     for(const part of everyPart){if(!part.continuum)continue;part.continuum.update(part.people,crewContinuumOrder,true);anyCut||=part.people.some(s=>s.visible!==false&&s.cutShader);}
   };
-  return {state,assets:{poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets},
+  return {state,assets:{poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler},
     // The finest cut is each body whole; what is drawn of it is the GPU's to choose.
     triangles:everyPart.reduce((n,part)=>n+part.body.triangles*part.people.length,0),
     get posed(){return posed;},
@@ -763,15 +764,15 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       for(const b of batches)if(b.people.length){pass.setBindGroup(0,b.poseBlendGroup);pass.dispatchWorkgroups(Math.ceil(b.people.length*CREW_JOINT_COUNT/64));}
       for(const b of batches)if(b.people.length){b.clip.encode(pass);b.captainClip?.encode(pass);}
       for(const b of batches)if(b.people.length)b.turn.encode(pass);
-      // Last, from the joints everybody will be drawn with.
+      // Last, from the joints everybody will be drawn with; then the tools stood from those arrows and their hands' work.
       for(const b of batches)b.arrows.encode(pass);
+      gunTools.encode(pass);
       for(const part of everyPart)part.continuum?.encodeSelect(pass);
     },
     // Under water, through the water's own capture: the far bodies the shadow list already holds.
     drawSubmerged(pass,above=false){
       if(!drawEnabled)return;
       for(const part of everyPart)part.continuum?.drawSubmerged(pass,above);
-      gunTools.drawSubmerged(pass,above);
     },
     // Opaque sailors belong with the opaque scene. Anyone being cut follows it.
     drawOpaque(pass){
@@ -788,7 +789,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       gunTools.drawShadow(pass);
     },
     // For the continuum census: each part's indirect draws.
-    continuumDraws(){return drawEnabled?everyPart.flatMap(part=>part.continuum?.continuumDraws()??[]):[];},
+    continuumDraws(){return drawEnabled?[...everyPart.flatMap(part=>part.continuum?.continuumDraws()??[]),...gunTools.continuumDraws()]:[];},
     status(){return state.crew.length&&!state.crew.some(s=>s.visible)?hasExtendedCrewModel(modelId)?'Crew hidden':'Crew needs a larger deck':companyStatus(state);},
     destroy(){
       gunTools.destroy();

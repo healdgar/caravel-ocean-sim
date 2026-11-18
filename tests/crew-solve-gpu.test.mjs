@@ -218,7 +218,7 @@ test('an arrow stays in the bone it struck, placed from the joints the pose pass
     const { applyCrewRealism } = await import('/js/crew-physics.js');
     const { applyCrewWounds, recordCrewWound } = await import('/js/crew-wounds.js');
     const { CREW_JOINT_COUNT } = await import('/js/crew-skeleton.js');
-    const { writeGunneryToolInstances } = await import('/js/gunnery-tools.js');
+    const { writeGunneryToolInstances, GUNNERY_TOOL_PIECE } = await import('/js/gunnery-tools.js');
     const { getShipModel } = await import('/js/ship-models.js');
     const { sailingState } = await import('/js/sailing.js');
     const adapter = await navigator.gpu.requestAdapter(), device = await adapter.requestDevice(), errors = [];
@@ -275,7 +275,8 @@ test('an arrow stays in the bone it struck, placed from the joints the pose pass
         mixers.set(s, s._mixer); s._mixer = kept;
         const expected = s.stuckArrowPoses, records = placed.filter((p) => p.sailor === s).map((p) => p.record * 8);
         s.stuckArrowPoses = null;
-        const kept2 = records.filter((at) => out[at + 3] > 0);
+        // A record that stands no piece names none (-1).
+        const kept2 = records.filter((at) => out[at + 3] >= 0);
         lost += records.length - kept2.length;
         if (kept2.length !== expected.length || records.length !== s.stuckArrows.length) throw Error('The pass kept ' + kept2.length + ' of ' + records.length + ' arrows in ' + s.id + ', the skeleton ' + expected.length + ' of ' + s.stuckArrows.length);
         if (Math.abs(s.climbPitch ?? 0) > 1) down++;
@@ -283,7 +284,7 @@ test('an arrow stays in the bone it struck, placed from the joints the pose pass
           const want = expected[n], along = want.tail.map((v, i) => v - want.tip[i]), length = Math.hypot(...along);
           tip = Math.max(tip, far(want.tip, out, at)); tail = Math.max(tail, far(want.tail, out, at + 4));
           fletch = Math.max(fletch, far(want.tail.map((v, i) => v - along[i] / length * 0.1), out, at + 8), far(want.tail, out, at + 12));
-          sized &&= Math.abs(out[at + 3] - 0.011) < 1e-6 && out[at + 7] === 1 && Math.abs(out[at + 11] - 0.02) < 1e-6 && out[at + 15] === 2;
+          sized &&= out[at + 3] === GUNNERY_TOOL_PIECE['arrow-shaft'] && out[at + 11] === GUNNERY_TOOL_PIECE['arrow-fletching'];
           compared++;
         });
       }

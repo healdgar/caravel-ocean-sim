@@ -30,8 +30,8 @@ export const CITY_CONTINUUM_VIEW_LISTS = 4;
 // The draws buffer: each list's draw, four words.
 export const CITY_CONTINUUM_DRAW_WORDS = CITY_CONTINUUM_LISTS.length * 4;
 export const CITY_CONTINUUM_VIEW_BYTES = 32 + CITY_CONTINUUM_LISTS.length * 16 + 16;
-// An instance's record: its place (root, then shape, as CityContinuumPlace), then its tag.
-export const CITY_CONTINUUM_INSTANCE_WORDS = 12;
+// An instance's record: its place (root, then shape), its tag, then its turn (the rest of its place).
+export const CITY_CONTINUUM_INSTANCE_WORDS = 16;
 // The select dispatch is laid in rows of this many workgroups, an instance to each.
 export const CITY_CONTINUUM_ROW = 8192;
 // How each draw reads its list: the list buffer bound as an instance-rate vertex buffer at the list's first entry.
@@ -63,16 +63,19 @@ struct CityContinuumView {
   lists:array<vec4u,${CITY_CONTINUUM_LISTS.length}>,     // each list's first entry and capacity
   aim:vec4f,                // where the player's guns would fall, in the scene's frame, and how far about it (0: none)
 };
-// Where an instance stands (its type's mesh turned by root.w and stood at root.xyz) and how it is stretched
-// (shape.xyz); shape.w its family's own word: a building's tint, or, from -150 to -50, a fence's slope along its
-// length (plus 100), or, below that, CITY_CONTINUUM_AS_BUILT; a prop's glow.
-struct CityContinuumPlace { root:vec4f, shape:vec4f };
-struct CityContinuumInstance { root:vec4f, shape:vec4f, tag:vec4u };
+// Where an instance stands (its type's mesh stretched by shape.xyz, turned by the unit quaternion turn, then about
+// the vertical by root.w, and stood at root.xyz); shape.w its family's own word: a building's tint, or, from -150 to
+// -50, a fence's slope along its length (plus 100), or, below that, CITY_CONTINUUM_AS_BUILT; a prop's glow. A body
+// that stands upright keeps the turn (0, 0, 0, 1); one held at any angle (a rammer, a spyglass, an arrow) is turned.
+struct CityContinuumPlace { root:vec4f, shape:vec4f, turn:vec4f };
+struct CityContinuumInstance { root:vec4f, shape:vec4f, tag:vec4u, turn:vec4f };
 struct CityContinuumPoint { position:vec3f, normal:vec3f, high:u32, surface:u32 };
 struct CityContinuumFar { position:vec3f, normal:vec3f, high:u32, surface:u32, shown:bool };
 struct CityContinuumPose { position:vec3f, normal:vec3f, hidden:bool };
 const CITY_CONTINUUM_NEVER:u32=${CITY_CONTINUUM_NEVER}u;
-fn cityContinuumPlaceOf(instance:u32)->CityContinuumPlace { let at=cityInstances[instance];return CityContinuumPlace(at.root,at.shape); }
+fn cityContinuumPlaceOf(instance:u32)->CityContinuumPlace { let at=cityInstances[instance];return CityContinuumPlace(at.root,at.shape,at.turn); }
+// A vector turned by a unit quaternion.
+fn cityContinuumQuat(q:vec4f,v:vec3f)->vec3f { let t=2.0*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t); }
 fn cityContinuumTypeOf(instance:u32)->u32 { return cityInstances[instance].tag.x&65535u; }
 fn cityContinuumBroken(tag:vec4u)->bool { return (tag.x&${CITY_CONTINUUM_BROKEN}u)!=0u; }
 fn cityContinuumType(archetype:u32,field:u32)->u32 { return cityAtlas[cityAtlas[${CITY_CONTINUUM_HEADER.typesAt}u]+archetype*${CITY_CONTINUUM_TYPE_WORDS}u+field]; }
@@ -80,13 +83,14 @@ fn cityContinuumTypeF(archetype:u32,field:u32)->f32 { return bitcast<f32>(cityCo
 fn cityContinuumSlope(shape:vec4f)->f32 { return select(0.0,clamp(shape.w+100.0,-0.95,0.95),shape.w< -50.0&&shape.w> -150.0); }
 // A point of the type, in the type's own metres, stood where the instance stands (without the world's offset).
 fn cityContinuumPlace(p:vec3f,place:CityContinuumPlace)->vec3f {
-  let q=p*place.shape.xyz;
+  let s0=p*place.shape.xyz;
+  let q=cityContinuumQuat(place.turn,vec3f(s0.x,s0.y+s0.z*cityContinuumSlope(place.shape),s0.z));
   let c=cos(place.root.w);let s=sin(place.root.w);
-  return place.root.xyz+vec3f(q.x*c+q.z*s,q.y+q.z*cityContinuumSlope(place.shape),-q.x*s+q.z*c);
+  return place.root.xyz+vec3f(q.x*c+q.z*s,q.y,-q.x*s+q.z*c);
 }
 fn cityContinuumTurn(n:vec3f,place:CityContinuumPlace)->vec3f {
   let b=n/max(place.shape.xyz,vec3f(1e-3));
-  let m=normalize(vec3f(b.x,b.y,b.z-cityContinuumSlope(place.shape)*b.y));
+  let m=cityContinuumQuat(place.turn,normalize(vec3f(b.x,b.y,b.z-cityContinuumSlope(place.shape)*b.y)));
   let c=cos(place.root.w);let s=sin(place.root.w);
   return vec3f(m.x*c+m.z*s,m.y,-m.x*s+m.z*c);
 }
@@ -382,7 +386,10 @@ fn cityContinuumSplatCorner(archetype:u32,place:CityContinuumPlace,eye:vec3f,ver
   let centre=cityContinuumPlace(local,place);
   var out:CityContinuumSplat;
   out.toward=normalize(eye-centre);
-  let up=normalize(vec3f(0.0,1.0,0.0)-out.toward*out.toward.y+vec3f(0.0,1e-4,0.0));
+  // Its height is along the body's own up, turned as the body is; an upright body's is the world's.
+  let raised=cityContinuumQuat(place.turn,vec3f(0.0,1.0,0.0));let c=cos(place.root.w);let s=sin(place.root.w);
+  let lift=vec3f(raised.x*c+raised.z*s,raised.y,-raised.x*s+raised.z*c);
+  let up=normalize(lift-out.toward*dot(lift,out.toward)+vec3f(0.0,1e-4,0.0));
   let right=normalize(cross(up,out.toward));
   let k=CONTINUUM_SPLAT_AREA*thinned;
   out.corner=array<vec2f,3>(vec2f(0.0,2.0),vec2f(-1.7320508,-1.0),vec2f(1.7320508,-1.0))[min(vertex,2u)];

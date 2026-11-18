@@ -10,6 +10,7 @@ import { poseCrewWork, poseRotation } from './crew-pose.js';
 import { applyCrewRealism, getCrewMixerMasks } from './crew-physics.js';
 import { applyCrewWounds, CREW_BROKEN_ANGLE, CREW_CRUSHED_SCALE, CREW_ARROW_LENGTH } from './crew-wounds.js';
 import { CREW_JOINT_NAMES } from './crew-skeleton.js';
+import { PROP_CONTINUUM_TOOLS, propContinuumTool } from './prop-continuum.js';
 
 // The published page is every module in one scope, so each name here says whose it is.
 const CREW_SOLVE_CLIPS = ['Idle', 'Walk', 'Brace'], CREW_SOLVE_RATE = 30;
@@ -377,7 +378,8 @@ function crewArrowAtRest(animator, arrow) {
   return (arrow.atRest = { joint, tip: frame.point(arrow.offset), along: frame.vector(arrow.direction) });
 }
 export async function createCrewArrowPipeline(device, shader) {
-  const module = await shader(crewArrowWGSL({ length: CREW_ARROW_LENGTH }), 'crew arrows');
+  const shaft = propContinuumTool('arrow-shaft'), fletching = propContinuumTool('arrow-fletching');
+  const module = await shader(crewArrowWGSL({ length: CREW_ARROW_LENGTH, shaft, fletching, fletched: PROP_CONTINUUM_TOOLS[fletching].length }), 'crew arrows');
   return device.createComputePipelineAsync({ label: 'crew arrows', layout: 'auto', compute: { module, entryPoint: 'main' } });
 }
 // The arrows stuck in one batch of bodies. 'joints' and 'actors' are what the bodies are drawn from, and 'tubes'
