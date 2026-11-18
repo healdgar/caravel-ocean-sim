@@ -18,6 +18,7 @@ import {
   TOWNSFOLK_LOOKS, TOWNSFOLK_MODELS, TOWNSFOLK_MOISTURE_SLOTS, TOWNSFOLK_RESET, TOWNSFOLK_WALK,
 } from './wgsl/townsfolk.js';
 import { WALKER_WORDS } from './town-streets.js';
+import { continuumGroundView } from './continuum-ground.js';
 import { CREW_CONTINUUM_PLACED_WORDS } from './wgsl/crew-continuum.js';
 import {
   createCrewContinuumBatch, createCrewContinuumPoser, createCrewContinuumWorldHull, crewContinuumBodyFor, crewContinuumRestPlaces,
@@ -275,7 +276,9 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const resetGroup = device.createBindGroup({ label: 'townsfolk reset', layout: resetPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: counts } }] });
     const walkGroup = device.createBindGroup({
       label: 'townsfolk walk', layout: walkPipeline.getBindGroupLayout(0),
-      entries: [frameUBO, walkers, route, placed, counts, uniform, shots, fates, moisture].map((b, binding) => ({ binding, resource: { buffer: b } })),
+      entries: [...[frameUBO, walkers, route, placed, counts, uniform, shots, fates, moisture].map((b, binding) => ({ binding, resource: { buffer: b } })),
+        // The ground the land draws, which they are drawn walking on (js/continuum-ground.js).
+        { binding: 9, resource: continuumGroundView(device) }],
     });
     const countedOf = (m) => ({ buffer: counts, offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 });
     const main = [{ buffer: frameUBO }, { buffer: hull }, { buffer: joints }, { buffer: actors }, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: moisture }, skyView, { binding: 13, resource: shared.captainTexView }, { binding: 14, resource: shared.captainSampler }];

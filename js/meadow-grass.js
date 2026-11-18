@@ -33,8 +33,9 @@ import {
   MEADOW_PATCH_METRES, MEADOW_CONTINUUM_HEADER, MEADOW_CONTINUUM_VARIANT, MEADOW_CONTINUUM_VARIANT_WORDS, MEADOW_CONTINUUM_CLUSTER_WORDS,
   MEADOW_CONTINUUM_CLUSTER_TRIANGLES, MEADOW_CONTINUUM_VERTEX_WORDS, MEADOW_CONTINUUM_STEP_WORDS, MEADOW_CONTINUUM_TRIANGLE_WORDS,
   MEADOW_CONTINUUM_NEVER, MEADOW_CONTINUUM_HOPS, MEADOW_CONTINUUM_CHUNK_TRIANGLES, MEADOW_CONTINUUM_OFFSET_UNIT, MEADOW_CONTINUUM_STIFFNESS_UNIT,
-  MEADOW_MIX_ROLES,
+  MEADOW_MIX_ROLES, MEADOW_BODY_FLOOR,
 } from './meadow-continuum.js';
+import { CONTINUUM_GROUND_PLACE_WGSL, continuumGroundWGSL, continuumGroundView } from './continuum-ground.js';
 
 export const MEADOW_MAX_SHOT_WAKES = 16;
 export const MEADOW_MAX_BLAST_RINGS = 16;
@@ -637,12 +638,6 @@ struct MeadowCfg {
   mixes: array<vec4f, 3>, // each mix's (lowland, upland, margin) colour (linear) and cover from above: its variants' mean
 };
 fn meadowFocalOf(screenY: f32, camUp: vec3f) -> f32 { return screenY / max(2.0 * length(camUp), 1e-4); }
-// The most the land's cut, at the same pixel error, draws its ground above the lattice 'away' metres off: a point
-// keeps its departure from its coarser neighbours' line until the allowed error passes the error it waits for, less
-// the handoff band (landContinuumMorph in js/wgsl/land-continuum.js). The sward stands on the lattice raised by it,
-// so the coarse land never shows through it; on flat ground, where the land is the lattice, it stands that much
-// above, under the same pixels the land may be off by.
-fn meadowLandSlack(away: f32) -> f32 { return continuumAllowedError(cfg.scene.x, meadowFocalOf(F.screen.y, F.camUp.xyz), away) * (1.0 + CONTINUUM_HANDOFF_BAND); }
 // Where the far body begins to take a pixel from the clusters: one distance for every patch, from the far error.
 fn meadowStart(focal: f32) -> f32 { return cfg.scene.y * focal / max(cfg.scene.x, 1e-4); }
 // How many pixels a patch spans seen 'away' metres off along 'toward': the width of a disc of the area it shows from
@@ -718,7 +713,7 @@ fn meadowShadowStateOf(entry: vec2u) -> MeadowState {
 `;
 
 // --------------------------------------------------------------------------------------------- the cut
-export const MEADOW_CUT_WGSL = FRAME_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + MEADOW_HASH_GROUND_WGSL + /* wgsl */ `
+export const MEADOW_CUT_WGSL = FRAME_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + CONTINUUM_GROUND_PLACE_WGSL + MEADOW_HASH_GROUND_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> cfg: MeadowCfg;
 @group(0) @binding(2) var<uniform> nearTerrain: MeadowNearDomain;
@@ -813,7 +808,9 @@ fn meadowStand(origin: vec2f, local: vec3f) -> vec3f {
   let bottom = data.y - ${MEADOW_GROUND_SLACK.toFixed(1)};
   let top = data.z + ${(MEADOW_REACH_UP + MEADOW_GROUND_SLACK).toFixed(1)};
   let centre = vec3f(low.x + side * 0.5, (bottom + top) * 0.5, low.y + side * 0.5);
-  let reach = length(vec3f(side * 0.5 + ${MEADOW_OVERHANG.toFixed(1)}, (top - bottom) * 0.5, side * 0.5 + ${MEADOW_OVERHANG.toFixed(1)}));
+  // The sward stands on the ground the land draws (js/continuum-ground.js), off the true ground by up to its bound.
+  let size = length(vec3f(side * 0.5 + ${MEADOW_OVERHANG.toFixed(1)}, (top - bottom) * 0.5, side * 0.5 + ${MEADOW_OVERHANG.toFixed(1)}));
+  let reach = size + continuumGroundBound(cfg.scene.x, meadowFocal(), length(centre + meadowShift() - F.camPos.xyz) + size);
   let seen = !meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach);
   if (!seen && !meadowInLight(centre + meadowShift(), reach)) { return; }
   let at = atomicAdd(&meadowBlockWork[0], 1u);
@@ -846,14 +843,16 @@ fn meadowDecide(cell: vec2i, blockSeen: bool) {
   // Everything the variant can draw, stood on the plane of its ground.
   let sphere = meadowVariantSphere(variant);
   let centre = vec3f(origin.x + sphere.x, ground + sphere.y + hx * (sphere.x - half) + hz * (sphere.z - half), origin.y + sphere.z);
-  let reach = sphere.w * (1.0 + abs(hx) + abs(hz)) + MEADOW_SWAY;
   let relative = centre + meadowShift() - F.camPos.xyz;
+  let size = sphere.w * (1.0 + abs(hx) + abs(hz)) + MEADOW_SWAY;
+  // Stood on the ground the land draws, as the block was.
+  let reach = size + continuumGroundBound(cfg.scene.x, meadowFocal(), length(relative) + size);
   let seen = blockSeen && !meadowOutside(earthCurve(relative, F.camPos.y), reach);
   let lit = meadowInLight(centre + meadowShift(), reach);
   if (!seen && !lit) { return; }
   let away = max(length(relative), 1e-3);
-  let nearest = max(away - reach, 0.25);
-  let farthest = away + reach;
+  let nearest = max(away - size, 0.25);
+  let farthest = away + size;
   let focal = meadowFocal();
   let pixels = cfg.scene.x;
   meadowSteps = meadowVariant(variant, ${MEADOW_VARIANT_AT.steps}u);
@@ -927,7 +926,7 @@ fn meadowDecide(cell: vec2i, blockSeen: bool) {
 }
 
 var<workgroup> meadowNear: vec4u;     // the patch's state, its variant's first cluster, the clusters to try, 0
-var<workgroup> meadowNearView: vec4f; // focal, allowed pixels, how much the ground's slope widens a sphere, 0
+var<workgroup> meadowNearView: vec4f; // focal, allowed pixels, how much the ground's slope widens a sphere, the drawn ground's bound
 // One workgroup a patch cut by clusters: the clusters drawn at its distance, by the core's own test, those in view
 // entered in the list.
 @compute @workgroup_size(64) fn meadowClusters(@builtin(workgroup_id) group: vec3u, @builtin(local_invocation_index) lane: u32) {
@@ -944,7 +943,7 @@ var<workgroup> meadowNearView: vec4f; // focal, allowed pixels, how much the gro
     let first = meadowVariant(state.variant, ${MEADOW_VARIANT_AT.clusterFirst}u);
     let candidates = meadowClusterPrefix(first, meadowVariant(state.variant, ${MEADOW_VARIANT_AT.clusterCount}u), pixels * max(away - reach, 0.25) / focal);
     meadowNear = vec4u(index, first, candidates, 0u);
-    meadowNearView = vec4f(focal, pixels, tilt, 0.0);
+    meadowNearView = vec4f(focal, pixels, tilt, continuumGroundBound(pixels, focal, away + reach));
   }
   let chosen = workgroupUniformLoad(&meadowNear);
   let view = workgroupUniformLoad(&meadowNearView);
@@ -959,7 +958,7 @@ var<workgroup> meadowNearView: vec4f; // focal, allowed pixels, how much the gro
     if (!continuumClusterDrawn(meadowClusterF(c, 12u), meadowStand(origin, lod.xyz) + shift, lod.w * grow + MEADOW_SWAY,
       meadowClusterF(c, 13u), meadowStand(origin, parent.xyz) + shift, parent.w * grow + MEADOW_SWAY, view.x, view.y)) { continue; }
     let cull = meadowClusterSphere(c, 8u);
-    if (meadowOutside(earthCurve(meadowStand(origin, cull.xyz) + shift, F.camPos.y), cull.w * grow + MEADOW_SWAY)) { continue; }
+    if (meadowOutside(earthCurve(meadowStand(origin, cull.xyz) + shift, F.camPos.y), cull.w * grow + MEADOW_SWAY + view.w)) { continue; }
     let at = meadowAppend(0u, 1u);
     if (at != MEADOW_FULL) { meadowLists[at] = vec2u(chosen.x, c | (${MEADOW_CLUSTER_ENTRY}u << 28u)); }
   }
@@ -1055,6 +1054,10 @@ export const MEADOW_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + S
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
 @group(0) @binding(22) var landCraterField: texture_2d_array<f32>;
+` + continuumGroundWGSL(0, 23) + /* wgsl */ `
+// The land's cut the sward stands on: the view's, or in the water's captures the captures' (continuum-ground.js).
+var<private> meadowGroundCut: u32 = 0u;
+fn meadowGroundLift(unshiftedXZ: vec2f) -> f32 { return continuumGroundLiftCut(unshiftedXZ + nearTerrain.grid.yz, meadowGroundCut); }
 ` + MEADOW_ATLAS_WGSL + /* wgsl */ `
 struct MeadowVertexOut {
   @builtin(position) pos: vec4f,
@@ -1290,7 +1293,7 @@ fn meadowShadePlace(state: MeadowState, vd: MeadowVertexData, blade: bool) -> Me
   // its top onto its floor lays that face on the ground, never under the land's own surface.
   var heightM = vd.pos.y + edgeTuck;
   if (vd.pos.y >= 0.0 || !blade) {
-    heightM = max(vd.pos.y, 0.0) * hBoost * heightWeight * (1.0 - ballistics.buryDepth) * wavePress + edgeTuck + select(0.0, MEADOW_BODY_LIFT, !blade);
+    heightM = max(vd.pos.y, ${MEADOW_BODY_FLOOR.toFixed(4)}) * hBoost * heightWeight * (1.0 - ballistics.buryDepth) * wavePress + edgeTuck + select(0.0, MEADOW_BODY_LIFT, !blade);
   }
   let posH = max(0.0, heightM);
 
@@ -1309,7 +1312,8 @@ fn meadowShadePlace(state: MeadowState, vd: MeadowVertexData, blade: bool) -> Me
   let sinTheta = clamp(length(dispXZ) / max(posH, 0.055), 0.0, 0.78);
   let arcDrop = posH * (1.0 - sqrt(max(0.25, 1.0 - sinTheta * sinTheta))) * smoothstep(0.08, 0.65, flexAlong);
 
-  let world = vec3f(unshiftedXZ.x + dispXZ.x + shiftXZ.x, groundY + heightM - arcDrop + meadowLandSlack(camDist), unshiftedXZ.y + dispXZ.y + shiftXZ.y);
+  // Draped on the ground the land draws there, vertex by vertex.
+  let world = vec3f(unshiftedXZ.x + dispXZ.x + shiftXZ.x, groundY + heightM - arcDrop + meadowGroundLift(unshiftedXZ), unshiftedXZ.y + dispXZ.y + shiftXZ.y);
 
   // Normals lean on the ground's slope and tilt with the wind bend: nBent = normalize(nRest - bendDir * bendSlope * 0.85)
   let terrainN = state.slope;
@@ -1416,7 +1420,7 @@ fn meadowSplatVertex(state: MeadowState, vertex: u32) -> MeadowVertexOut {
   let canopy = meadowVariantF(variant, ${MEADOW_VARIANT_AT.canopy}u);
   let standing = canopy * (0.82 + 0.44 * cover.b) * meadowWorldBillow(middle).x * (1.0 - ballistics.buryDepth);
   let shift = vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-  let centre = vec3f(middle.x, ground + standing * 0.5 + meadowLandSlack(distance(vec3f(middle.x, ground, middle.y) + shift, F.camPos.xyz)), middle.y) + shift;
+  let centre = vec3f(middle.x, ground + standing * 0.5 + meadowGroundLift(middle), middle.y) + shift;
   let relative = centre - F.camPos.xyz;
   let toward = relative / max(length(relative), 1e-3);
   let level = length(toward.xz);
@@ -1480,6 +1484,7 @@ fn meadowShadowVertex(entry: vec2u, vertex: u32) -> MeadowVertexOut {
 }
 // Drawn by the water's capture (js/water-optics.js), single-sampled: the same coarse cut, shaded as the camera's.
 @vertex fn meadowSubmergedVS(@builtin(vertex_index) vertex: u32, listed: MeadowEntry) -> MeadowVertexOut {
+  meadowGroundCut = 1u;
   var out = meadowShadowVertex(listed.entry, vertex);
   out.coverage = vec4u(${MEADOW_FAR_ENTRY}u, 0u, ${MEADOW_SAMPLE_SEED}u, 1u);
   return out;
@@ -1772,8 +1777,8 @@ export function requestMeadowPipelines({ device, shader, format = 'rgba16float',
 }
 // The bindings each drawing pipeline reads: the camera's and the water's capture all of them, the sun's what places a
 // body.
-const MEADOW_DRAW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
-const MEADOW_SHADOW_BINDINGS = Object.freeze([0, 5, 6, 7, 8, 12, 13, 14, 16, 18, 19, 22]);
+const MEADOW_DRAW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+const MEADOW_SHADOW_BINDINGS = Object.freeze([0, 5, 6, 7, 8, 12, 13, 14, 16, 18, 19, 22, 23]);
 
 // The blocks of `region` on the world's grid of blocks, and for each the most grass the cover map grows on or beside
 // it and the lowest and highest ground under that grass: what the cut's first pass reads.
@@ -1959,6 +1964,7 @@ export async function createMeadowGrass({
       [17, resMap.get(7)],
       [18, resMap.get(8)],
       [22, craterFieldView],
+      [23, continuumGroundView(device)],
     ]);
     const entries = (ids) => ids.map((id) => ({ binding: id, resource: extraMap.get(id) ?? resMap.get(id) }));
     for (const pipe of [P.clusterDraw, P.farDraw]) {

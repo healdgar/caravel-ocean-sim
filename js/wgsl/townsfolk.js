@@ -8,6 +8,7 @@ import { FRAME_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CREW_WALK_CYCLE_METRES } from '../crew-motion.js';
 import { CREW_CONTINUUM_ORDER_IMPORTANT, CREW_CONTINUUM_PLACED_WGSL } from './crew-continuum.js';
+import { continuumGroundWGSL } from '../continuum-ground.js';
 
 // The two bodies of a town: walker flags bit 0 says which a person wears, a man's or a woman's.
 export const TOWNSFOLK_MODELS = 2;
@@ -69,6 +70,7 @@ struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32};
 @group(0) @binding(6) var<uniform> shots:TownShots;
 @group(0) @binding(7) var<storage,read_write> fates:array<TownFate>;
 @group(0) @binding(8) var<storage,read_write> moisture:array<vec2f>;
+` + continuumGroundWGSL(0, 9) + /* wgsl */ `
 const ABOUT=${TOWN_ABOUT}u;const AFRAID=${TOWN_AFRAID}u;const FALLING=${TOWN_FALLING}u;const DOWN=${TOWN_DOWN}u;
 fn inFrustum(relative:vec3f,radius:f32)->bool {
   let clip=F.viewProj*vec4f(relative,1);
@@ -308,6 +310,10 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     }
   }
   if(hidden){return;}
+  // Drawn on the ground the land draws there (js/continuum-ground.js) where they walk the land; not on a pier's deck
+  // nor in the sea. They are shot and fall where they truly are, above.
+  let dry=position.y>-0.02;
+  if(dry&&!((w.flags&8u)!=0u&&position.y>1.75)){position.y+=continuumGroundLift(position.xz);}
   let centerY=select(${(BODY_HEIGHT_M * 0.5).toFixed(3)},1.40,isMounted&&fate.mode==ABOUT);
   let relative=position+vec3f(0.0,centerY,0.0)-F.camPos.xyz;
   // Those out of sight are kept only for the shadow they may cast into it, and are never drawn themselves.
@@ -361,7 +367,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let transform=mat4x4f(vec4f(c,0.0,-s,0.0),vec4f(0.0,1.0,0.0,0.0),vec4f(s,0.0,c,0.0),vec4f(position,1.0));
   // The fallen and the hurt are cut finer, and anyone in the sea is wet through.
   let important=select(0u,${CREW_CONTINUUM_ORDER_IMPORTANT}u,fate.mode>=FALLING||dmgCode>0u);
-  let wet=select(0u,${TOWNSFOLK_SEA_MOISTURE}u,position.y<-0.02);
+  let wet=select(0u,${TOWNSFOLK_SEA_MOISTURE}u,!dry);
   placed[select(0u,crowd.second,model==1u)+kept]=CrewPlaced(transform,vec4u(first+whole,first+after,first+whole,model*crowd.looks+w.look%crowd.looks),vec4f(blend,0.0,0.0,0.0),vec4u(id.x,dmgCode,important,wet));
 }
 `;

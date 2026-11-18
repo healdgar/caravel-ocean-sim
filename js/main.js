@@ -4318,7 +4318,7 @@ async function main() {
     for(const v of vessels)v.continuum.encode(cp,v.boat.showProw);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
     fortSoldiers?.encodePose(cp);mateSoldiers?.encodePose(cp);
-    townsfolk?.encode(cp,gameDateMs());boardLife?.tick(gameDateMs());caravanClock(gameDateMs());
+    boardLife?.tick(gameDateMs());caravanClock(gameDateMs());
     props?.encode(cp,simF[53],simTime);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
     wakePool.commit();
@@ -5558,6 +5558,8 @@ async function main() {
     }
     clouds.encode(cp);
     terrain?.encode(cp,skyChanged,frameF);
+    // The townsfolk after the land, whose cut writes the ground they are drawn walking on (js/continuum-ground.js).
+    townsfolk?.encode(cp,gameDateMs());
     cp.setPipeline(sunVisPipe);
     cp.setBindGroup(0, bgSunVis);
     cp.setBindGroup(1, bgSunClouds);

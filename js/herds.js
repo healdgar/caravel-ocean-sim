@@ -9,6 +9,7 @@ import { requestOnce } from './gpu-program-cache.js';
 import { createAnimalContinuumSet, requestAnimalContinuumAtlas, requestAnimalContinuumPipelines } from './animal-continuum-draw.js';
 import { ANIMAL_CONTINUUM_ENTRY_LAYOUT } from './wgsl/animal-continuum.js';
 import { ROUTE_STEP_M, WALKER_WORDS } from './town-streets.js';
+import { continuumGroundView } from './continuum-ground.js';
 import {
   HERD_CONTINUUM_BINDING,
   HERD_FATE_FLOATS,
@@ -937,6 +938,8 @@ export async function createLivestockHerds({
         { binding: 9, resource: { buffer: routes } },
         { binding: 10, resource: { buffer: shotsBuf } },
         { binding: 11, resource: { buffer: fatesBuf } },
+        // The ground the land draws, which a beast is drawn standing on (js/continuum-ground.js).
+        { binding: 12, resource: continuumGroundView(device) },
       ],
     });
 

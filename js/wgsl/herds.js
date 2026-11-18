@@ -12,6 +12,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
+import { continuumGroundWGSL } from '../continuum-ground.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 import { SHADOW_FRAME } from './shadows.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
@@ -295,6 +296,7 @@ const HERD_STAMPEDE_SPAN_S: f32 = 14.0;
 @group(0) @binding(9) var<storage, read> routes: array<vec4f>;
 @group(0) @binding(10) var<uniform> shots: HerdShots;
 @group(0) @binding(11) var<storage, read_write> fates: array<HerdFate>;
+` + continuumGroundWGSL(0, 12) + /* wgsl */ `
 
 // root (drawn world x, y, z, yaw), frame (pitch, roll, scale, code), pose (walk phase, walk amount, graze or pole
 // yaw, coat seed), more (tail phase or pole pitch, flags, hit age, hit direction). Scale 0 is not drawn.
@@ -691,6 +693,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   if (wy < 0.32 && !onBridge && !isStreetMount) { return; }
+  // Drawn standing on the ground the land draws there (js/continuum-ground.js), where it stands on the land and not on
+  // a deck or a street raised over it; it is shot, felled and walks on the true ground above.
+  if (wy <= herdGroundY(worldXZ) + 0.01) { wy += continuumGroundLift(worldXZ + shiftXZ); }
 
   // Axle-to-axle pitch and articulated draft tongue orientation.
   var slopePitch = 0.0;

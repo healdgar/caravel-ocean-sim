@@ -12,6 +12,7 @@
 // so a texel spans about the same share of its distance everywhere; one stack for the view's cut and one for the
 // water captures', which are cut coarser. A level's texels stay fixed on the world as the camera moves. Loaded early
 // in the bundle, before the land and every family that reads it.
+import { CONTINUUM_HANDOFF_BAND } from './continuum-core.js';
 
 // Texels across a level, and the spacing of the finest, in metres.
 export const CONTINUUM_GROUND_TEXELS = 256;
@@ -63,7 +64,6 @@ const CONTINUUM_GROUND_TEXELS: i32 = ${CONTINUUM_GROUND_TEXELS};
 const CONTINUUM_GROUND_LEVELS: u32 = ${CONTINUUM_GROUND_LEVELS}u;
 const CONTINUUM_GROUND_TEXEL_M: f32 = ${CONTINUUM_GROUND_TEXEL_M.toFixed(4)};
 const CONTINUUM_GROUND_BLEND: f32 = ${CONTINUUM_GROUND_BLEND.toFixed(4)};
-const CONTINUUM_GROUND_REACH: f32 = ${CONTINUUM_GROUND_REACH.toFixed(4)};
 // A level's spacing: a power of two of the finest's, so every level's place below is exact.
 fn continuumGroundSpacing(level: u32) -> f32 { return ldexp(CONTINUUM_GROUND_TEXEL_M, i32(level)); }
 // The world x and z of a level's first texel's corner, about the camera 'eye' (x, z) on the level's own grid.
@@ -79,11 +79,22 @@ fn continuumGroundUnread(level: u32) -> f32 {
   if (level == 0u) { return -1.0; }
   return continuumGroundReachOf(level - 1u) * (1.0 - CONTINUUM_GROUND_BLEND) - 2.0 * continuumGroundSpacing(level);
 }
+// How far the drawn ground may lie from the true one 'distance' metres from the camera, for a cut at 'pixels' of
+// error and a focal length of 'focal' pixels (with the morph's handoff band): what a culling sphere grows by to hold
+// what stands on the drawn ground.
+fn continuumGroundBound(pixels: f32, focal: f32, distance: f32) -> f32 {
+  return ${(CONTINUUM_GROUND_REACH * (1 + CONTINUUM_HANDOFF_BAND)).toFixed(4)} * pixels * max(distance, 0.0) / max(focal, 1e-4);
+}
 `;
+
+// Where the land's own module (js/terrain.js: the land, the forest and a city's buildings drawn with it) binds the
+// field: group 2, beside the land's pieces (50 to 61), the forest's surfaces (0 to 13) and a city's (40 to 44).
+export const CONTINUUM_GROUND_LAND_BINDING = 63;
 
 // What a family adds to read the field: the texture at (group, binding), and continuumGroundLift(xz), how far the
 // land draws its ground above the true ground at a point of the frame's world, for the view's cut (or, with
-// continuumGroundLiftCut, cut 1: the water captures'). The source it is added to names its frame 'F'.
+// continuumGroundLiftCut, cut 1: the water captures'). The source it is added to names its frame 'F'. A module that
+// only culls by the bound takes CONTINUUM_GROUND_PLACE_WGSL alone.
 export function continuumGroundWGSL(group, binding) {
   return CONTINUUM_GROUND_PLACE_WGSL + /* wgsl */`
 @group(${group}) @binding(${binding}) var continuumGroundTexture: texture_2d_array<f32>;
@@ -115,10 +126,5 @@ fn continuumGroundLiftCut(xz: vec2f, cut: u32) -> f32 {
   return mix(lift, next, smoothstep(start, reach, away));
 }
 fn continuumGroundLift(xz: vec2f) -> f32 { return continuumGroundLiftCut(xz, 0u); }
-// How far the drawn ground may lie from the true one 'distance' metres from the camera, for a cut at 'pixels' of
-// error and a focal length of 'focal' pixels: what a culling sphere grows by to hold what stands on the drawn ground.
-fn continuumGroundBound(pixels: f32, focal: f32, distance: f32) -> f32 {
-  return CONTINUUM_GROUND_REACH * (1.0 + CONTINUUM_HANDOFF_BAND) * pixels * max(distance, 0.0) / max(focal, 1e-4);
-}
 `;
 }

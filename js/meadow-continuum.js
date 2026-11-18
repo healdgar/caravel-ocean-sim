@@ -12,6 +12,9 @@ export const MEADOW_CONTINUUM_VERSION = 2;
 export const MEADOW_CONTINUUM_MAGIC = 0x4d43_4e43;
 // The side of one patch, in metres: the source's own tile.
 export const MEADOW_PATCH_METRES = 4;
+// Where a canopy body's floor lies over the ground it stands on, in metres: on it, as the drawing stands it (meadowShadePlace
+// in js/meadow-grass.js), so a collapse that folds a top onto the floor lays that face on the ground, never under it.
+export const MEADOW_BODY_FLOOR = 0;
 // Levels of the hierarchy inside a patch: cells 16 to a side at the finest, halving to one by the fifth; each level
 // keeps half the organs of the one below.
 export const MEADOW_CONTINUUM_LEVELS = 8;

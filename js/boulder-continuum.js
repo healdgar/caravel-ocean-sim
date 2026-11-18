@@ -7,6 +7,7 @@ import { FRAME_WGSL, ATMO_CORE_WGSL } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { SHADOW_FRAME } from './wgsl/shadows.js';
 import { CONTINUUM_CORE_WGSL } from './continuum-core.js';
+import { continuumGroundWGSL, continuumGroundView } from './continuum-ground.js';
 import { ROCK_ARCHETYPES, rockArchetypeFromSeed } from './vegetation.js';
 import { BUILDING_SHARD_KINDS, buildingKindWithYaw, noteBuildingMesh, traceShotAtBuilding } from './building-fracture.js';
 
@@ -1484,6 +1485,7 @@ struct CullParams {
 @group(0) @binding(4) var<storage, read> stepMeta: array<vec4f>;
 @group(0) @binding(5) var<storage, read_write> shownOut: array<ContinuumBoulder>;
 @group(0) @binding(6) var<storage, read_write> draws: array<atomic<u32>>;
+` + continuumGroundWGSL(0, 7) + /* wgsl */ `
 
 @compute @workgroup_size(32)
 fn boulderReset(@builtin(global_invocation_id) gid: vec3u) {
@@ -1601,10 +1603,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (group >= 2u) { return; }
   let slot = packedGroup >> 2u;
 
-  let src = srcInstances[denseIdx];
+  var src = srcInstances[denseIdx];
   let radius = src.root.w;
   let height = src.shape.x;
   if (radius <= 0.02 || height <= 0.02) { return; }
+  // Drawn bedded in the ground the land draws there (js/continuum-ground.js); struck where it truly lies.
+  src.root.y += continuumGroundLift(src.root.xz + P.worldShift.xy);
 
   let centerWorld = src.root.xyz + vec3f(P.worldShift.x, height * 0.28, P.worldShift.y);
   let relative = centerWorld - F.camPos.xyz;
@@ -2371,6 +2375,7 @@ export async function createBoulderContinuum(device, {
       { binding: 4, resource: { buffer: stepMetaBuf } },
       { binding: 5, resource: { buffer: shownBuf } },
       { binding: 6, resource: { buffer: drawsBuf } },
+      { binding: 7, resource: continuumGroundView(device) },
     ],
   });
 

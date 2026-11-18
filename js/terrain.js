@@ -33,6 +33,7 @@ import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,land
 import {createLandBanks} from './land-banks.js';
 import {bakeLandContinuumPiece,landContinuumSeams,requestLandContinuumPipelines,landContinuumViewPipeline,createLandContinuum} from './land-continuum.js';
 import {LAND_CONTINUUM_RENDER,LAND_CONTINUUM_ENTRY_LAYOUT} from './wgsl/land-continuum.js';
+import {continuumGroundWGSL,CONTINUUM_GROUND_LAND_BINDING} from './continuum-ground.js';
 import {sharedGroundDetail} from './ground-detail.js';
 import {sharedNeuralPbrBank} from './neural-pbr.js';
 import {withNeuralPbrTerrain} from './wgsl/neural-pbr.js';
@@ -1065,7 +1066,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
   const neuralPbr=sharedNeuralPbrBank(device);
   const terrainSource=withNeuralPbrTerrain(TERRAIN);
-  const modulePromise=shader(terrainSource+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+cityContinuumRenderWGSL()+LAND_CONTINUUM_RENDER,'island terrain');
+  const modulePromise=shader(terrainSource+continuumGroundWGSL(2,CONTINUUM_GROUND_LAND_BINDING)+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+cityContinuumRenderWGSL()+LAND_CONTINUUM_RENDER,'island terrain');
   const terrainPipesPromise=modulePromise.then(module=>Promise.all([
     computePipe(TERRAIN_LIGHT,'island sunlight'),
     module,

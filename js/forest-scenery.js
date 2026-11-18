@@ -5,6 +5,7 @@
 // module places the roots, culls them once on the GPU into one visible list a species, and shades bark and leaves.
 import {createForestTerrainOcclusion,withForestTerrainOcclusion} from './forest-occlusion.js';
 import {FRAME_WGSL} from './wgsl/common.js';
+import {continuumGroundWGSL,continuumGroundView,CONTINUUM_GROUND_LAND_BINDING} from './continuum-ground.js';
 import {createTaskYieldBudget} from './task-yield.js';
 import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,PORTUGAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,FOREST_CLUSTER_SHADOW_WGSL} from './forest-clusters.js';
 import {loadForestCrowns,FOREST_CROWN_ASSETS,SUBTROPICAL_FOREST_CROWN_ASSETS,PORTUGAL_FOREST_CROWN_ASSETS,FOREST_CROWN_SPLAT_PIXELS,FOREST_CROWN_MIN_PIXELS} from './forest-crowns.js';
@@ -475,7 +476,11 @@ const ROOT_WGSL=/* wgsl */`
 struct ForestRoot {rootScale:vec4f,yawColour:vec4f,identity:vec4f};
 `;
 // What every tree's clusters and crowns are placed and shaded through (js/forest-clusters.js, js/forest-crowns.js).
+// The land's module it joins (js/terrain.js) binds the drawn ground's field at CONTINUUM_GROUND_LAND_BINDING.
 export const FOREST_VERTEX_WGSL=ROOT_WGSL+/* wgsl */`
+// Where a tree stands as drawn: its root on the ground the land draws there (js/continuum-ground.js). It is struck,
+// felled and blown over where it truly stands (forestStruckPlace and js/forest-trunks.js on the CPU).
+fn forestRootDrawn(r:ForestRoot)->vec3f{return r.rootScale.xyz+vec3f(0.,continuumGroundLift(r.rootScale.xz),0.);}
 @group(2)@binding(0)var<storage,read>forestRoots:array<ForestRoot>;
 @group(2)@binding(2)var<uniform>forestBin:vec4u;
 struct ForestLeafMaterial {optics:vec4f,underside:vec4f,coordinates:vec4f};
@@ -606,8 +611,9 @@ fn forestPlaceSkinned(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:
  let baseCol=select(colour,vec3f(1.),nativeMaterial>=0.);
  var tint=baseCol*r.yawColour.yzw;var fallen=false;
  if(r.identity.w!=0.){let struck=forestStruckPlace(r,posAdj,local,o.normal,tint,kind.x<3.5);local=struck.local;o.normal=struck.normal;tint=struck.colour;fallen=struck.fallen;}
- o.world=r.rootScale.xyz+local;
- if(!fallen&&kind.x>=3.5){o.world.y=max(o.world.y,r.rootScale.y);}
+ let root=forestRootDrawn(r);
+ o.world=root+local;
+ if(!fallen&&kind.x>=3.5){o.world.y=max(o.world.y,root.y);}
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
  o.kind=kind;o.leafUV=leafUV;o.colour=tint;o.canopyAO=canopyAO;o.coverageSeed=forestCoverageHash(vertex^(rootId*0x9e3779b9u));o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
 }
@@ -779,6 +785,7 @@ struct ForestCullParameters {roots:f32,species:f32,pixelError:f32,rootCount:u32}
 @group(0)@binding(5)var<uniform>parameters:ForestCullParameters;
 @group(0)@binding(6)var<storage,read_write>speciesRoots:array<u32>;
 @group(0)@binding(7)var<storage,read_write>speciesCounts:array<atomic<u32>>;
+`+continuumGroundWGSL(0,8)+/* wgsl */`
 @compute @workgroup_size(64)fn forestReset(@builtin(global_invocation_id)id:vec3u){
  if(id.x>=u32(parameters.species)){return;}atomicStore(&visibleCounts[id.x],0u);
 }
@@ -787,8 +794,8 @@ struct ForestCullParameters {roots:f32,species:f32,pixelError:f32,rootCount:u32}
  if(i>=parameters.rootCount){return;}
  let r=roots[i];if(r.rootScale.w<=0.0){return;}let pi=u32(r.identity.x);let p=prototypes[pi];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let b=p.bound.xyz*r.rootScale.w;
- // A felled tree lies as far as its own height from where it stood.
- let world=r.rootScale.xyz+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);let relative=world-F.camPos.xyz;let radius=p.bound.w*r.rootScale.w*select(1.,2.,r.identity.w<0.);
+ // A felled tree lies as far as its own height from where it stood: on the ground the land draws (forestRootDrawn).
+ let world=r.rootScale.xyz+vec3f(c*b.x-s*b.z,b.y+continuumGroundLift(r.rootScale.xz),s*b.x+c*b.z);let relative=world-F.camPos.xyz;let radius=p.bound.w*r.rootScale.w*select(1.,2.,r.identity.w<0.);
  let clip=F.viewProj*vec4f(relative,1);
  let rowW=vec3f(F.viewProj[0].w,F.viewProj[1].w,F.viewProj[2].w);
  for(var a=0u;a<2u;a++){
@@ -908,7 +915,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       device.createComputePipelineAsync({label:'forest species roots',layout:'auto',compute:{module:cullModule,entryPoint:'forestSpeciesRoots'}}),
     ]);
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:visibleCounts}},{binding:5,resource:{buffer:parameters}}]});
-    const groupCull=()=>device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...[frameUBO,roots,prototypes,visible,visibleCounts,parameters].map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
+    const groupCull=()=>device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...[frameUBO,roots,prototypes,visible,visibleCounts,parameters].map((buffer,binding)=>({binding,resource:{buffer}})),{binding:8,resource:continuumGroundView(device)},...(terrainVisibility?.entries??[])]});
     const groupSpecies=()=>device.createBindGroup({layout:listSpecies.getBindGroupLayout(0),entries:[[1,roots],[2,prototypes],[5,parameters],[6,speciesRoots],[7,speciesCounts]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
     let cullGroup=null,speciesGroup=null;
     // The GPU lets a buffer go once the work already given it is done.
@@ -1046,7 +1053,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       hasLandShadow:resources.some(([id])=>id===19),shadowUniform:resources.find(([id])=>id===19)?.[1].buffer??null,
       cloudEntries:p=>clouds.bindVolume(p),
       surfaceEntries:(pipeline,id,offset,normals)=>{
-        const entries=[{binding:0,resource:{buffer:roots}},{binding:2,resource:{buffer:offset}},{binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler}];
+        const entries=[{binding:0,resource:{buffer:roots}},{binding:2,resource:{buffer:offset}},{binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler},{binding:CONTINUUM_GROUND_LAND_BINDING,resource:continuumGroundView(device)}];
         for(let family=0;family<4;family++){const texture=surfaces.families[family]??surfaces.families[0],first=family?5+family*2:3;
           entries.push({binding:first,resource:texture.albedo.createView({dimension:'2d-array'})});if(normals)entries.push({binding:first+1,resource:texture.normal.createView({dimension:'2d-array'})});}
         return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});

@@ -36,7 +36,7 @@ import {
   MEADOW_CONTINUUM_STEP_WORDS, MEADOW_CONTINUUM_NEVER, MEADOW_CONTINUUM_HOPS, MEADOW_CONTINUUM_CLUSTER_SPAN,
   MEADOW_CONTINUUM_VARIANT_VERTICES, MEADOW_CONTINUUM_OFFSET_UNIT, MEADOW_MIX_ROLES, PORTUGAL_MEADOW_GRASS_ASSETS,
   TROPICAL_MEADOW_GRASS_ASSETS, meadowContinuumCellsAt, packMeadowContinuumVertex, packMeadowContinuumCluster,
-  packMeadowContinuumIndices,
+  packMeadowContinuumIndices, MEADOW_BODY_FLOOR,
 } from '../js/meadow-continuum.js';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -54,7 +54,7 @@ const ALBEDO_SCALE = 0.46;
 const RASTER = 1024, SIDE_LOW = -0.2, SIDE_HEIGHT = 2, SIDE_CELLS = 512;
 // The canopy body: a slab of 8 x 8 cells; its top where this share of the sward seen from above lies below, each
 // vertex judged over the metre round it; its floor this far under the ground, never seen.
-const BODY_CELLS = 8, BODY_QUANTILE = 0.5, BODY_FLOOR = -0.05;
+const BODY_CELLS = 8, BODY_QUANTILE = 0.5, BODY_FLOOR = MEADOW_BODY_FLOOR;
 // The body's error: how far from its top this share of the sward seen from above lies, ground in its gaps included.
 const BODY_ERROR_QUANTILE = 0.9;
 // A coarser level's error: this share of the mean width its kept organs are grown to, as the forest's leaves
@@ -445,9 +445,9 @@ function bakeBody(sward, rim) {
   const baseError = quantileOf(misses, BODY_ERROR_QUANTILE);
 
   // The slab: a top and a floor of (G + 1)^2 vertices, joined round the edge, every face wound outward. The edge's
-  // normals stand straight up, as every variant's do. The floor lies under the ground and is never seen, but the
-  // walls rise from it between neighbouring patches: it carries the edge's colour, cover and height along the
-  // stalk, so a wall is shaded as the edge it stands under and no seam shows.
+  // normals stand straight up, as every variant's do. The floor lies on the ground (MEADOW_BODY_FLOOR) and is never
+  // seen, but the walls rise from it between neighbouring patches: it carries the edge's colour, cover and height
+  // along the stalk, so a wall is shaded as the edge it stands under and no seam shows.
   const slabPosition = [], slabNormal = [], slabColour = [], slabAlong = [], slabCover = [], slabIndex = [];
   for (const layer of [0, 1]) for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) {
     slabPosition.push(i * step, layer ? BODY_FLOOR : heightAt(i, j), j * step);

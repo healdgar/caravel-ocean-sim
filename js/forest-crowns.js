@@ -237,14 +237,15 @@ fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,colour:vec3f,exposure
    let struck=forestStruckPlace(r,localMid,centreLocal,vec3f(0.,1.,0.),tint,false);
    centreLocal=struck.local;tint=struck.colour;fallen=struck.fallen;
   }
-  let centreWorld=r.rootScale.xyz+centreLocal;
+  let root=forestRootDrawn(r);
+  let centreWorld=root+centreLocal;
   let toEye=normalize(F.camPos.xyz-centreWorld);
   let right=normalize(cross(select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(toEye.y)>.98),toEye));
   let up=cross(toEye,right);
   let rx=forestCrownSplat.centre.w*scale*inflate;let ry=forestCrownSplat.colour.w*scale*inflate;
   let uvCorner=select(select(vec2f(0.,1.58),vec2f(-1.325,-.79),corner==1u),vec2f(1.325,-.79),corner==2u);
   var world=centreWorld+right*(uvCorner.x*rx)+up*(uvCorner.y*ry);
-  if(!fallen){world.y=max(world.y,r.rootScale.y);}
+  if(!fallen){world.y=max(world.y,root.y);}
   let dome=normalize(toEye*.68+right*(uvCorner.x*.52)+up*(uvCorner.y*.56));
   let leaves=normalize(dome+vec3f(0.,.35,0.));
   let lit=forestCrownLight(world,leaves,dome,tint,forestCrownSplat.shade.x,forestCrownSplat.shade.y,forestCrown.optics,forestCrown.underside.rgb);

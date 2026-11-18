@@ -5,6 +5,7 @@ import { FOREST_CROWN_LIMIT, FOREST_CROWN_NEAREST, forestCrownLook, forestCrownS
 import { CONTINUUM_CORE_WGSL, continuumClusterPrefixWGSL, continuumMorphStepWGSL } from './continuum-core.js';
 import { FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES, FOREST_WIND_SKIN_WGSL } from './forest-wind.js';
 import { forestDispatch } from './forest-dispatch.js';
+import { continuumGroundWGSL, continuumGroundView, CONTINUUM_GROUND_LAND_BINDING } from './continuum-ground.js';
 
 export const FOREST_CLUSTER_VERTEX_WORDS = 5;
 export const FOREST_CLUSTER_WORDS = 16;
@@ -120,6 +121,9 @@ struct ForestClusterShadowBox {lightView:mat4x4f,origin:vec4f,sun:vec4f,texel:ve
 // the GPU whenever the sections change (forestSpeciesRoots, js/forest-scenery.js), in the same stretches as the
 // visible lists. The shadow cut reads it; the camera's cut reads the visible lists.
 @group(0)@binding(11)var<storage,read>speciesRoots:array<u32>;
+`+continuumGroundWGSL(0,12)+/* wgsl */`
+// A tree as it is drawn: its root on the ground the land draws there (forestRootDrawn, js/forest-scenery.js).
+fn forestRootAt(tree:u32)->ForestRoot{var r=roots[tree];r.rootScale.y+=continuumGroundLift(r.rootScale.xz);return r;}
 // Shares of the forest's pixel error each kind may use. A leaf's error is its size, which stays
 // visible as a card, so leaves need the tighter limit. Wood is thin and hides among them.
 // Each halving of the leaf share draws four times the cards. At .2 the cards stayed about two pixels
@@ -145,7 +149,7 @@ fn forestClusterTree(index:u32)->u32{
 // Both cuts spread their workgroups over y past 65,535 of them (js/forest-dispatch.js).
 @compute @workgroup_size(64)fn forestClusterSelect(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
  let tree=forestClusterTree(id.x+id.y*groups.x*64u);if(tree==0xffffffffu){return;}
- let r=roots[tree];let scale=r.rootScale.w;let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
+ let r=forestRootAt(tree);let scale=r.rootScale.w;let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let origin=r.rootScale.xyz-F.camPos.xyz;
  let focal=F.screen.y/max(2.0*length(F.camUp.xyz),.0001);
  let b=bucket.centre.xyz*scale;
@@ -232,7 +236,7 @@ const FOREST_CLUSTER_SHADOW_PIXELS=1.5;
  if(shadowBox.origin.w<.5||index>=bucket.capacity.z){return;}
  let entry=speciesRoots[bucket.capacity.y+index];if(entry==0u){return;}
  let tree=entry-1u;
- let r=roots[tree];let scale=r.rootScale.w;if(scale<=0.){return;}
+ let r=forestRootAt(tree);let scale=r.rootScale.w;if(scale<=0.){return;}
  let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let rowX=vec3f(shadowBox.lightView[0].x,shadowBox.lightView[1].x,shadowBox.lightView[2].x);
  let rowY=vec3f(shadowBox.lightView[0].y,shadowBox.lightView[1].y,shadowBox.lightView[2].y);
@@ -500,20 +504,20 @@ export async function createForestClusters({ device, shader, module, frame, sour
       });
       const shadowSurface = (pipeline, offset) => device.createBindGroup({
         layout: pipeline.getBindGroupLayout(2),
-        entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: offset } }],
+        entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: offset } }, { binding: CONTINUUM_GROUND_LAND_BINDING, resource: continuumGroundView(device) }],
       });
       if (crown) {
         const groups = (pipeline) => ({
           cluster: device.createBindGroup({ layout: pipeline.getBindGroupLayout(3), entries: [{ binding: 0, resource: { buffer: list } }, { binding: 2, resource: { buffer: crownVertices } }, { binding: 3, resource: { buffer: crownIndices } }, { binding: 5, resource: { buffer: crown.look } }, { binding: 6, resource: { buffer: crownMorph } }, { binding: 7, resource: { buffer: crown.splat } }, { binding: 8, resource: { buffer: windPoses } }] }),
-          surface: crown.bins.map((bin) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(2), entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: bin } }] })),
+          surface: crown.bins.map((bin) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(2), entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: bin } }, { binding: CONTINUUM_GROUND_LAND_BINDING, resource: continuumGroundView(device) }] })),
         });
         crown.solid = groups(crownPipeline); crown.fade = groups(crownFadePipeline);
       }
-      s.select = device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, visibleCounts, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } })), { binding: 10, resource: { buffer: crownMorph } }] });
+      s.select = device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, visibleCounts, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } })), { binding: 10, resource: { buffer: crownMorph } }, { binding: 12, resource: continuumGroundView(device) }] });
       s.wood = { surface: surfaceEntries(woodPipeline, p.id, wood, true), cluster: clusterGroup(woodPipeline, true) };
       s.leafDepth = { surface: surfaceEntries(leafDepthPipeline, p.id, leaf, false), cluster: clusterGroup(leafDepthPipeline, false) };
       s.leaf = { surface: surfaceEntries(leafPipeline, p.id, leaf, true), cluster: clusterGroup(leafPipeline, false) };
-      s.shadowSelect = shadowSelect ? device.createBindGroup({ layout: shadowSelect.getBindGroupLayout(0), entries: [frameEntry(0), ...[[1, roots], [4, clusters], [5, shadowList], [6, draws], [7, parameters], [8, bucket], [9, shadowUniform], [11, speciesRoots]].map(([binding, buffer]) => ({ binding, resource: { buffer } }))] }) : null;
+      s.shadowSelect = shadowSelect ? device.createBindGroup({ layout: shadowSelect.getBindGroupLayout(0), entries: [frameEntry(0), ...[[1, roots], [4, clusters], [5, shadowList], [6, draws], [7, parameters], [8, bucket], [9, shadowUniform], [11, speciesRoots]].map(([binding, buffer]) => ({ binding, resource: { buffer } })), { binding: 12, resource: continuumGroundView(device) }] }) : null;
       s.woodShadow = woodShadowPipeline ? { surface: shadowSurface(woodShadowPipeline, woodShadow), cluster: clusterGroup(woodShadowPipeline, true, shadowList) } : null;
       s.leafShadow = leafShadowPipeline ? { surface: surfaceEntries(leafShadowPipeline, p.id, leafShadow, false), cluster: clusterGroup(leafShadowPipeline, false, shadowList) } : null;
     }
