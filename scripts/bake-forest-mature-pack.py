@@ -27,24 +27,26 @@ import subprocess
 import sys
 import time
 
-# (species, cohort, age_yr, seed, grower_res, max_blades_per_archetype)
-# Uses forestmodeler's canonical 12,000 blades/archetype ceiling for veterans so the gzipped
-# One Continuum atlas fits comfortably under GitHub's 100 MiB file limit without any synthetic pruning.
+# (species, canopy_age_yr, veteran_age_yr, seed)
+# Every species is grown ONCE monotonically with forestmodeler's canonical ColonizingGrower
+# (`resolution=1.0, steps_per_cycle=2`) and meshed with `native_tree_render.blade_meshes(...,
+# individual_cutout=True, lod_tier='hero')` — 100% native-size individual folded leaves with
+# zero card enlargement, zero blade capping, and zero synthetic pruning.
+SPECIES_SPECS = (
+    ('oak', 19, 32, 101),
+    ('chestnut', 20, 35, 101),
+    ('maple', 15, 24, 101),
+    ('elm', 17, 28, 303),
+    ('birch', 14, 25, 202),
+    ('blueberry', 10, 20, 303),
+)
 PROTOTYPES = (
-    ('oak', 'veteran', 60, 101, 2.0, 12000),
-    ('chestnut', 'veteran', 60, 101, 2.0, 12000),
-    ('maple', 'veteran', 55, 101, 2.0, 12000),
-    ('elm', 'veteran', 60, 303, 2.0, 12000),
-    ('birch', 'veteran', 32, 202, 1.5, 10500),
-    ('blueberry', 'veteran', 20, 303, 1.5, 9000),
-    ('oak', 'canopy', 38, 202, 2.0, 9500),
-    ('chestnut', 'canopy', 38, 202, 2.0, 9500),
-    ('maple', 'canopy', 36, 202, 2.0, 9500),
-    ('elm', 'canopy', 38, 202, 2.0, 9500),
-    ('birch', 'canopy', 20, 101, 1.5, 8000),
-    ('blueberry', 'canopy', 12, 202, 1.5, 6500),
+    tuple((sp, 'veteran', vet_age, seed) for sp, _can_age, vet_age, seed in SPECIES_SPECS)
+    + tuple((sp, 'canopy', can_age, seed) for sp, can_age, _vet_age, seed in SPECIES_SPECS)
 )
 
+RESOLUTION = 1.0
+STEPS_PER_CYCLE = 2
 LATITUDE = 39.0
 FIELD_CELL_METRES = 0.6
 MIDDLE_CELLS_IN_HEIGHT = 40
@@ -77,6 +79,7 @@ def main():
     work = pathlib.Path(args.work).resolve()
     pack = pathlib.Path(args.pack).resolve()
     sys.path.insert(0, str(source))
+    sys.path.insert(0, str(source / 'scripts'))
 
     import numpy as np
     import gardenplans
@@ -89,6 +92,7 @@ def main():
     from gardenplans.plan import SPECIES
     from gardenplans.scenery import _measure_grown
     from gardenplans.sky import SkyModel
+    from native_tree_render import blade_meshes as native_blade_meshes
     from scripts import bake_tiered_forest as baker_cli
 
     before = json.loads((pack / 'manifest.json').read_text())
@@ -98,27 +102,41 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
 
-    grown, blade_cap_of, grower_of_skel, record = [], {}, {}, []
-    for index, (species, cohort, age, seed, resolution, max_blades) in enumerate(PROTOTYPES):
+    # Grow each species ONCE monotonically with forestmodeler's canonical resolution=1.0, steps_per_cycle=2
+    # capturing both the canopy checkpoint and the veteran checkpoint on the exact same skeleton.
+    grown_by_species = {}
+    for species, can_age, vet_age, seed in SPECIES_SPECS:
         clock = time.perf_counter()
-        # Keep stochastic whole-tree mortality off for single-seed prototypes (matches bake_waterworld_native_prototypes.py)
-        # while running forestmodeler's exact ColonizingGrower at clean resolution.
-        plan = dataclasses.replace(SPECIES[species](seed), growth_cycles=age, background_mortality=0.0, senescent_mortality=0.0)
+        plan = dataclasses.replace(
+            SPECIES[species](seed),
+            growth_cycles=vet_age,
+            background_mortality=0.0,
+            senescent_mortality=0.0,
+        )
         grower = ColonizingGrower(
             plan,
             Environment(extinction=plan.light_extinction, sky=SkyModel(latitude=LATITUDE)),
-            checkpoints=(float(age),),
-            resolution=resolution,
+            checkpoints=(float(can_age), float(vet_age)),
+            steps_per_cycle=STEPS_PER_CYCLE,
+            resolution=RESOLUTION,
         )
         grower.grow()
-        height, crown, dbh, basal = _measure_grown(grower, float(age))
+        grown_by_species[species] = (plan, grower)
+        h_v, c_v, d_v, _ = _measure_grown(grower, float(vet_age))
+        h_c, c_c, d_c, _ = _measure_grown(grower, float(can_age))
         print(
-            f'{species:9s} {cohort:7s} {age:3d} yr  {height:4.1f} m tall, {crown:4.1f} m crown, {dbh:5.1f} cm dbh  '
+            f'{species:9s} res={RESOLUTION} spc={STEPS_PER_CYCLE}  '
+            f'canopy {can_age:2d}yr ({h_c:4.1f}m, {c_c:4.1f}m r)  '
+            f'veteran {vet_age:2d}yr ({h_v:4.1f}m, {c_v:4.1f}m r, {d_v:5.1f}cm dbh)  '
             f'({time.perf_counter() - clock:.1f} s)',
             flush=True,
         )
+
+    grown, grower_of_skel, record = [], {}, []
+    for index, (species, cohort, age, seed) in enumerate(PROTOTYPES):
+        plan, grower = grown_by_species[species]
+        height, crown, dbh, basal = _measure_grown(grower, float(age))
         grown.append((index, species, cohort, float(age), plan, grower))
-        blade_cap_of[id(plan)] = max_blades
         grower_of_skel[id(grower.skeleton)] = grower
         record.append({
             'id': index,
@@ -126,7 +144,8 @@ def main():
             'cohort': cohort,
             'age': age,
             'seed': seed,
-            'resolution': resolution,
+            'resolution': RESOLUTION,
+            'stepsPerCycle': STEPS_PER_CYCLE,
             'basalRadius': round(float(basal), 4),
         })
 
@@ -138,7 +157,6 @@ def main():
 
     accel = tf._get_bake_accel()
     real_meshes = accel.plant_meshes_fast if accel is not None else tf.plant_meshes
-    real_blades = tf._build_tier0_blade_meshes
 
     # Use forestmodeler's REAL hero wood mesher directly (only omitting underground ±30m subterranean root networks
     # so prototype bounding spheres stay accurate to above-ground trunks and crowns).
@@ -150,9 +168,12 @@ def main():
         g = grower_of_skel.get(id(skel))
         return native_place_leaves(skel, float(age), plan, env=g.env if g is not None else options.get('env'))
 
-    # Use forestmodeler's real V-folded blade mesher directly with per-cohort archetype blade cap.
+    # Use forestmodeler's REAL native_tree_render.blade_meshes: 1:1 physical native leaf size, zero card enlargement!
     def native_hero_blades(organs, plan, cluster, **_):
-        return real_blades(organs, plan, cluster, max_blades_per_archetype=blade_cap_of.get(id(plan), 14000))
+        meshes, _audit = native_blade_meshes(
+            organs, plan, cluster, max_triangles=20_000_000, individual_cutout=True, lod_tier='hero'
+        )
+        return meshes
 
     merged_by_cell = tf._simplify_wood_indices_by_cell
 
@@ -172,7 +193,7 @@ def main():
     clock = time.perf_counter()
     result = tf.bake_tiered_forest(
         baker_cli._build_subtropical_island_field(), work, stand='portugal', stem='portugal_forest', n_stems=24, seed=42,
-        prototype_age=38.0, veteran_age=60.0, growth_mode='isolated', cohorts=('veteran', 'canopy'), resolution=2.0,
+        prototype_age=22.0, veteran_age=42.0, growth_mode='isolated', cohorts=('veteran', 'canopy'), resolution=RESOLUTION,
         field_cell_m=FIELD_CELL_METRES, latitude=LATITUDE,
     )
     print(f'baked in {time.perf_counter() - clock:.0f} s', flush=True)
@@ -264,7 +285,7 @@ def main():
         'bake': {
             'script': 'scripts/bake-forest-mature-pack.py',
             'forestmodeler': revision,
-            'growth': 'native forestmodeler ColonizingGrower + hero wood + native place_leaves blades (zero fake shoots/pruning)',
+            'growth': 'native forestmodeler ColonizingGrower (resolution=1.0, steps_per_cycle=2) + hero wood + native_tree_render.blade_meshes (1:1 native leaves, zero card enlargement)',
             'latitudeDegrees': LATITUDE,
             'fieldCellMetres': FIELD_CELL_METRES,
             'middleCellsInHeight': MIDDLE_CELLS_IN_HEIGHT,

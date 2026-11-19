@@ -45,10 +45,10 @@ const FITS = path.resolve(ROOT, option('fits', '.tripo/1550-hd/fit-regions'));
 const OUT = path.resolve(ROOT, option('out', 'assets/crew/continuum'));
 const ONLY = option('only', null);
 const TEXTURE_SIZE = Number(option('texture', 4096));
-const SAMPLE_SIZE = 2048;
+const SAMPLE_SIZE = Math.min(2048, TEXTURE_SIZE);
 // The far source the far body is wrapped round, and the light mesh body.glb carries, in triangles.
 const FAR_SOURCE_TRIANGLES = Number(option('far', 50000));
-const STAND_IN_TRIANGLES = 20000;
+const STAND_IN_TRIANGLES = Number(option('standin', 20000));
 // What every sphere and the slack are grown by past what they must hold: for a pose outside the set, and for the
 // quantization of the points they bound.
 const SPHERE_MARGIN = 0.01;

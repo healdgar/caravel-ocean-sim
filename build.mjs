@@ -18,6 +18,7 @@ import { PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS } from './js
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 import { CREW_CONTINUUM_ASSETS, crewContinuumMissingMessage } from './js/crew-continuum.js';
 import { HAIR_CONTINUUM_ASSETS } from './js/hair-continuum.js';
+import { CLOTHING_CONTINUUM_ASSETS } from './js/clothing-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
 import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
 import { BOULDER_CONTINUUM_ASSETS } from './js/boulder-continuum.js';
@@ -40,7 +41,7 @@ order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-clip-pose.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-solve.js');
 // People through the one continuum: the baked format, strand hair, its GPU cut and draws, and the batches crew.js keeps.
-order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/hair-continuum.js','js/wgsl/crew-continuum.js','js/bc7-transcode.js','js/crew-continuum-draw.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/hair-continuum.js','js/clothing-continuum.js','js/wgsl/crew-continuum.js','js/bc7-transcode.js','js/crew-continuum-draw.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-groves.js');
@@ -210,6 +211,8 @@ if(missingCrewContinuum.length)throw Error(crewContinuumMissingMessage(missingCr
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))
   runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.glb')?'model/gltf-binary':'application/octet-stream');
 for(const file of Object.values(HAIR_CONTINUUM_ASSETS))
+  runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
+for(const file of Object.values(CLOTHING_CONTINUUM_ASSETS))
   runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The ships' continuum bodies (scripts/prepare-ship-continuum.mjs), committed and embedded: no ship is drawn without them.
 for(const files of Object.values(SHIP_CONTINUUM_ASSETS))for(const file of Object.values(files)){
