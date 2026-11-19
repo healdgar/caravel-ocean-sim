@@ -493,7 +493,7 @@ async function main() {
   const MSAA = 4;
   const AUTO_START_PIXELS = 2.5e6;
   const SEA_LATITUDE_UNKNOWN = 30;
-  const POLYGONS_YIELD_AT = 0.5;
+  const POLYGONS_YIELD_AT = 0.45;
   const HDR = 'rgba16float';
 
   // Kick off all ocean, atmosphere, cloud, and landfall shader/pipeline compilations and asset fetches concurrently
@@ -801,9 +801,10 @@ async function main() {
   // A vessel's own resources (group 0: her hull program's, her damage record, the neural material bank, her assembly)
   // and lighting (group 1) for her continuum's view, made once a resize.
   const vesselGroupEntries=v=>[...v.hullResources,{buffer:v.holesUBO},{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer},{buffer:v.vertexBuffer}];
-  function vesselOwnGroups(v,pipeline){
+  const vesselFarGroupEntries=v=>[v.hullResources[0],v.hullResources[1],v.hullResources[2],v.hullResources[3],null,v.hullResources[5]];
+  function vesselOwnGroups(v,pipeline,far=false){
     let made=v.ownGroups.get(pipeline);
-    if(!made){made=[bg(pipeline,vesselGroupEntries(v),v.id+' vessel'),v.shadows.bind(pipeline)];v.ownGroups.set(pipeline,made);}
+    if(!made){made=[bg(pipeline,far?vesselFarGroupEntries(v):vesselGroupEntries(v),v.id+(far?' vessel far':' vessel')),v.shadows.bind(pipeline)];v.ownGroups.set(pipeline,made);}
     return made;
   }
   // The same entries for her continuum's water capture (js/water-optics.js).
@@ -981,7 +982,7 @@ async function main() {
   const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto',
     {initial:Math.sqrt(AUTO_START_PIXELS/Math.max(1,canvas.clientWidth*canvas.clientHeight*(window.devicePixelRatio||1)**2))});
   const fixedPolygons = fixedResolution && !qs.has('polygons');
-  const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto', { minimum: 0.35 });
+  const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto', { minimum: 0.50, budgetMinimum: 0.25 });
   setContinuumPixelError(polygons.pixelError);
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView;
@@ -5309,33 +5310,46 @@ async function main() {
           mainPass.timestampWrites=undefined;
         });
       };
-      const drawOceanAndSky=rp=>{
+      const drawOceanDepth=rp=>{
+        if(nodeCount&&OCEAN_DEPTH){
+          rp.setVertexBuffer(0,instBuf);rp.setIndexBuffer(idxBuf,'uint16');
+          const ocean=terrain?coastalOcean:openOcean;
+          rp.setPipeline(ocean.depthPipe);rp.setBindGroup(0,ocean.depthGroups[wakeIndex()]);
+          if(coastalDepthGroup){rp.setBindGroup(1,opticsEmptyGroup);rp.setBindGroup(2,coastalDepthGroup);}
+          rp.drawIndexed(GRID*GRID*6,nodeCount);
+        }
+      };
+      const drawOceanShade=rp=>{
         if(nodeCount){
           rp.setVertexBuffer(0,instBuf);rp.setIndexBuffer(idxBuf,'uint16');
           const ocean=terrain?coastalOcean:openOcean;
-          if(OCEAN_DEPTH){
-            rp.setPipeline(ocean.depthPipe);rp.setBindGroup(0,ocean.depthGroups[wakeIndex()]);
-            if(coastalDepthGroup){rp.setBindGroup(1,opticsEmptyGroup);rp.setBindGroup(2,coastalDepthGroup);}
-            rp.drawIndexed(GRID*GRID*6,nodeCount);
-          }
           rp.setPipeline(ocean.pipe);rp.setBindGroup(0,ocean.groups[foamCur][wakeIndex()]);
           rp.setBindGroup(1,ocean.shadows);rp.setBindGroup(2,coastalGroup??opticsEmptyGroup);
           rp.setBindGroup(3,ocean.optics??=oceanOpticsGroup(ocean));
           rp.drawIndexed(GRID*GRID*6,nodeCount);
         }
+      };
+      const drawOceanAndSky=rp=>{
+        drawOceanDepth(rp);
+        drawOceanShade(rp);
         terrain?.drawWater?.(rp,camSnap,frameF);
         rp.setPipeline(skyPipe);rp.setBindGroup(0,bgSky);clouds.drawSky(rp);rp.draw(3);
       };
       await runSceneSubpass('Scene (all MSAA)',rp=>{
-        for(const v of hullsSnap)v.continuum.draw(rp,pipeline=>vesselOwnGroups(v,pipeline));
+        for(const v of hullsSnap)v.continuum.draw(rp,(pipeline,far)=>vesselOwnGroups(v,pipeline,far));
         for(const v of hullsSnap)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
         fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);townsfolk?.draw(rp);props?.draw(rp);
-        terrain?.draw(rp,camSnap,frameF);
-        drawOceanAndSky(rp);
+        terrain?.drawOpaqueCity?.(rp,camSnap,frameF);
+        drawOceanDepth(rp);
+        terrain?.drawOpaqueLand?.(rp,camSnap,frameF);
+        drawOceanShade(rp);
+        terrain?.drawFoliage?.(rp);
+        terrain?.drawWater?.(rp,camSnap,frameF);
+        rp.setPipeline(skyPipe);rp.setBindGroup(0,bgSky);clouds.drawSky(rp);rp.draw(3);
         dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);weatherRenderer.draw(rp);
       });
       await runSceneSubpass('Scene: Ships',rp=>{
-        for(const v of hullsSnap)v.continuum.draw(rp,pipeline=>vesselOwnGroups(v,pipeline));
+        for(const v of hullsSnap)v.continuum.draw(rp,(pipeline,far)=>vesselOwnGroups(v,pipeline,far));
       });
       await runSceneSubpass('Scene: People+Props',rp=>{
         for(const v of hullsSnap)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
@@ -5873,29 +5887,34 @@ async function main() {
     const hulls=!drawProw?[]:vessels.filter(v=>v.boat.showProw&&!(v.bakedWreck&&v.entirelySubmerged));
     lastTerrainCamera=terrainCamera;lastHulls=hulls;
     // Whole hulls through their cuts: clusters, far body and splat, each keeping its own samples of a pixel.
-    for(const v of hulls)v.continuum.draw(rp,pipeline=>vesselOwnGroups(v,pipeline));
+    for(const v of hulls)v.continuum.draw(rp,(pipeline,far)=>vesselOwnGroups(v,pipeline,far));
     for(const v of hulls)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
     fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);
     townsfolk?.draw(rp);
     props?.draw(rp);
     frameStages.mark('GPU commands');
-    terrain?.draw(rp,terrainCamera,frameF);
-    frameStages.mark('Scenery');
+    // Opaque city buildings & boulders first, then ocean depth prepass so hardware early-Z skips 100% of submerged
+    // seabed in landContinuum, then opaque land/herds/trade vessels, then opaque ocean shading, then sample-mask foliage.
+    terrain?.drawOpaqueCity?.(rp,terrainCamera,frameF);
+    if (nodeCount && OCEAN_DEPTH) {
+      rp.setVertexBuffer(0, instBuf);
+      rp.setIndexBuffer(idxBuf, 'uint16');
+      const ocean=terrain?coastalOcean:openOcean;
+      rp.setPipeline(ocean.depthPipe);
+      rp.setBindGroup(0, ocean.depthGroups[wakeIndex()]);
+      if (coastalDepthGroup) {
+        rp.setBindGroup(1, opticsEmptyGroup);
+        rp.setBindGroup(2, coastalDepthGroup);
+      }
+      rp.drawIndexed(GRID * GRID * 6, nodeCount);
+    }
+    terrain?.drawOpaqueLand?.(rp,terrainCamera,frameF);
     if (nodeCount) {
       rp.setVertexBuffer(0, instBuf);
       rp.setIndexBuffer(idxBuf, 'uint16');
       // Keep depth and colour in one render pass so tile attachments stay live.
       // The second draw shades only the surviving surface, with no discard.
       const ocean=terrain?coastalOcean:openOcean;
-      if (OCEAN_DEPTH) {
-        rp.setPipeline(ocean.depthPipe);
-        rp.setBindGroup(0, ocean.depthGroups[wakeIndex()]);
-        if (coastalDepthGroup) {
-          rp.setBindGroup(1, opticsEmptyGroup);
-          rp.setBindGroup(2, coastalDepthGroup);
-        }
-        rp.drawIndexed(GRID * GRID * 6, nodeCount);
-      }
       rp.setPipeline(ocean.pipe);
       rp.setBindGroup(0, ocean.groups[foamCur][wakeIndex()]);
       rp.setBindGroup(1, ocean.shadows);
@@ -5903,6 +5922,8 @@ async function main() {
       rp.setBindGroup(3,ocean.optics??=oceanOpticsGroup(ocean));
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
     }
+    terrain?.drawFoliage?.(rp);
+    frameStages.mark('Scenery');
     terrain?.drawWater?.(rp,terrainCamera,frameF);
     rp.setPipeline(skyPipe);
     rp.setBindGroup(0, bgSky);

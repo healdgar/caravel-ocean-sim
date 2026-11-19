@@ -176,6 +176,7 @@ fn oceanHeight(p: vec2f) -> f32 {
 // waterY is the sea surface height under the fragment, sampled once by the caller.
 fn waterLight(world: vec3f, direction: vec3f, roughness: f32, waterY: f32) -> vec3f {
   let env = textureSampleLevel(envCube, sampC, direction, roughness * 8.0).rgb;
+  if (direction.y >= -0.025) { return env; }
   let dy = min(direction.y, -0.03);
   let t = clamp((waterY - world.y) / dy, 0.0, 100.0);
   let clip = F.viewProj * vec4f(world + direction * t - F.camPos.xyz, 1.0);
@@ -249,6 +250,8 @@ fn vesselSurvives(in:BoatVertex)->bool {
   let grainUV = in.uv;
   let materialPoint = p * vec3f(hull.size.x / 3.6, hull.right.w, hull.size.y / 12.0);
   let materialFootprint = max(length(dpdx(materialPoint)), length(dpdy(materialPoint)));
+  let uvDx = dpdx(in.uv); let uvDy = dpdy(in.uv);
+  let uvFw = abs(uvDx) + abs(uvDy);
   let paintedWood = vesselPainted(in.material);
   let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;
   let isVictory = abs(hull.rig.w - 1.0) < 0.5;
@@ -260,11 +263,37 @@ fn vesselSurvives(in:BoatVertex)->bool {
   let isGilt=in.material==25u || (in.material==20u && (isProceduralFleet || isFlyingCloud) && abs(p.y - 0.53) < 0.018 && abs(in.normalLocal.x) > 0.35);
   let isMastSpar=vesselMastSpar(in.material,hull.rig.w,p);
   let hoopFootprint=max(fwidth(p.y*1.35),0.0005);
-  // Wall strakes are the Niña's width in metres on every ship, not in the ship's design units.
   let course=select(p.y*hull.right.w/(.16*20.0/12.0),in.uv.x*18.0,in.material==15u);
   let board=floor(course);
+  let deckCourse=select(
+    (p.x+1.8)/.145,
+    select(
+      select((p.x+1.8)/0.054, (p.x+1.8)/(3.6/44.0), laterSailModel(hull.rig.w)),
+      materialPoint.x / 0.17,
+      isRowingShip && !isDugoutCanoe
+    ),
+    isVictory || laterSailModel(hull.rig.w) || (isRowingShip && !isDugoutCanoe)
+  );
+  let deckPlankId=floor(deckCourse);
+  let isWood=vesselWoodMaterial(in.material,paintedWood) && !isCopper && !isGilt;
+  let isIron=in.material==3u || in.material==8u;
+  let isAdditionalIberian=hull.rig.w>1.5 && hull.rig.w<3.5;
+  let dx = dpdx(in.world); let dy = dpdy(in.world);
+  let triangleNormal=cross(dx,dy);
+  let shadowNormal=triangleNormal/max(length(triangleNormal),.000000000001);
+  let sx = cross(dy,n); let sy = cross(n,dx);
+  let det = dot(dx,sx);
+  let courseFw = max(fwidth(course), .001);
+  let deckCourseFw = max(fwidth(deckCourse), .002);
+  let along=select(p.z,p.x,abs(in.normalLocal.z)>.75 && in.material!=15u);
+  let buttCoord=(along+fract(sin(board*73.17)*4321.1)*2.6)/2.6;
+  let buttFw = max(fwidth(buttCoord), .0003);
+  let deckButtSpan=select(2.3, 3.6, isVictory || laterSailModel(hull.rig.w));
+  let deckAlongZ=select(p.z, materialPoint.z, isVictory || laterSailModel(hull.rig.w) || isRowingShip);
+  let deckButtCoord=(deckAlongZ+fract(deckPlankId*0.413)*2.0)/deckButtSpan;
+  let deckButtFw = max(fwidth(deckButtCoord), .001);
   var oakUV = grainUV;
-  if (isVictory && in.material != 9u && in.material != 13u && in.material != 2u && in.material != 12u && in.material != 19u && in.material != 11u) {
+  if (isVictory && isWood) {
     if (isMastSpar) {
       let upSpar = abs(in.normalLocal.y) < 0.55;
       oakUV = select(
@@ -288,110 +317,63 @@ fn vesselSurvives(in:BoatVertex)->bool {
   } else if (laterSailModel(hull.rig.w) && (in.material == 20u || in.material == 23u)) {
     oakUV = vec2f(materialPoint.y * 0.96, select(materialPoint.z, materialPoint.x, abs(in.normalLocal.z) > 0.72) * 0.36);
   }
-  let timber = pow(textureSample(oakAlbedo, oakSampler, oakUV).rgb, vec3f(2.2));
-  let relief = dot(timber, vec3f(0.2126,0.7152,0.0722));
-  let broad = gnoise(vec2f(oakUV.x * 18.0, oakUV.y * 0.7));
-  let grain = gnoise(vec2f(oakUV.x * 180.0 + broad*3.0, oakUV.y * 5.0));
-  let footprint = max(length(dpdx(oakUV)),length(dpdy(oakUV)));
+  let oakDx = dpdx(oakUV); let oakDy = dpdy(oakUV);
+  var timber = vec3f(0.18, 0.13, 0.08);
+  var relief = 0.2;
+  var grain = 0.5;
+  var bump = 0.0;
+  var join = 0.0;
+  var deckCaulk = 0.0;
+  var castleMoulding = 0.0;
+  var castleFuttock = 0.0;
+  let isGunwaleRail = isRowingShip && in.material == 15u && abs(in.normalLocal.y) > 0.58;
+  let plankedWall = !isDugoutCanoe && !isGunwaleRail && (in.material==15u || (paintedWood && !isCopper && !isGilt && abs(in.normalLocal.y)<.5) || (in.material==1u && !isMastSpar && abs(in.normalLocal.y)<.35));
+  let hasGaplessDeck=((isProceduralFleet || isAdditionalIberian) && in.material==0u) || ((isVictory || (isRowingShip && !isDugoutCanoe) || laterSailModel(hull.rig.w)) && in.material==0u);
+  if (isWood || in.material == 15u || in.material == 16u || in.material == 17u || paintedWood) {
+    timber = pow(textureSampleGrad(oakAlbedo, oakSampler, oakUV, oakDx, oakDy).rgb, vec3f(2.2));
+    relief = dot(timber, vec3f(0.2126,0.7152,0.0722));
+    let broad = gnoise(vec2f(oakUV.x * 18.0, oakUV.y * 0.7));
+    grain = gnoise(vec2f(oakUV.x * 180.0 + broad*3.0, oakUV.y * 5.0));
+    let footprint = max(length(oakDx), length(oakDy));
+    let edge=min(fract(course),1.0-fract(course));
+    let seam=select(1.0-smoothstep(.008,.035+courseFw,edge), 0.0, isDugoutCanoe || isGunwaleRail);
+    let butt=min(fract(buttCoord),1.0-fract(buttCoord));
+    let buttSeam=select(1.0-smoothstep(.0008,.003+buttFw,butt), 0.0, isDugoutCanoe || isGunwaleRail);
+    let deckEdge=min(fract(deckCourse),1.0-fract(deckCourse));
+    let deckSeam=1.0-smoothstep(.014,.038+deckCourseFw,deckEdge);
+    let deckButtEdge=min(fract(deckButtCoord),1.0-fract(deckButtCoord));
+    let deckButtSeam=1.0-smoothstep(.001,.004+deckButtFw,deckButtEdge);
+    deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),hasGaplessDeck);
+    let castleFore=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='forecastle').bounds[1]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='forecastle').bounds[1]},hull.rig.w<2.5);
+    let castleAft=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='quarter').bounds[0]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='quarter').bounds[0]},hull.rig.w<2.5);
+    let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>castleAft || p.z<castleFore);
+    castleMoulding=select(0.0,1.0-smoothstep(.14,.22,abs(fract(course*.3333)-.5)*3.0),isCastleWall);
+    castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && hull.rig.w>2.5 && castleMoulding<.5);
+    let castleRelief=(castleMoulding*.0024 + castleFuttock*.0018);
+    join=select(deckCaulk*.85,max(seam,buttSeam*.8),plankedWall);
+    bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018 + castleRelief;
+    ${damaged?'if(in.damage>0.05){bump+=smoothstep(0.05,0.45,clamp(in.damage,0.0,1.5))*gnoise(vec2f(p.z*28.0,p.y*165.0))*.016*(1.0-smoothstep(.002,.015,footprint));}':''}
+  }
   ${damaged?`// Timber stands raw and splintered around a hole, and whatever is seen through it lies in the dark of the hold.
   let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
   let holeRim=select(0.0,max(hullHoleRim(p),0.0),holedTimber);
-`:''}  let isGunwaleRail = isRowingShip && in.material == 15u && abs(in.normalLocal.y) > 0.58;
-  let plankedWall = !isDugoutCanoe && !isGunwaleRail && (in.material==15u || (paintedWood && !isCopper && !isGilt && abs(in.normalLocal.y)<.5) || (in.material==1u && !isMastSpar && abs(in.normalLocal.y)<.35));
-  let edge=min(fract(course),1.0-fract(course));
-  let seam=select(1.0-smoothstep(.008,.035+max(fwidth(course),.001),edge), 0.0, isDugoutCanoe || isGunwaleRail);
-  let along=select(p.z,p.x,abs(in.normalLocal.z)>.75 && in.material!=15u);
-  let buttCoord=(along+fract(sin(board*73.17)*4321.1)*2.6)/2.6;
-  let butt=min(fract(buttCoord),1.0-fract(buttCoord));
-  let buttSeam=select(1.0-smoothstep(.0008,.003+max(fwidth(buttCoord),.0003),butt), 0.0, isDugoutCanoe || isGunwaleRail);
-  let deckCourse=select(
-    (p.x+1.8)/.145,
-    select(
-      select((p.x+1.8)/0.054, (p.x+1.8)/(3.6/44.0), laterSailModel(hull.rig.w)),
-      materialPoint.x / 0.17,
-      isRowingShip && !isDugoutCanoe
-    ),
-    isVictory || laterSailModel(hull.rig.w) || (isRowingShip && !isDugoutCanoe)
-  );
-  let deckPlankId=floor(deckCourse);
-  let deckEdge=min(fract(deckCourse),1.0-fract(deckCourse));
-  let deckSeam=1.0-smoothstep(.014,.038+max(fwidth(deckCourse),.002),deckEdge);
-  let deckButtSpan=select(2.3, 3.6, isVictory || laterSailModel(hull.rig.w));
-  let deckAlongZ=select(p.z, materialPoint.z, isVictory || laterSailModel(hull.rig.w) || isRowingShip);
-  let deckButtCoord=(deckAlongZ+fract(deckPlankId*0.413)*2.0)/deckButtSpan;
-  let deckButtEdge=min(fract(deckButtCoord),1.0-fract(deckButtCoord));
-  let deckButtSeam=1.0-smoothstep(.001,.004+max(fwidth(deckButtCoord),.001),deckButtEdge);
-  // Pinta and Santa María carry their model code in rig.w, so isProceduralFleet
-  // above never matches them.
-  let isAdditionalIberian=hull.rig.w>1.5 && hull.rig.w<3.5;
-  let hasGaplessDeck=((isProceduralFleet || isAdditionalIberian) && in.material==0u) || ((isVictory || (isRowingShip && !isDugoutCanoe) || laterSailModel(hull.rig.w)) && in.material==0u);
-  let deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),hasGaplessDeck);
-  let castleFore=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='forecastle').bounds[1]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='forecastle').bounds[1]},hull.rig.w<2.5);
-  let castleAft=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='quarter').bounds[0]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='quarter').bounds[0]},hull.rig.w<2.5);
-  let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>castleAft || p.z<castleFore);
-  let castleMoulding=select(0.0,1.0-smoothstep(.14,.22,abs(fract(course*.3333)-.5)*3.0),isCastleWall);
-  // Only the nao carries upright battens on her castles; the caravel stays plain.
-  let castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && hull.rig.w>2.5 && castleMoulding<.5);
-  let castleRelief=(castleMoulding*.0024 + castleFuttock*.0018);
-  let join=select(deckCaulk*.85,max(seam,buttSeam*.8),plankedWall);
-  var bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018 + castleRelief;
-  ${damaged?'if(in.damage>0.05){bump+=smoothstep(0.05,0.45,clamp(in.damage,0.0,1.5))*gnoise(vec2f(p.z*28.0,p.y*165.0))*.016*(1.0-smoothstep(.002,.015,footprint));}':''}
-  let dx = dpdx(in.world); let dy = dpdy(in.world);
-  // Shadow depth rasterizes flat triangles, while cloth lighting uses smooth
-  // analytic normals. Receiver-plane filtering must follow the actual triangle
-  // or a wide filter can turn that mismatch into a ladder of self-shadow acne.
-  let triangleNormal=cross(dx,dy);
-  let shadowNormal=triangleNormal/max(length(triangleNormal),.000000000001);
-  let sx = cross(dy,n); let sy = cross(n,dx);
-  let det = dot(dx,sx);
-  let gradient = (dpdx(bump)*sx + dpdy(bump)*sy) / max(abs(det), 0.000001) * sign(det);
-  let isWood=vesselWoodMaterial(in.material,paintedWood) && !isCopper && !isGilt;
+`:''}  let gradient = (dpdx(bump)*sx + dpdy(bump)*sy) / max(abs(det), 0.000001) * sign(det);
   n = normalize(n - clamp(gradient,vec3f(-.38),vec3f(.38))*select(0.0,1.0,isWood));
-  let isIron=in.material==3u || in.material==8u;
   var iron:VesselIronSurface;
   if(isIron){iron=vesselIronSurface(materialPoint,materialFootprint,vesselAirFilm(wet.y));}
   // Derivatives remain outside material-dependent control flow. They use the
   // same surface-gradient frame as timber but a separate, filtered cast relief.
   let ironGradient=(dpdx(iron.relief)*sx+dpdy(iron.relief)*sy)/max(abs(det),0.000001)*sign(det);
   if(isIron){n=normalize(n-clamp(ironGradient,vec3f(-.18),vec3f(.18)));}
-  // Precompute staggered copper plate coordinates & surface-gradient relief outside control flow
-  let cuRow=floor(materialPoint.y*3.2);
-  let cuCol=floor(materialPoint.z*0.95+fract(cuRow*0.5)*0.5);
-  let cuUV=vec2f(fract(materialPoint.z*0.95+fract(cuRow*0.5)*0.5),fract(materialPoint.y*3.2));
-  let cuHash=fract(sin(cuRow*127.1+cuCol*311.7)*43758.5453);
-  let cuEdge=min(min(cuUV.x,1.0-cuUV.x),min(cuUV.y,1.0-cuUV.y));
-  let cuSeam=1.0-smoothstep(0.015,0.055,cuEdge);
-  let cuNailCoord=vec2f(fract(cuUV.x*8.0)-0.5,fract(cuUV.y*4.0)-0.5);
-  let cuNailRing=cuEdge<0.14 && cuEdge>0.025;
-  let cuNail=select(0.0,1.0-smoothstep(0.12,0.28,length(cuNailCoord)),cuNailRing)*(1.0-smoothstep(0.01,0.05,materialFootprint));
-  let cuRelief=(cuUV.y*0.0012 - cuSeam*0.0018 + cuNail*0.0009)*(1.0-smoothstep(0.02,0.09,materialFootprint));
-  let cuGradient=(dpdx(cuRelief)*sx+dpdy(cuRelief)*sy)/max(abs(det),0.000001)*sign(det);
-  // Precompute sail canvas panel pillowing, seam puckering & reef-band surface-gradient relief outside control flow
-  let clothSeam=sailClothSeam(in.uv.x);
-  let clothAA=max(fwidth(clothSeam),0.001);
-  let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
-  // A flag's weave fades where a pixel spans its threads.
-  let flagWeave=1.0-smoothstep(0.35,1.2,max(fwidth(in.uv.x*140.0),fwidth(in.uv.y*95.0)));
-  let clothEdge=vesselClothEdge(in.uv,in.material);
-  let edgeAA=max(fwidth(clothEdge),0.0005);
-  let reefDist=min(abs(in.uv.y-0.26),abs(in.uv.y-0.52));
-  let reefBand=select(0.0,1.0-smoothstep(0.007,0.014+max(fwidth(in.uv.y),0.0005),reefDist),in.material==9u);
-  let reefGrommet=select(0.0,1.0-smoothstep(0.003,0.007,length(vec2f((fract(in.uv.x*20.0)-0.5)*0.05,reefDist))),in.material==9u && reefDist<0.012);
-  let cornerDist=min(min(length(in.uv),length(in.uv-vec2f(1.0,0.0))),min(length(in.uv-vec2f(0.0,1.0)),length(in.uv-vec2f(1.0,1.0))));
-  let cornerPatch=1.0-smoothstep(0.055,0.085,cornerDist);
-  let panelPillow=sailPanelPillow(in.uv.x);
-  let seamPucker=sin(in.uv.y*95.0+floor(in.uv.x*10.0)*2.3)*(1.0-smoothstep(0.0,0.08,clothSeam));
-  let canvasRelief=(panelPillow*0.0032 + seamPucker*0.0011 + reefBand*0.0018 + cornerPatch*0.0012)*(1.0-smoothstep(0.004,0.025,weaveAA));
-  let canvasGradient=(dpdx(canvasRelief)*sx+dpdy(canvasRelief)*sy)/max(abs(det),0.000001)*sign(det);
   var albedo = timber * vec3f(1.02,.98,.88);
   var rough = clamp(.86 + (.2-relief)*.20 + (grain-.5)*.08,.78,.95); var metal = 0.0;
-  let canvasDepth=canvasThickness(in.uv,in.material)*canvasWetDepth(wet.x);
+  let canvasDepth = canvasThickness(in.uv, in.material) * canvasWetDepth(wet.x);
   let plank=select(deckPlankId,board,plankedWall);
   albedo *= .88 + .16 * select(fract(sin(plank*74.17)*4321.1), 0.5, isDugoutCanoe);
   albedo *= 1.0-join*.58;
   // Fine end-grain joints, splits, and oxidised grain.
   let joint = abs(fract(deckButtCoord)-0.5);
-  let jointAA = max(fwidth(joint),0.001);
+  let jointAA = deckButtFw;
   if(in.material==0u) {
     if (!isDugoutCanoe) {
       albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint));
@@ -442,6 +424,15 @@ fn vesselSurvives(in:BoatVertex)->bool {
   if(isCopper){
     // Staggered 18th/19th-century Muntz-metal / copper hull sheathing plates with overlapped seams,
     // embossed tack rows, rolled-metal tone variation, and sea-salt verdigris patina near the waterline.
+    let cuRow=floor(materialPoint.y*3.2);
+    let cuCol=floor(materialPoint.z*0.95+fract(cuRow*0.5)*0.5);
+    let cuUV=vec2f(fract(materialPoint.z*0.95+fract(cuRow*0.5)*0.5),fract(materialPoint.y*3.2));
+    let cuHash=fract(sin(cuRow*127.1+cuCol*311.7)*43758.5453);
+    let cuEdge=min(min(cuUV.x,1.0-cuUV.x),min(cuUV.y,1.0-cuUV.y));
+    let cuSeam=1.0-smoothstep(0.015,0.055,cuEdge);
+    let cuNailCoord=vec2f(fract(cuUV.x*8.0)-0.5,fract(cuUV.y*4.0)-0.5);
+    let cuNailRing=cuEdge<0.14 && cuEdge>0.025;
+    let cuNail=select(0.0,1.0-smoothstep(0.12,0.28,length(cuNailCoord)),cuNailRing)*(1.0-smoothstep(0.01,0.05,materialFootprint));
     let plateTone = 0.90 + 0.18 * cuHash;
     let rolledStreak = 0.96 + 0.04 * sin(materialPoint.z * 48.0 + cuRow * 5.1);
     let cuBase = vec3f(0.33, 0.135, 0.065) * plateTone * rolledStreak * (1.0 - cuSeam * 0.28 + cuNail * 0.14);
@@ -452,7 +443,9 @@ fn vesselSurvives(in:BoatVertex)->bool {
     albedo = mix(cuBase, verdigrisColor, verdigrisMask);
     rough = mix(0.46 + (1.0 - plateTone) * 0.12, 0.82, verdigrisMask);
     metal = mix(0.72, 0.08, verdigrisMask);
-    n = normalize(n - clamp(cuGradient, vec3f(-0.22), vec3f(0.22)));
+    let cuFade = 1.0 - smoothstep(0.02, 0.09, materialFootprint);
+    let cuTilt = rotateHull(vec3f(0.0, (0.04 - cuSeam * 0.14) * cuFade, (cuUV.x - 0.5) * cuSeam * 0.10 * cuFade));
+    n = normalize(n + cuTilt);
   }
   if(in.material==23u){
     albedo=vec3f(.68,.65,.55);rough=.86;
@@ -468,7 +461,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
   if(in.material==25u){albedo=vec3f(.48,.28,.055);rough=.42;metal=.68;}
   if(in.material==26u){albedo=vec3f(.015,.035,.09);rough=.88;}
   if(paintedWood && metal < 0.1){albedo*=mix(.88,1.04,relief)*(1.0-join*.46);}
-  let ropeAA = max(materialFootprint, fwidth(in.uv.y) * (hull.size.y * 0.12));
+  let ropeAA = max(materialFootprint, uvFw.y * (hull.size.y * 0.12));
   if(in.material == 2u || in.material == 12u || in.material==19u) {
     // MaterialCraft 3D Helical 3-Strand Laid Hemp Hawser (Z-twist lay + S-twist spun-yarn plies):
     // True cylindrical strand cross-section with recessed V-grooves, yarn-to-yarn bast fibre variation,
@@ -541,17 +534,29 @@ fn vesselSurvives(in:BoatVertex)->bool {
   if(in.material == 4u) { albedo=vec3f(0.012,0.009,0.006); rough=0.92; }
   if(isIron){albedo=iron.albedo;rough=iron.rough;metal=iron.bare;}
   if(in.material == 9u || in.material == 13u) {
+    let clothSeam = sailClothSeam(in.uv.x);
+    let clothAA = max(uvFw.x * 10.0, 0.001);
+    let weaveAA = max(uvFw.x + uvFw.y, 0.001);
+    let clothEdge = vesselClothEdge(in.uv, in.material);
+    let edgeAA = max(max(uvFw.x, uvFw.y), 0.0005);
+    let reefDist = min(abs(in.uv.y - 0.26), abs(in.uv.y - 0.52));
+    let reefBand = select(0.0, 1.0 - smoothstep(0.007, 0.014 + max(uvFw.y, 0.0005), reefDist), in.material == 9u);
+    let reefGrommet = select(0.0, 1.0 - smoothstep(0.003, 0.007, length(vec2f((fract(in.uv.x * 20.0) - 0.5) * 0.05, reefDist))), in.material == 9u && reefDist < 0.012);
+    let cornerDist = min(min(length(in.uv), length(in.uv - vec2f(1.0, 0.0))), min(length(in.uv - vec2f(0.0, 1.0)), length(in.uv - vec2f(1.0, 1.0))));
+    let cornerPatch = 1.0 - smoothstep(0.055, 0.085, cornerDist);
     let weave=sin(in.uv.x*1400.0)*sin(in.uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,weaveAA));
     let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
     let panelTone=0.985+0.03*fract(sin(floor(in.uv.x*10.0)*91.7)*43758.5);
     let seam=1.0-smoothstep(0.004,0.013+clothAA,clothSeam);
     let hem=1.0-smoothstep(0.006,0.014+edgeAA,clothEdge);
     // Optical depth: overlapped stitching, reef bands, corner tabling patches and doubled edge cloth
-    // block more light, while surface-gradient normal relief gives each cloth panel 3D pillowing.
+    // block more light, while analytic cloth-panel slope gives each cloth panel 3D pillowing.
     let stitchShade=1.0 - 0.13*seam - 0.09*hem - 0.08*reefBand - 0.06*cornerPatch - 0.22*reefGrommet;
     albedo=vec3f(0.58,0.55,0.48)*aged*panelTone*stitchShade*(1.0+0.025*weave);
     let baseClothN=normalize(in.normal)*select(-1.0,1.0,front);
-    n=normalize(baseClothN - clamp(canvasGradient,vec3f(-0.24),vec3f(0.24)));
+    let pillowSlope = cos(fract(in.uv.x * 10.0 + 0.5) * 3.14159265) * (1.0 - smoothstep(0.004, 0.025, weaveAA));
+    let clothTang = normalize(cross(vec3f(0.0, 1.0, 0.0), baseClothN) + vec3f(0.001, 0.0, 0.0));
+    n=normalize(baseClothN + clothTang * (pillowSlope * 0.075));
     rough=0.93;
     ${damaged?`if(in.damage>0.04){
       let tear=canvasTear(in.uv,p,in.material,in.damage);
@@ -570,6 +575,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
   // A ship's colours: her ensign's and pennant's bunting, woven in the pattern of the colours she wears (the hull
   // program's material is her colours' material plus their code, plus 16 on the pennant; js/vessel-continuum.js).
   if(in.material >= ${VESSEL_COLOURS_MATERIAL}u) {
+    let flagWeave=1.0-smoothstep(0.35,1.2,max(uvFw.x*140.0,uvFw.y*95.0));
     let colours = in.material - ${VESSEL_COLOURS_MATERIAL}u;
     albedo = vesselColoursPattern(clamp(in.uv.x,0.0,1.0), clamp(in.uv.y,0.0,1.0), i32(colours % 16u), colours >= 16u, flagWeave);
     n = normalize(in.normal)*select(-1.0,1.0,front);
@@ -898,7 +904,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
     // to automatic layout reflection, matching the capture fog bypass pattern.
     sky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
     reflected=waterLight(in.world,reflect(-v,n),rough,oceanY);
-    bounce=waterLight(in.world,normalize(vec3f(n.x,-0.65,n.z)),0.9,oceanY);
+    bounce=${damaged?'waterLight(in.world,normalize(vec3f(n.x,-0.65,n.z)),0.9,oceanY)':'textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-0.65,n.z)),7.2).rgb'};
   }
   let skyVisibility=0.5+0.5*n.y;
   let ambient=vesselAmbient(n,sky,bounce);
@@ -1017,7 +1023,15 @@ fn vesselSurvives(in:BoatVertex)->bool {
 // The vessel shading the continuum's vessel material wears (js/vessel-continuum.js): the damaged variant's prelude
 // and vesselShade, which a ship's empty damage record leaves whole, its medium composed for the water's capture when
 // `capture`. The material brings vesselAir, its vertex and its sample mask.
-export const vesselShadingWGSL=(capture=false)=>vesselPrelude(true,capture)+vesselShadeWGSL(true);
+export const vesselShadingWGSL=(capture=false,damaged=true)=>vesselPrelude(true,capture)+vesselShadeWGSL(damaged);
+// Lean 5-binding prelude for far-body and splat ship draws (no hull textures, no Neural PBR, no rigging).
+export const vesselFarPreludeWGSL=()=>FRAME_WGSL+ATMO_CORE_WGSL+VESSEL_LIGHTING+SHADOW_SAMPLE+/* wgsl */`
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var transLUT: texture_2d<f32>;
+@group(0) @binding(2) var skyLUT: texture_2d<f32>;
+@group(0) @binding(3) var sampC: sampler;
+@group(0) @binding(5) var<storage, read> sunVis: array<f32, 4>;
+`+SKY_RENDER_FUNCS;
 // A whole vessel's shading as one program over her assembly as a vertex buffer: no ship is drawn so, but the tests put
 // her finish rules and her medium's capture marker to it (tests/vessel-finish-gpu.test.mjs and others).
 export const CARAVEL = vesselPrelude(false)+vesselVertexWGSL()+vesselShadeWGSL(false)+/* wgsl */ `

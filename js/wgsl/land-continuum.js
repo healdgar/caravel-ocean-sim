@@ -408,9 +408,13 @@ fn landContinuumVertex(vertex:u32,node:u32,coarse:bool)->LandVertex {
   let xz=landContinuumXZ(p);
   var o:LandVertex;
   o.world=vec3f(xz.x,landContinuumHeight(p,pixels),xz.y);
-  // The lattice's slope, and the banks' across their own cell.
-  let bank=landBankAt(xz);let e=${(LAND_BANK_CELL_M).toFixed(3)};
-  let slope=vec2f(landBankAt(xz-vec2f(e,0.0)).x-landBankAt(xz+vec2f(e,0.0)).x,landBankAt(xz-vec2f(0.0,e)).x-landBankAt(xz+vec2f(0.0,e)).x)/(2.0*e);
+  // The lattice's slope, and the banks' across their own cell (only when inside the river-bank bounds).
+  let bank=landBankAt(xz);
+  var slope=vec2f(0.0);
+  if(landBankNear(xz)){
+    let e=${(LAND_BANK_CELL_M).toFixed(3)};
+    slope=vec2f(landBankAt(xz-vec2f(e,0.0)).x-landBankAt(xz+vec2f(e,0.0)).x,landBankAt(xz-vec2f(0.0,e)).x-landBankAt(xz+vec2f(0.0,e)).x)/(2.0*e);
+  }
   let lattice=landContinuumNormal(p);
   o.normal=normalize(vec3f(lattice.x/lattice.y+slope.x,1.0,lattice.z/lattice.y+slope.y));
   let n=landPiece.near;
@@ -435,6 +439,6 @@ export function landContinuumMaterial(landSource) {
   return Object.freeze({
     name: 'landContinuum', heightfield: true, varying: 'LandVertex', entryLayout: LAND_CONTINUUM_ENTRY_LAYOUT,
     prelude: (pass) => (pass === 'capture' ? captured : landSource), core: true, wgsl: () => LAND_CONTINUUM_RENDER,
-    cullMode: 'none', capture: true,
+    cullMode: 'back', capture: true,
   });
 }

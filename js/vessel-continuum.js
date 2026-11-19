@@ -14,7 +14,7 @@ import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture
 import { SHIP_CONTINUUM_MATERIAL, loadShipContinuum, shipContinuumTurn } from './ship-continuum.js';
 import { SHIP_RIDER_HEADER } from './wgsl/ship-kinds.js';
 import { CANVAS_OPTICS } from './wgsl/vessel.js';
-import { vesselShadingWGSL } from './wgsl/caravel.js';
+import { vesselShadingWGSL, vesselFarPreludeWGSL } from './wgsl/caravel.js';
 import { withNeuralPbrVessel } from './wgsl/neural-pbr.js';
 import { VESSEL_COLOURS_MATERIAL } from './wgsl/ship-colours.js';
 import { vesselVerticalScale } from './hull.js';
@@ -22,16 +22,19 @@ import { vesselVerticalScale } from './hull.js';
 // Group 0: her own resources as her hull program had them (0-14), her damage record (15), the neural material bank
 // (16, 17) and her assembly as she now is (18), her scars baked in. Group 1: her shadow's lighting. Group 2: the scene.
 const VESSEL_CONTINUUM_ASSEMBLY = 18;
-const vesselContinuumShading = [null, null];
-const vesselContinuumPrelude = (capture) => () => (vesselContinuumShading[capture ? 1 : 0] ??= withNeuralPbrVessel(vesselShadingWGSL(capture))
-  + `@group(0) @binding(${VESSEL_CONTINUUM_ASSEMBLY}) var<storage,read> vesselAssembly:array<f32>;\n`);
+const vesselContinuumShading = [null, null, null];
+const vesselContinuumPrelude = (capture, damaged = true) => () => {
+  const idx = capture ? 1 : damaged ? 0 : 2;
+  return (vesselContinuumShading[idx] ??= withNeuralPbrVessel(vesselShadingWGSL(capture, damaged))
+    + `@group(0) @binding(${VESSEL_CONTINUUM_ASSEMBLY}) var<storage,read> vesselAssembly:array<f32>;\n`);
+};
 
-const VESSEL_CONTINUUM_WGSL = () => /* wgsl */`
+const vesselContinuumWGSL = (damaged = true, fnName = 'vesselContinuum') => () => /* wgsl */`
 fn vesselAir(colour:vec3f,world:vec3f)->vec3f { return continuumAir(colour,world); }
 // What a corner hands her fragments. A cluster corner is a vertex of her assembly as she now is (her rest place, normal,
 // material, UV and wetness) or a line vertex of her detail layer as her pose pass laid it; her colours' cloth wears the
 // colours her pose pass flies. A far-body corner or her splat carries its own colour (sqrt-encoded rgb8).
-fn vesselContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
+fn ${fnName}Varying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   let data=continuumKindData(s.record);
   let head=continuumPoses[data];
   let scale=max(continuumPoses[data+1u].xyz,vec3f(1e-4));
@@ -84,16 +87,15 @@ fn vesselContinuumFarShade(v:ContinuumVarying,front:bool)->vec4f {
 }
 // Both shades in uniform control flow (her timber's takes derivatives), the one drawn chosen. Under water the capture
 // keeps her samples by her mask as her view does (js/wgsl/continuum-cut.js), so her holes read from below as above.
-fn vesselContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
+fn ${fnName}Shade(v:ContinuumVarying,front:bool)->vec4f {
   let near=vesselShade(vesselContinuumBoat(v),front);
-  if(v.coverage.x==CONTINUUM_CLUSTER_ENTRY){return near;}
-  return vesselContinuumFarShade(v,front);
+  ${damaged ? 'if(v.coverage.x==CONTINUUM_CLUSTER_ENTRY){return near;}\n  return vesselContinuumFarShade(v,front);' : 'if(F.screen.x< -1.0){return near+vec4f(hullDamage.scale.xxx,0.0);}\n  return near;'}
 }
-// The samples a holed vessel's clusters keep: none where shot has holed her timber, parted her rope or torn her canvas.
-fn vesselContinuumMask(v:ContinuumVarying,front:bool)->u32 {
+${damaged ? `// The samples a holed vessel's clusters keep: none where shot has holed her timber, parted her rope or torn her canvas.
+fn ${fnName}Mask(v:ContinuumVarying,front:bool)->u32 {
   let holed=v.coverage.x==CONTINUUM_CLUSTER_ENTRY&&continuumFlagged(continuumRecords[v.coverage.z],CONTINUUM_DAMAGED);
   return select(0xffffffffu,select(0u,0xffffffffu,vesselSurvives(vesselContinuumBoat(v))),holed);
-}
+}` : ''}
 `;
 
 // Her shadow (js/wgsl/continuum-cut.js, a material's shadow): her canvas apart from the rest, its depth into her canvas
@@ -124,30 +126,68 @@ fn vesselContinuumShadowTransmit(v:ContinuumShadowVarying)->vec3f {
 `,
 });
 
-const vesselContinuumMaterial = (capture) => Object.freeze({
-  name: 'vesselContinuum', prelude: vesselContinuumPrelude(capture), core: false, data: Object.freeze({ group: 2, binding: 0 }),
-  varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['wet', 'vec2f'], ['damage', 'f32'], ['colour', 'vec3f'], ['material', 'u32', true]],
-  wgsl: VESSEL_CONTINUUM_WGSL,
+const vesselContinuumMaterial = (capture, damaged = true) => {
+  const fnName = damaged ? 'vesselContinuum' : 'vesselContinuumIntact';
+  return Object.freeze({
+    name: fnName, prelude: vesselContinuumPrelude(capture, damaged), core: false, data: Object.freeze({ group: 2, binding: 0 }),
+    varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['wet', 'vec2f'], ['damage', 'f32'], ['colour', 'vec3f'], ['material', 'u32', true]],
+    wgsl: vesselContinuumWGSL(damaged, fnName),
+    salt: 7,
+    // Sails, planking and her lines are open shells, lit from whichever side is seen.
+    cullMode: 'none', air: true, capture: true, mask: damaged, visibility: !capture, shadow: capture ? null : (damaged ? VESSEL_CONTINUUM_SHADOW : null),
+  });
+};
+const VESSEL_CONTINUUM_FAR_MATERIAL = Object.freeze({
+  name: 'vesselContinuumFar',
+  prelude: vesselFarPreludeWGSL,
+  core: false,
+  data: Object.freeze({ group: 2, binding: 0 }),
+  varyings: [['colour', 'vec3f']],
+  wgsl: () => /* wgsl */`
+fn vesselContinuumFarVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
+  let colourWord=select(continuumType(s.model,${SHIP_CONTINUUM_MATERIAL.splat}u),s.word,s.what==CONTINUUM_FAR_ENTRY);
+  let colour=unpack4x8unorm(colourWord).rgb;
+  (*v).colour=colour*colour;
+}
+fn vesselContinuumFarShade(v:ContinuumVarying,front:bool)->vec4f {
+  let n=normalize(v.normal)*select(select(-1.0,1.0,front),1.0,v.coverage.x==CONTINUUM_SPLAT_ENTRY);
+  let toSun=normalize(F.sunDir.xyz);
+  let eye=normalize(continuumEye()-v.world);
+  let shadowed=vesselShadow(v.world,n);
+  let reach=continuumOpticLight(n,toSun,v.optics);
+  let sunLight=sunIlluminance()*sunVis[0]*step(0.0,toSun.y)*solarShadowVisibility(shadowed);
+  let lit=max(dot(n,toSun),0.0)*reach.x+reach.y;
+  let skyLight=skyAtmo(normalize(vec3f(n.x*0.35,max(n.y,0.14),n.z*0.35)))*reach.z;
+  let seaLight=(skyAtmo(vec3f(0.0,0.25,0.0))*0.45+F.waterCol.rgb*0.65)*reach.z;
+  let f0=vec3f(0.04);
+  var col=v.colour*vesselAmbient(n,skyLight,seaLight)*0.82+(v.colour/PI)*sunLight*lit+vesselSpecular(n,eye,toSun,0.86,f0)*sunLight*max(dot(n,toSun),0.0)*reach.x;
+  col+=lunarSurface(n,eye,v.colour,0.86,f0,sunVis[1]*lunarShadowVisibility(shadowed));
+  return vec4f(continuumAir(col,v.world),1.0);
+}
+`,
   salt: 7,
-  // Sails, planking and her lines are open shells, lit from whichever side is seen.
-  cullMode: 'none', air: true, capture: true, mask: true, visibility: !capture, shadow: capture ? null : VESSEL_CONTINUUM_SHADOW,
+  cullMode: 'none', air: true, capture: false, mask: false, visibility: true, shadow: null,
 });
-// Her material in the scene, and as the water captures it (its medium water, js/wgsl/caravel.js).
-export const VESSEL_CONTINUUM_MATERIAL = vesselContinuumMaterial(false);
-export const VESSEL_CONTINUUM_CAPTURE_MATERIAL = vesselContinuumMaterial(true);
 
-// The one select and shadow program, her material's view and, under water, its capture; once a device.
+// Her material in the scene (intact cluster fast-path + lean far-body/splat pipeline + damaged variant), and capture.
+export const VESSEL_CONTINUUM_MATERIAL = vesselContinuumMaterial(false, true);
+export const VESSEL_CONTINUUM_INTACT_MATERIAL = vesselContinuumMaterial(false, false);
+export const VESSEL_CONTINUUM_CAPTURE_MATERIAL = vesselContinuumMaterial(true, true);
+
+// The one select and shadow program, her material's intact, far and damaged views and, under water, its capture; once a device.
 export function requestVesselContinuumPrograms({ device, shader, format, samples, waterOptics = null }) {
   return requestOnce(device, `vessel continuum ${format} ${samples}`, async () => {
-    const [programs, view] = await Promise.all([
+    const [programs, view, viewIntact, viewFar] = await Promise.all([
       requestContinuumPrograms({ device, shader, shadowFormat: 'depth32float' }),
       requestContinuumView({ device, shader, material: VESSEL_CONTINUUM_MATERIAL, format, samples }),
+      requestContinuumView({ device, shader, material: VESSEL_CONTINUUM_INTACT_MATERIAL, format, samples }),
+      requestContinuumView({ device, shader, material: VESSEL_CONTINUUM_FAR_MATERIAL, format, samples }),
     ]);
     const capture = await requestContinuumCapture(waterOptics, VESSEL_CONTINUUM_CAPTURE_MATERIAL).catch((error) => {
       console.error('Vessel continuum capture:', error);
       return null;
     });
-    return { programs, view, capture };
+    return { programs, view, viewIntact, viewFar, capture };
   });
 }
 
@@ -181,6 +221,8 @@ export function createVesselContinuum({ device, programs, body, asset, pose, fra
   let shown = false;
   const shadowOwn = [{ binding: 0, resource: { buffer: shadows.wetness.moisture } }, { binding: 1, resource: { buffer: shadows.wetness.lookup } }];
   const capture = { draw: null, key: null };
+  let intactData = null;
+  let farData = null;
   return {
     scene,
     // Her place this frame, from her boat state: where she floats and how she lies, at her scale over the model's; cut
@@ -208,15 +250,35 @@ export function createVesselContinuum({ device, programs, body, asset, pose, fra
     },
     get damaged() { return scene.flagged(0, CONTINUUM_DAMAGED); },
     // The scene pass: her clusters, lines, far body and splat, each keeping its own samples. `groups(pipeline)` gives
-    // her own resources and lighting, groups 0 and 1.
+    // her own resources and lighting, groups 0 and 1. Intact ships use the lean pureEqual intact pipeline without
+    // crater/shatter register overhead; damaged ships switch seamlessly to the masked damaged pipeline.
     draw(pass, groups) {
       if (!shown) return;
-      if (!this.damaged && programs.view.equalPipeline) {
-        const [own, lighting] = groups(programs.view.equalPipeline);
-        scene.drawEqual(pass, own, lighting);
+      if (!this.damaged && programs.viewIntact?.pipeline && programs.viewFar?.pipeline) {
+        scene.drawVisibility(pass);
+        const intactPipe = programs.viewIntact.pipeline;
+        intactData ??= scene.dataGroup(intactPipe, programs.viewIntact.material);
+        const [own, lighting] = groups(intactPipe, false);
+        pass.setPipeline(intactPipe);
+        pass.setBindGroup(0, own); pass.setBindGroup(1, lighting); pass.setBindGroup(2, intactData);
+        for (let index = 0; index < 2; index++) {
+          const [at, n] = scene.lists[index];
+          pass.setVertexBuffer(0, scene.list, at * 8, n * 8);
+          pass.drawIndirect(scene.draws, index * 16);
+        }
+        const farPipe = programs.viewFar.pipeline;
+        farData ??= scene.dataGroup(farPipe, programs.viewFar.material);
+        const [farOwn, farLighting] = groups(farPipe, true);
+        pass.setPipeline(farPipe);
+        pass.setBindGroup(0, farOwn); pass.setBindGroup(1, farLighting); pass.setBindGroup(2, farData);
+        for (let index = 2; index < 4; index++) {
+          const [at, n] = scene.lists[index];
+          pass.setVertexBuffer(0, scene.list, at * 8, n * 8);
+          pass.drawIndirect(scene.draws, index * 16);
+        }
         return;
       }
-      const [own, lighting] = groups(programs.view.pipeline);
+      const [own, lighting] = groups(programs.view.pipeline, false);
       scene.draw(pass, own, lighting);
     },
     // Her shadow (js/shadows.js castWith): her coarse cut, all but her canvas into her solid map and her canvas, with

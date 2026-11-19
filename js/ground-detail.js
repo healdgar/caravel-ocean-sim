@@ -121,9 +121,39 @@ export async function createGroundDetail({ device, computePipe, mipPipe }) {
   }
   device.queue.writeBuffer(archBuffer, 0, archWords);
 
+  // Hardware 2D-array texture holding the exact same 18 layers x 6 mip levels so city/architectural shading uses
+  // L1-cached hardware trilinear + anisotropic sampling instead of 12-20 manual storage-buffer reads per fragment.
+  const ARCH_MIPS = 6;
+  const archTexture = device.createTexture({
+    label: 'MaterialCraft architectural PBR texture array',
+    size: [ARCH_MATERIAL_SIZE, ARCH_MATERIAL_SIZE, ARCH_MATERIAL_LAYERS],
+    format: 'rgba8unorm',
+    mipLevelCount: ARCH_MIPS,
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  const archBytes = new Uint8Array(archWords.buffer, archWords.byteOffset, archWords.byteLength);
+  for (let layer = 0; layer < ARCH_MATERIAL_LAYERS; layer++) {
+    let wordOff = layer * ARCH_LAYER_STRIDE;
+    for (let m = 0; m < ARCH_MIPS; m++) {
+      const sz = ARCH_MATERIAL_SIZE >> m;
+      const byteOff = wordOff * 4;
+      const byteLen = sz * sz * 4;
+      device.queue.writeTexture(
+        { texture: archTexture, mipLevel: m, origin: [0, 0, layer] },
+        archBytes.subarray(byteOff, byteOff + byteLen),
+        { bytesPerRow: sz * 4, rowsPerImage: sz },
+        [sz, sz, 1]
+      );
+      wordOff += sz * sz;
+    }
+  }
+  const archTextureView = archTexture.createView({ dimension: '2d-array' });
+
   const sampler = device.createSampler({ label: 'ground detail', minFilter: 'linear', magFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   return {
-    texture, archBuffer, resources: [[16, texture.createView()], [17, sampler], [18, { buffer: archBuffer }]],
+    texture, archBuffer, archTexture, archTextureView,
+    resources: [[16, texture.createView()], [17, sampler], [18, { buffer: archBuffer }]],
+    cityResources: [[17, sampler], [18, archTextureView]],
     // What the land looks like with none of this. For tests and for looking into what went wrong.
     flatten() {
       const texel = GROUND_DETAIL_MEAN.map((v) => Math.round(v * 255));
@@ -132,6 +162,6 @@ export async function createGroundDetail({ device, computePipe, mipPipe }) {
         device.queue.writeTexture({ texture, mipLevel: m }, new Uint8Array(size * size * 4).map((_, i) => texel[i & 3]), { bytesPerRow: size * 4 }, [size, size]);
       }
     },
-    dispose() { texture.destroy(); archBuffer.destroy(); },
+    dispose() { texture.destroy(); archBuffer.destroy(); archTexture.destroy(); },
   };
 }

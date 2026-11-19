@@ -1,6 +1,6 @@
 import { ISLAND, decodeIsland, decodeBiome, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
 import { GROUND_COVER, createGroundCoverPatches, groundCoverInstances } from './vegetation.js';
-import { TERRAIN, TERRAIN_LIGHT, COASTAL_FIELD_BAKE } from './wgsl/terrain.js';
+import { TERRAIN_FINISH_ONLY, TERRAIN_LAND, TERRAIN_CITY, TERRAIN_LIGHT, COASTAL_FIELD_BAKE } from './wgsl/terrain.js';
 import { GROUND_DETAIL_BAKE } from './wgsl/ground-detail.js';
 import { createCoastalField } from './coastal-field.js';
 import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
@@ -34,7 +34,7 @@ import {bakeLandContinuumPiece,landContinuumSeams,requestLandContinuumPipelines,
 import {landContinuumMaterial} from './wgsl/land-continuum.js';
 import {sharedGroundDetail} from './ground-detail.js';
 import {sharedNeuralPbrBank} from './neural-pbr.js';
-import {withNeuralPbrTerrain} from './wgsl/neural-pbr.js';
+import {withNeuralPbrLand,withNeuralPbrCity} from './wgsl/neural-pbr.js';
 import {createLandShadows} from './shadows.js';
 import {createBoulderContinuum,requestBoulderContinuumAtlas} from './boulder-continuum.js';
 import {BOULDER_CONTINUUM_MATERIAL_SPEC} from './wgsl/boulder-continuum.js';
@@ -1069,13 +1069,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const mipPipePromise=Promise.resolve(mipPipe),cloudsResolvedPromise=Promise.resolve(clouds),waterOpticsResolvedPromise=Promise.resolve(waterOptics);
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
   const neuralPbr=sharedNeuralPbrBank(device);
-  const terrainSource=withNeuralPbrTerrain(TERRAIN);
+  // Specialized shader preludes: land (terrain-only), city (architectural + hardware texture_2d_array),
+  // and forest (finish-only) eliminate Apple Metal register spilling and 12-20x storage-buffer arch reads.
+  const landSource=withNeuralPbrLand(TERRAIN_LAND);
+  const citySource=withNeuralPbrCity(TERRAIN_CITY);
   // The land itself, every piece cut by its own quadtree and drawn as a heightfield of the one family's programs
   // (js/land-continuum.js, js/wgsl/land-continuum.js): its view, and under water the captures' coarser cut.
-  const landMaterial=landContinuumMaterial(terrainSource);
+  const landMaterial=landContinuumMaterial(landSource);
   // A city's buildings, through the one continuum: the city's material, shaded by the land's own surfaces, in a view
   // of its own (js/wgsl/city-continuum.js).
-  const cityViewPromise=requestContinuumView({device,shader,material:cityContinuumMaterial(terrainSource),format,samples});
+  const cityViewPromise=requestContinuumView({device,shader,material:cityContinuumMaterial(citySource),format,samples});
   // The ground cover's rocks, through the one continuum: their stone, lit by the land's light (js/wgsl/boulder-continuum.js).
   const boulderViewPromise=requestContinuumView({device,shader,material:BOULDER_CONTINUUM_MATERIAL_SPEC,format,samples});
   boulderViewPromise.catch(()=>{});
@@ -1478,6 +1481,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     forest.setPushers('hull',hulls);
   }
+  const LAND_BIND_IDS=new Set([0,1,2,3,4,5,6,7,8,9,12,13,14,15,16,17,19,20,21,22,23,24]);
+  const CITY_BIND_IDS=new Set([0,1,2,3,4,5,6,8,13,17,18,19,20,21,22,23,24]);
+  const landEntries=entries=>entries.filter(([b])=>LAND_BIND_IDS.has(b));
+  const cityEntries=entries=>entries.filter(([b])=>CITY_BIND_IDS.has(b)).map(([b,r])=>b===18?[18,groundDetail.archTextureView]:[b,r]);
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],...activeLandShadows.terrainResources];
   // Every building of a city, cut and drawn through the one continuum from the atlas baked for every type
@@ -1521,7 +1528,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}):forestPack;
   // What has been shot down on this coast comes back with it, and is kept with the port damage.
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
-  const forest=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees)}).catch(error=>{forestFailure=error.message;console.error('forest continuum',error);return null;}):null;
+  const forest=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource:TERRAIN_FINISH_ONLY,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees)}).catch(error=>{forestFailure=error.message;console.error('forest continuum',error);return null;}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   const forestHeld=pack=>({roots:pack?.manifest?.rootCount??0,groveRoots:pack?.groveRoots??0,sections:pack?.sectionsResident??0,released:pack?.sectionsReleased??0});
   forestStats.groves=grovePack?{loaded:true,...forestHeld(activeForestPack),rootCapacity}:{loaded:false,error:groveFailure};
@@ -1547,9 +1554,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   };
   let activeTownField=townField(proceduralPack?.port?.streets);
   let nearResources=[...resources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources,...neuralPbr.terrainResources];
-  let cityGroup=bind(cityPipe,nearResources);const cityClouds=clouds.bindVolume(cityPipe);
+  let cityGroup=bind(cityPipe,cityEntries(nearResources));const cityClouds=clouds.bindVolume(cityPipe);
   const [submerged]=await submergedPipesPromise;
-  let submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+  let submergedGroup=submerged?.bindGroup(landEntries(nearResources).map(([binding,resource])=>({binding,resource})));
   const submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
   // The land: every piece cut and drawn through the one continuum (js/land-continuum.js, AGENTS.md rule 3). A piece is
   // the coast's own lattice ('0,0'; on Saba with the surveyed bay as a finer window in it) or a streamed section. One
@@ -1581,7 +1588,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return {n,cell:spacing/g,gx:gx0,gz:gz0,heights:heightsOut,kind};
   }
   const landCentreSpec=()=>{
-    const land=()=>bind(landPipe,nearResources),captureLand=()=>submergedGroup??null;
+    const land=()=>bind(landPipe,landEntries(nearResources)),captureLand=()=>submergedGroup??null;
     if(!proceduralPack){
       const cell=ISLAND.span/(ISLAND.size-1)/landGrid.g;
       return {sx:0,sz:0,n:ISLAND.size,cell,heights,kind:null,authority:3,window:nearTile?landSabaWindow(cell):null,near:nearTile?[...nearTile.bounds]:null,land,captureLand};
@@ -1774,7 +1781,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       [12,{buffer:nearDomain}],[13,nearAlbedo.createView()],
       ...sTownField.resources,...groundDetail.resources,...activeLandShadows.terrainResources,...neuralPbr.terrainResources,
     ];
-    const submergedSecGroup=submerged?.bindGroup(secOpaqueResources.map(([binding,resource])=>({binding,resource})));
+    const submergedSecGroup=submerged?.bindGroup(landEntries(secOpaqueResources).map(([binding,resource])=>({binding,resource})));
     const rec={
       secX:secPack.secX,
       secZ:secPack.secZ,
@@ -1800,8 +1807,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       townField:sTownField,
       resources:secOpaqueResources,
       // Its buildings shot down, drawn by the city's view with the section's own surfaces.
-      cityGroup:bind(cityPipe,secOpaqueResources),
-      landGroup:bind(landPipe,secOpaqueResources),
+      cityGroup:bind(cityPipe,cityEntries(secOpaqueResources)),
+      landGroup:bind(landPipe,landEntries(secOpaqueResources)),
       submergedGroup:submergedSecGroup,
     };
     landPiece(rec.key,landSectionSpec(rec));
@@ -1864,9 +1871,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const oldTownField=activeTownField;
     activeTownField=townField(streets);
     nearResources=[...resources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources,...neuralPbr.terrainResources];
-    cityGroup=bind(cityPipe,nearResources);
-    submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
-    landContinuum?.rebind('0,0',bind(landPipe,nearResources),submergedGroup??null);
+    cityGroup=bind(cityPipe,cityEntries(nearResources));
+    submergedGroup=submerged?.bindGroup(landEntries(nearResources).map(([binding,resource])=>({binding,resource})));
+    landContinuum?.rebind('0,0',bind(landPipe,landEntries(nearResources)),submergedGroup??null);
     boulderContinuum?.rebind(nearResources);
     inlandWater?.rebind(nearResources);
     herds?.rebind(nearResources);
@@ -2941,23 +2948,32 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       meadowGrass?.drawSubmerged(pass,above);
       tradeVessels?.drawSubmerged?.(pass,above);
     },
-    draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
+    drawOpaqueCity(pass,camera={x:0,y:6,z:0},viewProjection=null){
       if(!lastCamera)updateTrees(camera,viewProjection);
       // Major opaque occluders (city buildings, fractured masonry, boulders) draw first so hardware HSR skips hidden
-      // terrain behind them, followed by the land heightfield, herds, vessels, trees and grass.
+      // terrain and ocean behind them.
       cityContinuum?.draw(pass,cityGroup,cityClouds);
       if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,4800))portFractures.draw(pass,cityGroup,cityClouds);
       for(const sec of loadedSections.values()){
         if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,3400))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
       }
       if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,4800))boulderContinuum.draw(pass);
+    },
+    drawOpaqueLand(pass,camera={x:0,y:6,z:0},viewProjection=null){
+      // Drawn after the ocean depth prepass so hardware early-Z skips 100% of submerged seabed fragments beneath water.
       landContinuum?.draw(pass,landClouds);
       if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
-      // Every tree, its leaves cut by the sample mask: one pipeline, four indirect draws (js/forest-scenery.js).
+    },
+    drawFoliage(pass){
+      // Sample-mask feedback foliage draws strictly after all opaque surfaces (AGENTS.md rule 2 TBDR discipline).
       forest?.draw(pass);
-      // Every patch of grass, cut on the GPU through the one continuum (js/meadow-grass.js).
       meadowGrass?.draw(pass);
+    },
+    draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
+      this.drawOpaqueCity(pass,camera,viewProjection);
+      this.drawOpaqueLand(pass,camera,viewProjection);
+      this.drawFoliage(pass);
     },
     drawWater(pass,camera={x:0,y:6,z:0},viewProjection=null){
       if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200)){

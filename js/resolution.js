@@ -52,7 +52,7 @@ const ADAPTIVE_STARTUP_SETTLE_SECONDS = 4;
 const POLYGON_RAISE = 1.12;
 const POLYGON_RECOVERY_RAISE = 1.3;
 // Below this budget the loss starts to show, so polygons are restored ahead of sharpness.
-export const POLYGON_COMFORT = 0.5;
+export const POLYGON_COMFORT = 0.65;
 const WORK_HEADROOM = 0.86;
 const trimmedMean = (values, count) => {
   const sorted = values.slice(0, count).sort(), trim = Math.floor(count * 0.1);
@@ -138,7 +138,7 @@ const POLYGON_CHOSEN_MINIMUM = 0.06;
 const POLYGON_BUDGET_STEP = 0.5;
 const POLYGON_BUDGET_AIM = 0.95;
 const POLYGON_BUDGET_RECOVER = 0.8;
-export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = CONTINUUM_BASE_PIXEL_ERROR, minimum = POLYGON_CHOSEN_MINIMUM, targetFPS = 60 } = {}) {
+export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = CONTINUUM_BASE_PIXEL_ERROR, minimum = POLYGON_CHOSEN_MINIMUM, budgetMinimum = POLYGON_CHOSEN_MINIMUM, targetFPS = 60 } = {}) {
   let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
   const samples = new Float64Array(240), workSamples = new Float64Array(240);
@@ -148,7 +148,7 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
   // Two limits on the one scale: frame time (scale) and the scene's triangle budget (budgetScale). The tighter wins.
   let budgetScale = 1;
   const timeGranted = () => Math.max(mode === 'auto' ? minimum : Math.min(minimum, POLYGON_CHOSEN_MINIMUM), scale);
-  const granted = () => Math.min(timeGranted(), Math.max(POLYGON_CHOSEN_MINIMUM, budgetScale));
+  const granted = () => Math.min(timeGranted(), Math.max(budgetMinimum, budgetScale));
   return {
     get mode() { return mode; },
     get scale() { return scale; },
@@ -178,7 +178,7 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
       const before = granted(), at = pixels > 0 ? Math.min(1, (basePixelError / pixels) ** 2) : before;
       const filled = at * (budget * POLYGON_BUDGET_AIM) / total;
       let next = budgetScale;
-      if (total > budget) next = Math.max(POLYGON_CHOSEN_MINIMUM, Math.min(before, Math.max(at * POLYGON_BUDGET_STEP, filled)));
+      if (total > budget) next = Math.max(budgetMinimum, Math.min(before, Math.max(at * POLYGON_BUDGET_STEP, filled)));
       else if (budgetScale < 1 && budgetScale <= timeGranted() && total < budget * POLYGON_BUDGET_RECOVER) {
         next = Math.min(1, Math.max(budgetScale, Math.min(at / POLYGON_BUDGET_STEP, filled)));
       }

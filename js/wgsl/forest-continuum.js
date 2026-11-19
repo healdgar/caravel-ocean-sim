@@ -152,11 +152,16 @@ fn forestStandOwn(tree:u32,touched:bool,near:f32,lane:u32)->vec2f{
  let r=forestRoots[i];let scale=r.rootScale.w;
  if(!(scale>0.0)){return;}
  let model=u32(r.identity.x);let yaw=r.yawColour.x;
+ // Fast conservative frustum + shadow-box cull before ground-lift texture loads, wind-lane atan2, force/capsule scans
+ // and own-skeleton atomic probes: skips ~75% of roots that lie behind the camera or outside both frusta.
+ let shift=forestStand.shift.xyz;
+ let sphere=vec4f(forestStandTypeF(model,${T.sphere}u),forestStandTypeF(model,${T.sphere + 1}u),forestStandTypeF(model,${T.sphere + 2}u),forestStandTypeF(model,${T.sphere + 3}u));
+ let coarseCentre=r.rootScale.xyz+forestStandTurn(yaw,sphere.xyz)*scale;
+ let coarseRadius=sphere.w*scale*2.2+24.0;
+ if(forestStandOutside(earthCurve(coarseCentre+shift-F.camPos.xyz,F.camPos.y),coarseRadius)&&!(forestStand.counts.z!=0u&&forestStandShadowed(coarseCentre,coarseRadius))){return;}
  // Where it stands as drawn: on the ground the land draws there (js/continuum-ground.js). It is struck, felled and
  // blown over where it truly stands (js/forest-trunks.js on the CPU).
- let shift=forestStand.shift.xyz;
  let position=r.rootScale.xyz+vec3f(0.0,continuumGroundLift(r.rootScale.xz+shift.xz),0.0);
- let sphere=vec4f(forestStandTypeF(model,${T.sphere}u),forestStandTypeF(model,${T.sphere + 1}u),forestStandTypeF(model,${T.sphere + 2}u),forestStandTypeF(model,${T.sphere + 3}u));
  let felled=r.identity.w<0.0;let wounded=r.identity.w>0.0;let t=F.camPos.w;
  // Its skeleton: its lane's, and its own when near the eye or touched; a tree on the ground is still.
  var bones=vec3f(-1.0,-1.0,0.0);var sway=0.0;
@@ -467,6 +472,25 @@ fn forestReadNative(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->For
  if(family==2u){return forestNativePair(forestNativeAlbedo2,forestNativeNormal2,uv,ux,uy,layer,repeating);}
  return forestNativePair(forestNativeAlbedo3,forestNativeNormal3,uv,ux,uy,layer,repeating);
 }
+fn forestReadNormalOnly(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->vec4f{
+ let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);let repeating=material.coordinates.z>0.;
+ var d:vec4f;
+ if(repeating){
+  if(family==0u){d=textureSampleGrad(forestNativeNormal0,forestNativeRepeatSampler,uv,layer,ux,uy);}
+  else if(family==1u){d=textureSampleGrad(forestNativeNormal1,forestNativeRepeatSampler,uv,layer,ux,uy);}
+  else if(family==2u){d=textureSampleGrad(forestNativeNormal2,forestNativeRepeatSampler,uv,layer,ux,uy);}
+  else{d=textureSampleGrad(forestNativeNormal3,forestNativeRepeatSampler,uv,layer,ux,uy);}
+ }else{
+  if(family==0u){d=textureSampleGrad(forestNativeNormal0,forestNativeSampler,uv,layer,ux,uy);}
+  else if(family==1u){d=textureSampleGrad(forestNativeNormal1,forestNativeSampler,uv,layer,ux,uy);}
+  else if(family==2u){d=textureSampleGrad(forestNativeNormal2,forestNativeSampler,uv,layer,ux,uy);}
+  else{d=textureSampleGrad(forestNativeNormal3,forestNativeSampler,uv,layer,ux,uy);}
+ }
+ return forestDetailSigned(d);
+}
+var<private> forestLastMask:u32=1u;
+var<private> forestLastHasPigment:bool=false;
+var<private> forestLastPigment:vec4f=vec4f(1.0);
 // A layer's own colour over all of it: the last level of its coverage-weighted mips.
 fn forestNativeMean(material:ForestLeafMaterial)->vec3f{
  let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);let middle=vec2f(.5);
@@ -519,9 +543,9 @@ fn forestLeafUnderside(face:vec3f,material:ForestLeafMaterial,tint:vec3f)->vec3f
 // their mean). Eight leaves about that mean, each counted by how much of it the viewer sees, give the light and
 // colour a pixel full of them would average to.
 const FOREST_CROWN_ALIKE=.7;
-const FOREST_CROWN_RING=array<vec2f,8>(
- vec2f(.92387953,.38268343),vec2f(.38268343,.92387953),vec2f(-.38268343,.92387953),vec2f(-.92387953,.38268343),
- vec2f(-.92387953,-.38268343),vec2f(-.38268343,-.92387953),vec2f(.38268343,-.92387953),vec2f(.92387953,-.38268343));
+const FOREST_CROWN_RING=array<vec2f,4>(
+ vec2f(.70710678,.70710678),vec2f(-.70710678,.70710678),
+ vec2f(-.70710678,-.70710678),vec2f(.70710678,-.70710678));
 struct ForestCrownLight {colour:vec3f,light:vec2f,finish:vec2f,normal:vec3f};
 fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,face:vec3f,back:vec3f,exposure:f32,escape:f32,transmission:f32,roughness:f32)->ForestCrownLight{
  let view=normalize(continuumEye()-world);let middle=normalize(leaves);
@@ -529,7 +553,7 @@ fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,face:vec3f,back:vec3f
  let spread=sqrt(1.-FOREST_CROWN_ALIKE*FOREST_CROWN_ALIKE);
  let moonDir=lunarDirection();
  var weight=0.;var gain=vec3f(0.);var lit=vec3f(0.);var mean=vec3f(0.);var level=0.;var moon=0.;
- for(var k=0;k<8;k++){
+ for(var k=0;k<4;k++){
   let cs=FOREST_CROWN_RING[k];
   var n=middle*FOREST_CROWN_ALIKE+(side*cs.x+other*cs.y)*spread;
   let facing=dot(n,view);let seen=abs(facing);
@@ -570,9 +594,12 @@ fn forestCrownLattice(p:vec3f)->f32{
 // sizes of that unevenness, each fading out as it shrinks below what a pixel can show.
 fn forestCrownMottle(world:vec3f)->f32{
  let pixel=length(continuumEye()-world)*2.*length(F.camUp.xyz)/max(F.screen.y,1.);
- let spray=forestCrownLattice(world/1.1)*.26*(1.-smoothstep(.3,.8,pixel/1.1));
- let bough=forestCrownLattice(world/3.4+vec3f(17.3,5.1,9.7))*.16*(1.-smoothstep(.3,.8,pixel/3.4));
- return 1.+spray+bough;
+ let wSpray=1.-smoothstep(.3,.8,pixel/1.1);
+ let wBough=1.-smoothstep(.3,.8,pixel/3.4);
+ var sum=1.0;
+ if(wSpray>0.001){sum+=forestCrownLattice(world/1.1)*.26*wSpray;}
+ if(wBough>0.001){sum+=forestCrownLattice(world/3.4+vec3f(17.3,5.1,9.7))*.16*wBough;}
+ return sum;
 }
 // The surface lies just inside its outermost leaves, which the land's shadow map holds: its shadow is looked up beyond them.
 const FOREST_CROWN_SHADOW_LIFT=.45;
@@ -660,6 +687,8 @@ fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
 }
 fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
  let dx=dpdx(v.world);let dy=dpdy(v.world);let ux=dpdx(v.uv);let uy=dpdy(v.uv);
+ // continuumFS computes coverage before shade: skip all normal/shadow/envCube shading on zero-sample air pixels.
+ if(forestLastMask==0u){return vec4f(0.0);}
  let toEye=continuumEye()-v.world;let viewDist=length(toEye);
  var n=normalize(v.normal);var colour=v.colour;var diffuse=0.0;var ambient=0.0;var wet=0.0;var roughness=.9;
  var shadowAt=v.world;
@@ -677,8 +706,15 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
  }else{
   let layer=v.layer&0xffffu;let leaf=(v.layer>>16u)!=0u;let textured=layer!=FOREST_UNTEXTURED;
   let material=forestNativeMaterials[select(0u,layer,textured)];
-  var surface=forestReadNative(material,v.uv,ux,uy);
-  if(!textured){surface.pigment=vec4f(1.);surface.detail=vec4f(0.,0.,1.,.9);}
+  var surface:ForestSurface;
+  if(!textured){
+   surface.pigment=vec4f(1.);surface.detail=vec4f(0.,0.,1.,.9);
+  }else if(forestLastHasPigment){
+   surface.pigment=forestLastPigment;
+   surface.detail=forestReadNormalOnly(material,v.uv,ux,uy);
+  }else{
+   surface=forestReadNative(material,v.uv,ux,uy);
+  }
   let canopy=clamp(v.surface.y,0.,1.);
   if(!leaf){
    // Bark: its maps, its grain close to, raw where shot has opened it.
@@ -731,14 +767,21 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
 // pattern of their own, so trees standing one behind another fill each other's gaps.
 fn forestContinuumCoverage(v:ContinuumVarying,front:bool)->u32{
  let ux=dpdx(v.uv);let uy=dpdy(v.uv);
+ forestLastHasPigment=false;
  let layer=v.layer&0xffffu;
- if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){return forestLeafSampleMask(1.-clamp(v.surface.z,0.,1.),continuumHash(v.coverage.z^0x2c1b3c6du),v.position.xy,v.coverage.w);}
- if((v.layer>>16u)==0u||layer==FOREST_UNTEXTURED){return 0xffffffffu;}
+ if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){
+  let m=forestLeafSampleMask(1.-clamp(v.surface.z,0.,1.),continuumHash(v.coverage.z^0x2c1b3c6du),v.position.xy,v.coverage.w);
+  forestLastMask=m;return m;
+ }
+ if((v.layer>>16u)==0u||layer==FOREST_UNTEXTURED){forestLastMask=0xffffffffu;return 0xffffffffu;}
  let viewDist=length(continuumEye()-v.world);
  let near=mix(.7,1.,smoothstep(30.,90.,viewDist));
- let rawAlpha=forestNativeAlbedoOnly(forestNativeMaterials[layer],v.uv,ux*near,uy*near).a;
+ let pigment=forestNativeAlbedoOnly(forestNativeMaterials[layer],v.uv,ux*near,uy*near);
+ forestLastPigment=pigment;forestLastHasPigment=true;
+ let rawAlpha=pigment.a;
  let crisp=select(rawAlpha,forestBotanicalDetail(v.uv,viewDist,rawAlpha).x,viewDist<38.);
- return forestLeafSampleMask(clamp(crisp*mix(1.,FOREST_CROWN_CLOSING,smoothstep(45.,220.,viewDist)),0.,1.),v.seed,v.position.xy,v.coverage.w);
+ let m=forestLeafSampleMask(clamp(crisp*mix(1.,FOREST_CROWN_CLOSING,smoothstep(45.,220.,viewDist)),0.,1.),v.seed,v.position.xy,v.coverage.w);
+ forestLastMask=m;return m;
 }
 `;
 };

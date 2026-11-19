@@ -890,8 +890,8 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
 @vertex fn continuumVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { return continuumVertex(vertex,listed,false); }
 @fragment fn continuumFS(v:ContinuumVarying,@builtin(front_facing) front:bool)->ContinuumCoverage {
   var out:ContinuumCoverage;
-  out.colour=${material.name}Shade(v,front);
   out.mask=${mask};
+  out.colour=${material.name}Shade(v,front);
   return out;
 }
 @fragment fn continuumEqualFS(v:ContinuumVarying,@builtin(front_facing) front:bool)->@location(0) vec4f {

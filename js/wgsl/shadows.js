@@ -19,7 +19,9 @@ struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
 export const LAND_CLOTH_SHADOW = /* wgsl */ `
 @group(0) @binding(24) var<storage,read> landCanvasShadow:array<vec2u>;
 fn landClothShadow(uv:vec2f,depth:f32)->vec3f {
-  let side=i32(round(sqrt(f32(arrayLength(&landCanvasShadow)))));
+  let count=arrayLength(&landCanvasShadow);
+  if(count<=1u){return vec3f(1.0);}
+  let side=i32(round(sqrt(f32(count))));
   let texel=uv*f32(side)-0.5;let cell=vec2i(floor(texel));let phase=fract(texel);
   var light=vec3f(0.0);
   for(var corner=0;corner<4;corner++){
@@ -135,25 +137,24 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   let denominator=select(-1.0,1.0,nl>=0.0)*max(abs(nl),0.1)*SH.sun.w;
   let slope=vec2f(dot(normal,right),-dot(normal,up))*span/denominator;
   var result=vec3f(0);
-  for(var i=0u;i<9u;i++){
-    let x=i%3u;let y=i/3u;let weight=horizontal.weight[x]*vertical.weight[y];
-    if(weight<=.000001){continue;}
-    let delta=(vec2f(horizontal.position[x],vertical.position[y])-uv)*spread;let q=uv+delta;
-    // Follow the receiving plane across the tent; the residual bias below is
-    // limited to one comparison-texel footprint, independent of penumbra width.
-    // A bilinear comparison fetch still tests ONE reference against four
-    // distinct texel centres. Bound the nearer-plane discrepancy within that
-    // exact footprint too; correcting only q leaves a repeating lattice of
-    // false canvas blockers as the paired tent positions cross depth texels.
-    let samplePhase=fract(q*vec2f(dim)-.5);
-    let footprintBias=dot(max(slope,vec2f(0)),samplePhase/vec2f(dim))
-      +dot(max(-slope,vec2f(0)),(vec2f(1)-samplePhase)/vec2f(dim));
-    let depth=min(reference+dot(slope,delta)-footprintBias,0.99999);
-    let solid=textureSampleCompareLevel(solidShadow,shadowCompare,q,depth);
-    let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,q,depth);
-    var transmission=vec3f(1);
-    if(cloth<0.999){transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,q,0.0));}
-    result+=solid*mix(transmission,vec3f(1),cloth)*weight;
+  for(var y=0u;y<3u;y++){
+    let wy=vertical.weight[y];
+    if(wy<=.000001){continue;}
+    for(var x=0u;x<3u;x++){
+      let weight=horizontal.weight[x]*wy;
+      if(weight<=.000001){continue;}
+      let delta=(vec2f(horizontal.position[x],vertical.position[y])-uv)*spread;let q=uv+delta;
+      let samplePhase=fract(q*vec2f(dim)-.5);
+      let footprintBias=dot(max(slope,vec2f(0)),samplePhase/vec2f(dim))
+        +dot(max(-slope,vec2f(0)),(vec2f(1)-samplePhase)/vec2f(dim));
+      let depth=min(reference+dot(slope,delta)-footprintBias,0.99999);
+      let solid=textureSampleCompareLevel(solidShadow,shadowCompare,q,depth);
+      if(solid<=0.001){continue;}
+      let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,q,depth);
+      var transmission=vec3f(1);
+      if(cloth<0.999){transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,q,0.0));}
+      result+=solid*mix(transmission,vec3f(1),cloth)*weight;
+    }
   }
   return result;
 }

@@ -110,10 +110,10 @@ fn sampleNeuralPbrBand(matId: u32, band: u32, uv: vec2f, lod: f32) -> vec4f {
   let clod = clamp(lod, 0.0, 6.0);
   let m0 = u32(floor(clod));
   let ft = clod - f32(m0);
-  let a = neuralPbrSampleMip(baseWord, uvWrap, m0);
-  if (ft <= 0.001) {
-    return a;
+  if (clod >= 2.5 || ft <= 0.08 || ft >= 0.92) {
+    return neuralPbrSampleMip(baseWord, uvWrap, min(m0 + select(0u, 1u, ft >= 0.5), 6u));
   }
+  let a = neuralPbrSampleMip(baseWord, uvWrap, m0);
   let b = neuralPbrSampleMip(baseWord, uvWrap, min(m0 + 1u, 6u));
   return mix(a, b, ft);
 }
@@ -130,7 +130,7 @@ fn evalNeuralPbr(
   let sc = NPBR.uvScale[m];
   let distFade = 1.0 - smoothstep(NPBR.params.w * 0.55, NPBR.params.w, camDist);
   let strength = clamp(NPBR.params.x, 0.0, 2.0) * distFade * clamp(maskWeight, 0.0, 1.0);
-  if (strength <= 0.002) {
+  if (strength <= 0.04) {
     return NeuralPbrSample(vec3f(1.0), 0.0, vec2f(0.0), 1.0, 0.0);
   }
   let footM = max(length(dUVdx), length(dUVdy));
@@ -140,37 +140,62 @@ fn evalNeuralPbr(
   }
   let lod1 = clamp(log2(max(footM * sc.y * 46.0, 1.0)), 0.0, 6.0);
   let uv0 = surfUV * sc.x + vec2f(sc.w, sc.w * 0.618034);
-  let uv1 = vec2f(
-    uv0.x * ${NEURAL_PBR_ROT_COS} - uv0.y * ${NEURAL_PBR_ROT_SIN},
-    uv0.x * ${NEURAL_PBR_ROT_SIN} + uv0.y * ${NEURAL_PBR_ROT_COS}
-  ) * 6.85410197;
-
   let z0 = sampleNeuralPbrBand(m, 0u, uv0, lod0);
-  let z1 = sampleNeuralPbrBand(m, 1u, uv1, lod1);
+  let hasMicro = lod1 < 5.0 && distFade > 0.25;
+  var z1 = vec4f(0.0);
+  if (hasMicro) {
+    let uv1 = vec2f(
+      uv0.x * ${NEURAL_PBR_ROT_COS} - uv0.y * ${NEURAL_PBR_ROT_SIN},
+      uv0.x * ${NEURAL_PBR_ROT_SIN} + uv0.y * ${NEURAL_PBR_ROT_COS}
+    ) * 6.85410197;
+    z1 = sampleNeuralPbrBand(m, 1u, uv1, lod1);
+  }
   if (all(z0 == vec4f(0.0)) && all(z1 == vec4f(0.0))) {
     return NeuralPbrSample(vec3f(1.0), 0.0, vec2f(0.0), 1.0, 0.0);
   }
 
   let m0 = z0 * NPBR.matMeso[m];
-  let m1 = z1 * NPBR.matMicro[m];
+  let m1 = select(vec4f(0.0), z1 * NPBR.matMicro[m], hasMicro);
   let gBase = m * 4u;
-  let p0 = NPBR.w1Meso0 * m0 + NPBR.w1Micro0 * m1;
-  let p1 = NPBR.w1Meso1 * m0 + NPBR.w1Micro1 * m1;
-  let p2 = NPBR.w1Meso2 * m0 + NPBR.w1Micro2 * m1;
-  let p3 = NPBR.w1Meso3 * m0 + NPBR.w1Micro3 * m1;
   let slope = f32(${NEURAL_PBR_LEAKY_SLOPE});
-  let h0 = select(p0 * slope, p0, p0 >= vec4f(0.0)) * NPBR.matGate[gBase];
-  let h1 = select(p1 * slope, p1, p1 >= vec4f(0.0)) * NPBR.matGate[gBase + 1u];
-  let h2 = select(p2 * slope, p2, p2 >= vec4f(0.0)) * NPBR.matGate[gBase + 2u];
-  let h3 = select(p3 * slope, p3, p3 >= vec4f(0.0)) * NPBR.matGate[gBase + 3u];
+  var accA = vec4f(0.0);
+  var accB = vec4f(0.0);
+  {
+    var p = NPBR.w1Meso0 * m0;
+    if (hasMicro) { p += NPBR.w1Micro0 * m1; }
+    let h = select(p * slope, p, p >= vec4f(0.0)) * NPBR.matGate[gBase];
+    accA += NPBR.w2A0 * h;
+    accB += NPBR.w2B0 * h;
+  }
+  {
+    var p = NPBR.w1Meso1 * m0;
+    if (hasMicro) { p += NPBR.w1Micro1 * m1; }
+    let h = select(p * slope, p, p >= vec4f(0.0)) * NPBR.matGate[gBase + 1u];
+    accA += NPBR.w2A1 * h;
+    accB += NPBR.w2B1 * h;
+  }
+  {
+    var p = NPBR.w1Meso2 * m0;
+    if (hasMicro) { p += NPBR.w1Micro2 * m1; }
+    let h = select(p * slope, p, p >= vec4f(0.0)) * NPBR.matGate[gBase + 2u];
+    accA += NPBR.w2A2 * h;
+    accB += NPBR.w2B2 * h;
+  }
+  {
+    var p = NPBR.w1Meso3 * m0;
+    if (hasMicro) { p += NPBR.w1Micro3 * m1; }
+    let h = select(p * slope, p, p >= vec4f(0.0)) * NPBR.matGate[gBase + 3u];
+    accA += NPBR.w2A3 * h;
+    accB += NPBR.w2B3 * h;
+  }
 
   let outA = clamp(
-    (NPBR.w2A0 * h0 + NPBR.w2A1 * h1 + NPBR.w2A2 * h2 + NPBR.w2A3 * h3) * 1.35,
+    accA * 1.35,
     vec4f(-0.68, -0.68, -0.68, -0.42),
     vec4f(0.68, 0.68, 0.68, 0.42)
   ) * strength;
   let outB = clamp(
-    (NPBR.w2B0 * h0 + NPBR.w2B1 * h1 + NPBR.w2B2 * h2 + NPBR.w2B3 * h3) * 1.35,
+    accB * 1.35,
     vec4f(-0.78, -0.78, -0.44, -0.88),
     vec4f(0.78, 0.78, 0.44, 0.88)
   ) * strength;
@@ -287,15 +312,15 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
     'vessel bindings'
   );
 
-  // Compute metric 3D and sail-UV derivatives in uniform control flow
+  // Compute metric 3D and sail-UV derivatives in uniform control flow right before Neural PBR evaluation
+  // (instead of holding 22 floats live across 600 lines of vessel material branching).
   out = neuralPbrReplaceRequired(
     out,
-    /let\s+grainUV\s*=\s*in\.uv\s*;/,
-    `let grainUV = in.uv;
-  let npbrMetres = p * vec3f(hull.size.x / 3.6, max(hull.right.w, 0.5), hull.size.y / 12.0);
+    /let\s+v\s*=\s*normalize\(\s*F\.camPos\.xyz\s*-\s*in\.world\s*\)\s*;\s*let\s+l\s*=\s*F\.sunDir\.xyz\s*;/,
+    `let npbrMetres = p * vec3f(hull.size.x / 3.6, max(hull.right.w, 0.5), hull.size.y / 12.0);
   let npbrDxM = dpdx(npbrMetres);
   let npbrDyM = dpdy(npbrMetres);
-  let npbrWorldFootM = max(length(dpdx(in.world)), length(dpdy(in.world)));
+  let npbrWorldFootM = max(length(dx), length(dy));
   let npbrSailScale = clamp(hull.size.y * 0.34, 6.0, 14.0);
   let npbrSailM = in.uv * npbrSailScale;
   let npbrRawSailDx = dpdx(npbrSailM);
@@ -303,81 +328,82 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
   let npbrRawSailFoot = max(max(length(npbrRawSailDx), length(npbrRawSailDy)), 1e-6);
   let npbrSailRatio = clamp(npbrWorldFootM / npbrRawSailFoot, 0.18, 2.5);
   let npbrSailDx = npbrRawSailDx * npbrSailRatio;
-  let npbrSailDy = npbrRawSailDy * npbrSailRatio;`,
-    'vessel uniform derivatives'
-  );
-
-  // Decode neural PBR material right before lighting (`let v=normalize(...)`), where all material flags & albedo/rough are finalized
-  out = neuralPbrReplaceRequired(
-    out,
-    /let\s+v\s*=\s*normalize\(\s*F\.camPos\.xyz\s*-\s*in\.world\s*\)\s*;\s*let\s+l\s*=\s*F\.sunDir\.xyz\s*;/,
-    `var npbrMatId = 0u;
-  var npbrMask = 0.0;
-  var npbrUV = vec2f(npbrMetres.z + board * 0.41, npbrMetres.y);
-  var npbrDuDx = vec2f(npbrDxM.z, npbrDxM.y);
-  var npbrDuDy = vec2f(npbrDyM.z, npbrDyM.y);
-  var npbrHintT = rotateHull(vec3f(0.0, 0.0, 1.0));
-  let npbrRowingOar = hull.rig.w > 3.5 && hull.rig.w < 6.5 && (in.material == 16u || in.material == 17u) && abs(p.x) > 0.35;
-  if (in.material == 11u) {
-    npbrMask = 0.0;
-  } else if (isCopper || isGilt) {
-    npbrMatId = 9u;
-    npbrMask = select(0.95, 0.72, isGilt);
-    npbrUV = vec2f(npbrMetres.z, npbrMetres.y);
-    npbrHintT = rotateHull(vec3f(0.0, 0.0, 1.0));
-  } else if (isIron) {
-    npbrMatId = 8u;
-    npbrMask = 0.92;
-    npbrUV = vec2f(npbrMetres.z + npbrMetres.x * 0.5, npbrMetres.y + npbrMetres.x * 0.5);
-    npbrDuDx = vec2f(npbrDxM.z + npbrDxM.x * 0.5, npbrDxM.y + npbrDxM.x * 0.5);
-    npbrDuDy = vec2f(npbrDyM.z + npbrDyM.x * 0.5, npbrDyM.y + npbrDyM.x * 0.5);
-  } else if (in.material == 9u || in.material == 13u) {
-    npbrMatId = 6u;
-    npbrMask = 0.94;
-    npbrUV = npbrSailM;
-    npbrDuDx = npbrSailDx;
-    npbrDuDy = npbrSailDy;
-    npbrHintT = rotateHull(vec3f(0.0, 1.0, 0.0));
-  } else if (in.material == 2u || in.material == 12u || in.material == 19u) {
-    npbrMatId = 7u;
-    npbrMask = 0.92;
-    let ropeVertical = abs(in.normalLocal.y) < 0.55;
-    npbrUV = select(vec2f(npbrMetres.z + npbrMetres.x, npbrMetres.y), vec2f(npbrMetres.y, npbrMetres.x + npbrMetres.z), ropeVertical);
-    npbrDuDx = select(vec2f(npbrDxM.z + npbrDxM.x, npbrDxM.y), vec2f(npbrDxM.y, npbrDxM.x + npbrDxM.z), ropeVertical);
-    npbrDuDy = select(vec2f(npbrDyM.z + npbrDyM.x, npbrDyM.y), vec2f(npbrDyM.y, npbrDyM.x + npbrDyM.z), ropeVertical);
-    npbrHintT = rotateHull(select(vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), ropeVertical));
-  } else if (isMastSpar || npbrRowingOar) {
-    npbrMatId = 1u;
-    npbrMask = 1.0;
-    let mastUpright = abs(in.normalLocal.y) < 0.55 && !npbrRowingOar;
-    npbrUV = select(vec2f(npbrMetres.x + npbrMetres.z, npbrMetres.y), vec2f(npbrMetres.y, npbrMetres.x - npbrMetres.z), mastUpright);
-    npbrDuDx = select(vec2f(npbrDxM.x + npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.y, npbrDxM.x - npbrDxM.z), mastUpright);
-    npbrDuDy = select(vec2f(npbrDyM.x + npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.y, npbrDyM.x - npbrDyM.z), mastUpright);
-    npbrHintT = rotateHull(select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), mastUpright));
-  } else if (in.material == 0u) {
-    npbrMatId = 2u;
-    npbrMask = 1.0;
-    npbrUV = vec2f(npbrMetres.z + deckPlankId * 0.37, npbrMetres.x);
-    npbrDuDx = vec2f(npbrDxM.z, npbrDxM.x);
-    npbrDuDy = vec2f(npbrDyM.z, npbrDyM.x);
-    npbrHintT = rotateHull(vec3f(0.0, 0.0, 1.0));
-  } else if (isWood) {
-    npbrMatId = 0u;
-    npbrMask = select(1.0, 0.85, paintedWood);
-    let transomFace = abs(in.normalLocal.z) > 0.75 && in.material != 15u;
-    npbrUV = select(vec2f(npbrMetres.z + board * 0.41, npbrMetres.y), vec2f(npbrMetres.x + board * 0.41, npbrMetres.y), transomFace);
-    npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), transomFace);
-    npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), transomFace);
-    npbrHintT = rotateHull(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), transomFace));
-  }
-  let npbrBasis = neuralPbrTangentBasis(n, npbrHintT);
+  let npbrSailDy = npbrRawSailDy * npbrSailRatio;
   let npbrCamDist = distance(in.world, F.camPos.xyz);
-  let npbr = evalNeuralPbr(npbrMatId, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrMask * (1.0 - wet.x * 0.25));
-  let npbrAlbedoWeight = select(1.0, 0.45, paintedWood && !isCopper && !isGilt);
-  let npbrNormalWeight = select(1.0, 0.78, paintedWood && !isCopper && !isGilt);
-  albedo = clamp(albedo * mix(vec3f(1.0), npbr.albedoMul, npbrAlbedoWeight), vec3f(0.004), vec3f(0.98));
-  rough = clamp(rough + npbr.roughDelta * (1.0 - wet.x * 0.55), 0.06, 0.98);
-  n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS * npbrNormalWeight * (1.0 - wet.x * 0.35));
+  var npbrCavityAO = 1.0;
+  var npbrAniso = 0.0;
+  var npbrT = vec3f(1.0, 0.0, 0.0);
+  if (NPBR.params.x > 0.04 && npbrCamDist < NPBR.params.w * 0.92 && in.material != 11u) {
+    var npbrMatId = 0u;
+    var npbrMask = 0.0;
+    var npbrUV = vec2f(npbrMetres.z + board * 0.41, npbrMetres.y);
+    var npbrDuDx = vec2f(npbrDxM.z, npbrDxM.y);
+    var npbrDuDy = vec2f(npbrDyM.z, npbrDyM.y);
+    var npbrHintT = rotateHull(vec3f(0.0, 0.0, 1.0));
+    let npbrRowingOar = hull.rig.w > 3.5 && hull.rig.w < 6.5 && (in.material == 16u || in.material == 17u) && abs(p.x) > 0.35;
+    if (isCopper || isGilt) {
+      npbrMatId = 9u;
+      npbrMask = select(0.95, 0.72, isGilt);
+      npbrUV = vec2f(npbrMetres.z, npbrMetres.y);
+      npbrHintT = rotateHull(vec3f(0.0, 0.0, 1.0));
+    } else if (isIron) {
+      npbrMatId = 8u;
+      npbrMask = 0.92;
+      npbrUV = vec2f(npbrMetres.z + npbrMetres.x * 0.5, npbrMetres.y + npbrMetres.x * 0.5);
+      npbrDuDx = vec2f(npbrDxM.z + npbrDxM.x * 0.5, npbrDxM.y + npbrDxM.x * 0.5);
+      npbrDuDy = vec2f(npbrDyM.z + npbrDyM.x * 0.5, npbrDyM.y + npbrDyM.x * 0.5);
+    } else if (in.material == 9u || in.material == 13u) {
+      npbrMatId = 6u;
+      npbrMask = 0.94;
+      npbrUV = npbrSailM;
+      npbrDuDx = npbrSailDx;
+      npbrDuDy = npbrSailDy;
+      npbrHintT = rotateHull(vec3f(0.0, 1.0, 0.0));
+    } else if (in.material == 2u || in.material == 12u || in.material == 19u) {
+      npbrMatId = 7u;
+      npbrMask = 0.92;
+      let ropeVertical = abs(in.normalLocal.y) < 0.55;
+      npbrUV = select(vec2f(npbrMetres.z + npbrMetres.x, npbrMetres.y), vec2f(npbrMetres.y, npbrMetres.x + npbrMetres.z), ropeVertical);
+      npbrDuDx = select(vec2f(npbrDxM.z + npbrDxM.x, npbrDxM.y), vec2f(npbrDxM.y, npbrDxM.x + npbrDxM.z), ropeVertical);
+      npbrDuDy = select(vec2f(npbrDyM.z + npbrDyM.x, npbrDyM.y), vec2f(npbrDyM.y, npbrDyM.x + npbrDyM.z), ropeVertical);
+      npbrHintT = rotateHull(select(vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), ropeVertical));
+    } else if (isMastSpar || npbrRowingOar) {
+      npbrMatId = 1u;
+      npbrMask = 1.0;
+      let mastUpright = abs(in.normalLocal.y) < 0.55 && !npbrRowingOar;
+      npbrUV = select(vec2f(npbrMetres.x + npbrMetres.z, npbrMetres.y), vec2f(npbrMetres.y, npbrMetres.x - npbrMetres.z), mastUpright);
+      npbrDuDx = select(vec2f(npbrDxM.x + npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.y, npbrDxM.x - npbrDxM.z), mastUpright);
+      npbrDuDy = select(vec2f(npbrDyM.x + npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.y, npbrDyM.x - npbrDyM.z), mastUpright);
+      npbrHintT = rotateHull(select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), mastUpright));
+    } else if (in.material == 0u) {
+      npbrMatId = 2u;
+      npbrMask = 1.0;
+      npbrUV = vec2f(npbrMetres.z + deckPlankId * 0.37, npbrMetres.x);
+      npbrDuDx = vec2f(npbrDxM.z, npbrDxM.x);
+      npbrDuDy = vec2f(npbrDyM.z, npbrDyM.x);
+      npbrHintT = rotateHull(vec3f(0.0, 0.0, 1.0));
+    } else if (isWood) {
+      npbrMatId = 0u;
+      npbrMask = select(1.0, 0.85, paintedWood);
+      let transomFace = abs(in.normalLocal.z) > 0.75 && in.material != 15u;
+      npbrUV = select(vec2f(npbrMetres.z + board * 0.41, npbrMetres.y), vec2f(npbrMetres.x + board * 0.41, npbrMetres.y), transomFace);
+      npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), transomFace);
+      npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), transomFace);
+      npbrHintT = rotateHull(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), transomFace));
+    }
+    if (npbrMask > 0.002) {
+      let npbrBasis = neuralPbrTangentBasis(n, npbrHintT);
+      let npbr = evalNeuralPbr(npbrMatId, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrMask * (1.0 - wet.x * 0.25));
+      let npbrAlbedoWeight = select(1.0, 0.45, paintedWood && !isCopper && !isGilt);
+      let npbrNormalWeight = select(1.0, 0.78, paintedWood && !isCopper && !isGilt);
+      albedo = clamp(albedo * mix(vec3f(1.0), npbr.albedoMul, npbrAlbedoWeight), vec3f(0.004), vec3f(0.98));
+      rough = clamp(rough + npbr.roughDelta * (1.0 - wet.x * 0.55), 0.06, 0.98);
+      n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS * npbrNormalWeight * (1.0 - wet.x * 0.35));
+      npbrCavityAO = npbr.cavityAO;
+      npbrAniso = npbr.aniso;
+      npbrT = npbrBasis[0];
+    }
+  }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;`,
     'vessel material eval'
   );
@@ -385,14 +411,14 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
   out = neuralPbrReplaceRequired(
     out,
     /let\s+ao\s*=\s*mix\(\s*0?\.65\s*,\s*1(?:\.0?)?\s*,\s*smoothstep\(\s*0?\.72\s*,\s*1\.5\s*,\s*p\.y\s*\)\s*\)\s*;/,
-    'let ao=mix(0.65,1.0,smoothstep(0.72,1.5,p.y))*npbr.cavityAO;',
+    'let ao=mix(0.65,1.0,smoothstep(0.72,1.5,p.y))*npbrCavityAO;',
     'vessel cavity ao'
   );
 
   out = neuralPbrReplaceRequired(
     out,
     /let\s+spec\s*=\s*vesselSpecular\(\s*n\s*,\s*v\s*,\s*l\s*,\s*rough\s*,\s*f0\s*\)\s*;/,
-    'let spec=neuralPbrAnisoSpecular(n,npbrBasis,v,l,rough,npbr.aniso,f0);',
+    'let spec=select(vesselSpecular(n,v,l,rough,f0),neuralPbrAnisoSpecular(n,mat2x3f(npbrT,cross(n,npbrT)),v,l,rough,npbrAniso,f0),abs(npbrAniso)>0.001);',
     'vessel anisotropic specular'
   );
 
@@ -453,9 +479,9 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
     var npbrDuDy = select(select(vec2f(dy.z, dy.y), vec2f(dy.x, dy.y), wallAlongX), dy.xz, horizFace);
     var npbrHint = select(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), wallAlongX), vec3f(1.0, 0.0, 0.0), horizFace);
     if (in.kind.x < 2.5) {
-      let isCobbleWay = roughness < 0.89 && rocky < 0.35;
+      let isCobbleWay = landOnPavedWay > 0.05 && rocky < 0.35;
       npbrMat = select(10u, 11u, isCobbleWay);
-      npbrWeight = clamp(max(rocky * 0.92, select(0.0, 0.88, isCobbleWay)) * (1.0 - max(pit.cover, 0.0)), 0.0, 1.0);
+      npbrWeight = clamp(max(rocky * 0.92, landOnPavedWay * 0.88) * (1.0 - max(pit.cover, 0.0)), 0.0, 1.0);
     } else if (in.kind.x < 3.5) {
       npbrMat = 0u;
       npbrWeight = 0.65;
@@ -512,6 +538,143 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
   );
 
   return out;
+}
+
+function withNeuralPbrTerrainCommon(source, bindingAnchor, label, evalBlock, { group = 0, latentBinding = 22, weightBinding = 23 } = {}) {
+  const block = createNeuralPbrWGSL({ group, latentBinding, weightBinding });
+  let out = neuralPbrReplaceRequired(source, bindingAnchor, match => `${match}\n${block}`, `${label} bindings`);
+  out = neuralPbrReplaceRequired(
+    out,
+    /var<private>\s*landNormalSpread\s*:\s*f32\s*=\s*0(?:\.0?)?\s*;/,
+    'var<private> landNormalSpread:f32=0.0;\nvar<private> landNpbrGloss:f32=0.0;',
+    `${label} private gloss var`
+  );
+  out = neuralPbrReplaceRequired(
+    out,
+    /let\s+smoothFilm\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.46\s*-\s*effRough\s*\)\s*\/\s*0?\.34\s*,\s*0(?:\.0?)?\s*,\s*1(?:\.0?)?\s*\)\s*\*\s*effWet\s*,\s*1(?:\.0?)?\s*,\s*isMetal\s*\)\s*;/,
+    `let npbrDryGloss=clamp((0.68-effRough)/0.42,0.0,1.0)*landNpbrGloss;
+  let smoothFilm=select(max(clamp((0.46-effRough)/0.34,0.0,1.0)*effWet,npbrDryGloss*0.52),1.0,isMetal);`,
+    `${label} smoothFilm`
+  );
+  out = neuralPbrReplaceRequired(
+    out,
+    /let\s+specMask\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.72\s*-\s*effRough\s*\)\s*\/\s*0?\.42\s*,\s*0(?:\.0?)?\s*,\s*1(?:\.0?)?\s*\)\s*\*\s*\(\s*0?\.08\s*\+\s*0?\.92\s*\*\s*effWet\s*\)\s*,\s*0?\.65\s*,\s*isMetal\s*\)\s*;/,
+    'let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*max(0.08+0.92*effWet,npbrDryGloss*0.64),0.65,isMetal);',
+    `${label} specMask`
+  );
+  out = neuralPbrReplaceRequired(
+    out,
+    /let\s+reliefX\s*=\s*dpdx\(\s*relief\s*\)\s*;\s*let\s+reliefY\s*=\s*dpdy\(\s*relief\s*\)\s*;\s*n\s*=\s*landFilteredBump\(\s*n\s*,\s*dx\s*,\s*dy\s*,\s*reliefX\s*,\s*reliefY\s*\)\s*;/,
+    `let reliefX=dpdx(relief);let reliefY=dpdy(relief);
+  n=landFilteredBump(n,dx,dy,reliefX,reliefY);
+${evalBlock}`,
+    `${label} neural pbr`
+  );
+  return out;
+}
+
+/**
+ * Injects Shared Neural PBR into TERRAIN_LAND (terrain cliffs and paved cobble roads only; skips grass/sand/seabed).
+ */
+export function withNeuralPbrLand(source, opts = {}) {
+  return withNeuralPbrTerrainCommon(
+    source,
+    /@group\(0\)\s*@binding\(15\)\s*var<uniform>\s*townWindow\s*:\s*vec4f\s*;/,
+    'land',
+    `  {
+    let npbrCamDist = distance(world, F.camPos.xyz);
+    let npbrWeight = clamp(max(rocky * 0.92, landOnPavedWay * 0.88) * (1.0 - max(pit.cover, 0.0)), 0.0, 1.0);
+    landNpbrGloss = 0.0;
+    if (npbrWeight > 0.002 && NPBR.params.x > 0.002 && npbrCamDist < NPBR.params.w) {
+      let horizFace = abs(n.y) > 0.65;
+      let wallAlongX = abs(n.z) >= abs(n.x);
+      let npbrUV = select(select(vec2f(world.z, world.y), vec2f(world.x, world.y), wallAlongX), world.xz, horizFace);
+      let npbrDuDx = select(select(vec2f(dx.z, dx.y), vec2f(dx.x, dx.y), wallAlongX), dx.xz, horizFace);
+      let npbrDuDy = select(select(vec2f(dy.z, dy.y), vec2f(dy.x, dy.y), wallAlongX), dy.xz, horizFace);
+      let npbrHint = select(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), wallAlongX), vec3f(1.0, 0.0, 0.0), horizFace);
+      let npbrMat = select(10u, 11u, landOnPavedWay > 0.05 && rocky < 0.35);
+      landNpbrGloss = clamp(NPBR.params.z, 0.0, 1.5) * clamp(NPBR.params.x, 0.0, 1.5) * (1.0 - smoothstep(NPBR.params.w * 0.55, NPBR.params.w, npbrCamDist)) * npbrWeight;
+      let npbr = evalNeuralPbr(npbrMat, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrWeight);
+      let npbrBasis = neuralPbrTangentBasis(n, npbrHint);
+      albedo = clamp(albedo * npbr.albedoMul, vec3f(0.005), vec3f(0.98));
+      roughness = clamp(roughness + npbr.roughDelta, 0.08, 0.98);
+      ambientVisibility = clamp(ambientVisibility * npbr.cavityAO, 0.05, 1.0);
+      n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS);
+    }
+  }`,
+    opts
+  );
+}
+
+/**
+ * Injects Shared Neural PBR into TERRAIN_CITY (architectural walls, roofs, timber, docks, masonry, cobbles).
+ */
+export function withNeuralPbrCity(source, opts = {}) {
+  return withNeuralPbrTerrainCommon(
+    source,
+    /@group\(0\)\s*@binding\(18\)\s*var\s+archMaterialTex\s*:\s*texture_2d_array<f32>\s*;/,
+    'city',
+    `  {
+    let npbrCamDist = distance(world, F.camPos.xyz);
+    landNpbrGloss = 0.0;
+    if (NPBR.params.x > 0.002 && npbrCamDist < NPBR.params.w) {
+      var npbrMat = 3u;
+      var npbrWeight = 0.0;
+      if (in.kind.x >= 9.5 && in.kind.x < 10.5) {
+        npbrMat = select(0u, 8u, surfaceWet < -0.01);
+        npbrWeight = 0.96;
+      } else if (in.kind.x >= 10.5 && in.kind.x < 11.5) {
+        npbrMat = 3u;
+        npbrWeight = 0.98;
+      } else if (in.kind.x >= 11.5 && in.kind.x < 12.5) {
+        npbrMat = 4u;
+        npbrWeight = 0.94;
+      } else if (in.kind.x >= 12.5 && in.kind.x < 13.5) {
+        npbrMat = 5u;
+        npbrWeight = 1.0;
+      } else if (in.kind.x >= 13.5 && in.kind.x < 14.5) {
+        npbrMat = 8u;
+        npbrWeight = select(0.0, 0.88, surfaceWet < -0.01);
+      } else if (in.kind.x >= 14.5 && in.kind.x < 15.5) {
+        npbrMat = 7u;
+        npbrWeight = 0.82;
+      } else if (in.kind.x >= 15.5 && in.kind.x < 16.5) {
+        npbrMat = 11u;
+        npbrWeight = 0.98;
+      } else if (in.kind.x >= 16.5 && in.kind.x < 17.5) {
+        npbrMat = 2u;
+        npbrWeight = 0.90;
+      } else if (in.kind.x >= 17.5 && in.kind.x < 18.5) {
+        npbrMat = 8u;
+        npbrWeight = 0.95;
+      } else if (in.kind.x >= 18.5 && in.kind.x < 19.5) {
+        let isPaintedBoards = floor(in.kind.y) > 4.5;
+        npbrMat = select(4u, 0u, isPaintedBoards);
+        let lumaCur = dot(albedo, vec3f(0.2126, 0.7152, 0.0722));
+        npbrWeight = smoothstep(0.035, 0.09, lumaCur) * 0.94;
+      } else if (in.kind.x >= 19.5) {
+        npbrMat = 3u;
+        npbrWeight = 0.78;
+      }
+      if (npbrWeight > 0.002) {
+        let horizFace = abs(n.y) > 0.65;
+        let wallAlongX = abs(n.z) >= abs(n.x);
+        let npbrUV = select(select(vec2f(world.z, world.y), vec2f(world.x, world.y), wallAlongX), world.xz, horizFace);
+        let npbrDuDx = select(select(vec2f(dx.z, dx.y), vec2f(dx.x, dx.y), wallAlongX), dx.xz, horizFace);
+        let npbrDuDy = select(select(vec2f(dy.z, dy.y), vec2f(dy.x, dy.y), wallAlongX), dy.xz, horizFace);
+        let npbrHint = select(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), wallAlongX), vec3f(1.0, 0.0, 0.0), horizFace);
+        landNpbrGloss = clamp(NPBR.params.z, 0.0, 1.5) * clamp(NPBR.params.x, 0.0, 1.5) * (1.0 - smoothstep(NPBR.params.w * 0.55, NPBR.params.w, npbrCamDist));
+        let npbr = evalNeuralPbr(npbrMat, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrWeight);
+        let npbrBasis = neuralPbrTangentBasis(n, npbrHint);
+        albedo = clamp(albedo * npbr.albedoMul, vec3f(0.005), vec3f(0.98));
+        roughness = clamp(roughness + npbr.roughDelta, 0.08, 0.98);
+        ambientVisibility = clamp(ambientVisibility * npbr.cavityAO, 0.05, 1.0);
+        n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS);
+      }
+    }
+  }`,
+    opts
+  );
 }
 
 /**

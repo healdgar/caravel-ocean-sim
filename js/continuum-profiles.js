@@ -22,25 +22,25 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.38, taperMetres: 500, taperPower: 1.0, splatScale: 0.75, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.02, shadowMaxDistance: 900,
   }),
   people: normalizeContinuumProfile({
-    errorScale: 0.38, taperMetres: 24.0, taperPower: 1.15, splatScale: 1.0, minPixels: 1.1, maxDistance: 0, shadowMinError: 0.14, shadowMaxDistance: 0,
+    errorScale: 0.48, taperMetres: 12.0, taperPower: 1.40, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.38, shadowMaxDistance: 80,
   }),
   hair: normalizeContinuumProfile({
-    errorScale: 0.16, taperMetres: 36.0, taperPower: 1.15, splatScale: 0.85, minPixels: 1.0, maxDistance: 180, shadowMinError: 0.12, shadowMaxDistance: 65,
+    errorScale: 0.18, taperMetres: 32.0, taperPower: 1.20, splatScale: 0.85, minPixels: 1.0, maxDistance: 160, shadowMinError: 0.12, shadowMaxDistance: 65,
   }),
   animals: normalizeContinuumProfile({
-    errorScale: 0.40, taperMetres: 32, taperPower: 1.15, splatScale: 1.0, minPixels: 1.1, maxDistance: 0, shadowMinError: 0.07, shadowMaxDistance: 280,
+    errorScale: 0.40, taperMetres: 32, taperPower: 1.15, splatScale: 1.0, minPixels: 1.1, maxDistance: 0, shadowMinError: 0.07, shadowMaxDistance: 240,
   }),
   props: normalizeContinuumProfile({
-    errorScale: 0.45, taperMetres: 48, taperPower: 1.15, splatScale: 0.90, minPixels: 1.3, maxDistance: 900, shadowMinError: 0.05, shadowMaxDistance: 240,
+    errorScale: 0.45, taperMetres: 48, taperPower: 1.15, splatScale: 0.90, minPixels: 1.3, maxDistance: 900, shadowMinError: 0.05, shadowMaxDistance: 200,
   }),
   city: normalizeContinuumProfile({
-    errorScale: 0.26, taperMetres: 700, taperPower: 1.0, splatScale: 0.55, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.28, shadowMaxDistance: 0,
+    errorScale: 0.30, taperMetres: 280, taperPower: 1.15, splatScale: 0.55, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.28, shadowMaxDistance: 380,
   }),
   boulders: normalizeContinuumProfile({
-    errorScale: 0.50, taperMetres: 420, taperPower: 1.0, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.05, shadowMaxDistance: 750,
+    errorScale: 0.50, taperMetres: 420, taperPower: 1.0, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.05, shadowMaxDistance: 400,
   }),
   forest: normalizeContinuumProfile({
-    errorScale: 0.80, taperMetres: 340, taperPower: 1.0, splatScale: 1.0, minPixels: 1.6, maxDistance: 0, shadowMinError: 0.06, shadowMaxDistance: 900,
+    errorScale: 1.05, taperMetres: 150, taperPower: 1.15, splatScale: 2.2, minPixels: 2.0, maxDistance: 0, shadowMinError: 0.14, shadowMaxDistance: 280,
   }),
   meadow: normalizeContinuumProfile({
     errorScale: 1.45, taperMetres: 100, taperPower: 1.25, splatScale: 1.2, minPixels: 2.3, maxDistance: 850, shadowMinError: 0.22, shadowMaxDistance: 120,
