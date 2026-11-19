@@ -6,7 +6,7 @@
 // game has it. Ground keeps the look of its geography: what the board adds to it is drawn by the GPU
 // (js/board-stamp.js) from the compact tables made here once.
 import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist, segRectDist } from './old-world-city.js';
-import { CITY_ARTILLERY_TOWER, CITY_BASTION, CITY_BATTERY, CITY_BUILDING_TYPES, CITY_CORNER_BASTION, CITY_CHURCH, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_HOUSE_STOREYS, CITY_KEEP, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TOWER, CITY_TYPE, CITY_TYPED_ROOF, cityBatteryGuns, cityCornerBastionPlan, cityCornerBastionType, cityGunType, cityHouseType, cityVariant } from './old-world-buildings.js';
+import { CITY_ARTILLERY_TOWER, CITY_BASTION, CITY_BATTERY, CITY_BUILDING_TYPES, CITY_CORNER_BASTION, CITY_CHURCH, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_HOUSE_STOREYS, CITY_KEEP, CITY_PAINT, CITY_PENTICE, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TOWER, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF, CITY_TYPES_WATERSIDE, cityBatteryGuns, cityCornerBastionPlan, cityCornerBastionType, cityGunType, cityHouseType, cityVariant } from './old-world-buildings.js';
 import { WORKS_BRIDGE, WORKS_WHEEL } from './old-world-works.js';
 import { NATIVE_PALISADE } from './native-works.js';
 import { FORT_RECORDS } from './fort-records.js';
@@ -980,7 +980,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const eaves = boardHashUnit(k, 47) < (f.w >= f.d * 0.8 ? 0.85 : 0.5);
     const { type, T, at } = fit(cityHouseType(extraMural ? 1 : storeys, eaves, (mannered && !extraMural) ? (royalProximity ? 0.85 : boardHashUnit(k, 53)) : 0), f, toStreet);
     const base = seatBlock(at, toStreet ? heightAt(at.x - Math.sin(at.yaw) * (at.d / 2 + 1.5), at.z - Math.cos(at.yaw) * (at.d / 2 + 1.5)) : null);
-    if (base.range > 7.5) { dropped.steep++; return; }
+    const maxFoot = Math.max(2.5, (T.foundationDepth ?? 4.5) - 0.3);
+    if (base.range > 7.5 || base.lo < 0.0 || base.floor - base.lo > maxFoot) { dropped.steep++; return; }
     const tone = royalProximity ? (0.90 + boardHashUnit(k, 29) * 0.09) : washOf(k);
     const wallMat = royalProximity ? (boardHashUnit(k, 63) < 0.45 ? CITY_WALL.ASHLAR : CITY_WALL.STUCCO) : CITY_WALL.HOUSE;
     if (eaves) pushBlock(footprint(f.x, f.z, f.d, f.w, f.yaw + Math.PI / 2), T.height, 0.36 * T.length / 2, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallMat, tone, base);
@@ -1017,9 +1018,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const thatch = key === 'COT' || as === BOARD_THATCHED[arch] || as[6] ? CITY_THATCH_ROOF : 0;
     const { type, T, at: g } = fit(CITY_TYPE[key], f, toStreet && key !== 'WHARF');
     if (key === 'WHARF') g.isWharf = true;
-    const base = key === 'WHARF' ? { floor: wharfOverride?.floor ?? Math.max(BOARD_WHARF_M, heightAt(g.x, g.z)), plinth: 0.3, range: 0 }
+    const base = key === 'WHARF' ? { floor: wharfOverride?.floor ?? Math.max(BOARD_WHARF_M, heightAt(g.x, g.z)), plinth: 0.3, range: 0, lo: BOARD_WHARF_M }
       : seatBlock(g, toStreet ? heightAt(g.x - Math.sin(g.yaw) * (g.d / 2 + 1.5), g.z - Math.cos(g.yaw) * (g.d / 2 + 1.5)) : null);
-    if (base.range > 9) { dropped.steep++; return; }
+    const maxFoot = Math.max(2.5, (T.foundationDepth ?? 4.5) - 0.3);
+    if (base.range > 9 || (key !== 'WHARF' && key !== 'WATERMILL' && (base.lo < 0.0 || base.floor - base.lo > maxFoot))) { dropped.steep++; return; }
     const hu = boardHashUnit(k, 31), paint = arch === 'tannery' ? CITY_PAINT.BROWN : arch === 'dyer' ? BOARD_CLOTHS[Math.floor(hu * 5)] : arch === 'toll' ? CITY_PAINT.RED : -1;
     const tone = paint >= 0 ? paint + 0.3 + 0.65 * hu : key === 'WINDMILL' || key === 'DOVECOTE' || key === 'WHARF' ? 0.2 + 0.75 * hu : washOf(k);
     // Its plot's block: the quarry's is its face, a wharf's its deck.
@@ -2626,6 +2628,34 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     vertices: new Float32Array(waterVerts),
     indices: new Uint32Array(waterIdx),
   } : null;
+
+  // River and pond carving above may lower `heights` beneath bankside buildings that were seated against the
+  // uncarved survey earlier in this pass. Re-seat every non-waterside building (and its attached street fronts)
+  // whose ground fell so no house or longhouse is left hovering over a carved channel or pond rim.
+  if (heights && uncarved) {
+    for (let i = 0; i < typedTypes.length;) {
+      const span = 1 + (attached.get(i) ?? 0);
+      const firstBlock = typedBlocks[i * 2], ownBlocks = typedBlocks[i * 2 + 1];
+      if (ownBlocks > 0 && !CITY_TYPES_WATERSIDE.has(typedTypes[i])) {
+        const at = i * CITY_TYPED_FLOATS;
+        const tx = typed[at], ty = typed[at + 1], tz = typed[at + 2];
+        const carvedDrop = origAt(tx, tz) - heightAt(tx, tz);
+        if (carvedDrop > 0.05) {
+          const nextY = Math.max(BOARD_DRY_M, ty - carvedDrop);
+          const dy = nextY - ty;
+          if (Math.abs(dy) > 1e-4) {
+            for (let s = 0; s < span && i + s < typedTypes.length; s++) {
+              typed[(i + s) * CITY_TYPED_FLOATS + 1] += dy;
+            }
+            for (let b = 0; b < ownBlocks; b++) {
+              blocks[(firstBlock + b) * CITY_BLOCK_FLOATS + 1] += dy;
+            }
+          }
+        }
+      }
+      i += span;
+    }
+  }
 
   /* ---- the town on the lattice: where it stands, how far beyond it each point lies, how near its middle ---- */
   const urbanMark = new Uint8Array(n * n), early = new Float32Array(n * n).fill(-1);

@@ -104,7 +104,7 @@ export function cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, 
     let lo = Infinity, hi = -Infinity, sum = 0;
     for (const [lx, lz] of [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]]) { const [x, z] = local(f, lx, lz), h = heightAt(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); sum += h; }
     const floor = front === null ? sum / 4 : Math.max(lo, Math.min(hi, front));
-    return { floor, plinth: floor - lo + 0.7, range: hi - lo };
+    return { floor, plinth: floor - lo + 0.7, range: hi - lo, lo, hi, center: heightAt(f.x, f.z) };
   };
   const pushBlock = (f, wallH, roofH, roof, wallKind, tone, base = null) => {
     const { floor, plinth } = base ?? seatBlock(f);

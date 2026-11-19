@@ -12,7 +12,7 @@ import {foreshorePalmPlacement} from './forest-trunks.js';
 import {createPortFractures} from './building-fracture.js';
 import {layTownStreets,paveCityStreets,streetEdgeAt} from './town-streets.js';
 import {layPortProps} from './port-props.js';
-import {oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard,runtimeBoardPortKey} from './old-world.js';
+import {bakedBoardFor,oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard,runtimeBoardPortKey,syncOldWorldHeights} from './old-world.js';
 import {nativeOwnGroundFor} from './native-towns.js';
 import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
@@ -276,7 +276,7 @@ export function retargetForestPackToProcedural(
     const portCx = port ? port.center.x : proceduralPack.region.x;
     const portCz = port ? port.center.z : proceduralPack.region.z;
     // Tended country: trees stand where a farmer set them, apart and kept small.
-    const country = oldWorldCountry(region, secPack.heights, port);
+    const country = port?._resolvedCountry ?? oldWorldCountry(region, secPack.heights, port);
     const secWaterAt = createInlandWaterSampler(port?.country ?? country, { margin: 3.8 });
     const secCityBlocked = buildCityBlockTester(secPack.city ?? country?.plan, 2.6);
     const tendedKinds = new Map();
@@ -809,7 +809,7 @@ export function retargetForestPackToProcedural(
     const size = secPack === proceduralPack ? (isMobile ? 512 : 1024) : (isMobile ? 256 : 512);
     const cover = forestGroveCover({ region: { ...region, span }, heights, biome: secPack.biome, beaches: secPack.beaches, port, mangrove: hasMangrove, size });
     forestGroveOccupy(cover, size, { ...region, span }, plantedFlat, groveReach);
-    const country = oldWorldCountry(region, heights, port);
+    const country = port?._resolvedCountry ?? oldWorldCountry(region, heights, port);
     const waterAt = createInlandWaterSampler(port?.country ?? country, { margin: 3.8 });
     const cityBlocked = buildCityBlockTester(secPack.city ?? country?.plan, 2.6);
     const half = span * 0.5 - 0.01;
@@ -2143,7 +2143,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   let baseSnapshot=proceduralPack&&!preloaded1550?{
     region:activeRegion,
-    heights:new Float32Array(heights),
+    heights:new Float32Array(proceduralPack.surveyHeights??heights),
     rawHeights:proceduralPack.rawHeights?new Float32Array(proceduralPack.rawHeights):new Float32Array(heights),
     regionalDem:proceduralPack.regionalDem??null,
     biome:new Uint8Array(biome),
@@ -2155,8 +2155,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     port:proceduralPack.port,
   }:null;
 
+  let fabricEpoch=0;
+  let refreshBoardFabricFn=null;
+
   function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
     if(terrainDisposed||!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
+    fabricEpoch++;
     proceduralPack._cachedForestPlanted=null;
     upgradedPack._cachedForestPlanted=null;
     if(upgradedPack.regionalDem)proceduralPack.regionalDem=upgradedPack.regionalDem;
@@ -2179,7 +2183,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       proceduralPack.vegetation=upgradedPack.vegetation;
     }
     if(upgradedPack.rawHeights)proceduralPack.rawHeights=upgradedPack.rawHeights;
+    if(upgradedPack.elevationSource)proceduralPack.elevationSource=upgradedPack.elevationSource;
     heights.set(upgradedPack.heights);
+    syncOldWorldHeights(heights,{
+      surveyHeights:upgradedPack.surveyHeights??null,
+      port:upgradedPack.port??proceduralPack.port,
+      country:upgradedPack.port?._resolvedCountry??null,
+    });
     device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
     if(upgradedPack.biome&&upgradedPack.biome.byteLength===biome.byteLength){
       biome.set(upgradedPack.biome);
@@ -2208,19 +2218,32 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(upgradedPack.port?.country?.board){
       tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
     }
-    if(upgradedPack.surveyHeights)proceduralPack.surveyHeights=upgradedPack.surveyHeights;
-    if(upgradedPack.board)proceduralPack.board=upgradedPack.board;
+    proceduralPack.surveyHeights=upgradedPack.surveyHeights??null;
+    const registeredBoard=!upgradedPack.city?(bakedBoardFor(activeRegion)?.board??null):null;
     proceduralPack.inlandWater=upgradedPack.inlandWater??null;
     proceduralPack.herds=upgradedPack.herds??null;
-    proceduralPack.city=upgradedPack.city??proceduralPack.city??null;
-    // The city is laid out again on the new ground, whole; what was shot down is put back from the record.
-    portDamage?.capture(proceduralPack?.port);
-    cityStruckIndices.clear();cityHitIndices.clear();
-    setCityBuildings(upgradedPack).catch(error=>console.warn('city continuum',error));
-    activeCity=upgradedPack.city??null;cityTargets=cityTargetsFor(activeCity,upgradedPack.port);
-    portFractures?.destroy();
-    portFractures=portFracturesFor(upgradedPack.port,cityTargets);
-    portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
+    if(registeredBoard&&refreshBoardFabricFn){
+      // A runtime-founded board arrived while the 1550 terrain upgrade was running: re-lay it on the new heights
+      // instead of leaving pre-upgrade building elevations floating over the upgraded terrain.
+      proceduralPack.board=null;
+      proceduralPack.city=null;
+      cityStruckIndices.clear();cityHitIndices.clear();
+      setCityBuildings(null).catch(error=>console.warn('city continuum',error));
+      activeCity=null;cityTargets=null;
+      portFractures?.destroy();portFractures=null;
+      refreshBoardFabricFn(registeredBoard).catch(error=>console.warn('board fabric refresh',error));
+    }else{
+      proceduralPack.board=upgradedPack.board??null;
+      proceduralPack.city=upgradedPack.city??null;
+      // The city is laid out again on the new ground, whole; what was shot down is put back from the record.
+      portDamage?.capture(proceduralPack?.port);
+      cityStruckIndices.clear();cityHitIndices.clear();
+      setCityBuildings(upgradedPack).catch(error=>console.warn('city continuum',error));
+      activeCity=upgradedPack.city??null;cityTargets=cityTargetsFor(activeCity,upgradedPack.port);
+      portFractures?.destroy();
+      portFractures=portFracturesFor(upgradedPack.port,cityTargets);
+      portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
+    }
 
     groundPatches=createGroundCoverPatches(activeRegion,baseGroundSample,null);
     groundStats.patches=groundPatches.length;
@@ -2407,6 +2430,91 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     recentBlastRings.push({x:lx,y,z:lz,t0:lastBallisticClock,maxAge:2.2,strength,speed:26.0,hot:Boolean(hot)});
     if(recentBlastRings.length>16)recentBlastRings.splice(0,recentBlastRings.length-16);
   }
+  async function refreshBoardFabric(nextBoardJson){
+    if(terrainDisposed||!proceduralPack||!nextBoardJson)return false;
+    const myEpoch=++fabricEpoch;
+    const portObj=proceduralPack.port;
+    if(!proceduralPack.surveyHeights)proceduralPack.surveyHeights=heights.slice();
+    const country=refreshOldWorldBoardCountry(nextBoardJson,activeRegion,heights,portObj,proceduralPack.surveyHeights);
+    if(!country)return false;
+    device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
+    if(portObj){
+      portObj._resolvedCountry=country;
+      portObj.country={
+        board:country.board??null,
+        places:country.places??null,
+        riverReaches:country.riverReaches??null,
+        ponds:country.ponds??null,
+        bridges:country.bridges??null,
+      };
+      portObj.riverCut=country.riverCut??null;
+      if(country.watch)portObj.watch=country.watch;
+      // Its works and its waterfront as the board stands them now; the dock, ways and props are read from them again.
+      portObj.works=country.works??[];
+      settlePortOnWaterfront(portObj,heights,activeRegion,country.waterfront??[]);
+      const sampleGround=(x,z)=>terrainSurfaceSample(heights,x,z,activeRegion);
+      portObj.streets=layTownStreets(portObj,sampleGround,{suppressSyntheticCountryRoads:true});
+      portObj.streetsOwn=null;
+      portObj.props=layPortProps(portObj,sampleGround);
+      if(country.plan?.paving?.length){
+        portObj.streets=paveCityStreets(portObj.streets,country.plan.paving);
+      }
+      rebindNearTownField(portObj.streets);
+    }
+    const nextBaseCity=country.plan?{
+      blocks:country.plan.blocks,
+      count:country.plan.count,
+      typed:country.plan.typed,
+      typedTypes:country.plan.typedTypes,
+      typedCount:country.plan.typedCount,
+      typedBlocks:country.plan.typedBlocks,
+      typedAttached:country.plan.typedAttached??null,
+      stats:country.plan.stats,
+    }:null;
+    proceduralPack.board=country.board??null;
+    proceduralPack.inlandWater=country.inlandWater??null;
+    proceduralPack.city=nextBaseCity;
+    proceduralPack.herds=country.herds??null;
+    const nextBiome=synthesizeCoastalBiome(activeRegion,heights,proceduralPack.beaches,portObj);
+    biome.set(nextBiome);
+    proceduralPack.biome=biome;
+    device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
+    proceduralPack.albedo=synthesizeCoastalAlbedo(activeRegion,heights,proceduralPack.beaches,portObj,biome);
+    proceduralPack.vegetation=seedCoastalVegetation(activeRegion,heights,biome,proceduralPack.beaches,portObj);
+    // The board cut its rivers into the lattice again and meshed their banks anew: the land is baked from both.
+    landCentre(portObj?.riverCut);
+    craters?.invalidate(activeRegion);
+    inlandWaterSampler=createInlandWaterSampler(portObj?.country??null);
+    inlandWater?.setGeometry?.(proceduralPack.inlandWater??null);
+    herds?.setBridges?.(portObj?.country?.bridges??null);
+    herds?.setHerds?.(proceduralPack.herds??null);
+    if(proceduralPack.albedo){
+      device.queue.writeTexture({texture:albedo},proceduralPack.albedo,{bytesPerRow:activeRegion.albedoSize*4},[activeRegion.albedoSize,activeRegion.albedoSize]);
+    }
+    boardStamp?.dispose();boardStamp=null;
+    if(proceduralPack.board){
+      const stamp=await createBoardStamp({device,shader,board:proceduralPack.board});
+      if(terrainDisposed||fabricEpoch!==myEpoch){stamp.dispose();return false;}
+      boardStamp=stamp;
+      boardStamp.stamp(albedo,activeRegion.albedoSize);
+    }
+    if(terrainDisposed||fabricEpoch!==myEpoch)return false;
+    regenerateAlbedoMips();
+    for(const [,block] of groundResident){boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
+    groundResident.clear();groundWanted=[];
+    rebuildNeighborTreeInstances();
+    cityStruckIndices.clear();cityHitIndices.clear();
+    setCityBuildings(proceduralPack).catch(error=>console.warn('city continuum',error));
+    activeCity=proceduralPack.city??null;cityTargets=cityTargetsFor(activeCity,portObj);
+    portFractures?.destroy();
+    portFractures=portFracturesFor(portObj,cityTargets);
+    meadowGrass?.sync?.({
+      region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portObj??null,
+      city:proceduralPack.city??null,board:proceduralPack.board??null,inlandWater:proceduralPack.inlandWater??null,
+    });
+    return true;
+  }
+  refreshBoardFabricFn=refreshBoardFabric;
   return {
     waterGroup:pipe=>coastalField.waterGroup(pipe),
     get turbidityScale(){return coastalTurbidityScale(activeRegion.latitude??0,activeRegion.coastalArchetype);},
@@ -2554,88 +2662,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get herds(){return herds;},
     herdsWatch(from,to,best,projectile){return herds?.watchShot?herds.watchShot(from,to,best,projectile):best;},
     setStreetMounts(mountSeeds,routes){return herds?.setStreetMounts?.(mountSeeds,routes);},
-    async refreshBoardFabric(nextBoardJson){
-      if(terrainDisposed||!proceduralPack||!nextBoardJson)return false;
-      const portObj=proceduralPack.port;
-      if(!proceduralPack.surveyHeights)proceduralPack.surveyHeights=heights.slice();
-      const country=refreshOldWorldBoardCountry(nextBoardJson,activeRegion,heights,portObj,proceduralPack.surveyHeights);
-      if(!country)return false;
-      device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
-      if(portObj){
-        portObj._resolvedCountry=country;
-        portObj.country={
-          board:country.board??null,
-          places:country.places??null,
-          riverReaches:country.riverReaches??null,
-          ponds:country.ponds??null,
-          bridges:country.bridges??null,
-        };
-        portObj.riverCut=country.riverCut??null;
-        if(country.watch)portObj.watch=country.watch;
-        // Its works and its waterfront as the board stands them now; the dock, ways and props are read from them again.
-        portObj.works=country.works??[];
-        settlePortOnWaterfront(portObj,heights,activeRegion,country.waterfront??[]);
-        const sampleGround=(x,z)=>terrainSurfaceSample(heights,x,z,activeRegion);
-        portObj.streets=layTownStreets(portObj,sampleGround,{suppressSyntheticCountryRoads:true});
-        portObj.streetsOwn=null;
-        portObj.props=layPortProps(portObj,sampleGround);
-        if(country.plan?.paving?.length){
-          portObj.streets=paveCityStreets(portObj.streets,country.plan.paving);
-        }
-        rebindNearTownField(portObj.streets);
-      }
-      const nextBaseCity=country.plan?{
-        blocks:country.plan.blocks,
-        count:country.plan.count,
-        typed:country.plan.typed,
-        typedTypes:country.plan.typedTypes,
-        typedCount:country.plan.typedCount,
-        typedBlocks:country.plan.typedBlocks,
-        typedAttached:country.plan.typedAttached??null,
-        stats:country.plan.stats,
-      }:null;
-      proceduralPack.board=country.board??null;
-      proceduralPack.inlandWater=country.inlandWater??null;
-      proceduralPack.city=nextBaseCity;
-      proceduralPack.herds=country.herds??null;
-      const nextBiome=synthesizeCoastalBiome(activeRegion,heights,proceduralPack.beaches,portObj);
-      biome.set(nextBiome);
-      proceduralPack.biome=biome;
-      device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
-      proceduralPack.albedo=synthesizeCoastalAlbedo(activeRegion,heights,proceduralPack.beaches,portObj,biome);
-      proceduralPack.vegetation=seedCoastalVegetation(activeRegion,heights,biome,proceduralPack.beaches,portObj);
-      // The board cut its rivers into the lattice again and meshed their banks anew: the land is baked from both.
-      landCentre(portObj?.riverCut);
-      craters?.invalidate(activeRegion);
-      inlandWaterSampler=createInlandWaterSampler(portObj?.country??null);
-      inlandWater?.setGeometry?.(proceduralPack.inlandWater??null);
-      herds?.setBridges?.(portObj?.country?.bridges??null);
-      herds?.setHerds?.(proceduralPack.herds??null);
-      if(proceduralPack.albedo){
-        device.queue.writeTexture({texture:albedo},proceduralPack.albedo,{bytesPerRow:activeRegion.albedoSize*4},[activeRegion.albedoSize,activeRegion.albedoSize]);
-      }
-      boardStamp?.dispose();boardStamp=null;
-      if(proceduralPack.board){
-        const stamp=await createBoardStamp({device,shader,board:proceduralPack.board});
-        if(terrainDisposed){stamp.dispose();return false;}
-        boardStamp=stamp;
-        boardStamp.stamp(albedo,activeRegion.albedoSize);
-      }
-      regenerateAlbedoMips();
-      for(const [,block] of groundResident){boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
-      groundResident.clear();groundWanted=[];
-      rebuildNeighborTreeInstances();
-      cityStruckIndices.clear();cityHitIndices.clear();
-      setCityBuildings(proceduralPack).catch(error=>console.warn('city continuum',error));
-      activeCity=proceduralPack.city??null;cityTargets=cityTargetsFor(activeCity,portObj);
-      portFractures?.destroy();
-      portFractures=portFracturesFor(portObj,cityTargets);
-      meadowGrass?.sync?.({
-        region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portObj??null,
-        city:proceduralPack.city??null,board:proceduralPack.board??null,inlandWater:proceduralPack.inlandWater??null,
-      });
-      return true;
-    },
+    refreshBoardFabric,
     get meadowGrass(){return meadowGrass;},
     meadowGrassStats,
     get bridges(){return proceduralPack?.port?.country?.bridges??[];},

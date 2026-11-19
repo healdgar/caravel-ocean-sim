@@ -399,6 +399,21 @@ export function oldWorldCountry(region, heights, port = null) {
   return country;
 }
 
+// Synchronizes cached country lookups and uncarved survey snapshots whenever a persistent `heights` buffer is
+// replaced in-place (e.g. during a 1550 historical territory or real-DEM upgrade), preventing subsequent
+// `oldWorldCountry` calls from reverting `heights` back to a stale pre-upgrade survey.
+export function syncOldWorldHeights(heights, { surveyHeights = null, port = null, country = null } = {}) {
+  if (!heights) return;
+  countries.delete(heights);
+  uncarvedSurveys.delete(heights);
+  if (surveyHeights instanceof Float32Array && surveyHeights.length === heights.length) {
+    uncarvedSurveys.set(heights, surveyHeights.slice());
+  }
+  if (country && port) {
+    countries.set(heights, { port, country });
+  }
+}
+
 export function refreshOldWorldBoardCountry(nextBoardJson, region, heights, port = null, surveyHeights = null) {
   if (!nextBoardJson || !region || !heights) return null;
   if (surveyHeights instanceof Float32Array && surveyHeights.length === heights.length && !uncarvedSurveys.has(heights)) {

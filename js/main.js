@@ -4528,7 +4528,8 @@ async function main() {
 
   function wakeBoard(){
     if(boardLife||qs.get('boardLife')==='off')return;
-    const region=terrain?.region,pack=window.oceanLand?.pack;
+    const activeTerrain=terrain;
+    const region=activeTerrain?.region,pack=window.oceanLand?.pack;
     let baked=region&&pack?.board?bakedBoardFor(region):null;
     let runtimeFounded=false;
     if(!baked?.world&&region&&pack?.heights&&pack?.port&&qs.get('board')!=='off'&&!castleDuel.active){
@@ -4541,8 +4542,8 @@ async function main() {
       kept:()=>BOARD_KEPT?(runtimeFounded?keptBoard(baked.port,baked.year,{clock:boardKeepClock()}):baked.lived?keptBoard(baked.port,baked.year,{clock:boardKeepClock()}).then(left=>left?.day===baked.lived.day?left:null):null):null,
       keep:record=>BOARD_KEPT?keepBoard({...record,clock:boardKeepClock()}):false,
       onFounded:async nextBoard=>{
-        if(!nextBoard||terrain?.region!==region)return;
-        if(!pack?.board)await terrain?.refreshBoardFabric?.(nextBoard);
+        if(!nextBoard||terrain!==activeTerrain)return;
+        if(!window.oceanLand?.pack?.board)await activeTerrain.refreshBoardFabric?.(nextBoard);
         activePortRef=null;
         folkPlan.at=-Infinity;folkPlan.day=-1;
         caravanPlan.at=-Infinity;

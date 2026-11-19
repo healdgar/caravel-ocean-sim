@@ -6731,10 +6731,16 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
         const inlandM = distWater[k];
         const sat = sampleSatelliteEquirectangular(satSource, u, v);
 
-        // Protect the immediate 1550 colonial bastion & careening wharf core so historical structures stay grounded
-        const inBastionCore = basePack.port
+        // Protect the immediate 1550 colonial bastion & careening wharf core — and any coastal indigenous
+        // village terrace — so historical settlements stay grounded instead of being carved into estuaries.
+        const inIndigenousVillageCore = Boolean(
+          basePack.port?.hasIndigenousSettlement &&
+          basePack.port?.center &&
+          Math.hypot(x - basePack.port.center.x, z - basePack.port.center.z) < 130
+        );
+        const inBastionCore = inIndigenousVillageCore || (basePack.port
           ? !portClearanceEnvelope(basePack.port, x, z, 28)
-          : (region.hasColonialPort !== false && Math.hypot(x - region.x, z - region.z) < 320);
+          : (region.hasColonialPort !== false && Math.hypot(x - region.x, z - region.z) < 320));
 
         if (h > 0.25) {
           // High-frequency canopy & headland ridge micro-relief (Depth-Anything V2 high-pass detail proxy)
