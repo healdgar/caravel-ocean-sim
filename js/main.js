@@ -1827,9 +1827,11 @@ async function main() {
   // A list chosen with the pointer hands the keyboard back to the ship; one worked from the keyboard keeps it.
   let lastInputWasKey = false;
   addEventListener('pointerdown', () => { lastInputWasKey = false; }, true);
+  let shiftHeld = false;
   addEventListener('change', (e) => { if (!lastInputWasKey && e.target instanceof HTMLSelectElement) e.target.blur(); });
   addEventListener('keydown', (e) => {
     lastInputWasKey = true;
+    shiftHeld = Boolean(e.shiftKey);
     if (keyIsForField(e)) return;
     // The port and the choice of career stop the game for an answer: no order reaches the ship from under them.
     if (document.getElementById('port-panel') || document.getElementById('career-prompt')) return;
@@ -1899,8 +1901,8 @@ async function main() {
       vessels[1].gunnery.fire(oppSide);
     }
   });
-  addEventListener('keyup', (e) => { keys[e.code] = false; });
-  addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+  addEventListener('keyup', (e) => { keys[e.code] = false; shiftHeld = Boolean(e.shiftKey); });
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; shiftHeld = false; });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   let freeCamMobile = null;
   function turnView(dx,dy) {
@@ -2139,7 +2141,7 @@ async function main() {
     const mob = freeCamMobile?.state;
     const fwd = Math.max(-1, Math.min(1, ((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)) + (mob ? mob.forward : 0)));
     const str = Math.max(-1, Math.min(1, ((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0)) + (mob ? mob.strafe : 0)));
-    const fast = Boolean(keys.ShiftLeft || keys.ShiftRight || mob?.boost);
+    const fast = Boolean(keys.ShiftLeft || keys.ShiftRight || shiftHeld || mob?.boost);
     if(ashore.on&&terrain){
       // On foot: the way the eye faces, over the ground. A step that a wall or the water stops is tried along
       // each of its two directions alone, so a wall is walked along and not stuck to.
@@ -2159,7 +2161,7 @@ async function main() {
     mx += fwd * cp * sy + str * cy;
     my += fwd * sp + up;
     mz += -fwd * cp * cy + str * sy;
-    const boost = fast ? 10 : 1;
+    const boost = fast ? 40 : 1;
     const v = cam.speed * boost * dt;
     cam.x += mx * v; cam.y += my * v; cam.z += mz * v;
     cam.y = Math.max(-500, Math.min(3000, cam.y));
