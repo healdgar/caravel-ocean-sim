@@ -847,8 +847,11 @@ struct ContinuumVisibilityVarying {
   out.coverage=vec4u(what,state.x&65535u,record.tag.z,continuumView.counts.y);
   return out;
 }
-@fragment fn continuumVisibilityFS(v:ContinuumVisibilityVarying)->@builtin(sample_mask) u32 {
-  return continuumMask(v.coverage,v.position.xy,continuumView.counts.w);
+// Return a struct carrying @location(0) vec4f alongside @builtin(sample_mask) u32: Safari/WebKit WebGPU
+// rejects a bare scalar u32 return type (MTLDataTypeUInt=33) when targets[0] is rgba16float (115), even with writeMask: 0.
+struct ContinuumVisibilityOut { @location(0) colour:vec4f, @builtin(sample_mask) mask:u32 };
+@fragment fn continuumVisibilityFS(v:ContinuumVisibilityVarying)->ContinuumVisibilityOut {
+  return ContinuumVisibilityOut(vec4f(0.0), continuumMask(v.coverage,v.position.xy,continuumView.counts.w));
 }
 `;
 
