@@ -64,7 +64,7 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
   const view=sea.createView();
   const pipes=await Promise.all([[WET_CLEAR,'wetting grid clear'],[WET_DEPOSIT,'spray deposition'],[WET_SEA,'wetting sea heights'],[posed?withPosedWetnessProbes():WET_UPDATE,'surface moisture']].map(([code,label])=>computePipe(code,label)));
   const bind=(p,resources)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
-  const b=buffer=>({buffer});let groups,needsClear=true;
+  const b=buffer=>({buffer});let groups,needsClear=true,wetTick=0;
   return {state,lookup,points,crewOffset:data.crewOffset,crewCount:data.crewCount,probeCount:data.points.length/8,
     connect(interaction,spindrift,seaView,seaSampler){
       groups=[bind(pipes[0],[b(mist)]),
@@ -87,7 +87,11 @@ export async function createSurfaceWetness({device,mesh,hullUBO,frameUBO,compute
     },
     encode(pass,enabled=true){
       if(!enabled && !needsClear)return;
+      const transitioning=enabled!==needsClear;
       needsClear=enabled;
+      // Surface moisture evolves over seconds; halve redundant 4-pass dispatches while always
+      // executing immediately on frame 0 and on enable/disable transitions.
+      if(enabled&&!transitioning&&(wetTick++&1)!==0)return;
       for(let i=enabled?0:3;i<4;i++){
         pass.setPipeline(pipes[i]);pass.setBindGroup(0,groups[i]);
         if(i===2)pass.dispatchWorkgroups(WET_SEA_SIZE/8,WET_SEA_SIZE/8);

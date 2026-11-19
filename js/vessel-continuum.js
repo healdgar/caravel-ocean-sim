@@ -25,7 +25,7 @@ const VESSEL_CONTINUUM_ASSEMBLY = 18;
 const vesselContinuumShading = [null, null, null];
 const vesselContinuumPrelude = (capture, damaged = true) => () => {
   const idx = capture ? 1 : damaged ? 0 : 2;
-  return (vesselContinuumShading[idx] ??= withNeuralPbrVessel(vesselShadingWGSL(capture, damaged))
+  return (vesselContinuumShading[idx] ??= (capture ? vesselShadingWGSL(true, damaged) : withNeuralPbrVessel(vesselShadingWGSL(false, damaged)))
     + `@group(0) @binding(${VESSEL_CONTINUUM_ASSEMBLY}) var<storage,read> vesselAssembly:array<f32>;\n`);
 };
 

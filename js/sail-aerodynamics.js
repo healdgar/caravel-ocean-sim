@@ -111,24 +111,31 @@ function updateSurfaceSailGeometry(geometry,boat){
   if(!state)throw Error('Surface sail geometry requires vessel sailing state');
   const scale=[boat.beam/design.frame.beam,design.frame.verticalScale,boat.length/design.frame.length];
   if(!scale.every(v=>Number.isFinite(v)&&v>0))throw Error('Invalid surface sail dimensions');
-  const poses=new Map(geometry.surfaces.map(surface=>[surface.sail.id,rigSurfacePose(surface.sail,state)]));
+  const poses=new Map();
+  for(const surface of geometry.surfaces)poses.set(surface.sail.id,rigSurfacePose(surface.sail,state));
   const liveContext=withRigPoseContext(context,state,poses),contextKey=surfaceAeroContextKey(liveContext);
+  const prevCtx=geometry.contextKey;
+  let contextChanged=!prevCtx||prevCtx.length!==contextKey.length;
+  if(!contextChanged){
+    for(let i=0;i<contextKey.length;i++)if(prevCtx[i]!==contextKey[i]){contextChanged=true;break;}
+  }
+  if(contextChanged)geometry.contextKey=contextKey;
   for(const surface of geometry.surfaces){
     const {sail,samples,indices,points}=surface,pose=poses.get(sail.id);
-    const values=[...scale,pose.yaw,pose.deployed,pose.fill,pose.pressure,pose.side,pose.opening,pose.dip,...surfaceAeroDescriptorKey(sail),...contextKey];
-    if(surface.key&&values.length===surface.key.length&&values.every((v,i)=>surface.key[i]===v))continue;
+    const values=[scale[0],scale[1],scale[2],pose.yaw,pose.deployed,pose.fill,pose.pressure,pose.side,pose.opening,pose.dip,...surfaceAeroDescriptorKey(sail)];
+    if(!contextChanged&&surface.key&&values.length===surface.key.length&&values.every((v,i)=>surface.key[i]===v))continue;
     for(let j=0;j<samples.length;j++){
       const q=surfaceClothPoint(sail,samples[j][0],samples[j][1],pose,liveContext,0,0);
-      for(let k=0;k<3;k++)points[j][k]=q[k]*scale[k];
+      points[j][0]=q[0]*scale[0];points[j][1]=q[1]*scale[1];points[j][2]=q[2]*scale[2];
     }
     let total=0,low=Infinity,high=-Infinity;
-    for(const point of points){low=Math.min(low,point[1]);high=Math.max(high,point[1]);}
-    for(const [j,[a,b,c]]of indices.entries()){
-      const panel=surface.panels[j],A=points[a],B=points[b],C=points[c];
+    for(const point of points){if(point[1]<low)low=point[1];if(point[1]>high)high=point[1];}
+    for(let j=0;j<indices.length;j++){
+      const [a,b,c]=indices[j],panel=surface.panels[j],A=points[a],B=points[b],C=points[c];
       const ux=B[0]-A[0],uy=B[1]-A[1],uz=B[2]-A[2],vx=C[0]-A[0],vy=C[1]-A[1],vz=C[2]-A[2];
-      const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,m=Math.hypot(nx,ny,nz);
-      panel.normal[0]=nx/Math.max(m,1e-10);panel.normal[1]=ny/Math.max(m,1e-10);panel.normal[2]=nz/Math.max(m,1e-10);
-      for(let k=0;k<3;k++)panel.point[k]=(A[k]+B[k]+C[k])/3;
+      const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,m=Math.hypot(nx,ny,nz),inv=1/Math.max(m,1e-10);
+      panel.normal[0]=nx*inv;panel.normal[1]=ny*inv;panel.normal[2]=nz*inv;
+      panel.point[0]=(A[0]+B[0]+C[0])/3;panel.point[1]=(A[1]+B[1]+C[1])/3;panel.point[2]=(A[2]+B[2]+C[2])/3;
       // Retain the visual bundle while exposing zero aerodynamic area at furl.
       panel.area=m*.5*pose.deployed/(.012+.988*pose.deployed);total+=panel.area;
     }

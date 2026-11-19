@@ -82,6 +82,7 @@ fn captureHeight(p:vec2f,footprint:f32)->f32{
 ${fragment}{
   // Most of a ship is on the wrong side of the surface here. Leave before lighting any of it.
   let captureWorld=${world};
+  if(select((captureWorld.y > 14.0), (captureWorld.y < -14.0), (captureMode.x > 0.5))){discard;return vec4f(0);}
   let eyeDist=length(captureWorld-F.camPos.xyz);
   let pxSpan=max(length(F.camRight.xyz)/max(F.screen.x,1.0),length(F.camUp.xyz)/max(F.screen.y,1.0));
   let footprint=2.0*eyeDist*pxSpan*4.0;

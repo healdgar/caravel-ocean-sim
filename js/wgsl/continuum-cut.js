@@ -44,12 +44,13 @@ export const CONTINUUM_LIVE_WORD = CONTINUUM_DRAW_WORDS + CONTINUUM_VIEW_LISTS;
 export const CONTINUUM_DRAWS_BYTES = (CONTINUUM_LIVE_WORD + 1) * 4;
 export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 48;
 // The select's workgroups each cut this many instances, and are laid in rows of CONTINUUM_ROW.
-export const CONTINUUM_BATCH = 8;
+export const CONTINUUM_BATCH = 4;
 export const CONTINUUM_ROW = 8192;
 // How many cuts an instance may take, each at twice the last's pixel error, when its finest no longer fits the lists.
 export const CONTINUUM_LEVELS = 4;
 // How many of a workgroup's tried clusters keep their test between its passes; the rest are tried again.
-const CONTINUUM_KEPT = 1024;
+// Total workgroup storage stays strictly under WebGPU's 16 KB guaranteed limit (15.2 KB).
+const CONTINUUM_KEPT = 3584;
 // The entries ahead of the lists that hold an instance's state for the frame.
 export const CONTINUUM_STATE_ENTRIES = 3;
 // How each draw reads its list: the list buffer bound as an instance-rate vertex buffer at the list's first entry.
@@ -375,8 +376,11 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     if(!continuumOutside(select(earthCurve(cullAt,F.camPos.y),cullAt,continuumFlagged(record,CONTINUUM_SEA)),cull.w*cut.z)){
       let parent=continuumSphere(record,part,${atlasVec4('at+4u')});
       let own=continuumPlace(record,lod.xyz)+shift;let above=continuumPlace(record,parent.xyz)+shift;
+      let ownPx=continuumPixels(ownError,cut.x,max(length(own)-lod.w*cut.z,CONTINUUM_NEAREST));
+      let parentPx=continuumPixels(parentError,cut.x,max(length(above)-parent.w*cut.z,CONTINUUM_NEAREST));
       for(var j=0u;j<CONTINUUM_LEVELS;j++){
-        if(continuumClusterDrawn(ownError,own,lod.w*cut.z,parentError,above,parent.w*cut.z,cut.x,cut.y*continuumLevel(j))){tried|=1u<<j;}
+        let allowedJ=cut.y*continuumLevel(j);
+        if(parentPx>allowedJ&&ownPx<=allowedJ){tried|=1u<<j;}
       }
     }
   }
@@ -385,9 +389,10 @@ fn continuumTry(slot:u32,i:u32)->u32 {
   if(i<tries.y){
     if(i<tries.w){tried|=${((1 << L) - 1) << 4}u;}
     else{
-      let unit=vec3f(0.0,0.0,1.0);
+      let shdBase=cut.w*cut.z;
       for(var j=0u;j<CONTINUUM_LEVELS;j++){
-        if(continuumClusterDrawn(ownError,unit,0.0,parentError,unit,0.0,1.0,cut.w*cut.z*continuumLevel(j))){tried|=16u<<j;}
+        let allowedS=shdBase*continuumLevel(j);
+        if(parentError>allowedS&&ownError<=allowedS){tried|=16u<<j;}
       }
     }
   }

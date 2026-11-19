@@ -72,15 +72,17 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
     if(id>0u && id<=${VICTORY_SAILS.length}u){
       let sail=victorySails[id-1u];
       if(base==9u || base==13u || base==19u){
-        let offsets=array<vec2f,5>(vec2f(0,0),vec2f(.0005,0),vec2f(-.0005,0),vec2f(0,.0005),vec2f(0,-.0005));
-        var pts=array<vec3f,5>(vec3f(0),vec3f(0),vec3f(0),vec3f(0),vec3f(0));
-        let sampleCount=select(5u,1u,base==19u);
+        let du=select(.0005,-.0005,uv.x>.999);
+        let dv=select(.0005,-.0005,uv.y>.999);
+        let offsets=array<vec2f,3>(vec2f(0,0),vec2f(du,0),vec2f(0,dv));
+        var pts=array<vec3f,3>(vec3f(0),vec3f(0),vec3f(0));
+        let sampleCount=select(3u,1u,base==19u);
         for(var s=0u;s<sampleCount;s++){pts[s]=victorySailCloth(sail,uv+offsets[s]);}
         local=pts[0];
         let restCloth=victorySailRest(sail,uv);let clothDelta=position-restCloth;
         if(base==19u){local+=victorySailRotate(sail,clothDelta);localN=victorySailRotate(sail,normal);}
         else{
-          let clothN=normalize(cross(pts[1]-pts[2],pts[3]-pts[4]));
+          let clothN=normalize(cross((pts[1]-pts[0])*sign(du),(pts[2]-pts[0])*sign(dv)));
           if(hasBakedDamage){
             local+=clothDelta;
             let dispMix=clamp(length(clothDelta)*1.2,0.0,0.85);
@@ -152,9 +154,11 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
     let rest0=sailRestPoint(id,uv);
     let clothDelta=position-rest0;
     let isDamagedCloth=isCloth && hasBakedDamage && dot(clothDelta,clothDelta)>.01;
-    let offsets=array<vec2f,5>(vec2f(0,0),vec2f(.0005,0),vec2f(-.0005,0),vec2f(0,.0005),vec2f(0,-.0005));
-    var pts=array<vec3f,5>(vec3f(0),vec3f(0),vec3f(0),vec3f(0),vec3f(0));
-    let sampleCount=select(1u,5u,isCloth);
+    let du=select(.0005,-.0005,uv.x>.999);
+    let dv=select(.0005,-.0005,uv.y>.999);
+    let offsets=array<vec2f,3>(vec2f(0,0),vec2f(du,0),vec2f(0,dv));
+    var pts=array<vec3f,3>(vec3f(0),vec3f(0),vec3f(0));
+    let sampleCount=select(1u,3u,isCloth);
     for(var s=0u;s<sampleCount;s++){
       let suv=uv+offsets[s];
       let sp=select(select(position,rest0,base==19u || isDamagedCloth),sailRestPoint(id,suv),s>0u);
@@ -163,7 +167,7 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
     local=pts[0];
     if(base==19u){local+=clothRotation(id,clothDelta);}
     else if(isDamagedCloth){local+=clothDelta;}
-    if(isCloth){localN=normalize(cross(pts[1]-pts[2],pts[3]-pts[4]));}
+    if(isCloth){localN=normalize(cross((pts[1]-pts[0])*sign(du),(pts[2]-pts[0])*sign(dv)));}
     else if(base==10u){localN=yardRotation(id,normal);}
     else{localN=clothRotation(id,normal);}
   }

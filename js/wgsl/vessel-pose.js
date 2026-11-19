@@ -20,11 +20,41 @@ struct VesselPoseVertex {position:vec4f,normal:vec4f};
 }
 `;
 
+export const VESSEL_POSE_DYNAMIC_UPDATE=VESSEL_RIG+/* wgsl */ `
+@group(0)@binding(0)var<uniform>hull:Hull;
+@group(0)@binding(1)var<storage,read>vesselPoseSource:array<f32>;
+struct VesselPoseVertex {position:vec4f,normal:vec4f};
+@group(0)@binding(2)var<storage,read_write>vesselPoseOutput:array<VesselPoseVertex>;
+@group(0)@binding(3)var<storage,read>vesselPoseDynamic:array<u32>;
+@compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
+  if(id.x>=arrayLength(&vesselPoseDynamic)){return;}
+  let vertex=vesselPoseDynamic[id.x];let at=vertex*9u;
+  if(vertex>=arrayLength(&vesselPoseOutput)||at+8u>=arrayLength(&vesselPoseSource)){return;}
+  let position=vec3f(vesselPoseSource[at],vesselPoseSource[at+1u],vesselPoseSource[at+2u]);
+  let normal=vec3f(vesselPoseSource[at+3u],vesselPoseSource[at+4u],vesselPoseSource[at+5u]);
+  let uv=vec2f(vesselPoseSource[at+7u],vesselPoseSource[at+8u]);
+  let rig=rigVertex(position,normal,vesselPoseSource[at+6u],uv);
+  vesselPoseOutput[vertex]=VesselPoseVertex(vec4f(rig.position,0),vec4f(rig.normal,0));
+}
+`;
+
 // All descriptor-driven models enter the same canonical compute pose stage.
 // The original Niña/Victory shader and 208-byte Hull contract stay intact.
 export const VESSEL_SURFACE_POSE_UPDATE=GPU_RIG_SURFACES+/* wgsl */ `
 @compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
   let vertex=id.x;let at=vertex*9u;
+  if(vertex>=arrayLength(&vesselPoseOutput)||at+8u>=arrayLength(&vesselPoseSource)||vertex*3u+2u>=arrayLength(&surfaceGpuVertices)){return;}
+  let position=vec3f(vesselPoseSource[at],vesselPoseSource[at+1u],vesselPoseSource[at+2u]);
+  let normal=vec3f(vesselPoseSource[at+3u],vesselPoseSource[at+4u],vesselPoseSource[at+5u]);
+  vesselPoseOutput[vertex]=surfaceGpuVertex(vertex,position,normal);
+}
+`;
+
+export const VESSEL_SURFACE_POSE_DYNAMIC_UPDATE=GPU_RIG_SURFACES+/* wgsl */ `
+@group(0)@binding(6)var<storage,read>vesselPoseDynamic:array<u32>;
+@compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
+  if(id.x>=arrayLength(&vesselPoseDynamic)){return;}
+  let vertex=vesselPoseDynamic[id.x];let at=vertex*9u;
   if(vertex>=arrayLength(&vesselPoseOutput)||at+8u>=arrayLength(&vesselPoseSource)||vertex*3u+2u>=arrayLength(&surfaceGpuVertices)){return;}
   let position=vec3f(vesselPoseSource[at],vesselPoseSource[at+1u],vesselPoseSource[at+2u]);
   let normal=vec3f(vesselPoseSource[at+3u],vesselPoseSource[at+4u],vesselPoseSource[at+5u]);

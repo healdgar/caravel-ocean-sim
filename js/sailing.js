@@ -146,12 +146,12 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
 }
 
 export function sailForces(boat, windSpeed, windDirection, velocity, sideways = 0,
-  roll = boat.roll ?? 0, rollRate = boat.rollVelocity ?? 0) {
+  roll = boat.roll ?? 0, rollRate = boat.rollVelocity ?? 0, reuseGeometry = false) {
   const s = sailingState(boat);
   apparentWind(s, boat.heading, velocity, sideways, windSpeed, windDirection);
   s.forward=0;s.side=0;s.area=0;s.rollMoment=0;s.pitchMoment=0;s.yawMoment=0;s.heaveForce=0;s.squareFill=0;s.lateenFill=0;
   s.panelSide.fill(0);s.panelMoment.fill(0);
-  const geometry=s.geometry,panels=updateSailGeometry(geometry,boat,s.rig),force=geometry.force;
+  const geometry=s.geometry,panels=reuseGeometry?geometry.panels:updateSailGeometry(geometry,boat,s.rig),force=geometry.force;
   const pitch=boat.pitch??0,pitchRate=boat.pitchVelocity??0,yawRate=boat.yawRate??0,heaveRate=boat.heaveVelocity??0;
   const cr=Math.cos(roll),sr=Math.sin(roll),cp=Math.cos(pitch),sp=Math.sin(pitch);
   const datum=boat.hydrodynamics?.datumDraft??vesselDraft(boat),cg=(boat.hydrodynamics?.centreOfGravity??datum)-datum;

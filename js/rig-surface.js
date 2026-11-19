@@ -5,13 +5,13 @@ import {evaluateRopeWaveDisplacement} from './rope-wave.js';
 const surfaceKinds=new Set(['square','lateen','headsail','gaff','bermudan']);
 const surfaceClamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 const surfaceSmooth=(a,b,x)=>{const t=surfaceClamp((x-a)/(b-a));return t*t*(3-2*t);};
-const surfaceAdd=(a,b)=>a.map((x,i)=>x+b[i]);
-const surfaceSubtract=(a,b)=>a.map((x,i)=>x-b[i]);
-const surfaceMultiply=(a,s)=>a.map(x=>x*s);
-const surfaceDot=(a,b)=>a.reduce((sum,x,i)=>sum+x*b[i],0);
+const surfaceAdd=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const surfaceSubtract=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const surfaceMultiply=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
+const surfaceDot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const surfaceCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
-const surfaceMix=(a,b,t)=>a.map((x,i)=>x+(b[i]-x)*t);
-const surfaceFinitePoint=p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite);
+const surfaceMix=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];
+const surfaceFinitePoint=p=>Array.isArray(p)&&p.length===3&&Number.isFinite(p[0])&&Number.isFinite(p[1])&&Number.isFinite(p[2]);
 const surfaceCheckedGeometry=new WeakSet(),surfacePreparedViews=new WeakMap(),surfacePreparedNormals=new WeakMap();
 function surfaceFrozenData(value){
   if(!value||!Object.isFrozen(value))return false;
@@ -19,10 +19,11 @@ function surfaceFrozenData(value){
   if(prototype!==Object.prototype&&prototype!==Array.prototype&&prototype!==null)return false;
   return Object.values(Object.getOwnPropertyDescriptors(value)).every(d=>Object.hasOwn(d,'value'));
 }
-function surfaceUnit(p){const length=Math.hypot(...p);if(!(length>1e-12))throw Error('Degenerate rig surface axis');return surfaceMultiply(p,1/length);}
+function surfaceUnit(p){const length=Math.hypot(p[0],p[1],p[2]);if(!(length>1e-12))throw Error('Degenerate rig surface axis');const inv=1/length;return [p[0]*inv,p[1]*inv,p[2]*inv];}
 function surfaceRotate(p,axis,angle){
-  const a=surfaceUnit(axis),c=Math.cos(angle),s=Math.sin(angle),cross=surfaceCross(a,p),dot=surfaceDot(a,p);
-  return p.map((x,i)=>x*c+cross[i]*s+a[i]*dot*(1-c));
+  const a=surfaceUnit(axis),c=Math.cos(angle),s=Math.sin(angle),d=a[0]*p[0]+a[1]*p[1]+a[2]*p[2],k=1-c;
+  const cx=a[1]*p[2]-a[2]*p[1],cy=a[2]*p[0]-a[0]*p[2],cz=a[0]*p[1]-a[1]*p[0];
+  return [p[0]*c+cx*s+a[0]*d*k,p[1]*c+cy*s+a[1]*d*k,p[2]*c+cz*s+a[2]*d*k];
 }
 function surfaceCheck(surface){
   if(surfaceCheckedGeometry.has(surface))return;
@@ -173,16 +174,26 @@ export function withRigPoseContext(context,state={},poses=null){
   const live=poses??new Map((context.surfaces??[]).map(s=>[s.id,rigSurfacePose(s,state)]));
   if(!context.spars?.length)return {...context,state,poses:live};
   const stationary=context._surfaceCollisionSupports??[...(context.supports??[]),...(context.masts??[]).map(surfaceMastSupport)];
-  const moving=context.spars.map(spar=>{
-    const owner=surfaceFind(spar.surface,context),pose=live.get(owner.id),a=surfaceYardPoint(owner,spar.a,pose),b=surfaceYardPoint(owner,spar.b,pose),axis=surfaceSubtract(b,a);
-    return {a,b,r:spar.radius,kind:'spar',surface:owner.id,mast:owner.mast,...(spar.kind===undefined?{}:{sparKind:spar.kind}),_surfaceAxis:axis,_surfaceLength2:surfaceDot(axis,axis)};
-  });
+  const stationaryData=surfacePreparedSupportData(stationary);
+  const moving=[],movingData=stationaryData?[]:null;
+  for(let i=0;i<context.spars.length;i++){
+    const spar=context.spars[i],owner=surfaceFind(spar.surface,context),pose=live.get(owner.id);
+    const a=surfaceYardPoint(owner,spar.a,pose),b=surfaceYardPoint(owner,spar.b,pose),axis=surfaceSubtract(b,a),length2=surfaceDot(axis,axis);
+    const rec={a,b,r:spar.radius,kind:'spar',surface:owner.id,mast:owner.mast,...(spar.kind===undefined?{}:{sparKind:spar.kind}),_surfaceAxis:axis,_surfaceLength2:length2};
+    moving.push(rec);
+    if(movingData){
+      if(!(length2>=1e-12)||!Number.isFinite(spar.radius??0)){movingData.length=0;break;}
+      movingData.push({ax:a[0],ay:a[1],az:a[2],bx:b[0],by:b[1],bz:b[2],x:axis[0],y:axis[1],z:axis[2],length2,
+        r:spar.radius??0,rEnd:undefined,kind:'spar',mast:owner.mast,surface:owner.id,...(spar.kind===undefined?{}:{sparKind:spar.kind})});
+    }
+  }
   // Dynamic endpoints belong to this one pose view. They are deliberately
   // separate from the immutable authored-support preparation above.
   const active=[...stationary,...moving];
-  if(surfacePreparedSupportData(stationary)){
-    for(const support of moving){Object.freeze(support.a);Object.freeze(support.b);Object.freeze(support._surfaceAxis);Object.freeze(support);}
-    Object.freeze(active);surfacePreparedViews.set(active,{data:null});
+  if(stationaryData&&movingData.length===context.spars.length){
+    const data=[...stationaryData,...movingData];
+    surfacePreparedViews.set(active,{data});
+    surfacePreparedNormals.set(data,{entries:[],fore:[],aft:[]});
   }
   return {...context,state,poses:live,_surfaceActiveSupports:active};
 }

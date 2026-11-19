@@ -78,13 +78,18 @@ struct NeuralPbrSample {
 @group(${group}) @binding(${latentBinding}) var<storage, read> neuralPbrLatents: array<u32>;
 @group(${group}) @binding(${weightBinding}) var<uniform> NPBR: NeuralPbrWeights;
 
+struct NeuralPbrPair {
+  a: vec4f,
+  b: vec4f,
+};
+
 fn neuralPbrMipOffset(mip: u32) -> u32 {
   return (16384u - (16384u >> (min(mip, 6u) * 2u))) / 3u;
 }
 
-fn neuralPbrSampleMip(baseWord: u32, uvWrap: vec2f, mip: u32) -> vec4f {
+fn neuralPbrSampleMipPair(baseWord: u32, uvWrap: vec2f, mip: u32) -> NeuralPbrPair {
   if (mip >= 6u) {
-    return vec4f(0.0);
+    return NeuralPbrPair(vec4f(0.0), vec4f(0.0));
   }
   let sz = 64u >> mip;
   let mask = sz - 1u;
@@ -94,28 +99,38 @@ fn neuralPbrSampleMip(baseWord: u32, uvWrap: vec2f, mip: u32) -> vec4f {
   let i0 = bitcast<vec2u>(vec2i(fl)) & vec2u(mask);
   let i1 = (i0 + vec2u(1u)) & vec2u(mask);
   let off = baseWord + neuralPbrMipOffset(mip);
-  let s00 = unpack4x8snorm(neuralPbrLatents[off + i0.y * sz + i0.x]);
-  let s10 = unpack4x8snorm(neuralPbrLatents[off + i0.y * sz + i1.x]);
-  let s01 = unpack4x8snorm(neuralPbrLatents[off + i1.y * sz + i0.x]);
-  let s11 = unpack4x8snorm(neuralPbrLatents[off + i1.y * sz + i1.x]);
-  return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+  let k00 = (off + i0.y * sz + i0.x) * 2u;
+  let k10 = (off + i0.y * sz + i1.x) * 2u;
+  let k01 = (off + i1.y * sz + i0.x) * 2u;
+  let k11 = (off + i1.y * sz + i1.x) * 2u;
+  let a = mix(
+    mix(unpack4x8snorm(neuralPbrLatents[k00]), unpack4x8snorm(neuralPbrLatents[k10]), f.x),
+    mix(unpack4x8snorm(neuralPbrLatents[k01]), unpack4x8snorm(neuralPbrLatents[k11]), f.x),
+    f.y
+  );
+  let b = mix(
+    mix(unpack4x8snorm(neuralPbrLatents[k00 + 1u]), unpack4x8snorm(neuralPbrLatents[k10 + 1u]), f.x),
+    mix(unpack4x8snorm(neuralPbrLatents[k01 + 1u]), unpack4x8snorm(neuralPbrLatents[k11 + 1u]), f.x),
+    f.y
+  );
+  return NeuralPbrPair(a, b);
 }
 
-fn sampleNeuralPbrBand(matId: u32, band: u32, uv: vec2f, lod: f32) -> vec4f {
+fn sampleNeuralPbrBandPair(matId: u32, band: u32, uv: vec2f, lod: f32) -> NeuralPbrPair {
   if (lod >= 6.0) {
-    return vec4f(0.0);
+    return NeuralPbrPair(vec4f(0.0), vec4f(0.0));
   }
   let uvWrap = uv - floor(uv);
   let baseWord = min(matId, 11u) * ${NEURAL_PBR_WORDS_PER_MATERIAL}u + band * ${NEURAL_PBR_WORDS_PER_BAND}u;
   let clod = clamp(lod, 0.0, 6.0);
   let m0 = u32(floor(clod));
   let ft = clod - f32(m0);
-  if (clod >= 2.5 || ft <= 0.08 || ft >= 0.92) {
-    return neuralPbrSampleMip(baseWord, uvWrap, min(m0 + select(0u, 1u, ft >= 0.5), 6u));
+  if (clod >= 2.0 || ft <= 0.12 || ft >= 0.88) {
+    return neuralPbrSampleMipPair(baseWord, uvWrap, min(m0 + select(0u, 1u, ft >= 0.5), 6u));
   }
-  let a = neuralPbrSampleMip(baseWord, uvWrap, m0);
-  let b = neuralPbrSampleMip(baseWord, uvWrap, min(m0 + 1u, 6u));
-  return mix(a, b, ft);
+  let p0 = neuralPbrSampleMipPair(baseWord, uvWrap, m0);
+  let p1 = neuralPbrSampleMipPair(baseWord, uvWrap, min(m0 + 1u, 6u));
+  return NeuralPbrPair(mix(p0.a, p1.a, ft), mix(p0.b, p1.b, ft));
 }
 
 fn evalNeuralPbr(
@@ -140,62 +155,29 @@ fn evalNeuralPbr(
   }
   let lod1 = clamp(log2(max(footM * sc.y * 46.0, 1.0)), 0.0, 6.0);
   let uv0 = surfUV * sc.x + vec2f(sc.w, sc.w * 0.618034);
-  let z0 = sampleNeuralPbrBand(m, 0u, uv0, lod0);
-  let hasMicro = lod1 < 5.0 && distFade > 0.25;
-  var z1 = vec4f(0.0);
-  if (hasMicro) {
+  let p0 = sampleNeuralPbrBandPair(m, 0u, uv0, lod0);
+  var accA = p0.a;
+  var accB = p0.b;
+  if (lod1 < 3.0 && distFade > 0.25) {
     let uv1 = vec2f(
       uv0.x * ${NEURAL_PBR_ROT_COS} - uv0.y * ${NEURAL_PBR_ROT_SIN},
       uv0.x * ${NEURAL_PBR_ROT_SIN} + uv0.y * ${NEURAL_PBR_ROT_COS}
     ) * 5.61803399;
-    z1 = sampleNeuralPbrBand(m, 1u, uv1, lod1);
+    let p1 = sampleNeuralPbrBandPair(m, 1u, uv1, lod1);
+    accA += p1.a;
+    accB += p1.b;
   }
-  if (all(z0 == vec4f(0.0)) && all(z1 == vec4f(0.0))) {
+  if (all(accA == vec4f(0.0)) && all(accB == vec4f(0.0))) {
     return NeuralPbrSample(vec3f(1.0), 0.0, vec2f(0.0), 1.0, 0.0);
   }
 
-  let m0 = z0 * NPBR.matMeso[m];
-  let m1 = select(vec4f(0.0), z1 * NPBR.matMicro[m], hasMicro);
-  let gBase = m * 4u;
-  let slope = f32(${NEURAL_PBR_LEAKY_SLOPE});
-  var accA = vec4f(0.0);
-  var accB = vec4f(0.0);
-  {
-    var p = NPBR.w1Meso0 * m0;
-    if (hasMicro) { p += NPBR.w1Micro0 * m1; }
-    let h = select(p * slope, p, p >= vec4f(0.0)) * NPBR.matGate[gBase];
-    accA += NPBR.w2A0 * h;
-    accB += NPBR.w2B0 * h;
-  }
-  {
-    var p = NPBR.w1Meso1 * m0;
-    if (hasMicro) { p += NPBR.w1Micro1 * m1; }
-    let h = select(p * slope, p, p >= vec4f(0.0)) * NPBR.matGate[gBase + 1u];
-    accA += NPBR.w2A1 * h;
-    accB += NPBR.w2B1 * h;
-  }
-  {
-    var p = NPBR.w1Meso2 * m0;
-    if (hasMicro) { p += NPBR.w1Micro2 * m1; }
-    let h = select(p * slope, p, p >= vec4f(0.0)) * NPBR.matGate[gBase + 2u];
-    accA += NPBR.w2A2 * h;
-    accB += NPBR.w2B2 * h;
-  }
-  {
-    var p = NPBR.w1Meso3 * m0;
-    if (hasMicro) { p += NPBR.w1Micro3 * m1; }
-    let h = select(p * slope, p, p >= vec4f(0.0)) * NPBR.matGate[gBase + 3u];
-    accA += NPBR.w2A3 * h;
-    accB += NPBR.w2B3 * h;
-  }
-
   let outA = clamp(
-    accA * 1.35,
+    accA * vec4f(0.70, 0.70, 0.70, 0.45),
     vec4f(-0.68, -0.68, -0.68, -0.42),
     vec4f(0.68, 0.68, 0.68, 0.42)
   ) * strength;
   let outB = clamp(
-    accB * 1.35,
+    accB * vec4f(0.80, 0.80, 0.46, 0.90),
     vec4f(-0.78, -0.78, -0.44, -0.88),
     vec4f(0.78, 0.78, 0.44, 0.88)
   ) * strength;

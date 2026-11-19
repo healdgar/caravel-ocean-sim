@@ -22,10 +22,10 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.38, taperMetres: 500, taperPower: 1.0, splatScale: 0.75, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.02, shadowMaxDistance: 900,
   }),
   people: normalizeContinuumProfile({
-    errorScale: 0.48, taperMetres: 12.0, taperPower: 1.40, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.38, shadowMaxDistance: 80,
+    errorScale: 0.72, taperMetres: 7.5, taperPower: 1.55, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.38, shadowMaxDistance: 80,
   }),
   hair: normalizeContinuumProfile({
-    errorScale: 0.18, taperMetres: 32.0, taperPower: 1.20, splatScale: 0.85, minPixels: 1.0, maxDistance: 220, shadowMinError: 0.12, shadowMaxDistance: 65,
+    errorScale: 0.35, taperMetres: 14.0, taperPower: 1.50, splatScale: 0.85, minPixels: 1.0, maxDistance: 160, shadowMinError: 0.12, shadowMaxDistance: 65,
   }),
   animals: normalizeContinuumProfile({
     errorScale: 0.40, taperMetres: 32, taperPower: 1.15, splatScale: 1.0, minPixels: 1.1, maxDistance: 0, shadowMinError: 0.07, shadowMaxDistance: 240,

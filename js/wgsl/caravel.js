@@ -335,27 +335,29 @@ fn vesselSurvives(in:BoatVertex)->bool {
   if (isWood || in.material == 15u || in.material == 16u || in.material == 17u || paintedWood) {
     timber = pow(textureSampleGrad(oakAlbedo, oakSampler, oakUV, oakDx, oakDy).rgb, vec3f(2.2));
     relief = dot(timber, vec3f(0.2126,0.7152,0.0722));
-    let broad = gnoise(vec2f(oakUV.x * 18.0, oakUV.y * 0.7));
-    grain = gnoise(vec2f(oakUV.x * 180.0 + broad*3.0, oakUV.y * 5.0));
-    let footprint = max(length(oakDx), length(oakDy));
-    let edge=min(fract(course),1.0-fract(course));
-    let seam=select(1.0-smoothstep(.008,.035+courseFw,edge), 0.0, isDugoutCanoe || isGunwaleRail);
-    let butt=min(fract(buttCoord),1.0-fract(buttCoord));
-    let buttSeam=select(1.0-smoothstep(.0008,.003+buttFw,butt), 0.0, isDugoutCanoe || isGunwaleRail);
-    let deckEdge=min(fract(deckCourse),1.0-fract(deckCourse));
-    let deckSeam=1.0-smoothstep(.014,.038+deckCourseFw,deckEdge);
-    let deckButtEdge=min(fract(deckButtCoord),1.0-fract(deckButtCoord));
-    let deckButtSeam=1.0-smoothstep(.001,.004+deckButtFw,deckButtEdge);
-    deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),hasGaplessDeck);
-    let castleFore=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='forecastle').bounds[1]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='forecastle').bounds[1]},hull.rig.w<2.5);
-    let castleAft=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='quarter').bounds[0]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='quarter').bounds[0]},hull.rig.w<2.5);
-    let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>castleAft || p.z<castleFore);
-    castleMoulding=select(0.0,1.0-smoothstep(.14,.22,abs(fract(course*.3333)-.5)*3.0),isCastleWall);
-    castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && hull.rig.w>2.5 && castleMoulding<.5);
-    let castleRelief=(castleMoulding*.0024 + castleFuttock*.0018);
-    join=select(deckCaulk*.85,max(seam,buttSeam*.8),plankedWall);
-    bump=relief*.0038 + grain*.00042*(1.0-smoothstep(.0005,.004,footprint)) - join*.0015 + castleRelief;
-    ${damaged?'if(in.damage>0.05){bump+=smoothstep(0.05,0.45,clamp(in.damage,0.0,1.5))*gnoise(vec2f(p.z*28.0,p.y*165.0))*.016*(1.0-smoothstep(.002,.015,footprint));}':''}
+    if (!vesselWaterCapture) {
+      let broad = gnoise(vec2f(oakUV.x * 18.0, oakUV.y * 0.7));
+      grain = gnoise(vec2f(oakUV.x * 180.0 + broad*3.0, oakUV.y * 5.0));
+      let footprint = max(length(oakDx), length(oakDy));
+      let edge=min(fract(course),1.0-fract(course));
+      let seam=select(1.0-smoothstep(.008,.035+courseFw,edge), 0.0, isDugoutCanoe || isGunwaleRail);
+      let butt=min(fract(buttCoord),1.0-fract(buttCoord));
+      let buttSeam=select(1.0-smoothstep(.0008,.003+buttFw,butt), 0.0, isDugoutCanoe || isGunwaleRail);
+      let deckEdge=min(fract(deckCourse),1.0-fract(deckCourse));
+      let deckSeam=1.0-smoothstep(.014,.038+deckCourseFw,deckEdge);
+      let deckButtEdge=min(fract(deckButtCoord),1.0-fract(deckButtCoord));
+      let deckButtSeam=1.0-smoothstep(.001,.004+deckButtFw,deckButtEdge);
+      deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),hasGaplessDeck);
+      let castleFore=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='forecastle').bounds[1]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='forecastle').bounds[1]},hull.rig.w<2.5);
+      let castleAft=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='quarter').bounds[0]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='quarter').bounds[0]},hull.rig.w<2.5);
+      let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>castleAft || p.z<castleFore);
+      castleMoulding=select(0.0,1.0-smoothstep(.14,.22,abs(fract(course*.3333)-.5)*3.0),isCastleWall);
+      castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && hull.rig.w>2.5 && castleMoulding<.5);
+      let castleRelief=(castleMoulding*.0024 + castleFuttock*.0018);
+      join=select(deckCaulk*.85,max(seam,buttSeam*.8),plankedWall);
+      bump=relief*.0038 + grain*.00042*(1.0-smoothstep(.0005,.004,footprint)) - join*.0015 + castleRelief;
+      ${damaged?'if(in.damage>0.05){bump+=smoothstep(0.05,0.45,clamp(in.damage,0.0,1.5))*gnoise(vec2f(p.z*28.0,p.y*165.0))*.016*(1.0-smoothstep(.002,.015,footprint));}':''}
+    }
   }
   ${damaged?`// Timber stands raw and splintered around a hole, and whatever is seen through it lies in the dark of the hold.
   let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
@@ -370,7 +372,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
   if(isIron){n=normalize(n-clamp(ironGradient,vec3f(-.18),vec3f(.18)));}
   var albedo = timber * vec3f(1.02,.98,.88);
   var rough = clamp(.64 + (.2-relief)*.14 + (grain-.5)*.06,.54,.78); var metal = 0.0;
-  let canvasDepth = canvasThickness(in.uv, in.material) * canvasWetDepth(wet.x);
+  let canvasDepth = select(1.0, canvasThickness(in.uv, in.material), !vesselWaterCapture) * canvasWetDepth(wet.x);
   let plank=select(deckPlankId,board,plankedWall);
   albedo *= .88 + .16 * select(fract(sin(plank*74.17)*4321.1), 0.5, isDugoutCanoe);
   albedo *= 1.0-join*.58;
@@ -637,7 +639,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
   // The sea surface under this fragment: three cascade samples, taken once and shared by the
   // waterline, the caustics and every water reflection below. The underwater capture uses none.
   var oceanY = 0.0;
-  if(!vesselWaterCapture || F.screen.x < 0.0) { oceanY = oceanHeight(in.world.xz); }
+  if((!vesselWaterCapture && in.world.y < 2.5) || F.screen.x < 0.0) { oceanY = oceanHeight(in.world.xz); }
   let waterSurfY = select(0.0, oceanY, !vesselWaterCapture && in.world.y < 2.2);
   let hullExterior = hullExteriorFace(p, in.normalLocal);
   let waveMeniscus = select(0.0, (1.0 - smoothstep(0.0, 0.28, abs(in.world.y - waterSurfY))) * step(waterSurfY - 0.06, in.world.y), !vesselWaterCapture && in.world.y < 2.2 && hullExterior);
@@ -931,7 +933,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
   var col=(diffuse/PI+spec)*direct*nl*directTransmission;
   col+=(diffuseAmbient*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0))*environmentTransmission;
   // Grazing-angle flax & hemp micro-fibre fuzz rim sheen on sails and ropes
-  if(in.material==2u || in.material==12u || in.material==19u || in.material==9u || in.material==13u || in.material>=${VESSEL_COLOURS_MATERIAL}u){
+  if(!vesselWaterCapture && (in.material==2u || in.material==12u || in.material==19u || in.material==9u || in.material==13u || in.material>=${VESSEL_COLOURS_MATERIAL}u)){
     let grazing=1.0-clamp(dot(n,v),0.0,1.0);
     let g2=grazing*grazing;
     let isRopeMat = in.material==2u || in.material==12u || in.material==19u;
@@ -973,12 +975,14 @@ fn vesselSurvives(in:BoatVertex)->bool {
     let behind=sky*(1.0-skyVisibility)+bounce*0.22*skyVisibility;
     col+=behind*exp(-opticalDepth)*0.7;
   }
-  let moonVisibility=sunVis[1]*lunarShadowVisibility(shadowSample);
-  col+=lunarSurface(n,v,diffuse,rough,f0,moonVisibility);
-  if(in.material==9u||in.material==13u){
-    let ml=lunarDirection();let throughMoon=max(dot(-n,ml),0.0);
-    let moonScatter=.70/PI+.30*(34.0/(2.0*PI))*pow(max(dot(-v,ml),0.0),32.0);
-    col+=lunarIlluminance()*moonVisibility*canvasTransmission(canvasDepth,throughMoon)*throughMoon*moonScatter;
+  if (sunVis[1] > 0.001) {
+    let moonVisibility=sunVis[1]*lunarShadowVisibility(shadowSample);
+    col+=lunarSurface(n,v,diffuse,rough,f0,moonVisibility);
+    if(in.material==9u||in.material==13u){
+      let ml=lunarDirection();let throughMoon=max(dot(-n,ml),0.0);
+      let moonScatter=.70/PI+.30*(34.0/(2.0*PI))*pow(max(dot(-v,ml),0.0),32.0);
+      col+=lunarIlluminance()*moonVisibility*canvasTransmission(canvasDepth,throughMoon)*throughMoon*moonScatter;
+    }
   }
   col+=lightningSurface(n,v,albedo,rough)+gunFlashSurface(in.world,n,v,albedo,rough)+worldFireSurface(in.world,n,v,albedo,rough);
   if(in.material==9u || in.material==13u){col+=lightningLight()*albedo*max(dot(-n,lightningDirection()),0.0)*.12;}

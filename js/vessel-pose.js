@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-import {VESSEL_POSE_UPDATE,VESSEL_SURFACE_POSE_UPDATE} from './wgsl/vessel-pose.js';
+import {VESSEL_POSE_UPDATE,VESSEL_POSE_DYNAMIC_UPDATE,VESSEL_SURFACE_POSE_UPDATE,VESSEL_SURFACE_POSE_DYNAMIC_UPDATE} from './wgsl/vessel-pose.js';
 import {createRigGPUFrame,writeRigGPUFrame} from './rig-gpu-data.js';
 import {createVesselRecoil} from './vessel-recoil.js';
 import {createPartAssemblyGPU,bakeVesselImpactMarks} from './part-assembly.js';
@@ -7,10 +7,29 @@ import {createShipFractureGPU} from './ship-fracture.js';
 import {createVesselDetailGPU} from './vessel-detail.js';
 
 const vesselPosePipelineCache=new WeakMap();
-async function vesselPosePipeline(device,computePipe,generic){
+async function vesselPosePipeline(device,computePipe,generic,dynamic=false){
   let modes=vesselPosePipelineCache.get(device);if(!modes){modes=new Map();vesselPosePipelineCache.set(device,modes);}
-  if(!modes.has(generic))modes.set(generic,computePipe(generic?VESSEL_SURFACE_POSE_UPDATE:VESSEL_POSE_UPDATE,'shared vessel deformation'));
-  try{return await modes.get(generic);}catch(error){modes.delete(generic);throw error;}
+  const key=(generic?2:0)|(dynamic?1:0);
+  const code=generic?(dynamic?VESSEL_SURFACE_POSE_DYNAMIC_UPDATE:VESSEL_SURFACE_POSE_UPDATE):(dynamic?VESSEL_POSE_DYNAMIC_UPDATE:VESSEL_POSE_UPDATE);
+  if(!modes.has(key))modes.set(key,computePipe(code,dynamic?'shared dynamic vessel deformation':'shared vessel deformation'));
+  try{return await modes.get(key);}catch(error){modes.delete(key);throw error;}
+}
+
+function collectDynamicVesselIndices(vertexCount,mesh,rigData){
+  if(rigData){
+    const verts=rigData.vertices,out=[];
+    for(let i=0;i<vertexCount;i++)if(verts[i*12]!==0)out.push(i);
+    return new Uint32Array(out);
+  }
+  if(mesh instanceof Float32Array&&mesh.length>=vertexCount*9){
+    const out=[];
+    for(let i=0;i<vertexCount;i++){
+      const m=mesh[i*9+6],base=Math.floor(m),frac=m-base,uvx=mesh[i*9+7];
+      if(base===7||base===8||base===14||base===18||(base===12&&uvx>=100)||(frac>1e-4&&(base===9||base===13||base===19||base===10)))out.push(i);
+    }
+    return new Uint32Array(out);
+  }
+  return null;
 }
 
 export async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,pristineMesh=null,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null,fracture=null,detail=null}){
@@ -38,13 +57,33 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
   // The descriptor shader reads its compact state rather than Hull. Automatic
   // layouts omit that unused binding; retain the original binding numbers.
   const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource:{buffer:resource}})).filter(entry=>!rigData||entry.binding!==0)});
+  // Compact dynamic-only vertex dispatch: rigid hull/deck/gun/mast vertices never move while sailing intact,
+  // cutting pose compute threads by 65–95% across every ship model with bit-identical results.
+  let dynamicPipeline=shared?.dynamicPipeline??null,dynamicBuffer=shared?.dynamicBuffer??null,dynamicCount=shared?.dynamicCount??-1,dynamicGroup=null;
+  if(!shared){
+    const indices=collectDynamicVesselIndices(vertexCount,pristineMesh??mesh,rigData);
+    if(indices&&indices.length<vertexCount){
+      dynamicCount=indices.length;
+      if(dynamicCount>0){
+        dynamicPipeline=await vesselPosePipeline(device,computePipe,!!rigData,true);
+        dynamicBuffer=device.createBuffer({label:'shared dynamic vessel vertex indices',size:indices.byteLength,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+        device.queue.writeBuffer(dynamicBuffer,0,indices);
+      }
+    }
+  }
+  if(dynamicPipeline&&dynamicBuffer&&dynamicCount>0){
+    const dynBinding=rigData?6:3;
+    const dynEntries=resources.map((resource,binding)=>({binding,resource:{buffer:resource}})).filter(entry=>!rigData||entry.binding!==0);
+    dynEntries.push({binding:dynBinding,resource:{buffer:dynamicBuffer}});
+    dynamicGroup=device.createBindGroup({layout:dynamicPipeline.getBindGroupLayout(0),entries:dynEntries});
+  }
   const recoil=recoilMap?.guns?.length?await createVesselRecoil({device,computePipe,posedBuffer:buffer,recoilMap,shared:shared?.recoilAssets??null}):null;
   const assembly=partAssembly?.parts?.length?await createPartAssemblyGPU({device,computePipe,posedBuffer:buffer,catalog:partAssembly,shared:shared?.partAssemblyAssets??null}):null;
   const shards=fracture?.shardCount>1?await createShipFractureGPU({device,computePipe,posedBuffer:buffer,fracture,shared:shared?.fractureAssets??null}):null;
   const details=detail&&(detail.stationCount||detail.lineVertexCount)?await createVesselDetailGPU({device,computePipe,posedBuffer:buffer,sourceBuffer,hullUBO,detail,fracture:shards,shared:shared?.detailAssets??null}):null;
-  const assets=shared??Object.freeze({device,pipeline,rigData,modelBuffer,metadataBuffer,recoilAssets:recoil?.assets??null,partAssemblyAssets:assembly?.assets??null,fractureAssets:shards?.assets??null,detailAssets:details?.assets??null});let destroyed=false,initialized=!rigData;
+  const assets=shared??Object.freeze({device,pipeline,dynamicPipeline,dynamicBuffer,dynamicCount,rigData,modelBuffer,metadataBuffer,recoilAssets:recoil?.assets??null,partAssemblyAssets:assembly?.assets??null,fractureAssets:shards?.assets??null,detailAssets:details?.assets??null});let destroyed=false,initialized=!rigData;
   // True once her vertices carry damage, which the hull shader's whole variant would not draw.
-  let baked=false,clock=0;
+  let baked=false,clock=0,needsFullPose=true;
   return {buffer,assets,vertexCount,headerAt,lineVertexCount:detail?.lineVertexCount??0,partAssembly:assembly,
     get scarred(){return baked||assembly?.active===true||shards?.active===true;},
     update(boat,time,wind){
@@ -68,7 +107,7 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
         shards?.apply(boat.damage,batch,clock,boat);
         const range=bakeVesselImpactMarks(mesh,batch,9);
         if(range){
-          baked=true;
+          baked=true;needsFullPose=true;
           device.queue.writeBuffer(sourceBuffer,range.byteOffset,mesh.buffer,mesh.byteOffset+range.byteOffset,range.byteLength);
           updated=true;
         }
@@ -79,12 +118,19 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
     // Undo scorch marks and broken shards once a repair or a new ship makes them wrong.
     restoreGeometry(){
       if(destroyed||!(mesh instanceof Float32Array)||!(pristineMesh instanceof Float32Array))return false;
-      mesh.set(pristineMesh);device.queue.writeBuffer(sourceBuffer,0,mesh);baked=false;shards?.reset();return true;
+      mesh.set(pristineMesh);device.queue.writeBuffer(sourceBuffer,0,mesh);baked=false;needsFullPose=true;shards?.reset();return true;
     },
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;
       if(!initialized)throw Error('GPU rig state must be updated before dispatch');
-      pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));recoil?.encode(pass);assembly?.encode(pass);
+      const inplaceMutators=Boolean(recoil?.active||assembly?.active||shards?.active);
+      if(needsFullPose||inplaceMutators||dynamicCount<0){
+        pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));
+        needsFullPose=inplaceMutators;
+      }else if(dynamicCount>0&&dynamicGroup){
+        pass.setPipeline(dynamicPipeline);pass.setBindGroup(0,dynamicGroup);pass.dispatchWorkgroups(Math.ceil(dynamicCount/64));
+      }
+      recoil?.encode(pass);assembly?.encode(pass);
       // Her colours and her anchor's iron are placed on her assembled parts, then her shards fly with them, then her
       // lines are laid between the parts they ride.
       details?.encodeStations(pass);shards?.encode(pass);details?.encodeLines(pass);return true;

@@ -407,7 +407,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   const steps = Math.ceil(dt * 120), h = dt / steps;
   for (let i = 0; i < steps; i++) {
     const aeroFactor=velocity>0&&upwind>0?1-.90*upwind:1;
-    const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity*aeroFactor, sideways*aeroFactor) : null;
+    const loads = sailing ? sailForces(boat, windSpeed, windDirection, velocity*aeroFactor, sideways*aeroFactor, boat.roll ?? 0, boat.rollVelocity ?? 0, i > 0) : null;
     let blades=null;
     if(rowing){
       advanceRowing(boat,h,sailing?undefined:{effort:0,port:0,starboard:0});
@@ -444,7 +444,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   boat.surgeVelocity = velocity;
   boat.surgeAcceleration = (velocity - initial) / dt;
   boat.leewayVelocity = sideways; boat.leewayDistance = sidewaysDistance;
-  sailForces(boat, windSpeed, windDirection, velocity, sideways);
+  sailForces(boat, windSpeed, windDirection, velocity, sideways, boat.roll ?? 0, boat.rollVelocity ?? 0, sailing && steps > 0);
   stepVesselRopeChain(boat, dt);
   return distance;
 }

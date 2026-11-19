@@ -313,12 +313,14 @@ fn surfaceGpuVertex(vertex:u32,position:vec3f,normal:vec3f)->VesselPoseVertex {
     if(hasDmg && length(clothDelta)>=0.45){
       return VesselPoseVertex(vec4f(position,0),vec4f(normal,0));
     }
-    let e=.0005;p=surfaceGpuCloth(index,uv);
+    let e=.0005;
+    let relU=surfaceGpuClothDelta(index,uv,vec2f(e,0));
+    p=relU.origin;
     if(hasDmg){
       let pose=surfaceGpuPose(index);
       p+=surfaceGpuClothRotate(surface,clothDelta,pose)*clamp(pose.deployed,0.25,1.0);
     }
-    let du=surfaceGpuClothDelta(index,uv,vec2f(e,0)).offset-surfaceGpuClothDelta(index,uv,vec2f(-e,0)).offset;
+    let du=relU.offset-surfaceGpuClothDelta(index,uv,vec2f(-e,0)).offset;
     let dv=surfaceGpuClothDelta(index,uv,vec2f(0,e)).offset-surfaceGpuClothDelta(index,uv,vec2f(0,-e)).offset;
     n=surfaceGpuUnit(cross(du,dv))*dmgScale;
     return VesselPoseVertex(vec4f(p,0),vec4f(n,0));

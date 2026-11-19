@@ -207,17 +207,14 @@ fn continuumSkinnedSphere(record:ContinuumRecord,data:u32,part:u32,sphere:vec4f)
     for(var k=0u;k<count;k++){let s=continuumPoses[spheres+k];if(s.w>=0.0){lo=min(lo,s.xyz-vec3f(s.w));hi=max(hi,s.xyz+vec3f(s.w));}}
     if(lo.x>hi.x){return vec4f(sphere.xyz,-1.0);}
     let centre=(lo+hi)*0.5;
-    var radius=0.0;
-    for(var k=0u;k<count;k++){let s=continuumPoses[spheres+k];if(s.w>=0.0){radius=max(radius,distance(s.xyz,centre)+s.w);}}
-    return vec4f(centre,radius);
+    return vec4f(centre,length(hi-centre));
   }
   let j=min(part,count-1u);
   if(continuumPoses[spheres+j].w<0.0){return vec4f(sphere.xyz,-1.0);}
   let m=continuumSkinnedJoint(data,count,j);
   let stretch=max(max(length(vec3f(m[0].x,m[1].x,m[2].x)),length(vec3f(m[0].y,m[1].y,m[2].y))),length(vec3f(m[0].z,m[1].z,m[2].z)));
-  let mCentre=humanMorphPoint(sphere.xyz,record.spare.z,record.spare.w);
-  let mGrow=select(1.0,1.22,(record.spare.z&1u)!=0u);
-  return vec4f(vec4f(mCentre,1.0)*m,sphere.w*stretch*mGrow+continuumPoses[data].y);
+  let mGrow=select(1.0,1.24,(record.spare.z&1u)!=0u);
+  return vec4f(vec4f(sphere.xyz,1.0)*m,sphere.w*stretch*mGrow+continuumPoses[data].y);
 }
 `;
   },
