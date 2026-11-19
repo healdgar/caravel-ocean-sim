@@ -85,6 +85,7 @@ import { requestDeckWaterPipelines } from './deck.js';
 import { WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, SHEET_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
 import { SCENE_DECK_UPDATE, DECK_RENDER } from './wgsl/deck.js';
 import { createSurfaceWaves } from './surface-waves.js';
+import { createShallowWater } from './shallow-water.js';
 import { createSpindrift, requestCrestSprayPipeline } from './spindrift.js';
 import { SPINDRIFT_UPDATE, SPINDRIFT_RENDER } from './wgsl/spindrift.js';
 import { createSurfaceWetness } from './wetness.js';
@@ -529,6 +530,11 @@ async function main() {
   oakTexPromise.catch(() => {});
   const waterFilterPipePromise = computePipe(WATER_FILTER, 'water reflections filter');
   const surfaceWavesPromise = createSurfaceWaves({ device, computePipe });
+  const shallowWaterPromise = surfaceWavesPromise.then(sw => createShallowWater({
+    device, shader, computePipe, surfaceWaves: sw,
+    frameUBO, transView, skyView, sampClamp, sunVisBuf,
+    format: HDR, samples: MSAA,
+  }));
   const waterOpticsPromise = surfaceWavesPromise.then(sw => createWaterOptics({ device, shader, seaView: fullArr(dispTex), seaSampler: samplerSim, format: HDR, surfaceWaves: sw }));
   const cloudsPromise = createVolumetricClouds({ device, frameUBO, transView, skyView, sampler: sampClamp, computePipe });
   const oceanBridge = {
@@ -565,7 +571,7 @@ async function main() {
     ...(sceneModelCodes.some(c => c <= 1) ? [computePipe(VESSEL_POSE_UPDATE, 'shared vessel deformation')] : []),
     ...(sceneModelCodes.some(c => c >= 2) ? [computePipe(VESSEL_SURFACE_POSE_UPDATE, 'shared vessel deformation')] : []),
   ];
-  for (const p of [rgba8MipPipePromise, waterFilterPipePromise, surfaceWavesPromise, waterOpticsPromise, cloudsPromise, terrainPromise, ...prewarmPromises]) p.catch(() => {});
+  for (const p of [rgba8MipPipePromise, waterFilterPipePromise, surfaceWavesPromise, shallowWaterPromise, waterOpticsPromise, cloudsPromise, terrainPromise, ...prewarmPromises]) p.catch(() => {});
 
   // The ships, their crews, the port's people and the weather ask for their programs here as well, before anything
   // is awaited. A subsystem that waits its turn to ask adds its whole compile to the load, and on Direct3D that is
@@ -738,11 +744,15 @@ async function main() {
   const [[oceanPipe,oceanDepthPipe],[skyPipe,downPipe,upPipe,compPipe,mediumDownPipe,mediumCompPipe]]=await Promise.all([openOceanPromise,renderPipesPromise]);
 
   window.oceanStartup?.stage('ship-crew','Building the ships and loading their crew…');
-  const [waterFilterPipe, surfaceWaves, waterOptics] = await Promise.all([
+  const [waterFilterPipe, surfaceWaves, shallowWater, waterOptics] = await Promise.all([
     waterFilterPipePromise,
     surfaceWavesPromise,
+    shallowWaterPromise,
     waterOpticsPromise,
   ]);
+  surfaceWaves.attachShallowWater(shallowWater);
+  window.oceanShallowWater = shallowWater;
+  let lastSweWorldKey = '';
   const rowingSurfaceEvents=createRowingSurfaceEvents(surfaceWaves);
   const shipAssets=createShipAssetCache(),renderAssets=new Map();
   const seaShadows=await seaShadowsPromise;
@@ -5379,7 +5389,7 @@ async function main() {
         terrain?.drawFoliage?.(rp);
         terrain?.drawWater?.(rp,camSnap,frameF);
         rp.setPipeline(skyPipe);rp.setBindGroup(0,bgSky);clouds.drawSky(rp);rp.draw(3);
-        dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);weatherRenderer.draw(rp);
+        dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);shallowWater.drawSpray(rp);weatherRenderer.draw(rp);
       });
       await runSceneSubpass('Scene: Ships',rp=>{
         for(const v of hullsSnap)v.continuum.draw(rp,(pipeline,far)=>vesselOwnGroups(v,pipeline,far));
@@ -5703,8 +5713,26 @@ async function main() {
     },terrain);
     if(dt>0||needSpectrum||frameIndex===0){
       const waveCenter=ashore.on||cameraMode==='free'?cam:boat;
-      surfaceWaves.setWakeHulls?.(terrain?.tradeVessels?.getWakeSources?.(waveCenter)??[]);
-      surfaceWaves.update(waveCenter,dt);
+      const tBridges=terrain?.bridges??[];
+      const tReaches=terrain?.port?.country?.riverReaches??[];
+      const tWaterfront=terrain?.port?.country?.waterfront??terrain?.port?.waterfront??[];
+      const tWo=terrain?.getWorldOffset?.()??{x:0,z:0};
+      let collapsedMask=0;
+      for(let bi=0;bi<tBridges.length&&bi<30;bi++)if(tBridges[bi]?.collapsed)collapsedMask|=(1<<bi);
+      const sweKey=`${terrain?.region?.id??''}|${tBridges.length}|${collapsedMask}|${tReaches.length}|${tWaterfront.length}|${Math.round(tWo.x)}|${Math.round(tWo.z)}|${Boolean(terrain?.coastalField)}`;
+      if(sweKey!==lastSweWorldKey){
+        lastSweWorldKey=sweKey;
+        shallowWater.setWorld({bridges:tBridges,riverReaches:tReaches,waterfront:tWaterfront,coastalField:terrain?.coastalField??null,worldOffset:tWo});
+      }
+      const wakeHulls=terrain?.tradeVessels?.getWakeSources?.(waveCenter)??[];
+      surfaceWaves.setWakeHulls?.(wakeHulls);
+      const swellAng=frameF[59],sdx=Math.abs(swellAng)>0.1?Math.cos(swellAng):frameF[56],sdz=Math.abs(swellAng)>0.1?Math.sin(swellAng):frameF[57];
+      const swellHs=frameF[51]>1.0?frameF[50]:Math.max(0.25,0.14*P.windSpeed);
+      const swellLen=frameF[51]>1.0?frameF[51]:95;
+      surfaceWaves.update(waveCenter,dt,false,undefined,{
+        coastalWindow:terrain?.coastalField?.window??null,
+        swellDir:[sdx,sdz],swellHs,swellLen,windSpeed:P.windSpeed,
+      });
     }
     if(boardLife?.state==='alive'&&terrain?.tradeVessels&&(frameIndex%30)===0){
       boardLife.setMaritimeReport?.(terrain.tradeVessels.getMaritimeReport());
@@ -5975,7 +6003,7 @@ async function main() {
       }
     }
     if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(rp);
-    dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);weatherRenderer.draw(rp);
+    dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);shallowWater.drawSpray(rp);weatherRenderer.draw(rp);
     rp.end();
 
     if(gunVolumes){

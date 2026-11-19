@@ -12,6 +12,8 @@ struct SurfaceWaveUniform {
 
 // Caller declares SW, surfaceWaveTex and wakeSamp. Both clipmaps represent the
 // same disturbance: crossfade their representations instead of adding energy.
+// Layer 2 carries the live 2D Shallow Water Equations (SWE) CFD field (eta, u, v, foam)
+// on the exact same 256 m nearDomain (zero extra texture bindings in water shaders).
 export const SURFACE_WAVE_SAMPLE=SURFACE_WAVE_TYPES+/* wgsl */ `
 fn surfaceWaveAt(p:vec2f)->vec4f {
   if(SW.step.w<.5){return vec4f(0);}
@@ -25,6 +27,14 @@ fn surfaceWaveAt(p:vec2f)->vec4f {
   if(nearWeight<=0.0){return far;}
   let near=textureSampleLevel(surfaceWaveTex,wakeSamp,nearUV,0,0.0);
   return mix(far,near,nearWeight);
+}
+fn shallowWaterAt(p:vec2f)->vec4f {
+  if(SW.step.w<1.5){return vec4f(0);}
+  let nearUV=(p-SW.nearDomain.xy)/SW.nearDomain.z+.5;
+  let nearEdge=max(abs(nearUV.x-.5),abs(nearUV.y-.5));
+  if(nearEdge>=.492){return vec4f(0);}
+  let fade=1.0-smoothstep(.38,.492,nearEdge);
+  return textureSampleLevel(surfaceWaveTex,wakeSamp,nearUV,2,0.0)*fade;
 }
 `;
 

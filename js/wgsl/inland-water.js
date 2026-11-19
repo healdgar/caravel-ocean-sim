@@ -209,7 +209,8 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let horzW = smoothstep(0.28, 0.54, estuaryT);
   let vertW = mix(tideVert * bankMask * 0.45, 1.0, seaBlendV);
   let displacedXZ = xzBase + oceanDisp.xz * horzW;
-  let splashY = surfaceWaveAt(displacedXZ).x * mix(bankMask, 1.0, seaBlendV);
+  let sweV = shallowWaterAt(displacedXZ);
+  let splashY = (surfaceWaveAt(displacedXZ).x + sweV.x) * mix(bankMask, 1.0, seaBlendV);
   let rawRelY = posKind.y + fluvialY + barY;
   let plumeRelY = max(rawRelY, 0.0) + mix(0.090, 0.055, smoothstep(0.42, 0.98, estuaryT));
   let relToOceanY = mix(
@@ -258,13 +259,16 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let dir = select(normalize(F.windP[0].xy + vec2f(1e-4, 0.0)), in.flow / max(speed, 1e-4), speed > 1e-3);
   let across = vec2f(-dir.y, dir.x);
 
-  // Staggered dual-phase Lagrangian advection along world current vector (continuous around bends).
+  // Staggered dual-phase Lagrangian advection along world current vector (steered by live 2D SWE around piers & eddies).
+  let sweC = shallowWaterAt(xz);
+  let sweFlowSpd = length(sweC.yz);
+  let liveFlow = select(in.flow, mix(in.flow, sweC.yz, clamp(sweFlowSpd * 0.85, 0.0, 0.78)), !isPond && sweFlowSpd > 0.05);
   let advPeriod = select(1.85, 3.2, isPond);
   let phA = fract(t / advPeriod);
   let phB = fract(t / advPeriod + 0.5);
   let wA = 0.5 - 0.5 * cos(2.0 * PI * phA);
   let wB = 1.0 - wA;
-  let advVel = select(in.flow * 0.72, vec2f(0.05, 0.035), isPond);
+  let advVel = select(liveFlow * 0.72, vec2f(0.05, 0.035), isPond);
   let posA = in.rawXZ - advVel * (phA - 0.5) * advPeriod;
   let posB = in.rawXZ - advVel * (phB - 0.5) * advPeriod;
 
@@ -337,7 +341,7 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     fluvialSl *= roughScale;
   }
 
-  // Dynamic splash & boat-wake height-field slope on upland rivers/estuaries.
+  // Dynamic splash, boat-wake & 2D SWE bridge-pier/obstacle wave slope + whitewater foam.
   var splashSl = vec2f(0.0);
   var splashFoam = 0.0;
   if (SW.step.w > 0.5) {
@@ -347,6 +351,12 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     let swZ = surfaceWaveAt(xz + vec2f(0.0, dxW)).x - surfaceWaveAt(xz - vec2f(0.0, dxW)).x;
     splashSl = vec2f(swX, swZ) / (2.0 * dxW);
     splashFoam = clamp(swC.z + swC.w * 0.6, 0.0, 1.0);
+    if (SW.step.w > 1.5) {
+      let sweX = shallowWaterAt(xz + vec2f(dxW, 0.0)).x - shallowWaterAt(xz - vec2f(dxW, 0.0)).x;
+      let sweZ = shallowWaterAt(xz + vec2f(0.0, dxW)).x - shallowWaterAt(xz - vec2f(0.0, dxW)).x;
+      splashSl += vec2f(sweX, sweZ) / (2.0 * dxW);
+      splashFoam = max(splashFoam, clamp(sweC.w * 1.15, 0.0, 1.0));
+    }
   }
 
   // ---- Estuary-to-ocean wave-current convergence (derivTex / momTex / coastalWaveState) ----

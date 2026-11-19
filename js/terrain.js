@@ -2688,6 +2688,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // A struck building of the port in view stands whole again at once (js/castle-duel.js rematch).
     rebuildPortBuilding(instance){portFractures?.rebuild(instance);},
     get inlandWater(){return inlandWater;},
+    get coastalField(){return coastalField;},
     inlandWaterAt(x,z){return inlandWaterSampler?inlandWaterSampler(x-worldOffset.x,z-worldOffset.z):null;},
     get herds(){return herds;},
     herdsWatch(from,to,best,projectile){return herds?.watchShot?herds.watchShot(from,to,best,projectile):best;},

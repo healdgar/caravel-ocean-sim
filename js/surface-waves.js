@@ -44,19 +44,20 @@ export async function createSurfaceWaves({device,computePipe,size=512}){
   const uniforms=Array.from({length:3},(_,i)=>device.createBuffer({label:'scene wave substep '+i,size:64,usage:B.UNIFORM|B.COPY_DST}));
   const sources=device.createBuffer({label:'scene wave impulses',size:SURFACE_WAVE_LIMITS.emitters*48,usage:B.STORAGE|B.COPY_DST});
   const hulls=device.createBuffer({label:'scene wake hulls',size:SURFACE_WAVE_LIMITS.hulls*32,usage:B.STORAGE|B.COPY_DST});
-  const textures=[0,1].map(i=>device.createTexture({label:'scene surface waves '+i,size:[size,size,2],format:'rgba16float',usage:T.TEXTURE_BINDING|T.STORAGE_BINDING|T.COPY_SRC}));
+  const textures=[0,1].map(i=>device.createTexture({label:'scene surface waves '+i,size:[size,size,3],format:'rgba16float',usage:T.TEXTURE_BINDING|T.STORAGE_BINDING|T.COPY_SRC}));
   const views=textures.map(t=>t.createView({dimension:'2d-array'})),pipeline=await computePipe(SURFACE_WAVE_UPDATE,'scene surface gravity waves');
   const groups=uniforms.map(u=>views.map((view,i)=>device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[
     {binding:0,resource:{buffer:u}},{binding:1,resource:view},{binding:2,resource:views[1-i]},{binding:3,resource:{buffer:sources}},{binding:4,resource:{buffer:hulls}},
   ]})));
   const values=new Float32Array(16),sourceValues=new Float32Array(SURFACE_WAVE_LIMITS.emitters*12),hullValues=new Float32Array(SURFACE_WAVE_LIMITS.hulls*8),pending=[],seen=new Set();
-  let pendingHulls=[];
-  const stats={active:false,queued:0,culled:0,dropped:0,duplicates:0,invalid:0,resets:0,dispatches:0,accepted:0,hulls:0};
+  let pendingHulls=[],shallowWater=null,sweActive=false;
+  const stats={active:false,queued:0,culled:0,dropped:0,duplicates:0,invalid:0,resets:0,dispatches:0,accepted:0,hulls:0,sweActive:false};
   let current=0,time=0,lastEmission=-Infinity,needsClear=true,steps=0,destroyed=false,epoch=0,hasDomain=false;
-  const writeDomain=(active,dt=0,count=0)=>{values.set(domains,0);values[12]=dt;values[13]=needsClear?1:0;values[14]=count;values[15]=active?1:0;device.queue.writeBuffer(uniform,0,values);};
-  function reset(){epoch++;stats.resets++;stats.active=false;pending.length=0;stats.queued=0;stats.hulls=0;seen.clear();steps=0;lastEmission=-Infinity;needsClear=true;hasDomain=false;writeDomain(false);}
-  writeDomain(false);
+  const writeDomain=(activeFlags,dt=0,count=0)=>{values.set(domains,0);values[12]=dt;values[13]=needsClear?1:0;values[14]=count;values[15]=typeof activeFlags==='number'?activeFlags:(activeFlags?1:0);device.queue.writeBuffer(uniform,0,values);};
+  function reset(){epoch++;stats.resets++;stats.active=false;sweActive=false;stats.sweActive=false;pending.length=0;stats.queued=0;stats.hulls=0;seen.clear();steps=0;lastEmission=-Infinity;needsClear=true;hasDomain=false;shallowWater?.reset?.();writeDomain(0);}
+  writeDomain(0);
   return {uniform,views,textures,stats,get current(){return current;},get view(){return views[current];},get epoch(){return epoch;},
+    attachShallowWater(swe){shallowWater=swe??null;},
     setWakeHulls(list){
       if(destroyed)return;
       pendingHulls=Array.isArray(list)?list:[];
@@ -74,14 +75,14 @@ export async function createSurfaceWaves({device,computePipe,size=512}){
       seen.add(key);if(seen.size>SURFACE_WAVE_LIMITS.dedupe)seen.delete(seen.values().next().value);
       pending.push(source);stats.queued=pending.length;return true;
     },
-    update(center,dt,resetField=false,wakeHulls=undefined){
+    update(center,dt,resetField=false,wakeHulls=undefined,sweForcing=null){
       if(destroyed)return;
       if(wakeHulls!==undefined)pendingHulls=Array.isArray(wakeHulls)?wakeHulls:[];
       dt=surfaceWaveClamp(surfaceWaveFinite(dt),0,SURFACE_WAVE_LIMITS.maxDt);time+=dt;steps=0;
       const x=surfaceWaveFinite(center?.x),z=surfaceWaveFinite(center?.z);
       const teleport=hasDomain&&Math.hypot(x-committed[0],z-committed[1])>SURFACE_WAVE_LIMITS.farExtent*.25;
       if(resetField||teleport)reset();
-      if(dt===0){writeDomain(stats.active);return;}
+      if(dt===0){writeDomain((stats.active?1:0)+(sweActive?2:0));return;}
       for(let layer=0;layer<2;layer++){
         const extent=layer?SURFACE_WAVE_LIMITS.farExtent:SURFACE_WAVE_LIMITS.nearExtent,dx=extent/size;
         domains.set([Math.round(x/dx)*dx,Math.round(z/dx)*dx,extent,dx],layer*4);
@@ -114,20 +115,36 @@ export async function createSurfaceWaves({device,computePipe,size=512}){
       }
       stats.hulls=hullCount;
       if(hullCount){lastEmission=time;device.queue.writeBuffer(hulls,0,hullValues,0,hullCount*8);}
-      if(time-lastEmission>SURFACE_WAVE_LIMITS.restSeconds){stats.active=false;needsClear=true;hasDomain=false;writeDomain(false);return;}
+      const wavesLive=(time-lastEmission)<=SURFACE_WAVE_LIMITS.restSeconds;
+      const maxStep=.45*domains[3]/SURFACE_WAVE_SPEED;
+      const stepCount=Math.max(1,Math.min(3,Math.ceil(dt/maxStep)));
+      sweActive=Boolean(shallowWater&&shallowWater.update({
+        domains,committed,dt,steps:stepCount,time,hulls:pendingHulls,resetField:resetField||teleport,
+        ...(sweForcing||{}),
+      }));
+      stats.sweActive=sweActive;
+      if(!wavesLive&&!sweActive){stats.active=false;needsClear=true;hasDomain=false;writeDomain(0);return;}
       stats.active=true;
-      const maxStep=.45*domains[3]/SURFACE_WAVE_SPEED;steps=Math.ceil(dt/maxStep);
+      steps=stepCount;
       const substep=dt/steps;
+      const activeMode=(wavesLive?1:0)+(sweActive?2:0);
       for(let i=0;i<steps;i++){
         values.set(domains,0);values.set(i?[domains[0],domains[1],domains[4],domains[5]]:committed,8);
-        values.set([substep,i===0&&needsClear?1:0,(i===0?count:0)+hullCount*256,1],12);device.queue.writeBuffer(uniforms[i],0,values);
+        values.set([substep,i===0&&needsClear?1:0,(i===0?count:0)+hullCount*256,activeMode],12);device.queue.writeBuffer(uniforms[i],0,values);
       }
-      writeDomain(true,dt,count+hullCount*256);
+      writeDomain(activeMode,dt,count+hullCount*256);
     },
     encode(pass){
       if(destroyed||!steps||!stats.active)return;
-      pass.setPipeline(pipeline);
-      for(let i=0;i<steps;i++){pass.setBindGroup(0,groups[i][current]);pass.dispatchWorkgroups(Math.ceil(size/8),Math.ceil(size/8),2);current=1-current;stats.dispatches++;}
+      if(sweActive)shallowWater.encodeEnv(pass);
+      for(let i=0;i<steps;i++){
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0,groups[i][current]);
+        pass.dispatchWorkgroups(Math.ceil(size/8),Math.ceil(size/8),2);
+        if(sweActive)shallowWater.encodeSubstep(pass,i,current);
+        current=1-current;stats.dispatches++;
+      }
+      if(sweActive)shallowWater.encodeSprayUpdate(pass);
       committed.set([domains[0],domains[1],domains[4],domains[5]]);hasDomain=true;needsClear=false;steps=0;
     },reset,
     destroy(){if(destroyed)return;destroyed=true;for(const b of [uniform,...uniforms,sources,hulls])b.destroy();for(const t of textures)t.destroy();},

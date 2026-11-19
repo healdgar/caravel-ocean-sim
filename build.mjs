@@ -92,9 +92,9 @@ wgslModules.push('js/wgsl/skinned-pose.js');
 // The herds go first: board-folk.js reads herds.js's STREET_MOUNT_FLAG as it loads.
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/board-waterfront.js','js/place-landmarks.js','js/old-world-board.js','js/native-towns.js','js/colonial-towns.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
-order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
-wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/meadow-continuum.js','js/wgsl/meadow-continuum.js','js/meadow-grass.js','js/trade-vessels.js');
+order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
+wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/shallow-water.js','js/meadow-continuum.js','js/wgsl/meadow-continuum.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // Ships in the one continuum: the bodies' format and loading, ahead of the families that draw them (their kinds,
 // js/wgsl/ship-kinds.js, stand beside the kernel's).
@@ -282,7 +282,7 @@ write('ocean.html', page.replace(SCRIPT_TAG, () => `<script type="module">\n${co
 const TIGHT_WGSL_RELS = new Set([
   'js/trade-vessels.js', 'js/meadow-grass.js', 'js/wgsl/meadow-continuum.js', 'js/wgsl/boulder-continuum.js',
   'js/wgsl/herds.js', 'js/wgsl/townsfolk.js', 'js/wgsl/gunnery.js',
-  'js/wgsl/crew-solve.js', 'js/wgsl/inland-water.js', 'js/wgsl/hull-flood.js',
+  'js/wgsl/crew-solve.js', 'js/wgsl/inland-water.js', 'js/wgsl/shallow-water.js', 'js/wgsl/surf-spray.js', 'js/wgsl/hull-flood.js',
   'js/wgsl/land-craters.js', 'js/wgsl/part-assembly.js',
   'js/wgsl/clouds.js', 'js/wgsl/cloud-model.js', 'js/wgsl/sky.js', 'js/wgsl/weather.js',
   'js/wgsl/spindrift.js', 'js/wgsl/rowing-water.js', 'js/wgsl/neural-pbr.js',

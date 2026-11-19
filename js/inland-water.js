@@ -345,7 +345,7 @@ export async function createInlandWater({
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     ownedBuffers.push(fbSwUniform);
-    fbSwArray2View = mk1x1Array('inland water fallback sw tex', 2, 0, 0, 0, 0).createView({ dimension: '2d-array' });
+    fbSwArray2View = mk1x1Array('inland water fallback sw tex', 3, 0, 0, 0, 0).createView({ dimension: '2d-array' });
   }
 
   let group2 = null;

@@ -47,8 +47,12 @@ export async function createCoastalField({ device, computePipe, frameUBO, land, 
   ] });
   const state = createCoastalFieldState();
   let swellX = 0, swellZ = 0, windowX = NaN, windowZ = NaN;
+  const shelterView = shelter.createView();
   return {
     state,
+    shelterView,
+    sampler,
+    window: windowData,
     // The ground changed: everything baked from it is stale.
     invalidate() { state.generation++; },
     // How clear this coast's shallows run, which the water's colour reads alongside the window.

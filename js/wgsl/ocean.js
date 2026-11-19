@@ -122,7 +122,7 @@ struct VSOut {
   ${coast ? 'disp += cws.dispOffset;' : ''}
   var o: VSOut;
   let displacedXZ = xz + disp.xz;
-  disp.y += wakeAt(displacedXZ).x;
+  ${coast && surfaceWaves ? 'let sweCoastV = 1.0 - smoothstep(5.0, 14.0, max(0.0, -cws.bed)); disp.y += wakeAt(displacedXZ).x + shallowWaterAt(displacedXZ).x * sweCoastV;' : 'disp.y += wakeAt(displacedXZ).x;'}
   let world = vec3f(displacedXZ.x, disp.y, displacedXZ.y);
   o.rel = world - F.camPos.xyz;
   o.pos = F.viewProj * vec4f(o.rel, 1.0);
@@ -199,8 +199,18 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let wp = in.rel.xz + F.camPos.xz;
   let dx = I.domain.w;
   var wakeSlope = vec2f(0.0);
+  var sweCoastFoam = 0.0;
   if (dist < 360.0) {
     wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
+    ${coast && surfaceWaves ? `let sweCoastW = 1.0 - smoothstep(5.0, 14.0, max(0.0, -cws.bed));
+    if (sweCoastW > 0.01 && SW.step.w > 1.5) {
+      let sdx = max(SW.nearDomain.w, 0.45);
+      let sweC = shallowWaterAt(wp);
+      let sweX = shallowWaterAt(wp + vec2f(sdx, 0.0)).x - shallowWaterAt(wp - vec2f(sdx, 0.0)).x;
+      let sweZ = shallowWaterAt(wp + vec2f(0.0, sdx)).x - shallowWaterAt(wp - vec2f(0.0, sdx)).x;
+      wakeSlope += (vec2f(sweX, sweZ) / (2.0 * sdx)) * sweCoastW;
+      sweCoastFoam = clamp(sweC.w * sweCoastW, 0.0, 1.0);
+    }` : ''}
   }
   var sl = vec2f(s.x / jx, s.y / jz) + wakeSlope;
   ${coast?'sl = coastalRefractSlope(xz, sl, cws) + cws.extraSlope;':''}
@@ -317,7 +327,7 @@ ${OCEAN_HULL_MASK}
   // aged foam breaks into wind-aligned streaks; fresh crest foam stays dense
   let freshK = clamp(fwl.g * 2.0 + fresh, 0.0, 1.0);
   cover *= mix(mix(0.35,1.0,smoothstep(0.25,0.75,streak)), 1.0, freshK);
-  ${coast ? 'let shoreBreak = coastalBreakerFoam(xz, effHeight, sl, cws); cover = max(cover, shoreBreak * 0.92);' : ''}
+  ${coast ? 'let shoreBreak = max(coastalBreakerFoam(xz, effHeight, sl, cws), sweCoastFoam * 0.92); cover = max(cover, shoreBreak * 0.92);' : ''}
   // soft threshold: thin foam is a translucent film, dense foam is opaque white
   // dense foam has crisp edges, thin decaying foam a soft translucent margin
   let soft = 0.04 + 0.14 * (1.0 - clamp(cover, 0.0, 1.0));
