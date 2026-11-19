@@ -237,19 +237,26 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
 
   // Smooth anatomical throat/neck mask (prevents stray shirt tags or white UV collar bleed on neck without hard steps).
-  let neckLineY=select(1.465,1.370,female);
+  let neckLineY=select(1.465,1.425,female);
   let neckRad=length(vec2f(bodyPos.x*1.02,bodyPos.z+select(0.005,0.036,female)));
   let neckSkinMask=select(0.0,
-    smoothstep(neckLineY-0.016,neckLineY+0.016,bodyPos.y)*(1.0-smoothstep(neckLineY+0.130,neckLineY+0.155,bodyPos.y))*(1.0-smoothstep(0.072,0.094,neckRad)),
+    smoothstep(neckLineY-0.012,neckLineY+0.014,bodyPos.y)*(1.0-smoothstep(neckLineY+0.120,neckLineY+0.145,bodyPos.y))*(1.0-smoothstep(0.056,0.072,neckRad)),
     skin.w>0.5);
 
   // Smooth torso/sleeve cloth override where fit-crew-body.py mislabeled shirt folds as region 4 (hair), 0 (paint), or 3 (skin),
-  // and bare forearm override on sailor-male past the rolled-up sleeve cuff (|x| > 0.50).
-  let sleeveLimit=select(0.48,0.62,female);
+  // and bare forearm override on sailor-male past the rolled-up sleeve cuff (|x| >= 0.495).
+  let sleeveLimit=select(0.495,0.62,female);
   let strayHairOnShirt=(region==4u||region==0u)&&bodyPos.y>0.86&&bodyPos.y<1.495&&abs(bodyPos.x)<sleeveLimit;
   let strayHairOnTrousers=(region==4u||region==0u)&&bodyPos.y>=0.24&&bodyPos.y<=0.86;
-  let torsoSkinOnShirt=region==3u&&bodyPos.y>0.94&&bodyPos.y<select(1.40,1.335,female)&&abs(bodyPos.x)<0.32&&!( !female&&bodyPos.z>0.06&&abs(bodyPos.x)<0.055&&bodyPos.y>1.26 );
-  let strayClothOnForearm=!female&&(region==1u||region==4u)&&bodyPos.y>1.00&&bodyPos.y<1.52&&abs(bodyPos.x)>0.50;
+  let maleOpenVNeck=!female&&bodyPos.z>0.06&&abs(bodyPos.x)<0.050&&bodyPos.y>1.32&&bodyPos.y<1.46;
+  let torsoSkinOnShirt=region==3u&&bodyPos.y>0.94&&abs(bodyPos.x)<sleeveLimit&&(
+    select(
+      bodyPos.y<1.495&&!(neckRad<0.072&&bodyPos.y>1.44)&&!maleOpenVNeck,
+      bodyPos.y<1.445&&(neckRad>=0.072||bodyPos.z<-0.045),
+      female
+    )
+  );
+  let strayClothOnForearm=!female&&(region==1u||region==4u)&&bodyPos.y>1.00&&bodyPos.y<1.52&&abs(bodyPos.x)>=0.495;
   var effRegion=region;
   if(strayClothOnForearm){effRegion=3u;}
   else if(strayHairOnShirt||torsoSkinOnShirt){effRegion=1u;}
@@ -263,8 +270,8 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
       let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
       let dyed=worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2);
       // Skin-border rescue applies ONLY at the collar opening around the neck and past the actual cuff — never across sleeves!
-      let cuffX=select(0.46,0.62,female);
-      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.030&&neckRad<0.095)||abs(bodyPos.x)>cuffX),effRegion==1u);
+      let cuffX=select(0.495,0.62,female);
+      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.020&&neckRad<0.076)||abs(bodyPos.x)>cuffX),effRegion==1u);
       if(!atBorder||skin.w<=0.5){
         baseOut=vec4f(dyed,0.0);
       }else{
@@ -287,7 +294,7 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   // Fibrous hair-root scalp under-coat: softly tints & texturizes the hair-bearing cranium inside the 3D strand hairline
   // with the person's darkened root hair pigment so bare scalp never flashes between locks from any angle or distance.
   let crownY=select(select(1.768,1.766,indigenous),1.702,female);
-  if(scalpMode>0.5&&bodyPos.y>crownY-0.185&&(effRegion==3u||effRegion==4u||effRegion==0u)){
+  if(bodyPos.y>crownY-0.185&&(effRegion==3u||effRegion==4u||effRegion==0u||effRegion==1u)){
     let midZ=select(select(0.026,-0.032,indigenous),-0.025,female);
     let ax=abs(bodyPos.x);
     let rz=bodyPos.z-midZ;
@@ -306,7 +313,8 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
     // Tonsure mode (2.0) keeps the top crown dome bare skin and paints only the lower fringe band.
     let tonsureR=length(vec2f(bodyPos.x/0.058,(rz+0.004)/0.070));
     let tonsureKeep=select(1.0,max(smoothstep(0.86,1.10,tonsureR),1.0-smoothstep(crownY-0.072,crownY-0.056,bodyPos.y)),scalpMode>1.5);
-    let scalpCov=frontMask*earKeep*napeMask*tonsureKeep;
+    let cranialMask=frontMask*earKeep*napeMask;
+    let scalpCov=select(0.0,cranialMask*tonsureKeep,scalpMode>0.5);
     if(scalpCov>0.002){
       let hairCol=max(actor.hair.rgb,vec3f(0.010,0.008,0.007));
       let fiberA=sin(bodyPos.x*520.0+sin(bodyPos.z*190.0)*1.6);
@@ -314,6 +322,11 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
       let rootGrain=0.38+0.14*(0.5+0.5*fiberA)+0.08*(0.5+0.5*fiberB);
       let scalpTint=hairCol*rootGrain;
       baseOut=vec4f(mix(baseOut.rgb,scalpTint,scalpCov*0.92),mix(baseOut.w,0.0,scalpCov*0.92));
+    }else if((effRegion==4u||effRegion==1u)&&cranialMask>0.15&&skin.w>0.5&&(scalpMode<=0.5||(scalpMode>1.5&&tonsureKeep<0.5))){
+      // Shaved or bare tonsure dome: remap baked hair/stray shirt tag to clean head skin.
+      let bareMask=cranialMask*select(1.0,1.0-tonsureKeep,scalpMode>1.5);
+      let skinTone=skin.xyz*(0.84*clamp(bright/skinBright,0.75,1.08));
+      baseOut=vec4f(mix(baseOut.rgb,skinTone,bareMask),mix(baseOut.w,1.0,bareMask));
     }
   }
   return baseOut;
@@ -538,6 +551,10 @@ fn hairContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
       let hv=continuumPointAt(s.model,s.vertex).high;
       along=f32(hv&255u)/255.0;
       crossV=f32((hv>>8u)&255u)/255.0*2.0-1.0;
+    }else{
+      // Far hair shell: derive smooth crown-to-tip flow & azimuth fiber coordinate so far hair keeps natural strand sheen.
+      along=clamp((1.75-s.local.y)*4.2,0.0,1.0);
+      crossV=sin(atan2(s.local.x,s.local.z+0.01)*9.0);
     }
   }
   var tWorld=tLocal;
@@ -562,16 +579,19 @@ fn hairContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let lockTone=v.strand.z;
   let seedPhase=v.strand.w;
 
-  // Dense multi-frequency individual hair-fiber striations & soft cylindrical lock rounding so broader shingled locks
-  // read as rich bundles of dozens of fine hairs instead of flat ribbons.
+  // Dense multi-frequency individual hair-fiber striations, fwidth band-limited to eliminate shimmer/banding with distance.
   let B=normalize(cross(n,T)+vec3f(1e-5,0.0,0.0));
   let wobble=sin(along*14.0+seedPhase*6.2831853)*0.22;
   let uFiber=crossV+wobble;
-  let micro=sin(uFiber*28.27+seedPhase*6.2831853);
-  let micro2=sin(uFiber*62.83-seedPhase*12.566+along*4.0);
-  let micro3=sin(uFiber*113.10+seedPhase*18.85-along*7.5);
+  let du=max(fwidth(uFiber),1e-4);
+  let band1=1.0-smoothstep(0.08,0.28,du);
+  let band2=1.0-smoothstep(0.035,0.14,du);
+  let band3=1.0-smoothstep(0.018,0.075,du);
+  let micro=sin(uFiber*28.27+seedPhase*6.2831853)*band1;
+  let micro2=sin(uFiber*62.83-seedPhase*12.566+along*4.0)*band2;
+  let micro3=sin(uFiber*113.10+seedPhase*18.85-along*7.5)*band3;
   let edgeFluff=smoothstep(0.55,1.0,abs(crossV));
-  n=normalize(n+B*(crossV*0.38+micro*0.22+micro2*0.12+micro3*0.06));
+  n=normalize(n+B*(crossV*0.32+micro*0.18+micro2*0.10+micro3*0.05));
 
   // Root-to-tip melanin variation, deep follicle root AO, sub-strand striations, and soft sun-kissed tips.
   let rootAO=mix(0.36,1.0,smoothstep(0.0,0.28,along));

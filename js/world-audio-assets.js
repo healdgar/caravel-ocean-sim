@@ -97,7 +97,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.22,
     "category": "town",
     "sex": null,
-    "seconds": 6.2
+    "seconds": 19
   },
   "town-bustle": {
     "url": "assets/audio/world/town-bustle.mp3",
@@ -106,7 +106,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.2,
     "category": "town",
     "sex": null,
-    "seconds": 7.8
+    "seconds": 17.3
   },
   "footstep-deck": {
     "url": "assets/audio/world/footstep-deck.mp3",

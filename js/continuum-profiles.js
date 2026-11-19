@@ -25,13 +25,13 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.48, taperMetres: 12.0, taperPower: 1.40, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.38, shadowMaxDistance: 80,
   }),
   hair: normalizeContinuumProfile({
-    errorScale: 0.18, taperMetres: 32.0, taperPower: 1.20, splatScale: 0.85, minPixels: 1.0, maxDistance: 160, shadowMinError: 0.12, shadowMaxDistance: 65,
+    errorScale: 0.18, taperMetres: 32.0, taperPower: 1.20, splatScale: 0.85, minPixels: 1.0, maxDistance: 220, shadowMinError: 0.12, shadowMaxDistance: 65,
   }),
   animals: normalizeContinuumProfile({
     errorScale: 0.40, taperMetres: 32, taperPower: 1.15, splatScale: 1.0, minPixels: 1.1, maxDistance: 0, shadowMinError: 0.07, shadowMaxDistance: 240,
   }),
   props: normalizeContinuumProfile({
-    errorScale: 0.45, taperMetres: 48, taperPower: 1.15, splatScale: 0.90, minPixels: 1.3, maxDistance: 900, shadowMinError: 0.05, shadowMaxDistance: 200,
+    errorScale: 0.45, taperMetres: 48, taperPower: 1.15, splatScale: 0.90, minPixels: 1.3, maxDistance: 1400, shadowMinError: 0.05, shadowMaxDistance: 200,
   }),
   city: normalizeContinuumProfile({
     errorScale: 0.30, taperMetres: 280, taperPower: 1.15, splatScale: 0.55, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.28, shadowMaxDistance: 380,
@@ -40,10 +40,10 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.50, taperMetres: 420, taperPower: 1.0, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.05, shadowMaxDistance: 400,
   }),
   forest: normalizeContinuumProfile({
-    errorScale: 1.05, taperMetres: 150, taperPower: 1.15, splatScale: 2.2, minPixels: 2.0, maxDistance: 0, shadowMinError: 0.14, shadowMaxDistance: 280,
+    errorScale: 0.55, taperMetres: 480, taperPower: 1.08, splatScale: 1.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.14, shadowMaxDistance: 320,
   }),
   meadow: normalizeContinuumProfile({
-    errorScale: 1.45, taperMetres: 100, taperPower: 1.25, splatScale: 1.2, minPixels: 2.3, maxDistance: 850, shadowMinError: 0.22, shadowMaxDistance: 120,
+    errorScale: 1.45, taperMetres: 120, taperPower: 1.20, splatScale: 1.1, minPixels: 2.0, maxDistance: 1500, shadowMinError: 0.22, shadowMaxDistance: 140,
   }),
   land: normalizeContinuumProfile({
     errorScale: 1.0, taperMetres: 0, taperPower: 1.0, splatScale: 1.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.0, shadowMaxDistance: 0,

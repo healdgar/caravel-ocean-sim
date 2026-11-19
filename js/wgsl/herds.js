@@ -590,8 +590,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   if (wy < 0.32 && !onBridge && !isStreetMount) { return; }
   // Drawn standing on the ground the land draws there (js/continuum-ground.js), where it stands on the land and not on
-  // a deck or a street raised over it; it is shot, felled and walks on the true ground above.
-  if (wy <= herdGroundY(worldXZ) + 0.01) { wy += continuumGroundLift(worldXZ + shiftXZ); }
+  // a deck or a street raised over it; street mounts mirror TOWNSFOLK_WALK's dry-land ground lift so horse & rider stay flush.
+  if (isStreetMount) {
+    if (wy > -0.02) { wy += continuumGroundLift(worldXZ + shiftXZ); }
+  } else if (wy <= herdGroundY(worldXZ) + 0.01) {
+    wy += continuumGroundLift(worldXZ + shiftXZ);
+  }
 
   // Axle-to-axle pitch and articulated draft tongue orientation.
   var slopePitch = 0.0;

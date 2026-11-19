@@ -164,16 +164,21 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   var cov = vec3f(0.0);
   // wind gusts ("cat's paws"): patches where the short ripples are stronger or calmer
   ${coast ? 'let cws = coastalWaveState(xz);' : ''}
+  let dist = length(in.rel);
+  let ddxz = dpdx(xz);
+  let ddyz = dpdy(xz);
   let gustN = textureSample(foamTex, sampR, xz * 0.011 + F.windP[0].xy * (F.camPos.w * 0.0004)).b;
   let gust = mix(0.35, 1.2, smoothstep(0.3, 0.72, gustN));
-  for (var c = 0u; c < ${CASCADES}u; c++) {
-    let uv = xz * F.cascInvL[c >> 2u][c & 3u];
+  let activeCascades = select(select(${CASCADES}u, 4u, dist > 140.0), 3u, dist > 520.0);
+  for (var c = 0u; c < activeCascades; c++) {
+    let invL = F.cascInvL[c >> 2u][c & 3u];
+    let uv = xz * invL;
     let cw = ${coast ? 'select(cws.chopScale, cws.swellScale, c <= 1u)' : '1.0'};
     let gk = mix(1.0, gust, select(0.0, select(0.5, 1.0, c >= 4u), c >= 3u)) * cw;
-    let dv = textureSample(derivTex, sampR, uv, c) * gk;
+    let dv = textureSampleGrad(derivTex, sampR, uv, c, ddxz * invL, ddyz * invL) * gk;
     // Moments carry the same filtered jxz in alpha, saving one anisotropic
     // displacement sample per cascade. jxz scales linearly, moments quadratically.
-    let moments = textureSample(momTex, sampR, uv, c);
+    let moments = textureSampleGrad(momTex, sampR, uv, c, ddxz * invL, ddyz * invL);
     let mv = moments.xyz * (gk * gk);
     s += dv.xy;
     jxx += dv.z;
@@ -181,20 +186,22 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
     jxz += moments.w * gk;
     cov += vec3f(max(mv.x - dv.x * dv.x, 0.0), max(mv.y - dv.y * dv.y, 0.0), mv.z - dv.x * dv.y);
   }
-  let dist = length(in.rel);
   let V = -in.rel / dist;
   let Ld = F.sunDir.xyz;
 
   // slope statistics (LEAN): add unresolved capillary roughness + sun disk size
   // unresolved roughness; grows with distance to reach Cox-Munk-like totals in the far sheen
-  let unres = F.waterCol.w + 0.0035 * smoothstep(30.0, 500.0, dist);
+  let unres = F.waterCol.w + 0.0035 * smoothstep(30.0, 500.0, dist) + select(0.0, 0.0012, dist > 140.0);
   cov.x += unres;
   cov.y += unres;
   let jx = max(1.0 + jxx, 0.15);
   let jz = max(1.0 + jzz, 0.15);
   let wp = in.rel.xz + F.camPos.xz;
   let dx = I.domain.w;
-  let wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
+  var wakeSlope = vec2f(0.0);
+  if (dist < 360.0) {
+    wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
+  }
   var sl = vec2f(s.x / jx, s.y / jz) + wakeSlope;
   ${coast?'sl = coastalRefractSlope(xz, sl, cws) + cws.extraSlope;':''}
   let nrm = normalize(vec3f(-sl.x, 1.0, -sl.y));
@@ -390,7 +397,10 @@ export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,c
       `if(${cameraProbe?'cameraSea[9]==cameraSea[9]&&F.camPos.y==F.camPos.y&&F.camPos.y<cameraSea[9]-.005':'optics.w>.5&&optics.z==optics.z&&F.camPos.y==F.camPos.y&&F.camPos.y<optics.z-.005'}){
     return vec4f(underwaterBoundary(in.rel+F.camPos.xyz,nrm,V,skyHemi,foamMask,foamLit),1);
   }
-  body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);\n  var col = body * (1.0 - Fr)`);
+  if (dist < 260.0 && Fr < 0.94) {
+    body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);
+  }
+  var col = body * (1.0 - Fr)`);
   return depthFirst?optical.replace(OCEAN_HULL_MASK,''):optical;
 }
 

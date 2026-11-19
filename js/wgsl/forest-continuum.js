@@ -157,15 +157,17 @@ fn forestStandOwn(tree:u32,touched:bool,near:f32,lane:u32)->vec2f{
  let shift=forestStand.shift.xyz;
  let sphere=vec4f(forestStandTypeF(model,${T.sphere}u),forestStandTypeF(model,${T.sphere + 1}u),forestStandTypeF(model,${T.sphere + 2}u),forestStandTypeF(model,${T.sphere + 3}u));
  let coarseCentre=r.rootScale.xyz+forestStandTurn(yaw,sphere.xyz)*scale;
- let coarseRadius=sphere.w*scale*2.2+24.0;
- if(forestStandOutside(earthCurve(coarseCentre+shift-F.camPos.xyz,F.camPos.y),coarseRadius)&&!(forestStand.counts.z!=0u&&forestStandShadowed(coarseCentre,coarseRadius))){return;}
+ let coarseRadius=sphere.w*scale*1.35+6.0;
+ let coarseRel=coarseCentre+shift-F.camPos.xyz;
+ if(forestStandOutside(earthCurve(coarseRel,F.camPos.y),coarseRadius)&&!(forestStand.counts.z!=0u&&forestStandShadowed(coarseCentre,coarseRadius))){return;}
+ let coarseDist=length(coarseRel);
  // Where it stands as drawn: on the ground the land draws there (js/continuum-ground.js). It is struck, felled and
  // blown over where it truly stands (js/forest-trunks.js on the CPU).
  let position=r.rootScale.xyz+vec3f(0.0,continuumGroundLift(r.rootScale.xz+shift.xz),0.0);
  let felled=r.identity.w<0.0;let wounded=r.identity.w>0.0;let t=F.camPos.w;
- // Its skeleton: its lane's, and its own when near the eye or touched; a tree on the ground is still.
+ // Its skeleton: its lane's, and its own when near the eye or touched; distant crowns and felled trees skip wind math.
  var bones=vec3f(-1.0,-1.0,0.0);var sway=0.0;
- if(!felled&&forestWind.counts.z>model){
+ if(!felled&&forestWind.counts.z>model&&coarseDist<260.0){
   let lane=model*${FOREST_WIND_LANES}u+forestWindLane(yaw,forestWindState[0].yz,i);
   bones.x=f32(lane*FOREST_WIND_SKELETON);
   sway=forestStandReach(lane*FOREST_WIND_SKELETON,sphere);
@@ -491,6 +493,8 @@ fn forestReadNormalOnly(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)-
 var<private> forestLastMask:u32=1u;
 var<private> forestLastHasPigment:bool=false;
 var<private> forestLastPigment:vec4f=vec4f(1.0);
+var<private> forestLastHasBot:bool=false;
+var<private> forestLastBot:vec4f=vec4f(1.0,0.0,0.0,0.0);
 // A layer's own colour over all of it: the last level of its coverage-weighted mips.
 fn forestNativeMean(material:ForestLeafMaterial)->vec3f{
  let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);let middle=vec2f(.5);
@@ -514,7 +518,7 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
 }
 // Near, a leaf's edge is crisp and its veins and cuticle show; this fades out before the canopy is far.
 fn forestBotanicalDetail(uv:vec2f,viewDist:f32,rawAlpha:f32)->vec4f{
- let detailW=1.-smoothstep(10.,38.,viewDist);
+ let detailW=1.-smoothstep(8.,22.,viewDist);
  if(detailW<=.001||rawAlpha<=.04){return vec4f(rawAlpha,0.,0.,0.);}
  // Near, solidify BC7-compressed leaf & twig interiors (rawAlpha >= 0.72 -> 1.0) so MSAA sample-masking never
  // punches salt-and-pepper stipple dots through solid leaves up close, while preserving smooth anti-aliased edges.
@@ -579,16 +583,17 @@ fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,face:vec3f,back:vec3f
  o.light*=vec2f(mix(.68,1.36,smoothstep(-.45,.75,dot(outward,F.sunDir.xyz))),mix(.8,1.2,outward.y*.5+.5));
  return o;
 }
-// Value noise on a lattice fixed to the ground, between -1 and 1.
+// Fast 4-corner value noise folded on XZ + Y phase, between -1 and 1 (4x fewer hashes than 8-corner 3D lattice).
 fn forestCrownLattice(p:vec3f)->f32{
- let i=vec3i(floor(p));let f=fract(p);let u=f*f*(3.-2.*f);var sum=0.;
- for(var k=0;k<8;k++){
-  let corner=vec3i(k&1,(k>>1)&1,k>>2);let q=bitcast<vec3u>(i+corner);
-  let h=continuumHash((q.x*0x8da6b343u)^continuumHash((q.y*0xd8163841u)^continuumHash(q.z*0xcb1ab31fu)));
-  let w=mix(vec3f(1.)-u,u,vec3f(corner));
-  sum+=w.x*w.y*w.z*f32(h&65535u)/65535.;
- }
- return sum*2.-1.;
+ let q=p.xz+vec2f(p.y*0.618034,p.y*0.381966);
+ let i=vec2i(floor(q));let f=fract(q);let u=f*f*(3.-2.*f);
+ let x0=bitcast<u32>(i.x)*0x8da6b343u;let x1=bitcast<u32>(i.x+1)*0x8da6b343u;
+ let y0=bitcast<u32>(i.y)*0xd8163841u;let y1=bitcast<u32>(i.y+1)*0xd8163841u;
+ let h00=f32(continuumHash(x0^continuumHash(y0))&65535u)/65535.;
+ let h10=f32(continuumHash(x1^continuumHash(y0))&65535u)/65535.;
+ let h01=f32(continuumHash(x0^continuumHash(y1))&65535u)/65535.;
+ let h11=f32(continuumHash(x1^continuumHash(y1))&65535u)/65535.;
+ return mix(mix(h00,h10,u.x),mix(h01,h11,u.x),u.y)*2.-1.;
 }
 // Sprays of leaves catch the light or fall into the next one's shade, and whole boughs stand lighter or darker: two
 // sizes of that unevenness, each fading out as it shrinks below what a pixel can show.
@@ -742,8 +747,8 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
    let mappedN=forestMappedNormal(n,surface.detail.xyz*vec3f(1.35,1.35,1.0),dx,dy,ux,uy)*select(-1.,1.,front);
    n=normalize(mappedN+vec3f(uvOff.x*0.06,uvOff.y*0.05,0.0));
    var rawRough=surface.detail.a/max(pigment.a,FOREST_THINNEST_COVERAGE);
-   if(viewDist<38.){
-    let bot=forestBotanicalDetail(v.uv,viewDist,pigment.a);
+   if(viewDist<22.){
+    let bot=select(forestBotanicalDetail(v.uv,viewDist,pigment.a),forestLastBot,forestLastHasBot);
     let tDir=normalize(dx+vec3f(1e-5,0.,0.));let bDir=normalize(dy+vec3f(0.,0.,1e-5));
     n=normalize(n+(tDir*bot.y+bDir*bot.z)*0.28);
     colour*=vec3f(1.+bot.w*.07,1.+bot.w*.10,1.-bot.w*.05);
@@ -768,6 +773,7 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
 fn forestContinuumCoverage(v:ContinuumVarying,front:bool)->u32{
  let ux=dpdx(v.uv);let uy=dpdy(v.uv);
  forestLastHasPigment=false;
+ forestLastHasBot=false;
  let layer=v.layer&0xffffu;
  if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){
   let m=forestLeafSampleMask(1.-clamp(v.surface.z,0.,1.),continuumHash(v.coverage.z^0x2c1b3c6du),v.position.xy,v.coverage.w);
@@ -779,7 +785,12 @@ fn forestContinuumCoverage(v:ContinuumVarying,front:bool)->u32{
  let pigment=forestNativeAlbedoOnly(forestNativeMaterials[layer],v.uv,ux*near,uy*near);
  forestLastPigment=pigment;forestLastHasPigment=true;
  let rawAlpha=pigment.a;
- let crisp=select(rawAlpha,forestBotanicalDetail(v.uv,viewDist,rawAlpha).x,viewDist<38.);
+ var crisp=rawAlpha;
+ if(viewDist<22.){
+  forestLastBot=forestBotanicalDetail(v.uv,viewDist,rawAlpha);
+  forestLastHasBot=true;
+  crisp=forestLastBot.x;
+ }
  let m=forestLeafSampleMask(clamp(crisp*mix(1.,FOREST_CROWN_CLOSING,smoothstep(45.,220.,viewDist)),0.,1.),v.seed,v.position.xy,v.coverage.w);
  forestLastMask=m;return m;
 }

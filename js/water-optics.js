@@ -15,7 +15,7 @@ function opticsMatching(source,start,open,close){
 
 // `land` marks ground, which is captured up to WATER_CAPTURE_LAND_MARGIN above the surface so a shore seen
 // through a wave has ground behind it; everything else stops at the surface.
-export const WATER_CAPTURE_LAND_MARGIN=0.45,WATER_CAPTURE_MARGIN=0.015;
+export const WATER_CAPTURE_LAND_MARGIN=0.45,WATER_CAPTURE_MARGIN=0.08;
 export function createSubmergedShader(source,entry='fs',world='v.world',surfaceWaves=false,land=false){
   // Explicit vessel-material opt-in. Do not guess by material number, rename
   // arbitrary booleans or apply an air/water toggle to unrelated scene shaders.

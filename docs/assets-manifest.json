@@ -680,9 +680,9 @@
     "sha256": "5930aabe392ff7eccf0d59bdd87b71b48a6dc597b3525f9a972cf8db10ce50c2"
   },
   "assets/forest-scenery/portugal/continuum/atlas.bin.gz": {
-    "url": "assets/forest-scenery/portugal/continuum/atlas.bin.33d3f4a848dcb82c.gz",
-    "bytes": 54540523,
-    "sha256": "33d3f4a848dcb82cb5b092d7e2eb6481da4a33cc14bb73ea3e83fa037456c14c"
+    "url": "assets/forest-scenery/portugal/continuum/atlas.bin.14d84b60420b7cb3.gz",
+    "bytes": 90765394,
+    "sha256": "14d84b60420b7cb32537b0f9ca914da8b12aaeefeeb34228b3e3e0e8182db1be"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
     "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.03aaf54ab8042358.gz",
@@ -730,14 +730,14 @@
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
   "assets/crew/hair-continuum/manifest.json": {
-    "url": "assets/crew/hair-continuum/manifest.21fc8a09c99f597d.json",
-    "bytes": 10878,
-    "sha256": "21fc8a09c99f597de4a19e3f737207b4b075ea12fd10fc33a55c5e5ef3c514e2"
+    "url": "assets/crew/hair-continuum/manifest.4358756ec0860511.json",
+    "bytes": 10883,
+    "sha256": "4358756ec086051177c9eaaade2404c2256e1e0e7fd3ae9027565695c607078d"
   },
   "assets/crew/hair-continuum/atlas.bin.gz": {
-    "url": "assets/crew/hair-continuum/atlas.bin.77b5d82bf47e7845.gz",
-    "bytes": 10332238,
-    "sha256": "77b5d82bf47e7845e23bc14a254a37f085f70fad431da358cc8b69338c6c5a55"
+    "url": "assets/crew/hair-continuum/atlas.bin.2799134b9f125dee.gz",
+    "bytes": 10356492,
+    "sha256": "2799134b9f125dee5f5a887fb404b3f041f2b2ec40b8c01bd6c01d7380c376da"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",
@@ -1055,9 +1055,9 @@
     "sha256": "7284cb491666b5f0d0d6b2719a615ca5c01ef603a676f7741b2ac72a0bac6b25"
   },
   "assets/forest-scenery/portugal/continuum/manifest.json": {
-    "url": "assets/forest-scenery/portugal/continuum/manifest.030e71421110eef8.json",
-    "bytes": 108810,
-    "sha256": "030e71421110eef83e9092e653e71ce0b9e4f487c40ea4dabc0eb8c33a61e455"
+    "url": "assets/forest-scenery/portugal/continuum/manifest.b1990ff58d891dfa.json",
+    "bytes": 108958,
+    "sha256": "b1990ff58d891dfaae6508b735b2a232ab75545b2040c127660792b199c62cf9"
   },
   "assets/forest-scenery/saba/manifest.json": {
     "url": "assets/forest-scenery/saba/manifest.447959ed7e073853.json",
@@ -1605,14 +1605,14 @@
     "sha256": "8571ce38e63f3890b500ab15cbf1cf08d3b405ba9bc08dc36a1f1722935138b7"
   },
   "assets/forest-scenery/portugal/manifest.json": {
-    "url": "assets/forest-scenery/portugal/manifest.b9f38e67d964afd9.json",
-    "bytes": 80981,
-    "sha256": "b9f38e67d964afd98f26abd29f2bba61b63fce06e4aaf5bb36ef73a9f5c3fb37"
+    "url": "assets/forest-scenery/portugal/manifest.849ca4d4dc2fce3e.json",
+    "bytes": 81003,
+    "sha256": "849ca4d4dc2fce3ed91222ddee279124927bf223bbe26918a0b44dc121398dcb"
   },
   "assets/forest-scenery/portugal/roots.bin.gz": {
-    "url": "assets/forest-scenery/portugal/roots.bin.74168e3df040459f.gz",
-    "bytes": 1086,
-    "sha256": "74168e3df040459ff4edf6cdf49a8025f37c97a1eb848f66ac1389f120f0e639"
+    "url": "assets/forest-scenery/portugal/roots.bin.4f069d6af9d1d885.gz",
+    "bytes": 1083,
+    "sha256": "4f069d6af9d1d8851f7da2ead8ac6d80b4a6f6d3d991a7c55b78b9250a87994a"
   },
   "assets/forest-scenery/portugal/oak-veteran-bark-albedo.png": {
     "url": "assets/forest-scenery/portugal/oak-veteran-bark-albedo.bec57a5718ce3134.png",
@@ -2630,14 +2630,14 @@
     "sha256": "1c473bfa106577d5caf8dbd35ad34c1199dc7e443ec25fd14814554fc2cf9132"
   },
   "assets/audio/world/town-ambience.mp3": {
-    "url": "assets/audio/world/town-ambience.cbc788334b31f084.mp3",
-    "bytes": 45600,
-    "sha256": "cbc788334b31f08405d3e1e0f81a149a71755830c5fe6e8e2c48a2b6765e8d50"
+    "url": "assets/audio/world/town-ambience.c946b71108cb9fda.mp3",
+    "bytes": 132158,
+    "sha256": "c946b71108cb9fda2ab871b6af6fdd3de4e3d6f2b08eafbcf2cc2dd66a7e3fb5"
   },
   "assets/audio/world/town-bustle.mp3": {
-    "url": "assets/audio/world/town-bustle.ca184a9bc942f5ea.mp3",
-    "bytes": 59097,
-    "sha256": "ca184a9bc942f5eaeea929eb9e988011b022301d3594f34b49004c710e923bd4"
+    "url": "assets/audio/world/town-bustle.4dacc4dbe8ae36b4.mp3",
+    "bytes": 130362,
+    "sha256": "4dacc4dbe8ae36b46ea29ca68470bc8eae025321bf66996b9b92794874cb2e8a"
   },
   "assets/audio/world/footstep-deck.mp3": {
     "url": "assets/audio/world/footstep-deck.e304e81848d3960a.mp3",

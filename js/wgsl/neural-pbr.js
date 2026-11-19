@@ -418,7 +418,7 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
   out = neuralPbrReplaceRequired(
     out,
     /let\s+spec\s*=\s*vesselSpecular\(\s*n\s*,\s*v\s*,\s*l\s*,\s*rough\s*,\s*f0\s*\)\s*;/,
-    'let spec=select(vesselSpecular(n,v,l,rough,f0),neuralPbrAnisoSpecular(n,mat2x3f(npbrT,cross(n,npbrT)),v,l,rough,npbrAniso,f0),abs(npbrAniso)>0.001);',
+    'var spec:vec3f;if(abs(npbrAniso)>0.001){spec=neuralPbrAnisoSpecular(n,mat2x3f(npbrT,cross(n,npbrT)),v,l,rough,npbrAniso,f0);}else{spec=vesselSpecular(n,v,l,rough,f0);}',
     'vessel anisotropic specular'
   );
 

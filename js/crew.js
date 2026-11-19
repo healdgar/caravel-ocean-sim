@@ -350,6 +350,12 @@ export function stepCompany(company,boat,dt,wind) {
     const sailorDt=s.casualtyState==='wounded'?dt*0.55:dt;
     s.observation.wind=wind;s.observation.roll=boat.roll??0;s.observation.rollRate=boat.rollVelocity??0;s.observation.captainOrder=company.order;s.observation.orderRevision=company.revision;
     s.order=company.gunneryActive||company.pending||company.order==='weather'?'standby':'patrol';
+    if(boat?.playerCaptain&&isCaptainActor(s)){
+      s.job=null;s.observation.job=null;s.seatedPose=null;s.navigationPath=null;s.navigationKey=null;
+      stepPlayerCaptainOnDeck(s,boat,sailorDt);
+      stepCrewPhysicsState(s,boat,sailorDt,company);
+      continue;
+    }
     if(s.job){s.seatedPose=null;s.moisturePoints=null;s.navigationPath=null;s.navigationKey=null;s.navigationY=null;}
     const hadJob=!!s.job;
     if(!stepCrewWork(s,company,boat,sailorDt)){s.observation.job=null;stepDeckhand(s,boat,hadJob?0:sailorDt,wind,company);}
@@ -545,6 +551,42 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   }else s.position.set([s.x*boat.beam/3.6,(s.navigationY??(s.company?modelDeck(boat,s.z):modelHullDeck(boat,s.z)))*vesselVerticalScale(boat)+.028+proneLift,s.z*lengthScale]);
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin((s.climbPitch??0)/2),cx=Math.cos((s.climbPitch??0)/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
+  return s;
+}
+
+function stepPlayerCaptainOnDeck(s,boat,dt){
+  const pc=boat.playerCaptain;
+  s.time=(s.time??0)+dt;
+  s.climbPitch=0;
+  s.brace+=(Number(crewDeckHazard(boat,s.observation.wind??0,s.intent==='brace'))-s.brace)*(1-Math.exp(-dt*8));
+  if(pc.ashore){
+    s.visible=false;
+    s.walk=0;
+    return s;
+  }
+  const sx=Math.max(0.25,(boat.beam||3.6)/3.6);
+  const sz=Math.max(0.5,(boat.length||12)/12);
+  const prevX=Number.isFinite(s.x)?s.x:pc.x;
+  const prevZ=Number.isFinite(s.z)?s.z:pc.z;
+  const dxM=(pc.x-prevX)*sx;
+  const dzM=(pc.z-prevZ)*sz;
+  const stepDist=Math.hypot(dxM,dzM);
+  s.x=pc.x;
+  s.z=pc.z;
+  const deckY=Number.isFinite(pc.y)?pc.y:crewDeckHeight(boat,s.z,s.x);
+  s.navigationY=deckY;
+  s._cachedDeckY=deckY;
+  const moving=stepDist>1e-4&&stepDist<4.0;
+  if(moving)crewAdvanceWalk(s,stepDist);
+  const lookYaw=Math.atan2(Math.sin(pc.viewYaw||0),-Math.cos(pc.viewYaw||0));
+  const goalYaw=moving?Math.atan2(dxM,dzM):lookYaw;
+  s.yaw=crewTurnTowards(s.yaw??lookYaw,goalYaw,dt,moving?9.5:6.5);
+  s.walk+=(Number(moving)-s.walk)*(1-Math.exp(-dt*10));
+  s.visible=!s.obliterated&&!pc.firstPerson;
+  s.position.set([s.x*sx,deckY*vesselVerticalScale(boat)+.028,s.z*sz]);
+  const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2);
+  s.rotation.set([0,sy,0,cy]);
+  gltfTRS(s.transform,s.position,s.rotation,s.scale);
   return s;
 }
 
@@ -2348,6 +2390,7 @@ export async function createFortSoldiers({
   samples = 4,
   shared = null,
   port = null,
+  waterOptics = null,
   // How many bodies each of its batches has room for: a fort's many by default, or one for a lone figure.
   most = MAX_FORT_SOLDIERS_PER_BATCH,
 }) {
@@ -2359,7 +2402,7 @@ export async function createFortSoldiers({
   };
   // Soldiers, the women of the post and its captains; a port's indigenous pair is fetched when the port is. A body
   // that is not baked fails the garrison's load, naming its missing files.
-  const { bodies, pipelines } = await loadCrewContinuum({ device, shader, format, samples }, ['soldier', 'villager-female', 'captain']);
+  const { bodies, pipelines } = await loadCrewContinuum({ device, shader, format, samples, waterOptics }, ['soldier', 'villager-female', 'captain']);
   // The crew's group 0 names the captain's picture (bindings 13 and 14). The continuum binds it and never reads it, so
   // a garrison of its own holds a single texel.
   const captainTexture = shared?.captainTexture ?? placeholderCaptainTexture(device);
@@ -2601,6 +2644,10 @@ export async function createFortSoldiers({
     drawShadow(pass) {
       if (!drawEnabled) return;
       for (const b of batches) { b.soldierCut?.drawShadow(pass); b.captainCut?.drawShadow(pass); }
+    },
+    drawSubmerged(pass, above = false) {
+      if (!drawEnabled) return;
+      for (const b of batches) { b.soldierCut?.drawSubmerged?.(pass, above); b.captainCut?.drawSubmerged?.(pass, above); }
     },
     // For the continuum census: each run's indirect draws.
     continuumDraws() { return drawEnabled ? batches.flatMap(b => [...(b.soldierCut?.continuumDraws() ?? []), ...(b.captainCut?.continuumDraws() ?? [])]) : []; },

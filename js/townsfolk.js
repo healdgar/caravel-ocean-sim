@@ -30,8 +30,8 @@ const MODELS = TOWNSFOLK_MODELS;
 const TOWN_JOINT_BYTES = CREW_JOINT_COUNT * 64, TOWN_ACTOR_BYTES = CREW_ACTOR_FLOATS * 4, TOWN_PLACED_BYTES = CREW_CONTINUUM_PLACED_WORDS * 4;
 // The second body's people begin at a slot whose joints and actor records a bind group may start at (256 bytes).
 const TOWN_SLOT_ALIGNMENT = 16;
-const PORT_REACH_M = 3200;
-const PORT_OFFSHORE_CULL_M = 3000;
+const PORT_REACH_M = 5200;
+const PORT_OFFSHORE_CULL_M = 5000;
 const PORT_CHECK_FRAMES = 45;
 const MOBILE_SHARE = 0.4;
 const CROWD_UNIFORM_WORDS = 28;
@@ -153,7 +153,7 @@ export function townsfolkBodiesFor(culture = null) {
 }
 
 // `shared` is the crew's shared assets: the captain's picture its group 0 names. `fetchAsset` fetches the bodies' files.
-export async function createTownsfolk({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, shared = null, herds = null, isMobile = false, fetchAsset }) {
+export async function createTownsfolk({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, shared = null, herds = null, isMobile = false, waterOptics = null, fetchAsset }) {
   const B = GPUBufferUsage;
   const buffer = (label, data, usage) => {
     const b = device.createBuffer({ label, size: Math.max(16, data.byteLength), usage: usage | B.COPY_DST });
@@ -165,7 +165,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   const bodyLoad = { fetchAsset };
   const [{ intent: intentPipeline, walk: walkPipeline, reset: resetPipeline, pose: posePipeline }, continuum, colonial] = await Promise.all([
     requestTownsfolkPipelines({ device, shader }),
-    requestCrewContinuumPipelines({ device, shader, format, samples, fetchAsset }),
+    requestCrewContinuumPipelines({ device, shader, format, samples, waterOptics, fetchAsset }),
     loadCrewContinuumBodies(device, townsfolkBodiesFor(), bodyLoad),
   ]);
   // Ashore the frame people are drawn in is the world's own.
@@ -227,7 +227,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   }
   function dispose() {
     if (!crowd) return;
-    for (const b of [crowd.walkers, crowd.route, crowd.looks, crowd.placed, crowd.counts, crowd.joints, crowd.actors, crowd.uniform, crowd.shots]) b.destroy();
+    for (const b of [crowd.walkers, crowd.route, crowd.looks, crowd.placed, crowd.counts, crowd.joints, crowd.actors, crowd.uniform, crowd.shots, crowd.intents]) b.destroy();
     for (const made of [...crowd.posers, ...crowd.batches]) made.destroy();
     delete crowd.port.townsfolkWatch;
     linkedHerds()?.setStreetMounts?.(null);
@@ -272,6 +272,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const uniform = buffer('townsfolk crowd', crowdWords, B.UNIFORM);
     const shots = device.createBuffer({ label: 'townsfolk shots', size: TOWN_SHOTS_WORDS * 4, usage: B.UNIFORM | B.COPY_DST });
     const fateRecord = fatesFor(port, people), fates = fateRecord.buffer;
+    const intents = device.createBuffer({ label: 'townsfolk intents', size: Math.max(32, people * 32), usage: B.STORAGE });
     const shotLog = createTownShots(streets), shotBytes = new ArrayBuffer(TOWN_SHOTS_WORDS * 4);
     port.townsfolkWatch = shotLog.note;
     const resetGroup = device.createBindGroup({ label: 'townsfolk reset', layout: resetPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: counts } }] });
@@ -282,13 +283,15 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
         { binding: 1, resource: { buffer: walkers } },
         { binding: 2, resource: { buffer: route } },
         { binding: 7, resource: { buffer: fates } },
+        { binding: 10, resource: { buffer: intents } },
       ],
     });
     const walkGroup = device.createBindGroup({
       label: 'townsfolk walk', layout: walkPipeline.getBindGroupLayout(0),
       entries: [...[frameUBO, walkers, route, placed, counts, uniform, shots, fates, moisture].map((b, binding) => ({ binding, resource: { buffer: b } })),
         // The ground the land draws, which they are drawn walking on (js/continuum-ground.js).
-        { binding: 9, resource: continuumGroundView(device) }],
+        { binding: 9, resource: continuumGroundView(device) },
+        { binding: 10, resource: { buffer: intents } }],
     });
     const countedOf = (m) => ({ buffer: counts, offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 });
     const main = [{ buffer: frameUBO }, { buffer: hull }, { buffer: joints }, { buffer: actors }, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: moisture }, skyView, { binding: 13, resource: shared.captainTexView }, { binding: 14, resource: shared.captainSampler }];
@@ -298,7 +301,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const posers = rigsOfTown.map((rig, m) => createCrewContinuumPoser({ device, pipeline: posePipeline, placed, palettes: rig.palette, looks, rest: rig.rest, joints, actors, orders: batches[m].orders, first: firsts[m], counted: countedOf(m) }));
     crowd = {
       port, people, capacity, walkers, route, looks, placed, counts, joints, actors, uniform, crowdWords, crowdHours: new Float32Array(crowdWords.buffer), hours: NaN,
-      shots, fates, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, resetGroup, intentGroup, walkGroup, batches, posers,
+      shots, fates, intents, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, resetGroup, intentGroup, walkGroup, batches, posers,
     };
   }
 
@@ -367,6 +370,10 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     drawShadow(pass) {
       if (!withinPortReach()) return;
       for (const batch of crowd.batches) batch.drawShadow(pass);
+    },
+    drawSubmerged(pass, above = false) {
+      if (!withinPortReach()) return;
+      for (const batch of crowd.batches) batch.drawSubmerged?.(pass, above);
     },
     // For the continuum census: each body's indirect draws.
     continuumDraws() { return withinPortReach() ? crowd.batches.flatMap((batch) => batch.continuumDraws()) : []; },

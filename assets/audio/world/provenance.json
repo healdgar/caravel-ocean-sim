@@ -142,31 +142,31 @@
   },
   {
     "id": "town-ambience",
-    "take": "01",
+    "take": "02",
     "category": "town",
     "provider": "ElevenLabs",
     "model": "eleven_text_to_sound_v2",
     "voiceId": null,
     "text": null,
-    "prompt": "Outdoor 16th century coastal harbour port town ambience, lively distant crowd murmur, marketplace chatter, wooden crates, and dockyard carpenter hammering, no motors or modern sounds.",
-    "seconds": 6.2,
-    "sourceSha256": "0819b8514febc49f39ec34f3560d835ba166c827a514b271115a7db79a1b3d4c",
-    "sha256": "cbc788334b31f08405d3e1e0f81a149a71755830c5fe6e8e2c48a2b6765e8d50",
-    "bytes": 45600
+    "prompt": "Seamless distant outdoor ambience of a 16th century coastal harbour town heard across the water, soft diffuse background walla murmur of many faraway people with zero distinct speakers, gentle sea breeze through alleys and moored wooden boats, steady even volume throughout, no hammering, no shouting, no laughter, no bells, no music, no motors or modern sounds.",
+    "seconds": 19,
+    "sourceSha256": "4da28cd372c24a3f0cb02d206f1ef9a071706122aec19981bd507da57410ad4c",
+    "sha256": "c946b71108cb9fda2ab871b6af6fdd3de4e3d6f2b08eafbcf2cc2dd66a7e3fb5",
+    "bytes": 132158
   },
   {
     "id": "town-bustle",
-    "take": "01",
+    "take": "03",
     "category": "town",
     "provider": "ElevenLabs",
     "model": "eleven_text_to_sound_v2",
     "voiceId": null,
     "text": null,
-    "prompt": "Calm outdoor 16th century harbour town street on an ordinary market morning, a loose unhurried crowd of townsfolk strolling past on packed earth and cobblestones, relaxed indistinct conversation as a murmur with no intelligible words, soft footsteps, a little easy laughter, even level throughout, no shouting, no running, no bells, no music, no motors or modern sounds.",
-    "seconds": 7.8,
-    "sourceSha256": "39a3ddf562384505114fb4138b25f1ed2b3d43a626497cdf5e82b4575bd93f46",
-    "sha256": "ca184a9bc942f5eaeea929eb9e988011b022301d3594f34b49004c710e923bd4",
-    "bytes": 59097
+    "prompt": "Seamless outdoor background bed of a calm 16th century cobblestone market square at medium distance, soft diffuse murmur of a large unhurried crowd with completely unintelligible distant voices and no foreground speakers, gentle shuffling footsteps on stone, steady flat ambient level from start to finish, no laughter, no shouting, no hammering, no bells, no music, no modern sounds.",
+    "seconds": 17.3,
+    "sourceSha256": "9d0bab38c1889fa0f4e6498517648af0d1b91aa2d063dc7ae1923dd6f3ae1abc",
+    "sha256": "4dacc4dbe8ae36b46ea29ca68470bc8eae025321bf66996b9b92794874cb2e8a",
+    "bytes": 130362
   },
   {
     "id": "footstep-deck",

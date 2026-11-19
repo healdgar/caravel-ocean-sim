@@ -472,12 +472,13 @@ function buildScalpGroom(ref, style, seed) {
       curlFreq = 4.8;
     }
 
-    // Loft by layer so inner under-coat seals the scalp tightly while mid/outer locks add soft fluffy volume.
-    const rootLift = isUnderCoat ? 0.0018 : (tier === 1 ? 0.0038 : 0.0046);
+    // Slimmer, naturally tapered lock ribbons tucked tightly into the scalp root so strands never look like floating tabs.
+    baseW *= 0.76;
+    const rootLift = isUnderCoat ? -0.0008 : (tier === 1 ? 0.0014 : 0.0024);
     const root = add3(point, normal, rootLift);
-    const archRatio = isUnderCoat ? 0.24 : (tier === 1 ? 0.42 : 0.36);
-    const pts = [root], widths = [baseW * 1.18], arches = [baseW * archRatio];
-    let cur = add3(point, normal, rootLift + (isUnderCoat ? 0.0012 : 0.0034));
+    const archRatio = isUnderCoat ? 0.28 : (tier === 1 ? 0.44 : 0.36);
+    const pts = [root], widths = [baseW * 0.88], arches = [baseW * archRatio];
+    let cur = add3(point, normal, rootLift + (isUnderCoat ? 0.0016 : 0.0032));
     // Smooth part-line emergence: near partX, strands crest slightly UP & BACK before parting sideways so the crown part has zero bald gap!
     const distFromPart = Math.abs(rx - partX);
     const partSpread = Math.min(1, distFromPart / 0.028);
@@ -750,6 +751,8 @@ function buildFarHairShell(ref, mesh, spec) {
   const RINGS = isBeard ? 7 : 12;
   const SEGS = isBeard ? 12 : 20;
   const verts = [];
+  const recessedFlag = [];
+  const shellCenter = [0, ref.crownY - 0.090, ref.midZ - 0.006];
 
   if (isBeard) {
     // Tight jawline/lip ellipsoid strictly below nostrils so far beards never touch eyes or nose.
@@ -765,11 +768,13 @@ function buildFarHairShell(ref, mesh, spec) {
       let y = Math.min(maxY, cy + dy * ry);
       let z = cz + dz * rz;
       // Recess upper-back vertices into the jaw interior so only the outward beard silhouette shows.
-      if (dz < -0.15) {
+      const isRec = dz < -0.15;
+      if (isRec) {
         x *= 0.65;
         z = cz - 0.018;
       }
       verts.push([x, y, z]);
+      recessedFlag.push(isRec);
     };
     pushBeardVert(0, 1, 0);
     for (let r = 1; r < RINGS; r++) {
@@ -821,6 +826,7 @@ function buildFarHairShell(ref, mesh, spec) {
 
       if (recessed) {
         // Pull deep inside the cranium core (4.0 cm sphere) so no triangle or collapsed chord can ever cross the face!
+        recessedFlag.push(true);
         return add3(center, dir, 0.040);
       }
 
@@ -846,6 +852,7 @@ function buildFarHairShell(ref, mesh, spec) {
       if (out[1] < ref.crownY - 0.042 && out[2] > ref.midZ + 0.032) {
         out[2] = ref.midZ + 0.032;
       }
+      recessedFlag.push(false);
       return out;
     };
 
@@ -879,9 +886,11 @@ function buildFarHairShell(ref, mesh, spec) {
     tris.push([ringIdx(RINGS - 1, s), southIdx, ringIdx(RINGS - 1, s + 1)]);
   }
 
-  // Compute smooth outward vertex normals.
+  // Compute smooth outward vertex normals from non-recessed outer triangles so recessed inner cliff faces never darken
+  // or twist hairline normals.
   const vNorms = verts.map(() => [0, 0, 0]);
   for (const [ia, ib, ic] of tris) {
+    if (recessedFlag[ia] || recessedFlag[ib] || recessedFlag[ic]) continue;
     const fn = cross3(sub3(verts[ib], verts[ia]), sub3(verts[ic], verts[ia]));
     for (const idx of [ia, ib, ic]) {
       vNorms[idx][0] += fn[0];
@@ -889,7 +898,10 @@ function buildFarHairShell(ref, mesh, spec) {
       vNorms[idx][2] += fn[2];
     }
   }
-  for (let i = 0; i < vNorms.length; i++) vNorms[i] = norm3(vNorms[i]);
+  for (let i = 0; i < vNorms.length; i++) {
+    const l = Math.hypot(vNorms[i][0], vNorms[i][1], vNorms[i][2]);
+    vNorms[i] = l > 1e-6 ? vNorms[i].map((c) => c / l) : norm3(sub3(verts[i], shellCenter));
+  }
 
   const T = tris.length;
   const vertices = new Float32Array(T * 24);
@@ -949,7 +961,7 @@ for (const spec of HAIR_CONTINUUM_TYPES) {
   const stepN = farBody.steps.length / 4;
   if (stepN > 0) {
     const stepFloats = new Float32Array(farBody.steps.buffer, farBody.steps.byteOffset, farBody.steps.length);
-    const eLo = spec.slot === 'beard' ? 0.008 : 0.009;
+    const eLo = spec.slot === 'beard' ? 0.012 : 0.016;
     const eHi = Math.max(0.18, stepFloats[(stepN - 1) * 4 + 1]);
     const origLo = stepFloats[1];
     const origSpan = Math.max(stepFloats[(stepN - 1) * 4 + 1] - origLo, 1e-6);
@@ -962,22 +974,30 @@ for (const spec of HAIR_CONTINUUM_TYPES) {
     }
   }
 
-  // Assign skin and wind to far-body vertices from the nearest strand vertex.
+  // Assign skin, per-vertex flow word (tangent/tone/seed), and damped wind to far-body vertices from the nearest strand.
+  // Keep crown/hairline wind zero so the solid far shell never shears sideways off the head in strong wind.
   const toStrand = triangleGrid(position, index, 0.02);
-  const farSkin = new Array(V), farWind = new Uint32Array(V);
+  const farSkin = new Array(V), farWind = new Uint32Array(V), farWords = new Uint32Array(V);
+  const neutralFarWord = packTangentToneSeed([0, -1, 0], 0.5, 0.5);
   for (let i = 0; i < V; i++) {
-    const t = toStrand(farBody.position[i * 3], farBody.position[i * 3 + 1], farBody.position[i * 3 + 2]);
+    const px = farBody.position[i * 3], py = farBody.position[i * 3 + 1], pz = farBody.position[i * 3 + 2];
+    const t = toStrand(px, py, pz);
     const w = [1 - closest[1] - closest[2], closest[1], closest[2]];
     const nearV = t >= 0 ? index[t * 3 + w.indexOf(Math.max(...w))] : 0;
     farSkin[i] = mesh.skin[nearV];
-    farWind[i] = mesh.wind[nearV];
+    farWords[i] = t >= 0 ? mesh.word[nearV] : neutralFarWord;
+    const rawWind = mesh.wind[nearV];
+    const rawFlex = (rawWind & 65535) / 65535;
+    const phase = (rawWind >>> 16) / 65535;
+    const hangShare = spec.slot === 'beard' ? 0 : Math.max(0, Math.min(1, (ref.crownY - 0.14 - py) / 0.14));
+    const cappedFlex = rawFlex * hangShare * 0.14;
+    farWind[i] = cappedFlex > 0.002 ? packWind(cappedFlex, phase) : 0;
   }
 
-  const neutralFarWord = packTangentToneSeed([0, -1, 0], 0.5, 0.5);
   const body = packContinuumBody({
     triangles: index.length / 3,
     vertex: (v) => ({ high: mesh.high[v], word: mesh.word[v] }),
-    farWord: () => neutralFarWord,
+    farWord: (i) => farWords[i],
     streams: {
       skin: (v) => mesh.skin[v],
       wind: (v) => [mesh.wind[v]],

@@ -160,7 +160,7 @@ export function continuumCaptureDraw(capture, main, shadows) {
         if (scene.paging !== capture.paging) throw Error(`The ${capture.material.name} capture binds ${capture.paging.pages} atlas pages, its scene ${scene.paging.pages}`);
         if (!groups.has(scene)) groups.set(scene, scene.dataGroup(capture.pipeline, capture.material));
         pass.setBindGroup(group, groups.get(scene));
-        scene.drawCoarse(pass);
+        scene.drawCaptureLists(pass);
       }
     },
   };
@@ -381,11 +381,16 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       if (program.own) pass.setBindGroup(2, groups.own);
       scene.drawCoarse(pass);
     },
-    // The shadow map's lists, the coarse cut it casts, by whatever pipeline and groups are bound: a shadow program,
-    // or an under-water capture of the material's view, whose data group `dataGroup` makes.
+    // The shadow map's lists, the coarse cut it casts, by whatever pipeline and groups are bound.
     drawCoarse(pass) {
       if (destroyed || !count) return;
       for (let index = CONTINUUM_VIEW_LISTS; index < CONTINUUM_LISTS.length; index++) drawList(pass, index);
+    },
+    // The camera view's body lists (clusters + far body, omitting horizon splats) for underwater/above-water refraction
+    // capture so floating/submerged bodies are never culled by a shadow frustum or nighttime shadow disable.
+    drawCaptureLists(pass) {
+      if (destroyed || !count) return;
+      for (let index = 0; index < CONTINUUM_VIEW_LISTS - 1; index++) drawList(pass, index);
     },
     dataGroup: dataGroupFor,
     // For the continuum census (js/continuum-census.js): the real triangles the scene's error asked of the view,

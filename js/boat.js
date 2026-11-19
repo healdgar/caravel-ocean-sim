@@ -514,7 +514,7 @@ export function stepBoatSteering(boat, command, dt) {
   boat.waterYawMoment=boat.sailYawMoment=boat.rowingYawMoment=boat.waterYawDamping=0;
 }
 
-function helmDesignStation(boat){
+export function helmDesignStation(boat){
   const side=boat.eyeSide??boat.sailState?.tack??1;
   const additional=additionalHydroDesign(boat.modelId),victory=boat.modelId==='victory',helm=additional?.helm??(victory?VICTORY_DESIGN.helm:null);
   const baseX=side*(helm?.x??HELM_EYE_X);

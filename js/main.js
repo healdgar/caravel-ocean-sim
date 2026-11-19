@@ -123,7 +123,7 @@ import { WATER_FILTER } from './wgsl/caravel.js';
 import { createHullFlood, requestHullFloodPipelines, HULL_DAMAGE_UNIFORM_BYTES } from './hull-flood.js';
 import { hullHoleDepth } from './hull-holes.js';
 import { loseHandInGale } from './crew-overboard.js';
-import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
+import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, helmDesignStation, crowsNestDesignStation, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors } from './ship-colors.js';
 import { createDockingBoardingState, computeBoardingStrength, mooringLinesState } from './boarding-docking.js';
 import { writeVesselDetailState, vesselDetailReach, VESSEL_DETAIL_STATE_FLOATS } from './vessel-detail.js';
@@ -261,7 +261,7 @@ export const P = {
   sunElev: 2.6,        // deg
   sunAzim: 4,          // deg (0 = straight ahead of the start view)
   exposure: 1.35,
-  haze: 3.0,
+  haze: 1.8,
   clouds: 0.55,
   cloudBase: 1.5,     // km
   cloudDepth: 2.2,    // km
@@ -810,23 +810,27 @@ async function main() {
   // The same entries for her continuum's water capture (js/water-optics.js).
   const vesselCaptureEntries=v=>vesselGroupEntries(v).map((resource,binding)=>({binding,resource}));
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
-  let fortSoldiers=null;
-  try{if(sharedCrew)fortSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew});}catch(error){console.error('Fort garrison initialization:',error);}
-  // The first mate ashore is one more such body, in a renderer with room for no one else.
-  let mateSoldiers=null;
-  try{if(sharedCrew)mateSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,most:1});}catch(error){console.error('The first mate\'s figure:',error);}
+  let fortSoldiers=null,mateSoldiers=null,townsfolk=null;
+  window.oceanTownsfolk=null;
   const props=createProps({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,waterOptics});
   window.oceanProps=props;
-  let townsfolk=null;
-  try{if(sharedCrew)townsfolk=await createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)});}catch(error){console.error('Townsfolk initialization:',error);}
-  window.oceanTownsfolk=townsfolk;
+  // Launch shore garrison, shore party (mate + captain), and townsfolk concurrently in the background so they don't
+  // stall Frame 0 serially while their 34 MiB soldier/villager atlases stream in.
+  const shoreFolkReadyPromise=sharedCrew?Promise.all([
+    createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics})
+      .then(r=>{fortSoldiers=r;}).catch(error=>{console.error('Fort garrison initialization:',error);}),
+    createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics,most:2})
+      .then(r=>{mateSoldiers=r;}).catch(error=>{console.error('The first mate\'s figure:',error);}),
+    createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)})
+      .then(r=>{townsfolk=r;window.oceanTownsfolk=r;}).catch(error=>{console.error('Townsfolk initialization:',error);}),
+  ]):Promise.resolve();
   const spindriftPromise=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
   const weatherRendererPromise=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   const hullContactProbePromise=createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
   // Her anchor's iron and rode are her own (js/vessel-detail.js); this is the splash it throws up when let go.
   const noAnchorSplash=Object.freeze({update(){},draw(){}});
   const anchorsPromise=Promise.all(vessels.map(async v=>{v.anchorSplash=getShipParts(v.modelId).equipment.anchor===null?noAnchorSplash:await createAnchorSplashRenderer({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
-  for(const p of [spindriftPromise,weatherRendererPromise,hullContactProbePromise,anchorsPromise])p.catch(()=>{});
+  for(const p of [spindriftPromise,weatherRendererPromise,hullContactProbePromise,anchorsPromise,shoreFolkReadyPromise])p.catch(()=>{});
   const spindrift=await spindriftPromise;
   for(const v of vessels)v.wetness.connect(v.interaction,spindrift,fullArr(dispTex),samplerSim);
   const wakeIndices=[0,1,2,3],wakeIndex=()=>wakePool.current+2*surfaceWaves.current;
@@ -2053,6 +2057,21 @@ async function main() {
       });
     }
   }
+  function syncPlayerCaptain() {
+    const hStation = helmDesignStation(boat);
+    const cn = boat.viewStation === 'crows-nest' ? crowsNestDesignStation(boat) : null;
+    const localViewYaw = boat.enabled
+      ? (cam.yaw + boatViewYawOffset())
+      : (cam.yaw - (boat.heading || 0) * D2R);
+    boat.playerCaptain = {
+      x: cn ? cn.x : (hStation.baseX + (boat.deckWalkX || 0)),
+      z: cn ? cn.z : (hStation.baseZ + (boat.deckWalkZ || 0)),
+      y: cn ? (cn.deckHeight / vesselVerticalScale(boat)) : null,
+      viewYaw: localViewYaw,
+      ashore: Boolean(ashore.on),
+      firstPerson: Boolean(boat.enabled),
+    };
+  }
   function updateCamera(dt) {
     const lookYaw=(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0);
     const lookPitch=(keys.ArrowDown?1:0)-(keys.ArrowUp?1:0);
@@ -2065,6 +2084,7 @@ async function main() {
       const walkStrafe=(keys.KeyE?1:0)-(keys.KeyQ?1:0);
       stepDeckWalk(boat,walkFwd,walkStrafe,cam.yaw+boatViewYawOffset(),dt);
       stepBoatView(boat,dt);
+      syncPlayerCaptain();
       boatEyePosition(eyePosition,boat);
       cam.x=eyePosition[0]; cam.y=eyePosition[1]; cam.z=eyePosition[2];
       if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+1.2);
@@ -2078,6 +2098,12 @@ async function main() {
       return;
     }
     if (cameraMode === 'ship') {
+      const walkFwd=(keys.KeyW?1:0)-(keys.KeyS?1:0);
+      const walkStrafe=(keys.KeyE?1:0)-(keys.KeyQ?1:0);
+      if(walkFwd||walkStrafe){
+        stepDeckWalk(boat,walkFwd,walkStrafe,cam.yaw-(boat.heading||0)*D2R,dt);
+      }
+      syncPlayerCaptain();
       const fleet=shipOrbit.fleet&&followerEnabled;
       const wildlifeState=shipOrbit.marine?marineLife.state:dolphins.state;
       const wildlife=shipOrbit.wildlife&&wildlifeState.active;
@@ -2115,8 +2141,10 @@ async function main() {
         else if(dz&&ashoreOpen(cam.x,cam.z+dz))cam.z+=dz;
       }
       cam.y+=(terrain.groundSample(cam.x,cam.z)+ASHORE_EYE_M-cam.y)*Math.min(1,dt*12);
+      syncPlayerCaptain();
       return;
     }
+    syncPlayerCaptain();
     const up = Math.max(-1, Math.min(1, ((keys.KeyE || keys.Space ? 1 : 0) - (keys.KeyQ || keys.KeyC ? 1 : 0)) + (mob ? mob.up : 0)));
     mx += fwd * cp * sy + str * cy;
     my += fwd * sp + up;
@@ -2316,7 +2344,7 @@ async function main() {
     f[88] = (5.802e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[89] = (13.558e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[90] = (33.1e-3 + 4.40e-3 * P.haze) * 1e-3;
-    f[91] = 1.1e-4;
+    f[91] = 3.2e-5;
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
     clearFireLights(f);
     if (!Number.isFinite(f[68]) || !(f[68] > 0)) f[68] = 1.0;
@@ -5244,12 +5272,17 @@ async function main() {
     if(ashore.on!==storySeen.ashore){storySeen.ashore=ashore.on;storyteller.tell({kind:ashore.on?'ashore':'aboard',place:port});}
     if(port!==storySeen.port){storyteller.tell(port?{kind:'landfall',place:port}:{kind:'sailed',from:storySeen.port});storySeen.port=port;}
   },1500);
-  // The mate ashore: their figure is made when first wanted, and walked after the captain each frame.
+  // The mate and captain ashore: made when first wanted, moving with the player each frame.
   function tendMate(dt){
     if(!mateSoldiers||!firstMate){if(mateAshore){mateAshore=null;mateSoldiers?.setPort(null);}return;}
     const on=ashore.on&&Boolean(terrain);
-    if(!mateAshore){if(!on)return;mateAshore=createMateFigure(firstMate);mateSoldiers.setPort(mateAshore.port);}
-    if(stepMateFigure(mateAshore,dt,{ashore:on,captain:on?{x:cam.x,z:cam.z,yaw:cam.yaw}:null,ground:(x,z)=>terrain.groundSample(x,z),open:ashoreOpen}))mateSoldiers.setPort(mateAshore.port);
+    if(!mateAshore){
+      if(!on)return;
+      const shipCap=vessels[0]?.crew?.state?.crew?.find(s=>s.role==='Captain'||s.roles?.includes('captain'))??null;
+      mateAshore=createMateFigure(firstMate,shipCap);
+      mateSoldiers.setPort(mateAshore.port);
+    }
+    if(stepMateFigure(mateAshore,dt,{ashore:on,captain:on?{x:cam.x,z:cam.z,yaw:cam.yaw}:null,ground:(x,z)=>terrain.groundSample(x,z),open:ashoreOpen,firstPerson:on&&cameraMode==='free'}))mateSoldiers.setPort(mateAshore.port);
     mateSoldiers.update(mateAshore.port,dt,P.windSpeed,cam,false,gameDateMs());
   }
   window.oceanStoryteller={
@@ -5854,6 +5887,8 @@ async function main() {
       v.continuum.drawCapture(underwater,false,()=>vesselCaptureEntries(v),v.ownGroups);
       if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(underwater);
     }
+    fortSoldiers?.drawSubmerged(underwater);mateSoldiers?.drawSubmerged(underwater);
+    townsfolk?.drawSubmerged(underwater);
     props?.drawSubmerged(underwater);
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
     if(cam.y<waterH+Math.min(HB,1.5)){
@@ -5865,6 +5900,8 @@ async function main() {
         v.continuum.drawCapture(aboveWater,true,()=>vesselCaptureEntries(v),v.ownGroups);
         if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(aboveWater,true);
       }
+      fortSoldiers?.drawSubmerged(aboveWater,true);mateSoldiers?.drawSubmerged(aboveWater,true);
+      townsfolk?.drawSubmerged(aboveWater,true);
       props?.drawSubmerged(aboveWater,true);
       dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
     }
@@ -5888,7 +5925,7 @@ async function main() {
     lastTerrainCamera=terrainCamera;lastHulls=hulls;
     // Whole hulls through their cuts: clusters, far body and splat, each keeping its own samples of a pixel.
     for(const v of hulls)v.continuum.draw(rp,(pipeline,far)=>vesselOwnGroups(v,pipeline,far));
-    for(const v of hulls)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
+    for(const v of vessels)if(drawProw&&v.boat.showProw&&vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
     fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);
     townsfolk?.draw(rp);
     props?.draw(rp);
@@ -6033,7 +6070,10 @@ async function main() {
       // Setup uploads submit earlier too. Only this submission contains the
       // first canvas composite, and its completion must precede revealing it.
       device.queue.onSubmittedWorkDone().then(()=>{
-        if(!firstGpuError&&!oceanStartupDeviceLost){window.oceanStartup?.ready();wakeBoard();}
+        if(!firstGpuError&&!oceanStartupDeviceLost){
+          window.oceanSceneryReady=Promise.all([shoreFolkReadyPromise,terrain?.sceneryReady??Promise.resolve()]).then(()=>true);
+          window.oceanStartup?.ready();wakeBoard();
+        }
       },error=>window.oceanStartup?.fail(error));
     }
     gunSea.read(contact=>{

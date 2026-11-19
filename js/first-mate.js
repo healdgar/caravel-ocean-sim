@@ -15,35 +15,68 @@ export const MATE_SETS_OFF_M = 2.4, MATE_STOPS_M = 1.5, MATE_WALK_MS = 1.5, MATE
 // Farther than this they are not walked to but found beside the captain (who came ashore, or was carried off).
 const MATE_LOST_M = 36, MATE_STUCK_S = 2.5, MATE_RECENTRE_M = 300;
 
-// The figure of `person` ({id, name, sex: 'm' | 'f', age, role}) and the garrison of one it is drawn as. It stands
-// nowhere until it is first stepped.
-export function createMateFigure(person) {
+// The figure of `person` ({id, name, sex: 'm' | 'f', age, role}) and the captain ashore, in one small garrison.
+export function createMateFigure(person, shipCaptain = null) {
   const figure = createDeckhand();
   Object.assign(figure, { id: 'first-mate', role: 'First mate', stationKind: 'mate', garrison: true, indigenous: false, modelVariant: 'colonial', crewIndex: 0,
     time: 0, walkTime: 0, walk: 0, brace: 0, work: 0, yaw: 0, visible: false, shirt: [...MATE_COAT], trousers: [...MATE_BREECHES], dress: 0, stuck: 0, placed: false });
   garrisonEnlist(figure, { ...person, of: 'mate' });
+  const captainFigure = createDeckhand();
+  Object.assign(captainFigure, {
+    id: shipCaptain?.id ?? 'player-captain', name: shipCaptain?.name ?? 'Captain', role: 'Captain',
+    sex: shipCaptain?.sex ?? 'female', stationKind: 'captain', garrison: true, indigenous: false, modelVariant: 'colonial', crewIndex: 1,
+    time: 0, walkTime: 0, walk: 0, brace: 0, work: 0, yaw: 0, visible: false,
+    shirt: shipCaptain?.shirt ? [...shipCaptain.shirt] : [0.06, 0.08, 0.14],
+    trousers: shipCaptain?.trousers ? [...shipCaptain.trousers] : [0.12, 0.10, 0.09],
+    skin: shipCaptain?.skin ? [...shipCaptain.skin] : captainFigure.skin,
+    hair: shipCaptain?.hair ? [...shipCaptain.hair] : captainFigure.hair,
+    hat: shipCaptain?.hat ? [...shipCaptain.hat] : captainFigure.hat,
+    dress: 0, placed: false,
+  });
   const port = { instances: [{ prefabId: 'first-mate' }], center: { x: 0, z: 0 } };
-  const garrison = { port, origin: [0, 0, 0], soldiers: [figure], byBuilding: new Map(), units: [], time: 0, dateMs: null, watch: null };
+  const garrison = { port, origin: [0, 0, 0], soldiers: [figure, captainFigure], byBuilding: new Map(), units: [], time: 0, dateMs: null, watch: null };
   port.garrison = garrison;
-  return { person, figure, garrison, port };
+  return { person, figure, captainFigure, garrison, port };
 }
 
 const mateTurn = (yaw, desired, most) => { const angle = Math.atan2(Math.sin(desired - yaw), Math.cos(desired - yaw)); return yaw + Math.max(-most, Math.min(most, angle)); };
 
 /**
- * Walk the mate after the captain for `dt` seconds. `captain` is where the captain stands and looks ({x, z, yaw},
- * world metres); `ground(x, z)` the height there; `open(x, z)` whether a body may stand there (dry, and through no
- * wall). `ashore` false puts the figure away. Answers true when the figure's garrison was moved to a new origin and
- * the renderer must be told (setPort).
+ * Walk the mate after the captain (and move the physical ashore captain figure with the player) for `dt` seconds.
  */
-export function stepMateFigure(mate, dt, { ashore, captain, ground, open }) {
-  const s = mate.figure, garrison = mate.garrison;
+export function stepMateFigure(mate, dt, { ashore, captain, ground, open, firstPerson = true }) {
+  const s = mate.figure, cap = mate.captainFigure, garrison = mate.garrison;
   dt = Math.max(0, Math.min(0.1, Number.isFinite(dt) ? dt : 0));
-  if (!ashore || !captain) { s.visible = false; s.placed = false; return false; }
+  if (!ashore || !captain) {
+    s.visible = false; s.placed = false;
+    if (cap) { cap.visible = false; cap.placed = false; }
+    return false;
+  }
   let moved = false;
   if (!s.placed || Math.hypot(captain.x - garrison.origin[0], captain.z - garrison.origin[2]) > MATE_RECENTRE_M) {
     garrison.origin[0] = Math.round(captain.x); garrison.origin[2] = Math.round(captain.z); mate.port.center.x = garrison.origin[0]; mate.port.center.z = garrison.origin[2];
     moved = true;
+  }
+  if (cap) {
+    const prevX = cap.placed ? cap.x : captain.x;
+    const prevZ = cap.placed ? cap.z : captain.z;
+    const stepDist = Math.hypot(captain.x - prevX, captain.z - prevZ);
+    cap.x = captain.x; cap.z = captain.z; cap.placed = true;
+    cap.time += dt;
+    const moving = stepDist > 1e-4 && stepDist < 8.0;
+    if (moving) crewAdvanceWalk(cap, stepDist);
+    const lookYaw = Math.atan2(Math.sin(captain.yaw || 0), -Math.cos(captain.yaw || 0));
+    const goalYaw = moving ? Math.atan2(captain.x - prevX, captain.z - prevZ) : lookYaw;
+    cap.yaw = mateTurn(cap.yaw, goalYaw, dt * (moving ? 9.5 : 6.5));
+    cap.walk += (Number(moving) - cap.walk) * (1 - Math.exp(-dt * 10));
+    const cy = ground(cap.x, cap.z) + 0.028;
+    cap.y = Number.isFinite(cap.y) && !moved ? cap.y + (cy - cap.y) * Math.min(1, dt * 12) : cy;
+    cap.position.set([cap.x, cap.y, cap.z]);
+    const ch = cap.yaw * 0.5;
+    cap.rotation.set([0, Math.sin(ch), 0, Math.cos(ch)]);
+    gltfTRS(cap.transform, [cap.x - garrison.origin[0], cap.y - garrison.origin[1], cap.z - garrison.origin[2]], cap.rotation, cap.scale);
+    cap.visible = !firstPerson;
+    cap._poseReady = !moving && cap.walk < 1e-3;
   }
   const place = () => {
     // Beside the captain: behind first, then to either hand, then anywhere about them that is open.

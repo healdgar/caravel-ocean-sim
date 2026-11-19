@@ -45,7 +45,7 @@ const NOT_WALKED_ON = new Set(['pier', 'quay']);
 const WITHOUT_DOORS = new Set(['quay']);
 const OPEN_AIR = new Set(['pier', 'quay', 'canoe']);
 // How often people have business at a place. Anything else counts for two.
-const PLACE_BUSINESS = Object.freeze({ pier: 5, slipway: 3, careening: 2 });
+const PLACE_BUSINESS = Object.freeze({ pier: 2, slipway: 3, careening: 2 });
 // People abroad at once at each size of town, before those indoors are taken off.
 const TOWNSFOLK_BY_STAGE = Object.freeze({
   'citadel-metropolis': 520, 'fortified-port': 360, settlement: 220, outpost: 110,
@@ -645,12 +645,30 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
   }
   if (!trips.length) return null;
   // Who walks which, since a way is as wide as those who use it have worn it.
-  const people = Math.round((TOWNSFOLK_BY_STAGE[port.stage] ?? TOWNSFOLK_DEFAULT) * townsfolkScale);
+  // Scale local street population by actual reachable doors so founded-board waterfronts (where only the pier & quay
+  // buildings live in town-streets while the city lives on the board) never cram hundreds of people onto one pier.
+  const doorCap = Math.max(12, reachable.length * 10);
+  const people = Math.min(doorCap, Math.round((TOWNSFOLK_BY_STAGE[port.stage] ?? TOWNSFOLK_DEFAULT) * townsfolkScale));
   const walkerTrip = new Uint16Array(people);
+  const nonPierTrips = [];
+  for (let t = 0; t < trips.length; t++) {
+    if (trips[t].a.inst.kind !== 'pier' && trips[t].b.inst.kind !== 'pier') nonPierTrips.push(t);
+  }
+  const pierCap = nonPierTrips.length ? Math.max(6, Math.min(16, Math.round(people * 0.25))) : people;
+  let pierAssigned = 0;
   const totalTripBusiness = trips.reduce((sum, trip) => sum + trip.business, 0);
+  const nonPierBusiness = nonPierTrips.reduce((sum, t) => sum + trips[t].business, 0);
   for (let w = 0; w < people; w++) {
-    let roll = random() * totalTripBusiness, chosen = trips.length - 1;
-    for (let t = 0; t < trips.length; t++) { roll -= trips[t].business; if (roll <= 0) { chosen = t; break; } }
+    let chosen = trips.length - 1;
+    if (pierAssigned >= pierCap && nonPierTrips.length) {
+      let roll = random() * nonPierBusiness;
+      chosen = nonPierTrips[nonPierTrips.length - 1];
+      for (const t of nonPierTrips) { roll -= trips[t].business; if (roll <= 0) { chosen = t; break; } }
+    } else {
+      let roll = random() * totalTripBusiness;
+      for (let t = 0; t < trips.length; t++) { roll -= trips[t].business; if (roll <= 0) { chosen = t; break; } }
+      if (trips[chosen].a.inst.kind === 'pier' || trips[chosen].b.inst.kind === 'pier') pierAssigned++;
+    }
     walkerTrip[w] = chosen;
     for (const c of trips[chosen].cells) traffic[c] += 1;
   }
@@ -823,11 +841,11 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     floats[at + 4] = 0.25 + 0.75 * random(); // Each keeps to one side of their way of going.
     floats[at + 5] = pauses ? 0.2 + 0.6 * random() : 0;
     floats[at + 6] = pauses ? PAUSE_SECONDS * (0.5 + random()) : 0;
-    floats[at + 7] = INDOOR_SECONDS[0] + (INDOOR_SECONDS[1] - INDOOR_SECONDS[0]) * random();
+    const pierTrip = trip.a.inst.kind === 'pier' || trip.b.inst.kind === 'pier';
+    floats[at + 7] = pierTrip ? (5 + 11 * random()) : (INDOOR_SECONDS[0] + (INDOOR_SECONDS[1] - INDOOR_SECONDS[0]) * random());
     floats[at + 8] = (count - 1) * ROUTE_STEP_M;
     floats[at + 9] = random(); // How readily they stay out after dark.
     words[at + 10] = Math.floor(random() * 0xffff);
-    const pierTrip = trip.a.inst.kind === 'pier' || trip.b.inst.kind === 'pier';
     words[at + 11] = (w & 1) | (OPEN_AIR.has(trip.a.inst.kind) ? 2 : 0) | (OPEN_AIR.has(trip.b.inst.kind) ? 4 : 0) | (pierTrip ? 8 : 0);
   }
 

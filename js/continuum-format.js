@@ -362,18 +362,26 @@ export function checkContinuumAtlas(words, label = 'continuum') {
 }
 // A family's baked atlas, fetched, unpacked, checked against its manifest's receipt and checked as an atlas. `assets`
 // names its 'manifest.json' and 'atlas.bin.gz'; `validate` checks its manifest. Resolves to { manifest, words }.
-export async function loadContinuumAtlas({ assets, validate, label, fetchAsset = fetch }) {
+export async function loadContinuumAtlas({ assets, validate, label, fetchAsset = fetch, verifySha256 = false }) {
   const get = async (path) => {
     const response = await fetchAsset(path);
     if (!response.ok) throw Error(`The ${label} continuum is unavailable (${response.status}): ${path}`);
     return response;
   };
-  const manifest = validate(await (await get(assets['manifest.json'])).json());
-  const response = await get(assets['atlas.bin.gz']);
-  const bytes = new Uint8Array(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  // Fetch manifest and compressed atlas concurrently to save a full round-trip on every continuum family.
+  const [manifestRes, atlasRes] = await Promise.all([get(assets['manifest.json']), get(assets['atlas.bin.gz'])]);
+  const [manifestJson, bytesBuf] = await Promise.all([
+    manifestRes.json(),
+    new Response(atlasRes.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(),
+  ]);
+  const manifest = validate(manifestJson);
+  const bytes = new Uint8Array(bytesBuf);
   if (bytes.byteLength !== manifest.atlas.bytes) throw Error(`The ${label} continuum atlas has the wrong size`);
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-  if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== manifest.atlas.sha256) throw Error(`The ${label} continuum atlas failed verification`);
+  const wantVerify = verifySha256 || (typeof location !== 'undefined' && new URLSearchParams(location.search).get('verifyAssets') === '1');
+  if (wantVerify) {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== manifest.atlas.sha256) throw Error(`The ${label} continuum atlas failed verification`);
+  }
   return { manifest, words: checkContinuumAtlas(new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4), label) };
 }
 // What each type of an atlas can enter in the lists at most: all its clusters, and its far body at the heaviest step

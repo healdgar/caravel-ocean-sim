@@ -476,7 +476,8 @@ fn continuumTry(slot:u32,i:u32)->u32 {
               share=u32(round(continuumHandoff(away,start)*255.0));
               let stretch=continuumStretch(record);
               let span=2.0*max(continuumTypeF(model,${CONTINUUM_TYPE.splatRx}u)*0.5*(stretch.x+stretch.z),continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*stretch.y)*record.place.w*focal/away;
-              splatShare=u32(round(continuumProfileSplatShare(span,pixels,continuumView.curve)*255.0));
+              let basePixels=continuumImportance(continuumView.scene.x,isImportant);
+              splatShare=u32(round(continuumProfileSplatShare(span,basePixels,continuumView.curve)*255.0));
               if(share>0u){
                 splatScale=continuumProfileThin(span,select(away,0.0,isImportant),continuumView.limits,seed);
                 if(splatShare>0u&&splatScale>0.0){
@@ -900,7 +901,7 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
 `;
   }
   return capture.directive + body + /* wgsl */`
-@vertex fn continuumCaptureVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { return continuumVertex(vertex,listed,true); }
+@vertex fn continuumCaptureVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { var out=continuumVertex(vertex,listed,false);out.coverage.w=1u;return out; }
 fn waterCaptureMaterial(v:ContinuumVarying,front:bool)->vec4f { return ${material.name}Shade(v,front); }
 ` + capture.tail({ fragment: 'fn continuumCaptured(v:ContinuumVarying,front:bool)->vec4f', args: 'v,front', world: 'v.world' }) + /* wgsl */`
 // Its one sample kept as the view keeps its samples: by the handoff's share and the material's mask and coverage (what

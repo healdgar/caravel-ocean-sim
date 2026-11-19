@@ -172,13 +172,21 @@ fn continuumSkinnedPose(record:ContinuumRecord,data:u32,part:u32,vertex:u32,p:Co
       );
       let motion=continuumPoses[data].zw;
       var delta=(vec3f(wDir.x*push+motion.x,flutter.y-push*0.18,wDir.y*push+motion.y)+vec3f(flutter.x,0.0,flutter.z))*flex;
-      // Deflect inward motion tangentially around the posed head core so wind blows hair around the face, never into it.
+      // Deflect only inward wind/motion delta tangentially around the posed head core so rest-pose strands never puff
+      // outward into a halo, while strong wind slides around the face instead of clipping into it.
       let headSph=continuumPoses[data+1u+count*3u+min(9u,count-1u)];
       if(headSph.w>0.0){
-        let rel=out.position+delta-headSph.xyz;
-        let rl=length(rel);
-        let guard=0.092;
-        if(rl<guard&&rl>1e-4){delta+=(guard-rl)*(rel/rl);}
+        let restRel=out.position-headSph.xyz;
+        let restR=length(restRel);
+        if(restR>1e-4){
+          let radDir=restRel/restR;
+          let inward=dot(delta,radDir);
+          if(inward<0.0&&restR<0.125){delta-=radDir*inward;}
+        }
+        let movedRel=restRel+delta;
+        let movedR=length(movedRel);
+        let minR=min(restR,0.086);
+        if(movedR<minR&&movedR>1e-4){delta+=(minR-movedR)*(movedRel/movedR);}
       }
       out.position+=delta;
       out.normal=normalize(out.normal+vec3f(delta.x,delta.y*0.4,delta.z)*2.2);

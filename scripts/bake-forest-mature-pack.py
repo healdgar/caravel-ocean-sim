@@ -45,34 +45,34 @@ import time
 
 # (species, cohort, age_yr, seed, grower_res, wood_skel_tris, n_woody_shoots, leaves_per_shoot, target_opaque_lai, max_botanical_scale)
 PROTOTYPES = (
-    ('oak', 'veteran', 110, 101, 3.0, 39000, 2300, 14, 3.6, 1.48),
-    ('chestnut', 'veteran', 110, 101, 3.0, 39000, 2200, 14, 3.5, 1.72),
-    ('maple', 'veteran', 100, 101, 3.0, 39000, 2250, 14, 3.6, 1.74),
-    ('elm', 'veteran', 110, 303, 3.0, 41000, 2400, 15, 3.4, 1.85),
-    ('birch', 'veteran', 40, 202, 1.8, 10500, 900, 13, 3.0, 1.85),
-    ('blueberry', 'veteran', 25, 303, 1.8, 4400, 240, 10, 3.6, 1.50),
-    ('oak', 'canopy', 70, 202, 3.0, 26000, 1500, 13, 3.6, 1.48),
-    ('chestnut', 'canopy', 70, 202, 3.0, 26000, 1450, 13, 3.5, 1.72),
-    ('maple', 'canopy', 60, 202, 3.0, 26000, 1500, 14, 3.6, 1.74),
-    ('elm', 'canopy', 70, 202, 3.0, 27000, 1550, 14, 3.4, 1.85),
-    ('birch', 'canopy', 25, 101, 1.8, 7600, 600, 12, 3.0, 1.85),
-    ('blueberry', 'canopy', 12, 202, 1.8, 2600, 110, 8, 3.6, 1.50),
+    ('oak', 'veteran', 110, 101, 3.0, 115000, 3000, 16, 3.4, 1.16),
+    ('chestnut', 'veteran', 110, 101, 3.0, 115000, 2900, 16, 3.3, 1.18),
+    ('maple', 'veteran', 100, 101, 3.0, 110000, 2900, 16, 3.4, 1.18),
+    ('elm', 'veteran', 110, 303, 3.0, 120000, 3100, 17, 3.2, 1.20),
+    ('birch', 'veteran', 40, 202, 1.8, 32000, 1250, 15, 2.9, 1.18),
+    ('blueberry', 'veteran', 25, 303, 1.8, 12000, 340, 12, 3.4, 1.15),
+    ('oak', 'canopy', 70, 202, 3.0, 72000, 2000, 15, 3.4, 1.16),
+    ('chestnut', 'canopy', 70, 202, 3.0, 72000, 1950, 15, 3.3, 1.18),
+    ('maple', 'canopy', 60, 202, 3.0, 70000, 2000, 16, 3.4, 1.18),
+    ('elm', 'canopy', 70, 202, 3.0, 76000, 2050, 16, 3.2, 1.20),
+    ('birch', 'canopy', 25, 101, 1.8, 22000, 850, 14, 2.9, 1.18),
+    ('blueberry', 'canopy', 12, 202, 1.8, 7000, 160, 10, 3.4, 1.15),
 )
 
 # Species-specific natural shoot length range (metres) and gravitational shoot tip droop fraction.
 SHOOT_HABIT = {
-    'oak': (0.36, 0.58, 0.04),
-    'chestnut': (0.38, 0.62, 0.07),
-    'maple': (0.34, 0.56, 0.05),
-    'elm': (0.36, 0.60, 0.14),
-    'birch': (0.24, 0.44, 0.13),
-    'blueberry': (0.14, 0.28, 0.04),
+    'oak': (0.28, 0.46, 0.05),
+    'chestnut': (0.30, 0.48, 0.08),
+    'maple': (0.26, 0.44, 0.06),
+    'elm': (0.28, 0.48, 0.16),
+    'birch': (0.20, 0.36, 0.18),
+    'blueberry': (0.12, 0.24, 0.05),
 }
 
 LATITUDE = 39.0
 FIELD_CELL_METRES = 0.6
-WOOD_STRAIGHTEN_VETERAN = 0.46
-WOOD_STRAIGHTEN_CANOPY = 0.40
+WOOD_STRAIGHTEN_VETERAN = 0.0
+WOOD_STRAIGHTEN_CANOPY = 0.0
 MIDDLE_CELLS_IN_HEIGHT = 40
 BAKER_MIDDLE_CELL_METRES = 0.15
 
@@ -289,6 +289,8 @@ def main():
 
     for index, (species, cohort, age, seed, resolution, wood_skel, n_shoots, lps, target_lai, max_scale) in enumerate(PROTOTYPES):
         clock = time.perf_counter()
+        # Keep stochastic whole-tree mortality off for single-seed prototypes (matches bake_waterworld_native_prototypes.py)
+        # while preserving genuine unstraightened forestmodeler crown growth, fine twigs, and true botanical leaf dimensions.
         plan = dataclasses.replace(SPECIES[species](seed), growth_cycles=age, background_mortality=0.0, senescent_mortality=0.0)
         grower = ColonizingGrower(
             plan,
@@ -405,14 +407,14 @@ def main():
             )
             return living, keep_mask
 
-        # Step 1: Binary-search the finest radius floor that fits ~78% of wood_skel_budget so fine 3rd/4th-order crown branches stay everywhere.
+        # Step 1: Binary-search the finest radius floor that fits ~78% of wood_skel_budget so fine 3rd/4th/5th-order twigs stay everywhere.
         fine_target = int(wood_skel_budget * 0.78)
-        full_liv, full_km = build_living_for(0.015, tips)
+        full_liv, full_km = build_living_for(0.008, tips)
         if len(full_liv.faces) <= wood_skel_budget:
             chosen_liv, chosen_keep, chosen_tips = full_liv, full_km, tips
         else:
-            lo_r, hi_r = 0.018, 0.16
-            best_r = 0.12
+            lo_r, hi_r = 0.008, 0.14
+            best_r = 0.08
             for _ in range(12):
                 mid_r = 0.5 * (lo_r + hi_r)
                 liv_try, _ = build_living_for(mid_r, None)
@@ -422,7 +424,7 @@ def main():
                 else:
                     lo_r = mid_r
             # Step 2: Spend the remaining 22% of wood_skel_budget on FPS-distributed distal bearing twig chains reaching outer crown tips.
-            fps_tips = tips[fps_indices(pos[tips], min(len(tips), 900))]
+            fps_tips = tips[fps_indices(pos[tips], min(len(tips), 2400))]
             lo_k, hi_k = 0, len(fps_tips)
             best_fit = None
             while lo_k <= hi_k:
@@ -509,17 +511,9 @@ def main():
                 wounds_out = concat(wounds_out, extra_w) if wounds_out is not None else extra_w
                 shoot_out = subset_faces(shoot_out, ~exposed)
 
+        # Omit underground lateral roots (±30-40 m horizontal subterranean networks) so prototype bounds stay true to the
+        # above-ground trunk and crown; prepare-forest-continuum.mjs adds the grounded basal root flare cleanly.
         root_mesh = None
-        if options.get('roots', True):
-            got = grower.roots_at.get(age_f)
-            if got is None and grower.roots is not None:
-                got = (grower.roots, grower.root_radius, grower.root_cloud)
-            if got is not None and len(got[0].nodes) > 1:
-                rk = prune_by_radius(got[0], age_f, got[1], 0.14)
-                root_mesh = build_branch_mesh(
-                    got[0], age_f, plan.pipe_exponent, plan.tip_radius,
-                    tess=tess, radius=got[1], alive=rk, straighten=st,
-                )
 
         wood_state[id(plan)] = {
             'grower': grower,

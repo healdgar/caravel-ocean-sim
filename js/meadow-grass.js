@@ -628,13 +628,15 @@ export function requestMeadowStand(device, shader) {
     const points = { reset: 'meadowStandReset', blocks: 'meadowBlocksInView', budget: 'meadowStandBudget', patches: 'meadowStandPatches', finish: 'meadowStandFinish' };
     const module = await shader(meadowContinuumStandWGSL(), 'meadow stand');
     const layouts = {}, pipelines = {};
-    for (const [name, list] of Object.entries(entries)) {
-      layouts[name] = device.createBindGroupLayout({ label: `meadow stand ${name}`, entries: list });
-      pipelines[name] = await device.createComputePipelineAsync({
-        label: `meadow stand ${name}`, layout: device.createPipelineLayout({ label: `meadow stand ${name}`, bindGroupLayouts: [layouts[name]] }),
-        compute: { module, entryPoint: points[name] },
-      });
+    const names = Object.keys(entries);
+    for (const name of names) {
+      layouts[name] = device.createBindGroupLayout({ label: `meadow stand ${name}`, entries: entries[name] });
     }
+    const built = await Promise.all(names.map((name) => device.createComputePipelineAsync({
+      label: `meadow stand ${name}`, layout: device.createPipelineLayout({ label: `meadow stand ${name}`, bindGroupLayouts: [layouts[name]] }),
+      compute: { module, entryPoint: points[name] },
+    })));
+    names.forEach((name, i) => { pipelines[name] = built[i]; });
     return { layouts, pipelines };
   });
 }

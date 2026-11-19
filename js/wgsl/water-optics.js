@@ -96,10 +96,10 @@ fn waterSourceValid(uv:vec2f,source:vec4f,surface:vec3f,surfaceDepth:f32)->bool 
   if(any(uv<=vec2f(0))||any(uv>=vec2f(1))||source.a<=0.001){return false;}
   let pos=waterSourcePosition(uv,source.a);
   if(F.camPos.y>surface.y+.05){
-    return pos.y<surface.y+.025+f16Tol*0.4;
+    return pos.y<surface.y+.085+f16Tol*0.4;
   }
   if(source.a<=surfaceDepth+.025-f16Tol){return false;}
-  return pos.y<surface.y+.025+f16Tol*0.4;
+  return pos.y<surface.y+.085+f16Tol*0.4;
 }
 fn waterRayPath(world:vec3f,ray:vec3f,alongForward:f32,surfaceDepth:f32,uv:vec2f,source:vec4f)->f32 {
   if(F.camPos.y>world.y+.05&&ray.y<-0.15){
@@ -113,19 +113,22 @@ fn waterTraceSource(world:vec3f,ray:vec3f,alongForward:f32,surfaceDepth:f32,star
   var hit:WaterSourceHit;hit.valid=0.0;hit.path=0.0;hit.uv=start;
   hit.source=waterSourceSample(hit.uv);
   if(!waterSourceValid(hit.uv,hit.source,world,surfaceDepth)){return hit;}
-  var initial=hit;
-  initial.path=waterRayPath(world,ray,alongForward,surfaceDepth,initial.uv,initial.source);
-  initial.valid=1.0;
+  var best=hit;
+  best.path=waterRayPath(world,ray,alongForward,surfaceDepth,best.uv,best.source);
+  best.valid=1.0;
   for(var refine=0u;refine<2u;refine++){
     hit.path=waterRayPath(world,ray,alongForward,surfaceDepth,hit.uv,hit.source);
     hit.uv=waterProject(world+ray*hit.path);
     hit.source=waterSourceSample(hit.uv);
     if(!waterSourceValid(hit.uv,hit.source,world,surfaceDepth)){
-      if(initial.path<0.85){return initial;}
-      return hit;
+      // Preserve the last valid hit when refining a narrow floating silhouette over deep empty water.
+      return best;
     }
+    best=hit;
+    best.path=waterRayPath(world,ray,alongForward,surfaceDepth,best.uv,best.source);
+    best.valid=1.0;
   }
-  hit.path=waterRayPath(world,ray,alongForward,surfaceDepth,hit.uv,hit.source);hit.valid=1.0;return hit;
+  return best;
 }
 fn waterTransmission(world:vec3f,normal:vec3f,body:vec3f)->vec3f {
   // This path observes the interface from air. Underwater scene variants use
@@ -139,12 +142,11 @@ fn waterTransmission(world:vec3f,normal:vec3f,body:vec3f)->vec3f {
   let alongForward=dot(ray,forward);
   if(alongForward<=.001){return body;}
   var hit=waterTraceSource(world,ray,alongForward,surfaceDepth,waterProject(world));
-  // An isolated animal has no depth outside its original silhouette. Probe a
-  // few bounded distances down the refracted ray so that its moved silhouette
-  // can enter those pixels; a depth lookup at the original UV alone clips it.
+  // An isolated floating body or animal in deep water has no depth outside its silhouette.
+  // Probe near-surface distances first so shallow floating bodies refract cleanly over deep water.
   if(hit.valid<.5){
-    let distances=array<f32,3>(3.0,12.0,36.0);
-    for(var sample=0u;sample<3u;sample++){
+    let distances=array<f32,6>(0.35,0.9,2.0,5.0,14.0,36.0);
+    for(var sample=0u;sample<6u;sample++){
       hit=waterTraceSource(world,ray,alongForward,surfaceDepth,waterProject(world+ray*distances[sample]));
       if(hit.valid>.5){break;}
     }

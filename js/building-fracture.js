@@ -41,10 +41,9 @@ const NOT_HELD = 255, TIE_REACH = 1.5;
 const TIMBER_KINDS = new Set([10, 15, 17]);
 const ROOF_KINDS = new Set([13, 15]);
 const STAYING_PLATE = /(^|_)(floor|plaza|terreplein|courtyard|cobble|apron|slipway|batey|earthwork|mounds?|sleepers|adarve)(_|$)/;
-const RAMPART_BODY = /scarp|bastion|retaining_wall|terreplein|adarve|earthwork|mounds?/;
-// The facing of a work's rampart, filled with earth to its terreplein (js/old-world-buildings.js: a bastion's faces and
-// flanks, a battery's platform, a gun tower's scarp).
-const SCARP_WALL = /^(bastion_faces|bastion_flanks|battery_platform|tower_scarp)$/;
+const RAMPART_BODY = /scarp|bastion|retaining_wall|terreplein|adarve|earthwork|mounds?|quay_coping|seawall/;
+// The facing of a work's rampart or seawall, filled with earth/rubble behind the dressed ashlar stone.
+const SCARP_WALL = /^(bastion_faces|bastion_flanks|battery_platform|tower_scarp|foundation_seawall_scarp)$/;
 const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
 const GUN = /gun_barrel|fort_cannon/;
 
@@ -413,7 +412,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     const midX = Math.max(qx0, x0), midX1 = Math.min(qx1, x1), midZ = Math.max(qz0, z0), midZ1 = Math.min(qz1, z1);
     if (midX < midX1 && midZ < midZ1) {
       noteLevel(floors, midX, midX1, midZ, midZ1, y);
-      const slabStep = 2.8 * blockScale;
+      const slabStep = (/quay_coping|seawall/.test(part?.key ?? '') ? 1.55 : 2.8) * blockScale;
       const nx = Math.max(1, Math.round((midX1 - midX) / slabStep));
       const nz = Math.max(1, Math.round((midZ1 - midZ) / slabStep));
       for (let ix = 0; ix < nx; ix++) {
@@ -580,8 +579,17 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
           else if (face.max[1] <= islandGround + 1.6) { stay(face); recordFloor(face); }
           continue;
         }
-        // Any other floor comes down in big slabs that hang from each other, held by the walls around them.
+        // Any other floor comes down in slabs held by the walls around them; fortified seawall/quay slabs are extruded
+        // as true 3D solid stone blocks (never zero-thickness glass sheets) so cannon impacts carve localized stone chunks.
         if (horizontal && platform && !ROOF_KINDS.has(face.kind)) {
+          if (!surface.timber && face.v.length === 4 && /quay|seawall/.test(partKey)) {
+            const corners = face.v.map((v) => vertices.slice(v * STRIDE, (v + 1) * STRIDE));
+            const stoneDepth = Math.min(0.42, Math.max(0.26, spanY * 0.85));
+            const slab = { ...surface, ceiling: false, scale: Math.max(surface.scale, 1.55), span: 2 };
+            if (longest > 1.45 * slab.scale * blockScale) cutQuad(face, part, slab, stoneDepth, isBridgePart);
+            else geometry[newShard(BUILDING_SHARD_KINDS.block, part, slab)].blocks.push({ corners, depth: stoneDepth });
+            continue;
+          }
           const slab = { ...surface, ceiling: true, scale: Math.max(surface.scale, 3.2), span: 4 };
           // One broad quad has no cells to fall into, so it is cut like a wall, or it would come down whole.
           if (face.v.length === 4 && longest > 1.45 * slab.scale * blockScale) cutQuad(face, part, slab, spanY, isBridgePart);
@@ -988,9 +996,10 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
   const massKg = shard.massKg ?? Math.max(12, (shard.volume ?? 0.25) * (shard.timber ? 680 : shard.earth ? 1600 : stoneDensity));
   // Momentum-conserving piece response: light timber splinters (~25-80 kg) and rock spalls (~5-45 kg) fly fast, medium masonry stones (~250-600 kg)
   // heave outward on low arcs, and multi-tonne cut-stone blocks (~1,200-3,000 kg) are shoved out of their course and crash down.
+  const isSeawallSlab = shard.floorSlab && !shard.timber && /quay_coping|seawall/.test(shard.partKey ?? '');
   const massScale = shard.earth
     ? 0.18
-    : shard.floorSlab
+    : shard.floorSlab && !isSeawallSlab
       ? 0.62
       : shard.timber
         ? Math.min(1.25, Math.max(0.55, Math.pow(75 / massKg, 0.38)))
@@ -1001,7 +1010,7 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
     ? [out[0] * (0.18 + 0.52 * a) + (b - 0.5) * 0.35, 0, out[2] * (0.18 + 0.52 * a) + (c - 0.5) * 0.35]
     : [
         out[0] * (2.2 + 3.0 * a) * impulse + (b - 0.5) * 0.85 * massScale,
-        (0.75 + 1.45 * b) * (shard.floorSlab ? Math.max(up, 1.35) : up) * impulse,
+        (0.75 + 1.45 * b) * (shard.floorSlab && !isSeawallSlab ? Math.max(up, 1.35) : up) * impulse,
         out[2] * (2.2 + 3.0 * a) * impulse + (c - 0.5) * 0.85 * massScale,
       ];
   // Turn about a level axis across the way it goes. A block off a wall lands on its broad face, a quarter or
@@ -1071,11 +1080,14 @@ function distanceMetres(shard, local) {
   for (let c = 0; c < 3; c++) {
     const d = local[c] < shard.localMin[c] ? shard.localMin[c] - local[c] : local[c] > shard.localMax[c] ? local[c] - shard.localMax[c] : 0;
     // A shock travels up a wall more easily than down it, except through a roof or deck into what lies right under it.
+    const isSeawall = /quay_coping|seawall/.test(shard.partKey ?? '');
     const yScale = local[1] < shard.localMin[1]
       ? 0.7
-      : (shard.roof || shard.ceiling || shard.floorSlab || shard.earth)
+      : (shard.roof || shard.ceiling || (shard.floorSlab && !isSeawall) || shard.earth)
         ? 0.42
-        : 1.1;
+        : shard.floorSlab
+          ? 0.90
+          : 1.1;
     sum += c === 1 ? (d * yScale) ** 2 : d * d;
   }
   return Math.sqrt(sum);
@@ -1153,7 +1165,9 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
       continue;
     }
     if (shard.max[1] < above) continue;
-    const overHead = shard.floorSlab || shard.roof || shard.ceiling || (topHit && shard.earth);
+    // Fortified seawall/quay paving breaks locally like dressed stone, never shattering like a fragile overhead ceiling.
+    const stonePaving = !shard.timber && state.fracture.toughness > 1.05 && /quay_coping|seawall/.test(shard.partKey ?? '');
+    const overHead = !stonePaving && (shard.floorSlab || shard.roof || shard.ceiling || (topHit && shard.earth));
     const reach = overHead && !drop ? radius * 1.45 : radius;
     const d = distanceMetres(shard, local);
     if (d >= reach) continue;

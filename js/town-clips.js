@@ -75,7 +75,7 @@ export function bakeRideClip(a, frames = TOWN_RIDE_FRAMES, keep = null) {
   const neck = a.nodeIndex('neck_01');
   const head = a.nodeIndex('head');
   const pelvisAboveSeat = a.seatContact?.pelvisAboveSeat ?? 0.278;
-  const stirrupX = Math.max(0.335, HORSE_BARREL_MAX_RX + 0.085);
+  const stirrupX = Math.min(0.315, Math.max(0.295, HORSE_BARREL_MAX_RX + 0.055));
 
   for (let frame = 0; frame < frames; frame++) {
     const phase = (frame / frames) * Math.PI * 2;
@@ -85,7 +85,7 @@ export function bakeRideClip(a, frames = TOWN_RIDE_FRAMES, keep = null) {
     const pelPitch = 0.040 + 0.028 * Math.cos(beat2);
     const chestCounter = 0.032 - 0.022 * Math.cos(beat2);
     const headSteady = -0.025 + 0.012 * Math.sin(phase);
-    const pelvisY = HORSE_SADDLE_SEAT_TOP_Y + pelvisAboveSeat - 0.012 + bobY;
+    const pelvisY = HORSE_SADDLE_SEAT_TOP_Y + pelvisAboveSeat - 0.038 + bobY;
 
     a.sample('Idle', 0);
     resetSymmetricTorso(a);
@@ -98,12 +98,12 @@ export function bakeRideClip(a, frames = TOWN_RIDE_FRAMES, keep = null) {
     if (neck >= 0) turnBone(a, neck, [0, 1, 0], [0, Math.cos(headSteady), Math.sin(headSteady)]);
     if (head >= 0) turnBone(a, head, [0, 0, 1], [0.025 * Math.sin(phase), 0, 1]);
 
-    // Short-stirrup sela à gineta leg geometry wrapping cleanly outside the horse barrel without clipping.
+    // Natural equestrian leg wrap: thighs angle forward along the saddle flaps hugging the 0.251 m barrel cleanly.
     for (const [side, sign] of LEFT_THEN_RIGHT) {
       const ankleAboveSole = a.footContacts?.[side]?.ankleAboveSole ?? 0.11;
       const stirrupBounce = 0.006 * Math.sin(beat2 + (sign > 0 ? 0.25 : -0.25));
-      const stirrupFoot = [sign * (stirrupX + 0.015), HORSE_STIRRUP_BAR_TOP_Y + ankleAboveSole + stirrupBounce, HORSE_STIRRUP_Z];
-      const kneePole = [sign * 0.96, pelvisY - 0.12, 0.20];
+      const stirrupFoot = [sign * stirrupX, HORSE_STIRRUP_BAR_TOP_Y + ankleAboveSole + stirrupBounce, HORSE_STIRRUP_Z];
+      const kneePole = [sign * 0.32, pelvisY - 0.16, 0.90];
       solveCrewLimb(a, ['thigh_' + side, 'calf_' + side, 'foot_' + side], stirrupFoot, kneePole);
       keepSoleFlat(a, side);
     }

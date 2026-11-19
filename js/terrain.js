@@ -1097,6 +1097,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // until each is first needed, they compile one after another once it is.
   for(const pending of [computePipe(COASTAL_FIELD_BAKE,'coastal field'),computePipe(GROUND_DETAIL_BAKE,'ground detail bake'),
     useProcedural?requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}):null,
+    requestCityContinuumAtlas(device),requestBoulderContinuumAtlas(device),
     requestLandCraterPipelines({computePipe}),requestLandContinuumPipelines({device,shader}),
     useProcedural?requestInlandWaterPipeline({device,shader,format,samples}):null,
     useProcedural?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
@@ -1519,21 +1520,30 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // The coast is not presented until its city has landed.
   await setCityBuildings(proceduralPack);
   clouds=await cloudsResolvedPromise;waterOptics=await waterOpticsResolvedPromise;
-  // Every tree of a coast is a root of its forest pack, drawn through the one continuum; a coast without a pack
-  // has no trees, never a stand-in.
-  const forestPack=await forestPromise;
+  // Stream the 62 MiB forest continuum + 112k root placement asynchronously right after Frame 0 so initial load
+  // reveals the harbor, ships, terrain and city immediately while trees stream in cleanly behind it.
+  let forestPack=null,grovePack=null,forest=null;
   const streamMaxRoots=isMobile?22000:112000;
-  // Planted trees keep their budget; a grove's are as many as the device can hold (forestRootCapacity).
-  const grovePack=forestPack&&proceduralPack?await grovePromise:null,rootCapacity=forestRootCapacity(device);
-  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}):forestPack;
-  // What has been shot down on this coast comes back with it, and is kept with the port damage.
+  const rootCapacity=forestRootCapacity(device);
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
-  const forest=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource:TERRAIN_FINISH_ONLY,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees)}).catch(error=>{forestFailure=error.message;console.error('forest continuum',error);return null;}):null;
-  const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   const forestHeld=pack=>({roots:pack?.manifest?.rootCount??0,groveRoots:pack?.groveRoots??0,sections:pack?.sectionsResident??0,released:pack?.sectionsReleased??0});
-  forestStats.groves=grovePack?{loaded:true,...forestHeld(activeForestPack),rootCapacity}:{loaded:false,error:groveFailure};
-  if(forest){forestSectionsReleased=activeForestPack?.sectionsReleased??0;forestHeldAt=forestNear??activeRegion;}
-  forestStats.coverage=forestPack?.manifest.coverage??null;
+  const forestStats={loaded:false,mode:canopyMode,error:forestFailure,groves:{loaded:false,error:groveFailure},coverage:null};
+  const forestReadyPromise=(async()=>{
+    forestPack=await forestPromise;
+    if(terrainDisposed)return null;
+    grovePack=forestPack&&proceduralPack?await grovePromise:null;
+    if(terrainDisposed)return null;
+    const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}):forestPack;
+    const made=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource:TERRAIN_FINISH_ONLY,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees)}).catch(error=>{forestFailure=error.message;console.error('forest continuum',error);return null;}):null;
+    if(terrainDisposed){made?.destroy?.();return null;}
+    forest=made;
+    if(forest?.stats)Object.assign(forestStats,forest.stats);
+    forestStats.error=forestFailure;
+    forestStats.groves=grovePack?{loaded:true,...forestHeld(activeForestPack),rootCapacity}:{loaded:false,error:groveFailure};
+    forestStats.coverage=forestPack?.manifest.coverage??null;
+    if(forest){forestSectionsReleased=activeForestPack?.sectionsReleased??0;forestHeldAt=forestNear??activeRegion;forest.setWorldOffset?.(worldOffset.x,worldOffset.z);}
+    return forest;
+  })();
   // The town's ways as a distance field. A coast without a town binds an empty one.
   const townField=streets=>{
     const size=streets?.size??1;
@@ -1636,33 +1646,46 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   landCentre(proceduralPack?.port?.riverCut);
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
-  // The ground cover's rocks, every one a record of the one cut, stood on the ground the land draws
-  // (js/boulder-continuum.js); a rock shot apart stands as its pieces in the coast's struck buildings.
-  try {
-    const [atlas,programs,view]=await Promise.all([requestBoulderContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}),boulderViewPromise]);
-    boulderContinuum=createBoulderContinuum({
-      device,atlas,programs,view,frame:frameUBO,shadowUniform:activeLandShadows.uniform,resources:nearResources,capacity:groundBlocks*groundBlock,samples,
-      getPort:()=>ensureBoulderFracturePort(),
-      groundAt:(x,z)=>baseGroundSample(x,z),
-      waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,
-    });
-    boulderContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
-  } catch (error) {
-    console.error('boulder continuum',error);
-    boulderContinuum=null;
-  }
-  let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
-  let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
-  const meadowPack=await meadowPromise;
-  let meadowGrass=null;
-  if(meadowPack)try{
-    meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset});
-  }catch(error){meadowFailure=error.message;}
-  const meadowGrassStats=meadowGrass?.stats??{loaded:false,error:meadowFailure};
-  let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):null;
+  // Build boulders, inland water, herds, and trade vessels in parallel (instead of 4 serial awaits).
+  const [boulderRes, inlandWaterRes, herdsRes, tradeVesselsRes] = await Promise.all([
+    Promise.all([requestBoulderContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}),boulderViewPromise])
+      .then(([atlas,programs,view])=>{
+        const made=createBoulderContinuum({
+          device,atlas,programs,view,frame:frameUBO,shadowUniform:activeLandShadows.uniform,resources:nearResources,capacity:groundBlocks*groundBlock,samples,
+          getPort:()=>ensureBoulderFracturePort(),
+          groundAt:(x,z)=>baseGroundSample(x,z),
+          waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,
+        });
+        made.setWorldOffset(worldOffset.x,worldOffset.z);
+        return made;
+      }).catch(error=>{console.error('boulder continuum',error);return null;}),
+    proceduralPack?createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):Promise.resolve(null),
+    proceduralPack?createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):Promise.resolve(null),
+    proceduralPack?createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):Promise.resolve(null),
+  ]);
+  boulderContinuum=boulderRes;
+  let inlandWater=inlandWaterRes;
+  let herds=herdsRes;
+  let tradeVessels=tradeVesselsRes;
   if(tradeVessels&&proceduralPack?.port?.country?.board){
     tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
   }
+  // Stream the 186 MiB meadow grass atlas asynchronously so Frame 0 never stalls waiting for grass tufts.
+  let meadowGrass=null;
+  const meadowGrassStats={loaded:false,error:meadowFailure};
+  const meadowReadyPromise=(async()=>{
+    const meadowPack=await meadowPromise;
+    if(!meadowPack||terrainDisposed)return null;
+    try{
+      const made=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset});
+      if(terrainDisposed){made?.destroy?.();return null;}
+      meadowGrass=made;
+      if(craters)meadowGrass.bindCraters?.(craters);
+      if(meadowGrass?.stats)Object.assign(meadowGrassStats,meadowGrass.stats);
+      return meadowGrass;
+    }catch(error){meadowFailure=error.message;meadowGrassStats.error=meadowFailure;return null;}
+  })();
+  const sceneryReady=Promise.all([forestReadyPromise,meadowReadyPromise]).then(()=>true);
   let tick=0;
 
   function regenerateTextureMips(tex,texSize){
@@ -2094,7 +2117,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         const secCx=activeRegion.x+sx*span;
         const secCz=activeRegion.z+sz*span;
         const borderDist=Math.hypot(Math.max(0,Math.abs(lx-secCx)-halfSpan),Math.max(0,Math.abs(lz-secCz)-halfSpan));
-        if(borderDist>260)continue;
+        if(borderDist>1600)continue;
         const isCurrentSection=sx===pSecX&&sz===pSecZ;
         if(sx!==0||sz!==0){
           const key=`${sx},${sz}`;
@@ -2529,7 +2552,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // The forest's own roots, as a ball meets them. Null with no forest, and for a moment while one loads.
     get forestTrunks(){return forest?.trunks??null;},
     get forestStrikeKey(){return forest?forestStrikeKey:null;},
-    groundStats,forestStats,
+    groundStats,forestStats,sceneryReady,
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
     continuumSources(){
@@ -2931,14 +2954,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(which==='land')landContinuum?.draw(pass,landClouds);
       else if(which==='city'){
         cityContinuum?.draw(pass,cityGroup,cityClouds);
-        if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,4800))portFractures.draw(pass,cityGroup,cityClouds);
-        for(const sec of loadedSections.values())if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,3400))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
+        if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,9000))portFractures.draw(pass,cityGroup,cityClouds);
+        for(const sec of loadedSections.values())if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,6500))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
       }else if(which==='meadow')meadowGrass?.draw(pass);
       else if(which==='forest')forest?.draw(pass);
       else if(which==='other'){
-        if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,4800))boulderContinuum.draw(pass);
-        if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
-        if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
+        if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,8500))boulderContinuum.draw(pass);
+        if(herds&&isSectionVisible(activeRegion,camera,viewProjection,4500))herds.draw(pass);
+        if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,18000))tradeVessels.draw(pass);
       }
     },
     drawSubmerged(pass,above=false){
@@ -2953,17 +2976,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       // Major opaque occluders (city buildings, fractured masonry, boulders) draw first so hardware HSR skips hidden
       // terrain and ocean behind them.
       cityContinuum?.draw(pass,cityGroup,cityClouds);
-      if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,4800))portFractures.draw(pass,cityGroup,cityClouds);
+      if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,9000))portFractures.draw(pass,cityGroup,cityClouds);
       for(const sec of loadedSections.values()){
-        if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,3400))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
+        if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,6500))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
       }
-      if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,4800))boulderContinuum.draw(pass);
+      if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,8500))boulderContinuum.draw(pass);
     },
     drawOpaqueLand(pass,camera={x:0,y:6,z:0},viewProjection=null){
       // Drawn after the ocean depth prepass so hardware early-Z skips 100% of submerged seabed fragments beneath water.
       landContinuum?.draw(pass,landClouds);
-      if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
-      if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
+      if(herds&&isSectionVisible(activeRegion,camera,viewProjection,4500))herds.draw(pass);
+      if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,18000))tradeVessels.draw(pass);
     },
     drawFoliage(pass){
       // Sample-mask feedback foliage draws strictly after all opaque surfaces (AGENTS.md rule 2 TBDR discipline).
@@ -2976,7 +2999,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       this.drawFoliage(pass);
     },
     drawWater(pass,camera={x:0,y:6,z:0},viewProjection=null){
-      if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200)){
+      if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,10000)){
         inlandWater.draw(pass,viewProjection,{shift:[worldOffset.x,worldOffset.z],camPos:[camera.x??0,camera.y??6,camera.z??0]});
       }
     },

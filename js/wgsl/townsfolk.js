@@ -60,6 +60,7 @@ struct TownCrowd {clips:array<vec4u,6>,second:u32,looks:u32,hours:f32,ride:u32};
 struct TownShot {start:vec3f,strike:f32,end:vec3f,blast:f32,reach:f32,seed:f32,padding:vec2f};
 struct TownShots {count:u32,list:array<TownShot,${TOWN_SHOT_LIMIT}>};
 struct TownFate {mode:u32,since:f32,until:f32,runFor:f32,along:f32,going:f32,lane:f32,heading:f32,clock:f32,speed:f32,look:f32,how:u32};
+struct TownIntent {pos:vec4f,state:vec4f};
 struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32};
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<storage,read> walkers:array<Walker>;
@@ -71,6 +72,7 @@ struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32};
 @group(0) @binding(7) var<storage,read_write> fates:array<TownFate>;
 @group(0) @binding(8) var<storage,read_write> moisture:array<vec2f>;
 ` + continuumGroundWGSL(0, 9) + /* wgsl */ `
+@group(0) @binding(10) var<storage,read_write> intents:array<TownIntent>;
 const ABOUT=${TOWN_ABOUT}u;const AFRAID=${TOWN_AFRAID}u;const FALLING=${TOWN_FALLING}u;const DOWN=${TOWN_DOWN}u;
 fn inFrustum(relative:vec3f,radius:f32)->bool {
   let clip=F.viewProj*vec4f(relative,1);
@@ -111,28 +113,33 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let inLeg=walked+select(0.0,w.pauseFor,w.pauseFor>0.0&&walked>=walking*w.pauseAt);
   return select(0.0,leg,going<0.0)+inLeg-fract(time/(2.0*leg)+w.phase)*2.0*leg;
 }
-// Pass 1 (intent): records each active routine walker's current world position, heading and width into their
-// persistent TownFate slot so Pass 2 (main) can resolve lateral passing, queuing and non-merging separation on the GPU.
+// Pass 1 (intent): publishes each active routine walker's current world position, heading, speed and corridor half-width
+// into a dedicated read-only snapshot buffer (intents) so Pass 2 (main) resolves lateral passing, queuing and non-merging
+// separation with zero read/write races on fates[]. Mounted riders follow pure closed-form time so they remain 1:1 locked
+// to their street mounts in js/wgsl/herds.js while still advertising their presence so pedestrians step aside.
 @compute @workgroup_size(64) fn intent(@builtin(global_invocation_id) id:vec3u){
   if(id.x>=arrayLength(&walkers)){return;}
   let w=walkers[id.x];
-  var fate=fates[id.x];
-  if(fate.mode!=ABOUT){return;}
-  let time=F.camPos.w;
-  if(w.abroad>.1+.9*smoothstep(-.1,.14,F.sunDir.y)){
-    fate.how=fate.how&(~2u);
-    fates[id.x]=fate;
+  let fate=fates[id.x];
+  if(fate.mode!=ABOUT){
+    intents[id.x]=TownIntent(vec4f(0.0),vec4f(0.0));
     return;
   }
+  let time=F.camPos.w;
+  if(w.abroad>.1+.9*smoothstep(-.1,.14,F.sunDir.y)){
+    intents[id.x]=TownIntent(vec4f(0.0),vec4f(0.0));
+    return;
+  }
+  let isMounted=(w.flags&16u)!=0u;
   let walking=w.length/w.speed;
   let leg=walking+w.pauseFor+w.indoors;
-  let turn=fract((time+fate.clock)/(2.0*leg)+w.phase)*2.0*leg;
+  let clk=select(fate.clock,0.0,isMounted);
+  let turn=fract((time+clk)/(2.0*leg)+w.phase)*2.0*leg;
   let back=turn>=leg;
   let inLeg=turn-select(0.0,leg,back);
   let arrived=inLeg>=walking+w.pauseFor;
   if(arrived&&((w.flags>>select(2u,1u,back))&1u)==0u){
-    fate.how=fate.how&(~2u);
-    fates[id.x]=fate;
+    intents[id.x]=TownIntent(vec4f(0.0),vec4f(0.0));
     return;
   }
   let stopAt=walking*w.pauseAt;
@@ -141,19 +148,11 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let metres=select(walked,w.length-walked,back);
   let going=select(1.0,-1.0,back);
   let init=(fate.how&1u)!=0u;
-  let latFrac=select(going*w.side,clamp(fate.lane,-1.0,1.0),init);
+  let latFrac=select(select(going*w.side,clamp(fate.lane,-1.0,1.0),init),going*w.side,isMounted);
   let spot=wayAtLat(w,metres,latFrac);
   let facing=spot.forward*going;
-  let isMounted=(w.flags&16u)!=0u;
-  fate.until=spot.position.x;
-  fate.runFor=spot.position.z;
-  fate.along=spot.position.y;
-  fate.going=going;
-  fate.heading=atan2(facing.x,facing.y);
-  fate.speed=select(w.speed,0.0,stopped);
-  fate.look=spot.halfWidth;
-  fate.how=(fate.how&1u)|2u|select(0u,4u,isMounted)|select(0u,8u,stopped);
-  fates[id.x]=fate;
+  let how=2u|select(0u,4u,isMounted)|select(0u,8u,stopped);
+  intents[id.x]=TownIntent(vec4f(spot.position,spot.halfWidth),vec4f(atan2(facing.x,facing.y),select(w.speed,0.0,stopped),going,f32(how)));
 }
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
   // Rain and sleet wet them. Snow and hail do not, and neither does anything else the frame happens to carry. Those in
@@ -194,7 +193,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     // Out along the route, a stop on the way perhaps, then indoors; then the same way back.
     let walking=w.length/w.speed;
     let leg=walking+w.pauseFor+w.indoors;
-    let turn=fract((time+fate.clock)/(2.0*leg)+w.phase)*2.0*leg;
+    let clk=select(fate.clock,0.0,isMounted);
+    let turn=fract((time+clk)/(2.0*leg)+w.phase)*2.0*leg;
     let back=turn>=leg;
     let inLeg=turn-select(0.0,leg,back);
     // At the end of the leg they go indoors, unless where they went is in the open.
@@ -205,95 +205,117 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     walked=min(w.length,(min(inLeg,stopAt)+max(0.0,inLeg-stopAt-w.pauseFor))*w.speed);
     metres=select(walked,w.length-walked,back);
     going=select(1.0,-1.0,back);
-    let init=(fate.how&1u)!=0u;
-    let dt=select(0.0,clamp(secondsSince(fate.since,time),0.0,0.25),init);
-    let prefFrac=going*w.side;
-    var latFrac=select(prefFrac,clamp(fate.lane,-1.0,1.0),init);
-    let baseSpot=wayAtLat(w,metres,latFrac);
-    let facing0=baseSpot.forward*going;
-    let right0=vec2f(facing0.y,-facing0.x);
-    let halfW=max(baseSpot.halfWidth,0.05);
-    let curRightM=latFrac*going*halfW;
-    let prefRightM=w.side*halfW;
-    let rSelf=select(0.42,0.85,isMounted);
-    var steerRightM=0.0;
-    var pushRightM=0.0;
-    var pushFwdM=0.0;
-    var moveFrac=1.0;
-    let totalW=arrayLength(&walkers);
-    for(var j=0u;j<totalW;j++){
-      if(j==id.x){continue;}
-      let o=fates[j];
-      if(o.mode!=ABOUT||(o.how&2u)==0u){continue;}
-      let dXZ=vec2f(o.until-baseSpot.position.x,o.runFor-baseSpot.position.z);
-      if(abs(dXZ.x)>4.2||abs(dXZ.y)>4.2||abs(o.along-baseSpot.position.y)>1.6){continue;}
-      let dist=length(dXZ);
-      if(dist>4.2){continue;}
-      let fwd=dot(dXZ,facing0);
-      let lat=dot(dXZ,right0);
-      let rOther=select(0.42,0.85,(o.how&4u)!=0u);
-      let rSum=rSelf+rOther;
-      let oDir=vec2f(sin(o.heading),cos(o.heading));
-      let sameDir=dot(facing0,oDir);
-      let oRightPos=curRightM+lat;
-      let roomRight=halfW-oRightPos;
-      let roomLeft=oRightPos+halfW;
-      // Lateral passing: shift into available lateral road/dock space around oncoming or slower walkers.
-      if(fwd>-0.45&&fwd<3.6&&abs(lat)<rSum*1.45&&halfW>0.28){
-        let prox=1.0-clamp(max(fwd,0.0)/3.6,0.0,1.0);
-        var passDir=select(-1.0,1.0,roomRight>=roomLeft);
-        if(sameDir<-0.25&&roomRight>=rSum*0.85){passDir=1.0;}
-        else if(sameDir>=-0.25&&roomLeft>=rSum*0.92&&o.speed<w.speed*0.95){passDir=-1.0;}
-        let needClear=max(0.0,rSum*1.12-abs(lat));
-        steerRightM+=passDir*(0.35+needClear)*prox;
-      }
-      // Orderly queuing: when a walker is directly ahead and lateral space cannot cleanly clear them, throttle & wait.
-      if(!stopped&&fwd>0.02&&fwd<rSum+0.68&&abs(lat)<rSum*0.94){
-        let canPassSide=max(roomLeft,roomRight)>=rSum*0.98;
-        if(sameDir>=-0.25&&(!canPassSide||abs(lat)<rSum*0.65)){
-          let qCap=clamp((fwd-rSum*0.95)/0.68,0.0,1.0);
-          let matchAhead=select(0.0,clamp(o.speed/max(w.speed,0.15),0.0,1.0),fwd>rSum*0.98);
-          moveFrac=min(moveFrac,max(qCap,matchAhead*clamp((fwd-rSum*0.92)/0.35,0.0,1.0)));
-        }else if(sameDir<-0.25&&!canPassSide&&id.x>j){
-          moveFrac=min(moveFrac,clamp((fwd-rSum*0.90)/0.65,0.0,0.45));
+    if(isMounted){
+      // Street-mounted riders stay bit-for-bit locked to their horse in js/wgsl/herds.js (pure time, fixed w.side).
+      spot=wayAt(w,metres,going);
+      lane=going;
+    }else{
+      let init=(fate.how&1u)!=0u;
+      let dt=select(0.0,clamp(secondsSince(fate.since,time),0.0,0.25),init);
+      let prefFrac=going*w.side;
+      // When turning around at an open-air end (e.g. a pier head), switch immediately to the new right-hand lane.
+      let turnedAround=init&&(fate.going*going<0.0);
+      var latFrac=select(prefFrac,clamp(fate.lane,-1.0,1.0),init&&!turnedAround);
+      let baseSpot=wayAtLat(w,metres,latFrac);
+      let facing0=baseSpot.forward*going;
+      let right0=vec2f(facing0.y,-facing0.x);
+      let halfW=max(baseSpot.halfWidth,0.05);
+      let curRightM=latFrac*going*halfW;
+      let prefRightM=w.side*halfW;
+      let rSelf=0.42;
+      var steerRightM=0.0;
+      var pushRightM=0.0;
+      var pushFwdM=0.0;
+      var moveFrac=1.0;
+      let totalW=arrayLength(&walkers);
+      for(var j=0u;j<totalW;j++){
+        if(j==id.x){continue;}
+        let oi=intents[j];
+        let oHow=u32(oi.state.w+0.5);
+        if((oHow&2u)==0u){continue;}
+        let dXZ=vec2f(oi.pos.x-baseSpot.position.x,oi.pos.z-baseSpot.position.z);
+        if(abs(dXZ.x)>4.2||abs(dXZ.y)>4.2||abs(oi.pos.y-baseSpot.position.y)>1.6){continue;}
+        let dist=length(dXZ);
+        if(dist>4.2){continue;}
+        let fwd=dot(dXZ,facing0);
+        let lat=dot(dXZ,right0);
+        let rOther=select(0.42,0.88,(oHow&4u)!=0u);
+        let rSum=rSelf+rOther;
+        let oDir=vec2f(sin(oi.state.x),cos(oi.state.x));
+        let sameDir=dot(facing0,oDir);
+        let oStopped=(oHow&8u)!=0u||oi.state.y<0.05;
+        let oGoing=oi.state.z;
+        let oRightPos=curRightM+lat;
+        let roomRight=halfW-oRightPos;
+        let roomLeft=oRightPos+halfW;
+        // Lateral passing: shift into available lateral road/dock space around oncoming, mounted, or slower walkers.
+        if(fwd>-0.45&&fwd<3.8&&abs(lat)<rSum*1.55&&halfW>0.26){
+          let prox=1.0-clamp(max(fwd,0.0)/3.8,0.0,1.0);
+          var passDir=select(-1.0,1.0,roomRight>=roomLeft);
+          if(sameDir<-0.25&&roomRight>=rSum*0.80){passDir=1.0;}
+          else if(sameDir>=-0.25&&roomLeft>=rSum*0.85&&oi.state.y<w.speed*0.95){passDir=-1.0;}
+          let needClear=max(0.0,rSum*1.12-abs(lat));
+          steerRightM+=passDir*(0.38+needClear)*prox;
+        }
+        // Orderly queuing without deadlocks: never trap returning pier walkers or freeze behind open-air loiterers.
+        if(!stopped&&fwd>0.02&&fwd<rSum+0.68&&abs(lat)<rSum*0.92){
+          let canPassSide=max(roomLeft,roomRight)>=rSum*0.88;
+          if(sameDir>=-0.25){
+            if(!canPassSide&&!oStopped){
+              let qCap=clamp((fwd-rSum*0.95)/0.68,0.0,1.0);
+              let matchAhead=select(0.0,clamp(oi.state.y/max(w.speed,0.15),0.0,1.0),fwd>rSum*0.98);
+              moveFrac=min(moveFrac,max(qCap,matchAhead*clamp((fwd-rSum*0.92)/0.35,0.0,1.0)));
+            }else if(abs(lat)<rSum*0.65){
+              // Plenty of lateral room or walker ahead is standing still: slow briefly to step around, never freeze.
+              moveFrac=min(moveFrac,select(0.45,0.38,oStopped));
+            }
+          }else if(!canPassSide&&abs(lat)<rSum*0.72){
+            // Opposing traffic in a narrow pinch: leaving-end walkers (going < 0) take right-of-way so piers never jam.
+            let yieldToOther=(going>0.0&&oGoing<0.0)||((going*oGoing>0.0)&&(facing0.x<oDir.x));
+            if(yieldToOther){
+              moveFrac=min(moveFrac,clamp((fwd-rSum*0.85)/0.65,0.26,0.65));
+            }
+          }
+        }
+        // Soft non-merging separation clamped strictly inside the walkable corridor.
+        if(dist<rSum){
+          let pen=rSum-dist;
+          let latSign=select(select(-1.0,1.0,lat<0.0),select(-1.0,1.0,id.x>j),abs(lat)<0.04);
+          pushRightM+=latSign*pen*0.62;
+          let edgeBlocked=(latSign>0.0&&curRightM>halfW-0.12)||(latSign<0.0&&curRightM<-halfW+0.12)||halfW<0.30;
+          if(edgeBlocked&&fwd>=0.0&&!oStopped){pushFwdM-=pen*0.42;}
+          else if(fwd>0.0&&dist<rSum*0.68&&!oStopped){pushFwdM-=pen*0.24;}
         }
       }
-      // Hard non-merging separation clamped strictly inside the walkable corridor.
-      if(dist<rSum){
-        let pen=rSum-dist;
-        let latSign=select(select(-1.0,1.0,lat<0.0),select(-1.0,1.0,id.x>j),abs(lat)<0.04);
-        let latPush=latSign*pen*0.62;
-        pushRightM+=latPush;
-        let edgeBlocked=(latSign>0.0&&curRightM>halfW-0.12)||(latSign<0.0&&curRightM<-halfW+0.12)||halfW<0.30;
-        if(edgeBlocked&&fwd>=0.0){pushFwdM-=pen*0.68;}
-        else if(fwd>0.0&&dist<rSum*0.72){pushFwdM-=pen*0.35;}
+      // Bounded stall breaker (stored in fate.look): if throttled for >1.8 s, smoothly release queuing so no one can trap.
+      var stallS=select(0.0,clamp(fate.look,0.0,6.0),init&&!turnedAround);
+      if(!stopped&&moveFrac<0.40&&dt>0.0){stallS=min(stallS+dt,6.0);}
+      else if(dt>0.0){stallS=max(stallS-dt*1.8,0.0);}
+      let escape=smoothstep(1.8,3.4,stallS);
+      moveFrac=max(moveFrac,escape);
+      pushFwdM*=(1.0-escape);
+      let wantRightM=clamp(prefRightM+clamp(steerRightM,-halfW*1.2,halfW*1.2),-halfW,halfW);
+      let maxStep=max(0.04,dt*1.65);
+      let smoothRightM=curRightM+clamp(wantRightM-curRightM,-maxStep,maxStep);
+      let finalRightM=clamp(smoothRightM+clamp(pushRightM,-0.80,0.80),-halfW,halfW);
+      latFrac=clamp((finalRightM*going)/halfW,-1.0,1.0);
+      if(!stopped&&moveFrac<0.995&&dt>0.0){
+        fate.clock-=dt*(1.0-moveFrac);
+        let backStep=clamp(pushFwdM,-0.45,0.0);
+        metres=clamp(metres+going*backStep,0.0,w.length);
+        if(moveFrac<0.16){stopped=true;}
+      }else if(pushFwdM<-0.01){
+        metres=clamp(metres+going*clamp(pushFwdM,-0.45,0.0),0.0,w.length);
       }
+      spot=wayAtLat(w,metres,latFrac);
+      lane=going;
+      fate.since=time;
+      fate.lane=latFrac;
+      fate.going=going;
+      fate.look=stallS;
+      fate.how=1u;
+      fates[id.x]=fate;
     }
-    let wantRightM=clamp(prefRightM+clamp(steerRightM,-halfW*1.2,halfW*1.2), -halfW, halfW);
-    let maxStep=max(0.04,dt*1.55);
-    let smoothRightM=curRightM+clamp(wantRightM-curRightM,-maxStep,maxStep);
-    let finalRightM=clamp(smoothRightM+clamp(pushRightM,-0.85,0.85),-halfW,halfW);
-    latFrac=clamp((finalRightM*going)/halfW,-1.0,1.0);
-    if(!stopped&&moveFrac<0.995&&dt>0.0){
-      fate.clock-=dt*(1.0-moveFrac);
-      let backStep=clamp(pushFwdM,-0.55,0.0);
-      metres=clamp(metres+going*backStep,0.0,w.length);
-      if(moveFrac<0.16){stopped=true;}
-    }else if(pushFwdM<-0.01){
-      metres=clamp(metres+going*clamp(pushFwdM,-0.55,0.0),0.0,w.length);
-    }
-    spot=wayAtLat(w,metres,latFrac);
-    lane=going;
-    fate.since=time;
-    fate.lane=latFrac;
-    fate.until=spot.position.x;
-    fate.runFor=spot.position.z;
-    fate.along=spot.position.y;
-    fate.going=going;
-    fate.speed=select(w.speed*moveFrac,0.0,stopped);
-    fate.look=spot.halfWidth;
-    fate.how=1u|2u|select(0u,4u,isMounted)|select(0u,8u,stopped);
-    fates[id.x]=fate;
   }else if(fate.mode==AFRAID){
     ran=clamp(age-${TOWN_STARTLE_S.toFixed(2)},0.0,fate.runFor);
     metres=clamp(fate.along+fate.going*fate.speed*ran,0.0,w.length);

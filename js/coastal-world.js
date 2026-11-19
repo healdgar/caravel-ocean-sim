@@ -3921,7 +3921,7 @@ export function buildCityTypeGeometry({ id = 0, kind = null, width, length, heig
       emitCylinder(toWorld, -hw, -hl + 0.62, quayBaseY, quayDeckY + 0.52, 0.78, 0.74, 8, 11, 0.88, true);
       emitCylinder(toWorld, hw, -hl + 0.62, quayBaseY, quayDeckY + 0.52, 0.78, 0.74, 8, 11, 0.88, true);
       beginSection('quay_coping_deck_slab');
-      emitBox(toWorld, -hw - 0.12, hw + 0.12, yCoping, quayDeckY, -hl - 0.16, hl + 0.08, 11, 0.93, true);
+      emitBox(toWorld, -hw - 0.12, hw + 0.12, yCoping, quayDeckY, -hl - 0.16, hl + 0.08, 11, 0.93, false);
       const qs = Math.min(1, hw / 22);
       beginSection('quay_parapet_walls');
       if (hw >= 9) {

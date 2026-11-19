@@ -180,7 +180,7 @@ test('promoted world audio SFX and voice assets match provenance and valid MP3 p
   for (const record of provenance) {
     const asset = WORLD_AUDIO_ASSETS[record.id];
     assert.ok(asset, `missing WORLD_AUDIO_ASSETS entry for ${record.id}`);
-    assert.ok(asset.seconds > 0.25 && asset.seconds <= 12, `${record.id} duration out of bounds`);
+    assert.ok(asset.seconds > 0.25 && asset.seconds <= (asset.loop ? 25 : 12), `${record.id} duration out of bounds`);
     const bytes = await fs.readFile(new URL('../' + asset.url, import.meta.url));
     assert.equal(bytes.length, record.bytes, `${record.id} byte length mismatch`);
     assert.equal(createHash('sha256').update(bytes).digest('hex'), record.sha256, `${record.id} sha256 mismatch`);

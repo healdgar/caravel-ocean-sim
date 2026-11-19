@@ -5815,13 +5815,14 @@ export async function createTradeVessels({
     deckOwned.push(buf);
     return buf;
   };
-  const requestDeckCrewPrograms = () => getPipelineEntry(device, `deckCrew:${format}:${samples}`, async () => {
+  const deckWaterOptics = resolvedWaterOptics?.capture ? resolvedWaterOptics : null;
+  const requestDeckCrewPrograms = () => getPipelineEntry(device, `deckCrew:${format}:${samples}:${deckWaterOptics ? 1 : 0}`, async () => {
     const module = await shader(DECK_CREW_PLACE_WGSL, 'trade deck crew place');
     const [place, reset, pose, continuum] = await Promise.all([
       device.createComputePipelineAsync({ label: 'trade deck crew place', layout: 'auto', compute: { module, entryPoint: 'deckCrewPlace' } }),
       device.createComputePipelineAsync({ label: 'trade deck crew reset', layout: 'auto', compute: { module, entryPoint: 'deckCrewReset' } }),
       requestCrewContinuumPose({ device, shader }),
-      requestCrewContinuumPipelines({ device, shader, format, samples }),
+      requestCrewContinuumPipelines({ device, shader, format, samples, waterOptics: deckWaterOptics }),
     ]);
     return { place, reset, pose, continuum };
   });
@@ -7920,9 +7921,12 @@ export async function createTradeVessels({
         crewEncoded = true;
       }
     },
-    // Seen from under the water: every vessel's coarse cut, through the water's own capture of her material.
+    // Seen from under the water: every vessel and her deck crew through the water's own capture.
     drawSubmerged(pass, above = false) {
       under?.draw(pass, [scene], above);
+      if (crewEncoded && deckCompany?.batches?.length) {
+        for (const batch of deckCompany.batches) batch?.drawSubmerged?.(pass, above);
+      }
     },
     draw(pass, elapsedSec = NaN) {
       const t = Number.isFinite(elapsedSec) ? elapsedSec : (hasSimClock ? simElapsedSec : performance.now() * 0.001);
