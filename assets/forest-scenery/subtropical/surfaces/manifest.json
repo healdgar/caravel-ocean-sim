@@ -135,11 +135,11 @@
      },
      "detail": {
       "bytes": 2796352,
-      "sha256": "97144d5a38d02fb097c1b9a20be44f0e8b1f5a6cbcfbb50ddbaf6ce3a6cbd31f",
+      "sha256": "6511cb686eddd3106e38b1273e337b73195c9b2dba399f4707d5c6353e0fd299",
       "gzip": {
        "file": "family-0-detail.bc7.bin.gz",
-       "bytes": 2532281,
-       "sha256": "3a1ccfcc23fa948943be0e50738d935fa2f3bc4bc321195f6bae8ba0b9655a3f"
+       "bytes": 2616882,
+       "sha256": "a285d3d87ab8ea73d4dcb3f4b0a4bdac6fed23a9305c5684c91e0c8532e6a47b"
       }
      }
     },
@@ -155,11 +155,11 @@
      },
      "detail": {
       "bytes": 2796352,
-      "sha256": "400c9fc8434fda48f14a00401f1bc13e40d4e7a508c63336330ead9c524063eb",
+      "sha256": "19036027db50f2ef2d75b99c5f23afc88b8ff6aa4de5903258c1aaa4c9323cb9",
       "gzip": {
        "file": "family-0-detail.astc.bin.gz",
-       "bytes": 2326048,
-       "sha256": "9fc4514675a5eb38933f47f914cba6517b7a722243105580570929685370d842"
+       "bytes": 2370844,
+       "sha256": "706ecf25e92ab8f0cd5da242d13a0b95eb5e508821373752c2c100ed2f5d7b44"
       }
      }
     }
@@ -201,7 +201,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "d5a4fa04ba11b939c53bc222fa04be5747907f8fe1adac40482d573369142994",
-      "normal": "1aaaebf3a5a0e2aa3ce56970994f224740467ebfa83a10e388af685c70782841"
+      "normal": "588f017b80df5e1e7fd34e8982aaa84ad0220d6d48ab011364ffc04e9d0d402f"
      },
      "coverage": [
       0.662419,
@@ -226,7 +226,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "41e8b3f36a314d8c327d701c3bd3255f7ff61ecc2b6ff4002e70be276d86b373",
-      "normal": "3278f2b55b9c57daa8a79fe6680d7f3c4b419fbf5a0fc825c0ddf62c35876cba"
+      "normal": "d529312fccb9f2ff504ef3dcc80e18dd7ecd98b6b20f23018fc85e92f2f954e8"
      },
      "coverage": [
       0.662419,
@@ -251,7 +251,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "a4dbf818240c699a0de6164912a8839f5f55e8ab856404d8f038df970e75847e",
-      "normal": "605e7e03afc98a7ff5a1c485e74ec7ee5755e815bcf665d86d22b0ce14227421"
+      "normal": "49927b4ad978ed290131af26244132829c2692be9846563d0e6a946e348cc370"
      },
      "coverage": [
       0.662419,
@@ -302,7 +302,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "5ce91b047f01bbbfec41b0a8df7786379ab4cb422bd48a1b9c322680be073095",
-      "normal": "d0e4b1e17562672a477a473fee6292232b8a973035433b1bd84a87ce5ba5852e"
+      "normal": "1fbdb32ba3a0335c2ebd700bb2f16f2dd4b907ca09d5cb015f3413d90b0ebef2"
      },
      "coverage": [
       0.662419,
@@ -327,7 +327,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "5b370a9f48214a0898bd09671cc4274c444f7ae67c554525b7e7efc0c91700c9",
-      "normal": "4d48beb23317fb2828e43ea379ca3138761c8cb178aeb4064cf56d40db990294"
+      "normal": "caa513a7ca2fdd72350fd666c0a763f971c45c3e8638f22da2c6575ab0bb8a68"
      },
      "coverage": [
       0.662419,
@@ -352,7 +352,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "cb957bdfa882cf979f8ac0f8fa3cfcca953a78e7602eee54fdf3f60829dd74c7",
-      "normal": "240763797e7ad994ed796e5b0d3bf3955f37a04534337f3aebd7f3b578d19570"
+      "normal": "684c35d8e68b53e11d2a48b10bd4a31b9710c410ebc6680c0b013def6c87bdac"
      },
      "coverage": [
       0.662419,
@@ -403,7 +403,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "f1becca09f528acc4b1543cca2884a8a54047fddcb71ec96264ad7beda375170",
-      "normal": "dc7e087f8143062826e204aa111caf3b4de726793bc623e7ffbeb3a0b97a7077"
+      "normal": "2cdf6bfcca037c6986127fc87261e75bf2b7bb68fd66cd4cca7ee3ccd827d22c"
      },
      "coverage": [
       0.495995,
@@ -428,7 +428,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "5b26c79e4abce1694df96ac481f142c9c5eda9de4110ef6bc54050fae631a13c",
-      "normal": "31c84758d5f9f9953c2e3e26930f679847b086963ee617a0f93a3a15d0af3d63"
+      "normal": "c4d24abe536faeb7b718e79ac862797bf0050a0ea3ec74114607d02d8d97381e"
      },
      "coverage": [
       0.495995,
@@ -453,7 +453,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "9afbf702251906365ceff4472ba71c3620703020ffbf159f6fa4e2a85dbbe790",
-      "normal": "6af6dabe1fc55ee97e01a33366ccdc02fa40f00d18570ea57857a2feaacb28e9"
+      "normal": "ba7169cb4d77e60ad4f68e3c9e6deca8fca8ec7486bb16a15286fba6efde4686"
      },
      "coverage": [
       0.496009,
@@ -504,7 +504,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "4ce305e8f15392eb6f23fe1d513806c96b15acf13378b6140fa94c9208b0b2f5",
-      "normal": "1be62328bd4e534c6c6421b0d519725118d28b4a56e0a19f7e90050ee0ea492f"
+      "normal": "8818d89fce698dc2890cb0c7847691097e7498379c65b91a711f409ba1e4eea4"
      },
      "coverage": [
       0.555104,
@@ -529,7 +529,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "6119dfa8bb0bc5c1442bdb5a8ed7c3d1aba387ced2106149feecb48ed0ad0880",
-      "normal": "e9a1a6bc668cc50f3259c7fa1fdaba643c33f59b05731d7644e4f1ccdc72d460"
+      "normal": "df5692cc9b9b0938d2c13ac2c331ad723907a1d052a2b01a1cb3c8c1704ac021"
      },
      "coverage": [
       0.555104,
@@ -554,7 +554,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "9722b84eddb35ee0142e84de8e8b5850861f8fac4fff37defb2cea45e7a6da53",
-      "normal": "8571ce38e63f3890b500ab15cbf1cf08d3b405ba9bc08dc36a1f1722935138b7"
+      "normal": "bf8fb128ceff809a174ed02935a73b2ddeff2c809fa614ee69f594b8c87a644a"
      },
      "coverage": [
       0.555104,
@@ -588,11 +588,11 @@
      },
      "detail": {
       "bytes": 1398528,
-      "sha256": "64f0f11bf9f267d658d92c7a081a5f24659ae55d8bfb76b25d9aecc3c793b0f0",
+      "sha256": "ff2d91eece4cdd0bacaccff0accf14e7e08d372c1af4598c4cc16296207dee58",
       "gzip": {
        "file": "family-1-detail.bc7.bin.gz",
-       "bytes": 828984,
-       "sha256": "608ada11d94b9163bb972e445d7317e62343edc3b0779fe2857cf1102a88405c"
+       "bytes": 778530,
+       "sha256": "2cb076c03f4dba144b20e28473e3c226d7bdfb2023f1b690d3944bb6ac32056f"
       }
      }
     },
@@ -608,11 +608,11 @@
      },
      "detail": {
       "bytes": 1398528,
-      "sha256": "5e0f2ecd829e2f1e2a43395e859fbafc0424e7dba5f5fd39523e5cf674ce0ca9",
+      "sha256": "744ff789347a9c9de2b8b463a1f29695a041966cd3ddb8998b16fb437dc07ba6",
       "gzip": {
        "file": "family-1-detail.astc.bin.gz",
-       "bytes": 881245,
-       "sha256": "e107a572b0d8e00ed029517ddc600b29b207aef48810e59f8d11ce45171fc5df"
+       "bytes": 779553,
+       "sha256": "2f268358260be8d58e28b5271331853ba44c8756e0d22e55c5718a259cb70abf"
       }
      }
     }

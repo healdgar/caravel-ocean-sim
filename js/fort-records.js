@@ -31,13 +31,13 @@ const phased = (record) => {
   }));
   return Object.freeze({ ...record, from: phases[0].from, phases });
 };
-const P = (port) => Object.freeze({ ...port, forts: Object.freeze(port.forts.map(phased)) });
+const fortPortRecord = (port) => Object.freeze({ ...port, forts: Object.freeze(port.forts.map(phased)) });
 
 export const FORT_RECORDS = Object.freeze({
   // Morro and La Punta: Antonelli and Tejeda's works of 1589–1600 (I. A. Wright, The Early History of Cuba; Wikipedia,
   // "Morro Castle (Havana)", "Castillo de San Salvador de la Punta"). La Fuerza: begun 1558 by Bartolomé Sánchez and
   // finished 1577, the first bastioned fort of the Americas (UNESCO 204; Wikipedia, "Castillo de la Real Fuerza").
-  "havana": P({
+  "havana": fortPortRecord({
     seaward: 340,
     anchorage: Object.freeze([23.1355,-82.345]),
     // The elevation data shows the channel as low ground, so the bay would be a lake without this.
@@ -53,7 +53,7 @@ export const FORT_RECORDS = Object.freeze({
   // (NPS, San Juan National Historic Site, "El Morro" and "Original Tower"; Naval History, June 1996). La Fortaleza:
   // a fortified house round a court with its round tower, 1533–1540 (UNESCO 266). El Cañuelo: a timber fortlet of
   // 1608, in stone from the 1670s. San Cristóbal: begun 1634, the great citadel of 1765–1783 (NPS).
-  "san-juan": P({
+  "san-juan": fortPortRecord({
     seaward: 340,
     anchorage: Object.freeze([18.459,-66.119]),
     forts: [
@@ -67,7 +67,7 @@ export const FORT_RECORDS = Object.freeze({
   // 1567. El Boquerón at the inner narrows, 1586, rebuilt as San Sebastián del Pastelillo in 1743. Santa Cruz of
   // Castillogrande, a square of four bastions, 1628–1631. Manzanillo, a battery opposite it, 1631 (E. Marco Dorta,
   // Cartagena de Indias: puerto y plaza fuerte, 1960; J. M. Zapatero, Historia de las fortificaciones de Cartagena).
-  "cartagena": P({
+  "cartagena": fortPortRecord({
     seaward: 200,
     anchorage: Object.freeze([10.405,-75.54]),
     forts: [
@@ -82,7 +82,7 @@ export const FORT_RECORDS = Object.freeze({
   // polygonal fort of five sides on the shore, 1503–1510, the first work of the town's sea wall (Visita República
   // Dominicana, "Fuerte San Gil"; Colonial Zone DR). Its ruin stands on the Paseo Presidente Billini, N 18° 28.031′
   // W 69° 53.391′ (Waymarking WM15VYR; OpenStreetMap way 318764340).
-  "santo-domingo": P({
+  "santo-domingo": fortPortRecord({
     seaward: 180,
     anchorage: Object.freeze([18.47,-69.878]),
     forts: [
@@ -94,7 +94,7 @@ export const FORT_RECORDS = Object.freeze({
   // towers of San Pedro and San Crispín in 1584; redesigned by Antonelli in the 1580s–90s as a bastioned work (INAH,
   // "Muro de las argollas" marker; Wikipedia, "San Juan de Ulúa"). The Baluarte de Santiago, a bastion of the city
   // wall, 1635.
-  "veracruz": P({
+  "veracruz": fortPortRecord({
     seaward: 60,
     anchorage: Object.freeze([19.205,-96.127]),
     forts: [
@@ -103,7 +103,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // The bastions of Campeche's wall, 1686–1704, and the fort of San Benito before them (INAH, "Fuerte de San Carlos").
-  "campeche": P({
+  "campeche": fortPortRecord({
     forts: [
       { name: "Baluarte de San Carlos (earlier fort San Benito)", phases: [[1610, 'battery']], lat: 19.8425, lon: -90.5385, role: "waterfront", side: "southwest", shape: "star", rough: true },
       { name: "Baluarte de la Soledad (beside the Sea Gate)", phases: [[1686, 'battery']], lat: 19.8475, lon: -90.5365, role: "waterfront", side: "north", shape: "star", rough: true },
@@ -111,7 +111,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // Santa Marta's bay was held by batteries and small forts of the 17th and 18th centuries (Zapatero).
-  "santa-marta": P({
+  "santa-marta": fortPortRecord({
     forts: [
       { name: "Fuerte de San Juan de las Matas", phases: [[1602, 'battery']], lat: 11.2415, lon: -74.2125, role: "waterfront", side: "west", shape: "battery", rough: true },
       { name: "Fuerte de San Vicente", phases: [[1644, 'battery']], lat: 11.2445, lon: -74.2125, role: "waterfront", side: "north", shape: "battery", rough: true },
@@ -121,24 +121,24 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // San Antonio de la Eminencia, a star of four points, 1659–1686; Santa María de la Cabeza, 1668 (Wikipedia).
-  "cumana": P({
+  "cumana": fortPortRecord({
     forts: [
       { name: "Castillo de San Antonio de la Eminencia", phases: [[1659, 'bastioned']], lat: 10.46214, lon: -64.17161, role: "citadel", side: "west", shape: "fitted" },
       { name: "Castillo de Santa Maria de la Cabeza", phases: [[1668, 'bastioned']], lat: 10.4611, lon: -64.1742, role: "waterfront", side: "east", shape: "star" },
     ],
   }),
-  "panama-viejo": P({
+  "panama-viejo": fortPortRecord({
     forts: [
     ],
   }),
   // A battery at the landing, left with the town for Portobelo in 1597.
-  "nombre-de-dios": P({
+  "nombre-de-dios": fortPortRecord({
     forts: [
       { name: "Fortificacion de Nombre de Dios (small late-16th-century fort)", phases: [[1570, 'battery']], until: 1597, lat: 9.579, lon: -79.476, role: "waterfront", shape: "star", rough: true },
     ],
   }),
   // Portobelo's works of Antonelli, 1597–1601, and the 18th century's (UNESCO 135).
-  "portobelo": P({
+  "portobelo": fortPortRecord({
     seaward: 280,
     anchorage: Object.freeze([9.557,-79.661]),
     forts: [
@@ -149,7 +149,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // San Diego: a pentagon of five bastions, 1615–1617, rebuilt after the earthquake of 1776 (Wikipedia, "Fort of San Diego").
-  "acapulco": P({
+  "acapulco": fortPortRecord({
     seaward: 200,
     anchorage: Object.freeze([16.848,-99.905]),
     forts: [
@@ -158,26 +158,26 @@ export const FORT_RECORDS = Object.freeze({
   }),
   // A battery at the mouth to Antonelli's design from the 1590s; the castle of San Pedro de la Roca begun by Juan
   // Bautista Antonelli in 1638 (UNESCO 841).
-  "santiago-de-cuba": P({
+  "santiago-de-cuba": fortPortRecord({
     seaward: 200,
     forts: [
       { name: "Castillo de San Pedro de la Roca (El Morro)", phases: [[1590, 'battery'], [1638, 'bastioned']], lat: 19.96871, lon: -75.8703, role: "mouth", side: "east", shape: "headland" },
     ],
   }),
-  "trujillo": P({
+  "trujillo": fortPortRecord({
     forts: [
       { name: "Fortaleza de Santa Barbara", phases: [[1575, 'battery']], lat: 15.9185, lon: -85.9535, role: "headland", side: "south", shape: "star", rough: true },
     ],
   }),
   // The Real Felipe, a pentagon of five bastions, 1747–1774.
-  "callao": P({
+  "callao": fortPortRecord({
     forts: [
       { name: "Fortaleza del Real Felipe", phases: [[1747, 'bastioned']], lat: -12.06278, lon: -77.14917, role: "waterfront", shape: "star", bastions: 5, sizeM: [120,120] },
     ],
   }),
   // Bahia's forts (IPHAN): Santo Antônio da Barra a battery of the 1580s, its polygon of 1696–1702; São Marcelo, the
   // round Forte do Mar, 1623–1650 on the reef where a battery stood; Monte Serrat a small fort of round turrets.
-  "salvador-da-bahia": P({
+  "salvador-da-bahia": fortPortRecord({
     seaward: 190,
     forts: [
       { name: "Forte de Santo Antonio da Barra", phases: [[1583, 'battery'], [1696, 'enclosed']], lat: -13.010278, lon: -38.532778, role: "mouth", side: "west", shape: "headland" },
@@ -187,14 +187,14 @@ export const FORT_RECORDS = Object.freeze({
       { name: "Forte de Nossa Senhora de Monte Serrat", phases: [[1580, 'enclosed', { round: true }]], lat: -12.9245, lon: -38.5035, role: "headland", side: "north", shape: "star", rough: true },
     ],
   }),
-  "sao-vicente": P({
+  "sao-vicente": fortPortRecord({
     seaward: 170,
     forts: [
       { name: "Fortaleza de Santo Amaro da Barra Grande", phases: [[1580, 'battery']], lat: -24.0125, lon: -46.372, role: "mouth", side: "east", shape: "headland", rough: true },
     ],
   }),
   // The Dutch works of Recife, 1629–1630: the forts of Brum and Cinco Pontas bastioned, the Picão a battery on the reef.
-  "olinda": P({
+  "olinda": fortPortRecord({
     forts: [
       { name: "Forte do Picao (reef entrance)", phases: [[1630, 'battery']], lat: -8.0543, lon: -34.872, role: "mouth", side: "east", shape: "islet", rough: true },
       { name: "Forte do Brum (Fort de Bruyne)", phases: [[1629, 'bastioned', { earth: true }]], lat: -8.0625, lon: -34.8727, role: "headland", side: "north", shape: "star", rough: true },
@@ -202,7 +202,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // San Marcos: four bastions of coquina, 1672–1695; nine timber forts before it; Matanzas a coquina gun tower, 1740–1742 (NPS).
-  "st-augustine": P({
+  "st-augustine": fortPortRecord({
     seaward: 70,
     anchorage: Object.freeze([29.894,-81.305]),
     forts: [
@@ -213,7 +213,7 @@ export const FORT_RECORDS = Object.freeze({
   }),
   // Guanabara: the French battery of 1555 at the bar and Fort Coligny on Villegagnon's island (1555–1560); the
   // Portuguese forts of the bar from 1565, made bastioned works in the 17th century (Wikipedia).
-  "rio-de-janeiro": P({
+  "rio-de-janeiro": fortPortRecord({
     seaward: 170,
     forts: [
       { name: "Fortaleza de Santa Cruz da Barra", phases: [[1555, 'battery'], [1612, 'enclosed']], lat: -22.951111, lon: -43.113611, role: "mouth", side: "east", shape: "headland" },
@@ -223,7 +223,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // The English batteries of Basseterre, 1666.
-  "st-kitts": P({
+  "st-kitts": fortPortRecord({
     forts: [
       { name: "Fort Thomas (Bluff Point)", phases: [[1666, 'battery']], lat: 17.2935, lon: -62.7345, role: "headland", side: "west", shape: "battery", rough: true },
       { name: "Fort Londonderry", phases: [[1666, 'battery']], lat: 17.2955, lon: -62.7235, role: "waterfront", side: "south", shape: "battery", rough: true },
@@ -231,32 +231,32 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // Levasseur's fort on its rock, 1640–1654.
-  "tortuga": P({
+  "tortuga": fortPortRecord({
     forts: [
       { name: "Fort de Rocher (Fort de la Roche, Dovecote)", phases: [[1640, 'enclosed']], until: 1654, lat: 20.0125, lon: -72.792, role: "headland", side: "north", shape: "star", rough: true },
     ],
   }),
-  "bridgetown": P({
+  "bridgetown": fortPortRecord({
     forts: [
       { name: "Needham's Fort (Charles Fort)", phases: [[1650, 'battery', { earth: true }]], lat: 13.0789, lon: -59.6127, role: "headland", side: "southwest", shape: "battery", earth: true },
     ],
   }),
   // Fort Amsterdam, four bastions, 1634–1635.
-  "curacao": P({
+  "curacao": fortPortRecord({
     seaward: 200,
     forts: [
       { name: "Fort Amsterdam", phases: [[1634, 'bastioned']], lat: 12.1047, lon: -68.9345, role: "mouth", side: "east", shape: "star" },
     ],
   }),
   // A timber fort of 1638 on the point, bastioned in stone from 1669 (Wikipedia, "Fort Saint-Louis (Martinique)").
-  "fort-royal-martinique": P({
+  "fort-royal-martinique": fortPortRecord({
     seaward: 220,
     forts: [
       { name: "Fort Saint-Louis (Fort-Royal)", phases: [[1638, 'enclosed', { earth: true }], [1669, 'bastioned']], lat: 14.5999, lon: -61.0664, role: "headland", side: "west", shape: "star" },
     ],
   }),
   // Fort Charles (Fort Cromwell to 1660) and the batteries along the Port Royal spit (M. Pawson and D. Buisseret, Port Royal, Jamaica).
-  "port-royal": P({
+  "port-royal": fortPortRecord({
     seaward: 190,
     forts: [
       { name: "Fort Charles (Cagway)", phases: [[1655, 'bastioned']], lat: 17.935048, lon: -76.842475, role: "mouth", side: "south", shape: "star" },
@@ -266,13 +266,13 @@ export const FORT_RECORDS = Object.freeze({
       { name: "Fort Carlisle", phases: [[1678, 'battery']], lat: 17.9385, lon: -76.8315, role: "waterfront", side: "north", shape: "battery", rough: true },
     ],
   }),
-  "nassau": P({
+  "nassau": fortPortRecord({
     forts: [
       { name: "Fort Nassau", phases: [[1697, 'bastioned']], until: 1703, lat: 25.0775, lon: -77.352, role: "waterfront", side: "south", shape: "star", rough: true },
       { name: "Fort Montagu", phases: [[1741, 'enclosed']], lat: 25.0817, lon: -77.3176, role: "mouth", side: "east", shape: "star", rough: true },
     ],
   }),
-  "cap-francois": P({
+  "cap-francois": fortPortRecord({
     forts: [
       { name: "Fort Picolet", phases: [[1736, 'battery']], lat: 19.7767, lon: -72.2155, role: "mouth", side: "west", shape: "headland", rough: true },
     ],
@@ -282,7 +282,7 @@ export const FORT_RECORDS = Object.freeze({
   // Baluarte of the Ribeira, a bulwark at the palace's waterfront (1511); Belém, a square tower behind its bastion of
   // guns at the water (1514–1519); São Julião, a bastioned work to Miguel de Arruda's design, begun 1553; the Bugio,
   // a round fort on its bank from 1590; the castle of São Jorge, the city's medieval castle.
-  "lisbon": P({
+  "lisbon": fortPortRecord({
     seaward: 250,
     anchorage: Object.freeze([38.7,-9.14]),
     forts: [
@@ -295,7 +295,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // James Fort, Strachey's triangle of palisades (1607), and the earthwork of 1665–67 (APVA Jamestown Rediscovery).
-  "jamestown": P({
+  "jamestown": fortPortRecord({
     seaward: 150,
     forts: [
       { name: "James Fort", phases: [[1607, 'enclosed', { earth: true }]], lat: 37.2092, lon: -76.7787, role: "river", side: "north", shape: "star", earth: true, rough: true, encloses: "triangle", gate: "river" },
@@ -303,7 +303,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // Fort Amsterdam, a square of four earthen bastions, 1625; the Battery's gun platform of 1693.
-  "new-amsterdam": P({
+  "new-amsterdam": fortPortRecord({
     seaward: 185,
     anchorage: Object.freeze([40.7,-74.005]),
     forts: [
@@ -312,7 +312,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // The Castle on Castle Island, earth and timber from 1634; the town's batteries and the Fort Hill fort.
-  "boston": P({
+  "boston": fortPortRecord({
     seaward: 95,
     anchorage: Object.freeze([42.359,-71.04]),
     forts: [
@@ -323,7 +323,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // Champlain's Habitation (1608), the forts Saint-Louis on the cliff (1620–1694) and the Batterie Royale (1691).
-  "quebec": P({
+  "quebec": fortPortRecord({
     forts: [
       { name: "Habitation de Québec", phases: [[1608, 'enclosed', { earth: true }]], lat: 46.8127, lon: -71.2017, role: "waterfront", side: "north", shape: "star", earth: true, rough: true, encloses: "square" },
       { name: "Fort Saint-Louis (cliff-top forts, 1620-1694)", phases: [[1620, 'enclosed', { earth: true }]], lat: 46.812, lon: -71.2051, role: "citadel", side: "north", shape: "fitted", rough: true },
@@ -331,7 +331,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // Governor Moore's forts and batteries of 1612 (E. C. Harris, Bermuda Forts 1612–1957).
-  "bermuda": P({
+  "bermuda": fortPortRecord({
     forts: [
       { name: "Fort St Catherine", phases: [[1612, 'battery']], lat: 32.39, lon: -64.676, role: "headland", side: "north", shape: "battery" },
       { name: "Gates Fort (Danvers Fort) at Town Cut", phases: [[1612, 'battery']], lat: 32.3835, lon: -64.661, role: "narrows", side: "south", shape: "battery", rough: true },
@@ -340,13 +340,13 @@ export const FORT_RECORDS = Object.freeze({
       { name: "King's Castle", phases: [[1612, 'battery']], lat: 32.357, lon: -64.69, role: "island", side: "south", shape: "islet", rough: true },
     ],
   }),
-  "plymouth-colony": P({
+  "plymouth-colony": fortPortRecord({
     forts: [
       { name: "Plymouth fort-meetinghouse on Fort (Burial) Hill", phases: [[1621, 'enclosed', { earth: true }]], lat: 41.9575, lon: -70.662, role: "citadel", shape: "fitted", earth: true, rough: true, encloses: "square" },
     ],
   }),
   // The bastions and batteries of Charles Town's sea wall, 1697–1708.
-  "charleston": P({
+  "charleston": fortPortRecord({
     seaward: 140,
     forts: [
       { name: "Granville Bastion", phases: [[1697, 'battery']], lat: 32.77325, lon: -79.92758, role: "waterfront", side: "east", shape: "star" },
@@ -354,7 +354,7 @@ export const FORT_RECORDS = Object.freeze({
       { name: "Fort Johnson", phases: [[1708, 'battery', { earth: true }]], lat: 32.7523, lon: -79.9005, role: "headland", side: "south", shape: "battery", earth: true, rough: true },
     ],
   }),
-  "philadelphia": P({
+  "philadelphia": fortPortRecord({
     seaward: 180,
     forts: [
       { name: "Association (Grand) Battery", phases: [[1747, 'battery']], lat: 39.9385, lon: -75.1425, role: "waterfront", side: "west", shape: "battery", rough: true },
@@ -362,7 +362,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // The castle of the dukes of Medina Sidonia, its keep and round towers of 1477 (Wikipedia, "Castillo de Santiago (Sanlúcar de Barrameda)").
-  "cadiz-sanlucar": P({
+  "cadiz-sanlucar": fortPortRecord({
     seaward: 290,
     forts: [
       { name: "Castillo de Santiago, Sanlúcar de Barrameda", phases: [[1477, 'enclosed', { round: true }]], lat: 36.7818, lon: -6.3538, role: "citadel", side: "south", shape: "fitted", rough: true },
@@ -370,7 +370,7 @@ export const FORT_RECORDS = Object.freeze({
   }),
   // Palos's castle of 1322. The Torre de la Arenilla is one of the almenara towers Philip II ordered from Gibraltar to
   // Ayamonte, raised in the late 16th and early 17th centuries (Croma Cultura, "Torre de la Arenilla"; BIC 1985).
-  "palos-huelva": P({
+  "palos-huelva": fortPortRecord({
     seaward: 200,
     forts: [
       { name: "Castillo de Palos de la Frontera", phases: [[1322, 'enclosed']], lat: 37.2301, lon: -6.8925, role: "river", side: "north", shape: "fitted" },
@@ -378,7 +378,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // San Antón on its islet, 1587–1590.
-  "la-coruna": P({
+  "la-coruna": fortPortRecord({
     seaward: 330,
     anchorage: Object.freeze([43.365,-8.395]),
     forts: [
@@ -390,7 +390,7 @@ export const FORT_RECORDS = Object.freeze({
   // Castlopedia). It stood on a reef cut off at high water, now built round, at 28° 08′ 55″ N 15° 25′ 29.5″ W
   // (Wikimedia Commons, "Castillo de La Luz"). San Pedro Mártir, a gun tower of 1578; Mata, the round tower of the
   // north wall, 1577.
-  "las-palmas": P({
+  "las-palmas": fortPortRecord({
     forts: [
       { name: "Castillo de la Luz", phases: [[1494, 'tower'], [1515, 'enclosed']], lat: 28.1486, lon: -15.4249, role: "headland", side: "north", shape: "headland" },
       { name: "Torreón de San Pedro Mártir (Castillo de San Cristóbal)", phases: [[1578, 'artillery-tower', { round: true }]], lat: 28.116, lon: -15.429, role: "waterfront", side: "south", shape: "drum", rough: true },
@@ -399,7 +399,7 @@ export const FORT_RECORDS = Object.freeze({
   }),
   // Santa Cruz: San Cristóbal, a square of four bastions (1575–1577); San Juan, the half-round Castillo Negro (1641);
   // Paso Alto, a battery (J. Tous Meliá, Guía histórica del Museo Militar de Canarias).
-  "tenerife": P({
+  "tenerife": fortPortRecord({
     forts: [
       { name: "Castillo de San Cristóbal", phases: [[1575, 'bastioned']], lat: 28.4678, lon: -16.2478, role: "waterfront", shape: "battery", rough: true },
       { name: "Castillo de San Juan Bautista", phases: [[1641, 'artillery-tower', { round: true }]], lat: 28.472, lon: -16.2415, role: "waterfront", side: "north", shape: "battery", rough: true },
@@ -409,7 +409,7 @@ export const FORT_RECORDS = Object.freeze({
   // São Lourenço: a rectangular wall with its Manueline round towers, 1529–1540; enlarged and bastioned after the sack
   // of 1566 by Mateus Fernandes III (Elucidário Madeirense, "São Lourenço"; SIPA); the palace that is its keep stands
   // on the Avenida Zarco, N 32° 38.830′ W 16° 54.609′ (Waymarking WM16XC6). São Tiago, 1614; the Pico, 1600s.
-  "funchal": P({
+  "funchal": fortPortRecord({
     forts: [
       { name: "Fortaleza de São Lourenço", phases: [[1529, 'enclosed', { round: true }], [1572, 'bastioned']], lat: 32.6472, lon: -16.9102, role: "waterfront", side: "west", shape: "star" },
       { name: "Forte de São Tiago", phases: [[1614, 'enclosed']], lat: 32.6446, lon: -16.9027, role: "waterfront", side: "east", shape: "battery", rough: true },
@@ -417,7 +417,7 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // Monte Brasil's citadel of São João Baptista, begun 1594; São Sebastião, a small fort of the 1570s (SIPA).
-  "angra": P({
+  "angra": fortPortRecord({
     anchorage: Object.freeze([38.65,-27.22]),
     forts: [
       { name: "Fortaleza de São João Baptista (São Filipe) on Monte Brasil", phases: [[1594, 'citadel']], lat: 38.648, lon: -27.229, role: "headland", side: "west", shape: "star", rough: true },
@@ -425,14 +425,14 @@ export const FORT_RECORDS = Object.freeze({
     ],
   }),
   // São Filipe over Cidade Velha, bastioned, 1587–1593 (UNESCO 1310).
-  "ribeira-grande": P({
+  "ribeira-grande": fortPortRecord({
     forts: [
       { name: "Forte Real de São Filipe", phases: [[1587, 'bastioned']], lat: 14.9205, lon: -23.604, role: "citadel", side: "north", shape: "star", rough: true },
     ],
   }),
   // Goa's bar: the Cabo's guns of 1540 under Estêvão da Gama (Lok Bhavan Goa, "History"); Reis Magos, 1551; Aguada,
   // 1612; Gaspar Dias, 1589.
-  "goa": P({
+  "goa": fortPortRecord({
     seaward: 265,
     anchorage: Object.freeze([15.502,73.82]),
     forts: [
@@ -444,33 +444,33 @@ export const FORT_RECORDS = Object.freeze({
   }),
   // A Famosa: Albuquerque's keep of 1511–1512 within ramparts of four towers; the town walled with bastions about 1586
   // (Wikipedia, "A Famosa").
-  "malacca": P({
+  "malacca": fortPortRecord({
     forts: [
       { name: "A Famosa", phases: [[1511, 'enclosed'], [1586, 'bastioned']], lat: 2.193, lon: 102.2505, role: "waterfront", side: "east", shape: "star", rough: true },
     ],
   }),
-  "nagasaki": P({
+  "nagasaki": fortPortRecord({
     seaward: 220,
     forts: [
       { name: "Megami Battery", phases: [[1634, 'battery', { earth: true }]], lat: 32.725, lon: 129.856, role: "mouth", shape: "battery", earth: true, rough: true },
     ],
   }),
   // Fort Santiago, the stone fort of 1590–1593.
-  "manila": P({
+  "manila": fortPortRecord({
     seaward: 250,
     forts: [
       { name: "Fort Santiago", phases: [[1590, 'enclosed']], lat: 14.5958, lon: 120.966, role: "mouth", side: "north", shape: "star", rough: true },
     ],
   }),
   // Batavia's castle, a square of four bastions, 1619.
-  "batavia": P({
+  "batavia": fortPortRecord({
     seaward: 0,
     forts: [
       { name: "Batavia Castle", phases: [[1619, 'bastioned']], lat: -6.131, lon: 106.812, role: "waterfront", side: "west", shape: "star", sizeM: [120,120], rough: true },
     ],
   }),
   // Van Riebeeck's earthen fort of four bastions (1652) and the Castle's pentagon (1666–1679).
-  "cape-town": P({
+  "cape-town": fortPortRecord({
     seaward: 340,
     forts: [
       { name: "Fort de Goede Hoop", phases: [[1652, 'bastioned', { earth: true }]], lat: -33.9255, lon: 18.4235, role: "waterfront", side: "south", shape: "star", earth: true, rough: true, encloses: "square" },

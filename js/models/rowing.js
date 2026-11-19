@@ -29,18 +29,24 @@ function rowingModelBuild({id,modelCode,name,length,beam,draft,freeboard,sheer,r
       sparesKg:id==='oseberg'?350:id==='lusoria'?200:70,defaultProvisionDays:id==='oseberg'?7:id==='lusoria'?2:1,designIncludesManifest:true,gmBeamFraction:id==='oseberg'?.13:id==='lusoria'?.16:.18,
       structureFloorThicknessMetres:.025,
       provenance:'Authored service manifest; reported hull weight/tonnage is retained only as source metadata.'},
-    propulsion:{kind:propulsor,driveFraction:.44,cadence:.45,maxCadence:.70,catchAngle:.52,torsoLeanRadians:propulsor==='oar'?.50:.16,
+    propulsion:{kind:propulsor,driveFraction:.44,cadence:.45,maxCadence:.70,catchAngle:.34,torsoLeanRadians:propulsor==='oar'?.32:.16,
       bladeLength:propulsor==='paddle'?.55:.62,bladeWidth:propulsor==='paddle'?.18:.15,bladeThickness:.018,
       ...(propulsor==='paddle'?{paddleGrip:{low:.87,high:1.18,loom:1.30,inboardMin:.60,inboardMax:.90,seatRimReference:.65}}:{}),
-      outboard:propulsor==='paddle'?0:id==='oseberg'?2.80:2.45,inboard:.80,shaftRadius:propulsor==='paddle'?.022:.028,
+      outboard:propulsor==='paddle'?0:id==='oseberg'?2.80:2.45,inboard:.60,shaftRadius:propulsor==='paddle'?.022:.028,
       ...(footInset?{footInset}:{}),maxHandForce:300,maxPower:210,dragCoefficient:1.6,normalDragProvenance:'Authored effective plate drag and human force/power limits; not measured replica trials.'},
     ...(sail?rowingModelSail(runtime,sail):{masts:[],surfaces:[]}),stations:[],crewStations:{},equipment:{guns:[],bailer:true,anchor:propulsor!=='paddle',cargo:[{z:3.8,extent:[.32,.16,.5]}]},
   };
   for(let row=0;row<rowingPairs;row++)for(const side of [-1,1]){
-    const z=(stationFirst+(stationLast-stationFirst)*row/Math.max(1,rowingPairs-1))/sy,y=hullLoftDeck(profile,z),width=hullLoftWidth(profile,z,y)*sx;
-    const lockY=y+(id==='oseberg'?-.12:.065)/sy,lockWidth=id==='oseberg'?hullLoftWidth(profile,z,lockY)*sx:width;
-    const inboard=Math.min(design.propulsion.inboard,width*.58),seatX=propulsor==='paddle'?side*Math.min(.32,width-.34):side*Math.max(.12,width-inboard*.82);
-    const seatZ=z-(propulsor==='oar'?.14/sy:0);
+    const stationZ=(stationFirst+(stationLast-stationFirst)*row/Math.max(1,rowingPairs-1))/sy;
+    // Place the oarlock/oarport 0.21 m aft (+Z) of the thwart with 0.60 m inboard loom and 0.34 rad catch angle,
+    // and centre the rower behind the handle midpoint (0.92 * inboard), so every oarsman (all scales 0.93..1.05,
+    // male & female) stays cleanly in front of the chest at finish (+0.14 m) and within natural arm reach at catch
+    // with zero emergency spine-folding, while keeping thwart positions unchanged.
+    const seatZ=stationZ-(propulsor==='oar'?.14/sy:0);
+    const z=propulsor==='oar'?seatZ+.21/sy:stationZ;
+    const y=hullLoftDeck(profile,z),width=hullLoftWidth(profile,z,y)*sx;
+    const lockY=y+(id==='oseberg'?-.12:.18)/sy,lockWidth=id==='oseberg'?hullLoftWidth(profile,z,lockY)*sx:width;
+    const inboard=Math.min(design.propulsion.inboard,width*.58),seatX=propulsor==='paddle'?side*Math.min(.32,width-.34):side*Math.max(.12,width-inboard*.92);
     const station={id:'rower.'+(side<0?'port':'starboard')+'.'+String(row+1).padStart(2,'0'),index:design.stations.length,row,side,z,
       seat:[seatX/sx,design.seatHeight+hullLoftSheer(profile,seatZ),seatZ],
       pivot:propulsor==='oar'?[side*lockWidth/sx,lockY,z]:null,oarlock:propulsor==='oar'?(id==='oseberg'?'hull-port':'tholepins'):null,

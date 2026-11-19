@@ -314,6 +314,9 @@ fn vesselSurvives(in:BoatVertex)->bool {
       vec2f((materialPoint.y + abs(materialPoint.x) * 0.6) * 0.96, materialPoint.z * 0.36),
       isDugoutCanoe
     );
+  } else if (isRowingShip && in.material == 1u && abs(in.normalLocal.y) > 0.65) {
+    // Transverse rowing thwarts run across X: align vertical-grain oakAlbedo and procedural grain along X.
+    oakUV = vec2f(materialPoint.z * 0.96, materialPoint.x * 0.36);
   } else if (laterSailModel(hull.rig.w) && (in.material == 20u || in.material == 23u)) {
     oakUV = vec2f(materialPoint.y * 0.96, select(materialPoint.z, materialPoint.x, abs(in.normalLocal.z) > 0.72) * 0.36);
   }

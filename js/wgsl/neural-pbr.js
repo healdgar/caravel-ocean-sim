@@ -147,7 +147,7 @@ fn evalNeuralPbr(
     let uv1 = vec2f(
       uv0.x * ${NEURAL_PBR_ROT_COS} - uv0.y * ${NEURAL_PBR_ROT_SIN},
       uv0.x * ${NEURAL_PBR_ROT_SIN} + uv0.y * ${NEURAL_PBR_ROT_COS}
-    ) * 6.85410197;
+    ) * 5.61803399;
     z1 = sampleNeuralPbrBand(m, 1u, uv1, lod1);
   }
   if (all(z0 == vec4f(0.0)) && all(z1 == vec4f(0.0))) {
@@ -371,9 +371,10 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
       npbrMatId = 1u;
       npbrMask = 1.0;
       let mastUpright = abs(in.normalLocal.y) < 0.55 && !npbrRowingOar;
-      npbrUV = select(vec2f(npbrMetres.x + npbrMetres.z, npbrMetres.y), vec2f(npbrMetres.y, npbrMetres.x - npbrMetres.z), mastUpright);
-      npbrDuDx = select(vec2f(npbrDxM.x + npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.y, npbrDxM.x - npbrDxM.z), mastUpright);
-      npbrDuDy = select(vec2f(npbrDyM.x + npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.y, npbrDyM.x - npbrDyM.z), mastUpright);
+      let mastWrap = atan2(in.normalLocal.x, in.normalLocal.z) * 0.35;
+      npbrUV = select(vec2f(npbrMetres.x + npbrMetres.z, npbrMetres.y), vec2f(npbrMetres.y, mastWrap), mastUpright);
+      npbrDuDx = select(vec2f(npbrDxM.x + npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.y, length(npbrDxM.xz)), mastUpright);
+      npbrDuDy = select(vec2f(npbrDyM.x + npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.y, length(npbrDyM.xz)), mastUpright);
       npbrHintT = rotateHull(select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), mastUpright));
     } else if (in.material == 0u) {
       npbrMatId = 2u;
@@ -385,11 +386,25 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
     } else if (isWood) {
       npbrMatId = 0u;
       npbrMask = select(1.0, 0.85, paintedWood);
-      let transomFace = abs(in.normalLocal.z) > 0.75 && in.material != 15u;
-      npbrUV = select(vec2f(npbrMetres.z + board * 0.41, npbrMetres.y), vec2f(npbrMetres.x + board * 0.41, npbrMetres.y), transomFace);
-      npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), transomFace);
-      npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), transomFace);
-      npbrHintT = rotateHull(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), transomFace));
+      let horizWood = abs(in.normalLocal.y) > 0.65;
+      let benchAlongX = isRowingShip && in.material == 1u && horizWood;
+      let transomFace = !horizWood && abs(in.normalLocal.z) > 0.75 && in.material != 15u;
+      if (benchAlongX) {
+        npbrUV = vec2f(npbrMetres.x, npbrMetres.z);
+        npbrDuDx = vec2f(npbrDxM.x, npbrDxM.z);
+        npbrDuDy = vec2f(npbrDyM.x, npbrDyM.z);
+        npbrHintT = rotateHull(vec3f(1.0, 0.0, 0.0));
+      } else if (horizWood) {
+        npbrUV = vec2f(npbrMetres.z + deckPlankId * 0.37, npbrMetres.x);
+        npbrDuDx = vec2f(npbrDxM.z, npbrDxM.x);
+        npbrDuDy = vec2f(npbrDyM.z, npbrDyM.x);
+        npbrHintT = rotateHull(vec3f(0.0, 0.0, 1.0));
+      } else {
+        npbrUV = select(vec2f(npbrMetres.z + board * 0.41, npbrMetres.y), vec2f(npbrMetres.x + board * 0.41, npbrMetres.y), transomFace);
+        npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), transomFace);
+        npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), transomFace);
+        npbrHintT = rotateHull(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), transomFace));
+      }
     }
     if (npbrMask > 0.002) {
       let npbrBasis = neuralPbrTangentBasis(n, npbrHintT);
@@ -659,10 +674,18 @@ export function withNeuralPbrCity(source, opts = {}) {
       if (npbrWeight > 0.002) {
         let horizFace = abs(n.y) > 0.65;
         let wallAlongX = abs(n.z) >= abs(n.x);
-        let npbrUV = select(select(vec2f(world.z, world.y), vec2f(world.x, world.y), wallAlongX), world.xz, horizFace);
-        let npbrDuDx = select(select(vec2f(dx.z, dx.y), vec2f(dx.x, dx.y), wallAlongX), dx.xz, horizFace);
-        let npbrDuDy = select(select(vec2f(dy.z, dy.y), vec2f(dy.x, dy.y), wallAlongX), dy.xz, horizFace);
-        let npbrHint = select(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), wallAlongX), vec3f(1.0, 0.0, 0.0), horizFace);
+        var npbrUV = select(select(vec2f(world.z, world.y), vec2f(world.x, world.y), wallAlongX), world.xz, horizFace);
+        var npbrDuDx = select(select(vec2f(dx.z, dx.y), vec2f(dx.x, dx.y), wallAlongX), dx.xz, horizFace);
+        var npbrDuDy = select(select(vec2f(dy.z, dy.y), vec2f(dy.x, dy.y), wallAlongX), dy.xz, horizFace);
+        var npbrHint = select(select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), wallAlongX), vec3f(1.0, 0.0, 0.0), horizFace);
+        let npbrTimberGrain = select(0.0, floor(in.leafUV.x + 0.001), in.leafUV.y < -0.5 && in.kind.x >= 9.5 && in.kind.x < 10.5);
+        let npbrTurnedTimber = (npbrMat == 0u || npbrMat == 2u) && ((npbrTimberGrain > 0.5 && npbrTimberGrain < 1.5 && !horizFace) || (npbrTimberGrain > 2.5 && horizFace));
+        if (npbrTurnedTimber) {
+          npbrUV = npbrUV.yx;
+          npbrDuDx = npbrDuDx.yx;
+          npbrDuDy = npbrDuDy.yx;
+          npbrHint = select(vec3f(0.0, 1.0, 0.0), vec3f(0.0, 0.0, 1.0), horizFace);
+        }
         landNpbrGloss = clamp(NPBR.params.z, 0.0, 1.5) * clamp(NPBR.params.x, 0.0, 1.5) * (1.0 - smoothstep(NPBR.params.w * 0.55, NPBR.params.w, npbrCamDist));
         let npbr = evalNeuralPbr(npbrMat, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrWeight);
         let npbrBasis = neuralPbrTangentBasis(n, npbrHint);
@@ -755,9 +778,10 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
     npbrMatId = 1u;
     npbrMask = 1.0;
     let mastUpright = abs(in.normalLocal.y) < 0.55 && !isLusoriaOar && !isLusoriaSweep;
-    npbrUV = select(vec2f(tvMetres.x + tvMetres.z, tvMetres.y), vec2f(tvMetres.y, tvMetres.x - tvMetres.z), mastUpright);
-    npbrDuDx = select(vec2f(npbrDxM.x + npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.y, npbrDxM.x - npbrDxM.z), mastUpright);
-    npbrDuDy = select(vec2f(npbrDyM.x + npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.y, npbrDyM.x - npbrDyM.z), mastUpright);
+    let mastWrap = atan2(in.normalLocal.x, in.normalLocal.z) * 0.35;
+    npbrUV = select(vec2f(tvMetres.x + tvMetres.z, tvMetres.y), vec2f(tvMetres.y, mastWrap), mastUpright);
+    npbrDuDx = select(vec2f(npbrDxM.x + npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.y, length(npbrDxM.xz)), mastUpright);
+    npbrDuDy = select(vec2f(npbrDyM.x + npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.y, length(npbrDyM.xz)), mastUpright);
     npbrHintT = continuumQuat(tvTurn, select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), mastUpright));
   } else if (m == 0u) {
     npbrMatId = 2u;
@@ -769,11 +793,19 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
   } else if (isWoodMat(m) || m == 28u || tvPaintedWood) {
     npbrMatId = 0u;
     npbrMask = select(1.0, 0.85, tvPaintedWood);
-    let tvTransomFace = abs(in.normalLocal.z) > 0.72;
-    npbrUV = select(vec2f(tvMetres.z + floor(course) * 0.41, tvMetres.y), vec2f(tvMetres.x + floor(course) * 0.41, tvMetres.y), tvTransomFace);
-    npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), tvTransomFace);
-    npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), tvTransomFace);
-    npbrHintT = continuumQuat(tvTurn, select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), tvTransomFace));
+    let tvHorizWood = abs(in.normalLocal.y) > 0.65;
+    let tvTransomFace = !tvHorizWood && abs(in.normalLocal.z) > 0.72;
+    if (tvHorizWood) {
+      npbrUV = vec2f(tvMetres.z + floor(deckCourse) * 0.37, tvMetres.x);
+      npbrDuDx = vec2f(npbrDxM.z, npbrDxM.x);
+      npbrDuDy = vec2f(npbrDyM.z, npbrDyM.x);
+      npbrHintT = continuumQuat(tvTurn, vec3f(0.0, 0.0, 1.0));
+    } else {
+      npbrUV = select(vec2f(tvMetres.z + floor(course) * 0.41, tvMetres.y), vec2f(tvMetres.x + floor(course) * 0.41, tvMetres.y), tvTransomFace);
+      npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), tvTransomFace);
+      npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), tvTransomFace);
+      npbrHintT = continuumQuat(tvTurn, select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), tvTransomFace));
+    }
   }
   let npbrCamDist = distance(in.world, tvEye);
   var npbrCavityAO = 1.0;

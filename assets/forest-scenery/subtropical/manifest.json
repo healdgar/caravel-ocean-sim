@@ -182,8 +182,8 @@
           },
           "normal": {
             "file": "royal-palm-foliage-0-normal.png",
-            "bytes": 211119,
-            "sha256": "1aaaebf3a5a0e2aa3ce56970994f224740467ebfa83a10e388af685c70782841",
+            "bytes": 93679,
+            "sha256": "588f017b80df5e1e7fd34e8982aaa84ad0220d6d48ab011364ffc04e9d0d402f",
             "encoding": "linear"
           },
           "roughness": 0.712,
@@ -208,8 +208,8 @@
           },
           "normal": {
             "file": "royal-palm-foliage-1-normal.png",
-            "bytes": 210679,
-            "sha256": "3278f2b55b9c57daa8a79fe6680d7f3c4b419fbf5a0fc825c0ddf62c35876cba",
+            "bytes": 92748,
+            "sha256": "d529312fccb9f2ff504ef3dcc80e18dd7ecd98b6b20f23018fc85e92f2f954e8",
             "encoding": "linear"
           },
           "roughness": 0.712,
@@ -234,8 +234,8 @@
           },
           "normal": {
             "file": "royal-palm-foliage-2-normal.png",
-            "bytes": 211163,
-            "sha256": "605e7e03afc98a7ff5a1c485e74ec7ee5755e815bcf665d86d22b0ce14227421",
+            "bytes": 93810,
+            "sha256": "49927b4ad978ed290131af26244132829c2692be9846563d0e6a946e348cc370",
             "encoding": "linear"
           },
           "roughness": 0.712,
@@ -367,8 +367,8 @@
           },
           "normal": {
             "file": "palm-foliage-0-normal.png",
-            "bytes": 202725,
-            "sha256": "d0e4b1e17562672a477a473fee6292232b8a973035433b1bd84a87ce5ba5852e",
+            "bytes": 115642,
+            "sha256": "1fbdb32ba3a0335c2ebd700bb2f16f2dd4b907ca09d5cb015f3413d90b0ebef2",
             "encoding": "linear"
           },
           "roughness": 0.7,
@@ -393,8 +393,8 @@
           },
           "normal": {
             "file": "palm-foliage-1-normal.png",
-            "bytes": 202394,
-            "sha256": "4d48beb23317fb2828e43ea379ca3138761c8cb178aeb4064cf56d40db990294",
+            "bytes": 115022,
+            "sha256": "caa513a7ca2fdd72350fd666c0a763f971c45c3e8638f22da2c6575ab0bb8a68",
             "encoding": "linear"
           },
           "roughness": 0.7,
@@ -419,8 +419,8 @@
           },
           "normal": {
             "file": "palm-foliage-2-normal.png",
-            "bytes": 202095,
-            "sha256": "240763797e7ad994ed796e5b0d3bf3955f37a04534337f3aebd7f3b578d19570",
+            "bytes": 114643,
+            "sha256": "684c35d8e68b53e11d2a48b10bd4a31b9710c410ebc6680c0b013def6c87bdac",
             "encoding": "linear"
           },
           "roughness": 0.7,
@@ -552,8 +552,8 @@
           },
           "normal": {
             "file": "ceiba-foliage-0-normal.png",
-            "bytes": 131732,
-            "sha256": "dc7e087f8143062826e204aa111caf3b4de726793bc623e7ffbeb3a0b97a7077",
+            "bytes": 81177,
+            "sha256": "2cdf6bfcca037c6986127fc87261e75bf2b7bb68fd66cd4cca7ee3ccd827d22c",
             "encoding": "linear"
           },
           "roughness": 0.832,
@@ -578,8 +578,8 @@
           },
           "normal": {
             "file": "ceiba-foliage-1-normal.png",
-            "bytes": 131558,
-            "sha256": "31c84758d5f9f9953c2e3e26930f679847b086963ee617a0f93a3a15d0af3d63",
+            "bytes": 80837,
+            "sha256": "c4d24abe536faeb7b718e79ac862797bf0050a0ea3ec74114607d02d8d97381e",
             "encoding": "linear"
           },
           "roughness": 0.832,
@@ -604,8 +604,8 @@
           },
           "normal": {
             "file": "ceiba-foliage-2-normal.png",
-            "bytes": 131547,
-            "sha256": "6af6dabe1fc55ee97e01a33366ccdc02fa40f00d18570ea57857a2feaacb28e9",
+            "bytes": 81597,
+            "sha256": "ba7169cb4d77e60ad4f68e3c9e6deca8fca8ec7486bb16a15286fba6efde4686",
             "encoding": "linear"
           },
           "roughness": 0.832,
@@ -737,8 +737,8 @@
           },
           "normal": {
             "file": "mangrove-foliage-0-normal.png",
-            "bytes": 174904,
-            "sha256": "1be62328bd4e534c6c6421b0d519725118d28b4a56e0a19f7e90050ee0ea492f",
+            "bytes": 85860,
+            "sha256": "8818d89fce698dc2890cb0c7847691097e7498379c65b91a711f409ba1e4eea4",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -763,8 +763,8 @@
           },
           "normal": {
             "file": "mangrove-foliage-1-normal.png",
-            "bytes": 174609,
-            "sha256": "e9a1a6bc668cc50f3259c7fa1fdaba643c33f59b05731d7644e4f1ccdc72d460",
+            "bytes": 85035,
+            "sha256": "df5692cc9b9b0938d2c13ac2c331ad723907a1d052a2b01a1cb3c8c1704ac021",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -789,8 +789,8 @@
           },
           "normal": {
             "file": "mangrove-foliage-2-normal.png",
-            "bytes": 175029,
-            "sha256": "8571ce38e63f3890b500ab15cbf1cf08d3b405ba9bc08dc36a1f1722935138b7",
+            "bytes": 86151,
+            "sha256": "bf8fb128ceff809a174ed02935a73b2ddeff2c809fa614ee69f594b8c87a644a",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,

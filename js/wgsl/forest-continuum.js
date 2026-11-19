@@ -516,23 +516,14 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
  }
  return n;
 }
-// Near, a leaf's edge is crisp and its veins and cuticle show; this fades out before the canopy is far.
+// Near, solidify BC7/ASTC-compressed leaf & twig interiors (rawAlpha >= 0.72 -> 1.0) so MSAA sample-masking never
+// punches salt-and-pepper stipple dots through solid leaves up close, while preserving smooth anti-aliased edges.
 fn forestBotanicalDetail(uv:vec2f,viewDist:f32,rawAlpha:f32)->vec4f{
  let detailW=1.-smoothstep(8.,22.,viewDist);
  if(detailW<=.001||rawAlpha<=.04){return vec4f(rawAlpha,0.,0.,0.);}
- // Near, solidify BC7-compressed leaf & twig interiors (rawAlpha >= 0.72 -> 1.0) so MSAA sample-masking never
- // punches salt-and-pepper stipple dots through solid leaves up close, while preserving smooth anti-aliased edges.
  let edgeSharp=smoothstep(.18,.72,rawAlpha);
- let crispAlpha=mix(rawAlpha,edgeSharp,detailW*.96);
- let interior=smoothstep(.20,.65,rawAlpha)*detailW;
- let chevronU=uv.x*22.0-abs(uv.y-.5)*14.0;
- let secVein=sin(chevronU)*exp(-abs(fract(chevronU*.1591549)-.5)*3.2);
- let fineNet=sin(uv.x*68.0+uv.y*44.0)*cos(uv.x*41.0-uv.y*63.0);
- let sideSign=select(-1.,1.,uv.y>=.5);
- let veinX=(secVein*.16+fineNet*.045)*interior;
- let veinY=(cos(chevronU)*sideSign*.14+fineNet*.045)*interior;
- let dapple=(sin(uv.x*11.3+uv.y*7.9)*.55+cos(uv.x*19.7-uv.y*15.1)*.45)*interior;
- return vec4f(crispAlpha,veinX,veinY,dapple);
+ let crispAlpha=mix(rawAlpha,edgeSharp,detailW);
+ return vec4f(crispAlpha,0.,0.,0.);
 }
 // The colour light shining through a leaf takes on, as its blade passes the green and holds back the blue; a leaf
 // near and a crown far take on the same.
@@ -744,16 +735,9 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
    let pigment=surface.pigment;
    colour=forestOwnColour(pigment)*v.colour;
    let uvOff=v.uv-vec2f(.5,.5);
-   let mappedN=forestMappedNormal(n,surface.detail.xyz*vec3f(1.35,1.35,1.0),dx,dy,ux,uy)*select(-1.,1.,front);
-   n=normalize(mappedN+vec3f(uvOff.x*0.06,uvOff.y*0.05,0.0));
-   var rawRough=surface.detail.a/max(pigment.a,FOREST_THINNEST_COVERAGE);
-   if(viewDist<22.){
-    let bot=select(forestBotanicalDetail(v.uv,viewDist,pigment.a),forestLastBot,forestLastHasBot);
-    let tDir=normalize(dx+vec3f(1e-5,0.,0.));let bDir=normalize(dy+vec3f(0.,0.,1e-5));
-    n=normalize(n+(tDir*bot.y+bDir*bot.z)*0.28);
-    colour*=vec3f(1.+bot.w*.07,1.+bot.w*.10,1.-bot.w*.05);
-    rawRough=clamp(rawRough-bot.w*.08,0.22,0.92);
-   }
+   let mappedN=forestMappedNormal(n,surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
+   n=normalize(mappedN+vec3f(uvOff.x*0.04,uvOff.y*0.03,0.0));
+   let rawRough=surface.detail.a/max(pigment.a,FOREST_THINNEST_COVERAGE);
    if(!front){colour=forestLeafUnderside(colour,material,v.colour);}
    let nDotL=dot(n,F.sunDir.xyz);
    let backlit=max(-nDotL,0.)*material.optics.z;

@@ -11,72 +11,62 @@
   "coverage": {
     "kind": "occupied-cells",
     "originXZ": [
-      -70.744,
-      -96.301
+      -64.371,
+      -68.679
     ],
     "cellMetres": 32.0,
     "dimensions": [
-      5,
-      6
+      4,
+      4
     ],
     "cells": [
       0,
       1,
       2,
       3,
+      4,
       5,
       6,
       7,
       8,
+      9,
       10,
       11,
       12,
       13,
       14,
-      15,
-      16,
-      17,
-      18,
-      19,
-      20,
-      21,
-      22,
-      23,
-      24,
-      26,
-      27,
-      28
+      15
     ]
   },
   "stature": "full-grown",
   "files": {
     "vertices.bin": {
-      "bytes": 159072648,
-      "sha256": "be920261311ec85d789ce5e2c94a1b2f3215414f445299047c2363f7aa5442d2",
+      "bytes": 174026664,
+      "sha256": "89b2b475a277b69a75de2aeb3f64739e50a2322eb20e49d1d98d47067c0e994d",
       "gzip": {
         "file": "vertices.bin.gz",
-        "bytes": 70408376,
-        "sha256": "5d3beefbc863aeed15fd4adadeeb5a75ea2dc0ebfc03442c03e7b0ecd52d4479"
+        "bytes": 71064198,
+        "sha256": "dbdf9ee2b0dca9492e8e3090d7b30d3f5ae0871742ee6d35b2ec9ebb04516351"
       },
-      "vertexCount": 2840583
+      "vertexCount": 3107619
     },
     "indices.bin": {
-      "bytes": 30580980,
-      "sha256": "5b5da5e519ae596a131970b44c4d08b23f34c7a722e479538edf67cbbcfdbb7f",
+      "bytes": 39432144,
+      "sha256": "5c793d576e950482298365a8bd0d8d9be23431d2ec80f990b0e4c8e7031dd2dc",
       "gzip": {
         "file": "indices.bin.gz",
-        "bytes": 7577309,
-        "sha256": "0ccb73c28f453697d644196a121782f841c8e93c087f15306c5c17bf1366be71"
+        "bytes": 9288102,
+        "sha256": "94a972ac42d2868369051e4e8f7141b5f80ef9b79b0e76d7478b6ffc1842b7b6"
       },
-      "indexCount": 7645245
+      "indexCount": 9858036
     },
     "roots.bin": {
       "bytes": 1152,
-      "sha256": "9316071b0e2f61b86458c36cc0d250fce1a3106d58618299cb763978f8509850",
+      "sha256": "ab9eb05f7e92cbd72635ba9bee06ca158900dacd5a2536acf57b4412205e0f80",
       "gzip": {
         "file": "roots.bin.gz",
-        "bytes": 1083,
-        "sha256": "4f069d6af9d1d8851f7da2ead8ac6d80b4a6f6d3d991a7c55b78b9250a87994a"
+        "bytes": 1082,
+        "sha256": "782c3593030e21d7b62b79078fe03b569c272bd1b0b88aa140cdfda11a6c4dd7"
       },
       "rootCount": 24
     }
@@ -86,39 +76,39 @@
       "id": 0,
       "species": "oak",
       "cohort": "veteran",
-      "age": 110.0,
-      "heightMetres": 25.518,
-      "crownRadiusMetres": 15.394,
-      "crownBaseMetres": 3.889,
-      "dbhCentimetres": 94.15,
+      "age": 60.0,
+      "heightMetres": 20.236,
+      "crownRadiusMetres": 9.537,
+      "crownBaseMetres": 4.118,
+      "dbhCentimetres": 50.84,
       "low": [
-        -13.5278,
-        -1.8031,
-        -13.2999
+        -8.9226,
+        -0.15,
+        -8.811
       ],
       "high": [
-        14.2862,
-        25.7797,
-        15.846
+        9.1345,
+        21.0228,
+        9.4565
       ],
       "centre": [
-        0.3792,
-        11.9883,
-        1.273
+        0.106,
+        10.4364,
+        0.3227
       ],
-      "radius": 24.4137,
+      "radius": 16.6447,
       "firstRoot": 0,
       "rootCount": 1,
       "wood": {
         "firstIndex": 0,
-        "indexCount": 478419
+        "indexCount": 1330146
       },
       "leaf": {
-        "firstIndex": 478419,
-        "indexCount": 576000
+        "firstIndex": 1330146,
+        "indexCount": 432000
       },
       "far": {
-        "firstIndex": 1054419,
+        "firstIndex": 1762146,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -196,8 +186,8 @@
           },
           "normal": {
             "file": "oak-veteran-foliage-0-normal.png",
-            "bytes": 167799,
-            "sha256": "98522c2c0155e06b8b4998a2cc2e040c23adfe1f411235d6c77feb5695c54d9a",
+            "bytes": 75365,
+            "sha256": "bfae67cb771f2c0bd860b14c90edebb227da165db0d564fea8fcb8b39971190d",
             "encoding": "linear"
           },
           "roughness": 0.94,
@@ -222,8 +212,8 @@
           },
           "normal": {
             "file": "oak-veteran-foliage-1-normal.png",
-            "bytes": 167569,
-            "sha256": "69fe8a42a7bde8b0dbffd3f1476dd58dc2600d0e834e06c386c6fa7370479b96",
+            "bytes": 74909,
+            "sha256": "fdac50bfe2bca0e744923e2a94a07efc5b5514273cd38884aec09c8e293073bd",
             "encoding": "linear"
           },
           "roughness": 0.94,
@@ -248,8 +238,8 @@
           },
           "normal": {
             "file": "oak-veteran-foliage-2-normal.png",
-            "bytes": 167691,
-            "sha256": "bb3c501a05cc8c7e874e1c174ba2e99e9660d5e770c36f5a98286624d9bc7001",
+            "bytes": 75502,
+            "sha256": "14424ea53327ae74b0028e15464279e64df3888b5326c7a1aebb8d0dcf9cd174",
             "encoding": "linear"
           },
           "roughness": 0.94,
@@ -266,47 +256,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 26.9482,
-      "crownRadius": 15.394,
-      "basalRadius": 0.666
+      "unverifiedGeometryErrorMetres": 20.0967,
+      "crownRadius": 9.537,
+      "basalRadius": 0.3404
     },
     {
       "id": 1,
       "species": "chestnut",
       "cohort": "veteran",
-      "age": 110.0,
-      "heightMetres": 24.178,
-      "crownRadiusMetres": 16.153,
-      "crownBaseMetres": 4.822,
-      "dbhCentimetres": 120.61,
+      "age": 60.0,
+      "heightMetres": 20.383,
+      "crownRadiusMetres": 12.211,
+      "crownBaseMetres": 3.977,
+      "dbhCentimetres": 55.71,
       "low": [
-        -13.6406,
-        -0.417,
-        -16.7799
+        -8.3855,
+        -0.462,
+        -12.6931
       ],
       "high": [
-        13.9809,
-        24.5967,
-        13.6558
+        8.3962,
+        21.1058,
+        10.928
       ],
       "centre": [
-        0.1701,
-        12.0898,
-        -1.5621
+        0.0053,
+        10.3219,
+        -0.8825
       ],
-      "radius": 24.058,
+      "radius": 18.0617,
       "firstRoot": 1,
       "rootCount": 1,
       "wood": {
-        "firstIndex": 1054551,
-        "indexCount": 400737
+        "firstIndex": 1762278,
+        "indexCount": 780876
       },
       "leaf": {
-        "firstIndex": 1455288,
-        "indexCount": 556800
+        "firstIndex": 2543154,
+        "indexCount": 432000
       },
       "far": {
-        "firstIndex": 2012088,
+        "firstIndex": 2975154,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -384,8 +374,8 @@
           },
           "normal": {
             "file": "chestnut-veteran-foliage-0-normal.png",
-            "bytes": 180948,
-            "sha256": "63750516f1b376397a5731a91f493c6154f0d1ef3737122785ed472c67a5b001",
+            "bytes": 87840,
+            "sha256": "a899a618983a96e109b9c2dbef0a269f9211cc306f8efbf867e1b5ecd29528eb",
             "encoding": "linear"
           },
           "roughness": 0.796,
@@ -410,8 +400,8 @@
           },
           "normal": {
             "file": "chestnut-veteran-foliage-1-normal.png",
-            "bytes": 180662,
-            "sha256": "57e38f73ed810ac5b3aa46ca15919b01922260ed777d6f57580794b63100f348",
+            "bytes": 87146,
+            "sha256": "539fd1bbbb3fd14948b3dcee37ab5fb9f28f656d5e0f384051579a9145183604",
             "encoding": "linear"
           },
           "roughness": 0.796,
@@ -436,8 +426,8 @@
           },
           "normal": {
             "file": "chestnut-veteran-foliage-2-normal.png",
-            "bytes": 180929,
-            "sha256": "3b6490e0cedddbd287feffbcc6b5d2e99d0df1fe636dcb95b84b188a45adf819",
+            "bytes": 88127,
+            "sha256": "4ce6f19201176077aef8dda8b3f77d50dd051c99c3775b0db29ad22bc3cd674b",
             "encoding": "linear"
           },
           "roughness": 0.796,
@@ -454,47 +444,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 25.1674,
-      "crownRadius": 16.153,
-      "basalRadius": 0.963
+      "unverifiedGeometryErrorMetres": 20.3305,
+      "crownRadius": 12.211,
+      "basalRadius": 0.408
     },
     {
       "id": 2,
       "species": "maple",
       "cohort": "veteran",
-      "age": 100.0,
-      "heightMetres": 25.061,
-      "crownRadiusMetres": 12.918,
-      "crownBaseMetres": 2.076,
-      "dbhCentimetres": 88.18,
+      "age": 55.0,
+      "heightMetres": 19.483,
+      "crownRadiusMetres": 10.014,
+      "crownBaseMetres": 2.52,
+      "dbhCentimetres": 44.6,
       "low": [
-        -12.6723,
-        -2.8724,
-        -12.4536
+        -9.3479,
+        -0.4265,
+        -9.3746
       ],
       "high": [
-        12.3066,
-        25.4569,
-        12.6934
+        10.3346,
+        19.898,
+        9.4725
       ],
       "centre": [
-        -0.1828,
-        11.2923,
-        0.1199
+        0.4934,
+        9.7358,
+        0.049
       ],
-      "radius": 22.6884,
+      "radius": 16.9988,
       "firstRoot": 2,
       "rootCount": 1,
       "wood": {
-        "firstIndex": 2012220,
-        "indexCount": 638724
+        "firstIndex": 2975286,
+        "indexCount": 1035165
       },
       "leaf": {
-        "firstIndex": 2650944,
-        "indexCount": 556800
+        "firstIndex": 4010451,
+        "indexCount": 432000
       },
       "far": {
-        "firstIndex": 3207744,
+        "firstIndex": 4442451,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -572,8 +562,8 @@
           },
           "normal": {
             "file": "maple-veteran-foliage-0-normal.png",
-            "bytes": 166308,
-            "sha256": "5bf41cf1832fbe8cdd82464b44f9be5e1cf69ab371728b396af6d9590664b29c",
+            "bytes": 81000,
+            "sha256": "ab568b0f252b6d2ad273a04a541680547be80175554e1c41b233bfb8e5b8513e",
             "encoding": "linear"
           },
           "roughness": 0.85,
@@ -598,8 +588,8 @@
           },
           "normal": {
             "file": "maple-veteran-foliage-1-normal.png",
-            "bytes": 166007,
-            "sha256": "e0e6e82e345697b85bcd09790ae50579da3a5f4a36d836a505d3fe664a927a75",
+            "bytes": 80518,
+            "sha256": "f20684baa2126de025b14f53cef60723c4691dde2fa0687bf3a606661132d576",
             "encoding": "linear"
           },
           "roughness": 0.85,
@@ -624,8 +614,8 @@
           },
           "normal": {
             "file": "maple-veteran-foliage-2-normal.png",
-            "bytes": 166177,
-            "sha256": "5ed3700efc87761337694a17312bbfb2a598dd03dfba1d2562c5d520d4f7920a",
+            "bytes": 81087,
+            "sha256": "ca8db0ca4f0d3642f7a90be924f3bafe9ac1f21b14ded0a1165f5379ed23d4b7",
             "encoding": "linear"
           },
           "roughness": 0.85,
@@ -642,47 +632,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 26.8684,
-      "crownRadius": 12.918,
-      "basalRadius": 0.623
+      "unverifiedGeometryErrorMetres": 20.7003,
+      "crownRadius": 10.014,
+      "basalRadius": 0.295
     },
     {
       "id": 3,
       "species": "elm",
       "cohort": "veteran",
-      "age": 110.0,
-      "heightMetres": 34.807,
-      "crownRadiusMetres": 18.822,
-      "crownBaseMetres": 5.645,
-      "dbhCentimetres": 116.61,
+      "age": 60.0,
+      "heightMetres": 25.766,
+      "crownRadiusMetres": 14.104,
+      "crownBaseMetres": 5.628,
+      "dbhCentimetres": 55.89,
       "low": [
-        -17.7831,
-        -0.3545,
-        -16.4317
+        -13.5134,
+        -0.7107,
+        -12.7838
       ],
       "high": [
-        16.0382,
-        35.0572,
-        16.4143
+        13.1541,
+        26.114,
+        13.7959
       ],
       "centre": [
-        -0.8724,
-        17.3513,
-        -0.0087
+        -0.1797,
+        12.7016,
+        0.506
       ],
-      "radius": 29.4829,
+      "radius": 23.1159,
       "firstRoot": 3,
       "rootCount": 1,
       "wood": {
-        "firstIndex": 3207876,
-        "indexCount": 418620
+        "firstIndex": 4442583,
+        "indexCount": 1303710
       },
       "leaf": {
-        "firstIndex": 3626496,
-        "indexCount": 632400
+        "firstIndex": 5746293,
+        "indexCount": 432000
       },
       "far": {
-        "firstIndex": 4258896,
+        "firstIndex": 6178293,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -760,8 +750,8 @@
           },
           "normal": {
             "file": "elm-veteran-foliage-0-normal.png",
-            "bytes": 186779,
-            "sha256": "beeda6522072477d8e31c2e7ead2fddb172b8550e1bff1e6f6596fba5d526652",
+            "bytes": 98076,
+            "sha256": "f880395761f8a6a4595c49502fb3e8f24e35ac6ead244690ff67017306d2aff4",
             "encoding": "linear"
           },
           "roughness": 0.868,
@@ -786,8 +776,8 @@
           },
           "normal": {
             "file": "elm-veteran-foliage-1-normal.png",
-            "bytes": 186527,
-            "sha256": "e17236c07b67908f6d70b103219ff103b72c9b7d3f5e772e489081d8b57a454a",
+            "bytes": 97204,
+            "sha256": "c89810848605faac370f8abaa0bac2604c920ab1cbeb6baf6e9bbae771ee836a",
             "encoding": "linear"
           },
           "roughness": 0.868,
@@ -812,8 +802,8 @@
           },
           "normal": {
             "file": "elm-veteran-foliage-2-normal.png",
-            "bytes": 186455,
-            "sha256": "d3d5c35b31c58ed2b1f2f88a06f2757a874201b781077ff7882d0d88e0cf87f5",
+            "bytes": 97779,
+            "sha256": "1d0492e659dacfe2a74adf397154fc210e6db2d750f0cd4d30db4907670da47f",
             "encoding": "linear"
           },
           "roughness": 0.868,
@@ -830,47 +820,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 31.0391,
-      "crownRadius": 18.822,
-      "basalRadius": 0.965
+      "unverifiedGeometryErrorMetres": 24.3297,
+      "crownRadius": 14.104,
+      "basalRadius": 0.4236
     },
     {
       "id": 4,
       "species": "birch",
       "cohort": "veteran",
-      "age": 40.0,
-      "heightMetres": 10.638,
-      "crownRadiusMetres": 4.082,
+      "age": 32.0,
+      "heightMetres": 9.856,
+      "crownRadiusMetres": 3.001,
       "crownBaseMetres": 2.171,
-      "dbhCentimetres": 10.61,
+      "dbhCentimetres": 8.15,
       "low": [
-        -3.7257,
-        -0.3549,
-        -3.7711
+        -3.1209,
+        -0.1797,
+        -2.8279
       ],
       "high": [
-        3.0509,
-        10.7533,
-        3.4604
+        2.5559,
+        9.8981,
+        3.2286
       ],
       "centre": [
-        -0.3374,
-        5.1992,
-        -0.1554
+        -0.2825,
+        4.8592,
+        0.2004
       ],
-      "radius": 7.4443,
+      "radius": 6.5292,
       "firstRoot": 4,
       "rootCount": 1,
       "wood": {
-        "firstIndex": 4259028,
-        "indexCount": 118458
+        "firstIndex": 6178425,
+        "indexCount": 119550
       },
       "leaf": {
-        "firstIndex": 4377486,
-        "indexCount": 225000
+        "firstIndex": 6297975,
+        "indexCount": 378000
       },
       "far": {
-        "firstIndex": 4602486,
+        "firstIndex": 6675975,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -948,8 +938,8 @@
           },
           "normal": {
             "file": "birch-veteran-foliage-0-normal.png",
-            "bytes": 127824,
-            "sha256": "5868e701876f56db74c645ae6df6fcd277ae7b29d03ec513f1be9eff10876667",
+            "bytes": 70653,
+            "sha256": "92237a56e5f75bbfc901701e277bb5259e5cd4a0849c433bcfa0497d48302343",
             "encoding": "linear"
           },
           "roughness": 0.748,
@@ -974,8 +964,8 @@
           },
           "normal": {
             "file": "birch-veteran-foliage-1-normal.png",
-            "bytes": 127683,
-            "sha256": "ad70c1c5b5c2a9706a2a21cb8ca0a3edfaaaff822f693b460f1c0fd0ce80fe51",
+            "bytes": 70383,
+            "sha256": "63ad2e87c98bdd25261a6ae522a82470b2a493a2b50a675f505a48844635e803",
             "encoding": "linear"
           },
           "roughness": 0.748,
@@ -1000,8 +990,8 @@
           },
           "normal": {
             "file": "birch-veteran-foliage-2-normal.png",
-            "bytes": 127390,
-            "sha256": "4d07735cadebc9e3a46095144e1e2eff7d59bc3598183e5ba21ed9a605473203",
+            "bytes": 69984,
+            "sha256": "7038d0005c04040e00ce1561a65529c05838982f372d370b8754f56c5793eea6",
             "encoding": "linear"
           },
           "roughness": 0.748,
@@ -1018,47 +1008,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 7.7624,
-      "crownRadius": 4.082,
-      "basalRadius": 0.057
+      "unverifiedGeometryErrorMetres": 8.0185,
+      "crownRadius": 3.001,
+      "basalRadius": 0.0439
     },
     {
       "id": 5,
       "species": "blueberry",
       "cohort": "veteran",
-      "age": 25.0,
-      "heightMetres": 1.803,
-      "crownRadiusMetres": 0.583,
-      "crownBaseMetres": 0.201,
-      "dbhCentimetres": 1.41,
+      "age": 20.0,
+      "heightMetres": 1.238,
+      "crownRadiusMetres": 0.403,
+      "crownBaseMetres": 0.2,
+      "dbhCentimetres": 0.39,
       "low": [
-        -0.5268,
-        -0.2635,
-        -0.3205
+        -0.4156,
+        -0.15,
+        -0.3026
       ],
       "high": [
-        0.6206,
-        1.9795,
-        0.7076
+        0.3627,
+        1.2931,
+        0.3994
       ],
       "centre": [
-        0.0469,
-        0.858,
-        0.1936
+        -0.0265,
+        0.5715,
+        0.0484
       ],
-      "radius": 1.3615,
+      "radius": 0.8928,
       "firstRoot": 5,
       "rootCount": 1,
       "wood": {
-        "firstIndex": 4602618,
-        "indexCount": 32901
+        "firstIndex": 6676107,
+        "indexCount": 15594
       },
       "leaf": {
-        "firstIndex": 4635519,
-        "indexCount": 48960
+        "firstIndex": 6691701,
+        "indexCount": 31932
       },
       "far": {
-        "firstIndex": 4684479,
+        "firstIndex": 6723633,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -1136,8 +1126,8 @@
           },
           "normal": {
             "file": "blueberry-veteran-foliage-0-normal.png",
-            "bytes": 189933,
-            "sha256": "616fcaf906dda1372ef1136dde30ef01683f346d93d8d66d0693305bd0c859f9",
+            "bytes": 107203,
+            "sha256": "ce3e618ddf3878dff9a09f7db5f6ded9ea9c59b807f6f54908d282bdaf3ccd07",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -1162,8 +1152,8 @@
           },
           "normal": {
             "file": "blueberry-veteran-foliage-1-normal.png",
-            "bytes": 189653,
-            "sha256": "5bcb527643814eb962aca0b18d9b35f99d056805cf7c2767515d7ec71d683470",
+            "bytes": 106450,
+            "sha256": "0c8ea3e2cabf69a1224fd978080380db77db0f8f9344d3981a245920ae9ffb06",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -1188,8 +1178,8 @@
           },
           "normal": {
             "file": "blueberry-veteran-foliage-2-normal.png",
-            "bytes": 189857,
-            "sha256": "99144cfe8e28e64f98390a7fa321f51456931e9bea0e6b134a82cd16a20fadbd",
+            "bytes": 107381,
+            "sha256": "655ebefdf1e5a1ab1ef2bd7bbc59319f08d39537e1cab6c796c1d54b31b78329",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -1206,47 +1196,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 1.7647,
-      "crownRadius": 0.583,
-      "basalRadius": 0.011
+      "unverifiedGeometryErrorMetres": 1.0155,
+      "crownRadius": 0.403,
+      "basalRadius": 0.0071
     },
     {
       "id": 6,
       "species": "oak",
       "cohort": "canopy",
-      "age": 70.0,
-      "heightMetres": 20.93,
-      "crownRadiusMetres": 11.836,
-      "crownBaseMetres": 3.645,
-      "dbhCentimetres": 58.79,
+      "age": 38.0,
+      "heightMetres": 13.868,
+      "crownRadiusMetres": 7.575,
+      "crownBaseMetres": 2.549,
+      "dbhCentimetres": 30.89,
       "low": [
-        -5.4634,
-        -0.1605,
-        -7.5151
+        -6.2459,
+        -0.3517,
+        -6.1556
       ],
       "high": [
-        7.448,
-        16.7587,
-        7.6389
+        6.3383,
+        14.4915,
+        7.4889
       ],
       "centre": [
-        0.9923,
-        8.2991,
-        0.0619
+        0.0462,
+        7.0699,
+        0.6667
       ],
-      "radius": 13.0644,
+      "radius": 11.8844,
       "firstRoot": 6,
       "rootCount": 6,
       "wood": {
-        "firstIndex": 4684611,
-        "indexCount": 252699
+        "firstIndex": 6723765,
+        "indexCount": 489147
       },
       "leaf": {
-        "firstIndex": 4937310,
-        "indexCount": 360000
+        "firstIndex": 7212912,
+        "indexCount": 342000
       },
       "far": {
-        "firstIndex": 5297310,
+        "firstIndex": 7554912,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -1324,8 +1314,8 @@
           },
           "normal": {
             "file": "oak-veteran-foliage-0-normal.png",
-            "bytes": 167799,
-            "sha256": "98522c2c0155e06b8b4998a2cc2e040c23adfe1f411235d6c77feb5695c54d9a",
+            "bytes": 75365,
+            "sha256": "bfae67cb771f2c0bd860b14c90edebb227da165db0d564fea8fcb8b39971190d",
             "encoding": "linear"
           },
           "roughness": 0.94,
@@ -1350,8 +1340,8 @@
           },
           "normal": {
             "file": "oak-veteran-foliage-1-normal.png",
-            "bytes": 167569,
-            "sha256": "69fe8a42a7bde8b0dbffd3f1476dd58dc2600d0e834e06c386c6fa7370479b96",
+            "bytes": 74909,
+            "sha256": "fdac50bfe2bca0e744923e2a94a07efc5b5514273cd38884aec09c8e293073bd",
             "encoding": "linear"
           },
           "roughness": 0.94,
@@ -1376,8 +1366,8 @@
           },
           "normal": {
             "file": "oak-veteran-foliage-2-normal.png",
-            "bytes": 167691,
-            "sha256": "bb3c501a05cc8c7e874e1c174ba2e99e9660d5e770c36f5a98286624d9bc7001",
+            "bytes": 75502,
+            "sha256": "14424ea53327ae74b0028e15464279e64df3888b5326c7a1aebb8d0dcf9cd174",
             "encoding": "linear"
           },
           "roughness": 0.94,
@@ -1394,47 +1384,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 13.0058,
-      "crownRadius": 11.836,
-      "basalRadius": 0.404
+      "unverifiedGeometryErrorMetres": 11.2851,
+      "crownRadius": 7.575,
+      "basalRadius": 0.1941
     },
     {
       "id": 7,
       "species": "chestnut",
       "cohort": "canopy",
-      "age": 70.0,
-      "heightMetres": 19.722,
-      "crownRadiusMetres": 12.195,
-      "crownBaseMetres": 4.191,
-      "dbhCentimetres": 71.18,
+      "age": 38.0,
+      "heightMetres": 16.624,
+      "crownRadiusMetres": 5.954,
+      "crownBaseMetres": 3.978,
+      "dbhCentimetres": 27.71,
       "low": [
-        -6.9622,
-        -0.15,
-        -5.4756
+        -4.9839,
+        -0.6696,
+        -6.7256
       ],
       "high": [
-        6.9149,
-        18.0188,
-        6.944
+        5.6089,
+        17.2414,
+        5.5148
       ],
       "centre": [
-        -0.0237,
-        8.9344,
-        0.7342
+        0.3125,
+        8.2859,
+        -0.6054
       ],
-      "radius": 13.0099,
+      "radius": 12.072,
       "firstRoot": 12,
       "rootCount": 5,
       "wood": {
-        "firstIndex": 5297442,
-        "indexCount": 250986
+        "firstIndex": 7555044,
+        "indexCount": 161661
       },
       "leaf": {
-        "firstIndex": 5548428,
-        "indexCount": 351000
+        "firstIndex": 7716705,
+        "indexCount": 193836
       },
       "far": {
-        "firstIndex": 5899428,
+        "firstIndex": 7910541,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -1512,8 +1502,8 @@
           },
           "normal": {
             "file": "chestnut-veteran-foliage-0-normal.png",
-            "bytes": 180948,
-            "sha256": "63750516f1b376397a5731a91f493c6154f0d1ef3737122785ed472c67a5b001",
+            "bytes": 87840,
+            "sha256": "a899a618983a96e109b9c2dbef0a269f9211cc306f8efbf867e1b5ecd29528eb",
             "encoding": "linear"
           },
           "roughness": 0.796,
@@ -1538,8 +1528,8 @@
           },
           "normal": {
             "file": "chestnut-veteran-foliage-1-normal.png",
-            "bytes": 180662,
-            "sha256": "57e38f73ed810ac5b3aa46ca15919b01922260ed777d6f57580794b63100f348",
+            "bytes": 87146,
+            "sha256": "539fd1bbbb3fd14948b3dcee37ab5fb9f28f656d5e0f384051579a9145183604",
             "encoding": "linear"
           },
           "roughness": 0.796,
@@ -1564,8 +1554,8 @@
           },
           "normal": {
             "file": "chestnut-veteran-foliage-2-normal.png",
-            "bytes": 180929,
-            "sha256": "3b6490e0cedddbd287feffbcc6b5d2e99d0df1fe636dcb95b84b188a45adf819",
+            "bytes": 88127,
+            "sha256": "4ce6f19201176077aef8dda8b3f77d50dd051c99c3775b0db29ad22bc3cd674b",
             "encoding": "linear"
           },
           "roughness": 0.796,
@@ -1582,47 +1572,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 12.723,
-      "crownRadius": 12.195,
-      "basalRadius": 0.536
+      "unverifiedGeometryErrorMetres": 14.1637,
+      "crownRadius": 5.954,
+      "basalRadius": 0.1855
     },
     {
       "id": 8,
       "species": "maple",
       "cohort": "canopy",
-      "age": 60.0,
-      "heightMetres": 20.947,
-      "crownRadiusMetres": 9.88,
-      "crownBaseMetres": 2.765,
-      "dbhCentimetres": 52.69,
+      "age": 36.0,
+      "heightMetres": 15.059,
+      "crownRadiusMetres": 7.192,
+      "crownBaseMetres": 2.761,
+      "dbhCentimetres": 26.83,
       "low": [
-        -9.9244,
-        -1.2503,
-        -9.9495
+        -7.1599,
+        -0.4562,
+        -6.2668
       ],
       "high": [
-        10.3367,
-        21.3151,
-        9.7963
+        6.4757,
+        15.5353,
+        6.4841
       ],
       "centre": [
-        0.2061,
-        10.0324,
-        -0.0766
+        -0.3421,
+        7.5396,
+        0.1086
       ],
-      "radius": 18.0952,
+      "radius": 12.2917,
       "firstRoot": 17,
       "rootCount": 2,
       "wood": {
-        "firstIndex": 5899560,
-        "indexCount": 461328
+        "firstIndex": 7910673,
+        "indexCount": 625932
       },
       "leaf": {
-        "firstIndex": 6360888,
-        "indexCount": 384000
+        "firstIndex": 8536605,
+        "indexCount": 342000
       },
       "far": {
-        "firstIndex": 6744888,
+        "firstIndex": 8878605,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -1700,8 +1690,8 @@
           },
           "normal": {
             "file": "maple-veteran-foliage-0-normal.png",
-            "bytes": 166308,
-            "sha256": "5bf41cf1832fbe8cdd82464b44f9be5e1cf69ab371728b396af6d9590664b29c",
+            "bytes": 81000,
+            "sha256": "ab568b0f252b6d2ad273a04a541680547be80175554e1c41b233bfb8e5b8513e",
             "encoding": "linear"
           },
           "roughness": 0.85,
@@ -1726,8 +1716,8 @@
           },
           "normal": {
             "file": "maple-veteran-foliage-1-normal.png",
-            "bytes": 166007,
-            "sha256": "e0e6e82e345697b85bcd09790ae50579da3a5f4a36d836a505d3fe664a927a75",
+            "bytes": 80518,
+            "sha256": "f20684baa2126de025b14f53cef60723c4691dde2fa0687bf3a606661132d576",
             "encoding": "linear"
           },
           "roughness": 0.85,
@@ -1752,8 +1742,8 @@
           },
           "normal": {
             "file": "maple-veteran-foliage-2-normal.png",
-            "bytes": 166177,
-            "sha256": "5ed3700efc87761337694a17312bbfb2a598dd03dfba1d2562c5d520d4f7920a",
+            "bytes": 81087,
+            "sha256": "ca8db0ca4f0d3642f7a90be924f3bafe9ac1f21b14ded0a1165f5379ed23d4b7",
             "encoding": "linear"
           },
           "roughness": 0.85,
@@ -1770,47 +1760,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 13.392,
-      "crownRadius": 9.88,
-      "basalRadius": 0.354
+      "unverifiedGeometryErrorMetres": 15.4352,
+      "crownRadius": 7.192,
+      "basalRadius": 0.1675
     },
     {
       "id": 9,
       "species": "elm",
       "cohort": "canopy",
-      "age": 70.0,
-      "heightMetres": 24.477,
-      "crownRadiusMetres": 12.413,
-      "crownBaseMetres": 5.764,
-      "dbhCentimetres": 72.19,
+      "age": 38.0,
+      "heightMetres": 18.013,
+      "crownRadiusMetres": 6.288,
+      "crownBaseMetres": 3.721,
+      "dbhCentimetres": 30.06,
       "low": [
-        -8.1604,
+        -6.3918,
         -0.15,
-        -7.7511
+        -4.6435
       ],
       "high": [
-        7.8431,
-        22.2396,
-        8.1646
+        5.1829,
+        18.1858,
+        6.3971
       ],
       "centre": [
-        -0.1587,
-        11.0448,
-        0.2068
+        -0.6045,
+        9.0179,
+        0.8768
       ],
-      "radius": 15.8968,
+      "radius": 12.1672,
       "firstRoot": 19,
       "rootCount": 2,
       "wood": {
-        "firstIndex": 6745020,
-        "indexCount": 263919
+        "firstIndex": 8878737,
+        "indexCount": 402837
       },
       "leaf": {
-        "firstIndex": 7008939,
-        "indexCount": 393600
+        "firstIndex": 9281574,
+        "indexCount": 342000
       },
       "far": {
-        "firstIndex": 7402539,
+        "firstIndex": 9623574,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -1888,8 +1878,8 @@
           },
           "normal": {
             "file": "elm-veteran-foliage-0-normal.png",
-            "bytes": 186779,
-            "sha256": "beeda6522072477d8e31c2e7ead2fddb172b8550e1bff1e6f6596fba5d526652",
+            "bytes": 98076,
+            "sha256": "f880395761f8a6a4595c49502fb3e8f24e35ac6ead244690ff67017306d2aff4",
             "encoding": "linear"
           },
           "roughness": 0.868,
@@ -1914,8 +1904,8 @@
           },
           "normal": {
             "file": "elm-veteran-foliage-1-normal.png",
-            "bytes": 186527,
-            "sha256": "e17236c07b67908f6d70b103219ff103b72c9b7d3f5e772e489081d8b57a454a",
+            "bytes": 97204,
+            "sha256": "c89810848605faac370f8abaa0bac2604c920ab1cbeb6baf6e9bbae771ee836a",
             "encoding": "linear"
           },
           "roughness": 0.868,
@@ -1940,8 +1930,8 @@
           },
           "normal": {
             "file": "elm-veteran-foliage-2-normal.png",
-            "bytes": 186455,
-            "sha256": "d3d5c35b31c58ed2b1f2f88a06f2757a874201b781077ff7882d0d88e0cf87f5",
+            "bytes": 97779,
+            "sha256": "1d0492e659dacfe2a74adf397154fc210e6db2d750f0cd4d30db4907670da47f",
             "encoding": "linear"
           },
           "roughness": 0.868,
@@ -1958,47 +1948,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 19.4468,
-      "crownRadius": 12.413,
-      "basalRadius": 0.56
+      "unverifiedGeometryErrorMetres": 13.1359,
+      "crownRadius": 6.288,
+      "basalRadius": 0.2029
     },
     {
       "id": 10,
       "species": "birch",
       "cohort": "canopy",
-      "age": 25.0,
-      "heightMetres": 8.688,
-      "crownRadiusMetres": 2.621,
-      "crownBaseMetres": 1.949,
-      "dbhCentimetres": 8.2,
+      "age": 20.0,
+      "heightMetres": 8.363,
+      "crownRadiusMetres": 2.12,
+      "crownBaseMetres": 1.696,
+      "dbhCentimetres": 5.71,
       "low": [
-        -2.0717,
-        -0.3684,
-        -2.3879
+        -1.7996,
+        -0.1582,
+        -2.2332
       ],
       "high": [
-        2.267,
-        8.8634,
-        2.093
+        1.7423,
+        8.5601,
+        1.4534
       ],
       "centre": [
-        0.0977,
-        4.2475,
-        -0.1475
+        -0.0287,
+        4.2009,
+        -0.3899
       ],
-      "radius": 5.5717,
+      "radius": 5.0543,
       "firstRoot": 21,
       "rootCount": 1,
       "wood": {
-        "firstIndex": 7402671,
-        "indexCount": 71166
+        "firstIndex": 9623706,
+        "indexCount": 41394
       },
       "leaf": {
-        "firstIndex": 7473837,
-        "indexCount": 142800
+        "firstIndex": 9665100,
+        "indexCount": 174000
       },
       "far": {
-        "firstIndex": 7616637,
+        "firstIndex": 9839100,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -2076,8 +2066,8 @@
           },
           "normal": {
             "file": "birch-veteran-foliage-0-normal.png",
-            "bytes": 127824,
-            "sha256": "5868e701876f56db74c645ae6df6fcd277ae7b29d03ec513f1be9eff10876667",
+            "bytes": 70653,
+            "sha256": "92237a56e5f75bbfc901701e277bb5259e5cd4a0849c433bcfa0497d48302343",
             "encoding": "linear"
           },
           "roughness": 0.748,
@@ -2102,8 +2092,8 @@
           },
           "normal": {
             "file": "birch-veteran-foliage-1-normal.png",
-            "bytes": 127683,
-            "sha256": "ad70c1c5b5c2a9706a2a21cb8ca0a3edfaaaff822f693b460f1c0fd0ce80fe51",
+            "bytes": 70383,
+            "sha256": "63ad2e87c98bdd25261a6ae522a82470b2a493a2b50a675f505a48844635e803",
             "encoding": "linear"
           },
           "roughness": 0.748,
@@ -2128,8 +2118,8 @@
           },
           "normal": {
             "file": "birch-veteran-foliage-2-normal.png",
-            "bytes": 127390,
-            "sha256": "4d07735cadebc9e3a46095144e1e2eff7d59bc3598183e5ba21ed9a605473203",
+            "bytes": 69984,
+            "sha256": "7038d0005c04040e00ce1561a65529c05838982f372d370b8754f56c5793eea6",
             "encoding": "linear"
           },
           "roughness": 0.748,
@@ -2146,47 +2136,47 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 7.0988,
-      "crownRadius": 2.621,
-      "basalRadius": 0.045
+      "unverifiedGeometryErrorMetres": 6.4824,
+      "crownRadius": 2.12,
+      "basalRadius": 0.0314
     },
     {
       "id": 11,
       "species": "blueberry",
       "cohort": "canopy",
       "age": 12.0,
-      "heightMetres": 1.5,
-      "crownRadiusMetres": 0.278,
-      "crownBaseMetres": 0.136,
-      "dbhCentimetres": 0.47,
+      "heightMetres": 1.405,
+      "crownRadiusMetres": 0.331,
+      "crownBaseMetres": 0.162,
+      "dbhCentimetres": 0.39,
       "low": [
-        -0.31,
-        -0.2125,
-        -0.3633
+        -0.2409,
+        -0.15,
+        -0.2968
       ],
       "high": [
-        0.5024,
-        1.7008,
-        0.3367
+        0.4591,
+        1.4743,
+        0.4032
       ],
       "centre": [
-        0.0962,
-        0.7442,
-        -0.0133
+        0.1091,
+        0.6622,
+        0.0532
       ],
-      "radius": 1.0977,
+      "radius": 0.9521,
       "firstRoot": 22,
       "rootCount": 2,
       "wood": {
-        "firstIndex": 7616769,
-        "indexCount": 9144
+        "firstIndex": 9839232,
+        "indexCount": 6396
       },
       "leaf": {
-        "firstIndex": 7625913,
-        "indexCount": 19200
+        "firstIndex": 9845628,
+        "indexCount": 12276
       },
       "far": {
-        "firstIndex": 7645113,
+        "firstIndex": 9857904,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -2264,8 +2254,8 @@
           },
           "normal": {
             "file": "blueberry-veteran-foliage-0-normal.png",
-            "bytes": 189933,
-            "sha256": "616fcaf906dda1372ef1136dde30ef01683f346d93d8d66d0693305bd0c859f9",
+            "bytes": 107203,
+            "sha256": "ce3e618ddf3878dff9a09f7db5f6ded9ea9c59b807f6f54908d282bdaf3ccd07",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -2290,8 +2280,8 @@
           },
           "normal": {
             "file": "blueberry-veteran-foliage-1-normal.png",
-            "bytes": 189653,
-            "sha256": "5bcb527643814eb962aca0b18d9b35f99d056805cf7c2767515d7ec71d683470",
+            "bytes": 106450,
+            "sha256": "0c8ea3e2cabf69a1224fd978080380db77db0f8f9344d3981a245920ae9ffb06",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -2316,8 +2306,8 @@
           },
           "normal": {
             "file": "blueberry-veteran-foliage-2-normal.png",
-            "bytes": 189857,
-            "sha256": "99144cfe8e28e64f98390a7fa321f51456931e9bea0e6b134a82cd16a20fadbd",
+            "bytes": 107381,
+            "sha256": "655ebefdf1e5a1ab1ef2bd7bbc59319f08d39537e1cab6c796c1d54b31b78329",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -2334,25 +2324,25 @@
         }
       ],
       "geometryErrorSupported": false,
-      "unverifiedGeometryErrorMetres": 1.3935,
-      "crownRadius": 0.278,
-      "basalRadius": 0.006
+      "unverifiedGeometryErrorMetres": 1.155,
+      "crownRadius": 0.331,
+      "basalRadius": 0.0052
     }
   ],
   "volume": {
     "file": "volumes/manifest.json",
-    "bytes": 16739,
-    "sha256": "747451d6acd1d534d9c1f6ff87db9bf464e69cf0c969909c422512ce47a613e1"
+    "bytes": 16798,
+    "sha256": "4c8673ea958ec28795dfc9ab2a889887923c29d2636d2efa1f52fbc6bc171360"
   },
   "middle": {
     "file": "middle/manifest.json",
-    "bytes": 7358,
-    "sha256": "f2fcfe08ab8a54e88936ee613e7327eec6f3c6d8e52fec68128cd92866b127eb"
+    "bytes": 7355,
+    "sha256": "cc75abb838ba8187b4395a376dbf75db4dc09325f26c7a8a1a1f1caade5138fd"
   },
   "bake": {
     "script": "scripts/bake-forest-mature-pack.py",
     "forestmodeler": "9159c6c42c3634e27455efdfaebf382ce565039c",
-    "growth": "each tree alone, every year of its age, with genomic single-leaf placement along 3D woody shoots",
+    "growth": "native forestmodeler ColonizingGrower + hero wood + native place_leaves blades (zero fake shoots/pruning)",
     "latitudeDegrees": 39.0,
     "fieldCellMetres": 0.6,
     "middleCellsInHeight": 40,
@@ -2361,386 +2351,166 @@
         "id": 0,
         "species": "oak",
         "cohort": "veteran",
-        "age": 110,
+        "age": 60,
         "seed": 101,
-        "resolution": 3.0,
-        "woodSkeletonBudget": 115000,
-        "genomicShootsTarget": 3000,
-        "leavesPerShoot": 16,
-        "growSeconds": 74.7,
-        "basalRadius": 0.666,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 8,
-        "keptWoodNodes": 8812,
-        "meshedWoodyShoots": 3000,
-        "crownFootprintSquareMetres": 566.0,
-        "botanicalLeafScale": 1.16,
-        "leafBladeMetres": [
-          0.313,
-          0.188
-        ],
-        "singleLeavesPlaced": 48000,
-        "leavesGrown": 154687,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.0,
-        "shootBaseToBarkSnapMedianMm": 348.0,
-        "heightMetres": 25.518,
-        "crownRadiusMetres": 15.394,
-        "crownBaseMetres": 3.889,
-        "dbhCentimetres": 94.15,
-        "woodTriangles": 159473,
-        "leafTriangles": 192000
+        "resolution": 2.0,
+        "basalRadius": 0.3404,
+        "heightMetres": 20.236,
+        "crownRadiusMetres": 9.537,
+        "crownBaseMetres": 4.118,
+        "dbhCentimetres": 50.84,
+        "woodTriangles": 443382,
+        "leafTriangles": 144000
       },
       {
         "id": 1,
         "species": "chestnut",
         "cohort": "veteran",
-        "age": 110,
+        "age": 60,
         "seed": 101,
-        "resolution": 3.0,
-        "woodSkeletonBudget": 115000,
-        "genomicShootsTarget": 2900,
-        "leavesPerShoot": 16,
-        "growSeconds": 46.1,
-        "basalRadius": 0.963,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 18,
-        "keptWoodNodes": 6253,
-        "meshedWoodyShoots": 2900,
-        "crownFootprintSquareMetres": 494.0,
-        "botanicalLeafScale": 1.18,
-        "leafBladeMetres": [
-          0.284,
-          0.106
-        ],
-        "singleLeavesPlaced": 46400,
-        "leavesGrown": 91253,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.55,
-        "shootBaseToBarkSnapMedianMm": 287.41,
-        "heightMetres": 24.178,
-        "crownRadiusMetres": 16.153,
-        "crownBaseMetres": 4.822,
-        "dbhCentimetres": 120.61,
-        "woodTriangles": 133579,
-        "leafTriangles": 185600
+        "resolution": 2.0,
+        "basalRadius": 0.408,
+        "heightMetres": 20.383,
+        "crownRadiusMetres": 12.211,
+        "crownBaseMetres": 3.977,
+        "dbhCentimetres": 55.71,
+        "woodTriangles": 260292,
+        "leafTriangles": 144000
       },
       {
         "id": 2,
         "species": "maple",
         "cohort": "veteran",
-        "age": 100,
+        "age": 55,
         "seed": 101,
-        "resolution": 3.0,
-        "woodSkeletonBudget": 110000,
-        "genomicShootsTarget": 2900,
-        "leavesPerShoot": 16,
-        "growSeconds": 198.7,
-        "basalRadius": 0.623,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 8,
-        "keptWoodNodes": 12808,
-        "meshedWoodyShoots": 2900,
-        "crownFootprintSquareMetres": 440.0,
-        "botanicalLeafScale": 1.18,
-        "leafBladeMetres": [
-          0.176,
-          0.153
-        ],
-        "singleLeavesPlaced": 46400,
-        "leavesGrown": 160402,
-        "phyllotaxyDegrees": 90.0,
-        "budsPerNode": 2,
-        "foliagePlanarity": 0.0,
-        "shootBaseToBarkSnapMedianMm": 328.6,
-        "heightMetres": 25.061,
-        "crownRadiusMetres": 12.918,
-        "crownBaseMetres": 2.076,
-        "dbhCentimetres": 88.18,
-        "woodTriangles": 212908,
-        "leafTriangles": 185600
+        "resolution": 2.0,
+        "basalRadius": 0.295,
+        "heightMetres": 19.483,
+        "crownRadiusMetres": 10.014,
+        "crownBaseMetres": 2.52,
+        "dbhCentimetres": 44.6,
+        "woodTriangles": 345055,
+        "leafTriangles": 144000
       },
       {
         "id": 3,
         "species": "elm",
         "cohort": "veteran",
-        "age": 110,
+        "age": 60,
         "seed": 303,
-        "resolution": 3.0,
-        "woodSkeletonBudget": 120000,
-        "genomicShootsTarget": 3100,
-        "leavesPerShoot": 17,
-        "growSeconds": 97.2,
-        "basalRadius": 0.965,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 13,
-        "keptWoodNodes": 6557,
-        "meshedWoodyShoots": 3100,
-        "crownFootprintSquareMetres": 710.0,
-        "botanicalLeafScale": 1.2,
-        "leafBladeMetres": [
-          0.145,
-          0.071
-        ],
-        "singleLeavesPlaced": 52700,
-        "leavesGrown": 326233,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.62,
-        "shootBaseToBarkSnapMedianMm": 317.1,
-        "heightMetres": 34.807,
-        "crownRadiusMetres": 18.822,
-        "crownBaseMetres": 5.645,
-        "dbhCentimetres": 116.61,
-        "woodTriangles": 139540,
-        "leafTriangles": 210800
+        "resolution": 2.0,
+        "basalRadius": 0.4236,
+        "heightMetres": 25.766,
+        "crownRadiusMetres": 14.104,
+        "crownBaseMetres": 5.628,
+        "dbhCentimetres": 55.89,
+        "woodTriangles": 434570,
+        "leafTriangles": 144000
       },
       {
         "id": 4,
         "species": "birch",
         "cohort": "veteran",
-        "age": 40,
+        "age": 32,
         "seed": 202,
-        "resolution": 1.8,
-        "woodSkeletonBudget": 32000,
-        "genomicShootsTarget": 1250,
-        "leavesPerShoot": 15,
-        "growSeconds": 2.0,
-        "basalRadius": 0.057,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 199,
-        "keptWoodNodes": 4904,
-        "meshedWoodyShoots": 1250,
-        "crownFootprintSquareMetres": 31.3,
-        "botanicalLeafScale": 1.18,
-        "leafBladeMetres": [
-          0.102,
-          0.059
-        ],
-        "singleLeavesPlaced": 18750,
-        "leavesGrown": 39344,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.4,
-        "shootBaseToBarkSnapMedianMm": 163.73,
-        "heightMetres": 10.638,
-        "crownRadiusMetres": 4.082,
+        "resolution": 1.5,
+        "basalRadius": 0.0439,
+        "heightMetres": 9.856,
+        "crownRadiusMetres": 3.001,
         "crownBaseMetres": 2.171,
-        "dbhCentimetres": 10.61,
-        "woodTriangles": 39486,
-        "leafTriangles": 75000
+        "dbhCentimetres": 8.15,
+        "woodTriangles": 39850,
+        "leafTriangles": 126000
       },
       {
         "id": 5,
         "species": "blueberry",
         "cohort": "veteran",
-        "age": 25,
+        "age": 20,
         "seed": 303,
-        "resolution": 1.8,
-        "woodSkeletonBudget": 12000,
-        "genomicShootsTarget": 340,
-        "leavesPerShoot": 12,
-        "growSeconds": 0.3,
-        "basalRadius": 0.011,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 91,
-        "keptWoodNodes": 1289,
-        "meshedWoodyShoots": 340,
-        "crownFootprintSquareMetres": 0.3,
-        "botanicalLeafScale": 1.05,
-        "leafBladeMetres": [
-          0.065,
-          0.025
-        ],
-        "singleLeavesPlaced": 4080,
-        "leavesGrown": 1310,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.0,
-        "shootBaseToBarkSnapMedianMm": 19.39,
-        "heightMetres": 1.803,
-        "crownRadiusMetres": 0.583,
-        "crownBaseMetres": 0.201,
-        "dbhCentimetres": 1.41,
-        "woodTriangles": 10967,
-        "leafTriangles": 16320
+        "resolution": 1.5,
+        "basalRadius": 0.0071,
+        "heightMetres": 1.238,
+        "crownRadiusMetres": 0.403,
+        "crownBaseMetres": 0.2,
+        "dbhCentimetres": 0.39,
+        "woodTriangles": 5198,
+        "leafTriangles": 10644
       },
       {
         "id": 6,
         "species": "oak",
         "cohort": "canopy",
-        "age": 70,
+        "age": 38,
         "seed": 202,
-        "resolution": 3.0,
-        "woodSkeletonBudget": 72000,
-        "genomicShootsTarget": 2000,
-        "leavesPerShoot": 15,
-        "growSeconds": 17.2,
-        "basalRadius": 0.404,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 54,
-        "keptWoodNodes": 6712,
-        "meshedWoodyShoots": 2000,
-        "crownFootprintSquareMetres": 265.2,
-        "botanicalLeafScale": 1.16,
-        "leafBladeMetres": [
-          0.313,
-          0.189
-        ],
-        "singleLeavesPlaced": 30000,
-        "leavesGrown": 66064,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.0,
-        "shootBaseToBarkSnapMedianMm": 291.57,
-        "heightMetres": 20.93,
-        "crownRadiusMetres": 11.836,
-        "crownBaseMetres": 3.645,
-        "dbhCentimetres": 58.79,
-        "woodTriangles": 84233,
-        "leafTriangles": 120000
+        "resolution": 2.0,
+        "basalRadius": 0.1941,
+        "heightMetres": 13.868,
+        "crownRadiusMetres": 7.575,
+        "crownBaseMetres": 2.549,
+        "dbhCentimetres": 30.89,
+        "woodTriangles": 163049,
+        "leafTriangles": 114000
       },
       {
         "id": 7,
         "species": "chestnut",
         "cohort": "canopy",
-        "age": 70,
+        "age": 38,
         "seed": 202,
-        "resolution": 3.0,
-        "woodSkeletonBudget": 72000,
-        "genomicShootsTarget": 1950,
-        "leavesPerShoot": 15,
-        "growSeconds": 10.0,
-        "basalRadius": 0.536,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 151,
-        "keptWoodNodes": 5686,
-        "meshedWoodyShoots": 1950,
-        "crownFootprintSquareMetres": 266.1,
-        "botanicalLeafScale": 1.18,
-        "leafBladeMetres": [
-          0.284,
-          0.106
-        ],
-        "singleLeavesPlaced": 29250,
-        "leavesGrown": 47373,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.55,
-        "shootBaseToBarkSnapMedianMm": 293.39,
-        "heightMetres": 19.722,
-        "crownRadiusMetres": 12.195,
-        "crownBaseMetres": 4.191,
-        "dbhCentimetres": 71.18,
-        "woodTriangles": 83662,
-        "leafTriangles": 117000
+        "resolution": 2.0,
+        "basalRadius": 0.1855,
+        "heightMetres": 16.624,
+        "crownRadiusMetres": 5.954,
+        "crownBaseMetres": 3.978,
+        "dbhCentimetres": 27.71,
+        "woodTriangles": 53887,
+        "leafTriangles": 64612
       },
       {
         "id": 8,
         "species": "maple",
         "cohort": "canopy",
-        "age": 60,
+        "age": 36,
         "seed": 202,
-        "resolution": 3.0,
-        "woodSkeletonBudget": 70000,
-        "genomicShootsTarget": 2000,
-        "leavesPerShoot": 16,
-        "growSeconds": 42.6,
-        "basalRadius": 0.354,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 8,
-        "keptWoodNodes": 11434,
-        "meshedWoodyShoots": 2000,
-        "crownFootprintSquareMetres": 273.1,
-        "botanicalLeafScale": 1.18,
-        "leafBladeMetres": [
-          0.176,
-          0.153
-        ],
-        "singleLeavesPlaced": 32000,
-        "leavesGrown": 101209,
-        "phyllotaxyDegrees": 90.0,
-        "budsPerNode": 2,
-        "foliagePlanarity": 0.0,
-        "shootBaseToBarkSnapMedianMm": 452.54,
-        "heightMetres": 20.947,
-        "crownRadiusMetres": 9.88,
-        "crownBaseMetres": 2.765,
-        "dbhCentimetres": 52.69,
-        "woodTriangles": 153776,
-        "leafTriangles": 128000
+        "resolution": 2.0,
+        "basalRadius": 0.1675,
+        "heightMetres": 15.059,
+        "crownRadiusMetres": 7.192,
+        "crownBaseMetres": 2.761,
+        "dbhCentimetres": 26.83,
+        "woodTriangles": 208644,
+        "leafTriangles": 114000
       },
       {
         "id": 9,
         "species": "elm",
         "cohort": "canopy",
-        "age": 70,
+        "age": 38,
         "seed": 202,
-        "resolution": 3.0,
-        "woodSkeletonBudget": 76000,
-        "genomicShootsTarget": 2050,
-        "leavesPerShoot": 16,
-        "growSeconds": 25.5,
-        "basalRadius": 0.56,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 33,
-        "keptWoodNodes": 5766,
-        "meshedWoodyShoots": 2050,
-        "crownFootprintSquareMetres": 384.0,
-        "botanicalLeafScale": 1.2,
-        "leafBladeMetres": [
-          0.145,
-          0.071
-        ],
-        "singleLeavesPlaced": 32800,
-        "leavesGrown": 181046,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.62,
-        "shootBaseToBarkSnapMedianMm": 302.45,
-        "heightMetres": 24.477,
-        "crownRadiusMetres": 12.413,
-        "crownBaseMetres": 5.764,
-        "dbhCentimetres": 72.19,
-        "woodTriangles": 87973,
-        "leafTriangles": 131200
+        "resolution": 2.0,
+        "basalRadius": 0.2029,
+        "heightMetres": 18.013,
+        "crownRadiusMetres": 6.288,
+        "crownBaseMetres": 3.721,
+        "dbhCentimetres": 30.06,
+        "woodTriangles": 134279,
+        "leafTriangles": 114000
       },
       {
         "id": 10,
         "species": "birch",
         "cohort": "canopy",
-        "age": 25,
+        "age": 20,
         "seed": 101,
-        "resolution": 1.8,
-        "woodSkeletonBudget": 22000,
-        "genomicShootsTarget": 850,
-        "leavesPerShoot": 14,
-        "growSeconds": 0.7,
-        "basalRadius": 0.045,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 229,
-        "keptWoodNodes": 2898,
-        "meshedWoodyShoots": 850,
-        "crownFootprintSquareMetres": 12.3,
-        "botanicalLeafScale": 1.18,
-        "leafBladeMetres": [
-          0.102,
-          0.06
-        ],
-        "singleLeavesPlaced": 11900,
-        "leavesGrown": 18500,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.4,
-        "shootBaseToBarkSnapMedianMm": 78.29,
-        "heightMetres": 8.688,
-        "crownRadiusMetres": 2.621,
-        "crownBaseMetres": 1.949,
-        "dbhCentimetres": 8.2,
-        "woodTriangles": 23722,
-        "leafTriangles": 47600
+        "resolution": 1.5,
+        "basalRadius": 0.0314,
+        "heightMetres": 8.363,
+        "crownRadiusMetres": 2.12,
+        "crownBaseMetres": 1.696,
+        "dbhCentimetres": 5.71,
+        "woodTriangles": 13798,
+        "leafTriangles": 58000
       },
       {
         "id": 11,
@@ -2748,34 +2518,14 @@
         "cohort": "canopy",
         "age": 12,
         "seed": 202,
-        "resolution": 1.8,
-        "woodSkeletonBudget": 7000,
-        "genomicShootsTarget": 160,
-        "leavesPerShoot": 10,
-        "growSeconds": 0.1,
-        "basalRadius": 0.006,
-        "woodStraighten": 0.0,
-        "protectedCrownTips": 22,
-        "keptWoodNodes": 276,
-        "meshedWoodyShoots": 160,
-        "crownFootprintSquareMetres": 0.1,
-        "botanicalLeafScale": 1.05,
-        "leafBladeMetres": [
-          0.065,
-          0.025
-        ],
-        "singleLeavesPlaced": 1600,
-        "leavesGrown": 300,
-        "phyllotaxyDegrees": 137.51,
-        "budsPerNode": 1,
-        "foliagePlanarity": 0.0,
-        "shootBaseToBarkSnapMedianMm": 18.8,
-        "heightMetres": 1.5,
-        "crownRadiusMetres": 0.278,
-        "crownBaseMetres": 0.136,
-        "dbhCentimetres": 0.47,
-        "woodTriangles": 3048,
-        "leafTriangles": 6400
+        "resolution": 1.5,
+        "basalRadius": 0.0052,
+        "heightMetres": 1.405,
+        "crownRadiusMetres": 0.331,
+        "crownBaseMetres": 0.162,
+        "dbhCentimetres": 0.39,
+        "woodTriangles": 2132,
+        "leafTriangles": 4092
       }
     ]
   }

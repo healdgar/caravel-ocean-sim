@@ -6,29 +6,29 @@
  "archetype": 4,
  "label": "River Trade Barge",
  "source": {
-  "vertices": 31243,
+  "vertices": 31248,
   "indices": 93942,
   "shards": 52,
-  "key": "968a1f24a78e49199ff2489cd8bc5ae7ce67818c8ff82ade763842cedc92088f",
+  "key": "19d5ea6809a361d7e0eb0e79489334c96918cfc5d513135a483099a38f4bd8d8",
   "surface": {
-   "area": 180.44967773877525,
+   "area": 180.44916738086093,
    "centroid": [
-    0.0023706217758432575,
-    0.1248563792244239,
-    0.027505940116266378
+    0.0023706290194329682,
+    0.12486004727098302,
+    0.029497186787954446
    ],
    "materials": {
-    "0": 32.67548226325009,
-    "1": 53.70328644829757,
+    "0": 32.67531281369901,
+    "1": 53.70312860226783,
     "2": 0.14152047381029204,
     "3": 1.794817412656508,
     "9": 2.648097241365943,
     "12": 0.6456385821023065,
     "13": 1.3278357589162915,
     "14": 28.19681466356856,
-    "15": 48.28523640137618,
-    "16": 8.455577937299557,
-    "17": 1.836104660761826,
+    "15": 48.28504674504284,
+    "16": 8.455577943030157,
+    "17": 1.836111249032175,
     "24": 0.32569573877045993,
     "28": 0.4135701565970079
    }
@@ -46,14 +46,14 @@
   "rode": 0
  },
  "clusters": {
-  "count": 1045,
-  "triangles": 57627,
-  "levels": 6,
-  "roots": 273,
-  "groups": 97,
+  "count": 785,
+  "triangles": 54226,
+  "levels": 12,
+  "roots": 261,
+  "groups": 214,
   "parts": 195,
-  "rootError": 4.6991,
-  "rootTriangles": 8838
+  "rootError": 0.9534,
+  "rootTriangles": 9288
  },
  "far": {
   "voxel": 0.0362,
@@ -69,7 +69,7 @@
     "count": 1,
     "dropped": 0,
     "genus": 0,
-    "surfaceTriangles": 776808
+    "surfaceTriangles": 774168
    },
    {
     "kind": "canvas",
@@ -87,14 +87,14 @@
   ],
   "baseTriangles": 8000,
   "baseVertices": 4006,
-  "baseError": 0.0894,
-  "baseGeometric": 0.0366,
+  "baseError": 0.0892,
+  "baseGeometric": 0.0361,
   "steps": 4002,
   "coreTriangles": 4,
-  "depth": 10,
+  "depth": 11,
   "errorRange": [
-   0.0894,
-   5.4289
+   0.0892,
+   4.3107
   ],
   "inflateMax": 0.4248,
   "euler": 6,
@@ -102,23 +102,23 @@
  },
  "splat": {
   "centre": [
-   -0.0013,
+   -0.0015,
    0.4601,
    -0.0035
   ],
   "ry": 0.8849,
-  "rxSide": 5.3007,
-  "rxEnd": 2.0518,
+  "rxSide": 5.2875,
+  "rxEnd": 2.0485,
   "colour": [
-   0.3296,
-   0.24106,
-   0.15781
+   0.33003,
+   0.24174,
+   0.1585
   ]
  },
  "bound": {
   "centre": [
    0,
-   0.3246,
+   0.325,
    0
   ],
   "radius": 6.5302
@@ -126,30 +126,30 @@
  "poses": 11,
  "files": {
   "body.bin": {
-   "bytes": 1892784,
-   "sha256": "8d846d3e1539a4e1e38a9c483e70d70c2a89b6fb0fd38aa7f01e5183406e4c52",
+   "bytes": 1835452,
+   "sha256": "43998e084669a52aba78c6332e48b0d381707e6cb479e146970d77b562b9560c",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 711038,
-    "sha256": "372a785ef8033014063a0685304e33d820ad926d4f32fa5130910cd4abebd097"
+    "bytes": 684810,
+    "sha256": "84dd2bf5399e8bc6d43f740ae1453b48a73c31e3427da55c253b115f547d8671"
    }
   },
   "vertices.bin": {
-   "bytes": 1124748,
-   "sha256": "48c1fc3bfa334df6566ddf3a98028140c80432fe3cd4c3f9ddf6cc796cc702c7",
+   "bytes": 1124928,
+   "sha256": "8a36a94ebef1ceda956b9c8d2b75e2d7c5f2bd9b99beddad665831c0064a2366",
    "gzip": {
     "file": "vertices.bin.gz",
-    "bytes": 387982,
-    "sha256": "cf439876972f27bc83012228a3540f8bd68072aa08ac0d4425f4b02099497ae7"
+    "bytes": 397707,
+    "sha256": "e85acd8df916608b80c3f88755995a130493f27571fc0fc944d4eea4bb934acc"
    }
   },
   "shards.bin": {
-   "bytes": 124972,
-   "sha256": "93f8ef7f1b8dfc21fc5bab7349a49908f2237ea94bec6a80c6f1085b3e3e8838",
+   "bytes": 124992,
+   "sha256": "d9a35dcb738d416ed319d23c3a49cd721d86e96a30567996b287c8858022a423",
    "gzip": {
     "file": "shards.bin.gz",
-    "bytes": 2032,
-    "sha256": "974eba305c217d9a708691764712f28c5185cd30cce6130b8d03b1392f04a929"
+    "bytes": 2026,
+    "sha256": "0ab0be0c3438eacef552cd528aa9d7e2c6ea220a97edd18af9ba9cefc16aa047"
    }
   }
  }

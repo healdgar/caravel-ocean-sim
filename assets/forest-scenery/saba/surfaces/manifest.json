@@ -163,11 +163,11 @@
      },
      "detail": {
       "bytes": 3495440,
-      "sha256": "638a49f9e7819cb48d208fcaf9ba7a46542fe85a626385986b9314f5266fbdc1",
+      "sha256": "15881509f85fc8f7e8a69e0707a89b137173d2aa069f3b68015826455b6c6d8b",
       "gzip": {
        "file": "family-0-detail.bc7.bin.gz",
-       "bytes": 3159343,
-       "sha256": "0edd4fc1637703059a0598285afd6cc334aa5195b9ec8f838403b2c6b5aa2c79"
+       "bytes": 3245587,
+       "sha256": "a5206fa4889b663dd6be11d344613798839efb514a5395237fc22997a3b7b5de"
       }
      }
     },
@@ -183,11 +183,11 @@
      },
      "detail": {
       "bytes": 3495440,
-      "sha256": "781152971f994aa5928aabd933a8fcf8152cd7a27c10a703f40d31f9173ffb7f",
+      "sha256": "aba370c6b0db0f12c596625537b0c0e7e2cd8c6abc03e5c75ff7bb111f03e3ac",
       "gzip": {
        "file": "family-0-detail.astc.bin.gz",
-       "bytes": 2949019,
-       "sha256": "bc9787db466f02fe72f1087cf3101cb52fa2fa2cc867e390e58ab5c30729ac06"
+       "bytes": 2950539,
+       "sha256": "46021a69b4091252fc57705096331dfea8ae719463f8fd3506c40358b2209bc2"
       }
      }
     }
@@ -229,7 +229,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "1866133bfb120c2262b4ac91760d068d717cc9c8f0acf08fbc3d73ce546af41f",
-      "normal": "98522c2c0155e06b8b4998a2cc2e040c23adfe1f411235d6c77feb5695c54d9a"
+      "normal": "bfae67cb771f2c0bd860b14c90edebb227da165db0d564fea8fcb8b39971190d"
      },
      "coverage": [
       0.356385,
@@ -254,7 +254,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "0058b47d08ac8ae06ba4707202c3b23a449e2256fcdb289a3cb35c58297ebae7",
-      "normal": "69fe8a42a7bde8b0dbffd3f1476dd58dc2600d0e834e06c386c6fa7370479b96"
+      "normal": "fdac50bfe2bca0e744923e2a94a07efc5b5514273cd38884aec09c8e293073bd"
      },
      "coverage": [
       0.356385,
@@ -279,7 +279,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "2205249ea46646f4338bb4f73627ce5ef15dc72656a73a99a4e5eec81702930a",
-      "normal": "bb3c501a05cc8c7e874e1c174ba2e99e9660d5e770c36f5a98286624d9bc7001"
+      "normal": "14424ea53327ae74b0028e15464279e64df3888b5326c7a1aebb8d0dcf9cd174"
      },
      "coverage": [
       0.356385,
@@ -330,7 +330,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "afb4718aae43d488e7957cfa35d18187fe29f947cc50aac56f4d1b6e8838d51a",
-      "normal": "5bf41cf1832fbe8cdd82464b44f9be5e1cf69ab371728b396af6d9590664b29c"
+      "normal": "ab568b0f252b6d2ad273a04a541680547be80175554e1c41b233bfb8e5b8513e"
      },
      "coverage": [
       0.346187,
@@ -355,7 +355,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "cfe97504caecd090e0a32df6446c52badf4896b146344f59d12f0a76e9e01641",
-      "normal": "e0e6e82e345697b85bcd09790ae50579da3a5f4a36d836a505d3fe664a927a75"
+      "normal": "f20684baa2126de025b14f53cef60723c4691dde2fa0687bf3a606661132d576"
      },
      "coverage": [
       0.346187,
@@ -380,7 +380,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "07c4d229f73580f8c08a9cc5acd89fe0d704ce114489e769cb854c3c3c1b1774",
-      "normal": "5ed3700efc87761337694a17312bbfb2a598dd03dfba1d2562c5d520d4f7920a"
+      "normal": "ca8db0ca4f0d3642f7a90be924f3bafe9ac1f21b14ded0a1165f5379ed23d4b7"
      },
      "coverage": [
       0.346187,
@@ -405,7 +405,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "5391c40fe83acfbddf5997fcfc3ba1a5821bf724cea5a3498ba8a050d8895be3",
-      "normal": "5868e701876f56db74c645ae6df6fcd277ae7b29d03ec513f1be9eff10876667"
+      "normal": "92237a56e5f75bbfc901701e277bb5259e5cd4a0849c433bcfa0497d48302343"
      },
      "coverage": [
       0.381212,
@@ -430,7 +430,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "b03a6fe49e65557296cce9d63cad13797f8f2fd770b4b3331e8e3b54afaaa4e3",
-      "normal": "ad70c1c5b5c2a9706a2a21cb8ca0a3edfaaaff822f693b460f1c0fd0ce80fe51"
+      "normal": "63ad2e87c98bdd25261a6ae522a82470b2a493a2b50a675f505a48844635e803"
      },
      "coverage": [
       0.381212,
@@ -455,7 +455,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "3fdb3be03b6aa2a529484ec5491c0866a6df330b0efeb115da1628564e0d453c",
-      "normal": "4d07735cadebc9e3a46095144e1e2eff7d59bc3598183e5ba21ed9a605473203"
+      "normal": "7038d0005c04040e00ce1561a65529c05838982f372d370b8754f56c5793eea6"
      },
      "coverage": [
       0.381212,
@@ -506,7 +506,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "c1ead0e12030b2b0c34d7e2c2f09d1c326e8310b0738e9f22dd33a616c944835",
-      "normal": "beeda6522072477d8e31c2e7ead2fddb172b8550e1bff1e6f6596fba5d526652"
+      "normal": "f880395761f8a6a4595c49502fb3e8f24e35ac6ead244690ff67017306d2aff4"
      },
      "coverage": [
       0.511599,
@@ -531,7 +531,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "c9d780d574a7ecc762bb724e47d40c1e97b4aa860d68383924c60987bd208252",
-      "normal": "e17236c07b67908f6d70b103219ff103b72c9b7d3f5e772e489081d8b57a454a"
+      "normal": "c89810848605faac370f8abaa0bac2604c920ab1cbeb6baf6e9bbae771ee836a"
      },
      "coverage": [
       0.511599,
@@ -556,7 +556,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "436b5161a538c55a12e625e737f8018fb7a1899ee4c48b0b329410dc0ec7af0b",
-      "normal": "d3d5c35b31c58ed2b1f2f88a06f2757a874201b781077ff7882d0d88e0cf87f5"
+      "normal": "1d0492e659dacfe2a74adf397154fc210e6db2d750f0cd4d30db4907670da47f"
      },
      "coverage": [
       0.511599,
@@ -607,7 +607,7 @@
      "name": "foliage_0",
      "sources": {
       "albedo": "c5c81ac225c55e106d0e2b8106f4f07fabb6072fab392eb5b384b56b143d56fb",
-      "normal": "63750516f1b376397a5731a91f493c6154f0d1ef3737122785ed472c67a5b001"
+      "normal": "a899a618983a96e109b9c2dbef0a269f9211cc306f8efbf867e1b5ecd29528eb"
      },
      "coverage": [
       0.528978,
@@ -632,7 +632,7 @@
      "name": "foliage_1",
      "sources": {
       "albedo": "0a72637974c904f2d3decd098bcdeeff71b00ac69c76d5c2254da54a5ec14af8",
-      "normal": "57e38f73ed810ac5b3aa46ca15919b01922260ed777d6f57580794b63100f348"
+      "normal": "539fd1bbbb3fd14948b3dcee37ab5fb9f28f656d5e0f384051579a9145183604"
      },
      "coverage": [
       0.528978,
@@ -657,7 +657,7 @@
      "name": "foliage_2",
      "sources": {
       "albedo": "cf33787428a63d8e8a42e6f3e37a1fb82bdb207ce185978a9fc0162fd3f6defa",
-      "normal": "3b6490e0cedddbd287feffbcc6b5d2e99d0df1fe636dcb95b84b188a45adf819"
+      "normal": "4ce6f19201176077aef8dda8b3f77d50dd051c99c3775b0db29ad22bc3cd674b"
      },
      "coverage": [
       0.528978,
@@ -691,11 +691,11 @@
      },
      "detail": {
       "bytes": 1660752,
-      "sha256": "50a5c7f4773c9e8acc5fdf84f6d0a92fbf41ea2b938c2fcd440841c34b914664",
+      "sha256": "8b838bacabc73cb1f2cec18f24145b143b54ba68cb6f4bddaade933c33030069",
       "gzip": {
        "file": "family-1-detail.bc7.bin.gz",
-       "bytes": 795359,
-       "sha256": "0cf4af69b15434ddbb871fea817db93f03b7a8e6404e9e72ea54b51988bd89ed"
+       "bytes": 758642,
+       "sha256": "7d7fc50e93df6e14d4eb0319944f3ceb4ead2628c8cb4f648ae9d29556c5e240"
       }
      }
     },
@@ -711,11 +711,11 @@
      },
      "detail": {
       "bytes": 1660752,
-      "sha256": "e159b693b71b24902134ebc4515cacbbefe715e41cbac7ef5907395535e739d7",
+      "sha256": "cdada5b31e700bdbc631ce6157fc6f4ec3b10fdb02b1e898d4a7a3791f5c986e",
       "gzip": {
        "file": "family-1-detail.astc.bin.gz",
-       "bytes": 841074,
-       "sha256": "0b8eecaf3a46878be8fdcd155fbc266735bbbda567639dcaa8a33c0c727df6eb"
+       "bytes": 753529,
+       "sha256": "3c18830fdedeef438beda81fac070c8cdaffe2a24531fdf4d05d6ba3862c230e"
       }
      }
     }

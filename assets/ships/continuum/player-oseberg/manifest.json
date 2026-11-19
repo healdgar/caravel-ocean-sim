@@ -6,27 +6,27 @@
  "model": "oseberg",
  "label": "Oseberg-based vessel · c. 850",
  "source": {
-  "vertices": 73815,
-  "indices": 175806,
+  "vertices": 73816,
+  "indices": 176040,
   "shards": 103,
-  "key": "a533d80c5620af21c5a2f36442a7c2c2200e0eecd377c2a22c55047bc65183bb",
+  "key": "b43d464f58ae9346021e3b9064844c3b3fb62c04cd2bd35435918f74865c6fc8",
   "surface": {
-   "area": 194.25143755870076,
+   "area": 193.744129097882,
    "centroid": [
-    -0.00017485893124489878,
-    0.7796353750594409,
-    0.24206875421508356
+    -0.00017531733459614395,
+    0.7806734292677378,
+    0.24666372948564844
    ],
    "materials": {
-    "0": 21.99354646691704,
-    "1": 75.16211353792163,
+    "0": 21.99355291519109,
+    "1": 74.90868709775715,
     "2": 1.8315729181405638,
     "3": 0.7152878814933379,
     "9": 27.87907033821594,
     "10": 2.7612888639196624,
     "12": 1.7490573441170056,
-    "15": 46.545521260230025,
-    "16": 9.444086501312848,
+    "15": 46.54539333298769,
+    "16": 9.190325959627025,
     "17": 0.2905522598233671,
     "19": 0.5796995181342764,
     "25": 0.02070976418349203,
@@ -47,14 +47,14 @@
   "rode": 110
  },
  "clusters": {
-  "count": 2202,
-  "triangles": 106263,
-  "levels": 7,
-  "roots": 722,
-  "groups": 188,
-  "parts": 431,
-  "rootError": 6.5914,
-  "rootTriangles": 25729
+  "count": 1624,
+  "triangles": 94798,
+  "levels": 10,
+  "roots": 699,
+  "groups": 511,
+  "parts": 430,
+  "rootError": 9.6051,
+  "rootTriangles": 26860
  },
  "far": {
   "voxel": 0.0775,
@@ -63,14 +63,14 @@
     "kind": "rigid",
     "close": 0.31,
     "grid": [
-     147,
+     152,
      162,
      336
     ],
     "count": 1,
     "dropped": 0,
-    "genus": 80,
-    "surfaceTriangles": 616124
+    "genus": 59,
+    "surfaceTriangles": 608664
    },
    {
     "kind": "canvas",
@@ -87,33 +87,33 @@
    }
   ],
   "baseTriangles": 8000,
-  "baseVertices": 3848,
-  "baseError": 0.2019,
-  "baseGeometric": 0.0772,
-  "steps": 3816,
+  "baseVertices": 3890,
+  "baseError": 0.1989,
+  "baseGeometric": 0.0699,
+  "steps": 3865,
   "coreTriangles": 4,
-  "depth": 9,
+  "depth": 10,
   "errorRange": [
-   0.2019,
-   14.2836
+   0.1989,
+   13.2005
   ],
-  "inflateMax": 0.8753,
-  "euler": -152,
+  "inflateMax": 0.8752,
+  "euler": -110,
   "farFirst": 0
  },
  "splat": {
   "centre": [
-   0.0258,
-   4.8273,
-   2.7612
+   0.007,
+   4.8657,
+   2.7623
   ],
-  "ry": 5.8883,
-  "rxSide": 3.6313,
-  "rxEnd": 4.6455,
+  "ry": 5.8499,
+  "rxSide": 3.6546,
+  "rxEnd": 4.712,
   "colour": [
-   0.31518,
-   0.2279,
-   0.14945
+   0.31465,
+   0.22755,
+   0.14927
   ]
  },
  "bound": {
@@ -127,21 +127,21 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 3658784,
-   "sha256": "c0075c51553ae5cb12f02b4e0936aa07e95c2358260bb23256909904ef592e66",
+   "bytes": 3487036,
+   "sha256": "d1ab5bd75ff46a4da693e71c3ce7cb0d928f30d1f9d47a40610a47fae581f4a0",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 1326993,
-    "sha256": "5acd214008a430ff498e15fe618acc2c679b5c95fa5735977294561917c75d19"
+    "bytes": 1254661,
+    "sha256": "21a3fccd4e719dbbf96f5d18121919f9e20ba0ba0a27478f4a049a496f490340"
    }
   },
   "corners.bin": {
-   "bytes": 703224,
-   "sha256": "577e9aee55d99ba359300d746005c28923cc153800215f20c078b1331d5b8396",
+   "bytes": 704160,
+   "sha256": "8d5fcbbd57f6cb15bf1e69541ae9c4eef7369579e260c69a239fc2470e80c7b4",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 203068,
-    "sha256": "2cab4e548101b5f2a9e2f320707d2f479e88f98d24d97f0198eb1275c5929fa5"
+    "bytes": 203392,
+    "sha256": "9d246ff9c0f6586abfe2ae6f7a2c8446b4f3710c209ec0d2235b0e3f4afcc63b"
    }
   }
  }

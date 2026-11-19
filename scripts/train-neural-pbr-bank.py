@@ -51,8 +51,8 @@ WORDS_PER_MATERIAL = WORDS_PER_BAND * 2  # 10928 words (43712 B)
 TOTAL_LATENT_WORDS = MATERIAL_COUNT * WORDS_PER_MATERIAL  # 131136 words (524544 B)
 
 LEAKY_SLOPE = 0.25
-GOLDEN_MICRO_RATIO = 6.854101966249685  # 3 + sqrt(14.854...) irrational anti-tiling ratio
-GOLDEN_ANGLE_RAD = 0.41151684606748806  # ~23.58 deg (cos=0.916515, sin=0.400000)
+GOLDEN_MICRO_RATIO = 5.618033988749895  # 4 + phi irrational anti-tiling ratio (axis-aligned for directional grain)
+GOLDEN_ANGLE_RAD = 0.0  # 0 deg: keeps micro fibers axis-aligned with meso grain (zero 23.6 deg corduroy staircases)
 ROT_COS = math.cos(GOLDEN_ANGLE_RAD)
 ROT_SIN = math.sin(GOLDEN_ANGLE_RAD)
 
@@ -183,10 +183,17 @@ def periodic_fbm(
     power: float = 1.65,
     aniso_xy: Tuple[float, float] = (1.0, 1.0),
 ) -> np.ndarray:
-    """Exact seamless periodic spectral noise via 2D FFT."""
+    """Exact seamless periodic spectral noise via 2D FFT.
+
+    `aniso_xy = (stretch_x, stretch_y)` elongates spatial features along x/y:
+    stretching space by `a` multiplies Fourier wavenumber `k` by `a` (normalized by geometric mean).
+    """
     ky = np.fft.fftfreq(res)[:, None] * res
     kx = np.fft.rfftfreq(res)[None, :] * res
-    k = np.sqrt((kx / max(aniso_xy[0], 1e-3)) ** 2 + (ky / max(aniso_xy[1], 1e-3)) ** 2)
+    ax = max(aniso_xy[0], 1e-3)
+    ay = max(aniso_xy[1], 1e-3)
+    g = math.sqrt(ax * ay)
+    k = np.sqrt((kx * (ax / g)) ** 2 + (ky * (ay / g)) ** 2)
     mask = (k >= freq_min) & (k <= freq_max)
     amp = np.zeros_like(k, dtype=np.float64)
     amp[mask] = 1.0 / np.maximum(k[mask], 1.0) ** power

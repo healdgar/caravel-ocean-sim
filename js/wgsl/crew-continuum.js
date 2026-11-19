@@ -237,21 +237,28 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
 
   // Smooth anatomical throat/neck mask (prevents stray shirt tags or white UV collar bleed on neck without hard steps).
-  let neckLineY=select(1.465,1.425,female);
-  let neckRad=length(vec2f(bodyPos.x*1.02,bodyPos.z+select(0.005,0.036,female)));
+  // Measured continuum vertex bounds: male neck sits around z=-0.01 with r_p50=0.094..r_p95=0.125 above y=1.475;
+  // female neck sits around z=-0.036 with r=0.056..0.072 above y=1.425.
+  let neckLineY=select(1.475,1.425,female);
+  let neckRad=length(vec2f(bodyPos.x*1.02,bodyPos.z+select(0.010,0.036,female)));
+  let neckRIn=select(0.088,0.056,female);
+  let neckROut=select(0.118,0.072,female);
   let neckSkinMask=select(0.0,
-    smoothstep(neckLineY-0.012,neckLineY+0.014,bodyPos.y)*(1.0-smoothstep(neckLineY+0.120,neckLineY+0.145,bodyPos.y))*(1.0-smoothstep(0.056,0.072,neckRad)),
+    smoothstep(neckLineY-0.014,neckLineY+0.014,bodyPos.y)*(1.0-smoothstep(neckLineY+0.125,neckLineY+0.150,bodyPos.y))*(1.0-smoothstep(neckRIn,neckROut,neckRad)),
     skin.w>0.5);
 
   // Smooth torso/sleeve cloth override where fit-crew-body.py mislabeled shirt folds as region 4 (hair), 0 (paint), or 3 (skin),
   // and bare forearm override on sailor-male past the rolled-up sleeve cuff (|x| >= 0.495).
+  // Measured waist split: villager-female skirt ends at y=0.997 and blouse begins at y=0.999; keeping waistY=1.00 prevents
+  // shirt dye from bleeding down onto upper skirts (and preserves leather belts/waistbands at y=1.00..1.08 on region 0).
   let sleeveLimit=select(0.495,0.62,female);
-  let strayHairOnShirt=(region==4u||region==0u)&&bodyPos.y>0.86&&bodyPos.y<1.495&&abs(bodyPos.x)<sleeveLimit;
-  let strayHairOnTrousers=(region==4u||region==0u)&&bodyPos.y>=0.24&&bodyPos.y<=0.86;
+  let waistY=1.00;
+  let strayHairOnShirt=((region==4u)||(region==0u&&bodyPos.y>1.095))&&bodyPos.y>waistY&&bodyPos.y<select(1.468,1.445,female)&&abs(bodyPos.x)<sleeveLimit;
+  let strayHairOnTrousers=(region==4u||region==0u)&&bodyPos.y>=0.24&&bodyPos.y<=waistY;
   let maleOpenVNeck=!female&&bodyPos.z>0.06&&abs(bodyPos.x)<0.050&&bodyPos.y>1.32&&bodyPos.y<1.46;
-  let torsoSkinOnShirt=region==3u&&bodyPos.y>0.94&&abs(bodyPos.x)<sleeveLimit&&(
+  let torsoSkinOnShirt=region==3u&&bodyPos.y>waistY&&abs(bodyPos.x)<sleeveLimit&&(
     select(
-      bodyPos.y<1.495&&!(neckRad<0.072&&bodyPos.y>1.44)&&!maleOpenVNeck,
+      bodyPos.y<1.465&&!(neckRad<0.105&&bodyPos.y>1.43)&&!maleOpenVNeck,
       bodyPos.y<1.445&&(neckRad>=0.072||bodyPos.z<-0.045),
       female
     )
@@ -271,7 +278,7 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
       let dyed=worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2);
       // Skin-border rescue applies ONLY at the collar opening around the neck and past the actual cuff — never across sleeves!
       let cuffX=select(0.495,0.62,female);
-      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.020&&neckRad<0.076)||abs(bodyPos.x)>cuffX),effRegion==1u);
+      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.025&&neckRad<neckROut+0.010)||abs(bodyPos.x)>cuffX),effRegion==1u);
       if(!atBorder||skin.w<=0.5){
         baseOut=vec4f(dyed,0.0);
       }else{

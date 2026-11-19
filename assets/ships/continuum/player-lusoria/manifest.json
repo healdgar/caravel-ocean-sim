@@ -6,27 +6,27 @@
  "model": "lusoria",
  "label": "Lusoria Rhenana interpretation · c. 350",
  "source": {
-  "vertices": 33443,
+  "vertices": 33451,
   "indices": 100932,
   "shards": 59,
-  "key": "ae265a009d930e741e17036f0a0bc6d8826fba6118d95b7321b17fbd47915b79",
+  "key": "1cd0a0723b434290d9ae1479d670b058e25c7c5b4ab81f0153ccb09153717bb9",
   "surface": {
-   "area": 187.68007069670375,
+   "area": 187.583940896522,
    "centroid": [
-    0.0005879836651633496,
-    0.5112395071797993,
-    0.15933422068583472
+    0.0005882855066105954,
+    0.5136568890177573,
+    0.17351563093049666
    ],
    "materials": {
-    "0": 30.41198501076421,
-    "1": 64.35720345632399,
+    "0": 30.41180693930037,
+    "1": 64.53361401085816,
     "2": 1.9870576979556271,
     "3": 0.8454715154591664,
     "9": 17.14285835500749,
     "10": 2.5921609398119325,
     "12": 1.5909826434849474,
-    "15": 48.90101808345371,
-    "16": 14.740169697285094,
+    "15": 48.90082150328419,
+    "16": 14.468003994203054,
     "17": 0.39608524557155944,
     "19": 0.7991233070851084,
     "25": 0.02070976418349203,
@@ -47,14 +47,14 @@
   "rode": 110
  },
  "clusters": {
-  "count": 1310,
-  "triangles": 64147,
-  "levels": 9,
-  "roots": 260,
-  "groups": 132,
+  "count": 937,
+  "triangles": 60259,
+  "levels": 12,
+  "roots": 247,
+  "groups": 316,
   "parts": 198,
-  "rootError": 7.3053,
-  "rootTriangles": 7295
+  "rootError": 7.1709,
+  "rootTriangles": 7660
  },
  "far": {
   "voxel": 0.062,
@@ -63,14 +63,14 @@
     "kind": "rigid",
     "close": 0.3098,
     "grid": [
-     139,
+     144,
      172,
      347
     ],
     "count": 1,
     "dropped": 0,
-    "genus": 61,
-    "surfaceTriangles": 559904
+    "genus": 6,
+    "surfaceTriangles": 549828
    },
    {
     "kind": "canvas",
@@ -87,33 +87,33 @@
    }
   ],
   "baseTriangles": 8000,
-  "baseVertices": 3886,
-  "baseError": 0.1437,
-  "baseGeometric": 0.0492,
-  "steps": 3864,
+  "baseVertices": 3996,
+  "baseError": 0.1405,
+  "baseGeometric": 0.0471,
+  "steps": 3980,
   "coreTriangles": 4,
-  "depth": 10,
+  "depth": 11,
   "errorRange": [
-   0.1437,
-   8.7048
+   0.1405,
+   6.2279
   ],
   "inflateMax": 0.7055,
-  "euler": -114,
-  "farFirst": 353
+  "euler": -4,
+  "farFirst": 170
  },
  "splat": {
   "centre": [
-   0.0195,
-   4.165,
-   2.1302
+   0.0107,
+   4.1657,
+   2.1312
   ],
-  "ry": 4.9486,
-  "rxSide": 2.0676,
-  "rxEnd": 1.8074,
+  "ry": 4.9478,
+  "rxSide": 2.093,
+  "rxEnd": 1.8544,
   "colour": [
-   0.31218,
-   0.22632,
-   0.14865
+   0.31199,
+   0.22659,
+   0.14917
   ]
  },
  "bound": {
@@ -127,21 +127,21 @@
  "poses": 1,
  "files": {
   "body.bin": {
-   "bytes": 2129968,
-   "sha256": "a80cdb7d1be5c26412af92a73432b380a41a62d6d598e04b9025bfef6a5ea473",
+   "bytes": 2066768,
+   "sha256": "a0e9f20563a5801199a48ebea04ae1cc0bebebc5406256ec4d4e5b5d27bf5f0d",
    "gzip": {
     "file": "body.bin.gz",
-    "bytes": 764455,
-    "sha256": "2499c55574a87616522ec47ba0a67a96573eb90e5f88a5d6813e39a1ca98bc28"
+    "bytes": 740364,
+    "sha256": "83ab023f063583774a61ed53608e5af0bdd5d964f643d1a8779b2ea954dcd2f2"
    }
   },
   "corners.bin": {
    "bytes": 403728,
-   "sha256": "743ec2bdff99e1f26233751c1a9e4b10416b4e851b85724dd5bab2e04b9173a8",
+   "sha256": "5b539d62c14262cf815968c7eb4fd45193dce5020d6b7c2a7b3b5c0277fd448d",
    "gzip": {
     "file": "corners.bin.gz",
-    "bytes": 110796,
-    "sha256": "e13d8d52c85cd153a6d50c35a9ca7b109251f28e0eef92532a2be002e5598ce8"
+    "bytes": 110811,
+    "sha256": "6b9fad46d6eb9396364ab85bbd81850611a578570960af95abfff88d19b38067"
    }
   }
  }

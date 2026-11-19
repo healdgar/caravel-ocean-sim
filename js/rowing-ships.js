@@ -171,7 +171,7 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   for(const station of d.stations){
     const start=out.length,pose=rowingStationPose(rest,station.id),material=16+station.index/64;
     if(station.oarlock==='tholepins'){
-      const pivot=station.pivot;for(const sign of [-1,1])tube([pivot[0],pivot[1]-.065/sy,pivot[2]+sign*.055/sz],[pivot[0],pivot[1]+.085/sy,pivot[2]+sign*.055/sz],.012/sy,1,.012/sy,6);
+      const pivot=station.pivot;for(const sign of [-1,1])tube([pivot[0],pivot[1]-.18/sy,pivot[2]+sign*.055/sz],[pivot[0],pivot[1]+.085/sy,pivot[2]+sign*.055/sz],.012/sy,1,.012/sy,6);
     }
     const dynamicStart=out.length;
     physicalGeometry(({tube,quad})=>{
