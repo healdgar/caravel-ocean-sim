@@ -39,6 +39,7 @@ export const CLOTHING_CONTINUUM_TYPES = Object.freeze([
   { index: 11, id: 'indigenous-breechcloth-m', sex: 'male', slot: 'lower' },
   { index: 12, id: 'indigenous-wrap-skirt-f', sex: 'female', slot: 'lower' },
   { index: 13, id: 'shoulder-cloak', sex: 'male', slot: 'over' },
+  { index: 14, id: 'female-riding-breeches', sex: 'female', slot: 'lower' },
 ].map(Object.freeze));
 
 // Role codes encoded into clothingInfo uniform so the GPU clothing stand pass picks authentic 1550 outfits per body.

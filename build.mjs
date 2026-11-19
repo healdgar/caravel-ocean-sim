@@ -60,7 +60,7 @@ order.splice(order.indexOf('js/crew.js'),0,'js/crew-overboard.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js','js/crew-components.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
-wgslModules.push('js/wgsl/part-assembly.js','js/wgsl/rig-surfaces.js','js/wgsl/vessel-recoil.js','js/wgsl/hull-flood.js','js/wgsl/townsfolk.js');
+wgslModules.push('js/wgsl/human-morph.js','js/wgsl/part-assembly.js','js/wgsl/rig-surfaces.js','js/wgsl/vessel-recoil.js','js/wgsl/hull-flood.js','js/wgsl/townsfolk.js');
 // Shaders read these constants as they are built, so they come first, after the fort plan the streets import.
 order.unshift('js/fort-plan.js','js/fort-records.js','js/harbour-geography.js','js/harbour-defences.js','js/town-streets.js','js/indigenous-dress.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/town-clips.js','js/town-shots.js','js/townsfolk.js','js/prop-continuum.js','js/wgsl/prop-continuum.js','js/gunnery-tools.js','js/props.js','js/free-cannon.js','js/castle-duel.js');
@@ -84,7 +84,7 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/native-works.js','js/old-
 // The one cut (its pose kinds, the ships' and the wind's among them, then its select, lists and pipeline family,
 // js/wgsl/continuum-cut.js), then the city continuum: its bodies' packing, then its material, which reads the
 // buildings' own constants.
-order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/continuum-kinds.js','js/wgsl/ship-kinds.js','js/wgsl/continuum-wind.js','js/wgsl/continuum-cut.js','js/city-continuum.js','js/wgsl/city-continuum.js');
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/human-morph.js','js/wgsl/continuum-kinds.js','js/wgsl/ship-kinds.js','js/wgsl/continuum-wind.js','js/wgsl/continuum-cut.js','js/city-continuum.js','js/wgsl/city-continuum.js');
 // The animal continuum: its atlas format, then how a family's pass writes its joints (the SKINNED kind's pose data),
 // which the herds' and the sea's shaders are built on.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/animal-continuum.js','js/wgsl/skinned-pose.js');

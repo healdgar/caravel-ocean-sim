@@ -17,40 +17,81 @@ After this, bake the derived continuum atlas:
     node scripts/prepare-forest-continuum.mjs portugal
 """
 import argparse
+import concurrent.futures
 import dataclasses
 import gzip
 import hashlib
 import json
 import pathlib
+import pickle
 import shutil
 import subprocess
 import sys
 import time
 
-# (species, canopy_age_yr, veteran_age_yr, seed)
-# Every species is grown ONCE monotonically with forestmodeler's canonical ColonizingGrower
-# (`resolution=1.0, steps_per_cycle=2`) and meshed with `native_tree_render.blade_meshes(...,
-# individual_cutout=True, lod_tier='hero')` — 100% native-size individual folded leaves with
-# zero card enlargement, zero blade capping, and zero synthetic pruning.
-SPECIES_SPECS = (
-    ('oak', 19, 32, 101),
-    ('chestnut', 20, 35, 101),
-    ('maple', 15, 24, 101),
-    ('elm', 17, 28, 303),
-    ('birch', 14, 25, 202),
-    ('blueberry', 10, 20, 303),
+# (species, seed) — canopy ('mature') and veteran ('old') ages are pulled directly from
+# forestmodeler's own `gardenplans.plan.life_stages(SPECIES[species](seed))`!
+# Long-lived old-growth species (old >= 80 yr: oak 168, chestnut 218, elm 148, maple 86) use
+# forestmodeler's canonical ancient-tree grower settings (`resolution=2.5, steps_per_cycle=1`,
+# matching forestmodeler/scripts/render_ancient_gallery.py); shorter-lived species (birch 34,
+# blueberry 25) use `resolution=1.0, steps_per_cycle=2`. All 12 prototypes use
+# `native_tree_render.blade_meshes(..., individual_cutout=True, lod_tier='hero')` — 100%
+# native-size individual folded leaves with zero card enlargement.
+SPECIES_SEEDS = (
+    ('oak', 101),
+    ('chestnut', 101),
+    ('maple', 101),
+    ('elm', 303),
+    ('birch', 202),
+    ('blueberry', 303),
 )
-PROTOTYPES = (
-    tuple((sp, 'veteran', vet_age, seed) for sp, _can_age, vet_age, seed in SPECIES_SPECS)
-    + tuple((sp, 'canopy', can_age, seed) for sp, can_age, _vet_age, seed in SPECIES_SPECS)
+PROTOTYPE_ORDER = (
+    tuple((sp, 'veteran', seed) for sp, seed in SPECIES_SEEDS)
+    + tuple((sp, 'canopy', seed) for sp, seed in SPECIES_SEEDS)
 )
 
-RESOLUTION = 1.0
-STEPS_PER_CYCLE = 2
 LATITUDE = 39.0
 FIELD_CELL_METRES = 0.6
 MIDDLE_CELLS_IN_HEIGHT = 40
 BAKER_MIDDLE_CELL_METRES = 0.15
+
+
+def _grow_one_species(job):
+    """Worker function for parallel ColonizingGrower execution across all 6 Portugal species."""
+    source_str, species, seed, latitude = job
+    if source_str not in sys.path:
+        sys.path.insert(0, source_str)
+    from gardenplans.grow_colonize import ColonizingGrower
+    from gardenplans.light import Environment
+    from gardenplans.plan import SPECIES, life_stages
+    from gardenplans.scenery import _measure_grown
+    from gardenplans.sky import SkyModel
+
+    t0 = time.perf_counter()
+    plan0 = SPECIES[species](seed)
+    stages = dict(life_stages(plan0))
+    can_age = int(round(stages['mature']))
+    vet_age = int(round(stages['old']))
+    res = 2.5 if vet_age >= 80 else 1.0
+    spc = 1 if vet_age >= 80 else 2
+    plan = dataclasses.replace(
+        plan0,
+        growth_cycles=vet_age,
+        background_mortality=0.0,
+        senescent_mortality=0.0,
+    )
+    grower = ColonizingGrower(
+        plan,
+        Environment(extinction=plan.light_extinction, sky=SkyModel(latitude=latitude)),
+        checkpoints=(float(can_age), float(vet_age)),
+        steps_per_cycle=spc,
+        resolution=res,
+    )
+    grower.grow()
+    h_v, c_v, d_v, _ = _measure_grown(grower, float(vet_age))
+    h_c, c_c, d_c, _ = _measure_grown(grower, float(can_age))
+    dt = time.perf_counter() - t0
+    return (species, seed, can_age, vet_age, res, spc, plan, grower, (h_c, c_c, d_c), (h_v, c_v, d_v), dt)
 
 
 def sha256(raw):
@@ -96,45 +137,39 @@ def main():
     from scripts import bake_tiered_forest as baker_cli
 
     before = json.loads((pack / 'manifest.json').read_text())
-    if [(p['species'], p['cohort']) for p in before['prototypes']] != [(s[0], s[1]) for s in PROTOTYPES]:
+    if [(p['species'], p['cohort']) for p in before['prototypes']] != [(s[0], s[1]) for s in PROTOTYPE_ORDER]:
         raise SystemExit('The pack does not hold these prototypes in this order')
 
     work.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
 
-    # Grow each species ONCE monotonically with forestmodeler's canonical resolution=1.0, steps_per_cycle=2
-    # capturing both the canopy checkpoint and the veteran checkpoint on the exact same skeleton.
+    # Grow all 6 species in parallel using forestmodeler's own life_stages(plan) mature & old ages
+    # (cached to work/grown_species.pkl so subsequent runs skip the 6-minute growth phase).
+    cache_pkl = work / 'grown_species.pkl'
     grown_by_species = {}
-    for species, can_age, vet_age, seed in SPECIES_SPECS:
-        clock = time.perf_counter()
-        plan = dataclasses.replace(
-            SPECIES[species](seed),
-            growth_cycles=vet_age,
-            background_mortality=0.0,
-            senescent_mortality=0.0,
-        )
-        grower = ColonizingGrower(
-            plan,
-            Environment(extinction=plan.light_extinction, sky=SkyModel(latitude=LATITUDE)),
-            checkpoints=(float(can_age), float(vet_age)),
-            steps_per_cycle=STEPS_PER_CYCLE,
-            resolution=RESOLUTION,
-        )
-        grower.grow()
-        grown_by_species[species] = (plan, grower)
-        h_v, c_v, d_v, _ = _measure_grown(grower, float(vet_age))
-        h_c, c_c, d_c, _ = _measure_grown(grower, float(can_age))
-        print(
-            f'{species:9s} res={RESOLUTION} spc={STEPS_PER_CYCLE}  '
-            f'canopy {can_age:2d}yr ({h_c:4.1f}m, {c_c:4.1f}m r)  '
-            f'veteran {vet_age:2d}yr ({h_v:4.1f}m, {c_v:4.1f}m r, {d_v:5.1f}cm dbh)  '
-            f'({time.perf_counter() - clock:.1f} s)',
-            flush=True,
-        )
+    if cache_pkl.exists():
+        grown_by_species = pickle.loads(cache_pkl.read_bytes())
+        print(f'loaded cached grown skeletons from {cache_pkl}', flush=True)
+    else:
+        jobs = [(str(source), sp, seed, LATITUDE) for sp, seed in SPECIES_SEEDS]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=len(jobs)) as pool:
+            for species, seed, can_age, vet_age, res, spc, plan, grower, m_c, m_v, dt in pool.map(_grow_one_species, jobs):
+                grown_by_species[species] = (can_age, vet_age, res, spc, plan, grower)
+                h_c, c_c, _d_c = m_c
+                h_v, c_v, d_v = m_v
+                print(
+                    f'{species:9s} res={res} spc={spc}  '
+                    f'canopy {can_age:3d}yr ({h_c:4.1f}m, {c_c:4.1f}m r)  '
+                    f'veteran {vet_age:3d}yr ({h_v:4.1f}m, {c_v:4.1f}m r, {d_v:5.1f}cm dbh)  '
+                    f'({dt:.1f} s)',
+                    flush=True,
+                )
+        cache_pkl.write_bytes(pickle.dumps(grown_by_species))
 
     grown, grower_of_skel, record = [], {}, []
-    for index, (species, cohort, age, seed) in enumerate(PROTOTYPES):
-        plan, grower = grown_by_species[species]
+    for index, (species, cohort, seed) in enumerate(PROTOTYPE_ORDER):
+        can_age, vet_age, res, spc, plan, grower = grown_by_species[species]
+        age = vet_age if cohort == 'veteran' else can_age
         height, crown, dbh, basal = _measure_grown(grower, float(age))
         grown.append((index, species, cohort, float(age), plan, grower))
         grower_of_skel[id(grower.skeleton)] = grower
@@ -144,14 +179,14 @@ def main():
             'cohort': cohort,
             'age': age,
             'seed': seed,
-            'resolution': RESOLUTION,
-            'stepsPerCycle': STEPS_PER_CYCLE,
+            'resolution': res,
+            'stepsPerCycle': spc,
             'basalRadius': round(float(basal), 4),
         })
 
     def grown_prototypes(species_order, *, cohorts, **_):
         wanted = [(species, cohort) for cohort in cohorts for species in species_order]
-        if wanted != [(s[0], s[1]) for s in PROTOTYPES]:
+        if wanted != [(s[0], s[1]) for s in PROTOTYPE_ORDER]:
             raise SystemExit(f'The stand asks for {wanted}')
         return grown
 
@@ -168,10 +203,12 @@ def main():
         g = grower_of_skel.get(id(skel))
         return native_place_leaves(skel, float(age), plan, env=g.env if g is not None else options.get('env'))
 
-    # Use forestmodeler's REAL native_tree_render.blade_meshes: 1:1 physical native leaf size, zero card enlargement!
+    # Use forestmodeler's REAL native_tree_render.blade_meshes at 1:1 native single-leaf scale (cluster=1.0):
+    # each veteran oak/chestnut/elm already carries 200k–408k real individual folded leaves (~12.3M total verts
+    # across all 12 prototypes, safely within the continuum's 16.77M float-indexable vertex address space).
     def native_hero_blades(organs, plan, cluster, **_):
         meshes, _audit = native_blade_meshes(
-            organs, plan, cluster, max_triangles=20_000_000, individual_cutout=True, lod_tier='hero'
+            organs, plan, 1.0, max_triangles=20_000_000, individual_cutout=True, lod_tier='hero'
         )
         return meshes
 
@@ -181,9 +218,21 @@ def main():
         reach = float(np.asarray(wood_vertices)[:, 1].max())
         return merged_by_cell(wood_vertices, wood_indices, cell_m * max(1.0, reach / MIDDLE_CELLS_IN_HEIGHT / BAKER_MIDDLE_CELL_METRES))
 
+    from gardenplans import foliage_fields as ff
+    ff.MAX_PATCHES = 200_000_000
+    ff.MAX_VOXELS = 24_000_000
+    orig_build_fields = tf.build_fields
+
+    def wide_build_fields(*a, **kw):
+        kw['max_patches'] = ff.MAX_PATCHES
+        kw['max_voxels'] = ff.MAX_VOXELS
+        kw['quadrature_edge_metres'] = 0.5
+        return orig_build_fields(*a, **kw)
+
     meshes_module, meshes_name = (accel, 'plant_meshes_fast') if accel is not None else (tf, 'plant_meshes')
     tf._grow_prototype_cohorts = grown_prototypes
     tf._simplify_wood_indices_by_cell = merged_for_height
+    tf.build_fields = wide_build_fields
     setattr(meshes_module, meshes_name, native_hero_meshes)
     tf.place_leaves = native_env_leaves
     tf._build_tier0_blade_meshes = native_hero_blades
@@ -193,7 +242,7 @@ def main():
     clock = time.perf_counter()
     result = tf.bake_tiered_forest(
         baker_cli._build_subtropical_island_field(), work, stand='portugal', stem='portugal_forest', n_stems=24, seed=42,
-        prototype_age=22.0, veteran_age=42.0, growth_mode='isolated', cohorts=('veteran', 'canopy'), resolution=RESOLUTION,
+        prototype_age=60.0, veteran_age=168.0, growth_mode='isolated', cohorts=('veteran', 'canopy'), resolution=2.5,
         field_cell_m=FIELD_CELL_METRES, latitude=LATITUDE,
     )
     print(f'baked in {time.perf_counter() - clock:.0f} s', flush=True)
@@ -285,7 +334,7 @@ def main():
         'bake': {
             'script': 'scripts/bake-forest-mature-pack.py',
             'forestmodeler': revision,
-            'growth': 'native forestmodeler ColonizingGrower (resolution=1.0, steps_per_cycle=2) + hero wood + native_tree_render.blade_meshes (1:1 native leaves, zero card enlargement)',
+            'growth': 'native forestmodeler ColonizingGrower at life_stages() mature/old ages (res=2.5/spc=1 for >=80yr, res=1.0/spc=2 for <80yr) + hero wood + native_tree_render.blade_meshes (1:1 native leaves, zero card enlargement)',
             'latitudeDegrees': LATITUDE,
             'fieldCellMetres': FIELD_CELL_METRES,
             'middleCellsInHeight': MIDDLE_CELLS_IN_HEIGHT,

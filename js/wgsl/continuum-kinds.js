@@ -46,6 +46,7 @@
 import { FRACTURE_GRAVITY } from '../ship-fracture.js';
 import { SIM_CLOCK_LOOP_S } from './common.js';
 import { CONTINUUM_KIND, CONTINUUM_HEADER, CONTINUUM_STREAMS } from '../continuum-format.js';
+import { HUMAN_MORPH_WGSL } from './human-morph.js';
 
 const continuumKindsDefined = new Map();
 // A kind's two functions, named continuum<Name>Pose and continuum<Name>Sphere in `wgsl` (a function, written when a
@@ -131,7 +132,7 @@ defineContinuumKind(CONTINUUM_KIND.SKINNED, {
   wgsl: () => {
     const skin = CONTINUUM_STREAMS.find((s) => s.name === 'skin');
     const wind = CONTINUUM_STREAMS.find((s) => s.name === 'wind');
-    return /* wgsl */`
+    return HUMAN_MORPH_WGSL + /* wgsl */`
 // Joint j's matrix, its three rows as the columns of a mat3x4f, so that vec4f(p, 1) * m is the posed point.
 fn continuumSkinnedJoint(data:u32,count:u32,j:u32)->mat3x4f {
   let at=data+1u+min(j,count-1u)*3u;
@@ -151,8 +152,9 @@ fn continuumSkinnedPose(record:ContinuumRecord,data:u32,part:u32,vertex:u32,p:Co
   }
   m=m*(1.0/max(weights.x+weights.y+weights.z+weights.w,1e-6));
   var out=p;
-  out.position=vec4f(p.position,1.0)*m;
-  out.normal=normalize(vec4f(p.normal,0.0)*m);
+  let morphed=humanMorphPosNrm(p.position,p.normal,record.spare.z,record.spare.w);
+  out.position=vec4f(morphed.pos,1.0)*m;
+  out.normal=normalize(vec4f(morphed.nrm,0.0)*m);
   out.hidden=continuumPoses[data+1u+count*3u+min((joints>>(8u*lead))&255u,count-1u)].w<0.0;
   let windWord=continuumStreamWord(${CONTINUUM_HEADER.wind}u,${wind.bit}u,${wind.words}u,vertex,0u);
   if(!out.hidden&&windWord!=0u){
@@ -213,7 +215,9 @@ fn continuumSkinnedSphere(record:ContinuumRecord,data:u32,part:u32,sphere:vec4f)
   if(continuumPoses[spheres+j].w<0.0){return vec4f(sphere.xyz,-1.0);}
   let m=continuumSkinnedJoint(data,count,j);
   let stretch=max(max(length(vec3f(m[0].x,m[1].x,m[2].x)),length(vec3f(m[0].y,m[1].y,m[2].y))),length(vec3f(m[0].z,m[1].z,m[2].z)));
-  return vec4f(vec4f(sphere.xyz,1.0)*m,sphere.w*stretch+continuumPoses[data].y);
+  let mCentre=humanMorphPoint(sphere.xyz,record.spare.z,record.spare.w);
+  let mGrow=select(1.0,1.22,(record.spare.z&1u)!=0u);
+  return vec4f(vec4f(mCentre,1.0)*m,sphere.w*stretch*mGrow+continuumPoses[data].y);
 }
 `;
   },

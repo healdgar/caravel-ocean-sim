@@ -7,29 +7,29 @@
   "source": {
     "forestManifest": {
       "file": "../manifest.json",
-      "rootsSha256": "e567fd917f65bf0634b2f6b5be9d818819617db0ab915c9a702716ba12831762"
+      "rootsSha256": "5611f204ccf115ddc3d9426e04f90843f5b633c58aba985c3058324b61055d1f"
     }
   },
   "files": {
     "middle-vertices.bin": {
-      "bytes": 492596,
-      "sha256": "82e8e766eff9d3313d73637d6253172579794d5fa22f8b2560ab532ef3f3a811",
+      "bytes": 2672124,
+      "sha256": "886d0e72d27581e6bd2414716727585bdbfa49f980370bac50209612fe87ee8b",
       "gzip": {
         "file": "middle-vertices.bin.gz",
-        "bytes": 295379,
-        "sha256": "3f81b5298238a02eff956289b21d2477fa8382a004814e02f61a9c42f54b1b38"
+        "bytes": 1525956,
+        "sha256": "02b659f92e58a58226039c68404e58306eb8adcdc05d984f38f5c1fd451468f5"
       },
-      "vertexCount": 9473
+      "vertexCount": 51387
     },
     "middle-indices.bin": {
-      "bytes": 101292,
-      "sha256": "4e54668ef9dfd9cb916b53c9a1695a68107d1af4355216499b7e991c5b443896",
+      "bytes": 823788,
+      "sha256": "94324c2caba678c64fe827c535b765c7966f9bf073938e792e1eb68166436532",
       "gzip": {
         "file": "middle-indices.bin.gz",
-        "bytes": 35196,
-        "sha256": "6f632b23c1f3edee510ed1b41528a7e4c0fbd9362d62421d2944c33972d6b728"
+        "bytes": 270914,
+        "sha256": "e8133c2b75a0e16b180cb9ab381d081526a02264e771d4afbf7b481c9ce8124b"
       },
-      "indexCount": 25323
+      "indexCount": 205947
     }
   },
   "prototypes": [
@@ -37,265 +37,265 @@
       "id": 0,
       "species": "oak",
       "cohort": "veteran",
-      "age": 32.0,
-      "heightMetres": 11.63,
-      "crownRadiusMetres": 5.302,
-      "crownBaseMetres": 3.156,
+      "age": 168.0,
+      "heightMetres": 30.237,
+      "crownRadiusMetres": 19.733,
+      "crownBaseMetres": 2.136,
       "wood": {
         "firstIndex": 0,
-        "indexCount": 4281,
-        "triangles": 1427,
-        "sourceTriangles": 188279
+        "indexCount": 19539,
+        "triangles": 6513,
+        "sourceTriangles": 808526
       },
       "shell": {
-        "firstIndex": 4281,
-        "indexCount": 1536,
-        "triangles": 512,
-        "sourceProxyAreaSquareMetres": 1015.74
+        "firstIndex": 19539,
+        "indexCount": 16536,
+        "triangles": 5512,
+        "sourceProxyAreaSquareMetres": 19767.39
       },
-      "geometryErrorMetres": 7.0072
+      "geometryErrorMetres": 24.1792
     },
     {
       "id": 1,
       "species": "chestnut",
       "cohort": "veteran",
-      "age": 35.0,
-      "heightMetres": 14.273,
-      "crownRadiusMetres": 6.362,
-      "crownBaseMetres": 3.048,
+      "age": 218.0,
+      "heightMetres": 28.045,
+      "crownRadiusMetres": 18.888,
+      "crownBaseMetres": 4.727,
       "wood": {
-        "firstIndex": 5817,
-        "indexCount": 2271,
-        "triangles": 757,
-        "sourceTriangles": 132166
+        "firstIndex": 36075,
+        "indexCount": 26109,
+        "triangles": 8703,
+        "sourceTriangles": 727980
       },
       "shell": {
-        "firstIndex": 8088,
-        "indexCount": 1302,
-        "triangles": 434,
-        "sourceProxyAreaSquareMetres": 477.71
+        "firstIndex": 62184,
+        "indexCount": 24336,
+        "triangles": 8112,
+        "sourceProxyAreaSquareMetres": 12189.73
       },
-      "geometryErrorMetres": 9.7453
+      "geometryErrorMetres": 24.5341
     },
     {
       "id": 2,
       "species": "maple",
       "cohort": "veteran",
-      "age": 24.0,
-      "heightMetres": 11.665,
-      "crownRadiusMetres": 3.901,
-      "crownBaseMetres": 1.73,
+      "age": 86.0,
+      "heightMetres": 24.844,
+      "crownRadiusMetres": 11.392,
+      "crownBaseMetres": 1.696,
       "wood": {
-        "firstIndex": 9390,
-        "indexCount": 2907,
-        "triangles": 969,
-        "sourceTriangles": 175056
+        "firstIndex": 86520,
+        "indexCount": 11748,
+        "triangles": 3916,
+        "sourceTriangles": 389822
       },
       "shell": {
-        "firstIndex": 12297,
-        "indexCount": 672,
-        "triangles": 224,
-        "sourceProxyAreaSquareMetres": 704.58
+        "firstIndex": 98268,
+        "indexCount": 9474,
+        "triangles": 3158,
+        "sourceProxyAreaSquareMetres": 10731.04
       },
-      "geometryErrorMetres": 7.9278
+      "geometryErrorMetres": 18.976
     },
     {
       "id": 3,
       "species": "elm",
       "cohort": "veteran",
-      "age": 28.0,
-      "heightMetres": 16.861,
-      "crownRadiusMetres": 4.266,
-      "crownBaseMetres": 3.027,
+      "age": 148.0,
+      "heightMetres": 23.054,
+      "crownRadiusMetres": 18.688,
+      "crownBaseMetres": 3.057,
       "wood": {
-        "firstIndex": 12969,
-        "indexCount": 1803,
-        "triangles": 601,
-        "sourceTriangles": 149916
+        "firstIndex": 107742,
+        "indexCount": 25149,
+        "triangles": 8383,
+        "sourceTriangles": 593748
       },
       "shell": {
-        "firstIndex": 14772,
-        "indexCount": 1272,
-        "triangles": 424,
-        "sourceProxyAreaSquareMetres": 524.84
+        "firstIndex": 132891,
+        "indexCount": 13938,
+        "triangles": 4646,
+        "sourceProxyAreaSquareMetres": 11773.94
       },
-      "geometryErrorMetres": 10.6948
+      "geometryErrorMetres": 25.7881
     },
     {
       "id": 4,
       "species": "birch",
       "cohort": "veteran",
-      "age": 25.0,
-      "heightMetres": 9.443,
-      "crownRadiusMetres": 3.914,
-      "crownBaseMetres": 1.736,
+      "age": 34.0,
+      "heightMetres": 10.328,
+      "crownRadiusMetres": 4.232,
+      "crownBaseMetres": 1.811,
       "wood": {
-        "firstIndex": 16044,
-        "indexCount": 822,
-        "triangles": 274,
-        "sourceTriangles": 49466
+        "firstIndex": 146829,
+        "indexCount": 1842,
+        "triangles": 614,
+        "sourceTriangles": 91172
       },
       "shell": {
-        "firstIndex": 16866,
-        "indexCount": 372,
-        "triangles": 124,
-        "sourceProxyAreaSquareMetres": 185.57
+        "firstIndex": 148671,
+        "indexCount": 804,
+        "triangles": 268,
+        "sourceProxyAreaSquareMetres": 367.47
       },
-      "geometryErrorMetres": 5.1573
+      "geometryErrorMetres": 7.0737
     },
     {
       "id": 5,
       "species": "blueberry",
       "cohort": "veteran",
-      "age": 20.0,
-      "heightMetres": 2.113,
-      "crownRadiusMetres": 1.202,
-      "crownBaseMetres": 0.215,
+      "age": 25.0,
+      "heightMetres": 2.225,
+      "crownRadiusMetres": 1.424,
+      "crownBaseMetres": 0.288,
       "wood": {
-        "firstIndex": 17238,
-        "indexCount": 78,
-        "triangles": 26,
-        "sourceTriangles": 10456
+        "firstIndex": 149475,
+        "indexCount": 138,
+        "triangles": 46,
+        "sourceTriangles": 18558
       },
       "shell": {
-        "firstIndex": 17316,
-        "indexCount": 264,
-        "triangles": 88,
-        "sourceProxyAreaSquareMetres": 2.0
+        "firstIndex": 149613,
+        "indexCount": 276,
+        "triangles": 92,
+        "sourceProxyAreaSquareMetres": 4.34
       },
-      "geometryErrorMetres": 1.4773
+      "geometryErrorMetres": 1.5761
     },
     {
       "id": 6,
       "species": "oak",
       "cohort": "canopy",
-      "age": 19.0,
-      "heightMetres": 8.403,
-      "crownRadiusMetres": 3.892,
-      "crownBaseMetres": 1.605,
+      "age": 60.0,
+      "heightMetres": 18.674,
+      "crownRadiusMetres": 12.258,
+      "crownBaseMetres": 1.669,
       "wood": {
-        "firstIndex": 17580,
-        "indexCount": 2298,
-        "triangles": 766,
-        "sourceTriangles": 64217
+        "firstIndex": 149889,
+        "indexCount": 8532,
+        "triangles": 2844,
+        "sourceTriangles": 359519
       },
       "shell": {
-        "firstIndex": 19878,
-        "indexCount": 660,
-        "triangles": 220,
-        "sourceProxyAreaSquareMetres": 360.61
+        "firstIndex": 158421,
+        "indexCount": 4566,
+        "triangles": 1522,
+        "sourceProxyAreaSquareMetres": 4245.11
       },
-      "geometryErrorMetres": 5.9207
+      "geometryErrorMetres": 13.8746
     },
     {
       "id": 7,
       "species": "chestnut",
       "cohort": "canopy",
-      "age": 20.0,
-      "heightMetres": 12.343,
-      "crownRadiusMetres": 2.468,
-      "crownBaseMetres": 1.237,
+      "age": 70.0,
+      "heightMetres": 21.313,
+      "crownRadiusMetres": 14.032,
+      "crownBaseMetres": 2.721,
       "wood": {
-        "firstIndex": 20538,
-        "indexCount": 459,
-        "triangles": 153,
-        "sourceTriangles": 19575
+        "firstIndex": 162987,
+        "indexCount": 9594,
+        "triangles": 3198,
+        "sourceTriangles": 340177
       },
       "shell": {
-        "firstIndex": 20997,
-        "indexCount": 312,
-        "triangles": 104,
-        "sourceProxyAreaSquareMetres": 76.08
+        "firstIndex": 172581,
+        "indexCount": 8244,
+        "triangles": 2748,
+        "sourceProxyAreaSquareMetres": 3765.59
       },
-      "geometryErrorMetres": 7.9072
+      "geometryErrorMetres": 17.4802
     },
     {
       "id": 8,
       "species": "maple",
       "cohort": "canopy",
-      "age": 15.0,
-      "heightMetres": 8.324,
-      "crownRadiusMetres": 2.413,
-      "crownBaseMetres": 1.35,
+      "age": 50.0,
+      "heightMetres": 19.258,
+      "crownRadiusMetres": 9.437,
+      "crownBaseMetres": 0.963,
       "wood": {
-        "firstIndex": 21309,
-        "indexCount": 1476,
-        "triangles": 492,
-        "sourceTriangles": 52156
+        "firstIndex": 180825,
+        "indexCount": 9897,
+        "triangles": 3299,
+        "sourceTriangles": 328075
       },
       "shell": {
-        "firstIndex": 22785,
-        "indexCount": 336,
-        "triangles": 112,
-        "sourceProxyAreaSquareMetres": 226.7
+        "firstIndex": 190722,
+        "indexCount": 4266,
+        "triangles": 1422,
+        "sourceProxyAreaSquareMetres": 6360.73
       },
-      "geometryErrorMetres": 5.532
+      "geometryErrorMetres": 14.6659
     },
     {
       "id": 9,
       "species": "elm",
       "cohort": "canopy",
-      "age": 17.0,
-      "heightMetres": 11.973,
-      "crownRadiusMetres": 2.342,
-      "crownBaseMetres": 1.775,
+      "age": 65.0,
+      "heightMetres": 29.646,
+      "crownRadiusMetres": 14.58,
+      "crownBaseMetres": 2.485,
       "wood": {
-        "firstIndex": 23121,
-        "indexCount": 1083,
-        "triangles": 361,
-        "sourceTriangles": 34123
+        "firstIndex": 194988,
+        "indexCount": 6294,
+        "triangles": 2098,
+        "sourceTriangles": 412404
       },
       "shell": {
-        "firstIndex": 24204,
-        "indexCount": 456,
-        "triangles": 152,
-        "sourceProxyAreaSquareMetres": 137.69
+        "firstIndex": 201282,
+        "indexCount": 3174,
+        "triangles": 1058,
+        "sourceProxyAreaSquareMetres": 5412.24
       },
-      "geometryErrorMetres": 7.772
+      "geometryErrorMetres": 22.2922
     },
     {
       "id": 10,
       "species": "birch",
       "cohort": "canopy",
-      "age": 14.0,
-      "heightMetres": 6.964,
-      "crownRadiusMetres": 3.196,
-      "crownBaseMetres": 1.215,
+      "age": 25.0,
+      "heightMetres": 9.441,
+      "crownRadiusMetres": 4.029,
+      "crownBaseMetres": 1.636,
       "wood": {
-        "firstIndex": 24660,
-        "indexCount": 312,
-        "triangles": 104,
-        "sourceTriangles": 10402
+        "firstIndex": 204456,
+        "indexCount": 852,
+        "triangles": 284,
+        "sourceTriangles": 49414
       },
       "shell": {
-        "firstIndex": 24972,
-        "indexCount": 120,
-        "triangles": 40,
-        "sourceProxyAreaSquareMetres": 40.86
+        "firstIndex": 205308,
+        "indexCount": 384,
+        "triangles": 128,
+        "sourceProxyAreaSquareMetres": 196.05
       },
-      "geometryErrorMetres": 4.7715
+      "geometryErrorMetres": 6.5002
     },
     {
       "id": 11,
       "species": "blueberry",
       "cohort": "canopy",
-      "age": 10.0,
-      "heightMetres": 0.95,
-      "crownRadiusMetres": 0.693,
-      "crownBaseMetres": 0.14,
+      "age": 8.0,
+      "heightMetres": 0.983,
+      "crownRadiusMetres": 0.564,
+      "crownBaseMetres": 0.097,
       "wood": {
-        "firstIndex": 25092,
+        "firstIndex": 205692,
         "indexCount": 15,
         "triangles": 5,
-        "sourceTriangles": 2662
+        "sourceTriangles": 2184
       },
       "shell": {
-        "firstIndex": 25107,
-        "indexCount": 216,
-        "triangles": 72,
-        "sourceProxyAreaSquareMetres": 0.5
+        "firstIndex": 205707,
+        "indexCount": 240,
+        "triangles": 80,
+        "sourceProxyAreaSquareMetres": 0.47
       },
-      "geometryErrorMetres": 0.9987
+      "geometryErrorMetres": 1.0985
     }
   ]
 }

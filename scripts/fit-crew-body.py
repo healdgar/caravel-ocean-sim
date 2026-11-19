@@ -197,6 +197,7 @@ def main():
     textured = '--textured' in flags
     full_texture = '--full-texture' in flags
     force_bald = '--bald' in flags
+    undressed = '--undressed' in flags
     source_path, target_path, out_path = args[:3]
 
     src, src_bin = read_glb(source_path)
@@ -1234,6 +1235,18 @@ def main():
                 idx0 = np.nonzero(fallback_mask)[0][:8]
                 regions[idx0] = req_k
 
+    if undressed:
+        # Clean undressed anatomical base body: all body geometry is pure SKIN (3), eyes stay untinted (0),
+        # and eyebrows on the brow ridge keep HAIR (4) so every person's skin & brows tint with zero garment stains!
+        brow_band = (
+            on_head & ~eye_feature
+            & (dx_h > 0.012) & (dx_h < 0.052)
+            & (out_p[:, 1] > eye_y + 0.008) & (out_p[:, 1] < eye_y + 0.032)
+            & (dz_h > 0.025) & (regions == HAIR)
+        )
+        regions[:] = SKIN
+        regions[eye_feature] = 0
+        regions[brow_band] = HAIR
     print('regions:', {name: int((regions == k).sum()) for name, k in (('paint', 0), ('shirt', SHIRT), ('trousers', TROUSERS), ('skin', SKIN), ('hair', HAIR))})
 
     # 7. Encode vertex colours without false channel-ratio hue blowups.

@@ -12,11 +12,13 @@ import { continuumGroundWGSL } from '../continuum-ground.js';
 import { CONTINUUM_KIND } from '../continuum-format.js';
 import { CREW_JOINT_COUNT, CREW_JOINT_PARENTS, CREW_SLOT } from '../crew-skeleton.js';
 import { CREW_CONTINUUM_RIG_VEC4S, CREW_CONTINUUM_WEAR_VEC4S } from '../crew-continuum.js';
+import { HUMAN_MORPH_WGSL } from './human-morph.js';
 
-// What the GPU is told of a person, beside their joints and actor record (the batch's orders): bit 1 as
-// CREW_CONTINUUM_ORDER_IMPORTANT says; above the low two bits, when not 0, who they are plus one. Where people are
-// compacted afresh each frame their slot changes, and the hash that thins them and splits their samples follows who
-// they are, so no one flickers as others come and go.
+// What the GPU is told of a person, beside their joints and actor record (the batch's orders): bit 0 marks a mounted
+// horseback rider, bit 1 as CREW_CONTINUUM_ORDER_IMPORTANT says; above the low two bits, when not 0, who they are plus
+// one. Where people are compacted afresh each frame their slot changes, and the hash that thins them and splits their
+// samples follows who they are, so no one flickers as others come and go.
+export const CREW_CONTINUUM_ORDER_MOUNTED = 1;    // riding astride a horse: stays adult/youth & wears riding breeches
 export const CREW_CONTINUUM_ORDER_IMPORTANT = 2;  // wounded, spoken to or aimed at: cut at the core's CONTINUUM_IMPORTANT
 export const CREW_CONTINUUM_IDENTITY_SHIFT = 2;
 // A person's pose data in its scene's pose buffer: the SKINNED kind's head, then every joint's rows and posed sphere.
@@ -137,7 +139,7 @@ fn crewPoseBroken(injury:u32)->vec2u {
 //        counts them, flags: 1 counted on the GPU, 2 afloat
 export function crewContinuumStandWGSL(ground) {
   const N = CREW_JOINT_COUNT;
-  return FRAME_WGSL + CONTINUUM_RECORD_WGSL + SKINNED_POSE_WGSL + (ground ? continuumGroundWGSL(0, 10) : '') + /* wgsl */`
+  return FRAME_WGSL + CONTINUUM_RECORD_WGSL + SKINNED_POSE_WGSL + HUMAN_MORPH_WGSL + (ground ? continuumGroundWGSL(0, 10) : '') + /* wgsl */`
 struct CrewStandHull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f };
 struct CrewStandActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
 struct CrewStandRun { first:u32, count:u32, counted:u32, flags:u32 };
@@ -172,7 +174,7 @@ fn crewStandTurn(p:vec3f)->vec3f { return crewStandHull.right.xyz*p.x+crewStandH
   workgroupBarrier();
   let severed=atomicLoad(&crewStandSevered)!=0u;
   let at=person*${CREW_CONTINUUM_POSE_VEC4S}u;
-  let slack=crewStandRig[0].y+select(0.0,${CREW_CONTINUUM_SEVERED_SLACK.toFixed(2)},severed);
+  let slack=crewStandRig[0].y+0.08+select(0.0,${CREW_CONTINUUM_SEVERED_SLACK.toFixed(2)},severed);
   if(!gone){
     let over=1.0/scale;
     for(var j=lane;j<${N}u;j+=64u){
@@ -187,12 +189,19 @@ fn crewStandTurn(p:vec3f)->vec3f { return crewStandHull.right.xyz*p.x+crewStandH
     if(!gone){lift=continuumGroundLift(place.xz);}` : ''}
     let orders=crewStandOrders[min(person,arrayLength(&crewStandOrders)-1u)];
     let identity=select(slot,(orders>>${CREW_CONTINUUM_IDENTITY_SHIFT}u)-1u,(orders>>${CREW_CONTINUUM_IDENTITY_SHIFT}u)!=0u);
+    let isMounted=(orders&${CREW_CONTINUUM_ORDER_MOUNTED}u)!=0u;
+    let female=actor.skin.w>0.5&&actor.skin.w<1.5;
+    let stage=humanLifeStage(identity,${ground ? 'true' : 'false'},isMounted);
+    // Townsfolk bake baseScale into actor.transform on placement; deck crew apply height diversity directly here!
+    let finalScale=select(scale,scale*stage.x,${ground ? 'false' : 'true'}&&abs(scale-1.0)<0.01);
+    let morphZ=humanMorphPackZ(identity,female);
+    let morphW=humanMorphPackW(stage.y,stage.z,isMounted);
     var flags=${CONTINUUM_KIND.SKINNED}u<<CONTINUUM_KIND_SHIFT;
     if(gone){flags|=CONTINUUM_GONE;}
     if((crewStandRun.flags&2u)!=0u){flags|=CONTINUUM_SEA;}
     if((orders&${CREW_CONTINUUM_ORDER_IMPORTANT}u)!=0u){flags|=CONTINUUM_IMPORTANT_FLAG;}
     if(severed){flags|=CONTINUUM_DAMAGED;}
-    crewStandRecords[person]=ContinuumRecord(vec4f(place+vec3f(0.0,lift,0.0),scale),vec4f(0.0,0.0,0.0,1.0),vec4u(flags,at,identity,0u),vec4u(slot,0u,0u,0u));
+    crewStandRecords[person]=ContinuumRecord(vec4f(place+vec3f(0.0,lift,0.0),finalScale),vec4f(0.0,0.0,0.0,1.0),vec4u(flags,at,identity,0u),vec4u(slot,0u,morphZ,morphW));
     skinnedWriteHead(at,${N}u,slack);
   }
 }
@@ -221,7 +230,7 @@ fn crewScalpMode(actor:CrewActor,identity:u32,slot:u32)->f32 {
   let compMask=select(0u,u32((-actor.face.w)*0.5),hasComp);
   let hairCode=compMask&7u;
   if(hairCode>=1u&&hairCode<=5u){return 1.0;}
-  var h=(identity*131u+slot*17u+1u)*0x9e3779b1u+0x85ebca6bu;
+  var h=(identity*131u+1u)*0x9e3779b1u+0x85ebca6bu;
   h=(h^(h>>15u))*0x2c1b3c6du;
   h=h^(h>>13u);
   let roll=h&31u;
@@ -397,7 +406,7 @@ fn crewHairHash(v:u32)->u32 {
   let slot=min(rec.spare.x,arrayLength(&crewStandActors)-1u);
   let actor=crewStandActors[slot];
   let identity=rec.tag.z;
-  let h=crewHairHash(identity*131u+slot*17u+1u);
+  let h=crewHairHash(identity*131u+1u);
 
   // Instantaneous gait sway from posed left/right foot separation + head forward trailing drag.
   let m0=skinnedPoses[at+1u+9u*3u];
@@ -458,17 +467,23 @@ fn crewHairHash(v:u32)->u32 {
     }
   }
 
+  let isChild=(rec.spare.w&255u)>45u;
+  if(isChild){
+    beardGone=true;
+    if(scalpGone||scalpType==4u){scalpGone=false;scalpType=select(0u,5u,female);}
+  }
+
   let scale=rec.place.w;
   let ds=crewHairInfo.scalpShift.xyz;
   let db=crewHairInfo.beardShift.xyz;
   let scalpDelta=vec3f(dot(m0.xyz,ds),dot(m1.xyz,ds),dot(m2.xyz,ds))*scale;
   let beardDelta=vec3f(dot(m0.xyz,db),dot(m1.xyz,db),dot(m2.xyz,db))*scale;
-  let reachWord=bitcast<u32>(0.10f);
+  let reachWord=bitcast<u32>(0.14f);
 
   let sFlags=select(baseFlags|scalpType,baseFlags|CONTINUUM_GONE,scalpGone);
   let bFlags=select(baseFlags|beardType,baseFlags|CONTINUUM_GONE,beardGone);
-  hairRecords[person*2u]=ContinuumRecord(vec4f(rec.place.xyz+scalpDelta,scale),rec.turn,vec4u(sFlags,at,identity*2u,reachWord),vec4u(slot,scalpType,0u,0u));
-  hairRecords[person*2u+1u]=ContinuumRecord(vec4f(rec.place.xyz+beardDelta,scale),rec.turn,vec4u(bFlags,at,identity*2u+1u,reachWord),vec4u(slot,beardType,0u,0u));
+  hairRecords[person*2u]=ContinuumRecord(vec4f(rec.place.xyz+scalpDelta,scale),rec.turn,vec4u(sFlags,at,identity*2u,reachWord),vec4u(slot,scalpType,rec.spare.z,rec.spare.w));
+  hairRecords[person*2u+1u]=ContinuumRecord(vec4f(rec.place.xyz+beardDelta,scale),rec.turn,vec4u(bFlags,at,identity*2u+1u,reachWord),vec4u(slot,beardType,rec.spare.z,rec.spare.w));
 }
 `;
 }
@@ -523,7 +538,8 @@ fn hairContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   }
   (*v).fiberT=tWorld+vec3f(hairContinuumTouch());
   (*v).strand=vec4f(along,crossV,lockTone,seedPhase);
-  (*v).tone=baseHair;
+  let elderness=f32((s.record.spare.w>>8u)&255u)*(1.0/255.0);
+  (*v).tone=mix(baseHair,vec3f(0.46,0.44,0.42),smoothstep(0.30,1.0,elderness)*0.75);
   let mBase=crewMoistureBase(actor.hair.w);
   (*v).wet=moisture[mBase+3u];
 }
@@ -642,11 +658,13 @@ fn crewClothHash(v:u32)->u32 {
   let slot=min(rec.spare.x,arrayLength(&crewStandActors)-1u);
   let actor=crewStandActors[slot];
   let identity=rec.tag.z;
-  let h=crewClothHash(identity*197u+slot*29u+7u);
+  let h=crewClothHash(identity*197u+7u);
 
   let female=crewClothInfo.counts.y!=0u||(actor.skin.w>0.5&&actor.skin.w<1.5);
   let roleCode=crewClothInfo.counts.z;
   let indigenous=roleCode==3u||actor.face.w>1.5;
+  let isChild=(rec.spare.w&255u)>45u;
+  let isMounted=((rec.spare.w>>16u)&1u)!=0u;
 
   var upperType=0u;
   var lowerType=7u;
@@ -655,40 +673,40 @@ fn crewClothHash(v:u32)->u32 {
   if(indigenous){
     if(female){
       upperType=6u; // indigenous-huipil-f
-      lowerType=12u; // indigenous-wrap-skirt-f
+      lowerType=select(12u,14u,isMounted); // tailored riding breeches when astride a horse
     }else{
       upperType=5u; // indigenous-tunic-m
       lowerType=11u; // indigenous-breechcloth-m
     }
   }else if(female){
-    // European women: 50% gathered linen chemise blouse, 50% laced bodice over white chemise;
-    // 50% full pleated kirtle skirt, 50% pleated skirt with crisp white working apron.
+    // European women: gathered linen chemise blouse or laced bodice;
+    // pleated kirtle / apron skirt on foot, tailored female riding breeches when riding astride a horse!
     upperType=select(3u,4u,(h&1u)!=0u);
-    lowerType=select(9u,10u,((h>>1u)&1u)!=0u);
+    lowerType=select(select(9u,10u,((h>>1u)&1u)!=0u),14u,isMounted);
   }else if(roleCode==1u){
     // Captain / Iberian officer: tailored doublet + paned trunk hose + shoulder cloak!
     upperType=1u;
     lowerType=8u;
-    cloakGone=false;
+    cloakGone=isChild;
   }else if(roleCode==2u){
     // Tercio / presidio garrison soldier: buff leather jerkin + trunk hose!
     upperType=2u;
     lowerType=8u;
   }else{
     // European mariner / townsman: 70% loose open V-neck linen shirt + mariner slops,
-    // 30% tailored doublet + trunk hose (and ~12% shoulder cloak for townsmen/officers).
+    // 30% tailored doublet + trunk hose (and ~12% shoulder cloak for adult townsmen/officers).
     let styleRoll=(h&15u);
-    upperType=select(0u,1u,styleRoll>=11u);
-    lowerType=select(7u,8u,styleRoll>=11u);
-    cloakGone=(styleRoll<14u);
+    upperType=select(0u,1u,styleRoll>=11u&&!isChild);
+    lowerType=select(7u,8u,styleRoll>=11u&&!isChild);
+    cloakGone=(styleRoll<14u)||isChild;
   }
 
-  // Generous reach margin (0.68 m) so cluster bounding spheres rooted on pelvis/spine_02 always cover outstretched sleeves & hems.
-  let reachWord=bitcast<u32>(0.68f);
-  clothRecords[person*3u]=ContinuumRecord(rec.place,rec.turn,vec4u(baseFlags|upperType,at,identity*3u,reachWord),vec4u(slot,upperType,0u,0u));
-  clothRecords[person*3u+1u]=ContinuumRecord(rec.place,rec.turn,vec4u(baseFlags|lowerType,at,identity*3u+1u,reachWord),vec4u(slot,lowerType,0u,0u));
+  // Generous reach margin (0.72 m) so cluster bounding spheres rooted on pelvis/spine_02 always cover outstretched sleeves & morphed builds.
+  let reachWord=bitcast<u32>(0.72f);
+  clothRecords[person*3u]=ContinuumRecord(rec.place,rec.turn,vec4u(baseFlags|upperType,at,identity*3u,reachWord),vec4u(slot,upperType,rec.spare.z,rec.spare.w));
+  clothRecords[person*3u+1u]=ContinuumRecord(rec.place,rec.turn,vec4u(baseFlags|lowerType,at,identity*3u+1u,reachWord),vec4u(slot,lowerType,rec.spare.z,rec.spare.w));
   let cFlags=select(baseFlags|13u,baseFlags|CONTINUUM_GONE,cloakGone);
-  clothRecords[person*3u+2u]=ContinuumRecord(rec.place,rec.turn,vec4u(cFlags,at,identity*3u+2u,reachWord),vec4u(slot,13u,0u,0u));
+  clothRecords[person*3u+2u]=ContinuumRecord(rec.place,rec.turn,vec4u(cFlags,at,identity*3u+2u,reachWord),vec4u(slot,13u,rec.spare.z,rec.spare.w));
 }
 `;
 }

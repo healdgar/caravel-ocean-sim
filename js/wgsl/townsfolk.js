@@ -7,7 +7,8 @@
 import { FRAME_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CREW_WALK_CYCLE_METRES } from '../crew-motion.js';
-import { CREW_CONTINUUM_ORDER_IMPORTANT, CREW_CONTINUUM_PLACED_WGSL } from './crew-continuum.js';
+import { CREW_CONTINUUM_ORDER_IMPORTANT, CREW_CONTINUUM_ORDER_MOUNTED, CREW_CONTINUUM_PLACED_WGSL } from './crew-continuum.js';
+import { HUMAN_MORPH_WGSL } from './human-morph.js';
 import { continuumGroundWGSL } from '../continuum-ground.js';
 
 // The two bodies of a town: walker flags bit 0 says which a person wears, a man's or a woman's.
@@ -53,7 +54,7 @@ const LYING_BOUND_M = 2.4;
 const SHADOW_NEAR_M = 110;
 const SHADOW_MARGIN_M = 18;
 
-export const TOWNSFOLK_WALK = FRAME_WGSL + CREW_CONTINUUM_PLACED_WGSL + /* wgsl */ `
+export const TOWNSFOLK_WALK = FRAME_WGSL + CREW_CONTINUUM_PLACED_WGSL + HUMAN_MORPH_WGSL + /* wgsl */ `
 struct Walker {first:u32,count:u32,phase:f32,speed:f32,side:f32,pauseAt:f32,pauseFor:f32,indoors:f32,length:f32,abroad:f32,look:u32,flags:u32};
 // second: the first slot of the second body's people; ride: each body's frames of the ride clip, 16 bits each.
 struct TownCrowd {clips:array<vec4u,6>,second:u32,looks:u32,hours:f32,ride:u32};
@@ -481,6 +482,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let boundR=select(select(${BODY_BOUND_M.toFixed(2)},1.95,isMounted),${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING);
   let seen=inFrustum(relative,boundR);
   if(!seen&&(length(relative)>=${SHADOW_NEAR_M.toFixed(1)}||!inFrustum(relative,${SHADOW_MARGIN_M.toFixed(1)}))){return;}
+  let lifeStage=humanLifeStage(id.x,true,isMounted);
+  let bodyScale=lifeStage.x;
   let model=w.flags&1u;
   let plain=crowd.clips[model*3u];let fright=crowd.clips[model*3u+1u];let fall=crowd.clips[model*3u+2u];
   var first=plain.z;var frames=plain.w;var frame=0.0;var looped=true;
@@ -494,15 +497,15 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       if(stopped){cycle=breathing/(f32(frames)*2.5);}
       frame=fract(cycle)*f32(frames);
     }else{
-      // A stride's frame follows the ground covered, so feet do not slide.
-      var cycle=walked/${CREW_WALK_CYCLE_METRES.toFixed(3)}+w.phase*7.0;
+      // A stride's frame follows the ground covered, scaled by leg length (bodyScale) so children's feet never slide!
+      var cycle=walked/(${CREW_WALK_CYCLE_METRES.toFixed(3)}*bodyScale)+w.phase*7.0;
       if(stopped){first=plain.x;frames=plain.y;cycle=breathing/f32(frames);}
       frame=fract(cycle)*f32(frames);
     }
   }else if(fate.mode==AFRAID){
     if(ran>0.0&&ran<fate.runFor&&metres>0.0&&metres<w.length){
       first=fright.x;frames=fright.y;
-      frame=fract(ran*fate.speed/${TOWN_RUN_CYCLE_METRES.toFixed(3)}+w.phase*7.0)*f32(frames);
+      frame=fract(ran*fate.speed/(${TOWN_RUN_CYCLE_METRES.toFixed(3)}*bodyScale)+w.phase*7.0)*f32(frames);
     }else if((fate.how&1u)==1u){
       // Down as it begins and up again as it ends.
       first=fright.z;frames=fright.w;looped=false;
@@ -523,11 +526,11 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let blend=select(fract(frame),0.0,fate.mode==DOWN);
   // Kept, in the run of their body's people: everyone kept is posed, and the cut decides who is drawn and how.
   let kept=atomicAdd(&counts[model*${TOWNSFOLK_DISPATCH_WORDS}u],1u);
-  let c=cos(heading);let s=sin(heading);
-  // Turned by their heading about the vertical: +z, the way they face, comes round toward +x.
-  let transform=mat4x4f(vec4f(c,0.0,-s,0.0),vec4f(0.0,1.0,0.0,0.0),vec4f(s,0.0,c,0.0),vec4f(position,1.0));
-  // The fallen and the hurt are cut finer, and anyone in the sea is wet through.
-  let important=select(0u,${CREW_CONTINUUM_ORDER_IMPORTANT}u,fate.mode>=FALLING||dmgCode>0u);
+  let c=cos(heading)*bodyScale;let s=sin(heading)*bodyScale;
+  // Turned by their heading about the vertical and scaled by their base height (children 0.64..0.82, adults 0.92..1.09).
+  let transform=mat4x4f(vec4f(c,0.0,-s,0.0),vec4f(0.0,bodyScale,0.0,0.0),vec4f(s,0.0,c,0.0),vec4f(position,1.0));
+  // The fallen and the hurt are cut finer, mounted riders carry bit 0, and anyone in the sea is wet through.
+  let important=select(0u,${CREW_CONTINUUM_ORDER_IMPORTANT}u,fate.mode>=FALLING||dmgCode>0u)|select(0u,${CREW_CONTINUUM_ORDER_MOUNTED}u,isMounted);
   let wet=select(0u,${TOWNSFOLK_SEA_MOISTURE}u,!dry);
   placed[select(0u,crowd.second,model==1u)+kept]=CrewPlaced(transform,vec4u(first+whole,first+after,first+whole,model*crowd.looks+w.look%crowd.looks),vec4f(blend,0.0,0.0,0.0),vec4u(id.x,dmgCode,important,wet));
 }

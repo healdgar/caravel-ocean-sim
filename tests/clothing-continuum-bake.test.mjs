@@ -11,7 +11,7 @@ import {
 import { CREW_CONTINUUM_BODIES } from '../js/crew-continuum.js';
 import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 
-test('clothing continuum manifest and 14 garments pass atlas, skin, and kinematic wind verification', () => {
+test('clothing continuum manifest and 15 garments pass atlas, skin, and kinematic wind verification', () => {
   for (const file of Object.values(CLOTHING_CONTINUUM_ASSETS)) {
     assert.ok(fs.existsSync(file), `${file} exists`);
   }

@@ -1039,16 +1039,44 @@ function buildGarment(spec, male, female) {
   return m.finalize();
 }
 
+// --------------------------------------------------------------------------- Load Blender real cloth-simulated .bin garment
+const BLENDER_CLOTH_DIR = path.resolve(ROOT, '.tripo/1550-hd-base/cloth');
+function loadBlenderClothBin(id) {
+  const file = path.join(BLENDER_CLOTH_DIR, `${id}.bin`);
+  if (!fs.existsSync(file)) return null;
+  const buf = fs.readFileSync(file);
+  const magic = buf.subarray(0, 4).toString('ascii');
+  if (magic !== 'CLTH') throw Error(`${file}: bad magic "${magic}"`);
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const version = view.getUint32(4, true);
+  if (version !== 1) throw Error(`${file}: unsupported CLTH version ${version}`);
+  const count = view.getUint32(8, true);
+  const nTris = view.getUint32(12, true);
+  let off = 16;
+  const sliceF32 = (n) => { const a = new Float32Array(buf.buffer.slice(buf.byteOffset + off, buf.byteOffset + off + n * 4)); off += n * 4; return a; };
+  const sliceU32 = (n) => { const a = new Uint32Array(buf.buffer.slice(buf.byteOffset + off, buf.byteOffset + off + n * 4)); off += n * 4; return a; };
+  const position = sliceF32(count * 3);
+  const normal = sliceF32(count * 3);
+  const words = sliceU32(count);
+  const skinJ = sliceU32(count);
+  const skinW = sliceU32(count);
+  const wind = sliceU32(count);
+  const index = sliceU32(nTris * 3);
+  const parts = new Uint32Array(count);
+  return { count, position, normal, words, skinJ, skinW, wind, index, parts, source: 'blender-cloth' };
+}
+
 // --------------------------------------------------------------------------- Bake all 14 garments into One Continuum atlas
 await MeshoptSimplifier.ready;
 const started = Date.now();
-const male = loadBodyReference('sailor-male');
-const female = loadBodyReference('villager-female');
+const useBlenderCloth = fs.existsSync(BLENDER_CLOTH_DIR) && !process.argv.includes('--procedural');
+const male = useBlenderCloth ? null : loadBodyReference('sailor-male');
+const female = useBlenderCloth ? null : loadBodyReference('villager-female');
 const typeWords = [], manifestTypes = [];
 
 for (const spec of CLOTHING_CONTINUUM_TYPES) {
   const t0 = Date.now();
-  const built = buildGarment(spec, male, female);
+  const built = (useBlenderCloth && loadBlenderClothBin(spec.id)) || buildGarment(spec, male || loadBodyReference('sailor-male'), female || loadBodyReference('villager-female'));
   const tris = built.index.length / 3;
   const garmentPart = spec.slot === 'lower' ? CREW_SLOT.pelvis : CREW_SLOT.spine_02;
   built.parts.fill(garmentPart);
@@ -1061,9 +1089,16 @@ for (const spec of CLOTHING_CONTINUUM_TYPES) {
     position: built.position, normal: built.normal, kind, part: built.parts,
     index: built.index, count: built.count, corner: null,
   };
-  const farFloats = new Float32Array(built.index.length * 8);
-  for (let i = 0; i < built.index.length; i++) {
-    const v = built.index[i], o = i * 8;
+  // Simplify far source to ~3600 tris when baking 30k-50k-tri Blender cloth so far-collapse baking stays fast while near clusters keep 100% full cloth detail!
+  let farIndex = built.index;
+  if (tris > 4200) {
+    const [simp] = MeshoptSimplifier.simplify(built.index, built.position, 3, 3600 * 3, 0.04);
+    if (simp.length >= 600) farIndex = simp;
+  }
+  const farTris = farIndex.length / 3;
+  const farFloats = new Float32Array(farIndex.length * 8);
+  for (let i = 0; i < farIndex.length; i++) {
+    const v = farIndex[i], o = i * 8;
     farFloats[o] = built.position[v * 3];
     farFloats[o + 1] = built.position[v * 3 + 1];
     farFloats[o + 2] = built.position[v * 3 + 2];
@@ -1076,7 +1111,7 @@ for (const spec of CLOTHING_CONTINUUM_TYPES) {
   const baked = await bakeContinuumBody({
     name: spec.id,
     welded,
-    far: { vertices: farFloats, triangles: tris, parts: new Uint32Array(tris).fill(garmentPart) },
+    far: { vertices: farFloats, triangles: farTris, parts: new Uint32Array(farTris).fill(garmentPart) },
   });
   const { clusters, far } = baked;
 

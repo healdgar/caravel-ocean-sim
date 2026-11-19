@@ -1,303 +1,303 @@
 {
   "assets/crew/continuum/sailor-male/manifest.json": {
-    "url": "assets/crew/continuum/sailor-male/manifest.f90a1321f0c74fdd.json",
-    "bytes": 10157,
-    "sha256": "f90a1321f0c74fddd4078743d2573dcec936aad51264c70a149dd1120e63fb69"
+    "url": "assets/crew/continuum/sailor-male/manifest.3b4288da1b937a66.json",
+    "bytes": 11465,
+    "sha256": "3b4288da1b937a66e99a145fad07f1bf63913b1206c7144859b1cf3ee607f2a4"
   },
   "assets/crew/continuum/sailor-male/body.glb": {
-    "url": "assets/crew/continuum/sailor-male/body.822c6565816b10f8.glb",
-    "bytes": 518104,
-    "sha256": "822c6565816b10f85d60cb379a12bbbf15fc99356b4f407d70808302f3d143c7"
+    "url": "assets/crew/continuum/sailor-male/body.4a0d5981b2e14860.glb",
+    "bytes": 974160,
+    "sha256": "4a0d5981b2e148606e19640019989a27471c2133c825a2757fd697ee2d2d39af"
   },
   "assets/crew/continuum/sailor-male/atlas.bin.gz": {
-    "url": "assets/crew/continuum/sailor-male/atlas.bin.b8b31323a3f08b0d.gz",
-    "bytes": 284332,
-    "sha256": "b8b31323a3f08b0d2b486057146681c8f94078785a733d179deed10bc1014e71"
+    "url": "assets/crew/continuum/sailor-male/atlas.bin.432a56d128ce5956.gz",
+    "bytes": 34607764,
+    "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
   },
   "assets/crew/continuum/sailor-male/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/sailor-male/albedo.bc7.bin.6b1c9585e4b8c999.gz",
-    "bytes": 21937,
-    "sha256": "6b1c9585e4b8c999bb68296657d48040e65d47d075a97901a97ca5ecdbad706d"
+    "url": "assets/crew/continuum/sailor-male/albedo.bc7.bin.4b14a4d0e0398175.gz",
+    "bytes": 12834875,
+    "sha256": "4b14a4d0e0398175cb37ac25a9666e9caf6753108e98b0310d71548d92d55be4"
   },
   "assets/crew/continuum/sailor-male/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/sailor-male/albedo.astc.bin.791e98f1ec9e124c.gz",
-    "bytes": 24746,
-    "sha256": "791e98f1ec9e124c1e5d9dde7ac627aff784b907c4a34075d19555f0b2e9cbbc"
+    "url": "assets/crew/continuum/sailor-male/albedo.astc.bin.e4c70011d14ca7f2.gz",
+    "bytes": 13598860,
+    "sha256": "e4c70011d14ca7f26b3e167a3f3032172af9020073f54d9385ba504a110f7ab6"
   },
   "assets/crew/continuum/villager-female/manifest.json": {
-    "url": "assets/crew/continuum/villager-female/manifest.68900e8ff96d54fe.json",
-    "bytes": 10144,
-    "sha256": "68900e8ff96d54fe4a34cca6c35c34907132adbcf3d3ca69fd975c377c4a722c"
+    "url": "assets/crew/continuum/villager-female/manifest.03cbe09960307889.json",
+    "bytes": 11497,
+    "sha256": "03cbe09960307889a4beb0605ac253ef487276e27815e9069f41054c9bfbf34b"
   },
   "assets/crew/continuum/villager-female/body.glb": {
-    "url": "assets/crew/continuum/villager-female/body.dfef9a937459b3a4.glb",
-    "bytes": 517832,
-    "sha256": "dfef9a937459b3a4c1c4ef851dda5ce4990f19033d3ef1d11e8ca003ce048ad5"
+    "url": "assets/crew/continuum/villager-female/body.70b61f310b217d76.glb",
+    "bytes": 974616,
+    "sha256": "70b61f310b217d763f45a8b98a72932744341b5ef6630aa8ea3e8de6f68e9065"
   },
   "assets/crew/continuum/villager-female/atlas.bin.gz": {
-    "url": "assets/crew/continuum/villager-female/atlas.bin.0a769568099f107e.gz",
-    "bytes": 289783,
-    "sha256": "0a769568099f107eaa99c856f5b211e408b4dfce696b90344c7181fefa590f25"
+    "url": "assets/crew/continuum/villager-female/atlas.bin.f076f1537cc6597b.gz",
+    "bytes": 34708838,
+    "sha256": "f076f1537cc6597bd451f03a51df0368e3b4bdfa9955fd55af069e6123b7ff13"
   },
   "assets/crew/continuum/villager-female/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/villager-female/albedo.bc7.bin.5d91e5e554035e43.gz",
-    "bytes": 21427,
-    "sha256": "5d91e5e554035e43e111452bb98f4b56981528b2a84b832be0c8ae809bf23e13"
+    "url": "assets/crew/continuum/villager-female/albedo.bc7.bin.12e6261f81dddd8a.gz",
+    "bytes": 12654776,
+    "sha256": "12e6261f81dddd8a7eb299801162d933c04e346ffc39b44c019a6d3a29ea6af2"
   },
   "assets/crew/continuum/villager-female/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/villager-female/albedo.astc.bin.bae42257d0299ec1.gz",
-    "bytes": 24278,
-    "sha256": "bae42257d0299ec1e9b6332347851ee2daf0441175643c0ce22c11abdbe8fa08"
+    "url": "assets/crew/continuum/villager-female/albedo.astc.bin.f1187f00c7b02720.gz",
+    "bytes": 13530521,
+    "sha256": "f1187f00c7b027202dfd901711613869e621397825a0930a7fd8dbd098cc823e"
   },
   "assets/crew/continuum/captain/manifest.json": {
-    "url": "assets/crew/continuum/captain/manifest.acc664617ceda47e.json",
-    "bytes": 10156,
-    "sha256": "acc664617ceda47e61a790bee175ddaf989a7229b8492a3ca1b1109c3e116a23"
+    "url": "assets/crew/continuum/captain/manifest.8ec07ef133cc7e67.json",
+    "bytes": 14430,
+    "sha256": "8ec07ef133cc7e67c49d18cf4758172af4de36d206bb697b230f92de674987da"
   },
   "assets/crew/continuum/captain/body.glb": {
-    "url": "assets/crew/continuum/captain/body.822c6565816b10f8.glb",
-    "bytes": 518104,
-    "sha256": "822c6565816b10f85d60cb379a12bbbf15fc99356b4f407d70808302f3d143c7"
+    "url": "assets/crew/continuum/captain/body.4a0d5981b2e14860.glb",
+    "bytes": 974160,
+    "sha256": "4a0d5981b2e148606e19640019989a27471c2133c825a2757fd697ee2d2d39af"
   },
   "assets/crew/continuum/captain/atlas.bin.gz": {
-    "url": "assets/crew/continuum/captain/atlas.bin.b8b31323a3f08b0d.gz",
-    "bytes": 284332,
-    "sha256": "b8b31323a3f08b0d2b486057146681c8f94078785a733d179deed10bc1014e71"
+    "url": "assets/crew/continuum/captain/atlas.bin.432a56d128ce5956.gz",
+    "bytes": 34607764,
+    "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
   },
   "assets/crew/continuum/captain/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/captain/albedo.bc7.bin.6b1c9585e4b8c999.gz",
-    "bytes": 21937,
-    "sha256": "6b1c9585e4b8c999bb68296657d48040e65d47d075a97901a97ca5ecdbad706d"
+    "url": "assets/crew/continuum/captain/albedo.bc7.bin.4b14a4d0e0398175.gz",
+    "bytes": 12834875,
+    "sha256": "4b14a4d0e0398175cb37ac25a9666e9caf6753108e98b0310d71548d92d55be4"
   },
   "assets/crew/continuum/captain/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/captain/albedo.astc.bin.791e98f1ec9e124c.gz",
-    "bytes": 24746,
-    "sha256": "791e98f1ec9e124c1e5d9dde7ac627aff784b907c4a34075d19555f0b2e9cbbc"
+    "url": "assets/crew/continuum/captain/albedo.astc.bin.e4c70011d14ca7f2.gz",
+    "bytes": 13598860,
+    "sha256": "e4c70011d14ca7f26b3e167a3f3032172af9020073f54d9385ba504a110f7ab6"
   },
   "assets/crew/continuum/soldier/manifest.json": {
-    "url": "assets/crew/continuum/soldier/manifest.3aec03d4cc4c209c.json",
-    "bytes": 10156,
-    "sha256": "3aec03d4cc4c209c37940b9d29aee1bbb9882434d5b97b80d83e06665770be85"
+    "url": "assets/crew/continuum/soldier/manifest.abdb4b3de4fe9413.json",
+    "bytes": 14430,
+    "sha256": "abdb4b3de4fe9413baf270f5ae73ae2407b5c40bc7970c6d58c7788b4f68a9f6"
   },
   "assets/crew/continuum/soldier/body.glb": {
-    "url": "assets/crew/continuum/soldier/body.822c6565816b10f8.glb",
-    "bytes": 518104,
-    "sha256": "822c6565816b10f85d60cb379a12bbbf15fc99356b4f407d70808302f3d143c7"
+    "url": "assets/crew/continuum/soldier/body.4a0d5981b2e14860.glb",
+    "bytes": 974160,
+    "sha256": "4a0d5981b2e148606e19640019989a27471c2133c825a2757fd697ee2d2d39af"
   },
   "assets/crew/continuum/soldier/atlas.bin.gz": {
-    "url": "assets/crew/continuum/soldier/atlas.bin.b8b31323a3f08b0d.gz",
-    "bytes": 284332,
-    "sha256": "b8b31323a3f08b0d2b486057146681c8f94078785a733d179deed10bc1014e71"
+    "url": "assets/crew/continuum/soldier/atlas.bin.432a56d128ce5956.gz",
+    "bytes": 34607764,
+    "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
   },
   "assets/crew/continuum/soldier/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/soldier/albedo.bc7.bin.6b1c9585e4b8c999.gz",
-    "bytes": 21937,
-    "sha256": "6b1c9585e4b8c999bb68296657d48040e65d47d075a97901a97ca5ecdbad706d"
+    "url": "assets/crew/continuum/soldier/albedo.bc7.bin.4b14a4d0e0398175.gz",
+    "bytes": 12834875,
+    "sha256": "4b14a4d0e0398175cb37ac25a9666e9caf6753108e98b0310d71548d92d55be4"
   },
   "assets/crew/continuum/soldier/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/soldier/albedo.astc.bin.791e98f1ec9e124c.gz",
-    "bytes": 24746,
-    "sha256": "791e98f1ec9e124c1e5d9dde7ac627aff784b907c4a34075d19555f0b2e9cbbc"
+    "url": "assets/crew/continuum/soldier/albedo.astc.bin.e4c70011d14ca7f2.gz",
+    "bytes": 13598860,
+    "sha256": "e4c70011d14ca7f26b3e167a3f3032172af9020073f54d9385ba504a110f7ab6"
   },
   "assets/crew/continuum/algonquian-male/manifest.json": {
-    "url": "assets/crew/continuum/algonquian-male/manifest.83d053d60747d86f.json",
-    "bytes": 10167,
-    "sha256": "83d053d60747d86ffe7df6cbc2bf78f304587f82e643a568b1c96ed373dc3011"
+    "url": "assets/crew/continuum/algonquian-male/manifest.9a2f4939b052c8d9.json",
+    "bytes": 14441,
+    "sha256": "9a2f4939b052c8d99ddbe3be513874476ce051f7448767a7f35d0eb5a42b9867"
   },
   "assets/crew/continuum/algonquian-male/body.glb": {
-    "url": "assets/crew/continuum/algonquian-male/body.822c6565816b10f8.glb",
-    "bytes": 518104,
-    "sha256": "822c6565816b10f85d60cb379a12bbbf15fc99356b4f407d70808302f3d143c7"
+    "url": "assets/crew/continuum/algonquian-male/body.4a0d5981b2e14860.glb",
+    "bytes": 974160,
+    "sha256": "4a0d5981b2e148606e19640019989a27471c2133c825a2757fd697ee2d2d39af"
   },
   "assets/crew/continuum/algonquian-male/atlas.bin.gz": {
-    "url": "assets/crew/continuum/algonquian-male/atlas.bin.b8b31323a3f08b0d.gz",
-    "bytes": 284332,
-    "sha256": "b8b31323a3f08b0d2b486057146681c8f94078785a733d179deed10bc1014e71"
+    "url": "assets/crew/continuum/algonquian-male/atlas.bin.432a56d128ce5956.gz",
+    "bytes": 34607764,
+    "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
   },
   "assets/crew/continuum/algonquian-male/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/algonquian-male/albedo.bc7.bin.6b1c9585e4b8c999.gz",
-    "bytes": 21937,
-    "sha256": "6b1c9585e4b8c999bb68296657d48040e65d47d075a97901a97ca5ecdbad706d"
+    "url": "assets/crew/continuum/algonquian-male/albedo.bc7.bin.4b14a4d0e0398175.gz",
+    "bytes": 12834875,
+    "sha256": "4b14a4d0e0398175cb37ac25a9666e9caf6753108e98b0310d71548d92d55be4"
   },
   "assets/crew/continuum/algonquian-male/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/algonquian-male/albedo.astc.bin.791e98f1ec9e124c.gz",
-    "bytes": 24746,
-    "sha256": "791e98f1ec9e124c1e5d9dde7ac627aff784b907c4a34075d19555f0b2e9cbbc"
+    "url": "assets/crew/continuum/algonquian-male/albedo.astc.bin.e4c70011d14ca7f2.gz",
+    "bytes": 13598860,
+    "sha256": "e4c70011d14ca7f26b3e167a3f3032172af9020073f54d9385ba504a110f7ab6"
   },
   "assets/crew/continuum/algonquian-female/manifest.json": {
-    "url": "assets/crew/continuum/algonquian-female/manifest.85fe47c78a4fbc6e.json",
-    "bytes": 10152,
-    "sha256": "85fe47c78a4fbc6e1dbe0236de1f7163be877ff1649da430ad87a7206c5b8d60"
+    "url": "assets/crew/continuum/algonquian-female/manifest.ad22e498022e6d63.json",
+    "bytes": 14471,
+    "sha256": "ad22e498022e6d63b2b1d7e510171dae688d04931ea4216022033c01d3330f77"
   },
   "assets/crew/continuum/algonquian-female/body.glb": {
-    "url": "assets/crew/continuum/algonquian-female/body.dfef9a937459b3a4.glb",
-    "bytes": 517832,
-    "sha256": "dfef9a937459b3a4c1c4ef851dda5ce4990f19033d3ef1d11e8ca003ce048ad5"
+    "url": "assets/crew/continuum/algonquian-female/body.70b61f310b217d76.glb",
+    "bytes": 974616,
+    "sha256": "70b61f310b217d763f45a8b98a72932744341b5ef6630aa8ea3e8de6f68e9065"
   },
   "assets/crew/continuum/algonquian-female/atlas.bin.gz": {
-    "url": "assets/crew/continuum/algonquian-female/atlas.bin.0a769568099f107e.gz",
-    "bytes": 289783,
-    "sha256": "0a769568099f107eaa99c856f5b211e408b4dfce696b90344c7181fefa590f25"
+    "url": "assets/crew/continuum/algonquian-female/atlas.bin.f076f1537cc6597b.gz",
+    "bytes": 34708838,
+    "sha256": "f076f1537cc6597bd451f03a51df0368e3b4bdfa9955fd55af069e6123b7ff13"
   },
   "assets/crew/continuum/algonquian-female/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/algonquian-female/albedo.bc7.bin.5d91e5e554035e43.gz",
-    "bytes": 21427,
-    "sha256": "5d91e5e554035e43e111452bb98f4b56981528b2a84b832be0c8ae809bf23e13"
+    "url": "assets/crew/continuum/algonquian-female/albedo.bc7.bin.12e6261f81dddd8a.gz",
+    "bytes": 12654776,
+    "sha256": "12e6261f81dddd8a7eb299801162d933c04e346ffc39b44c019a6d3a29ea6af2"
   },
   "assets/crew/continuum/algonquian-female/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/algonquian-female/albedo.astc.bin.bae42257d0299ec1.gz",
-    "bytes": 24278,
-    "sha256": "bae42257d0299ec1e9b6332347851ee2daf0441175643c0ce22c11abdbe8fa08"
+    "url": "assets/crew/continuum/algonquian-female/albedo.astc.bin.f1187f00c7b02720.gz",
+    "bytes": 13530521,
+    "sha256": "f1187f00c7b027202dfd901711613869e621397825a0930a7fd8dbd098cc823e"
   },
   "assets/crew/continuum/caribbean-male/manifest.json": {
-    "url": "assets/crew/continuum/caribbean-male/manifest.494a8d88a6e784dd.json",
-    "bytes": 10165,
-    "sha256": "494a8d88a6e784ddc06b0cd09206ad16b7f64d9e1a838507269d5ada397ef9a9"
+    "url": "assets/crew/continuum/caribbean-male/manifest.6eb25de045d3e67f.json",
+    "bytes": 14439,
+    "sha256": "6eb25de045d3e67f0bca08854c8f4b6eabe229d41821bd54e42deae49fef5e74"
   },
   "assets/crew/continuum/caribbean-male/body.glb": {
-    "url": "assets/crew/continuum/caribbean-male/body.822c6565816b10f8.glb",
-    "bytes": 518104,
-    "sha256": "822c6565816b10f85d60cb379a12bbbf15fc99356b4f407d70808302f3d143c7"
+    "url": "assets/crew/continuum/caribbean-male/body.4a0d5981b2e14860.glb",
+    "bytes": 974160,
+    "sha256": "4a0d5981b2e148606e19640019989a27471c2133c825a2757fd697ee2d2d39af"
   },
   "assets/crew/continuum/caribbean-male/atlas.bin.gz": {
-    "url": "assets/crew/continuum/caribbean-male/atlas.bin.b8b31323a3f08b0d.gz",
-    "bytes": 284332,
-    "sha256": "b8b31323a3f08b0d2b486057146681c8f94078785a733d179deed10bc1014e71"
+    "url": "assets/crew/continuum/caribbean-male/atlas.bin.432a56d128ce5956.gz",
+    "bytes": 34607764,
+    "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
   },
   "assets/crew/continuum/caribbean-male/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/caribbean-male/albedo.bc7.bin.6b1c9585e4b8c999.gz",
-    "bytes": 21937,
-    "sha256": "6b1c9585e4b8c999bb68296657d48040e65d47d075a97901a97ca5ecdbad706d"
+    "url": "assets/crew/continuum/caribbean-male/albedo.bc7.bin.4b14a4d0e0398175.gz",
+    "bytes": 12834875,
+    "sha256": "4b14a4d0e0398175cb37ac25a9666e9caf6753108e98b0310d71548d92d55be4"
   },
   "assets/crew/continuum/caribbean-male/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/caribbean-male/albedo.astc.bin.791e98f1ec9e124c.gz",
-    "bytes": 24746,
-    "sha256": "791e98f1ec9e124c1e5d9dde7ac627aff784b907c4a34075d19555f0b2e9cbbc"
+    "url": "assets/crew/continuum/caribbean-male/albedo.astc.bin.e4c70011d14ca7f2.gz",
+    "bytes": 13598860,
+    "sha256": "e4c70011d14ca7f26b3e167a3f3032172af9020073f54d9385ba504a110f7ab6"
   },
   "assets/crew/continuum/caribbean-female/manifest.json": {
-    "url": "assets/crew/continuum/caribbean-female/manifest.f0dea66f409d2b1f.json",
-    "bytes": 10150,
-    "sha256": "f0dea66f409d2b1f4ecb45d337f3487ee939bda2e64b05f98c4ceaf2cc9d7a40"
+    "url": "assets/crew/continuum/caribbean-female/manifest.1508fc7a3b760f19.json",
+    "bytes": 14469,
+    "sha256": "1508fc7a3b760f19fc50c5ef01aca0117901eb8341009f457367066d60668339"
   },
   "assets/crew/continuum/caribbean-female/body.glb": {
-    "url": "assets/crew/continuum/caribbean-female/body.dfef9a937459b3a4.glb",
-    "bytes": 517832,
-    "sha256": "dfef9a937459b3a4c1c4ef851dda5ce4990f19033d3ef1d11e8ca003ce048ad5"
+    "url": "assets/crew/continuum/caribbean-female/body.70b61f310b217d76.glb",
+    "bytes": 974616,
+    "sha256": "70b61f310b217d763f45a8b98a72932744341b5ef6630aa8ea3e8de6f68e9065"
   },
   "assets/crew/continuum/caribbean-female/atlas.bin.gz": {
-    "url": "assets/crew/continuum/caribbean-female/atlas.bin.0a769568099f107e.gz",
-    "bytes": 289783,
-    "sha256": "0a769568099f107eaa99c856f5b211e408b4dfce696b90344c7181fefa590f25"
+    "url": "assets/crew/continuum/caribbean-female/atlas.bin.f076f1537cc6597b.gz",
+    "bytes": 34708838,
+    "sha256": "f076f1537cc6597bd451f03a51df0368e3b4bdfa9955fd55af069e6123b7ff13"
   },
   "assets/crew/continuum/caribbean-female/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/caribbean-female/albedo.bc7.bin.5d91e5e554035e43.gz",
-    "bytes": 21427,
-    "sha256": "5d91e5e554035e43e111452bb98f4b56981528b2a84b832be0c8ae809bf23e13"
+    "url": "assets/crew/continuum/caribbean-female/albedo.bc7.bin.12e6261f81dddd8a.gz",
+    "bytes": 12654776,
+    "sha256": "12e6261f81dddd8a7eb299801162d933c04e346ffc39b44c019a6d3a29ea6af2"
   },
   "assets/crew/continuum/caribbean-female/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/caribbean-female/albedo.astc.bin.bae42257d0299ec1.gz",
-    "bytes": 24278,
-    "sha256": "bae42257d0299ec1e9b6332347851ee2daf0441175643c0ce22c11abdbe8fa08"
+    "url": "assets/crew/continuum/caribbean-female/albedo.astc.bin.f1187f00c7b02720.gz",
+    "bytes": 13530521,
+    "sha256": "f1187f00c7b027202dfd901711613869e621397825a0930a7fd8dbd098cc823e"
   },
   "assets/crew/continuum/maya-male/manifest.json": {
-    "url": "assets/crew/continuum/maya-male/manifest.3435ec17872820d2.json",
-    "bytes": 10155,
-    "sha256": "3435ec17872820d26248f8c9626b7f2463dee0d6c46eb2e7718caf735b9d3e66"
+    "url": "assets/crew/continuum/maya-male/manifest.a1a5c05890e3bdeb.json",
+    "bytes": 14429,
+    "sha256": "a1a5c05890e3bdebe049fbb83806740a547b60c24f45cc01792b46ccd329b5e6"
   },
   "assets/crew/continuum/maya-male/body.glb": {
-    "url": "assets/crew/continuum/maya-male/body.822c6565816b10f8.glb",
-    "bytes": 518104,
-    "sha256": "822c6565816b10f85d60cb379a12bbbf15fc99356b4f407d70808302f3d143c7"
+    "url": "assets/crew/continuum/maya-male/body.4a0d5981b2e14860.glb",
+    "bytes": 974160,
+    "sha256": "4a0d5981b2e148606e19640019989a27471c2133c825a2757fd697ee2d2d39af"
   },
   "assets/crew/continuum/maya-male/atlas.bin.gz": {
-    "url": "assets/crew/continuum/maya-male/atlas.bin.b8b31323a3f08b0d.gz",
-    "bytes": 284332,
-    "sha256": "b8b31323a3f08b0d2b486057146681c8f94078785a733d179deed10bc1014e71"
+    "url": "assets/crew/continuum/maya-male/atlas.bin.432a56d128ce5956.gz",
+    "bytes": 34607764,
+    "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
   },
   "assets/crew/continuum/maya-male/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/maya-male/albedo.bc7.bin.6b1c9585e4b8c999.gz",
-    "bytes": 21937,
-    "sha256": "6b1c9585e4b8c999bb68296657d48040e65d47d075a97901a97ca5ecdbad706d"
+    "url": "assets/crew/continuum/maya-male/albedo.bc7.bin.4b14a4d0e0398175.gz",
+    "bytes": 12834875,
+    "sha256": "4b14a4d0e0398175cb37ac25a9666e9caf6753108e98b0310d71548d92d55be4"
   },
   "assets/crew/continuum/maya-male/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/maya-male/albedo.astc.bin.791e98f1ec9e124c.gz",
-    "bytes": 24746,
-    "sha256": "791e98f1ec9e124c1e5d9dde7ac627aff784b907c4a34075d19555f0b2e9cbbc"
+    "url": "assets/crew/continuum/maya-male/albedo.astc.bin.e4c70011d14ca7f2.gz",
+    "bytes": 13598860,
+    "sha256": "e4c70011d14ca7f26b3e167a3f3032172af9020073f54d9385ba504a110f7ab6"
   },
   "assets/crew/continuum/maya-female/manifest.json": {
-    "url": "assets/crew/continuum/maya-female/manifest.e4e00692fb5ff065.json",
-    "bytes": 10140,
-    "sha256": "e4e00692fb5ff065df66a38337e5d4d913e7afecbea26faa866ca9f42664ba01"
+    "url": "assets/crew/continuum/maya-female/manifest.c5bfa140ca5a40e9.json",
+    "bytes": 14459,
+    "sha256": "c5bfa140ca5a40e9353668c4279af8eb8a27b81292c8b66754daa47108022d85"
   },
   "assets/crew/continuum/maya-female/body.glb": {
-    "url": "assets/crew/continuum/maya-female/body.dfef9a937459b3a4.glb",
-    "bytes": 517832,
-    "sha256": "dfef9a937459b3a4c1c4ef851dda5ce4990f19033d3ef1d11e8ca003ce048ad5"
+    "url": "assets/crew/continuum/maya-female/body.70b61f310b217d76.glb",
+    "bytes": 974616,
+    "sha256": "70b61f310b217d763f45a8b98a72932744341b5ef6630aa8ea3e8de6f68e9065"
   },
   "assets/crew/continuum/maya-female/atlas.bin.gz": {
-    "url": "assets/crew/continuum/maya-female/atlas.bin.0a769568099f107e.gz",
-    "bytes": 289783,
-    "sha256": "0a769568099f107eaa99c856f5b211e408b4dfce696b90344c7181fefa590f25"
+    "url": "assets/crew/continuum/maya-female/atlas.bin.f076f1537cc6597b.gz",
+    "bytes": 34708838,
+    "sha256": "f076f1537cc6597bd451f03a51df0368e3b4bdfa9955fd55af069e6123b7ff13"
   },
   "assets/crew/continuum/maya-female/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/maya-female/albedo.bc7.bin.5d91e5e554035e43.gz",
-    "bytes": 21427,
-    "sha256": "5d91e5e554035e43e111452bb98f4b56981528b2a84b832be0c8ae809bf23e13"
+    "url": "assets/crew/continuum/maya-female/albedo.bc7.bin.12e6261f81dddd8a.gz",
+    "bytes": 12654776,
+    "sha256": "12e6261f81dddd8a7eb299801162d933c04e346ffc39b44c019a6d3a29ea6af2"
   },
   "assets/crew/continuum/maya-female/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/maya-female/albedo.astc.bin.bae42257d0299ec1.gz",
-    "bytes": 24278,
-    "sha256": "bae42257d0299ec1e9b6332347851ee2daf0441175643c0ce22c11abdbe8fa08"
+    "url": "assets/crew/continuum/maya-female/albedo.astc.bin.f1187f00c7b02720.gz",
+    "bytes": 13530521,
+    "sha256": "f1187f00c7b027202dfd901711613869e621397825a0930a7fd8dbd098cc823e"
   },
   "assets/crew/continuum/andean-male/manifest.json": {
-    "url": "assets/crew/continuum/andean-male/manifest.4ebb83096bbbcf05.json",
-    "bytes": 10159,
-    "sha256": "4ebb83096bbbcf0587c2f4e1c0b68cfaa155d8bd254921378ea73136b44addc9"
+    "url": "assets/crew/continuum/andean-male/manifest.115c5261f2f70109.json",
+    "bytes": 14433,
+    "sha256": "115c5261f2f70109e19f884385133ec7cf051eed07a468316d876c6866443da4"
   },
   "assets/crew/continuum/andean-male/body.glb": {
-    "url": "assets/crew/continuum/andean-male/body.822c6565816b10f8.glb",
-    "bytes": 518104,
-    "sha256": "822c6565816b10f85d60cb379a12bbbf15fc99356b4f407d70808302f3d143c7"
+    "url": "assets/crew/continuum/andean-male/body.4a0d5981b2e14860.glb",
+    "bytes": 974160,
+    "sha256": "4a0d5981b2e148606e19640019989a27471c2133c825a2757fd697ee2d2d39af"
   },
   "assets/crew/continuum/andean-male/atlas.bin.gz": {
-    "url": "assets/crew/continuum/andean-male/atlas.bin.b8b31323a3f08b0d.gz",
-    "bytes": 284332,
-    "sha256": "b8b31323a3f08b0d2b486057146681c8f94078785a733d179deed10bc1014e71"
+    "url": "assets/crew/continuum/andean-male/atlas.bin.432a56d128ce5956.gz",
+    "bytes": 34607764,
+    "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
   },
   "assets/crew/continuum/andean-male/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/andean-male/albedo.bc7.bin.6b1c9585e4b8c999.gz",
-    "bytes": 21937,
-    "sha256": "6b1c9585e4b8c999bb68296657d48040e65d47d075a97901a97ca5ecdbad706d"
+    "url": "assets/crew/continuum/andean-male/albedo.bc7.bin.4b14a4d0e0398175.gz",
+    "bytes": 12834875,
+    "sha256": "4b14a4d0e0398175cb37ac25a9666e9caf6753108e98b0310d71548d92d55be4"
   },
   "assets/crew/continuum/andean-male/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/andean-male/albedo.astc.bin.791e98f1ec9e124c.gz",
-    "bytes": 24746,
-    "sha256": "791e98f1ec9e124c1e5d9dde7ac627aff784b907c4a34075d19555f0b2e9cbbc"
+    "url": "assets/crew/continuum/andean-male/albedo.astc.bin.e4c70011d14ca7f2.gz",
+    "bytes": 13598860,
+    "sha256": "e4c70011d14ca7f26b3e167a3f3032172af9020073f54d9385ba504a110f7ab6"
   },
   "assets/crew/continuum/andean-female/manifest.json": {
-    "url": "assets/crew/continuum/andean-female/manifest.0e7d9c9338c7e42f.json",
-    "bytes": 10144,
-    "sha256": "0e7d9c9338c7e42fa51b11ef959a2b79f84050b0aa3ad0f71651508886695838"
+    "url": "assets/crew/continuum/andean-female/manifest.c08cd49d660ffda0.json",
+    "bytes": 14463,
+    "sha256": "c08cd49d660ffda04c96a4aaca586909b139f0df0e59f319517bac3284d672a5"
   },
   "assets/crew/continuum/andean-female/body.glb": {
-    "url": "assets/crew/continuum/andean-female/body.dfef9a937459b3a4.glb",
-    "bytes": 517832,
-    "sha256": "dfef9a937459b3a4c1c4ef851dda5ce4990f19033d3ef1d11e8ca003ce048ad5"
+    "url": "assets/crew/continuum/andean-female/body.70b61f310b217d76.glb",
+    "bytes": 974616,
+    "sha256": "70b61f310b217d763f45a8b98a72932744341b5ef6630aa8ea3e8de6f68e9065"
   },
   "assets/crew/continuum/andean-female/atlas.bin.gz": {
-    "url": "assets/crew/continuum/andean-female/atlas.bin.0a769568099f107e.gz",
-    "bytes": 289783,
-    "sha256": "0a769568099f107eaa99c856f5b211e408b4dfce696b90344c7181fefa590f25"
+    "url": "assets/crew/continuum/andean-female/atlas.bin.f076f1537cc6597b.gz",
+    "bytes": 34708838,
+    "sha256": "f076f1537cc6597bd451f03a51df0368e3b4bdfa9955fd55af069e6123b7ff13"
   },
   "assets/crew/continuum/andean-female/albedo.bc7.bin.gz": {
-    "url": "assets/crew/continuum/andean-female/albedo.bc7.bin.5d91e5e554035e43.gz",
-    "bytes": 21427,
-    "sha256": "5d91e5e554035e43e111452bb98f4b56981528b2a84b832be0c8ae809bf23e13"
+    "url": "assets/crew/continuum/andean-female/albedo.bc7.bin.12e6261f81dddd8a.gz",
+    "bytes": 12654776,
+    "sha256": "12e6261f81dddd8a7eb299801162d933c04e346ffc39b44c019a6d3a29ea6af2"
   },
   "assets/crew/continuum/andean-female/albedo.astc.bin.gz": {
-    "url": "assets/crew/continuum/andean-female/albedo.astc.bin.bae42257d0299ec1.gz",
-    "bytes": 24278,
-    "sha256": "bae42257d0299ec1e9b6332347851ee2daf0441175643c0ce22c11abdbe8fa08"
+    "url": "assets/crew/continuum/andean-female/albedo.astc.bin.f1187f00c7b02720.gz",
+    "bytes": 13530521,
+    "sha256": "f1187f00c7b027202dfd901711613869e621397825a0930a7fd8dbd098cc823e"
   },
   "assets/boards/lisbon-1550.world": {
     "url": "assets/boards/lisbon-1550.a075ba18119c93c6.world",
@@ -680,9 +680,9 @@
     "sha256": "5930aabe392ff7eccf0d59bdd87b71b48a6dc597b3525f9a972cf8db10ce50c2"
   },
   "assets/forest-scenery/portugal/continuum/atlas.bin.gz": {
-    "url": "assets/forest-scenery/portugal/continuum/atlas.bin.9a48b51173afa3ec.gz",
-    "bytes": 96293714,
-    "sha256": "9a48b51173afa3ec5b3f72dd87f410020f4156593ad1ed7dc4b88cd1b7cfe964"
+    "url": "assets/forest-scenery/portugal/continuum/atlas.bin.fdf6215a60c61a90.gz",
+    "bytes": 381941654,
+    "sha256": "fdf6215a60c61a907c41c6bc2b78549253c81aaa12da20040e993a2ac6c48e50"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
     "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.03aaf54ab8042358.gz",
@@ -730,24 +730,24 @@
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
   "assets/crew/hair-continuum/manifest.json": {
-    "url": "assets/crew/hair-continuum/manifest.36a36213b863d017.json",
-    "bytes": 10841,
-    "sha256": "36a36213b863d017f9a107e7197024feaa5527b8c6388b8d9f76a82754e11aa9"
+    "url": "assets/crew/hair-continuum/manifest.7a98961dee029e6a.json",
+    "bytes": 10889,
+    "sha256": "7a98961dee029e6aecc308d8b570500b1dba579209ae2c1f03da40b4645b4dba"
   },
   "assets/crew/hair-continuum/atlas.bin.gz": {
-    "url": "assets/crew/hair-continuum/atlas.bin.2b1cf604c6e6f9fa.gz",
-    "bytes": 10352668,
-    "sha256": "2b1cf604c6e6f9fa93a398eca0620709abf4910c9b665216986dc4f5c7bc5220"
+    "url": "assets/crew/hair-continuum/atlas.bin.eadae9a6f550d3c2.gz",
+    "bytes": 10364976,
+    "sha256": "eadae9a6f550d3c21fdba922f64bd2e3fc75bd89b25b31bf5b400eb25351d82f"
   },
   "assets/crew/clothing-continuum/manifest.json": {
-    "url": "assets/crew/clothing-continuum/manifest.c5210b455d99af45.json",
-    "bytes": 13503,
-    "sha256": "c5210b455d99af451faf98baa207c657d6289920b5ee5260e1423425c3e94a7a"
+    "url": "assets/crew/clothing-continuum/manifest.9b68adb50c578fd1.json",
+    "bytes": 14452,
+    "sha256": "9b68adb50c578fd1a46c445fdd1e876effb0eb1cf1d848dc837b24a68aba5695"
   },
   "assets/crew/clothing-continuum/atlas.bin.gz": {
-    "url": "assets/crew/clothing-continuum/atlas.bin.94afe66cf21967a8.gz",
-    "bytes": 1079428,
-    "sha256": "94afe66cf21967a8d689ef60d605752ed45a83573d82a35c8cddb9ecd8624f4f"
+    "url": "assets/crew/clothing-continuum/atlas.bin.230b2404241816e6.gz",
+    "bytes": 10025086,
+    "sha256": "230b2404241816e6055b4a8fdeb96948cf4d77df93233b38bc7b161d9c779177"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",
@@ -1065,9 +1065,9 @@
     "sha256": "7284cb491666b5f0d0d6b2719a615ca5c01ef603a676f7741b2ac72a0bac6b25"
   },
   "assets/forest-scenery/portugal/continuum/manifest.json": {
-    "url": "assets/forest-scenery/portugal/continuum/manifest.dcd78ac276a70d5f.json",
-    "bytes": 109617,
-    "sha256": "dcd78ac276a70d5f13210ba22d6500679bce334103003d78a7732246f86fa00d"
+    "url": "assets/forest-scenery/portugal/continuum/manifest.22c79feeaa1c2054.json",
+    "bytes": 108941,
+    "sha256": "22c79feeaa1c20548cf611548906e30f8a0ec81a228aa39c648de8ab59787bba"
   },
   "assets/forest-scenery/saba/manifest.json": {
     "url": "assets/forest-scenery/saba/manifest.c8150c188c640786.json",
@@ -1615,14 +1615,14 @@
     "sha256": "bf8fb128ceff809a174ed02935a73b2ddeff2c809fa614ee69f594b8c87a644a"
   },
   "assets/forest-scenery/portugal/manifest.json": {
-    "url": "assets/forest-scenery/portugal/manifest.f2d19943accc0ba4.json",
-    "bytes": 73707,
-    "sha256": "f2d19943accc0ba40475b69f3e96b5f6e592d809afdaf91f1aa57cc9af45b408"
+    "url": "assets/forest-scenery/portugal/manifest.45c5f975e5765083.json",
+    "bytes": 73992,
+    "sha256": "45c5f975e5765083df43abe577f9086828d2e87e48498768a1a7acd3d15ebbb1"
   },
   "assets/forest-scenery/portugal/roots.bin.gz": {
-    "url": "assets/forest-scenery/portugal/roots.bin.0a8eb719a377f601.gz",
-    "bytes": 1077,
-    "sha256": "0a8eb719a377f6018ff2132299c14f5af15589350a6d2f1cf7ed1f6433b58403"
+    "url": "assets/forest-scenery/portugal/roots.bin.e37c195ac2384421.gz",
+    "bytes": 1083,
+    "sha256": "e37c195ac23844210aff6f5f50abea441574ae02a3fe042db181fc5d0402e275"
   },
   "assets/forest-scenery/portugal/oak-veteran-bark-albedo.png": {
     "url": "assets/forest-scenery/portugal/oak-veteran-bark-albedo.bec57a5718ce3134.png",
