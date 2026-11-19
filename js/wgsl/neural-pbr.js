@@ -409,10 +409,12 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
     if (npbrMask > 0.002) {
       let npbrBasis = neuralPbrTangentBasis(n, npbrHintT);
       let npbr = evalNeuralPbr(npbrMatId, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrMask * (1.0 - wet.x * 0.25));
+      let npbrIsWood = npbrMatId <= 2u;
       let npbrAlbedoWeight = select(1.0, 0.45, paintedWood && !isCopper && !isGilt);
-      let npbrNormalWeight = select(1.0, 0.78, paintedWood && !isCopper && !isGilt);
+      let npbrNormalWeight = select(1.0, 0.78, paintedWood && !isCopper && !isGilt) * select(1.0, 0.58, npbrIsWood);
+      let npbrRoughScale = select(1.0, 0.62, npbrIsWood);
       albedo = clamp(albedo * mix(vec3f(1.0), npbr.albedoMul, npbrAlbedoWeight), vec3f(0.004), vec3f(0.98));
-      rough = clamp(rough + npbr.roughDelta * (1.0 - wet.x * 0.55), 0.06, 0.98);
+      rough = clamp(rough + npbr.roughDelta * npbrRoughScale * (1.0 - wet.x * 0.55), 0.06, 0.98);
       n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS * npbrNormalWeight * (1.0 - wet.x * 0.35));
       npbrCavityAO = npbr.cavityAO;
       npbrAniso = npbr.aniso;
@@ -544,10 +546,11 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
     landNpbrGloss = clamp(NPBR.params.z, 0.0, 1.5) * clamp(NPBR.params.x, 0.0, 1.5) * (1.0 - smoothstep(NPBR.params.w * 0.55, NPBR.params.w, npbrCamDist));
     let npbr = evalNeuralPbr(npbrMat, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrWeight);
     let npbrBasis = neuralPbrTangentBasis(n, npbrHint);
+    let npbrIsWood = npbrMat <= 2u;
     albedo = clamp(albedo * npbr.albedoMul, vec3f(0.005), vec3f(0.98));
-    roughness = clamp(roughness + npbr.roughDelta, 0.08, 0.98);
+    roughness = clamp(roughness + npbr.roughDelta * select(1.0, 0.60, npbrIsWood), 0.08, 0.98);
     ambientVisibility = clamp(ambientVisibility * npbr.cavityAO, 0.05, 1.0);
-    n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS);
+    n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS * select(1.0, 0.55, npbrIsWood));
   }`,
     'terrain landSurface neural pbr'
   );
@@ -689,10 +692,11 @@ export function withNeuralPbrCity(source, opts = {}) {
         landNpbrGloss = clamp(NPBR.params.z, 0.0, 1.5) * clamp(NPBR.params.x, 0.0, 1.5) * (1.0 - smoothstep(NPBR.params.w * 0.55, NPBR.params.w, npbrCamDist));
         let npbr = evalNeuralPbr(npbrMat, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrWeight);
         let npbrBasis = neuralPbrTangentBasis(n, npbrHint);
+        let npbrIsWood = npbrMat <= 2u;
         albedo = clamp(albedo * npbr.albedoMul, vec3f(0.005), vec3f(0.98));
-        roughness = clamp(roughness + npbr.roughDelta, 0.08, 0.98);
+        roughness = clamp(roughness + npbr.roughDelta * select(1.0, 0.60, npbrIsWood), 0.08, 0.98);
         ambientVisibility = clamp(ambientVisibility * npbr.cavityAO, 0.05, 1.0);
-        n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS);
+        n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS * select(1.0, 0.55, npbrIsWood));
       }
     }
   }`,

@@ -138,22 +138,46 @@ export function extractShallowWaterGeometry({ bridges = [], riverReaches = [], w
     }
   }
 
-  // 3. Harbor waterfront jetties / pier pilings (for coastal swell diffraction & bow-slap around piers)
+  // 3. Harbor waterfront jetties / pier pilings (for coastal swell diffraction & piling flow)
   for (const wf of Array.isArray(waterfront) ? waterfront : []) {
     if (!wf || !Number.isFinite(wf.x) || !Number.isFinite(wf.z)) continue;
-    const isJetty = wf.kind === 'jetty' || wf.kind === 'pier' || wf.kind === 'mole' || wf.kind === 'breakwater';
-    if (!isJetty) continue;
+    const isSolidMole = wf.kind === 'mole' || wf.kind === 'breakwater';
+    const isTimberPier = wf.kind === 'jetty' || wf.kind === 'pier';
+    if (!isSolidMole && !isTimberPier) continue;
     const wx = wf.x + ox, wz = wf.z + oz;
     const yaw = SWE_FINITE(wf.yaw, 0);
     const ux = Math.sin(yaw), uz = Math.cos(yaw);
+    const px = -uz, pz = ux;
     const halfLen = Math.max(1.2, SWE_FINITE(wf.length, 10) * 0.5);
     const halfWid = Math.max(0.8, SWE_FINITE(wf.width, 3) * 0.5);
-    obstacles.push({
-      cx: wx, cz: wz, ux, uz,
-      halfLen, halfWid,
-      kind: 0,
-      waterY: 0,
-    });
+    if (isSolidMole) {
+      obstacles.push({
+        cx: wx, cz: wz, ux, uz,
+        halfLen, halfWid,
+        kind: 0,
+        waterY: 0,
+      });
+    } else {
+      // Timber jetties & docks stand on cylindrical pilings — water flows underneath between bents!
+      const bentStep = 3.6;
+      const bents = Math.max(2, Math.min(8, Math.round((halfLen * 2.0) / bentStep) + 1));
+      const span = (bents - 1) * bentStep;
+      const sideOff = Math.max(0.65, halfWid - 0.45);
+      for (let k = 0; k < bents; k++) {
+        const along = -span * 0.5 + k * bentStep;
+        for (const side of [-sideOff, sideOff]) {
+          obstacles.push({
+            cx: wx + ux * along + px * side,
+            cz: wz + uz * along + pz * side,
+            ux, uz,
+            halfLen: 0.32,
+            halfWid: 0.32,
+            kind: 2, // cylinder piling
+            waterY: 0,
+          });
+        }
+      }
+    }
   }
 
   return { obstacles, reaches };
@@ -229,7 +253,9 @@ export async function createShallowWater({
     usage: B.STORAGE | B.COPY_DST,
   });
 
-  // Environment textures: sweEnv (h0, u0, v0, obs) + sweWaterY (rest surface elevation in metres)
+  // Environment textures:
+  //   sweEnv    (h0, u0, v0, obs)
+  //   sweWaterY (waterY, rawTransmit, obsProx, riverW) — rgba16float carries exposure & obstacle proximity at zero extra bindings
   const sweEnvTex = device.createTexture({
     label: 'swe env',
     size: [size, size],
@@ -239,7 +265,7 @@ export async function createShallowWater({
   const sweWaterYTex = device.createTexture({
     label: 'swe waterY',
     size: [size, size],
-    format: 'r32float',
+    format: 'rgba16float',
     usage: T.TEXTURE_BINDING | T.STORAGE_BINDING,
   });
   const sweEnvView = sweEnvTex.createView();

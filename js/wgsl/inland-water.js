@@ -272,14 +272,22 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let posA = in.rawXZ - advVel * (phA - 0.5) * advPeriod;
   let posB = in.rawXZ - advVel * (phB - 0.5) * advPeriod;
 
-  let foamA = textureSample(foamTex, sampR, posA * 0.24);
-  let foamB = textureSample(foamTex, sampR, posB * 0.24 + vec2f(0.37, 0.71));
+  // Flow-aligned anisotropic foam sampling so river whitewater stretches into natural lacy current filaments
+  // instead of flat isotropic spots across the water surface.
+  let flowUvA = vec2f(dot(posA, across) * 0.52, dot(posA, dir) * 0.13);
+  let flowUvB = vec2f(dot(posB, across) * 0.52 + 0.37, dot(posB, dir) * 0.13 + 0.71);
+  let foamA = textureSample(foamTex, sampR, flowUvA);
+  let foamB = textureSample(foamTex, sampR, flowUvB);
+  let foamFineA = textureSample(foamTex, sampR, flowUvA * vec2f(2.1, 1.6) + vec2f(0.19, 0.43));
+  let foamFineB = textureSample(foamTex, sampR, flowUvB * vec2f(2.1, 1.6) + vec2f(0.61, 0.17));
   let gustN = textureSample(foamTex, sampR, xz * 0.011 + F.windP[0].xy * (t * 0.0004)).b;
   let ws = vec2f(dot(xz, F.windP[0].xy), dot(xz, vec2f(-F.windP[0].y, F.windP[0].x)));
   let streak = textureSample(foamTex, sampR, ws * vec2f(0.035, 0.11)).a;
+  let flowStreak = mix(foamA.a, foamB.a, wB);
   let bub = textureSample(foamTex, sampR, xz * 1.9 + vec2f(0.21, 0.53)).g;
 
-  let patFluvial = mix(foamA.r * 0.76 + foamA.g * 0.24, foamB.r * 0.76 + foamB.g * 0.24, wB);
+  let patFluvialRaw = mix(foamA.r * 0.62 + foamFineA.g * 0.38, foamB.r * 0.62 + foamFineB.g * 0.38, wB);
+  let patFluvial = patFluvialRaw * (0.55 + 0.45 * flowStreak);
   let patOcean = textureSample(foamTex, sampR, xz * 0.23 + vec2f(0.013, 0.0) * t).r * 0.78 + bub * 0.22;
   let pat = mix(patFluvial, patOcean, oceanBlend);
   let fw = fwidth(pat) + 0.03;
@@ -354,8 +362,8 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     if (SW.step.w > 1.5) {
       let sweX = shallowWaterAt(xz + vec2f(dxW, 0.0)).x - shallowWaterAt(xz - vec2f(dxW, 0.0)).x;
       let sweZ = shallowWaterAt(xz + vec2f(0.0, dxW)).x - shallowWaterAt(xz - vec2f(0.0, dxW)).x;
-      splashSl += vec2f(sweX, sweZ) / (2.0 * dxW);
-      splashFoam = max(splashFoam, clamp(sweC.w * 1.15, 0.0, 1.0));
+      splashSl += (vec2f(sweX, sweZ) / (2.0 * dxW)) * 1.35;
+      splashFoam = max(splashFoam, clamp(sweC.w * 0.95, 0.0, 1.0));
     }
   }
 
@@ -524,36 +532,42 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     body = mix(mix(riverBody, plumeBody, clamp(estuaryT * 1.4 * jetPlume, 0.0, 1.0)), oceanBody, oceanBlend);
   }
 
-  // ---- Foam: advected riffle lace, swirling eddy scum, bridge cutwater wakes & river-bar breaker convergence ----
-  let riffleBase = smoothstep(0.28, 1.15, riffleAmt);
+  // ---- Foam: clear glossy river flow with delicate flow-aligned whitewater ONLY at pier cutwaters, steep riffles & bars ----
+  let riffleBase = smoothstep(0.68, 1.40, riffleAmt);
   var riffleMod = patFluvial;
   if (riffleBase > 0.0 && distFade1 > 0.0) {
-    riffleMod = mix(patFluvial, clamp(0.5 + 0.65 * gnoise(posA * 0.9), 0.0, 1.0), distFade1);
+    riffleMod = mix(patFluvial, clamp(0.45 + 0.65 * gnoise(flowUvA * 2.2), 0.0, 1.0), distFade1);
   }
-  let riffleCover = riffleBase * (0.42 + 0.58 * riffleMod);
-  let eddyCover = smoothstep(0.32, 0.92, eddyAmt) * smoothstep(0.65, 2.4, speed) * (0.28 + 0.45 * eddyDimple) * 0.58;
-  let bankLace = smoothstep(0.84, 0.99, bankAbs) * (1.0 - seaOpen) * smoothstep(0.85, 2.1, speed) * 0.30;
+  let riffleCover = riffleBase * (0.28 + 0.55 * riffleMod);
+  let eddyCover = smoothstep(0.68, 0.98, eddyAmt) * smoothstep(1.15, 2.6, speed) * (0.25 + 0.45 * eddyDimple) * 0.22;
+  let bankLace = smoothstep(0.92, 0.995, bankAbs) * (1.0 - seaOpen) * smoothstep(1.25, 2.4, speed) * 0.14;
   let freshOcean = select(0.0, breakingCompression(jxx, jzz, jxz, F.foamP.x), estuaryT > 0.001);
-  let fluvialFoam = clamp(riffleCover * 0.62 + eddyCover + bankLace + splashFoam * 0.85, 0.0, 0.88);
+  // Pier/wake foam from 2D SWE stays tightly sculpted into slender flow-stretched lacy ribbons right off cutwaters
+  let pierLace = smoothstep(0.06, 0.58, splashFoam) * (0.58 + 0.42 * smoothstep(0.22, 0.76, flowStreak));
+  let bgFluvial = clamp(riffleCover * 0.36 + eddyCover + bankLace, 0.0, 0.65) * mix(0.32, 1.0, smoothstep(0.32, 0.80, flowStreak));
+  let fluvialFoam = clamp(max(bgFluvial, pierLace * 0.92), 0.0, 0.88);
   var cover = mix(fluvialFoam, max(max(freshOcean * 0.82 * F.foamP.z, shoreBreak * 0.92), barFoam), oceanBlend);
   cover = max(cover, barFoam);
-  cover *= mix(mix(0.45, 1.0, smoothstep(0.25, 0.75, streak)), 1.0, clamp(riffleCover + barFoam + freshOcean, 0.0, 1.0));
+  let dirStreak = mix(1.0, smoothstep(0.25, 0.75, streak), oceanBlend);
+  cover *= mix(mix(0.35, 1.0, dirStreak), 1.0, clamp(barFoam + freshOcean + pierLace, 0.0, 1.0));
 
-  let soft = 0.04 + 0.14 * (1.0 - clamp(cover, 0.0, 1.0));
-  let fm = smoothstep(1.0 - cover - fw - soft, 1.0 - cover + fw + soft, pat);
-  var foamMask = clamp(fm * smoothstep(0.0, 0.45, cover), 0.0, 1.0) * (0.68 + 0.32 * smoothstep(0.3, 0.9, cover));
+  let soft = 0.03 + 0.10 * (1.0 - clamp(cover, 0.0, 1.0));
+  let patUse = mix(pat, patFluvialRaw, clamp(pierLace * (1.0 - oceanBlend), 0.0, 1.0));
+  let fm = smoothstep(1.0 - cover - fw - soft, 1.0 - cover + fw + soft, patUse);
+  var foamMask = clamp(fm * smoothstep(0.04, 0.45, cover), 0.0, 1.0) * (0.65 + 0.35 * smoothstep(0.30, 0.88, cover));
+  foamMask = max(foamMask, pierLace * (1.0 - oceanBlend) * smoothstep(0.32, 0.72, patFluvialRaw) * 0.72);
   foamMask = max(foamMask, max(freshOcean, barFoam) * smoothstep(0.26, 0.68, pat) * 0.82);
   foamMask = max(foamMask, shoreBreak * (0.58 + 0.42 * smoothstep(0.22, 0.78, pat)));
-  foamMask = max(foamMask, cover * 0.22 * smoothstep(0.3, 0.75, pat));
+  foamMask = max(foamMask, cover * 0.18 * oceanBlend * smoothstep(0.35, 0.78, pat));
 
-  let foamAlb = vec3f(0.82, 0.87, 0.92) * (0.78 + 0.3 * bub);
+  let foamAlb = vec3f(0.84, 0.89, 0.93) * (0.80 + 0.26 * bub);
   let foamAmb = skyHemi * 1.0;
   let foamAmbN = mix(foamAmb, vec3f(dot(foamAmb, vec3f(0.2126, 0.7152, 0.0722))), 0.85);
-  let foamLit = foamAlb * ((sunE * max(dot(nrm, Ld), 0.0) + moonE * max(dot(nrm, lunarDirection()), 0.0)) * 0.318 * 0.5 + foamAmbN * 1.55);
+  let foamLit = foamAlb * ((sunE * max(dot(nrm, Ld), 0.0) + moonE * max(dot(nrm, lunarDirection()), 0.0)) * 0.318 * 0.5 + foamAmbN * 1.48);
 
   let effectiveFr = Fr * (1.0 - foamMask * 0.72);
   var col = body * (1.0 - effectiveFr) + refl * effectiveFr + spec + moonSpec;
-  col = mix(col, foamLit, foamMask * 0.95);
+  col = mix(col, foamLit, foamMask * 0.88);
 
   let surfaceAlbedo = mix(mix(riverTint, F.waterCol.rgb, oceanBlend), foamAlb, foamMask);
   col += lightningSurface(nrm, V, surfaceAlbedo, 0.23)

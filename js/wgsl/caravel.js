@@ -354,14 +354,14 @@ fn vesselSurvives(in:BoatVertex)->bool {
     castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && hull.rig.w>2.5 && castleMoulding<.5);
     let castleRelief=(castleMoulding*.0024 + castleFuttock*.0018);
     join=select(deckCaulk*.85,max(seam,buttSeam*.8),plankedWall);
-    bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018 + castleRelief;
+    bump=relief*.0038 + grain*.00042*(1.0-smoothstep(.0005,.004,footprint)) - join*.0015 + castleRelief;
     ${damaged?'if(in.damage>0.05){bump+=smoothstep(0.05,0.45,clamp(in.damage,0.0,1.5))*gnoise(vec2f(p.z*28.0,p.y*165.0))*.016*(1.0-smoothstep(.002,.015,footprint));}':''}
   }
   ${damaged?`// Timber stands raw and splintered around a hole, and whatever is seen through it lies in the dark of the hold.
   let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
   let holeRim=select(0.0,max(hullHoleRim(p),0.0),holedTimber);
 `:''}  let gradient = (dpdx(bump)*sx + dpdy(bump)*sy) / max(abs(det), 0.000001) * sign(det);
-  n = normalize(n - clamp(gradient,vec3f(-.38),vec3f(.38))*select(0.0,1.0,isWood));
+  n = normalize(n - clamp(gradient,vec3f(-.24),vec3f(.24))*select(0.0,1.0,isWood));
   var iron:VesselIronSurface;
   if(isIron){iron=vesselIronSurface(materialPoint,materialFootprint,vesselAirFilm(wet.y));}
   // Derivatives remain outside material-dependent control flow. They use the
@@ -369,7 +369,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
   let ironGradient=(dpdx(iron.relief)*sx+dpdy(iron.relief)*sy)/max(abs(det),0.000001)*sign(det);
   if(isIron){n=normalize(n-clamp(ironGradient,vec3f(-.18),vec3f(.18)));}
   var albedo = timber * vec3f(1.02,.98,.88);
-  var rough = clamp(.86 + (.2-relief)*.20 + (grain-.5)*.08,.78,.95); var metal = 0.0;
+  var rough = clamp(.64 + (.2-relief)*.14 + (grain-.5)*.06,.54,.78); var metal = 0.0;
   let canvasDepth = canvasThickness(in.uv, in.material) * canvasWetDepth(wet.x);
   let plank=select(deckPlankId,board,plankedWall);
   albedo *= .88 + .16 * select(fract(sin(plank*74.17)*4321.1), 0.5, isDugoutCanoe);
@@ -394,7 +394,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
       let sparGrain = 0.92 + 0.08 * sin(sparAngle * 24.0 + gnoise(vec2f(p.y * 6.0, p.z * 6.0)) * 4.0);
       let checkCrack = smoothstep(0.86, 0.95, sin(sparAngle * 11.0 + p.y * 2.5));
       albedo = timber * vec3f(1.08, 0.92, 0.68) * sparGrain * (1.0 - checkCrack * 0.28);
-      rough = clamp(0.74 + (1.0 - sparGrain) * 0.14 + checkCrack * 0.12, 0.68, 0.90);
+      rough = clamp(0.56 + (1.0 - sparGrain) * 0.10 + checkCrack * 0.10, 0.48, 0.74);
       let mastHoop = select(0.0, mastHoopBand(in.material, hull.rig.w, p.y, hoopFootprint), abs(p.z) < 4.6);
       albedo = mix(albedo, vec3f(0.032, 0.031, 0.029), mastHoop);
       rough = mix(rough, 0.58, mastHoop);
@@ -404,7 +404,7 @@ fn vesselSurvives(in:BoatVertex)->bool {
       let isCapRail = p.y > 0.58 && in.normalLocal.y > 0.52 && abs(p.x) > 0.32;
       if(isKeelOrPost) {
         albedo = timber * vec3f(.20,.18,.15);
-        rough = .90;
+        rough = .76;
         if(abs(p.x) < 0.055 && p.z > 5.25 && abs(fract((p.y + 0.85) / 0.42) - 0.5) < 0.085) {
           albedo = vec3f(0.045, 0.042, 0.040);
           rough = 0.56;
@@ -412,18 +412,18 @@ fn vesselSurvives(in:BoatVertex)->bool {
         }
       } else if(isCapRail) {
         albedo = timber * vec3f(1.10,1.0,.80);
-        rough = clamp(rough - 0.04, 0.74, 0.92);
+        rough = clamp(rough - 0.06, 0.48, 0.72);
       }
     }
   }
   if(in.material==20u){
-    albedo=vec3f(.009,.008,.006);rough=.88;
+    albedo=vec3f(.009,.008,.006);rough=.74;
     if(isGilt) {
       albedo = vec3f(.48,.28,.055);
       rough = .42; metal = .68;
     }
   }
-  if(in.material==21u){albedo=vec3f(.48,.265,.075);rough=.85;}
+  if(in.material==21u){albedo=vec3f(.48,.265,.075);rough=.66;}
   if(isCopper){
     // Staggered 18th/19th-century Muntz-metal / copper hull sheathing plates with overlapped seams,
     // embossed tack rows, rolled-metal tone variation, and sea-salt verdigris patina near the waterline.

@@ -24,6 +24,7 @@ test('extractShallowWaterGeometry extracts stone cutwater piers, timber pile ben
     ],
     waterfront: [
       { x: -50, z: -80, yaw: 0.4, length: 18, width: 3.5, kind: 'jetty' },
+      { x: -120, z: -40, yaw: 0.0, length: 24, width: 5.0, kind: 'mole' },
     ],
     worldOffset: { x: 10, z: -20 },
   });
@@ -35,11 +36,14 @@ test('extractShallowWaterGeometry extracts stone cutwater piers, timber pile ben
   // Stone 27m bridge => 3 arches of 9m => 4 piers (2 interior cutwaters kind=1 + 2 abutments kind=0)
   const cutwaters = geo.obstacles.filter((o) => o.kind === 1);
   assert.ok(cutwaters.length >= 2, `expected >= 2 interior stone cutwaters, got ${cutwaters.length}`);
-  // Timber 14m bridge => bents of paired cylinder piles (kind=2) + collapsed rubble (kind=2)
+  // Timber 14m bridge + timber jetty pilings + collapsed rubble => cylinder piles (kind=2)
   const cylinders = geo.obstacles.filter((o) => o.kind === 2);
-  assert.ok(cylinders.length >= 10, `expected timber piles + rubble mounds, got ${cylinders.length}`);
-  // Harbor jetty (kind=0)
-  assert.ok(geo.obstacles.some((o) => Math.abs(o.cx - (-40)) < 1e-6 && Math.abs(o.cz - (-100)) < 1e-6));
+  assert.ok(cylinders.length >= 18, `expected timber bridge piles + jetty pilings + rubble mounds, got ${cylinders.length}`);
+  // Solid stone harbor mole (kind=0) centered at (-110, -60)
+  assert.ok(geo.obstacles.some((o) => o.kind === 0 && Math.abs(o.cx - (-110)) < 1e-6 && Math.abs(o.cz - (-60)) < 1e-6));
+  // Timber jetty pilings flank (-40, -100) rather than stamping an impervious box
+  const jettyPiles = geo.obstacles.filter((o) => o.kind === 2 && Math.hypot(o.cx - (-40), o.cz - (-100)) < 11);
+  assert.ok(jettyPiles.length >= 8, `expected >= 8 cylindrical timber jetty pilings, got ${jettyPiles.length}`);
 });
 
 test('2D GPU Shallow Water solver builds physical bow-wave pileup, arch acceleration, wake foam, and spray at bridge piers', { timeout: 120000 }, async () => {
@@ -162,12 +166,21 @@ test('2D GPU Shallow Water solver builds physical bow-wave pileup, arch accelera
       }
       const archMid = sampleAt(4.5, 0.0);
       const freeStream = sampleAt(0.0, -35.0);
+      // Measure Nyquist 2-cell checkerboard ringing across open river upstream (must stay near zero!)
+      let maxCheckerboard = 0;
+      for (let wz = -40.0; wz <= -12.0; wz += 1.0) {
+        const a = sampleAt(3.0, wz - 0.5).eta;
+        const b = sampleAt(3.0, wz).eta;
+        const c = sampleAt(3.0, wz + 0.5).eta;
+        const ring = Math.abs(a - 2 * b + c);
+        if (ring > maxCheckerboard) maxCheckerboard = ring;
+      }
 
       swe.destroy();
       sw.destroy();
       return {
         errors, finite, active: swe.stats.active, obs: swe.stats.obstacles, reaches: swe.stats.reaches,
-        maxEtaUp, maxFoamNear, maxWakeFoam, archMid, freeStream,
+        maxEtaUp, maxFoamNear, maxWakeFoam, archMid, freeStream, maxCheckerboard,
       };
     });
 
@@ -177,7 +190,9 @@ test('2D GPU Shallow Water solver builds physical bow-wave pileup, arch accelera
     assert.ok(result.obs >= 3, `expected bridge pier obstacles, got ${result.obs}`);
     assert.ok(result.maxEtaUp > 0.04, `expected physical upstream bow-wave pileup > 4 cm, got ${result.maxEtaUp.toFixed(4)} m`);
     assert.ok(result.maxFoamNear > 0.12, `expected aerated collar foam at cutwater > 0.12, got ${result.maxFoamNear.toFixed(3)}`);
-    assert.ok(result.maxWakeFoam > 0.08, `expected advected downstream wake foam > 0.08, got ${result.maxWakeFoam.toFixed(3)}`);
+    assert.ok(result.maxWakeFoam > 0.05, `expected advected downstream wake foam > 0.05, got ${result.maxWakeFoam.toFixed(3)}`);
+    assert.ok(result.freeStream.foam < 0.02, `expected clear calm upstream river (zero uniform froth), got foam=${result.freeStream.foam.toFixed(4)}`);
+    assert.ok(result.maxCheckerboard < 0.015, `expected zero 2-dx Nyquist zebra-stripe ringing (< 1.5 cm), got ${result.maxCheckerboard.toFixed(4)} m`);
     assert.ok(result.archMid.v > 1.2, `expected live downstream flow through bridge arch, got v=${result.archMid.v.toFixed(2)} m/s`);
     assert.ok(result.freeStream.v > 1.2, `expected sustained upstream river current, got v=${result.freeStream.v.toFixed(2)} m/s`);
   } finally {

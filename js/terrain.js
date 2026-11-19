@@ -1079,9 +1079,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // A city's buildings, through the one continuum: the city's material, shaded by the land's own surfaces, in a view
   // of its own (js/wgsl/city-continuum.js).
   const cityViewPromise=requestContinuumView({device,shader,material:cityContinuumMaterial(citySource),format,samples});
-  // The ground cover's rocks, through the one continuum: their stone, lit by the land's light (js/wgsl/boulder-continuum.js).
-  const boulderViewPromise=requestContinuumView({device,shader,material:BOULDER_CONTINUUM_MATERIAL_SPEC,format,samples});
-  boulderViewPromise.catch(()=>{});
+  // Ground boulders removed (smooth boulders disabled until redesigned).
+  const boulderViewPromise=Promise.resolve(null);
   const terrainPipesPromise=Promise.all([
     computePipe(TERRAIN_LIGHT,'island sunlight'),
     cityViewPromise,
@@ -1424,6 +1423,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   // Instances are worked out once per patch and uploaded as it comes into range; the GPU does the rest.
   function updateGroundResidency(camera){
+    if(!boulderContinuum){groundStats.resident=0;return;}
     const moved=!groundResidencyAt||Math.hypot(camera.x-groundResidencyAt.x,camera.z-groundResidencyAt.z)>GROUND_RESIDENCY_MOVE_M;
     if(moved){
       groundResidencyAt={x:camera.x,z:camera.z};
@@ -1646,19 +1646,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   landCentre(proceduralPack?.port?.riverCut);
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
-  // Build boulders, inland water, herds, and trade vessels in parallel (instead of 4 serial awaits).
+  // Build inland water, herds, and trade vessels in parallel (ground boulders removed).
   const [boulderRes, inlandWaterRes, herdsRes, tradeVesselsRes] = await Promise.all([
-    Promise.all([requestBoulderContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}),boulderViewPromise])
-      .then(([atlas,programs,view])=>{
-        const made=createBoulderContinuum({
-          device,atlas,programs,view,frame:frameUBO,shadowUniform:activeLandShadows.uniform,resources:nearResources,capacity:groundBlocks*groundBlock,samples,
-          getPort:()=>ensureBoulderFracturePort(),
-          groundAt:(x,z)=>baseGroundSample(x,z),
-          waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,
-        });
-        made.setWorldOffset(worldOffset.x,worldOffset.z);
-        return made;
-      }).catch(error=>{console.error('boulder continuum',error);return null;}),
+    Promise.resolve(null),
     proceduralPack?createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):Promise.resolve(null),
     proceduralPack?createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):Promise.resolve(null),
     proceduralPack?createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):Promise.resolve(null),

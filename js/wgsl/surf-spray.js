@@ -78,13 +78,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         let r3 = spRand(baseSeed + 47u);
         let r4 = spRand(baseSeed + 61u);
         let isSurf = sp.velKind.w > 0.5;
-        let spread = select(0.55, 1.35, isSurf);
-        let pos = vec3f(sp.posEnergy.x + r1 * spread, sp.posEnergy.y + 0.08 + r3 * 0.18, sp.posEnergy.z + r2 * spread);
-        let vx = sp.velKind.x * select(0.55, 1.15, isSurf) + (r1 * 1.4);
-        let vz = sp.velKind.y * select(0.55, 1.15, isSurf) + (r2 * 1.4);
-        let vy = sp.velKind.z * (0.55 + 0.65 * r4);
-        let life = mix(0.55, 1.25, r3) * select(0.85, 1.15, isSurf);
-        let size = mix(0.28, 0.72, r4) * clamp(sp.posEnergy.w, 0.5, 1.4) * select(0.75, 1.35, isSurf);
+        let spread = select(0.35, 0.95, isSurf);
+        let pos = vec3f(sp.posEnergy.x + r1 * spread, sp.posEnergy.y + 0.06 + r3 * 0.14, sp.posEnergy.z + r2 * spread);
+        let vx = sp.velKind.x * select(0.45, 0.95, isSurf) + (r1 * 1.1);
+        let vz = sp.velKind.y * select(0.45, 0.95, isSurf) + (r2 * 1.1);
+        let vy = sp.velKind.z * (0.45 + 0.55 * r4);
+        let life = mix(0.45, 0.95, r3);
+        let size = mix(0.12, 0.28, r4) * clamp(sp.posEnergy.w, 0.5, 1.15);
         p = SprayParticle(
           vec4f(pos, 0.0),
           vec4f(vx, vy, vz, life),
@@ -160,8 +160,8 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Spray
 
   o.pos = F.viewProj * vec4f(worldPos, 1.0);
   o.uv = c;
-  let distFade = 1.0 - smoothstep(160.0, 275.0, dist);
-  let alpha = fadeIn * fadeOut * distFade * clamp(p.info.y * 0.48, 0.14, 0.56);
+  let distFade = 1.0 - smoothstep(140.0, 240.0, dist);
+  let alpha = fadeIn * fadeOut * distFade * clamp(p.info.y * 0.22, 0.06, 0.24);
   o.alphaEnergy = vec3f(alpha, p.info.z, p.info.w);
   o.rel = rel;
   return o;

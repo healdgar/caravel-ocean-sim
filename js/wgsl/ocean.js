@@ -122,7 +122,7 @@ struct VSOut {
   ${coast ? 'disp += cws.dispOffset;' : ''}
   var o: VSOut;
   let displacedXZ = xz + disp.xz;
-  ${coast && surfaceWaves ? 'let sweCoastV = 1.0 - smoothstep(5.0, 14.0, max(0.0, -cws.bed)); disp.y += wakeAt(displacedXZ).x + shallowWaterAt(displacedXZ).x * sweCoastV;' : 'disp.y += wakeAt(displacedXZ).x;'}
+  ${coast && surfaceWaves ? 'let sweCoastV = (1.0 - smoothstep(5.0, 14.0, max(0.0, -cws.bed))) * smoothstep(0.18, 0.72, cws.swellScale); disp.y += wakeAt(displacedXZ).x + shallowWaterAt(displacedXZ).x * sweCoastV;' : 'disp.y += wakeAt(displacedXZ).x;'}
   let world = vec3f(displacedXZ.x, disp.y, displacedXZ.y);
   o.rel = world - F.camPos.xyz;
   o.pos = F.viewProj * vec4f(o.rel, 1.0);
@@ -202,7 +202,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   var sweCoastFoam = 0.0;
   if (dist < 360.0) {
     wakeSlope = vec2f(wakeAt(wp + vec2f(dx, 0)).x - wakeAt(wp - vec2f(dx, 0)).x, wakeAt(wp + vec2f(0, dx)).x - wakeAt(wp - vec2f(0, dx)).x) / (2.0 * dx);
-    ${coast && surfaceWaves ? `let sweCoastW = 1.0 - smoothstep(5.0, 14.0, max(0.0, -cws.bed));
+    ${coast && surfaceWaves ? `let sweCoastW = (1.0 - smoothstep(5.0, 14.0, max(0.0, -cws.bed))) * smoothstep(0.18, 0.72, cws.swellScale);
     if (sweCoastW > 0.01 && SW.step.w > 1.5) {
       let sdx = max(SW.nearDomain.w, 0.45);
       let sweC = shallowWaterAt(wp);

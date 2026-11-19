@@ -48,7 +48,7 @@ export const SHALLOW_WATER_ENV_WGSL = SHALLOW_WATER_TYPES + /* wgsl */ `
 @group(0) @binding(4) var<storage, read> sweReaches: array<SweReach>;
 @group(0) @binding(5) var<storage, read> sweHulls: array<SweHull>;
 @group(0) @binding(6) var sweEnvOut: texture_storage_2d<rgba16float, write>;
-@group(0) @binding(7) var sweWaterYOut: texture_storage_2d<r32float, write>;
+@group(0) @binding(7) var sweWaterYOut: texture_storage_2d<rgba16float, write>;
 
 fn swePointSeg(p: vec2f, a: vec2f, b: vec2f) -> vec2f {
   let ab = b - a;
@@ -89,8 +89,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let hasCoast = (flags & 2u) != 0u;
   let hasRiver = (flags & 4u) != 0u;
 
-  // 1. Coastal bathymetry from the shared coastalShelter DEM texture (shelter.z = bed elevation in metres).
+  // 1. Coastal bathymetry & wave-exposure transmission from shared coastalShelter (x = rawTransmit, z = bed elevation).
   var h0 = -2.0;
+  var rawTransmit = 1.0;
   if (hasCoast) {
     let off = abs(p - sweU.coastalWin.xy);
     let inside = 1.0 - smoothstep(sweU.coastalWin.z - 220.0, sweU.coastalWin.z - 20.0, max(off.x, off.y));
@@ -98,6 +99,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let sh = textureSampleLevel(coastalShelter, coastalSamp, uv, 0.0);
     let bed = mix(-40.0, sh.z, inside);
     h0 = -bed;
+    rawTransmit = clamp(mix(1.0, sh.x, inside), 0.0, 1.0);
   }
 
   // 2. River reaches: parabolic cross-section depth and ambient downstream velocity (u0, v0).
@@ -146,31 +148,33 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     }
   }
 
-  // 3. Static physical obstructions: stone bridge piers & pointed cutwaters, timber pile bents, harbor pilings, boulders.
+  // 3. Static physical obstructions: stone bridge piers & pointed cutwaters, timber pile bents, harbor pilings.
   var obs = 0.0;
+  var obsProx = 0.0;
   let cellSoft = sweU.domain.w * 0.65;
   for (var i = 0u; i < obsCount; i++) {
     let o = sweObstacles[i];
     let rel = p - o.posDir.xy;
-    let bound = max(o.dims.x, o.dims.y) + cellSoft + 0.5;
+    let bound = max(o.dims.x, o.dims.y) + cellSoft + 3.0;
     if (abs(rel.x) > bound || abs(rel.y) > bound) { continue; }
     let u = o.posDir.zw;
     let perp = vec2f(-u.y, u.x);
     let local = vec2f(dot(rel, u), dot(rel, perp));
     var sdf = 10.0;
     if (o.dims.z > 1.5) {
-      // Cylinder (timber bridge pile bent, harbor piling, boulder)
+      // Cylinder (timber bridge pile bent, harbor piling)
       sdf = length(rel) - o.dims.x;
     } else if (o.dims.z > 0.5) {
       // Pointed stone cutwater pier
       sdf = sweCutwaterSdf(local, o.dims.x, o.dims.y);
     } else {
-      // Oriented rectangular box (quay wall, stone abutment, rubble block)
+      // Oriented rectangular box (solid stone mole, breakwater, abutment)
       let d = abs(local) - o.dims.xy;
       sdf = length(max(d, vec2f(0.0))) + min(max(d.x, d.y), 0.0);
     }
     let m = 1.0 - smoothstep(-cellSoft * 0.35, cellSoft * 0.85, sdf);
     obs = max(obs, m);
+    obsProx = max(obsProx, 1.0 - smoothstep(0.0, 2.4, max(0.0, sdf)));
   }
 
   // 4. Moving ship & river-barge hulls stamped as dynamic obstacles (generates bow pileup & deflected currents in rivers/harbors).
@@ -179,7 +183,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let rel = p - hull.posVel.xy;
     let halfL = max(hull.dims.x * 0.5, 2.0);
     let halfB = max(hull.dims.y * 0.5, 0.8);
-    let bound = halfL + cellSoft + 1.0;
+    let bound = halfL + cellSoft + 2.5;
     if (abs(rel.x) > bound || abs(rel.y) > bound) { continue; }
     let spd = length(hull.posVel.zw);
     let fwd = select(vec2f(0.0, 1.0), hull.posVel.zw / spd, spd > 0.05);
@@ -191,12 +195,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let sdf = max(abs(s) - halfL, y - planform);
     let m = 1.0 - smoothstep(-cellSoft * 0.3, cellSoft * 0.8, sdf);
     obs = max(obs, m);
+    obsProx = max(obsProx, 1.0 - smoothstep(0.0, 2.0, max(0.0, sdf)));
   }
 
   // Clamp dry-bank elevation to keep half-float precision high around water surface.
   h0 = clamp(h0, -6.0, 48.0);
   textureStore(sweEnvOut, q, vec4f(h0, u0, v0, obs));
-  textureStore(sweWaterYOut, q, vec4f(waterY, 0.0, 0.0, 0.0));
+  textureStore(sweWaterYOut, q, vec4f(waterY, rawTransmit, obsProx, riverW));
 }
 `;
 
@@ -268,13 +273,17 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let oldQ = q + shift;
 
   let envC = loadEnv(q, size);
+  let metaC = textureLoad(sweWaterY, q, 0);
   let h0 = envC.x;
   let uAmb = envC.yz;
   let obsC = envC.w;
+  let waterY = metaC.x;
+  let rawTransmit = clamp(metaC.y, 0.0, 1.0);
+  let obsProx = clamp(metaC.z, 0.0, 1.0);
   let ambSpeed = length(uAmb);
   let isRiver = ambSpeed > 0.06;
 
-  // Solid obstacle cell (bridge pier, cutwater, piling, boulder, hull): zero velocity, zero displacement.
+  // Solid obstacle cell (bridge pier, cutwater, piling, hull): zero velocity, zero displacement.
   if (obsC > 0.72 || h0 < -1.2) {
     textureStore(nextLayer2, q, vec4f(0.0));
     return;
@@ -291,7 +300,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let solidU = envU.w > 0.55 || envU.x < -0.55;
   let nearSolid = solidL || solidR || solidD || solidU;
 
-  // Load current & neighbor states (with no-penetration reflective wall boundary conditions against solid piers!)
+  // Load current & neighbor states
   var stC = loadPrev(oldQ, size, doClear);
   // Seed river velocity smoothly from ambient channel flow on clear or freshly shifted border cells
   if (doClear || any(oldQ < vec2i(2)) || any(oldQ >= size - 2)) {
@@ -303,11 +312,11 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   var stD = loadPrev(oldQ + vec2i(0, -1), size, doClear);
   var stU = loadPrev(oldQ + vec2i(0, 1), size, doClear);
 
-  // Solid wall reflection: mirror free-surface eta and invert normal velocity component so momentum converts into physical bow pileup!
-  if (solidL) { stL = vec4f(stC.x, -stC.y, stC.z * 0.78, stC.w); }
-  if (solidR) { stR = vec4f(stC.x, -stC.y, stC.z * 0.78, stC.w); }
-  if (solidD) { stD = vec4f(stC.x, stC.y * 0.78, -stC.z, stC.w); }
-  if (solidU) { stU = vec4f(stC.x, stC.y * 0.78, -stC.z, stC.w); }
+  // Solid wall mirror state (no-penetration slip reflection for tangent/vorticity terms)
+  if (solidL) { stL = vec4f(stC.x, -stC.y, stC.z * 0.88, stC.w); }
+  if (solidR) { stR = vec4f(stC.x, -stC.y, stC.z * 0.88, stC.w); }
+  if (solidD) { stD = vec4f(stC.x, stC.y * 0.88, -stC.z, stC.w); }
+  if (solidU) { stU = vec4f(stC.x, stC.y * 0.88, -stC.z, stC.w); }
 
   // Effective water depths H = max(0, h0 + eta) with smooth wetting/drying for beaches.
   let hDry = 0.04;
@@ -324,19 +333,48 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let hEffD = min(max(HD, hDry), 2.2);
   let hEffU = min(max(HU, hDry), 2.2);
 
-  // 1. Mass conservation (flux-conservative Rusanov / Lax-Friedrichs finite volume):
-  //    d(eta)/dt + d(H*u)/dx + d(H*v)/dz = 0
-  let qxL = hEffL * stL.y;
-  let qxR = hEffR * stR.y;
-  let qzD = hEffD * stD.z;
-  let qzU = hEffU * stU.z;
-  let divQ = (qxR - qxL + qzU - qzD) / (2.0 * dx);
+  let cC = sqrt(SWE_G * hEffC);
+  let cL = sqrt(SWE_G * hEffL);
+  let cR = sqrt(SWE_G * hEffR);
+  let cD = sqrt(SWE_G * hEffD);
+  let cU = sqrt(SWE_G * hEffU);
 
-  // Gentle Lax-Friedrichs numerical diffusion proportional to local wave speed c = sqrt(g * hEff)
-  let cWave = sqrt(SWE_G * hEffC);
-  let etaAvg = 0.25 * (stL.x + stR.x + stD.x + stU.x);
-  let lfDiff = clamp(0.16 * cWave * dt / dx, 0.015, 0.22);
-  var etaNew = mix(stC.x, etaAvg, lfDiff) - dt * divQ;
+  // 1. True Monotone Rusanov / Local Lax-Friedrichs Finite-Volume Fluxes on Half-Cell Faces (i±1/2, j±1/2):
+  //    Couples directly adjacent cells (C <-> L,R,D,U) so 2-dx Nyquist checkerboard ringing is mathematically damped!
+  //    At solid faces (cutwater piers, pilings, quay walls): exact zero mass flux and acoustic wall reflection pressure.
+  let aR = max(abs(stC.y) + cC, abs(stR.y) + cR);
+  let aL = max(abs(stC.y) + cC, abs(stL.y) + cL);
+  let aU = max(abs(stC.z) + cC, abs(stU.z) + cU);
+  let aD = max(abs(stC.z) + cC, abs(stD.z) + cD);
+
+  let fHR = select(0.5 * (hEffC * stC.y + hEffR * stR.y) - 0.5 * aR * (stR.x - stC.x), 0.0, solidR);
+  let fHL = select(0.5 * (hEffL * stL.y + hEffC * stC.y) - 0.5 * aL * (stC.x - stL.x), 0.0, solidL);
+  let fHU = select(0.5 * (hEffC * stC.z + hEffU * stU.z) - 0.5 * aU * (stU.x - stC.x), 0.0, solidU);
+  let fHD = select(0.5 * (hEffD * stD.z + hEffC * stC.z) - 0.5 * aD * (stC.x - stD.x), 0.0, solidD);
+
+  var etaNew = stC.x - (dt / dx) * ((fHR - fHL) + (fHU - fHD));
+
+  // Acoustic Riemann face elevations (couples pressure gradient to immediate neighbors, zero odd-even decoupling):
+  let etaFaceR = select(
+    0.5 * (stC.x + stR.x) - 0.5 * (hEffR * stR.y - hEffC * stC.y) / max(aR, 0.6),
+    stC.x + clamp((hEffC * stC.y) / max(cC, 0.8), -0.18, 0.22),
+    solidR
+  );
+  let etaFaceL = select(
+    0.5 * (stL.x + stC.x) - 0.5 * (hEffC * stC.y - hEffL * stL.y) / max(aL, 0.6),
+    stC.x - clamp((hEffC * stC.y) / max(cC, 0.8), -0.22, 0.18),
+    solidL
+  );
+  let etaFaceU = select(
+    0.5 * (stC.x + stU.x) - 0.5 * (hEffU * stU.z - hEffC * stC.z) / max(aU, 0.6),
+    stC.x + clamp((hEffC * stC.z) / max(cC, 0.8), -0.18, 0.22),
+    solidU
+  );
+  let etaFaceD = select(
+    0.5 * (stD.x + stC.x) - 0.5 * (hEffC * stC.z - hEffD * stD.z) / max(aD, 0.6),
+    stC.x - clamp((hEffC * stC.z) / max(cC, 0.8), -0.22, 0.18),
+    solidD
+  );
 
   // 2. Semi-Lagrangian advection of velocity (u, v) and foam along live SWE velocity:
   let velOld = stC.yz;
@@ -346,97 +384,112 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   var vNew = adv.z;
   var foamNew = adv.w;
 
-  // 3. Pressure gradient acceleration (-g * grad(eta)):
-  //    Uses wet-dry aware central difference so water rushes up dry beach slopes when eta > -h0 and drains back down!
-  let dEtaDx = (stR.x - stL.x) / (2.0 * dx);
-  let dEtaDz = (stU.x - stD.x) / (2.0 * dx);
+  // 3. Pressure gradient acceleration (-g * grad(eta)) from Riemann face states:
+  let dEtaDx = (etaFaceR - etaFaceL) / dx;
+  let dEtaDz = (etaFaceU - etaFaceD) / dx;
   let wetMask = smoothstep(-0.08, 0.10, max(h0 + etaNew, max(HL, max(HR, max(HD, HU)))));
   uNew -= SWE_G * dEtaDx * dt * wetMask;
   vNew -= SWE_G * dEtaDz * dt * wetMask;
 
-  // 4. Vorticity confinement (preserves crisp Kármán vortex eddies shedding off bridge piers & cutwaters!):
+  // Mild physical kinematic eddy viscosity on velocity to keep streamlines silky-smooth around piers & pilings
+  let velAvg = 0.25 * (stL.yz + stR.yz + stD.yz + stU.yz);
+  let viscBlend = clamp(0.18 * dt / (dx * dx), 0.0, 0.10);
+  uNew = mix(uNew, velAvg.x, viscBlend);
+  vNew = mix(vNew, velAvg.y, viscBlend);
+
+  // 4. Vorticity confinement (strictly localized to shed vortex wakes behind piers — silent in laminar channel flow!):
   let omegaC = ((stR.z - stL.z) - (stU.y - stD.y)) / (2.0 * dx);
-  let stLL = loadPrev(oldQ + vec2i(-2, 0), size, doClear);
-  let stRR = loadPrev(oldQ + vec2i(2, 0), size, doClear);
-  let stDD = loadPrev(oldQ + vec2i(0, -2), size, doClear);
-  let stUU = loadPrev(oldQ + vec2i(0, 2), size, doClear);
-  let omegaL = abs(((stC.z - stLL.z) - (loadPrev(oldQ + vec2i(-1, 1), size, doClear).y - loadPrev(oldQ + vec2i(-1, -1), size, doClear).y)) / (2.0 * dx));
-  let omegaR = abs(((stRR.z - stC.z) - (loadPrev(oldQ + vec2i(1, 1), size, doClear).y - loadPrev(oldQ + vec2i(1, -1), size, doClear).y)) / (2.0 * dx));
-  let omegaD = abs(((loadPrev(oldQ + vec2i(1, -1), size, doClear).z - loadPrev(oldQ + vec2i(-1, -1), size, doClear).z) - (stC.y - stDD.y)) / (2.0 * dx));
-  let omegaU = abs(((loadPrev(oldQ + vec2i(1, 1), size, doClear).z - loadPrev(oldQ + vec2i(-1, 1), size, doClear).z) - (stUU.y - stC.y)) / (2.0 * dx));
-  let gradW = vec2f(omegaR - omegaL, omegaU - omegaD) / (2.0 * dx);
-  let gLen = length(gradW);
-  if (gLen > 1e-3 && isRiver) {
-    let N = gradW / gLen;
-    // N x (0, omega, 0) in XZ plane => (N.y * omega, -N.x * omega)
-    let vortEps = 0.22 * dx;
-    let vortForce = vec2f(N.y * omegaC, -N.x * omegaC) * vortEps;
-    uNew += clamp(vortForce.x, -1.8, 1.8) * dt;
-    vNew += clamp(vortForce.y, -1.8, 1.8) * dt;
+  if (isRiver && abs(omegaC) > 0.55) {
+    let stLL = loadPrev(oldQ + vec2i(-2, 0), size, doClear);
+    let stRR = loadPrev(oldQ + vec2i(2, 0), size, doClear);
+    let stDD = loadPrev(oldQ + vec2i(0, -2), size, doClear);
+    let stUU = loadPrev(oldQ + vec2i(0, 2), size, doClear);
+    let omegaL = abs(((stC.z - stLL.z) - (loadPrev(oldQ + vec2i(-1, 1), size, doClear).y - loadPrev(oldQ + vec2i(-1, -1), size, doClear).y)) / (2.0 * dx));
+    let omegaR = abs(((stRR.z - stC.z) - (loadPrev(oldQ + vec2i(1, 1), size, doClear).y - loadPrev(oldQ + vec2i(1, -1), size, doClear).y)) / (2.0 * dx));
+    let omegaD = abs(((loadPrev(oldQ + vec2i(1, -1), size, doClear).z - loadPrev(oldQ + vec2i(-1, -1), size, doClear).z) - (stC.y - stDD.y)) / (2.0 * dx));
+    let omegaU = abs(((loadPrev(oldQ + vec2i(1, 1), size, doClear).z - loadPrev(oldQ + vec2i(-1, 1), size, doClear).z) - (stUU.y - stC.y)) / (2.0 * dx));
+    let gradW = vec2f(omegaR - omegaL, omegaU - omegaD) / (2.0 * dx);
+    let gLen = length(gradW);
+    if (gLen > 1e-3) {
+      let N = gradW / gLen;
+      let vortEps = 0.14 * dx * smoothstep(0.55, 1.8, abs(omegaC));
+      let vortForce = vec2f(N.y * omegaC, -N.x * omegaC) * vortEps;
+      uNew += clamp(vortForce.x, -1.2, 1.2) * dt;
+      vNew += clamp(vortForce.y, -1.2, 1.2) * dt;
+    }
   }
 
-  // 5. Physical bottom friction (Manning/Chezy quadratic drag) + viscous smoothing:
+  // 5. Physical bottom friction (Manning/Chezy quadratic drag):
   let spdNew = length(vec2f(uNew, vNew));
-  let dragCoeff = select(0.018, 0.045, HC < 0.35);
+  let dragCoeff = select(0.020, 0.048, HC < 0.35);
   let drag = exp(-dragCoeff * spdNew / max(HC, 0.12) * dt);
   uNew *= drag;
   vNew *= drag;
 
-  // 6. River current maintenance & pier stagnation/bow-wave enhancement:
+  // 6. River current maintenance & smooth aquadynamic cutwater bow cushion + parting:
+  var pierBowImpact = 0.0;
   if (isRiver) {
-    // Gently restore bulk channel flow away from solid obstacles so river keeps flowing steadily through the scrolling window,
-    // while piers freely stall, deflect, accelerate (Venturi), and shed eddies locally!
-    let restoreRate = select(0.65, 0.15, nearSolid);
+    let restoreRate = mix(0.75, 0.12, max(obsProx, select(0.0, 1.0, nearSolid)));
     let blend = 1.0 - exp(-restoreRate * dt);
     uNew = mix(uNew, uAmb.x, blend);
     vNew = mix(vNew, uAmb.y, blend);
-    // Direct stagnation pressure conversion on the upstream face of a bridge pier/cutwater:
-    // If ambient flow drives into an adjacent solid wall, add physical velocity-head pileup (v^2 / 2g)
     if (nearSolid) {
       let wallN = normalize(vec2f(
         select(0.0, -1.0, solidR) + select(0.0, 1.0, solidL),
         select(0.0, -1.0, solidU) + select(0.0, 1.0, solidD)
       ) + vec2f(1e-5, 0.0));
-      // wallN points FROM solid INTO water; impact is when flow opposes wallN (-dot(u, wallN) > 0)
+      // wallN points FROM solid INTO water; upstream nose receives positive impact (-dot(uAmb, wallN) > 0)
       let impact = max(0.0, -dot(uAmb, wallN));
-      let head = min(0.28, impact * impact / (2.0 * SWE_G) * 2.4);
-      etaNew += (head - etaNew * 0.35) * min(1.0, dt * 4.5);
-      // Tangential slip around the cutwater shoulders
+      pierBowImpact = impact;
+      // Physical stagnation head (v^2 / 2g): smooth glassy meniscus/bow pillow up to +16 cm on fast piers
+      let head = min(0.18, impact * impact / (2.0 * SWE_G) * 1.9);
+      etaNew += (head - etaNew * 0.25) * min(1.0, dt * 3.8);
+      // Clean tangential parting along cutwater faces (no wall penetration)
       let vn = dot(vec2f(uNew, vNew), wallN);
       if (vn < 0.0) {
         uNew -= wallN.x * vn;
         vNew -= wallN.y * vn;
       }
     }
-    // Mild restoring damping on eta so mean river elevation stays anchored to rest surface
-    etaNew *= exp(-0.42 * dt);
+    // Gentle restoring damping on eta so mean river surface stays anchored while diverging V-wakes travel cleanly
+    etaNew *= exp(-0.36 * dt);
   } else if (hasCoast) {
-    // 7. Shallow coastal ocean: inject incoming swell waves at the outer shoaling band (h0 in 2.5..12 m)
-    //    so waves physically refract/diffract around piers & headlands, steepen over bars, and run up beaches!
+    // 7. Shallow coastal ocean (additive layer on top of coastalWaveState shoreline/seawall/pier reflections):
+    //    Respects coastalShelter rawTransmit strictly so sheltered harbors stay completely calm and undisturbed,
+    //    while exposed surf zones gain subtle physical shallow-water diffraction & swash detail without fighting coastalWaveState.
+    let exposure = smoothstep(0.32, 0.82, rawTransmit);
     let p = (vec2f(q) + 0.5 - vec2f(size) * 0.5) * dx + sweU.domain.xy;
     let swellDir = sweU.forcing.zw;
-    let hs = clamp(sweU.seaParams.x, 0.0, 3.2);
+    let hs = clamp(sweU.seaParams.x, 0.0, 3.2) * exposure;
     let k0 = sweU.seaParams.y;
     let omega = sweU.seaParams.z;
     let phase = dot(p, swellDir) * k0 - t * omega;
-    let targetAmp = min(0.55, hs * 0.24);
+    let targetAmp = min(0.26, hs * 0.13);
     let targetEta = targetAmp * sin(phase);
     let cOrb = sqrt(SWE_G * clamp(h0, 0.2, 6.0));
     let targetU = (SWE_G / max(cOrb, 1.0)) * targetEta * swellDir.x;
     let targetV = (SWE_G / max(cOrb, 1.0)) * targetEta * swellDir.y;
-    // Drive smoothly at outer deeper rim (h0 > 3.5 m), leaving shallow surf zone (h0 < 3.5 m) & pier vicinity 100% free PDE!
-    let driveBand = smoothstep(2.4, 7.0, h0) * (1.0 - smoothstep(11.0, 18.0, h0)) * select(1.0, 0.0, nearSolid);
-    if (driveBand > 0.01 && hs > 0.05) {
-      let kDrive = 1.0 - exp(-1.8 * driveBand * dt);
+    // Drive gently at outer shoaling rim (h0 in 3.0..13 m) ONLY where exposed to open sea
+    let driveBand = smoothstep(3.0, 7.5, h0) * (1.0 - smoothstep(10.5, 16.0, h0)) * exposure * select(1.0, 0.0, nearSolid);
+    if (driveBand > 0.01 && hs > 0.08) {
+      let kDrive = 1.0 - exp(-1.35 * driveBand * dt);
       etaNew = mix(etaNew, targetEta, kDrive);
       uNew = mix(uNew, targetU, kDrive);
       vNew = mix(vNew, targetV, kDrive);
     }
-    // Deep water (> 16 m) damps cleanly to zero so open ocean remains pure spectral FFT + wakes
-    let deepDamp = smoothstep(13.0, 22.0, h0);
-    etaNew *= mix(exp(-0.22 * dt), exp(-4.0 * dt), deepDamp);
-    uNew *= mix(1.0, exp(-4.0 * dt), deepDamp);
-    vNew *= mix(1.0, exp(-4.0 * dt), deepDamp);
+    // Sheltered harbors & deep open ocean damp smoothly to zero so coastalWaveState & surfaceWaves shine cleanly
+    let shelterDamp = 1.0 - exposure;
+    let deepDamp = smoothstep(11.0, 18.0, h0);
+    let dampRate = mix(0.32, 3.4, max(deepDamp, shelterDamp * 0.85));
+    etaNew *= exp(-dampRate * dt);
+    let velDamp = exp(-mix(0.20, 3.6, max(deepDamp, shelterDamp * 0.65)) * dt);
+    uNew *= velDamp;
+    vNew *= velDamp;
+    // Never pull shallow coastal water troughs below the shallow sandy harbor floor
+    if (h0 > 0.05) {
+      let minEta = -min(0.28, h0 * mix(0.14, 0.36, exposure));
+      etaNew = max(etaNew, minEta);
+    }
   }
 
   // Soft sponge boundary along the 256 m scrolling window rim (prevents edge reflections)
@@ -450,10 +503,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   }
 
   // Clamp physical bounds for guaranteed stability
-  etaNew = clamp(etaNew, -0.85, 0.85);
+  etaNew = clamp(etaNew, -0.65, 0.65);
   let velMag = length(vec2f(uNew, vNew));
-  if (velMag > 5.5) {
-    let sc = 5.5 / velMag;
+  if (velMag > 5.0) {
+    let sc = 5.0 / velMag;
     uNew *= sc;
     vNew *= sc;
   }
@@ -463,37 +516,50 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     vNew *= 0.25;
   }
 
-  // 8. Advected whitewater foam generation (pier bow collars, vortex wake ribbons, shallow breaking surf):
+  // 8. Advected whitewater foam: strictly localized to real cutwater collars, strong pier shear wakes, and exposed surf!
+  //    Zero uniform background river froth and zero fake foam lines on calm sheltered docks.
+  let exposureFoam = smoothstep(0.32, 0.78, rawTransmit);
   let divU = ((stR.y - stL.y) + (stU.z - stD.z)) / (2.0 * dx);
   let conv = max(0.0, -divU);
   let slopeMag = length(vec2f(dEtaDx, dEtaDz));
-  let pierImpact = select(0.0, clamp(conv * 1.1 + abs(omegaC) * 0.45 + max(0.0, etaNew) * 3.2, 0.0, 1.5), nearSolid);
-  let wakeShear = select(0.0, smoothstep(0.45, 1.8, abs(omegaC)) * smoothstep(0.30, 1.3, ambSpeed) * 0.95, isRiver);
-  // Shallow wave breaking criterion (H_wave / depth > 0.72 => eta / max(h0, 0.22) > 0.36, or steep face)
-  let breakRatio = select(0.0, max(0.0, etaNew) / max(h0, 0.22), !isRiver && h0 > -0.15 && h0 < 4.5);
-  let surfBreak = select(0.0, smoothstep(0.28, 0.72, breakRatio) + smoothstep(0.26, 0.65, slopeMag) * smoothstep(4.5, 0.4, h0), !isRiver && h0 > -0.25 && h0 < 5.0);
+  let pierCollar = select(
+    0.0,
+    clamp(smoothstep(0.20, 1.30, pierBowImpact) * 1.05 + smoothstep(0.30, 1.5, conv) * 0.50 + max(0.0, etaNew - 0.020) * 4.5, 0.0, 1.15),
+    isRiver && nearSolid
+  );
+  // Slender separation ribbons peeling off cutwater shoulders & trailing pier shear layers (zero in open laminar channel!)
+  let shoulderShear = select(
+    0.0,
+    smoothstep(0.45, 1.65, abs(omegaC)) * smoothstep(0.45, 1.45, ambSpeed) * mix(0.48, 0.95, obsProx),
+    isRiver
+  );
+  // Shallow ocean wave breaking ONLY on genuinely exposed surf coasts (rawTransmit > 0.32)
+  let breakRatio = select(0.0, max(0.0, etaNew) / max(h0, 0.24), !isRiver && h0 > -0.10 && h0 < 3.8);
+  let surfBreak = select(
+    0.0,
+    (smoothstep(0.34, 0.78, breakRatio) + smoothstep(0.32, 0.72, slopeMag) * smoothstep(3.8, 0.35, h0)) * exposureFoam,
+    !isRiver && h0 > -0.20 && h0 < 4.2
+  );
 
-  let foamGen = (pierImpact * 2.6 + wakeShear * 1.65 + surfBreak * 2.8) * dt;
-  let foamDecay = select(0.42, 0.22, isRiver);
+  let foamGen = (pierCollar * 2.1 + shoulderShear * 1.55 + surfBreak * 2.2) * dt;
+  let foamDecay = select(0.48, 0.34, isRiver);
   foamNew = clamp(foamNew * exp(-foamDecay * dt) + foamGen, 0.0, 1.0);
-  // Keep wake foam slightly stronger right behind piers and vanish cleanly in deep open sea
-  if (!isRiver && h0 > 14.0) { foamNew *= exp(-3.5 * dt); }
+  // Calm sheltered harbors and deep open sea clear foam cleanly
+  if (!isRiver && (h0 > 12.0 || exposureFoam < 0.05)) { foamNew *= exp(-3.5 * dt); }
 
-  // 9. GPU breaking-crest & pier-impact spray emitter (zero CPU readback — feeds Tier 3 ballistic spray!)
-  if (emitSpray && (pierImpact > 0.42 || surfBreak > 0.48)) {
+  // 9. Tier 3 ballistic spray mist: ONLY genuine exposed open-coast crashing surf breakers!
+  //    Never spawn smoke-card spray billboards at river bridge piers or calm sheltered harbor docks.
+  if (emitSpray && !isRiver && rawTransmit > 0.48 && surfBreak > 0.68 && h0 > 0.05 && h0 < 2.2) {
     let p = (vec2f(q) + 0.5 - vec2f(size) * 0.5) * dx + sweU.domain.xy;
     let seed = sweHash(q, u32(t * 60.0));
-    let threshold = select(0.92, 0.86, pierImpact > 0.55 || surfBreak > 0.78);
-    if (seed > threshold) {
+    if (seed > 0.93) {
       let slot = atomicAdd(&sprayCount, 1u);
       if (slot < ${SHALLOW_WATER_LIMITS.spraySpawns}u) {
-        let energy = clamp(max(pierImpact, surfBreak), 0.3, 1.5);
-        let isSurf = select(0.0, 1.0, surfBreak >= pierImpact);
-        let upVel = mix(1.4, 3.8, clamp(energy * 0.75, 0.0, 1.0));
-        let wy = textureLoad(sweWaterY, q, 0).r;
+        let energy = clamp(surfBreak * exposureFoam, 0.35, 1.25);
+        let upVel = mix(1.1, 2.8, clamp(energy * 0.7, 0.0, 1.0));
         spraySpawns[slot] = SweSpraySpawn(
-          vec4f(p.x, wy + etaNew, p.y, energy),
-          vec4f(uNew, vNew, upVel, isSurf)
+          vec4f(p.x, waterY + etaNew, p.y, energy),
+          vec4f(uNew, vNew, upVel, 1.0)
         );
       }
     }

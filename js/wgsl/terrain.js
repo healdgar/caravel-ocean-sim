@@ -1055,16 +1055,16 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
       pbr=sampleArchMaterialPBR(archMatIdx,world,n,dx,dy,archScale,archLodFade,instYaw,timberGrain);
     }
     if(in.kind.x<10.5){
-      // Kind 10: MaterialCraft-cooked weathered Iberian oak, Spanish cedar & pitch-pine timber
-      albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.08+detailB*0.04);
-      archNormalOffset=pbr.normalOffset*0.55;
-      relief=detailA*0.004*archLodFade;
-      roughness=clamp(pbr.roughness+detailB*0.03,0.60,0.90);
+      // Kind 10: MaterialCraft-cooked dressed Iberian oak, Spanish cedar & pitch-pine timber
+      albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.07+detailB*0.03);
+      archNormalOffset=pbr.normalOffset*0.32;
+      relief=detailA*0.0024*archLodFade;
+      roughness=clamp(pbr.roughness-0.16+detailB*0.025,0.44,0.72);
       ambientVisibility=(0.44+0.34*max(n.y,0.0))*aoVis*pbr.ao;
       // Intertidal marine algae & barnacle biofouling on submerged/splash-zone dock pilings (excluding carved canoes, kind.y > 0.85)
       let pilingTide=(1.0-smoothstep(0.15,1.45,world.y))*(1.0-smoothstep(0.82,0.89,in.kind.y))*clamp(0.55+0.45*detailA,0.0,1.0);
       albedo=mix(albedo,vec3f(0.055,0.082,0.042),pilingTide*0.62);
-      roughness=mix(roughness,0.92,pilingTide*0.5);
+      roughness=mix(roughness,0.86,pilingTide*0.5);
     }else if(in.kind.x<11.5){
       // Kind 11: MaterialCraft-cooked coursed Pedra Lioz & coral-limestone ashlar masonry
       let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
