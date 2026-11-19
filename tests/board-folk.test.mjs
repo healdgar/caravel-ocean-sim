@@ -61,23 +61,25 @@ test('the model\'s plan becomes ways and walkers the GPU walks, each one a soul'
   assert.deepEqual(sample(80).slice(0, 3), [1060, Math.fround(heightAt(1060, 2040)), 2040], 'and the far end');
   assert.ok(f[3] >= 0.7 && f[3] <= 2.4); assert.equal(f[3], Math.fround(1.2));
   assert.ok(f[7] >= 150 && f[7] <= 420, 'at work a while');
-  assert.equal(words[11], 1, 'a woman, indoors at both ends');
+  assert.equal(words[11] & 0xff, 1, 'a woman, indoors at both ends');
+  assert.equal((words[11] >> 8) & 0xff, 30, 'packs exact board age into flags bits 8..15');
   assert.deepEqual(streets.souls[0], { id: 11, name: 'Soul 11', surname: 'Soul', sex: 'f', age: 30, role: 'brewer', goal: 'work', there: 'brewing', via: 'Market street', home: [1000, 2000], to: [1060, 2040], planned: true });
 
   // A child at play runs, stays in the open at both ends and is in before dark.
   const child = WALKER_WORDS;
   assert.equal(f[child + 3], Math.fround(2.25)); assert.equal(words[child + 11] & 6, 6);
+  assert.equal((words[child + 11] >> 8) & 0xff, 8, 'child soul packs exact age 8');
   assert.ok(f[child + 9] >= 0.55); assert.equal(f[child + 5], 0, 'and does not stop to talk');
   assert.ok(f[child + 7] >= 4 && f[child + 7] <= 18);
   // Fields half an hour off are walked only so far, and the walker goes in at the far end, not seen to vanish in the open.
   const far = 2 * WALKER_WORDS;
   assert.equal(f[far + 8], Math.floor(FOLK_WAY_MOST_M / ROUTE_STEP_M) * ROUTE_STEP_M); assert.equal(words[far + 11] & 4, 0);
   // An errand to the market ends in the open.
-  assert.equal(words[3 * WALKER_WORDS + 11], 1 | 4);
+  assert.equal(words[3 * WALKER_WORDS + 11] & 0xff, 1 | 4);
   // One of the port's own walkers, now someone: their way as it was, their sex and look their own.
   const own = 4 * WALKER_WORDS;
   assert.equal(words[own], 0); assert.equal(words[own + 1], 5); assert.equal(f[own + 3], Math.fround(1.3));
-  assert.equal(words[own + 11], 8 | 1); assert.equal(words[own + 10], Math.floor(folkRoll(71, 8) * 0xffff));
+  assert.equal(words[own + 11] & 0xff, 8 | 1); assert.equal(words[own + 10], Math.floor(folkRoll(71, 8) * 0xffff));
   assert.deepEqual(streets.souls[4], { ...others[0], goal: 'about', there: 'about the waterside', via: '', home: null, to: null, planned: false });
 
   // Laid the same again from the same plan: who stands where does not shift when a plan is asked for anew.

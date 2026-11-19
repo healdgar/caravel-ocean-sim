@@ -1323,19 +1323,24 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     });
     return bestPt;
   };
-  const stampBridgeApproach = (bx, bz, ux, uz, length, width) => {
+  const stampBridgeApproach = (bx, bz, ux, uz, length, width, deckY = null) => {
     const halfLen = length * 0.5;
     for (const dir of [-1, 1]) {
       const outX = ux * dir, outZ = uz * dir;
       const ex = bx + outX * halfLen, ez = bz + outZ * halfLen;
       const inX = ex - outX * 2.0, inZ = ez - outZ * 2.0;
-      const extX = ex + outX * 4.5, extZ = ez + outZ * 4.5;
-      const snap = snapRoadOrStreet(bx, bz, outX, outZ, halfLen, extX, extZ, 28);
+      const hBank = heightAt(ex + outX * 3.5, ez + outZ * 3.5);
+      const drop = Number.isFinite(deckY) ? Math.max(0, deckY - hBank) : 0;
+      const rampRun = Math.max(5.5, Math.min(20.0, 4.5 + drop * 4.2));
+      const midX = ex + outX * (rampRun * 0.5), midZ = ez + outZ * (rampRun * 0.5);
+      const extX = ex + outX * rampRun, extZ = ez + outZ * rampRun;
+      const snap = snapRoadOrStreet(bx, bz, outX, outZ, halfLen, extX, extZ, 32);
       const rawPts = [
-        [inX, inZ, width, 0.85],
-        [ex, ez, width, 0.85],
+        [inX, inZ, width, 0.88],
+        [ex, ez, width, 0.88],
+        [midX, midZ, Math.max(4.4, width * 0.95), 0.80],
         [extX, extZ, Math.max(4.4, width * 0.9), 0.72],
-        ...(snap ? [[snap[0], snap[1], 5.0, 0.56]] : []),
+        ...(snap ? [[snap[0], snap[1], 5.0, 0.58]] : []),
       ].filter(([qx, qz]) => inside(qx, qz, 4));
       if (rawPts.length >= 2) paving.push({ points: rawPts });
     }
@@ -1513,6 +1518,24 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       cityIndices.push(typedTypes.length - 1);
       built.bridges++;
     }
+    // Attach physical sloped approach ramps at BOTH bridge ends whenever the bridge deck stands above the riverbank road,
+    // so elevated bridges connect flush into the street regardless of coarse terrain heightfield grid spacing.
+    for (const dir of [-1, 1]) {
+      const outX = ux * dir, outZ = uz * dir;
+      const ex = x + outX * (length * 0.5), ez = z + outZ * (length * 0.5);
+      const hNear = heightAt(ex + outX * 2.5, ez + outZ * 2.5);
+      const hMid = heightAt(ex + outX * 6.5, ez + outZ * 6.5);
+      const hFar = heightAt(ex + outX * 10.5, ez + outZ * 10.5);
+      const dropEst = Math.max(deck - hNear, deck - (hMid * 0.65 + hFar * 0.35));
+      if (dropEst > 0.24) {
+        const rampDrop = WORKS_BRIDGE.rampDrops.find((d) => d >= dropEst - 0.12) ?? WORKS_BRIDGE.rampDrops[WORKS_BRIDGE.rampDrops.length - 1];
+        const rampType = cityVariant(stone ? CITY_TYPE.STONE_BRIDGE_RAMP : CITY_TYPE.FOOTBRIDGE_RAMP, stone ? width : null, null, +(rampDrop + 1.2).toFixed(2));
+        const rampRun = CITY_BUILDING_TYPES[rampType].length;
+        const rx = ex + outX * (rampRun * 0.5 - 0.25), rz = ez + outZ * (rampRun * 0.5 - 0.25);
+        pushTyped(rampType, rx, deck, rz, Math.atan2(outX, outZ), 0.5, 0);
+        cityIndices.push(typedTypes.length - 1);
+      }
+    }
     return { length, cityIndices };
   };
   // A track's bridge and road/street crossings: seated above channel flood levels with masonry or timber piers.
@@ -1525,12 +1548,12 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const hA = heightAt(x - ux * (half + 2.5), z - uz * (half + 2.5));
     const hB = heightAt(x + ux * (half + 2.5), z + uz * (half + 2.5));
     if (Math.max(hA, hB) <= 0.12) continue;
-    const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + 2.75) : -Infinity;
-    const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + 0.55, minNavDeck);
+    const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + (isStone ? 2.45 : 2.05)) : -Infinity;
+    const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + 0.42, minNavDeck);
     const width = isStone ? WORKS_BRIDGE.widths[0] : CITY_BUILDING_TYPES[CITY_TYPE.FOOTBRIDGE].width;
     const { length: totalLen, cityIndices } = layBridge(x, z, ux, uz, span + 4.0, deck, isStone, width);
     bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices, collapsed: false });
-    stampBridgeApproach(x, z, ux, uz, totalLen, width);
+    stampBridgeApproach(x, z, ux, uz, totalLen, width, deck);
   }
   // A road's or arterial street's bridge where it crosses a river: stone, the road's width, bank to bank in arches.
   for (const q of roadCrossings) {
@@ -1541,13 +1564,13 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const hB = heightAt(x + q.ux * (reach + 1.5), z + q.uz * (reach + 1.5));
     if (Math.max(hA, hB) <= 0.12) continue;
     const crossing = measureRiverCrossingAt(x, z, q.ux, q.uz);
-    const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + 2.75) : -Infinity;
-    const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise, minNavDeck);
     const isStone = q.stone !== false;
+    const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + (isStone ? 2.45 : 2.05)) : -Infinity;
+    const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise, minNavDeck);
     const bridgeWidth = isStone ? BOARD_ROAD_BRIDGE.width : CITY_BUILDING_TYPES[CITY_TYPE.FOOTBRIDGE].width;
     const { length, cityIndices } = layBridge(x, z, q.ux, q.uz, reach * 2, deck, isStone, bridgeWidth);
     bridges.push({ x, z, ux: q.ux, uz: q.uz, length, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone, cityIndices, collapsed: false });
-    stampBridgeApproach(x, z, q.ux, q.uz, length, bridgeWidth);
+    stampBridgeApproach(x, z, q.ux, q.uz, length, bridgeWidth, deck);
     built.roadBridges++;
   }
   // A churchyard: a dry-stone wall about it, and its graves as they are dug.
@@ -1725,7 +1748,9 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     for (let i = 0; i < m - 1; i++) {
       const p0 = dedup[Math.max(0, i - 1)], p1 = dedup[i], p2 = dedup[i + 1], p3 = dedup[Math.min(m - 1, i + 2)];
       const segL = Math.hypot(p2.wx - p1.wx, p2.wz - p1.wz);
-      const subSteps = isCanal ? Math.max(1, Math.min(8, Math.ceil(segL / 4.0))) : Math.max(1, Math.min(12, Math.ceil(segL / 2.4)));
+      const midPin = bridgeClearance(0.5 * (p1.wx + p2.wx), 0.5 * (p1.wz + p2.wz));
+      const stepTarget = isCanal ? 2.5 : (midPin < 0.85 || Math.max(p1.hw, p2.hw) >= 4.0 ? 1.25 : 2.0);
+      const subSteps = Math.max(1, Math.min(20, Math.ceil(segL / stepTarget)));
       for (let s = 0; s < subSteps; s++) {
         const t = s / subSteps;
         if (s === 0) {
@@ -2251,6 +2276,56 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       }
     }
   }
+  // Grade physical earthen/cobbled approach embankments on BOTH ends of every timber & stone bridge AFTER river carving
+  // so no elevated bridge ever terminates in mid-air above the riverbank road (works procedurally across every port).
+  if (heights && bridges.length > 0) {
+    for (const b of bridges) {
+      if (!b || !Number.isFinite(b.deckY)) continue;
+      const halfLen = (b.length || 12) * 0.5;
+      const deckTop = b.deckY - 0.08;
+      const roadHalfW = Math.max(2.0, (b.halfWidth || 1.8) + 0.85);
+      for (const dir of [-1, 1]) {
+        const outX = b.ux * dir, outZ = b.uz * dir;
+        const ex = b.x + outX * halfLen, ez = b.z + outZ * halfLen;
+        const hFar = fieldAt(heights, grid, ex + outX * 14.0, ez + outZ * 14.0);
+        const hNear = fieldAt(heights, grid, ex + outX * 2.5, ez + outZ * 2.5);
+        const drop = Math.max(0, deckTop - Math.min(hNear, hFar));
+        if (drop < 0.10) continue;
+        const rampLen = Math.max(9.0, Math.min(26.0, 5.5 + drop * 4.6));
+        const shoulderW = Math.max(5.0, drop * 2.5 + grid.step * 0.75);
+        const pad = rampLen + shoulderW + grid.step;
+        const i0 = Math.max(1, Math.floor((ex - pad - grid.x0) / grid.step));
+        const i1 = Math.min(n - 2, Math.ceil((ex + pad - grid.x0) / grid.step));
+        const j0 = Math.max(1, Math.floor((ez - pad - grid.z0) / grid.step));
+        const j1 = Math.min(n - 2, Math.ceil((ez + pad - grid.z0) / grid.step));
+        for (let j = j0; j <= j1; j++) {
+          const gz = grid.z0 + j * grid.step;
+          for (let i = i0; i <= i1; i++) {
+            const gx = grid.x0 + i * grid.step;
+            const k = j * n + i;
+            const s = (gx - ex) * outX + (gz - ez) * outZ;
+            // Never raise cells inside the wet river channel; seat cleanly from abutment face (-1.5 m) outward
+            if (s < -1.5 || s > rampLen) continue;
+            if (wet[k] && s < 0.6) continue;
+            const lat = Math.abs(-(gx - ex) * outZ + (gz - ez) * outX);
+            if (lat > roadHalfW + shoulderW) continue;
+            // Smooth S-curve along the ramp from full bridge deck height at s<=1.0 down to natural ground at s=rampLen
+            const uLong = Math.max(0, Math.min(1, (s - 1.0) / Math.max(1.0, rampLen - 1.0)));
+            const wLong = 1 - uLong * uLong * (3 - 2 * uLong);
+            const uLat = lat <= roadHalfW ? 0 : Math.min(1, (lat - roadHalfW) / Math.max(1.0, shoulderW));
+            const wLat = 1 - uLat * uLat * (3 - 2 * uLat);
+            // Taper abutment nose gently where s in [-1.5, 0.5] so embankment wraps tightly under bridge end
+            const wNose = s >= 0.5 ? 1 : Math.max(0, (s + 1.5) / 2.0);
+            const w = wLong * wLat * wNose;
+            if (w <= 1e-4) continue;
+            const baseH = heights[k];
+            const raised = baseH + Math.max(0, deckTop - baseH) * w;
+            if (raised > heights[k]) heights[k] = raised;
+          }
+        }
+      }
+    }
+  }
   // Refresh outer bank crest heights (ly, ry) against the carved terrain surface so crests sit watertightly on heights.
   for (const chain of reachChains) updateChainCrests(chain, false);
 
@@ -2446,7 +2521,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const tidalSpan = Math.min(80, Math.max(26, shoreHw * 10));
     const tidalStartS = Math.max(0, shoreS - tidalSpan);
     let maxEstT = 0;
-    const lanes = [-1.0, -0.84, -0.66, -0.46, -0.24, 0.0, 0.24, 0.46, 0.66, 0.84, 1.0];
+    // 17-across high-resolution 3D hydraulic mesh so GPU 2D-SWE CFD pier waves, Kelvin wakes & 3D advected river waves sculpt real 3D relief.
+    const lanes = [-1.0, -0.90, -0.78, -0.66, -0.54, -0.40, -0.26, -0.13, 0.0, 0.13, 0.26, 0.40, 0.54, 0.66, 0.78, 0.90, 1.0];
     let prevRow = null;
     for (let i = 0; i < st.length; i++) {
       const cur = st[i], p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];

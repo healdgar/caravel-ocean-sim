@@ -153,18 +153,19 @@ fn surfaceSourceGaussian(delta:vec2f,direction:vec2f,sigma:f32,elongation:f32)->
       kelvinForce=-armPhase*exp(-0.5*armPhase*armPhase)*1.65*armDecay;
       kelvinFoam=exp(-0.65*armPhase*armPhase)*armDecay;
     }
-    let headway=smoothstep(0.20,1.35,speed);
-    let draftScale=clamp(draft/0.85,0.38,1.65)*select(1.0,0.65,isRiver);
-    let pressureHead=min(0.60,speed*speed/(2.0*9.81)*0.95)*headway*draftScale;
-    hullForce+=((bowCrest-bowHollow)*11.5+stemWave*6.5+kelvinForce*5.2)*pressureHead
-      +(recCrest*recWeight-sternTrough)*min(0.55,speed*speed*0.042)*headway*draftScale;
-    let bowFroth=exp(-swSqr((outDist-shoulderW*0.35)/(shoulderW*1.15)))*foreEnv*smoothstep(-shoulderW*0.35,shoulderW*0.25,outDist);
+    let headway=smoothstep(0.28,1.55,speed);
+    let draftScale=clamp(draft/0.85,0.38,1.65)*select(1.0,0.88,isRiver);
+    let pressureHead=min(0.65,speed*speed/(2.0*9.81)*1.05)*headway*draftScale;
+    hullForce+=((bowCrest-bowHollow)*12.0+stemWave*7.0+kelvinForce*6.4)*pressureHead
+      +(recCrest*recWeight-sternTrough)*min(0.58,speed*speed*0.048)*headway*draftScale;
+    let frothW=shoulderW*select(1.10,0.58,isRiver);
+    let bowFroth=exp(-swSqr((outDist-frothW*0.30)/max(frothW,0.18)))*foreEnv*smoothstep(-frothW*0.30,frothW*0.25,outDist);
     let aftTrail=max(0.0,sStern-s);
-    let wakeRibbonW=max(domain.w*1.1,halfB*mix(0.58,1.35,clamp(aftTrail/max(L*1.6,6.0),0.0,1.0)));
-    let sternWash=select(0.0,exp(-swSqr(y/wakeRibbonW))*exp(-aftTrail/max(L*1.35,7.0)),s<=sStern+domain.w);
-    let insideHull=smoothstep(planform*0.92,planform*0.55,y)*smoothstep(halfL*0.92,halfL*0.55,abs(s));
-    let speedFoam=smoothstep(0.26,2.1,speed)*select(1.0,0.75,isRiver);
-    hullFoamRate+=(bowFroth*2.4+sternTrough*2.2+sternWash*1.65+kelvinFoam*0.95)*speedFoam*(1.0-insideHull*0.85);
+    let wakeRibbonW=max(domain.w*0.85,halfB*mix(0.42,select(1.25,0.78,isRiver),clamp(aftTrail/max(L*1.4,6.0),0.0,1.0)));
+    let sternWash=select(0.0,exp(-swSqr(y/wakeRibbonW))*exp(-aftTrail/max(L*select(1.35,0.85,isRiver),5.5)),s<=sStern+domain.w*0.6);
+    let insideHull=smoothstep(planform*0.95,planform*0.58,y)*smoothstep(halfL*0.95,halfL*0.58,abs(s));
+    let speedFoam=smoothstep(select(0.28,0.55,isRiver),2.4,speed)*select(1.0,0.32,isRiver);
+    hullFoamRate+=(bowFroth*1.55+sternTrough*1.15+sternWash*0.95+kelvinFoam*0.55)*speedFoam*(1.0-insideHull*0.92);
   }
   let dt=SW.step.x;let lap=(neighbours.x-4.0*old.x)/(domain.w*domain.w);
   let edge=max(abs(p.x-domain.x),abs(p.y-domain.y))/domain.z;

@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import zlib from 'node:zlib';
 import { buildCityTypeGeometry } from '../js/coastal-world.js';
 import { CITY_BUILDING_TYPES, compileCityBuildingTypes } from '../js/old-world-buildings.js';
-import { CONTINUUM_HOPS, CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
+import { CONTINUUM_HOPS, CONTINUUM_OPTICS_WORDS, CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
 import {
   CONTINUUM_ATLAS_MAGIC, CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_CLUSTER_WORDS, CONTINUUM_HEADER, CONTINUUM_NEVER,
   CONTINUUM_STREAMS, CONTINUUM_TRIANGLE_WORDS, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_VERTEX_WORDS, continuumSourceBytes,
@@ -82,7 +82,7 @@ test('each type\'s clusters are its own, coarsest parent first, and its far body
     assert.equal(field(type, T.triangles), field(type, T.records) + V);
     const triangleCount = (steps - field(type, T.triangles)) / CONTINUUM_TRIANGLE_WORDS;
     assert.ok(Number.isInteger(triangleCount), `${record.name}: whole far triangles`);
-    nextChain = steps + (S + 1) * CONTINUUM_STEP_WORDS;
+    nextChain = steps + (S + 1) * CONTINUUM_STEP_WORDS + (V ? (V + 1) * CONTINUUM_OPTICS_WORDS : 0);
     assert.equal(S, record.chain.steps);
     for (let s = 1; s <= S; s++) {
       const e0 = floats[steps + (s - 1) * CONTINUUM_STEP_WORDS + 1], e1 = floats[steps + s * CONTINUUM_STEP_WORDS + 1];

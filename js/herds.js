@@ -462,10 +462,17 @@ export function evaluateHerdStateAt(seeds, routes, fates, idx, clock = 0, elevat
       const behind = rh + 8 + Math.max(si - 2, 0) * 4;
       const fx = routes[ahead] - routes[behind] + 1e-4, fz = routes[ahead + 2] - routes[behind + 2];
       const fl = Math.hypot(fx, fz) || 1;
-      const room = routes[a0 + 3] + (routes[a1 + 3] - routes[a0 + 3]) * frac;
+      const decW = (raw) => {
+        if (raw < 16) return [raw, 0];
+        const v = Math.round(raw - 16);
+        return [(v & 511) * 0.01, (v >> 9) * 0.001 - 0.5];
+      };
+      const [hw0, sl0] = decW(routes[a0 + 3]), [hw1, sl1] = decW(routes[a1 + 3]);
+      const room = hw0 + (hw1 - hw0) * frac;
+      const crossSlope = sl0 + (sl1 - sl0) * frac;
       const aside = going * side * room;
       worldX = routes[a0] + (routes[a1] - routes[a0]) * frac + (fz / fl) * aside;
-      wayGroundY = routes[a0 + 1] + (routes[a1 + 1] - routes[a0 + 1]) * frac;
+      wayGroundY = routes[a0 + 1] + (routes[a1 + 1] - routes[a0 + 1]) * frac + aside * crossSlope;
       worldZ = routes[a0 + 2] + (routes[a1 + 2] - routes[a0 + 2]) * frac - (fx / fl) * aside;
       walkYaw = Math.atan2((fx / fl) * going, (fz / fl) * going);
       rolled = walked;

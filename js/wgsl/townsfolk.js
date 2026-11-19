@@ -92,15 +92,28 @@ fn townRoll(who:u32,salt:f32)->f32 {
 // The frame clock runs round, so a time past may read as later than now.
 fn secondsSince(since:f32,time:f32)->f32 {let age=time-since;return select(age,age+${SIM_CLOCK_LOOP_S.toFixed(1)},age<0.0);}
 fn turnTo(heading:f32,goal:f32)->f32 {return atan2(sin(goal-heading),cos(goal-heading));}
+// Decode packed (halfWidth, crossSlope) from route[k].w (backwards-compatible with raw halfWidth < 16.0).
+fn decodeRouteW(raw:f32)->vec2f {
+  if(raw<16.0){return vec2f(raw,0.0);}
+  let v=u32(raw-16.0+0.5);
+  return vec2f(f32(v&511u)*0.01,f32(v>>9u)*0.001-0.5);
+}
 // Somewhere on their way, at normalized lateral fraction latFrac in [-1, 1] of the full walkable half-width.
 fn wayAtLat(w:Walker,metres:f32,latFrac:f32)->TownSpot {
   let along=metres/${ROUTE_STEP_M.toFixed(4)};
   let i=min(u32(max(along,0.0)),w.count-2u);
-  let here=mix(route[w.first+i],route[w.first+i+1u],clamp(along-f32(i),0.0,1.0));
+  let frac=clamp(along-f32(i),0.0,1.0);
+  let r0=route[w.first+i];
+  let r1=route[w.first+i+1u];
+  let hereXYZ=mix(r0.xyz,r1.xyz,frac);
+  let ws=mix(decodeRouteW(r0.w),decodeRouteW(r1.w),frac);
+  let halfW=ws.x;
+  let crossSlope=ws.y;
   let ahead=route[w.first+min(i+3u,w.count-1u)].xz-route[w.first+u32(max(i32(i)-2,0))].xz;
   let forward=normalize(ahead+vec2f(1e-4,0.0));
-  let aside=vec2f(forward.y,-forward.x)*clamp(latFrac,-1.0,1.0)*here.w;
-  return TownSpot(vec3f(here.x+aside.x,here.y,here.z+aside.y),forward,here.xz,here.w);
+  let latOff=clamp(latFrac,-1.0,1.0)*halfW;
+  let aside=vec2f(forward.y,-forward.x)*latOff;
+  return TownSpot(vec3f(hereXYZ.x+aside.x,hereXYZ.y+latOff*crossSlope,hereXYZ.z+aside.y),forward,hereXYZ.xz,halfW);
 }
 // Somewhere on their way, on the side of it they are keeping to: +1 is the right hand going out along it.
 fn wayAt(w:Walker,metres:f32,lane:f32)->TownSpot {
@@ -482,7 +495,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let boundR=select(select(${BODY_BOUND_M.toFixed(2)},1.95,isMounted),${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING);
   let seen=inFrustum(relative,boundR);
   if(!seen&&(length(relative)>=${SHADOW_NEAR_M.toFixed(1)}||!inFrustum(relative,${SHADOW_MARGIN_M.toFixed(1)}))){return;}
-  let lifeStage=humanLifeStage(id.x,true,isMounted);
+  let realAge=(w.flags>>8u)&127u;
+  let lifeStage=humanLifeStageFromAge(realAge,id.x,true,isMounted);
   let bodyScale=lifeStage.x;
   let model=w.flags&1u;
   let plain=crowd.clips[model*3u];let fright=crowd.clips[model*3u+1u];let fall=crowd.clips[model*3u+2u];
@@ -529,8 +543,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let c=cos(heading)*bodyScale;let s=sin(heading)*bodyScale;
   // Turned by their heading about the vertical and scaled by their base height (children 0.64..0.82, adults 0.92..1.09).
   let transform=mat4x4f(vec4f(c,0.0,-s,0.0),vec4f(0.0,bodyScale,0.0,0.0),vec4f(s,0.0,c,0.0),vec4f(position,1.0));
-  // The fallen and the hurt are cut finer, mounted riders carry bit 0, and anyone in the sea is wet through.
-  let important=select(0u,${CREW_CONTINUUM_ORDER_IMPORTANT}u,fate.mode>=FALLING||dmgCode>0u)|select(0u,${CREW_CONTINUUM_ORDER_MOUNTED}u,isMounted);
+  // The fallen and the hurt are cut finer, mounted riders carry bit 0, bits 8..14 carry exact board age, and anyone in the sea is wet through.
+  let important=select(0u,${CREW_CONTINUUM_ORDER_IMPORTANT}u,fate.mode>=FALLING||dmgCode>0u)|select(0u,${CREW_CONTINUUM_ORDER_MOUNTED}u,isMounted)|(realAge<<8u);
   let wet=select(0u,${TOWNSFOLK_SEA_MOISTURE}u,!dry);
   placed[select(0u,crowd.second,model==1u)+kept]=CrewPlaced(transform,vec4u(first+whole,first+after,first+whole,model*crowd.looks+w.look%crowd.looks),vec4f(blend,0.0,0.0,0.0),vec4u(id.x,dmgCode,important,wet));
 }

@@ -868,7 +868,7 @@ export function cityVariant(type, across = null, along = null, up = null) {
 // What hangs over a street from a front: whoever walks there passes under it.
 export const CITY_TYPES_OVERHEAD = Object.freeze(new Set(cityFamilyTypes('PENTICE', 'SIGN', 'ALE_STAKE')));
 // Bridges are destructible gunnery targets whose intact spans let walkers and caravans cross rivers cleanly.
-export const CITY_TYPES_BRIDGES = Object.freeze(new Set(cityFamilyTypes('FOOTBRIDGE', 'STONE_BRIDGE', 'STONE_BRIDGE_SPAN')));
+export const CITY_TYPES_BRIDGES = Object.freeze(new Set(cityFamilyTypes('FOOTBRIDGE', 'STONE_BRIDGE', 'STONE_BRIDGE_SPAN', 'FOOTBRIDGE_RAMP', 'STONE_BRIDGE_RAMP')));
 // What stands in or over the water, never on the ground the land draws.
 export const CITY_TYPES_WATERSIDE = Object.freeze(new Set([...cityFamilyTypes('WHARF', 'WATERMILL', 'QUAY', 'PIER', 'TORRE_BELEM', 'CANOE_LANDING'), ...CITY_TYPES_BRIDGES]));
 // What is too slight to be laid as a gun's target or to stop anyone walking: what hangs overhead, a fence,
@@ -896,7 +896,8 @@ const CITY_TARGETS = Object.freeze({
   VATS: { prefabId: 'city_works', label: 'Tannery or dye works' }, STONE_HALL: { prefabId: 'city_stone_hall', label: 'Stone hall' }, CLOISTER: { prefabId: 'city_cloister', label: 'Cloister' },
   COURT: { prefabId: 'city_courtyard_house', label: 'Courtyard house' }, WHARF: { prefabId: 'city_wharf', label: 'Wharf' }, QUARRY: { prefabId: 'city_quarry', label: 'Quarry' },
   RUIN: { prefabId: 'city_ruin', label: 'Ruin' }, RUBBLE: { prefabId: 'city_rubble', label: 'Rubble' }, FENCE_RAIL: { prefabId: 'city_fence', label: 'Fence' }, FENCE_POST: { prefabId: 'city_fence', label: 'Fence' }, FENCE_STONE: { prefabId: 'city_fence', label: 'Dry-stone wall' },
-  FOOTBRIDGE: { prefabId: 'city_timber_bridge', label: 'Timber bridge' }, STONE_BRIDGE: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, STONE_BRIDGE_SPAN: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, GRAVES: { prefabId: 'city_graves', label: 'Graves' },
+  FOOTBRIDGE: { prefabId: 'city_timber_bridge', label: 'Timber bridge' }, STONE_BRIDGE: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, STONE_BRIDGE_SPAN: { prefabId: 'city_stone_bridge', label: 'Stone bridge' },
+  FOOTBRIDGE_RAMP: { prefabId: 'city_timber_bridge', label: 'Timber bridge approach' }, STONE_BRIDGE_RAMP: { prefabId: 'city_stone_bridge', label: 'Stone bridge approach' }, GRAVES: { prefabId: 'city_graves', label: 'Graves' },
   CAIRN: { prefabId: 'city_cairn', label: 'Cairn' }, TENT: { prefabId: 'city_tent', label: 'Tent' }, STANDARD: { prefabId: 'city_standard', label: 'Standard' }, SCAFFOLD: { prefabId: 'city_scaffold', label: 'Scaffold' },
   QUAY: { prefabId: 'city_quay', label: 'Stone quay' }, PIER: { prefabId: 'city_pier', label: 'Timber mole' }, SLIPWAY: { prefabId: 'city_slipway', label: 'Slipway' },
   CAREENING_SHED: { prefabId: 'city_careening_shed', label: 'Careening shed' }, CUSTOMHOUSE: { prefabId: 'city_customhouse', label: 'Customhouse' },

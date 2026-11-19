@@ -3650,80 +3650,80 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       return;
     }
 
-    // River barges: strict rendered-river centerline guidance, cross-track clamping, and exact station water elevation
+    // River barges: monotonic 1D arc-length centerline progression (`ai.routeS`) with smooth starboard-hand lane keeping,
+    // real current-vs-oar hydrodynamics, and zero segment-endpoint snagging so barges never row in place!
     if (isBarge && pts && pts.length >= 2) {
-      ai.wpIndex = Math.max(0, Math.min(pts.length - 1, ai.wpIndex | 0));
-      let target = pts[ai.wpIndex];
-      let probeIw = null;
+      const totalLen = Math.max(1, route.totalLen || pts[pts.length - 1]?.acc || 1);
+      // Initialize monotonic arc-length `ai.routeS` from current `(ai.x, ai.z)` on first step
+      if (!Number.isFinite(ai.routeS)) {
+        let bestS = 0, bestD2 = Infinity;
+        for (let i = 1; i < pts.length; i++) {
+          const a = pts[i - 1], b = pts[i];
+          const dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
+          const u = l2 > 1e-6 ? Math.max(0, Math.min(1, ((ai.x - a.x) * dx + (ai.z - a.z) * dz) / l2)) : 0;
+          const px = a.x + dx * u, pz = a.z + dz * u;
+          const d2 = (ai.x - px) * (ai.x - px) + (ai.z - pz) * (ai.z - pz);
+          if (d2 < bestD2) { bestD2 = d2; bestS = (a.acc ?? 0) + Math.sqrt(l2) * u; }
+        }
+        ai.routeS = Math.max(0, Math.min(totalLen, bestS));
+      }
+
+      // Helper: sample exact centerline geometry, half-width, water Y, and flow at arc-length `s`
+      const sampleAtS = (sRaw) => {
+        const s = Math.max(0, Math.min(totalLen, sRaw));
+        let lo = 0, hi = pts.length - 2;
+        while (lo < hi) {
+          const mid = (lo + hi + 1) >> 1;
+          if ((pts[mid].acc ?? 0) <= s) lo = mid;
+          else hi = mid - 1;
+        }
+        const a = pts[lo], b = pts[Math.min(pts.length - 1, lo + 1)];
+        const segLen = Math.max(1e-4, (b.acc ?? 0) - (a.acc ?? 0) || Math.hypot(b.x - a.x, b.z - a.z));
+        const u = Math.max(0, Math.min(1, (s - (a.acc ?? 0)) / segLen));
+        const dx = b.x - a.x, dz = b.z - a.z, dl = Math.hypot(dx, dz) || 1;
+        return {
+          segIdx: lo + 1, u, segLen,
+          cx: a.x + dx * u, cz: a.z + dz * u,
+          tx: dx / dl, tz: dz / dl,
+          snx: -dz / dl, snz: dx / dl,
+          hw: (Number.isFinite(a.hw) && Number.isFinite(b.hw)) ? (a.hw + (b.hw - a.hw) * u) : (b.hw ?? a.hw ?? 3.5),
+          wy: (Number.isFinite(a.y) && Number.isFinite(b.y)) ? (a.y + (b.y - a.y) * u) : (b.y ?? a.y ?? 0),
+          vx: (Number.isFinite(a.vx) && Number.isFinite(b.vx)) ? (a.vx + (b.vx - a.vx) * u) : ((dx / dl) * 0.9),
+          vz: (Number.isFinite(a.vz) && Number.isFinite(b.vz)) ? (a.vz + (b.vz - a.vz) * u) : ((dz / dl) * 0.9),
+          seaMouth: Boolean(a.seaMouth || b.seaMouth),
+          estuaryT: (Number.isFinite(a.estuaryT) && Number.isFinite(b.estuaryT)) ? (a.estuaryT + (b.estuaryT - a.estuaryT) * u) : ((a.seaMouth || b.seaMouth) ? 1 : 0),
+          dyAlong: (b.y ?? 0) - (a.y ?? 0),
+        };
+      };
+
+      const cur = sampleAtS(ai.routeS);
+      const slopeSign = ai.dirSign >= 0 ? 1 : -1;
+      // Look 8 m ahead along the river centerline for smooth natural helm turning
+      const look = sampleAtS(ai.routeS + slopeSign * Math.min(9.0, totalLen * 0.15));
+      const tx = look.tx * slopeSign, tz = look.tz * slopeSign;
+      const localHalfWidth = cur.hw;
+
+      let cvx = cur.vx, cvz = cur.vz;
       if (riverFlowAt) {
-        const candIw = riverFlowAt(ai.x + worldOffsetX, ai.z + worldOffsetZ);
-        if (candIw && (!Number.isFinite(candIw.dist) || !Number.isFinite(candIw.hw) || candIw.dist <= candIw.hw * 0.92)) {
-          probeIw = candIw;
+        const candIw = riverFlowAt(cur.cx + worldOffsetX, cur.cz + worldOffsetZ);
+        if (candIw && Number.isFinite(candIw.vx) && Number.isFinite(candIw.vz)) {
+          cvx = candIw.vx;
+          cvz = candIw.vz;
         }
       }
-      const localHalfWidth = Number.isFinite(target.hw)
-        ? target.hw
-        : (Number.isFinite(probeIw?.hw) ? probeIw.hw : 3.5);
-      const arriveR = Math.max(3.6, Math.min(7.5, localHalfWidth * 0.95));
-      let distToWp = Math.hypot(target.x - ai.x, target.z - ai.z);
-      let wpGuard = 0;
-      while (distToWp < arriveR && wpGuard++ < 16) {
-        if (ai.dirSign > 0) {
-          if (ai.wpIndex < pts.length - 1) ai.wpIndex++;
-          else { ai.dirSign = -1; ai.wpIndex = Math.max(0, pts.length - 2); }
-        } else {
-          if (ai.wpIndex > 0) ai.wpIndex--;
-          else { ai.dirSign = 1; ai.wpIndex = Math.min(pts.length - 1, 1); }
-        }
-        target = pts[Math.max(0, Math.min(pts.length - 1, ai.wpIndex))];
-        distToWp = Math.hypot(target.x - ai.x, target.z - ai.z);
-      }
-
-      let cvx = Number.isFinite(target.vx) ? target.vx : 0;
-      let cvz = Number.isFinite(target.vz) ? target.vz : 0;
-      if (probeIw && Number.isFinite(probeIw.vx) && Number.isFinite(probeIw.vz)) {
-        cvx = probeIw.vx;
-        cvz = probeIw.vz;
-      } else {
-        const prevIdx = Math.max(0, Math.min(pts.length - 1, ai.wpIndex - ai.dirSign));
-        const a = pts[prevIdx], b = target;
-        if (Number.isFinite(a?.vx) && Number.isFinite(a?.vz) && Number.isFinite(b?.vx) && Number.isFinite(b?.vz)) {
-          const segLen = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-          const u = Math.max(0, Math.min(1, 1 - distToWp / segLen));
-          cvx = a.vx + (b.vx - a.vx) * u;
-          cvz = a.vz + (b.vz - a.vz) * u;
-        } else if (!Number.isFinite(target.vx)) {
-          const d0 = pts[Math.max(0, ai.wpIndex - 1)], d1 = pts[Math.min(pts.length - 1, ai.wpIndex + 1)];
-          const dl = Math.hypot(d1.x - d0.x, d1.z - d0.z) || 1;
-          cvx = ((d1.x - d0.x) / dl) * 0.9;
-          cvz = ((d1.z - d0.z) / dl) * 0.9;
-        }
-      }
-
-      const refPrev = pts[Math.max(0, ai.wpIndex - 1)];
-      const refNext = pts[Math.min(pts.length - 1, ai.wpIndex + 1)];
-      const rdx = refNext.x - refPrev.x, rdz = refNext.z - refPrev.z;
-      const rlen = Math.hypot(rdx, rdz) || 1;
-      const hullHalfB0 = Math.max(0.85, beam * 0.5);
-      const maxAimLat = Math.max(0.0, Math.min(localHalfWidth * 0.90 - hullHalfB0, localHalfWidth - hullHalfB0 - 0.25));
-      const aimLat = (ai.dirSign >= 0 ? 1 : -1) * Math.min(maxAimLat, 0.28 * localHalfWidth);
-      const aimX = target.x + (-rdz / rlen) * aimLat;
-      const aimZ = target.z + (rdx / rlen) * aimLat;
-      const distToAim = Math.hypot(aimX - ai.x, aimZ - ai.z);
-      const tx = distToAim > 1e-3 ? (aimX - ai.x) / distToAim : Math.sin(ai.yaw);
-      const tz = distToAim > 1e-3 ? (aimZ - ai.z) / distToAim : -Math.cos(ai.yaw);
       const flowTrackAlong = cvx * tx + cvz * tz;
       const upstream = flowTrackAlong < -0.15;
-      let oarWaterSpeed = upstream
-        ? Math.max(1.55, Math.min(2.65, Math.abs(flowTrackAlong) + 0.95))
-        : 1.05;
+      // Oarsmen pull harder upstream to make steady 1.0–1.5 m/s ground headway, and glide briskly downstream with the current
+      let targetGroundSpeed = upstream
+        ? Math.max(1.05, Math.min(1.75, 1.35 - Math.abs(flowTrackAlong) * 0.12))
+        : Math.max(1.35, Math.min(2.65, 1.15 + Math.max(0, flowTrackAlong) * 0.72));
 
       // Longitudinal river-channel spacing & speed modulation so barges on the same leg never drive through each other
       let passingUrgency = 0;
       let speedMul = 1.0;
       if (avoidTargets && avoidTargets.length > 0) {
         const minFollowM = Math.max(19.0, length * 1.48);
-        const stopDistM = Math.max(18.0, minFollowM * 0.92);
+        const stopDistM = Math.max(16.0, minFollowM * 0.85);
         for (let k = 0; k < avoidTargets.length; k++) {
           const other = avoidTargets[k];
           if (!other || other.id === route.id) continue;
@@ -3734,12 +3734,12 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
           if (sep > 48 || sep < 1e-3) continue;
           const fwd = dxO * tx + dzO * tz;
           const lat = Math.abs(-dxO * tz + dzO * tx);
-          if (lat > Math.max(8.0, localHalfWidth * 1.35)) continue;
+          if (lat > Math.max(7.5, localHalfWidth * 1.15)) continue;
           const obx = Math.sin(other.yaw ?? 0), obz = -Math.cos(other.yaw ?? 0);
           const sameHeading = tx * obx + tz * obz;
-          if (sameHeading > 0.25) {
-            if (fwd > -1.5 && sep < stopDistM + 22.0) {
-              speedMul = Math.min(speedMul, sep <= stopDistM ? 0.0 : Math.max(0.0, (sep - stopDistM) / 22.0));
+          if (sameHeading > 0.35) {
+            if (fwd > 0.5 && sep < stopDistM + 20.0) {
+              speedMul = Math.min(speedMul, sep <= stopDistM ? 0.0 : Math.max(0.0, (sep - stopDistM) / 20.0));
             } else if (fwd < -1.5 && sep < minFollowM * 0.85) {
               speedMul = Math.max(speedMul, 1.18);
             }
@@ -3747,116 +3747,80 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
             passingUrgency = Math.max(passingUrgency, 1 - sep / 48);
           }
         }
-        oarWaterSpeed *= speedMul;
       }
 
-      // Steersman crabs only into cross-track current so downstream hulls ride river flow cleanly (and hold station when braking).
-      const driftScale = speedMul < 0.35 ? (speedMul / 0.35) : 1.0;
-      const crossVx = (cvx - flowTrackAlong * tx) * driftScale;
-      const crossVz = (cvz - flowTrackAlong * tz) * driftScale;
-      const crabVx = tx * oarWaterSpeed - crossVx * 0.78;
-      const crabVz = tz * oarWaterSpeed - crossVz * 0.78;
-      const desiredYaw = (Math.abs(crabVx) + Math.abs(crabVz) > 1e-3) ? Math.atan2(crabVx, -crabVz) : Math.atan2(tx, -tz);
+      const desiredGroundSpeed = targetGroundSpeed * speedMul;
+      ai.speed += (desiredGroundSpeed - ai.speed) * (1 - Math.exp(-h * 2.4));
+      const actualAdvance = Math.max(0, ai.speed) * h;
+      const prevS = ai.routeS;
+      ai.routeS += slopeSign * actualAdvance;
+      // Clean turnaround at route endpoints (leave 1.5 m clearance from terminal node so hull never pins)
+      const endMargin = Math.min(2.5, totalLen * 0.05);
+      if (ai.dirSign > 0 && ai.routeS >= totalLen - endMargin) {
+        ai.routeS = totalLen - endMargin;
+        ai.dirSign = -1;
+      } else if (ai.dirSign < 0 && ai.routeS <= endMargin) {
+        ai.routeS = endMargin;
+        ai.dirSign = 1;
+      }
+
+      const next = sampleAtS(ai.routeS);
+      const nextSign = ai.dirSign >= 0 ? 1 : -1;
+      ai.wpIndex = Math.max(0, Math.min(pts.length - 1, next.segIdx));
+
+      const hullHalfBeam = Math.max(0.85, beam * 0.5);
+      const effHw = next.hw;
+      const maxLat = Math.max(0.0, Math.min(effHw * 0.88 - hullHalfBeam, effHw - hullHalfBeam - 0.25));
+      const laneFrac = 0.28 + passingUrgency * 0.08;
+      const targetLat = nextSign * Math.min(maxLat, laneFrac * effHw);
+      ai.laneLat = Number.isFinite(ai.laneLat)
+        ? (ai.laneLat + (targetLat - ai.laneLat) * Math.min(1, h * 1.8))
+        : targetLat;
+      const clampedLat = Math.max(-maxLat, Math.min(maxLat, ai.laneLat));
+
+      const prevX = ai.x, prevZ = ai.z;
+      ai.x = next.cx + next.snx * clampedLat;
+      ai.z = next.cz + next.snz * clampedLat;
+      const stepDist = Math.hypot(ai.x - prevX, ai.z - prevZ);
+      const realSpd = h > 1e-4 ? (stepDist / h) : ai.speed;
+      ai.vx = h > 1e-4 ? (ai.x - prevX) / h : next.tx * nextSign * ai.speed;
+      ai.vz = h > 1e-4 ? (ai.z - prevZ) / h : next.tz * nextSign * ai.speed;
+
+      // Steer hull yaw smoothly along actual track direction (faster turn rate on turnarounds so bow never crabs sideways)
+      const look2 = sampleAtS(ai.routeS + nextSign * Math.min(8.0, totalLen * 0.12));
+      const desiredYaw = Math.atan2(look2.tx * nextSign, -(look2.tz * nextSign));
       const dYaw = wrapAnglePi(desiredYaw - ai.yaw);
-      const maxTurn = 0.85 * h;
+      const maxTurn = (Math.abs(dYaw) > 1.2 ? 1.85 : 1.15) * h;
       ai.yaw = wrapAnglePi(ai.yaw + Math.max(-maxTurn, Math.min(maxTurn, dYaw)));
 
-      const bowX = Math.sin(ai.yaw), bowZ = -Math.cos(ai.yaw);
-      const gvx = bowX * oarWaterSpeed + cvx * 0.78 * driftScale;
-      const gvz = bowZ * oarWaterSpeed + cvz * 0.78 * driftScale;
-      const groundSpd = speedMul <= 0.01 ? 0.0 : Math.max(0.05, Math.hypot(gvx, gvz));
-      ai.speed += (groundSpd - ai.speed) * (1 - Math.exp(-h * 2.4));
-      ai.x += gvx * h;
-      ai.z += gvz * h;
-      ai.vx = gvx;
-      ai.vz = gvz;
-      ai.motion = speedMul <= 0.02
+      // Oars ONLY row when the barge is genuinely making headway; if stopped/braking, oars immediately rest feathered!
+      ai.motion = (speedMul <= 0.04 || realSpd < 0.10)
         ? 0.0
-        : (upstream ? Math.min(1.5, 1.15 + Math.abs(flowTrackAlong) * 0.35) : Math.max(0.5, 0.78 - flowTrackAlong * 0.18))
-          * Math.max(0.25, Math.min(1.15, oarWaterSpeed / 1.15));
+        : (upstream ? Math.min(1.45, 1.05 + Math.abs(flowTrackAlong) * 0.28) : Math.max(0.55, 0.85))
+          * Math.max(0.25, Math.min(1.15, realSpd / 1.25));
       ai.sailSet = 0;
       ai.tacking = false;
       ai.heldByWeather = false;
 
-      // Project `(ai.x, ai.z)` onto active `riverReaches` centerline segment & hold starboard-hand (+0.28*hw) channel lane
-      let bestSegIdx = Math.max(1, Math.min(pts.length - 1, ai.wpIndex));
-      let bestU = 0;
-      let bestDistSq = Infinity;
-      const searchWindow = (lo, hi) => {
-        for (let i = lo; i <= hi; i++) {
-          const a = pts[i - 1], b = pts[i];
-          const dx = b.x - a.x, dz = b.z - a.z;
-          const lenSq = dx * dx + dz * dz;
-          const u = lenSq > 1e-6 ? Math.max(0, Math.min(1, ((ai.x - a.x) * dx + (ai.z - a.z) * dz) / lenSq)) : 0;
-          const px = a.x + dx * u, pz = a.z + dz * u;
-          const dSq = (ai.x - px) * (ai.x - px) + (ai.z - pz) * (ai.z - pz);
-          if (dSq < bestDistSq) {
-            bestDistSq = dSq;
-            bestSegIdx = i;
-            bestU = u;
-          }
-        }
-      };
-      searchWindow(Math.max(1, ai.wpIndex - 10), Math.min(pts.length - 1, ai.wpIndex + 10));
-      if (bestDistSq > 144) searchWindow(1, pts.length - 1);
-
-      const segA = pts[bestSegIdx - 1];
-      const segB = pts[bestSegIdx];
-      const sdx = segB.x - segA.x, sdz = segB.z - segA.z;
-      const slen = Math.hypot(sdx, sdz) || 1;
-      const cx = segA.x + sdx * bestU;
-      const cz = segA.z + sdz * bestU;
-      const snx = -sdz / slen, snz = sdx / slen;
-      const dLat = (ai.x - cx) * snx + (ai.z - cz) * snz;
-
-      let stHw = (Number.isFinite(segA.hw) && Number.isFinite(segB.hw))
-        ? (segA.hw + (segB.hw - segA.hw) * bestU)
-        : (Number.isFinite(segB.hw) ? segB.hw : segA.hw);
-      let stWy = (Number.isFinite(segA.y) && Number.isFinite(segB.y))
-        ? (segA.y + (segB.y - segA.y) * bestU)
-        : (Number.isFinite(segB.y) ? segB.y : (segA.y ?? 0));
-      const stSeaMouth = Boolean(segA.seaMouth || segB.seaMouth);
-      const stEstuaryT = (Number.isFinite(segA.estuaryT) && Number.isFinite(segB.estuaryT))
-        ? (segA.estuaryT + (segB.estuaryT - segA.estuaryT) * bestU)
-        : (stSeaMouth ? 1 : 0);
-
+      let stWy = next.wy;
       if (riverFlowAt) {
-        const iwCenter = riverFlowAt(cx + worldOffsetX, cz + worldOffsetZ);
-        if (iwCenter && (!Number.isFinite(iwCenter.dist) || !Number.isFinite(iwCenter.hw) || iwCenter.dist <= iwCenter.hw * 0.92)) {
-          if (!Number.isFinite(stHw) && Number.isFinite(iwCenter.hw)) stHw = iwCenter.hw;
-          if (Number.isFinite(iwCenter.wy)) stWy = iwCenter.wy;
+        const iwCenter = riverFlowAt(next.cx + worldOffsetX, next.cz + worldOffsetZ);
+        if (iwCenter && Number.isFinite(iwCenter.wy) && (!Number.isFinite(iwCenter.dist) || !Number.isFinite(iwCenter.hw) || iwCenter.dist <= iwCenter.hw * 0.92)) {
+          stWy = iwCenter.wy;
         }
       }
-      if (stSeaMouth && stEstuaryT > 0.72) {
-        stWy *= Math.max(0, (1 - stEstuaryT) / 0.28);
+      if (next.seaMouth && next.estuaryT > 0.72) {
+        stWy *= Math.max(0, (1 - next.estuaryT) / 0.28);
       }
-
-      const slopeSign = ai.dirSign >= 0 ? 1 : -1;
-      const hullHalfBeam = Math.max(0.85, beam * 0.5);
-      const effHw = Number.isFinite(stHw) ? stHw : 3.5;
-      const maxLat = Math.max(0.0, Math.min(effHw * 0.90 - hullHalfBeam, effHw - hullHalfBeam - 0.25));
-      const laneFrac = 0.28 + passingUrgency * 0.06;
-      const targetLat = slopeSign * Math.min(maxLat, laneFrac * effHw);
-      ai.laneLat = Number.isFinite(ai.laneLat)
-        ? (ai.laneLat + (targetLat - ai.laneLat) * Math.min(1, h * 2.0))
-        : targetLat;
-      const steeredLat = dLat + (ai.laneLat - dLat) * Math.min(1, h * 3.2);
-      const clampedLat = Math.max(-maxLat, Math.min(maxLat, steeredLat));
-      ai.x = cx + snx * clampedLat;
-      ai.z = cz + snz * clampedLat;
       ai.y = stWy;
       ai.waterY = stWy;
       ai.channelHw = effHw;
       ai.crossTrackM = Math.abs(clampedLat);
-
-      const dyAlong = ((segB.y ?? stWy) - (segA.y ?? stWy)) * slopeSign;
-      ai.pitch = Math.max(-0.14, Math.min(0.14, Math.asin(Math.max(-0.18, Math.min(0.18, dyAlong / slen)))));
+      ai.pitch = Math.max(-0.14, Math.min(0.14, Math.asin(Math.max(-0.18, Math.min(0.18, (next.dyAlong * nextSign) / next.segLen)))));
       ai.roll = 0;
 
-      const L = Math.max(1, route.totalLen || 1);
-      const projAcc = (segA.acc ?? 0) + slen * bestU;
-      const remSegs = ai.dirSign > 0 ? Math.max(0, L - projAcc) : Math.max(0, projAcc);
-      ai.progress = Math.max(0, Math.min(1, 1 - remSegs / L));
+      const remSegs = ai.dirSign > 0 ? Math.max(0, totalLen - ai.routeS) : Math.max(0, ai.routeS);
+      ai.progress = Math.max(0, Math.min(1, 1 - remSegs / totalLen));
       const dPerSec = Math.max(daysPerSecond || 0, 1 / 180);
       ai.etaDays = (remSegs / Math.max(0.35, ai.speed)) * dPerSec;
       return;

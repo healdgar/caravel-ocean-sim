@@ -294,9 +294,11 @@ export function townWalkerStride(streets,index,clock,sunY=1,out={position:{x:0,y
   const along=metres/ROUTE_STEP_M,i=Math.min(Math.floor(Math.max(along,0)),count-2),t=weatherClamp(along-i,0,1);
   const a=(first+i)*4,b=a+4,ahead=(first+Math.min(i+3,count-1))*4,behind=(first+Math.max(i-2,0))*4;
   const fx=route[ahead]-route[behind]+1e-4,fz=route[ahead+2]-route[behind+2],fl=Math.hypot(fx,fz)||1;
-  const room=route[a+3]+(route[b+3]-route[a+3])*t,aside=lane*side*room;
+  const decW=(raw)=>{if(raw<16)return [raw,0];const v=Math.round(raw-16);return [(v&511)*0.01,(v>>9)*0.001-0.5];};
+  const [hw0,sl0]=decW(route[a+3]),[hw1,sl1]=decW(route[b+3]);
+  const room=hw0+(hw1-hw0)*t,crossSlope=sl0+(sl1-sl0)*t,aside=lane*side*room;
   out.position.x=route[a]+(route[b]-route[a])*t+fz/fl*aside;
-  out.position.y=route[a+1]+(route[b+1]-route[a+1])*t;
+  out.position.y=route[a+1]+(route[b+1]-route[a+1])*t+aside*crossSlope;
   out.position.z=route[a+2]+(route[b+2]-route[a+2])*t-fx/fl*aside;
   out.walked=walked;out.back=back;
   out.stopped=arrived||(pauseFor>0&&inLeg>=stopAt&&inLeg<stopAt+pauseFor);

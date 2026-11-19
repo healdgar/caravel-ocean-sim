@@ -372,7 +372,7 @@ const WORKS_FENCE_STONE = WORKS_FENCE.courses.map((courses) => {
 });
 // A timber bridge stands on bents of piles this far apart, as many as its crossing needs, a ramp at each end; a stone
 // bridge is a row of arches, each of one of three spans, as wide as a track's or a road's. Its deck is the floor.
-export const WORKS_BRIDGE = Object.freeze({ bent: 2.8, bents: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], ends: 3.4, arches: [7, 9, 11], widths: [4.2, 6] });
+export const WORKS_BRIDGE = Object.freeze({ bent: 2.8, bents: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], ends: 3.4, arches: [7, 9, 11], widths: [4.2, 6], rampDrops: [0.9, 1.5, 2.2, 3.0] });
 const WORKS_FOOTBRIDGE = WORKS_BRIDGE.bents.map((bents) => {
   const deck = (bents - 1) * WORKS_BRIDGE.bent / 2 + 0.6, half = deck + 1.1, rails = Math.max(2, Math.round(2 * half / 2.15) + 1);
   const at = Array.from({ length: bents }, (_, k) => -(bents - 1) * WORKS_BRIDGE.bent / 2 + k * WORKS_BRIDGE.bent);
@@ -390,6 +390,58 @@ const WORKS_FOOTBRIDGE = WORKS_BRIDGE.bents.map((bents) => {
     ...[-1.42, 1.42].flatMap((x) => [...worksEvenly(rails, -half + 0.2, half - 0.2).map((z) => worksPost('bridge_rail_post', x, z, 0, 1.02, 0.07)), worksBox('bridge_rail', [x - 0.05, 0.94, -half + 0.05], [x + 0.05, 1.04, half - 0.05], 'oak')]),
   ], 5.2);
 });
+// Physical timber approach ramp descending from an elevated footbridge end (z = -run/2, y = 0) down to the riverbank
+// road (z = +run/2, y = -drop), with sloped deck/stringers/rails, vertical rail posts, and grounded timber bents.
+const WORKS_FOOTBRIDGE_RAMP = WORKS_BRIDGE.rampDrops.map((drop) => {
+  const run = +(drop * 4.4 + 1.0).toFixed(2), half = run / 2;
+  const pitch = Math.atan2(drop, run) * 180 / Math.PI;
+  const slopeLen = Math.hypot(run, drop) + 0.95;
+  const yAt = (z) => -((z + half) / run) * drop;
+  const nPosts = Math.max(2, Math.round(run / 2.15) + 1);
+  const postZs = worksEvenly(nPosts, -half + 0.4, half - 0.2);
+  const bentZs = [];
+  for (let d = 2.4; d < run - 1.3; d += 2.6) bentZs.push(-half + d);
+  return worksSpec(`Rampa de pontão (timber bridge approach ramp, ${drop.toFixed(1)} m drop)`, 3.2, run, +(drop + 1.2).toFixed(2), 10, [
+    { primitive: 'group', name: 'bridge_ramp_slope', position: [0, 0, -half], rotation: [pitch, 0, 0], children: [
+      worksBox('bridge_ramp_deck', [-1.5, -0.26, -0.35], [1.5, 0.06, slopeLen], 'wood'),
+      worksBox('bridge_beam', [-1.32, -0.56, -0.20], [-0.98, -0.24, slopeLen], 'oak'),
+      worksBox('bridge_beam', [0.98, -0.56, -0.20], [1.32, -0.24, slopeLen], 'oak'),
+      worksBox('bridge_rail', [-1.47, 0.94, -0.15], [-1.37, 1.04, slopeLen - 0.85], 'oak'),
+      worksBox('bridge_rail', [1.37, 0.94, -0.15], [1.47, 1.04, slopeLen - 0.85], 'oak'),
+    ] },
+    ...[-1.42, 1.42].flatMap((x) => postZs.map((z) => worksPost('bridge_rail_post', x, z, yAt(z), yAt(z) + 1.02, 0.07))),
+    ...bentZs.flatMap((z) => {
+      const yTop = yAt(z) - 0.48, yBot = -drop - 3.2, h = Math.max(0.4, yTop - yBot);
+      return [
+        worksBox('bridge_bent_cap', [-1.45, yTop - 0.26, z - 0.16], [1.45, yTop, z + 0.16], 'oak'),
+        ...[-1.15, 1.15].map((x) => ({ primitive: 'cylinder', name: 'bridge_piles', base: [x, yBot, z], height: h, radius: 0.18, segments: 6, material: 'timber', partGroup: 'foundation_plinth' })),
+      ];
+    }),
+    worksBox('bridge_sill', [-1.56, -drop - 1.4, half - 0.55], [1.56, -drop + 0.02, half + 0.65], 'dark_stone', { partGroup: 'foundation_plinth' }),
+  ], drop + 2.8);
+});
+// Physical masonry approach ramp descending from an elevated stone bridge end down to the riverbank road.
+const WORKS_STONE_BRIDGE_RAMP = WORKS_BRIDGE.widths.flatMap((width) => WORKS_BRIDGE.rampDrops.map((drop) => {
+  const w = width / 2, run = +(drop * 4.4 + 1.0).toFixed(2), half = run / 2;
+  const pitch = Math.atan2(drop, run) * 180 / Math.PI;
+  const slopeLen = Math.hypot(run, drop) + 0.95;
+  const segs = Math.max(3, Math.ceil(run / 2.2));
+  const segLen = run / segs;
+  const yAt = (z) => -((z + half) / run) * drop;
+  return worksSpec(`Rampa de pedra (stone bridge approach ramp, ${width} m wide, ${drop.toFixed(1)} m drop)`, width, run, +(drop + 1.2).toFixed(2), 11, [
+    { primitive: 'group', name: 'bridge_ramp_slope', position: [0, 0, -half], rotation: [pitch, 0, 0], children: [
+      worksBox('bridge_deck', [-w + 0.2, -0.45, -0.35], [w - 0.2, 0.10, slopeLen], 'limestone'),
+      ...[-1, 1].flatMap((side) => [
+        worksBox('bridge_parapet', [side < 0 ? -w + 0.08 : w - 0.42, 0.02, -0.25], [side < 0 ? -w + 0.42 : w - 0.08, 0.92, slopeLen - 0.75], 'ashlar'),
+        worksBox('bridge_coping', [side < 0 ? -w + 0.04 : w - 0.46, 0.92, -0.25], [side < 0 ? -w + 0.46 : w - 0.04, 1.04, slopeLen - 0.75], 'dark_stone'),
+      ]),
+    ] },
+    ...Array.from({ length: segs }, (_, k) => {
+      const z0 = -half + k * segLen, z1 = z0 + segLen + 0.06, yTop = yAt((z0 + z1) * 0.5) - 0.12;
+      return worksBox('bridge_abutment', [-w + 0.05, -drop - 3.6, z0], [w - 0.05, yTop, z1], 'ashlar', { partGroup: 'foundation_plinth' });
+    }),
+  ], drop + 3.2);
+}));
 // One arch of a stone bridge `span` long and `width` wide: its piers and their cutwaters, its parapets; its crown
 // keeps under the deck whatever its span.
 function worksStoneArch(span, width) {
@@ -470,6 +522,7 @@ export const CITY_WORKS = Object.freeze([
   ['FENCE_RAIL', WORKS_FENCE_RAIL, 1], ['FENCE_POST', WORKS_FENCE_POST], ['FENCE_STONE', WORKS_FENCE_STONE, 2], ['FOOTBRIDGE', WORKS_FOOTBRIDGE, 1], ['STONE_BRIDGE', WORKS_STONE_BRIDGE, 1], ['STONE_BRIDGE_SPAN', WORKS_STONE_BRIDGE_SPAN, 1],
   ['GRAVES', WORKS_GRAVES], ['CAIRN', WORKS_CAIRN], ['TENT', WORKS_TENT], ['STANDARD', WORKS_STANDARD], ['SCAFFOLD', WORKS_SCAFFOLD],
   ...NATIVE_SLIGHT_WORKS,
+  ['FOOTBRIDGE_RAMP', WORKS_FOOTBRIDGE_RAMP, 1], ['STONE_BRIDGE_RAMP', WORKS_STONE_BRIDGE_RAMP, 1],
 ]);
 // How many of them stand on a footing as a house does; the rest are the slighter works.
 export const CITY_WORKS_BUILT = CITY_WORKS_OLD_BUILT.length + NATIVE_WORKS.length;

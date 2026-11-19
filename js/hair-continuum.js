@@ -48,18 +48,18 @@ export const HAIR_REF_ANCHORS = Object.freeze({
 });
 
 export const HAIR_BODY_ANCHORS = Object.freeze({
-  'sailor-male': Object.freeze({ sex: 'male', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'villager-female': Object.freeze({ sex: 'female', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'captain': Object.freeze({ sex: 'male', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'soldier': Object.freeze({ sex: 'male', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'algonquian-male': Object.freeze({ sex: 'male', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'algonquian-female': Object.freeze({ sex: 'female', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'caribbean-male': Object.freeze({ sex: 'male', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'caribbean-female': Object.freeze({ sex: 'female', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'maya-male': Object.freeze({ sex: 'male', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'maya-female': Object.freeze({ sex: 'female', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'andean-male': Object.freeze({ sex: 'male', scalp: [0, 0, 0], beard: [0, 0, 0] }),
-  'andean-female': Object.freeze({ sex: 'female', scalp: [0, 0, 0], beard: [0, 0, 0] }),
+  'sailor-male': Object.freeze({ sex: 'male', scalp: [0, 0.008, -0.014], beard: [0, 0, 0] }),
+  'villager-female': Object.freeze({ sex: 'female', scalp: [0, 0.009, -0.015], beard: [0, 0, 0] }),
+  'captain': Object.freeze({ sex: 'male', scalp: [0, 0.008, -0.014], beard: [0, 0, 0] }),
+  'soldier': Object.freeze({ sex: 'male', scalp: [0, 0.008, -0.014], beard: [0, 0, 0] }),
+  'algonquian-male': Object.freeze({ sex: 'male', scalp: [0, 0.008, -0.014], beard: [0, 0, 0] }),
+  'algonquian-female': Object.freeze({ sex: 'female', scalp: [0, 0.009, -0.015], beard: [0, 0, 0] }),
+  'caribbean-male': Object.freeze({ sex: 'male', scalp: [0, 0.008, -0.014], beard: [0, 0, 0] }),
+  'caribbean-female': Object.freeze({ sex: 'female', scalp: [0, 0.009, -0.015], beard: [0, 0, 0] }),
+  'maya-male': Object.freeze({ sex: 'male', scalp: [0, 0.008, -0.014], beard: [0, 0, 0] }),
+  'maya-female': Object.freeze({ sex: 'female', scalp: [0, 0.009, -0.015], beard: [0, 0, 0] }),
+  'andean-male': Object.freeze({ sex: 'male', scalp: [0, 0.008, -0.014], beard: [0, 0, 0] }),
+  'andean-female': Object.freeze({ sex: 'female', scalp: [0, 0.009, -0.015], beard: [0, 0, 0] }),
 });
 
 export function hairContinuumShiftsFor(bodyId, defaultFemale = false) {

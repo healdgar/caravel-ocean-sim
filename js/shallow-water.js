@@ -117,7 +117,7 @@ export function extractShallowWaterGeometry({ bridges = [], riverReaches = [], w
         });
       }
     } else {
-      // Timber footbridge (Pontão): pairs of round timber piles every WORKS_BRIDGE.bent (2.8 m)
+      // Timber footbridge (Pontão): pairs of slender round timber piles every WORKS_BRIDGE.bent (2.8 m)
       const bentStep = WORKS_BRIDGE.bent || 2.8;
       const bents = Math.max(2, Math.min(14, Math.round((totalLen - 2.2) / bentStep) + 1));
       const spanLen = (bents - 1) * bentStep;
@@ -128,8 +128,8 @@ export function extractShallowWaterGeometry({ bridges = [], riverReaches = [], w
             cx: bx + dx * along + px * side,
             cz: bz + dz * along + pz * side,
             ux: dx, uz: dz,
-            halfLen: 0.34, // slightly padded for 0.5 m grid resolvability
-            halfWid: 0.34,
+            halfLen: 0.22, // true slender timber piling so river currents flow cleanly between bents
+            halfWid: 0.22,
             kind: 2, // cylinder pile
             waterY,
           });

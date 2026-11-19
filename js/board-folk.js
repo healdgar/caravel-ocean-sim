@@ -69,30 +69,44 @@ function folkWay(route, origin, heightAt, blocked) {
     if (blocked?.(x, z)) run = i + 1; else if (i - run > to - from) { from = run; to = i; }
   }
   if (to - from < 2) return { route, samples, fromDoor: false, whole: false, cut: true };
-  // Measure real walkable lateral half-width when building obstacles (`blocked`) are known so villagers
-  // spread across wide streets, plazas, and quays instead of walking single-file in a 0.45 m slot.
-  const lateralRoomAt = (idx) => {
+  // Measure real walkable lateral half-width AND cross-street terrain slope so villagers & street mounts
+  // stand flush on sloped hillside cobblestones even when offset laterally from the street centerline.
+  const packRouteW = (hw, slope) => {
+    if (Math.abs(slope) < 0.003) return hw;
+    const hwCode = Math.max(0, Math.min(511, Math.round(hw * 100)));
+    const slCode = Math.max(0, Math.min(1000, Math.round((Math.max(-0.5, Math.min(0.5, slope)) + 0.5) * 1000)));
+    return 16 + slCode * 512 + hwCode;
+  };
+  const lateralInfoAt = (idx, y0) => {
     if (typeof blocked !== 'function') return FOLK_LANE_M;
     const x = points[idx * 2], z = points[idx * 2 + 1];
-    const y0 = heightAt(x, z);
-    const i0 = Math.max(from, idx - 1), i1 = Math.min(to, idx + 1);
+    const i0 = Math.max(from, idx - 2), i1 = Math.min(to, idx + 3);
     const dx = points[i1 * 2] - points[i0 * 2], dz = points[i1 * 2 + 1] - points[i0 * 2 + 1];
     const len = Math.hypot(dx, dz) || 1;
     const rx = dz / len, rz = -dx / len;
     const probeSide = (sign) => {
-      let clear = FOLK_LANE_M;
+      let clear = FOLK_LANE_M, sampleD = 0, sampleY = y0;
       for (const dist of [0.75, 1.20, 1.65, 2.10, 2.50]) {
         const px = x + rx * sign * dist, pz = z + rz * sign * dist;
         if (blocked(px, pz)) break;
         const py = heightAt(px, pz);
         if (!Number.isFinite(py) || py < 0.20 || Math.abs(py - y0) > 0.75) break;
         clear = dist - 0.25;
+        sampleD = dist;
+        sampleY = py;
       }
-      return clear;
+      return { clear, sampleD, sampleY };
     };
-    return Math.max(FOLK_LANE_M, Math.min(2.25, Math.min(probeSide(1), probeSide(-1))));
+    const pos = probeSide(1), neg = probeSide(-1);
+    const hw = Math.max(FOLK_LANE_M, Math.min(2.25, Math.min(pos.clear, neg.clear)));
+    const spanD = pos.sampleD + neg.sampleD;
+    const crossSlope = spanD > 0.2 ? (pos.sampleY - neg.sampleY) / spanD : 0;
+    return packRouteW(hw, crossSlope);
   };
-  for (let i = from; i <= to; i++) { const x = points[i * 2], z = points[i * 2 + 1]; samples.push(x, heightAt(x, z), z, lateralRoomAt(i)); }
+  for (let i = from; i <= to; i++) {
+    const x = points[i * 2], z = points[i * 2 + 1], y0 = heightAt(x, z);
+    samples.push(x, y0, z, lateralInfoAt(i, y0));
+  }
   return { route, samples, fromDoor: from === 0, whole: to === count - 1 && length <= FOLK_WAY_MOST_M, cut: from > 0 || to < count - 1 };
 }
 const sameWay = (a, b) => a.length === b.length && a.every((v, k) => v === b[k]);
@@ -145,11 +159,14 @@ export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, k
     floats[at + 9] = person.age < 14 ? 0.55 + 0.45 * roll(7) : roll(7);
     words[at + 10] = Math.floor(roll(8) * 0xffff);
     // The far end is in the open where the work is, if the way reaches it; play is in the open at both. An end
-    // cut short at a building's wall is gone in at.
+    // cut short at a building's wall is gone in at. Bits 8..15 pack exact board age (1..99) so the GPU renders
+    // children, youths, adults, and elders at their true age (zero age/model mismatch!).
+    const ageByte = Math.max(1, Math.min(99, Math.round(person.age ?? 28))) & 0xff;
     words[at + 11] = (person.sex === 'f' ? 1 : 0)
       | (person.goal === 'play' && fromDoor ? 2 : 0)
       | (whole && (person.open || person.goal === 'play') ? 4 : 0)
-      | (mounted ? WALKER_MOUNTED_FLAG : 0);
+      | (mounted ? WALKER_MOUNTED_FLAG : 0)
+      | (ageByte << 8);
     const last = person.route.length - 2;
     const soulRec = {
       id, name: person.name, surname: person.surname, sex: person.sex, age: person.age, role: person.role,
@@ -177,8 +194,9 @@ export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, k
         floats[at + 6] = 0;
         mountedCount++;
       }
+      const ownAgeByte = Math.max(1, Math.min(99, Math.round(soul.age ?? 28))) & 0xff;
       words[at + 10] = Math.floor(folkRoll(soul.id, 8) * 0xffff);
-      words[at + 11] = (baseFlags & ~1) | (soul.sex === 'f' ? 1 : 0) | (mounted ? WALKER_MOUNTED_FLAG : 0);
+      words[at + 11] = ((baseFlags & ~1) & 0xff) | (soul.sex === 'f' ? 1 : 0) | (mounted ? WALKER_MOUNTED_FLAG : 0) | (ownAgeByte << 8);
       const soulRec = { ...soul, goal: 'about', there: 'about the waterside', via: '', home: null, to: null, planned: false };
       if (mounted) soulRec.mounted = true;
       souls[ways.length + k] = soulRec;

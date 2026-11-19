@@ -602,15 +602,16 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
             env_r, yc = surf.sample_torso(min(surf.t_z1, max(surf.t_z0, z)), th)
             bot_flare = flare_bot * (max(0.0, 1.0 - bf * 2.0) ** 1.5)
             pleat_w = (0.5 + 0.5 * math.cos(th * pleats)) * pleat_amp * (1.0 - bf * 0.5) if pleats > 0 else 0.0
-            tuck_drop = -0.009 * min(1.0, max(0.0, (1.02 - z) / 0.10)) if tucked else 0.0
+            # Never apply negative tuck_drop that pulls the lower back/waist cloth inside the spine skin!
+            tuck_drop = 0.0
             r = env_r + clearance + tuck_drop + bot_flare + pleat_w
 
             if in_yoke:
-                collar_r = neck_r + (0.011 if stand_collar > 0 else 0.015)
+                collar_r = neck_r + (0.012 if stand_collar > 0 else 0.016)
                 cw = yt ** 1.08
                 sh_r, sh_yc = surf.sample_torso(min(surf.t_z1, yoke_z0), th)
                 yoke_r = (sh_r + clearance) * (1.0 - cw) + collar_r * cw
-                r = max(env_r + 0.015, yoke_r)
+                r = max(env_r + 0.018, yoke_r)
                 yc = sh_yc * (1.0 - cw) + neck_y * cw
 
             x = math.sin(th) * r
@@ -621,9 +622,8 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
                 ch, fab = collar_ch, FAB_LINEN
             elif hem_trim and not in_yoke and bf < 0.09:
                 ch, fab = CH_TRIM, FAB_COTTON
-            elif bodice_lace and cos_f > 0.93 and 0.12 < bf < 0.92 and not in_yoke:
-                if abs(math.sin(bf * 30.0 + abs(x) * 85.0)) > 0.80:
-                    ch, fab = CH_LINEN, FAB_LINEN
+            elif bodice_lace and cos_f > 0.985 and 0.14 < bf < 0.88 and not in_yoke:
+                ch, fab = CH_LINEN, FAB_LINEN
 
             # Pin collar/yoke firmly + firm pin at tucked bottom hem so torso drapes naturally without riding up!
             pw = 0.0
@@ -641,15 +641,16 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
         rings.append(row)
 
     v, f, p, cfu, fp = build_tube(rings, True)
-    return make_cloth_object(name, v, f, p, cfu, fp, cloth_cfg=cloth_cfg, solidify=solidify, subsurf=subsurf, sim_frames=sim_frames, min_clr=max(0.011, clearance * 0.48))
+    return make_cloth_object(name, v, f, p, cfu, fp, cloth_cfg=cloth_cfg, solidify=solidify, subsurf=subsurf, sim_frames=sim_frames, min_clr=max(0.016, clearance * 0.58))
 
 
 def build_sleeves_piece(surf, name, *, x_end_frac=0.58, n_x=22, n_t=28, clearance=0.018,
                         puff_amp=0.016, cuff_trim=False, rolled_cuff=True,
                         channel=CH_SHIRT, fabric=FAB_LINEN, sleeve_flex=0.22,
-                        cloth_cfg=None, solidify=0.0024, subsurf=1, sim_frames=24):
+                        cloth_cfg=None, solidify=0.0024, subsurf=1, sim_frames=24, x0_frac=0.95):
     objs = []
-    x0 = surf.arm_x0 * 0.78
+    # Start cleanly at the outer shoulder seam (x0_frac=0.95) so contrasting chemise sleeves never bury inside the bodice chest!
+    x0 = surf.arm_x0 * x0_frac
     x1 = surf.arm_x0 + (surf.arm_x1 - surf.arm_x0) * x_end_frac
     for side in range(2):
         sgn = 1.0 if side == 0 else -1.0
@@ -662,10 +663,12 @@ def build_sleeves_piece(surf, name, *, x_end_frac=0.58, n_x=22, n_t=28, clearanc
                 vf = it / n_t
                 th = vf * math.tau
                 env_r, yc, zc = surf.sample_arm(side, max(surf.arm_x0, ax), th)
-                cap = 0.017 * (1.0 - uf / 0.28) if uf < 0.28 else 0.0
+                # Taper sleeve-cap smoothly out from inside the bodice armscye (uf=0) to avoid shoulder-seam z-fighting!
+                cap = 0.014 * math.sin(min(1.0, uf / 0.32) * math.pi) if uf < 0.32 else 0.0
                 puff = puff_amp * math.sin(uf * math.pi) * (0.85 + 0.15 * math.cos(th * 8))
                 cuff = 0.009 * math.sin(((uf - 0.85) / 0.15) * math.pi) if (rolled_cuff and uf > 0.85) else 0.0
-                r = env_r + clearance + cap + puff + cuff
+                armscye_tuck = -0.006 * (1.0 - uf / 0.14) if uf < 0.14 else 0.0
+                r = env_r + clearance + armscye_tuck + cap + puff + cuff
                 x = ax * sgn
                 y = yc + math.cos(th) * surf.front_y * r
                 z = zc + math.sin(th) * r
@@ -693,7 +696,7 @@ def build_sleeves_piece(surf, name, *, x_end_frac=0.58, n_x=22, n_t=28, clearanc
 
 
 def build_pleated_skirt(surf, name, *, z_waist, z_hem=0.10, n_z=30, n_t=64,
-                        waist_clr=0.025, hem_rx=0.38, hem_rz=0.34,
+                        waist_clr=0.024, hem_rx=0.40, hem_rz=0.37,
                         pleats=16, pleat_amp=0.020, channel=CH_TROUSERS, fabric=FAB_WOOL,
                         hem_trim=False, apron=False, max_flex=0.85, sim_frames=32):
     rings = []
@@ -706,76 +709,38 @@ def build_pleated_skirt(surf, name, *, z_waist, z_hem=0.10, n_z=30, n_t=64,
             uf = it / n_t
             th = uf * math.tau
             env_r, yc = surf.sample_torso(max(surf.t_z0, z), th)
-            bell = down ** 0.84
+            bell = down ** 0.80
             base_r = env_r + waist_clr
             target_r = math.hypot(math.sin(th) * hem_rx, math.cos(th) * hem_rz)
             pleat_w = math.cos(th * pleats) * pleat_amp * (down ** 0.85)
             side = 0 if math.sin(th) >= 0 else 1
-            leg_mask = max(0.0, min(1.0, (0.84 - z) / 0.14))
+            leg_mask = max(0.0, min(1.0, (0.88 - z) / 0.14))
             if leg_mask > 0.0:
                 lr, lxc, lyc = surf.sample_leg(side, min(surf.l_z1, max(surf.l_z0, z)), th)
-                leg_out = math.hypot(lxc + math.sin(th) * (lr + 0.054), (lyc - yc) + math.cos(th) * surf.front_y * (lr + 0.054)) * leg_mask
+                leg_out = math.hypot(lxc + math.sin(th) * (lr + 0.072), (lyc - yc) + math.cos(th) * surf.front_y * (lr + 0.072)) * leg_mask
             else:
                 leg_out = 0.0
-            r = max(base_r * (1 - bell) + target_r * bell, leg_out) + pleat_w
+            # Single-manifold sculpted front apron panel: crisp 6mm raised linen front apron with ZERO double-sheet z-fighting!
+            th_front = ((th + math.pi) % math.tau) - math.pi
+            in_apron = apron and (abs(th_front) < math.pi * 0.28) and (vf >= 0.18)
+            apron_lift = 0.006 if in_apron else 0.0
+            r = max(base_r * (1 - bell) + target_r * bell, leg_out) + pleat_w + apron_lift
             x = math.sin(th) * r
             y = yc + math.cos(th) * surf.front_y * r
-            ch, fab = (CH_TRIM, FAB_COTTON) if (hem_trim and vf < 0.08) else (channel, fabric)
-            pw = 1.0 if vf > 0.90 else (0.55 * (vf - 0.78) / 0.12 if vf > 0.78 else 0.0)
+            if in_apron:
+                ch, fab = CH_LINEN, FAB_LINEN
+            elif hem_trim and vf < 0.08:
+                ch, fab = CH_TRIM, FAB_COTTON
+            else:
+                ch, fab = channel, fabric
+            pw = 1.0 if vf > 0.88 else (0.55 * (vf - 0.76) / 0.12 if vf > 0.76 else 0.0)
             fl = max_flex * (down ** 1.5)
             row.append(((x, y, z), pw, ch, fab, uf * 5.0, vf * 4.0, fl, uf))
         rings.append(row)
 
     v, f, p, cfu, fp = build_tube(rings, True)
-    skirt_cfg = {'mass': 0.42, 'tension': 18.0, 'compression': 10.0, 'shear': 10.0, 'bending': 0.35, 'air_damping': 2.0, 'col_dist': 0.010}
-    objs = [make_cloth_object(name, v, f, p, cfu, fp, cloth_cfg=skirt_cfg, solidify=0.0030, subsurf=1, sim_frames=sim_frames)]
-
-    if apron:
-        # Turn simulated skirt into a temporary collider so the linen apron drapes cleanly OUTSIDE the pleated skirt!
-        skirt_obj = objs[0]
-        bpy.context.view_layer.objects.active = skirt_obj
-        skirt_obj.select_set(True)
-        bpy.ops.object.modifier_add(type='COLLISION')
-        skirt_obj.collision.thickness_outer = 0.008
-        skirt_obj.collision.cloth_friction = 18.0
-
-        a_rings = []
-        a_nz, a_nt = 22, 26
-        z_apron_bot = z_hem + (z_waist - z_hem) * 0.16
-        for iz in range(a_nz):
-            vf = iz / (a_nz - 1)
-            z = z_apron_bot + vf * (z_waist - z_apron_bot)
-            down = 1.0 - (z - z_hem) / (z_waist - z_hem)
-            row = []
-            for it in range(a_nt):
-                s = it / (a_nt - 1)
-                th = (s - 0.5) * math.pi * 0.66
-                env_r, yc = surf.sample_torso(max(surf.t_z0, z), th)
-                bell = down ** 0.84
-                target_r = math.hypot(math.sin(th) * hem_rx, math.cos(th) * hem_rz)
-                pleat_w = math.cos(th * pleats) * pleat_amp * (down ** 0.85)
-                side = 0 if math.sin(th) >= 0 else 1
-                leg_mask = max(0.0, min(1.0, (0.84 - z) / 0.14))
-                if leg_mask > 0.0:
-                    lr, lxc, lyc = surf.sample_leg(side, min(surf.l_z1, max(surf.l_z0, z)), th)
-                    leg_out = math.hypot(lxc + math.sin(th) * (lr + 0.054), (lyc - yc) + math.cos(th) * surf.front_y * (lr + 0.054)) * leg_mask
-                else:
-                    leg_out = 0.0
-                r = max((env_r + waist_clr) * (1 - bell) + target_r * bell, leg_out) + max(0.0, pleat_w) + 0.015 + 0.008 * down
-                x = math.sin(th) * r
-                y = yc + math.cos(th) * surf.front_y * r
-                pw = 1.0 if vf > 0.90 else 0.0
-                fl = (max_flex * 0.95) * (down ** 1.45)
-                row.append(((x, y, z), pw, CH_LINEN, FAB_LINEN, s * 2.5, vf * 3.0, fl, s))
-            a_rings.append(row)
-        av, af, ap, acfu, afp = build_tube(a_rings, False)
-        apron_cfg = {'mass': 0.24, 'tension': 14.0, 'compression': 8.0, 'shear': 8.0, 'bending': 0.22, 'air_damping': 2.0, 'col_dist': 0.009}
-        objs.append(make_cloth_object(name + '_apron', av, af, ap, acfu, afp, cloth_cfg=apron_cfg, solidify=0.0022, subsurf=1, sim_frames=sim_frames))
-        # Remove temporary collision modifier from skirt
-        for mod in list(skirt_obj.modifiers):
-            if mod.type == 'COLLISION':
-                skirt_obj.modifiers.remove(mod)
-    return objs
+    skirt_cfg = {'mass': 0.42, 'tension': 18.0, 'compression': 10.0, 'shear': 10.0, 'bending': 0.35, 'air_damping': 2.0, 'col_dist': 0.012}
+    return [make_cloth_object(name, v, f, p, cfu, fp, cloth_cfg=skirt_cfg, solidify=0.0030, subsurf=1, sim_frames=sim_frames, min_clr=0.018)]
 
 
 def build_leg_trousers(surf, name, *, z_waist, z_knee, z_ankle=None,
@@ -986,32 +951,32 @@ def build_buttons(surf, name, *, z_bot, z_top, count=7, clr=0.024):
     )
 
 
-def build_shoes(surf, name, *, channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.115):
+def build_shoes(surf, name, *, channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105):
     objs = []
     for side in range(2):
         fb = surf.feet[side]
         cx = 0.5 * (fb['min_x'] + fb['max_x'])
-        hx = 0.5 * (fb['max_x'] - fb['min_x']) + 0.011
+        hx = 0.5 * (fb['max_x'] - fb['min_x']) + 0.004
         cy = 0.5 * (fb['min_y'] + fb['max_y'])
-        hy = 0.5 * (fb['max_y'] - fb['min_y']) + 0.014
+        hy = 0.5 * (fb['max_y'] - fb['min_y']) + 0.006
         z0 = max(0.0, fb['min_z'] + 0.001)
         rings = []
         n_z, n_t = 8, 22
         for iz in range(n_z):
             f = iz / (n_z - 1)
             z = z0 + f * (cuff_z - z0)
-            taper_y = 1.0 - (f - 0.38) * 0.62 if f > 0.38 else (1.03 if f < 0.16 else 1.0)
-            shift_y = -surf.front_y * (f - 0.38) * hy * 0.50 if f > 0.38 else 0.0
+            taper_y = 1.0 - (f - 0.34) * 0.66 if f > 0.34 else (1.01 if f < 0.16 else 1.0)
+            shift_y = -surf.front_y * (f - 0.34) * hy * 0.54 if f > 0.34 else 0.0
             row = []
             for it in range(n_t):
                 uf = it / n_t
                 th = uf * math.tau
-                x = cx + math.sin(th) * hx * (0.88 if f > 0.48 else 1.0)
+                x = cx + math.sin(th) * hx * (0.82 if f > 0.45 else 0.96)
                 y = cy + shift_y + math.cos(th) * surf.front_y * hy * taper_y
                 row.append(((x, y, z), 1.0, channel, fabric, uf * 2.0, f, 0.0, uf))
             rings.append(row)
         v, f, p, cfu, fp = build_tube(rings, True)
-        objs.append(make_cloth_object(f'{name}_shoe{side}', v, f, p, cfu, fp, cloth_cfg=None, solidify=0.0038, subsurf=1, sim_frames=0, min_clr=0.005))
+        objs.append(make_cloth_object(f'{name}_shoe{side}', v, f, p, cfu, fp, cloth_cfg=None, solidify=0.0028, subsurf=1, sim_frames=0, min_clr=0.004))
     return objs
 
 
@@ -1170,11 +1135,11 @@ def join_and_transfer_skin(objs, body_ctx, spec_id, slot):
 
         # Skinning: crisp leg-following skirt blend (so knees/thighs stay covered walking & riding!), spine drape for cloaks, exact DATA_TRANSFER otherwise!
         if is_skirt and y > 0.13 and ch not in (CH_LEATHER, CH_BRASS, CH_BUFF):
-            # Pelvis holds waist (y >= 0.94), drops rapidly below hip so each side tracks its leg cleanly!
-            pw = max(0.0, min(1.0, (y - 0.68) / 0.28))
-            t_lr = max(0.0, min(1.0, (x + 0.075) / 0.15))
-            sb = t_lr * t_lr * (3.0 - 2.0 * t_lr)  # smoothstep(-0.075, +0.075, x)
-            calf_f = max(0.0, min(0.75, (0.54 - y) / 0.36))
+            # Pelvis holds waist (y >= 0.90), drops rapidly below hip so each side tracks its thigh/knee cleanly while striding!
+            pw = max(0.0, min(1.0, (y - 0.74) / 0.18))
+            t_lr = max(0.0, min(1.0, (x + 0.065) / 0.13))
+            sb = t_lr * t_lr * (3.0 - 2.0 * t_lr)  # smoothstep(-0.065, +0.065, x)
+            calf_f = max(0.0, min(0.70, (0.50 - y) / 0.34))
             leg_w = 1.0 - pw
             lw = leg_w * (1.0 - calf_f)
             cw = leg_w * calf_f
@@ -1273,17 +1238,17 @@ def build_one_garment(surf, body_ctx, spec_id, slot, sim_frames):
                                       cloth_cfg=leather_cfg, solidify=0.0044, sim_frames=sim_frames, hem_flex=0.08))
         objs.append(build_buttons(surf, 'jrk', z_bot=0.95, z_top=1.40, count=6, clr=0.030))
     elif spec_id == 'female-chemise-blouse':
-        objs.append(build_torso_piece(surf, 'blouse_body', z_bot=0.86, clearance=0.025, scoop=0.068, tucked=True,
+        objs.append(build_torso_piece(surf, 'blouse_body', z_bot=0.86, clearance=0.028, scoop=0.068, tucked=True,
                                       pleats=12, pleat_amp=0.005, channel=CH_SHIRT, fabric=FAB_LINEN,
-                                      cloth_cfg=linen_cfg, solidify=0.0024, sim_frames=sim_frames, hem_flex=0.10))
-        objs.extend(build_sleeves_piece(surf, 'blouse_slv', x_end_frac=0.58, clearance=0.024, puff_amp=0.026,
+                                      cloth_cfg=linen_cfg, solidify=0.0026, sim_frames=sim_frames, hem_flex=0.10))
+        objs.extend(build_sleeves_piece(surf, 'blouse_slv', x_end_frac=0.58, clearance=0.022, puff_amp=0.020,
                                         rolled_cuff=True, channel=CH_SHIRT, fabric=FAB_LINEN,
-                                        cloth_cfg=linen_cfg, solidify=0.0022, sim_frames=sim_frames))
+                                        cloth_cfg=linen_cfg, solidify=0.0022, sim_frames=sim_frames, x0_frac=1.02))
     elif spec_id == 'female-laced-bodice':
-        objs.extend(build_sleeves_piece(surf, 'bod_slv', x_end_frac=0.56, clearance=0.024, puff_amp=0.028,
+        objs.extend(build_sleeves_piece(surf, 'bod_slv', x_end_frac=0.56, clearance=0.022, puff_amp=0.022,
                                         rolled_cuff=True, channel=CH_LINEN, fabric=FAB_LINEN,
-                                        cloth_cfg=linen_cfg, solidify=0.0022, sim_frames=sim_frames))
-        objs.append(build_torso_piece(surf, 'bod_body', z_bot=0.86, clearance=0.026, scoop=0.075, tucked=True,
+                                        cloth_cfg=linen_cfg, solidify=0.0022, sim_frames=sim_frames, x0_frac=1.04))
+        objs.append(build_torso_piece(surf, 'bod_body', z_bot=0.86, clearance=0.028, scoop=0.075, tucked=True,
                                       collar_ch=CH_LINEN, bodice_lace=True, channel=CH_SHIRT, fabric=FAB_WOOL,
                                       cloth_cfg=wool_cfg, solidify=0.0032, sim_frames=sim_frames, hem_flex=0.06))
     elif spec_id == 'indigenous-tunic-m':
@@ -1313,17 +1278,17 @@ def build_one_garment(surf, body_ctx, spec_id, slot, sim_frames):
         objs.extend(build_belt_and_buckle(surf, 'trunk', z_center=z_waist + 0.032, clr=0.038))
         objs.extend(build_shoes(surf, 'trunk', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.155))
     elif spec_id == 'female-pleated-skirt':
-        objs.extend(build_pleated_skirt(surf, 'skirt', z_waist=z_waist + 0.028, z_hem=0.10, waist_clr=0.016,
-                                        hem_rx=0.41, hem_rz=0.37, pleats=16, pleat_amp=0.020,
+        objs.extend(build_pleated_skirt(surf, 'skirt', z_waist=z_waist + 0.032, z_hem=0.10, waist_clr=0.024,
+                                        hem_rx=0.43, hem_rz=0.40, pleats=16, pleat_amp=0.020,
                                         channel=CH_TROUSERS, fabric=FAB_WOOL, apron=False, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'skirt', z_center=z_waist + 0.020, half_h=0.018, clr=0.026, belt_ch=CH_LEATHER, buckle_ch=None))
-        objs.extend(build_shoes(surf, 'skirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105))
+        objs.extend(build_belt_and_buckle(surf, 'skirt', z_center=z_waist + 0.022, half_h=0.018, clr=0.030, belt_ch=CH_LEATHER, buckle_ch=None))
+        objs.extend(build_shoes(surf, 'skirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.10))
     elif spec_id == 'female-apron-skirt':
-        objs.extend(build_pleated_skirt(surf, 'askirt', z_waist=z_waist + 0.028, z_hem=0.10, waist_clr=0.016,
-                                        hem_rx=0.42, hem_rz=0.38, pleats=16, pleat_amp=0.020,
+        objs.extend(build_pleated_skirt(surf, 'askirt', z_waist=z_waist + 0.032, z_hem=0.10, waist_clr=0.024,
+                                        hem_rx=0.43, hem_rz=0.40, pleats=16, pleat_amp=0.020,
                                         channel=CH_TROUSERS, fabric=FAB_WOOL, apron=True, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'askirt', z_center=z_waist + 0.020, half_h=0.018, clr=0.028, belt_ch=CH_LINEN, buckle_ch=None))
-        objs.extend(build_shoes(surf, 'askirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105))
+        objs.extend(build_belt_and_buckle(surf, 'askirt', z_center=z_waist + 0.022, half_h=0.018, clr=0.032, belt_ch=CH_LINEN, buckle_ch=None))
+        objs.extend(build_shoes(surf, 'askirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.10))
     elif spec_id == 'indigenous-breechcloth-m':
         objs.extend(build_pleated_skirt(surf, 'breech', z_waist=z_waist + 0.020, z_hem=0.46, n_z=18, n_t=40,
                                         waist_clr=0.018, hem_rx=0.28, hem_rz=0.25, pleats=10, pleat_amp=0.012,

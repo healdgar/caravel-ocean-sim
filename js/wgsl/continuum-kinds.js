@@ -153,45 +153,54 @@ fn continuumSkinnedPose(record:ContinuumRecord,data:u32,part:u32,vertex:u32,p:Co
   m=m*(1.0/max(weights.x+weights.y+weights.z+weights.w,1e-6));
   var out=p;
   let morphed=humanMorphPosNrm(p.position,p.normal,record.spare.z,record.spare.w);
-  out.position=vec4f(morphed.pos,1.0)*m;
+  let bodyPos=humanBodyUnderClothInset(morphed.pos,morphed.nrm,record.spare.z,record.spare.w);
+  out.position=vec4f(bodyPos,1.0)*m;
   out.normal=normalize(vec4f(morphed.nrm,0.0)*m);
   out.hidden=continuumPoses[data+1u+count*3u+min((joints>>(8u*lead))&255u,count-1u)].w<0.0;
   let windWord=continuumStreamWord(${CONTINUUM_HEADER.wind}u,${wind.bit}u,${wind.words}u,vertex,0u);
   if(!out.hidden&&windWord!=0u){
     let flex=f32(windWord&65535u)/65535.0;
     if(flex>0.0){
+      let isGarment=p.position.y<1.47;
       let phase=f32(windWord>>16u)/65535.0*6.2831853+f32(record.tag.z&1023u)*0.173;
       let wLen=length(F.windP[0].xy);
       let wDir=select(vec2f(0.8,0.6),F.windP[0].xy/max(wLen,1e-4),wLen>1e-4);
       let speed=clamp(F.windP[0].z,0.0,22.0);
       let t=F.camPos.w;
       let gust=0.68+0.32*sin(dot(record.place.xz,wDir)*0.16-t*(1.5+speed*0.20)+phase);
-      let push=min(0.055,(0.005+speed*0.0034)*gust);
+      let pushCap=select(0.055,0.024,isGarment);
+      let push=min(pushCap,(0.004+speed*select(0.0034,0.0018,isGarment))*gust);
       let flutter=vec3f(
-        sin(t*(4.1+speed*0.40)+phase*3.1)*0.0042,
-        cos(t*(3.4+speed*0.32)+phase*2.3)*(0.0022+push*0.14),
-        cos(t*(3.8+speed*0.38)+phase*2.7)*0.0042
+        sin(t*(4.1+speed*0.40)+phase*3.1)*0.0038,
+        cos(t*(3.4+speed*0.32)+phase*2.3)*(0.0020+push*0.12),
+        cos(t*(3.8+speed*0.38)+phase*2.7)*0.0038
       );
       let motion=continuumPoses[data].zw;
-      var delta=(vec3f(wDir.x*push+motion.x,flutter.y-push*0.18,wDir.y*push+motion.y)+vec3f(flutter.x,0.0,flutter.z))*flex;
-      // Deflect only inward wind/motion delta tangentially around the posed head core so rest-pose strands never puff
-      // outward into a halo, while strong wind slides around the face instead of clipping into it.
-      let headSph=continuumPoses[data+1u+count*3u+min(9u,count-1u)];
-      if(headSph.w>0.0){
-        let restRel=out.position-headSph.xyz;
-        let restR=length(restRel);
-        if(restR>1e-4){
-          let radDir=restRel/restR;
-          let inward=dot(delta,radDir);
-          if(inward<0.0&&restR<0.125){delta-=radDir*inward;}
+      var delta=(vec3f(wDir.x*push+motion.x,flutter.y-push*0.15,wDir.y*push+motion.y)+vec3f(flutter.x,0.0,flutter.z))*flex;
+      if(isGarment){
+        // Never allow wind/stride sway to push garment cloth INWARD through legs, hips, or torso skin!
+        let inwardCloth=dot(delta,out.normal);
+        if(inwardCloth<0.0){delta-=out.normal*inwardCloth*0.95;}
+      }else{
+        // Deflect only inward wind/motion delta tangentially around the posed head core so rest-pose strands never puff
+        // outward into a halo, while strong wind slides around the face instead of clipping into it.
+        let headSph=continuumPoses[data+1u+count*3u+min(9u,count-1u)];
+        if(headSph.w>0.0){
+          let restRel=out.position-headSph.xyz;
+          let restR=length(restRel);
+          if(restR>1e-4){
+            let radDir=restRel/restR;
+            let inward=dot(delta,radDir);
+            if(inward<0.0&&restR<0.125){delta-=radDir*inward;}
+          }
+          let movedRel=restRel+delta;
+          let movedR=length(movedRel);
+          let minR=min(restR,0.086);
+          if(movedR<minR&&movedR>1e-4){delta+=(minR-movedR)*(movedRel/movedR);}
         }
-        let movedRel=restRel+delta;
-        let movedR=length(movedRel);
-        let minR=min(restR,0.086);
-        if(movedR<minR&&movedR>1e-4){delta+=(minR-movedR)*(movedRel/movedR);}
       }
       out.position+=delta;
-      out.normal=normalize(out.normal+vec3f(delta.x,delta.y*0.4,delta.z)*2.2);
+      out.normal=normalize(out.normal+vec3f(delta.x,delta.y*0.4,delta.z)*1.8);
     }
   }
   return out;
