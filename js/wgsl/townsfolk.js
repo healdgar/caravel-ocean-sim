@@ -89,15 +89,19 @@ fn townRoll(who:u32,salt:f32)->f32 {
 // The frame clock runs round, so a time past may read as later than now.
 fn secondsSince(since:f32,time:f32)->f32 {let age=time-since;return select(age,age+${SIM_CLOCK_LOOP_S.toFixed(1)},age<0.0);}
 fn turnTo(heading:f32,goal:f32)->f32 {return atan2(sin(goal-heading),cos(goal-heading));}
-// Somewhere on their way, on the side of it they are keeping to: +1 is the right hand going out along it.
-fn wayAt(w:Walker,metres:f32,lane:f32)->TownSpot {
+// Somewhere on their way, at normalized lateral fraction latFrac in [-1, 1] of the full walkable half-width.
+fn wayAtLat(w:Walker,metres:f32,latFrac:f32)->TownSpot {
   let along=metres/${ROUTE_STEP_M.toFixed(4)};
   let i=min(u32(max(along,0.0)),w.count-2u);
   let here=mix(route[w.first+i],route[w.first+i+1u],clamp(along-f32(i),0.0,1.0));
   let ahead=route[w.first+min(i+3u,w.count-1u)].xz-route[w.first+u32(max(i32(i)-2,0))].xz;
   let forward=normalize(ahead+vec2f(1e-4,0.0));
-  let aside=vec2f(forward.y,-forward.x)*lane*w.side*here.w;
+  let aside=vec2f(forward.y,-forward.x)*clamp(latFrac,-1.0,1.0)*here.w;
   return TownSpot(vec3f(here.x+aside.x,here.y,here.z+aside.y),forward,here.xz,here.w);
+}
+// Somewhere on their way, on the side of it they are keeping to: +1 is the right hand going out along it.
+fn wayAt(w:Walker,metres:f32,lane:f32)->TownSpot {
+  return wayAtLat(w,metres,lane*w.side);
 }
 // What to add to the clock so that their day, which follows from the time, goes on from this point of it.
 fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
@@ -106,6 +110,50 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let walked=select(metres,w.length-metres,going<0.0)/w.speed;
   let inLeg=walked+select(0.0,w.pauseFor,w.pauseFor>0.0&&walked>=walking*w.pauseAt);
   return select(0.0,leg,going<0.0)+inLeg-fract(time/(2.0*leg)+w.phase)*2.0*leg;
+}
+// Pass 1 (intent): records each active routine walker's current world position, heading and width into their
+// persistent TownFate slot so Pass 2 (main) can resolve lateral passing, queuing and non-merging separation on the GPU.
+@compute @workgroup_size(64) fn intent(@builtin(global_invocation_id) id:vec3u){
+  if(id.x>=arrayLength(&walkers)){return;}
+  let w=walkers[id.x];
+  var fate=fates[id.x];
+  if(fate.mode!=ABOUT){return;}
+  let time=F.camPos.w;
+  if(w.abroad>.1+.9*smoothstep(-.1,.14,F.sunDir.y)){
+    fate.how=fate.how&(~2u);
+    fates[id.x]=fate;
+    return;
+  }
+  let walking=w.length/w.speed;
+  let leg=walking+w.pauseFor+w.indoors;
+  let turn=fract((time+fate.clock)/(2.0*leg)+w.phase)*2.0*leg;
+  let back=turn>=leg;
+  let inLeg=turn-select(0.0,leg,back);
+  let arrived=inLeg>=walking+w.pauseFor;
+  if(arrived&&((w.flags>>select(2u,1u,back))&1u)==0u){
+    fate.how=fate.how&(~2u);
+    fates[id.x]=fate;
+    return;
+  }
+  let stopAt=walking*w.pauseAt;
+  let stopped=arrived||(w.pauseFor>0.0&&inLeg>=stopAt&&inLeg<stopAt+w.pauseFor);
+  let walked=min(w.length,(min(inLeg,stopAt)+max(0.0,inLeg-stopAt-w.pauseFor))*w.speed);
+  let metres=select(walked,w.length-walked,back);
+  let going=select(1.0,-1.0,back);
+  let init=(fate.how&1u)!=0u;
+  let latFrac=select(going*w.side,clamp(fate.lane,-1.0,1.0),init);
+  let spot=wayAtLat(w,metres,latFrac);
+  let facing=spot.forward*going;
+  let isMounted=(w.flags&16u)!=0u;
+  fate.until=spot.position.x;
+  fate.runFor=spot.position.z;
+  fate.along=spot.position.y;
+  fate.going=going;
+  fate.heading=atan2(facing.x,facing.y);
+  fate.speed=select(w.speed,0.0,stopped);
+  fate.look=spot.halfWidth;
+  fate.how=(fate.how&1u)|2u|select(0u,4u,isMounted)|select(0u,8u,stopped);
+  fates[id.x]=fate;
 }
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
   // Rain and sleet wet them. Snow and hail do not, and neither does anything else the frame happens to carry. Those in
@@ -126,6 +174,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     let ranFor=clamp(age-${TOWN_STARTLE_S.toFixed(2)},0.0,fate.runFor);
     fate.clock=routineClock(w,clamp(fate.along+fate.going*fate.speed*ranFor,0.0,w.length),fate.going,time);
     fate.mode=ABOUT;
+    fate.how=0u;
     fates[id.x]=fate;
   }else if(fate.mode==FALLING&&age>=${(TOWN_FALL_FRAMES / TOWN_FALL_RATE).toFixed(3)}){
     fate.mode=DOWN;
@@ -136,7 +185,9 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     fate=TownFate(ABOUT,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0u);
     fates[id.x]=fate;
   }
+  let isMounted=(w.flags&16u)!=0u;
   var metres=fate.along;var going=fate.going;var lane=fate.lane;var walked=0.0;var ran=0.0;var stopped=false;var hidden=false;
+  var spot:TownSpot;
   if(fate.mode==ABOUT){
     // After dark most are home.
     if(w.abroad>.1+.9*smoothstep(-.1,.14,F.sunDir.y)){return;}
@@ -154,8 +205,95 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     walked=min(w.length,(min(inLeg,stopAt)+max(0.0,inLeg-stopAt-w.pauseFor))*w.speed);
     metres=select(walked,w.length-walked,back);
     going=select(1.0,-1.0,back);
-    // Each keeps to their right of the way, so those coming and going pass.
+    let init=(fate.how&1u)!=0u;
+    let dt=select(0.0,clamp(secondsSince(fate.since,time),0.0,0.25),init);
+    let prefFrac=going*w.side;
+    var latFrac=select(prefFrac,clamp(fate.lane,-1.0,1.0),init);
+    let baseSpot=wayAtLat(w,metres,latFrac);
+    let facing0=baseSpot.forward*going;
+    let right0=vec2f(facing0.y,-facing0.x);
+    let halfW=max(baseSpot.halfWidth,0.05);
+    let curRightM=latFrac*going*halfW;
+    let prefRightM=w.side*halfW;
+    let rSelf=select(0.42,0.85,isMounted);
+    var steerRightM=0.0;
+    var pushRightM=0.0;
+    var pushFwdM=0.0;
+    var moveFrac=1.0;
+    let totalW=arrayLength(&walkers);
+    for(var j=0u;j<totalW;j++){
+      if(j==id.x){continue;}
+      let o=fates[j];
+      if(o.mode!=ABOUT||(o.how&2u)==0u){continue;}
+      let dXZ=vec2f(o.until-baseSpot.position.x,o.runFor-baseSpot.position.z);
+      if(abs(dXZ.x)>4.2||abs(dXZ.y)>4.2||abs(o.along-baseSpot.position.y)>1.6){continue;}
+      let dist=length(dXZ);
+      if(dist>4.2){continue;}
+      let fwd=dot(dXZ,facing0);
+      let lat=dot(dXZ,right0);
+      let rOther=select(0.42,0.85,(o.how&4u)!=0u);
+      let rSum=rSelf+rOther;
+      let oDir=vec2f(sin(o.heading),cos(o.heading));
+      let sameDir=dot(facing0,oDir);
+      let oRightPos=curRightM+lat;
+      let roomRight=halfW-oRightPos;
+      let roomLeft=oRightPos+halfW;
+      // Lateral passing: shift into available lateral road/dock space around oncoming or slower walkers.
+      if(fwd>-0.45&&fwd<3.6&&abs(lat)<rSum*1.45&&halfW>0.28){
+        let prox=1.0-clamp(max(fwd,0.0)/3.6,0.0,1.0);
+        var passDir=select(-1.0,1.0,roomRight>=roomLeft);
+        if(sameDir<-0.25&&roomRight>=rSum*0.85){passDir=1.0;}
+        else if(sameDir>=-0.25&&roomLeft>=rSum*0.92&&o.speed<w.speed*0.95){passDir=-1.0;}
+        let needClear=max(0.0,rSum*1.12-abs(lat));
+        steerRightM+=passDir*(0.35+needClear)*prox;
+      }
+      // Orderly queuing: when a walker is directly ahead and lateral space cannot cleanly clear them, throttle & wait.
+      if(!stopped&&fwd>0.02&&fwd<rSum+0.68&&abs(lat)<rSum*0.94){
+        let canPassSide=max(roomLeft,roomRight)>=rSum*0.98;
+        if(sameDir>=-0.25&&(!canPassSide||abs(lat)<rSum*0.65)){
+          let qCap=clamp((fwd-rSum*0.95)/0.68,0.0,1.0);
+          let matchAhead=select(0.0,clamp(o.speed/max(w.speed,0.15),0.0,1.0),fwd>rSum*0.98);
+          moveFrac=min(moveFrac,max(qCap,matchAhead*clamp((fwd-rSum*0.92)/0.35,0.0,1.0)));
+        }else if(sameDir<-0.25&&!canPassSide&&id.x>j){
+          moveFrac=min(moveFrac,clamp((fwd-rSum*0.90)/0.65,0.0,0.45));
+        }
+      }
+      // Hard non-merging separation clamped strictly inside the walkable corridor.
+      if(dist<rSum){
+        let pen=rSum-dist;
+        let latSign=select(select(-1.0,1.0,lat<0.0),select(-1.0,1.0,id.x>j),abs(lat)<0.04);
+        let latPush=latSign*pen*0.62;
+        pushRightM+=latPush;
+        let edgeBlocked=(latSign>0.0&&curRightM>halfW-0.12)||(latSign<0.0&&curRightM<-halfW+0.12)||halfW<0.30;
+        if(edgeBlocked&&fwd>=0.0){pushFwdM-=pen*0.68;}
+        else if(fwd>0.0&&dist<rSum*0.72){pushFwdM-=pen*0.35;}
+      }
+    }
+    let wantRightM=clamp(prefRightM+clamp(steerRightM,-halfW*1.2,halfW*1.2), -halfW, halfW);
+    let maxStep=max(0.04,dt*1.55);
+    let smoothRightM=curRightM+clamp(wantRightM-curRightM,-maxStep,maxStep);
+    let finalRightM=clamp(smoothRightM+clamp(pushRightM,-0.85,0.85),-halfW,halfW);
+    latFrac=clamp((finalRightM*going)/halfW,-1.0,1.0);
+    if(!stopped&&moveFrac<0.995&&dt>0.0){
+      fate.clock-=dt*(1.0-moveFrac);
+      let backStep=clamp(pushFwdM,-0.55,0.0);
+      metres=clamp(metres+going*backStep,0.0,w.length);
+      if(moveFrac<0.16){stopped=true;}
+    }else if(pushFwdM<-0.01){
+      metres=clamp(metres+going*clamp(pushFwdM,-0.55,0.0),0.0,w.length);
+    }
+    spot=wayAtLat(w,metres,latFrac);
     lane=going;
+    fate.since=time;
+    fate.lane=latFrac;
+    fate.until=spot.position.x;
+    fate.runFor=spot.position.z;
+    fate.along=spot.position.y;
+    fate.going=going;
+    fate.speed=select(w.speed*moveFrac,0.0,stopped);
+    fate.look=spot.halfWidth;
+    fate.how=1u|2u|select(0u,4u,isMounted)|select(0u,8u,stopped);
+    fates[id.x]=fate;
   }else if(fate.mode==AFRAID){
     ran=clamp(age-${TOWN_STARTLE_S.toFixed(2)},0.0,fate.runFor);
     metres=clamp(fate.along+fate.going*fate.speed*ran,0.0,w.length);
@@ -163,8 +301,10 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     lane=mix(fate.lane,going,smoothstep(0.0,1.0,age));
     // Run to the end of the way and they are through the door, until it is over.
     hidden=ran>0.0&&(metres<=0.0||metres>=w.length)&&((w.flags>>select(2u,1u,going<0.0))&1u)==0u;
+    spot=wayAt(w,metres,lane);
+  }else{
+    spot=wayAt(w,metres,lane);
   }
-  let spot=wayAt(w,metres,lane);
   var position=spot.position;
   let facing=spot.forward*going;
   var heading=atan2(facing.x,facing.y);
@@ -174,7 +314,6 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     else if((fate.how&1u)==1u){heading=fate.heading;}
     else{heading=fate.heading+turnTo(fate.heading,fate.look)*smoothstep(0.0,.7,age)*(1.0-smoothstep(fate.until-.7,fate.until,age));}
   }
-  let isMounted=(w.flags&16u)!=0u;
   // What the guns did since the last frame. Nearly always nothing, and then this costs one comparison.
   if(shots.count>0u&&fate.mode<FALLING){
     var fear=0.0;var danger=vec2f(0.0);var fearReach=1.0;var fearSeed=0.0;var fearBlast=0.0;var fearAway=1e6;

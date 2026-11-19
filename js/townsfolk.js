@@ -134,14 +134,15 @@ export function assignStreetMountsToWalkers(streets, { indigenous = false, maxPe
 // The town's own passes, once a device: the walk that places everyone, the reset of its counts, and the continuum's
 // pose pass that gives each person kept their joints.
 export function requestTownsfolkPipelines({ device, shader }) {
-  return requestOnce(device, 'townsfolk v4', async () => {
+  return requestOnce(device, 'townsfolk v5', async () => {
     const [walkModule, resetModule] = await Promise.all([shader(TOWNSFOLK_WALK, 'townsfolk walk'), shader(TOWNSFOLK_RESET, 'townsfolk reset')]);
-    const [walk, reset, pose] = await Promise.all([
+    const [intent, walk, reset, pose] = await Promise.all([
+      device.createComputePipelineAsync({ label: 'townsfolk intent', layout: 'auto', compute: { module: walkModule, entryPoint: 'intent' } }),
       device.createComputePipelineAsync({ label: 'townsfolk walk', layout: 'auto', compute: { module: walkModule, entryPoint: 'main' } }),
       device.createComputePipelineAsync({ label: 'townsfolk reset', layout: 'auto', compute: { module: resetModule, entryPoint: 'main' } }),
       requestCrewContinuumPose({ device, shader }),
     ]);
-    return { walk, reset, pose };
+    return { intent, walk, reset, pose };
   });
 }
 
@@ -162,7 +163,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   // People are drawn through the continuum alone. A colonial town's pair is had now, so that a body that is not baked
   // fails the load, naming its missing files; each culture's is fetched when a town of it first comes into reach.
   const bodyLoad = { fetchAsset };
-  const [{ walk: walkPipeline, reset: resetPipeline, pose: posePipeline }, continuum, colonial] = await Promise.all([
+  const [{ intent: intentPipeline, walk: walkPipeline, reset: resetPipeline, pose: posePipeline }, continuum, colonial] = await Promise.all([
     requestTownsfolkPipelines({ device, shader }),
     requestCrewContinuumPipelines({ device, shader, format, samples, fetchAsset }),
     loadCrewContinuumBodies(device, townsfolkBodiesFor(), bodyLoad),
@@ -274,6 +275,15 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const shotLog = createTownShots(streets), shotBytes = new ArrayBuffer(TOWN_SHOTS_WORDS * 4);
     port.townsfolkWatch = shotLog.note;
     const resetGroup = device.createBindGroup({ label: 'townsfolk reset', layout: resetPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: counts } }] });
+    const intentGroup = device.createBindGroup({
+      label: 'townsfolk intent', layout: intentPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: frameUBO } },
+        { binding: 1, resource: { buffer: walkers } },
+        { binding: 2, resource: { buffer: route } },
+        { binding: 7, resource: { buffer: fates } },
+      ],
+    });
     const walkGroup = device.createBindGroup({
       label: 'townsfolk walk', layout: walkPipeline.getBindGroupLayout(0),
       entries: [...[frameUBO, walkers, route, placed, counts, uniform, shots, fates, moisture].map((b, binding) => ({ binding, resource: { buffer: b } })),
@@ -288,7 +298,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const posers = rigsOfTown.map((rig, m) => createCrewContinuumPoser({ device, pipeline: posePipeline, placed, palettes: rig.palette, looks, rest: rig.rest, joints, actors, orders: batches[m].orders, first: firsts[m], counted: countedOf(m) }));
     crowd = {
       port, people, capacity, walkers, route, looks, placed, counts, joints, actors, uniform, crowdWords, crowdHours: new Float32Array(crowdWords.buffer), hours: NaN,
-      shots, fates, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, resetGroup, walkGroup, batches, posers,
+      shots, fates, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, resetGroup, intentGroup, walkGroup, batches, posers,
     };
   }
 
@@ -339,6 +349,9 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
         device.queue.writeBuffer(crowd.shots, 0, crowd.shotWords, 0, TOWN_SHOTS_WORDS - TOWN_SHOT_WORDS * (TOWN_SHOT_LIMIT - shotCount));
         crowd.shotsSent = shotCount;
       }
+      pass.setPipeline(intentPipeline);
+      pass.setBindGroup(0, crowd.intentGroup);
+      pass.dispatchWorkgroups(Math.ceil(crowd.people / 64));
       pass.setPipeline(walkPipeline);
       pass.setBindGroup(0, crowd.walkGroup);
       pass.dispatchWorkgroups(Math.ceil(crowd.people / 64));

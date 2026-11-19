@@ -2650,16 +2650,19 @@ export function buildTradeVesselRoutes(
     if (h?.slot) harborBySlot.set(h.slot, h);
   }
 
-  // Track occupied sea berths across docked `ship:*` & `roadstead:*` vessels so zero hulls snap onto the identical safeB coordinate.
+  // Track occupied sea berths & build a shared deduplicated harbor berth pool so multiple ships
+  // never spawn on top of each other and inbound ships can reserve distinct docks or queue cleanly.
   const MIN_DOCK_BERTH_SPACING = 42.0;
   const occupiedBerths = [];
+  const sharedHarborBerths = [];
   if (dockBerth && Number.isFinite(berthX) && Number.isFinite(berthZ)) {
     occupiedBerths.push({ x: berthX, z: berthZ });
   }
-  const resolveUnoccupiedBerth = (rawX, rawZ, rot = 0, minDepth = -2.6, clearance = 16, reqAir = 16, reqHalfBeam = 2.5, minSpacing = MIN_DOCK_BERTH_SPACING) => {
+  const resolveUnoccupiedBerth = (rawX, rawZ, rot = 0, minDepth = -2.6, clearance = 16, reqAir = 16, reqHalfBeam = 2.5, minSpacing = MIN_DOCK_BERTH_SPACING, extraTaken = null) => {
     const isClearSpot = (cx, cz) => (
       !blockedByLowBridge(cx, cz, cx, cz, seaLevel, reqAir, reqHalfBeam, normBridges)
       && occupiedBerths.every((b) => Math.hypot(b.x - cx, b.z - cz) >= minSpacing)
+      && (!extraTaken || extraTaken.every((b) => Math.hypot(b.x - cx, b.z - cz) >= minSpacing))
     );
     const safe0 = findNearestSafeWater(rawX, rawZ, minDepth, 0, 1800, clearance);
     if (safe0 && isClearSpot(safe0.x, safe0.z)) return safe0;
@@ -2684,6 +2687,48 @@ export function buildTradeVesselRoutes(
     }
     return null;
   };
+  const registerHarborBerth = (rawX, rawZ, rot = 0, shore = true, berthClear = 18, reqAir = 16, reqHalfBeam = 2.5) => {
+    if (!Number.isFinite(rawX) || !Number.isFinite(rawZ)) return null;
+    const safe0 = findNearestSafeWater(rawX, rawZ, -2.6, 0, 1800, berthClear);
+    if (!safe0 || blockedByLowBridge(safe0.x, safe0.z, safe0.x, safe0.z, seaLevel, reqAir, reqHalfBeam, normBridges)) return null;
+    const existing = sharedHarborBerths.find((b) => Math.hypot(b.x - safe0.x, b.z - safe0.z) < 34);
+    if (existing) return existing;
+    // Keep clear of the player's primary dock berth
+    if (dockBerth && Number.isFinite(berthX) && Number.isFinite(berthZ) && Math.hypot(berthX - safe0.x, berthZ - safe0.z) < MIN_DOCK_BERTH_SPACING) {
+      const alt = resolveUnoccupiedBerth(safe0.x, safe0.z, rot, -2.6, berthClear, reqAir, reqHalfBeam, MIN_DOCK_BERTH_SPACING, sharedHarborBerths);
+      if (!alt) return null;
+      const rec = { key: `berth:${sharedHarborBerths.length}`, x: alt.x, y: seaLevel, z: alt.z, rot: rot || 0, shore: Boolean(shore) };
+      sharedHarborBerths.push(rec);
+      return rec;
+    }
+    const rec = { key: `berth:${sharedHarborBerths.length}`, x: safe0.x, y: seaLevel, z: safe0.z, rot: rot || 0, shore: Boolean(shore) };
+    sharedHarborBerths.push(rec);
+    return rec;
+  };
+
+  // Seed harbor berth pool from port piers/quays and board ship berths so arriving traffic has multiple real docks.
+  for (const w of port?.works ?? []) {
+    if (!w || (w.kind !== 'pier' && w.kind !== 'quay')) continue;
+    if (!Number.isFinite(w.x) || !Number.isFinite(w.z)) continue;
+    const yaw = Number.isFinite(w.yaw) ? w.yaw : 0;
+    const sideOff = (w.width || 6) * 0.5 + 14;
+    for (const side of [-1, 1]) {
+      registerHarborBerth(
+        w.x + Math.cos(yaw) * sideOff * side,
+        w.z + Math.sin(yaw) * sideOff * side,
+        yaw,
+        true,
+      );
+    }
+  }
+  for (const sh of snapshot?.ships ?? []) {
+    if (Array.isArray(sh.portBerths)) {
+      for (const b of sh.portBerths) registerHarborBerth(ox + b.x, oz + b.z, b.rot || 0, Boolean(b.shore));
+    }
+    if (sh.berth) {
+      registerHarborBerth(ox + sh.berth.x, oz + sh.berth.z, sh.berth.rot || 0, Boolean(sh.berth.shore));
+    }
+  }
 
   for (const sh of snapshot?.ships ?? []) {
     if (routes.length >= MAX_TRADE_VESSELS) break;
@@ -2699,20 +2744,17 @@ export function buildTradeVesselRoutes(
       ? buildPolylineRoute(parseFlatPairs(sh.points), { x: ox, z: oz }, () => seaLevel)
       : null;
     const poly = rawPoly ? clampSeaPolyToSafeWater(rawPoly, minDepth, clearance, reqAir, reqHalfBeam) : null;
-    const portBerths = Array.isArray(sh.portBerths)
-      ? sh.portBerths.map((b) => {
-          const safeB = findNearestSafeWater(ox + b.x, oz + b.z, -2.6, 0, 1800, berthClear);
-          if (!safeB || blockedByLowBridge(safeB.x, safeB.z, safeB.x, safeB.z, seaLevel, reqAir, reqHalfBeam, normBridges)) {
-            return null;
-          }
-          if (occupiedBerths.some((ob) => Math.hypot(ob.x - safeB.x, ob.z - safeB.z) < MIN_DOCK_BERTH_SPACING)) {
-            const alt = resolveUnoccupiedBerth(safeB.x, safeB.z, b.rot || 0, -2.6, berthClear, reqAir, reqHalfBeam, MIN_DOCK_BERTH_SPACING);
-            if (!alt) return null;
-            return { x: alt.x, y: seaLevel, z: alt.z, rot: b.rot || 0, shore: Boolean(b.shore) };
-          }
-          return { x: safeB.x, y: seaLevel, z: safeB.z, rot: b.rot || 0, shore: Boolean(b.shore) };
-        }).filter(Boolean)
-      : [];
+    const shipBerths = [];
+    if (Array.isArray(sh.portBerths)) {
+      for (const b of sh.portBerths) {
+        const reg = registerHarborBerth(ox + b.x, oz + b.z, b.rot || 0, Boolean(b.shore), berthClear, reqAir, reqHalfBeam);
+        if (reg && !shipBerths.some((e) => e.key === reg.key)) shipBerths.push({ ...reg });
+      }
+    }
+    for (const reg of sharedHarborBerths) {
+      if (!shipBerths.some((e) => e.key === reg.key)) shipBerths.push({ ...reg });
+    }
+    const portBerths = shipBerths;
     const shipMeta = {
       shipName: sh.shipName || '',
       homePort: sh.homePort || sh.from || '',
@@ -2733,12 +2775,13 @@ export function buildTradeVesselRoutes(
       );
       if (!safeB) continue;
       occupiedBerths.push({ x: safeB.x, z: safeB.z });
+      const matchedKey = portBerths.find((b) => Math.hypot(b.x - safeB.x, b.z - safeB.z) < 28)?.key ?? `dock:${sh.id}`;
       routes.push({
         id: `ship:${sh.id}`, shipId: sh.id, mode: 'sea', phase: 'dock',
         archetype: archIdx,
         scale,
         depart: sh.t0 ?? 0, arrive: sh.t1 ?? 1, until: sh.until ?? 0, waited: sh.waited ?? 0, bi: sh.bi ?? -1,
-        berth: { x: safeB.x, y: seaLevel, z: safeB.z, rot: sh.berth.rot || 0, shore: Boolean(sh.berth.shore) },
+        berth: { key: matchedKey, x: safeB.x, y: seaLevel, z: safeB.z, rot: sh.berth.rot || 0, shore: Boolean(sh.berth.shore) },
         portBerths,
         pts: poly?.pts ?? null, totalLen: poly?.totalLen ?? 0,
         phaseOffset: (hashU32(sh.id | 0, 17) % 1000) / 1000,
@@ -3334,9 +3377,200 @@ export function createVesselAutopilotState(route, archIndex, seedState, simTime 
     heldByWeather: false,
     dirtySync: false,
     dockTarget: route.berth ? { ...route.berth } : null,
+    berthKey: route.berth?.key ?? null,
+    queueRank: 0,
+    queueEnteredAt: -1,
+    dockDwellSec: 0,
     phaseRad,
     simTime,
   };
+}
+
+/**
+ * Coordinates live harbor dock reservations & FIFO roadstead queuing across active trade vessels
+ * and any external vessels (such as the player's ship). Guarantees no two ships ever share a berth
+ * and automatically promotes the front-of-queue waiting ship into the next freed dock.
+ */
+export function assignHarborBerthsAndQueue(vessels, {
+  dt = 0,
+  elapsedSec = 0,
+  storm = false,
+  avoidVessels = null,
+  worldOffsetX = 0,
+  worldOffsetZ = 0,
+} = {}) {
+  if (!Array.isArray(vessels) || !vessels.length) return;
+  const BERTH_CLAIM_RADIUS = 38;
+  const BERTH_CLEAR_RADIUS = 46;
+
+  // 1. Collect deduplicated pool of harbor berths across all active sea routes.
+  const berthByKey = new Map();
+  const berthList = [];
+  const registerBerth = (b) => {
+    if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.z)) return null;
+    for (const existing of berthList) {
+      if (Math.hypot(existing.x - b.x, existing.z - b.z) < 28) return existing;
+    }
+    const key = b.key || `berth:${Math.round(b.x)}:${Math.round(b.z)}`;
+    const rec = { ...b, key };
+    berthByKey.set(key, rec);
+    berthList.push(rec);
+    return rec;
+  };
+  for (const v of vessels) {
+    if (!v?.route || v.route.mode === 'river') continue;
+    if (Array.isArray(v.route.portBerths)) {
+      for (const b of v.route.portBerths) registerBerth(b);
+    }
+    if (v.route.berth && !String(v.route.id || '').startsWith('roadstead:')) {
+      registerBerth(v.route.berth);
+    }
+    if (v.ai?.dockTarget && !String(v.route.id || '').startsWith('roadstead:')) {
+      registerBerth(v.ai.dockTarget);
+    }
+  }
+  if (!berthList.length) return;
+
+  const berthBlockedByExternal = (b) => {
+    if (!Array.isArray(avoidVessels)) return false;
+    for (const ext of avoidVessels) {
+      if (!ext || !Number.isFinite(ext.x) || !Number.isFinite(ext.z)) continue;
+      const ex = ext.x - worldOffsetX;
+      const ez = ext.z - worldOffsetZ;
+      if (Math.hypot(ex - b.x, ez - b.z) < BERTH_CLAIM_RADIUS) return true;
+    }
+    return false;
+  };
+
+  // 2. Claim berths already held by docked / docking / approaching / departing trade vessels
+  // (prioritizing already-docked > docking > approaching > departing, resolving any duplicate claims).
+  const occupiedKeys = new Map(); // key -> vessel
+  const stateRank = (st) => (st === 'docked' ? 0 : st === 'docking' ? 1 : st === 'approaching' ? 2 : st === 'departing' ? 3 : 4);
+  const berthHolders = vessels
+    .filter((v) => {
+      if (!v?.ai || !v.route || v.route.mode === 'river') return false;
+      if (v.boat?.damage?.sunk || v.ai.state === 'sunk' || v.ai.state === 'anchored') return false;
+      return v.ai.state === 'docked' || v.ai.state === 'docking' || v.ai.state === 'approaching' || v.ai.state === 'departing';
+    })
+    .sort((a, b) => stateRank(a.ai.state) - stateRank(b.ai.state));
+
+  const findNearestFreeBerth = (v) => {
+    const candidates = (Array.isArray(v.route?.portBerths) && v.route.portBerths.length)
+      ? v.route.portBerths.map((b) => registerBerth(b)).filter(Boolean)
+      : berthList;
+    let best = null;
+    let bestDist = Infinity;
+    for (const b of candidates) {
+      if (occupiedKeys.has(b.key) || berthBlockedByExternal(b)) continue;
+      const d = Math.hypot(b.x - v.ai.x, b.z - v.ai.z);
+      if (d < bestDist) { bestDist = d; best = b; }
+    }
+    return best;
+  };
+
+  const displacedHolders = [];
+  // Pass 2a: First lock in every existing valid reservation so a displaced ship cannot steal another ship's active dock.
+  for (const v of berthHolders) {
+    const ai = v.ai;
+    if (ai.state === 'docked') {
+      ai.dockDwellSec = (ai.dockDwellSec || 0) + Math.max(0, dt);
+    }
+    const target = ai.dockTarget ? registerBerth(ai.dockTarget) : (ai.berthKey ? berthByKey.get(ai.berthKey) : null);
+    if (ai.state === 'departing') {
+      if (target && Math.hypot(ai.x - target.x, ai.z - target.z) < BERTH_CLEAR_RADIUS) {
+        if (!occupiedKeys.has(target.key)) occupiedKeys.set(target.key, v);
+      } else {
+        ai.berthKey = null;
+      }
+      continue;
+    }
+    const usable = target && !occupiedKeys.has(target.key) && !berthBlockedByExternal(target);
+    if (usable) {
+      occupiedKeys.set(target.key, v);
+      ai.dockTarget = { ...target };
+      ai.berthKey = target.key;
+    } else {
+      displacedHolders.push(v);
+    }
+  }
+  // Pass 2b: Re-route displaced vessels (duplicate berth or player moored here) to a genuinely free dock, or enqueue them.
+  for (const v of displacedHolders) {
+    const ai = v.ai;
+    const alt = findNearestFreeBerth(v);
+    if (alt && !storm) {
+      occupiedKeys.set(alt.key, v);
+      ai.dockTarget = { ...alt };
+      ai.berthKey = alt.key;
+      if (ai.state === 'docked' && Math.hypot(ai.x - alt.x, ai.z - alt.z) > 12) {
+        ai.state = 'approaching';
+        ai.dirtySync = true;
+      }
+    } else if (ai.state !== 'docked') {
+      ai.state = 'waiting_berth';
+      ai.dockTarget = null;
+      ai.berthKey = null;
+      if (ai.queueEnteredAt < 0) ai.queueEnteredAt = elapsedSec;
+      ai.dirtySync = true;
+    }
+  }
+
+  // 3. Check inbound vessels nearing the harbor mouth: assign a free berth or enqueue them in FIFO order.
+  for (const v of vessels) {
+    if (!v?.ai || !v.route || v.route.mode === 'river') continue;
+    const ai = v.ai;
+    if (v.boat?.damage?.sunk || ai.state !== 'inbound') continue;
+    const pts = v.route.pts;
+    if (!pts || pts.length < 2) continue;
+    const last = pts[pts.length - 1];
+    const distMouth = Math.hypot(last.x - ai.x, last.z - ai.z);
+    if (distMouth < 135 && ai.wpIndex >= Math.max(0, pts.length - 2)) {
+      const freeB = (!storm && (v.route.waited || 0) === 0) ? findNearestFreeBerth(v) : null;
+      if (freeB) {
+        occupiedKeys.set(freeB.key, v);
+        ai.dockTarget = { ...freeB };
+        ai.berthKey = freeB.key;
+        ai.state = 'approaching';
+        ai.queueEnteredAt = -1;
+        ai.dirtySync = true;
+      } else {
+        ai.state = 'waiting_berth';
+        ai.dockTarget = null;
+        ai.berthKey = null;
+        if (ai.queueEnteredAt < 0) ai.queueEnteredAt = elapsedSec;
+        ai.dirtySync = true;
+      }
+    }
+  }
+
+  // 4. Maintain FIFO waiting queue and promote front-of-queue ships into newly available docks.
+  const waiting = vessels
+    .filter((v) => v?.ai && !v.boat?.damage?.sunk && v.route?.mode !== 'river' && v.ai.state === 'waiting_berth')
+    .sort((a, b) => {
+      const ta = a.ai.queueEnteredAt >= 0 ? a.ai.queueEnteredAt : 1e9;
+      const tb = b.ai.queueEnteredAt >= 0 ? b.ai.queueEnteredAt : 1e9;
+      if (ta !== tb) return ta - tb;
+      return String(a.route.id || '').localeCompare(String(b.route.id || ''));
+    });
+
+  let rank = 0;
+  for (const v of waiting) {
+    const ai = v.ai;
+    if (ai.queueEnteredAt < 0) ai.queueEnteredAt = elapsedSec;
+    if (!storm) {
+      const freeB = findNearestFreeBerth(v);
+      if (freeB) {
+        occupiedKeys.set(freeB.key, v);
+        ai.dockTarget = { ...freeB };
+        ai.berthKey = freeB.key;
+        ai.state = 'approaching';
+        ai.queueRank = 0;
+        ai.queueEnteredAt = -1;
+        ai.dirtySync = true;
+        continue;
+      }
+    }
+    ai.queueRank = rank++;
+  }
 }
 
 /**
@@ -3638,14 +3872,19 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       const prev = pts?.[Math.max(0, pts.length - 2)] || last;
       const inDx = prev.x - last.x, inDz = prev.z - last.z;
       const inL = Math.hypot(inDx, inDz) || 1;
-      const holdX = last.x + (inDx / inL) * 115 + Math.sin(elapsedSec * 0.18 + ai.phaseRad) * 32;
-      const holdZ = last.z + (inDz / inL) * 115 + Math.cos(elapsedSec * 0.18 + ai.phaseRad) * 32;
+      const ax = inDx / inL, az = inDz / inL;
+      const px = -az, pz = ax;
+      const qRank = Math.max(0, ai.queueRank | 0);
+      const standoff = 115 + qRank * 58;
+      const latSlot = qRank === 0 ? 0 : ((qRank & 1) ? 1 : -1) * Math.ceil(qRank / 2) * 46;
+      const holdX = last.x + ax * standoff + px * latSlot + Math.sin(elapsedSec * 0.14 + ai.phaseRad) * 18;
+      const holdZ = last.z + az * standoff + pz * latSlot + Math.cos(elapsedSec * 0.14 + ai.phaseRad) * 18;
       targetX = holdX;
       targetZ = holdZ;
       targetSpeedCap = 1.05;
       sailTarget = 0.22;
       ai.heldByWeather = activeStorm;
-      ai.etaDays = 0.15;
+      ai.etaDays = 0.15 + qRank * 0.08;
     } else if (ai.state === 'approaching') {
       const dest = berth || pts?.[pts.length - 1] || { x: ai.x, z: ai.z };
       targetX = dest.x;
@@ -3708,7 +3947,7 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
           if (ai.wpIndex < pts.length - 1) {
             ai.wpIndex++;
           } else if (ai.state === 'inbound' && route.phase === 'in') {
-            if (berth && (route.waited || 0) === 0 && !activeStorm) {
+            if (ai.dockTarget && (route.waited || 0) === 0 && !activeStorm) {
               ai.state = 'approaching';
             } else {
               ai.state = 'waiting_berth';
@@ -3732,9 +3971,9 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       targetX = wp.x;
       targetZ = wp.z;
 
-      // Also transition early if close to harbor mouth on inbound leg
+      // Also transition early if close to harbor mouth on inbound leg (requires a reserved dockTarget to approach).
       if (ai.state === 'inbound' && ai.wpIndex >= pts.length - 1 && distWp < 88) {
-        if (berth && (route.waited || 0) === 0 && !activeStorm) {
+        if (ai.dockTarget && (route.waited || 0) === 0 && !activeStorm) {
           ai.state = 'approaching';
         } else {
           ai.state = 'waiting_berth';
@@ -3815,25 +4054,56 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       }
     }
 
-    // Traffic & player vessel COLREG-style avoidance
-    if (avoidTargets && ai.state !== 'docking' && ai.state !== 'departing') {
+    // Traffic & player vessel COLREG-style avoidance with CPA lookahead and progressive braking to zero
+    if (avoidTargets && avoidTargets.length > 0) {
       const bx = Math.sin(ai.yaw), bz = -Math.cos(ai.yaw);
       const rx = -bz, rz = bx; // starboard vector
+      const avoidGain = ai.state === 'docking' ? 0.55 : ai.state === 'departing' ? 0.80 : 1.0;
+      const myVx = Number.isFinite(ai.vx) ? ai.vx : bx * ai.speed;
+      const myVz = Number.isFinite(ai.vz) ? ai.vz : bz * ai.speed;
       for (let k = 0; k < avoidTargets.length; k++) {
         const other = avoidTargets[k];
-        if (!other || other.id === route.id) continue;
+        if (!other || other.id === route.id || other.damage?.sunk) continue;
         const ox = (other.x ?? 0) - worldOffsetX;
         const oz = (other.z ?? 0) - worldOffsetZ;
         const dx = ox - ai.x, dz = oz - ai.z;
         const sep = Math.hypot(dx, dz);
-        const safeR = Math.max(40, (length + (other.length ?? 16)) * 2.2);
-        if (sep < safeR && sep > 0.5) {
+        const otherLen = other.length ?? 16;
+        const otherBeam = other.beam ?? 4.8;
+        const safeR = Math.max(48, (length + otherLen) * 1.95);
+        const stopR = Math.max(24, (length + otherLen) * 0.92);
+        const hardR = Math.max(18, (length + otherLen) * 0.65);
+        if (sep < safeR && sep > 0.25) {
           const fwd = dx * bx + dz * bz;
-          if (fwd > -length * 0.5) {
-            const stbd = dx * rx + dz * rz;
-            const urgency = 1 - sep / safeR;
-            avoidTurn += (stbd >= 0 ? -0.55 : 0.72) * urgency;
-            if (sep < safeR * 0.55) targetSpeedCap = Math.min(targetSpeedCap, 1.4);
+          const stbd = dx * rx + dz * rz;
+          const oSpd = Number.isFinite(other.speed) ? other.speed : 0;
+          const ovx = Number.isFinite(other.vx) ? other.vx : Math.sin(other.yaw ?? 0) * oSpd;
+          const ovz = Number.isFinite(other.vz) ? other.vz : -Math.cos(other.yaw ?? 0) * oSpd;
+          const rvx = myVx - ovx, rvz = myVz - ovz;
+          const rv2 = rvx * rvx + rvz * rvz;
+          const tCpa = rv2 > 1e-4 ? Math.max(0, Math.min(14, (dx * rvx + dz * rvz) / rv2)) : 0;
+          const cpaSep = Math.hypot(dx - rvx * tCpa, dz - rvz * tCpa);
+          const closing = (dx * rvx + dz * rvz) > 0.15;
+          if (fwd > -length * 0.45 || sep < hardR) {
+            const urgency = Math.max(1 - sep / safeR, closing ? Math.max(0, 1 - cpaSep / (safeR * 0.7)) : 0);
+            // COLREG starboard-passing rule: head-on or starboard-bow conflict turns to starboard (+),
+            // port-bow obstacle turns starboard (+) unless closely abeam to starboard where port clears faster.
+            let turnDir;
+            if (Math.abs(stbd) < (beam + otherBeam) * 0.9) {
+              turnDir = 1; // head-on: both alter course to starboard (pass port-to-port)
+            } else {
+              turnDir = stbd > 0 ? -1 : 1; // steer away from occupied side
+            }
+            avoidTurn += turnDir * (0.92 * urgency * avoidGain);
+            if (fwd > 0 && Math.abs(stbd) < (beam + otherBeam) * 1.65) {
+              if (sep <= stopR) {
+                targetSpeedCap = 0;
+              } else if (sep < stopR + 24) {
+                targetSpeedCap = Math.min(targetSpeedCap, ((sep - stopR) / 24) * 1.6);
+              }
+            } else if (sep < hardR && fwd > -length * 0.2) {
+              targetSpeedCap = Math.min(targetSpeedCap, 0.35);
+            }
           }
         }
       }
@@ -4206,13 +4476,18 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
   let isLusoriaSweep = (m == 17u && isLusoria);
   let isGunwaleTube = isLusoria && m == 15u && abs(in.normalLocal.y) > 0.58;
 
-  // Metric oak grain UVs matching Niña's 0.96 across-grain × 0.36 along-grain density across all 7 archetypes
-  let course = select(tvMetres.y / 0.24, in.uv.x * 18.0, m == 15u);
+  // Metric oak grain UVs matching Niña's 0.96 across-grain × 0.36 along-grain density across all 7 archetypes.
+  // Continuum UVs are unorm16-packed in [0, 1] for sails, so all hull/wood/trim/rope coordinates derive strictly
+  // from metric hull position tvMetres (never clamped in.uv) so upper hull strakes and transoms never stretch.
+  let transomFace = abs(in.normalLocal.z) > 0.72;
+  let alongHull = select(tvMetres.z, tvMetres.x, transomFace);
+  let course = tvMetres.y / 0.22;
   let courseBoard = floor(course);
+  let tvPaintedWoodMat = (m == 20u || m == 21u || m == 24u || m == 26u);
   var oakUV = in.uv;
   if (m == 15u) {
     oakUV = select(
-      vec2f(course * 0.24 + courseBoard * 0.37, tvMetres.z * 0.36 + fract(sin(courseBoard * 17.1) * 437.5)),
+      vec2f(course * 0.24 + courseBoard * 0.37, alongHull * 0.36 + fract(sin(courseBoard * 17.1) * 437.5)),
       vec2f(tvMetres.x * 0.96, tvMetres.z * 0.36),
       isGunwaleTube
     );
@@ -4226,11 +4501,10 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
     );
   } else if (m == 0u) {
     oakUV = vec2f(tvMetres.x * 0.96, tvMetres.z * 0.33);
-  } else if (isWoodMat(m) || m == 28u) {
+  } else if (isWoodMat(m) || m == 28u || tvPaintedWoodMat) {
     let horiz = abs(in.normalLocal.y) > 0.65;
-    let zFace = abs(in.normalLocal.z) > 0.72;
     oakUV = select(
-      select(vec2f(tvMetres.y * 0.96, tvMetres.z * 0.35), vec2f(tvMetres.y * 0.96, tvMetres.x * 0.35), zFace),
+      select(vec2f(tvMetres.y * 0.96, tvMetres.z * 0.35), vec2f(tvMetres.y * 0.96, tvMetres.x * 0.35), transomFace),
       vec2f(tvMetres.x * 0.96, tvMetres.z * 0.35),
       horiz
     );
@@ -4249,7 +4523,6 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
   let deckAA = max(fwidth(deckCourse), 0.002);
   let deckButtCoord = (tvMetres.z + fract(deckPlankId * 0.413) * 2.0) / 2.6;
   let deckButtAA = max(fwidth(deckButtCoord), 0.001);
-  let alongHull = select(tvMetres.z, tvMetres.x, abs(in.normalLocal.z) > 0.72 && m != 15u);
   let buttCoord = (alongHull + fract(sin(courseBoard * 73.17) * 4321.1) * 2.6) / 2.6;
   let buttAA = max(fwidth(buttCoord), 0.0005);
   let sailDepth = canvasThickness(in.uv, m);
@@ -4380,7 +4653,7 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
   } else if (m == 2u || m == 12u || m == 19u) {
     // 3D Helical 3-strand laid hemp shrouds (2u), running lines (12u) & bolt-ropes (19u)
     let rLoc = normalize(in.normalLocal);
-    let ropeLenM = length(tvMetres) * 0.85 + in.uv.y * 2.4;
+    let ropeLenM = select(tvMetres.y, tvMetres.z + tvMetres.x, abs(in.normalLocal.y) > 0.55);
     let ropeAz = atan2(rLoc.x, rLoc.z + rLoc.y * 0.35);
     let layPhase = ropeLenM * 52.0 + ropeAz * 3.0;
     let layFade = 1.0 - smoothstep(0.6, 2.6, metFootprint * 52.0);
@@ -6185,8 +6458,11 @@ export async function createTradeVessels({
     const initElapsed = route.phase === 'shuttle' ? simElapsedSec : 0;
     const s0 = sampleTradeVesselState(route, boardDay, daysPerSecond, initElapsed);
     const ai = createVesselAutopilotState(route, aIdx, s0, simElapsedSec);
-    boat.x = ai.x;
-    boat.z = ai.z;
+    boat.x = ai.x + worldOffsetX;
+    boat.z = ai.z + worldOffsetZ;
+    boat.vx = ai.vx;
+    boat.vz = ai.vz;
+    boat.speed = ai.speed;
     boat.heave = ai.y - hydro.hydroSinkage;
     boat.waterY = ai.y;
     boat.target.heave = ai.y;
@@ -6278,7 +6554,34 @@ export async function createTradeVessels({
       }
     }
 
-    // Pass 2: Update matched vessels in place and spawn new vessels into freed hydroSlots.
+    // Pass 2: Update matched vessels in place and spawn new vessels into freed hydroSlots,
+    // guaranteeing non-overlapping initial positions against all existing ships and the player.
+    const takenSpawns = [];
+    if (Array.isArray(lastEnv?.avoidVessels)) {
+      for (const b of lastEnv.avoidVessels) {
+        if (b && Number.isFinite(b.x) && Number.isFinite(b.z)) {
+          takenSpawns.push({ x: b.x - worldOffsetX, z: b.z - worldOffsetZ, length: b.length || 20, river: false });
+        }
+      }
+    }
+    for (const prev of matchedPrev) {
+      if (prev) takenSpawns.push({ x: prev.ai.x, z: prev.ai.z, length: prev.boat.length || 18, river: prev.route.mode === 'river' });
+    }
+    for (const oldV of extraDamaged) {
+      takenSpawns.push({ x: oldV.ai.x, z: oldV.ai.z, length: oldV.boat.length || 18, river: oldV.route.mode === 'river' });
+    }
+    const spawnBedAt = makeBedSampler(lastContext?.terrain ?? null);
+    const isSpawnClear = (x, z, len, isRiver) => {
+      for (let i = 0; i < takenSpawns.length; i++) {
+        const o = takenSpawns[i];
+        const minSep = isRiver
+          ? Math.max(20, (len + o.length) * 1.1)
+          : Math.max(40, (len + o.length) * 1.15);
+        if (Math.hypot(x - o.x, z - o.z) < minSep) return false;
+      }
+      return true;
+    };
+
     const nextVessels = cappedRoutes.map((route, ri) => {
       const prev = matchedPrev[ri];
       const aIdx = Math.max(0, Math.min(TRADE_VESSEL_ARCHETYPES - 1, route.archetype | 0));
@@ -6298,8 +6601,9 @@ export async function createTradeVessels({
           const ai = prev.ai;
           if (prevPhase !== route.phase) {
             if (route.phase === 'dock') {
-              ai.dockTarget = route.berth ? { ...route.berth } : (ai.dockTarget || route.portBerths?.[0] || null);
-              if (ai.state !== 'docked' && ai.state !== 'docking') ai.state = 'approaching';
+              ai.dockTarget = route.berth ? { ...route.berth } : (ai.dockTarget || null);
+              ai.berthKey = route.berth?.key ?? ai.berthKey ?? null;
+              if (ai.state !== 'docked' && ai.state !== 'docking') ai.state = ai.dockTarget ? 'approaching' : 'waiting_berth';
             } else if (route.phase === 'out') {
               ai.state = 'departing';
               ai.dirSign = -1;
@@ -6309,11 +6613,11 @@ export async function createTradeVessels({
                 ai.dirSign = 1;
               }
             }
-          } else if (route.phase === 'in' && ai.state === 'waiting_berth' && (route.waited || 0) === 0 && route.portBerths?.length) {
-            ai.dockTarget = route.portBerths[0] ? { ...route.portBerths[0] } : ai.dockTarget;
-            if (ai.dockTarget) ai.state = 'approaching';
           }
-          if (route.berth) ai.dockTarget = { ...route.berth };
+          if (route.berth && route.phase === 'dock') {
+            ai.dockTarget = { ...route.berth };
+            ai.berthKey = route.berth.key ?? ai.berthKey;
+          }
           prev.route = route;
           prev.scaleMul = route.scale || 1;
           prev.boat.length = prev.arch.length * prev.scaleMul;
@@ -6331,7 +6635,77 @@ export async function createTradeVessels({
         }
         return prev;
       }
-      return makeLiveVessel(route);
+      const fresh = makeLiveVessel(route);
+      const isRiver = route.mode === 'river';
+      const len = fresh.boat.length || 18;
+      if (!isSpawnClear(fresh.ai.x, fresh.ai.z, len, isRiver)) {
+        let resolved = false;
+        // 1. Docked/anchored ship: try another free dock berth before entering the offshore waiting queue.
+        if (fresh.ai.state === 'docked' || fresh.ai.state === 'anchored') {
+          for (const b of route.portBerths ?? []) {
+            if (isSpawnClear(b.x, b.z, len, false)) {
+              fresh.ai.x = b.x;
+              fresh.ai.z = b.z;
+              fresh.ai.yaw = b.rot || fresh.ai.yaw;
+              fresh.ai.dockTarget = { ...b };
+              fresh.ai.berthKey = b.key ?? null;
+              resolved = true;
+              break;
+            }
+          }
+          if (!resolved && fresh.ai.state === 'docked') {
+            fresh.ai.state = 'waiting_berth';
+            fresh.ai.dockTarget = null;
+            fresh.ai.berthKey = null;
+            fresh.ai.queueEnteredAt = simElapsedSec;
+          }
+        }
+        // 2. Route-following ship: stagger along the route polyline until clear of all existing ships.
+        if (!resolved && Array.isArray(route.pts) && route.pts.length >= 2 && route.totalLen > 20) {
+          const baseDist = Number.isFinite(fresh.lastState?.dist) ? fresh.lastState.dist : 0;
+          const stepM = isRiver ? Math.max(24, len * 1.45) : Math.max(52, len * 2.4);
+          const maxTries = Math.min(18, Math.ceil(route.totalLen / stepM) + 2);
+          for (let k = 1; k <= maxTries && !resolved; k++) {
+            for (const dir of [-1, 1]) {
+              const candDist = Math.max(0, Math.min(route.totalLen, baseDist + dir * k * stepM));
+              const sCand = sampleTradeVesselState(route, boardDay, daysPerSecond, 0, candDist);
+              if (isSpawnClear(sCand.x, sCand.z, len, isRiver)) {
+                fresh.ai.x = sCand.x;
+                fresh.ai.y = sCand.y;
+                fresh.ai.z = sCand.z;
+                fresh.ai.yaw = sCand.yaw;
+                fresh.lastState = sCand;
+                resolved = true;
+                break;
+              }
+            }
+          }
+        }
+        // 3. Fallback: radial deep-water offset clear of every other ship.
+        if (!resolved && !isRiver) {
+          const bx = fresh.ai.x, bz = fresh.ai.z;
+          const minBed = -(fresh.boat.draft + 1.0);
+          for (const rad of [55, 95, 145, 200]) {
+            for (let a = 0; a < 12 && !resolved; a++) {
+              const ang = (a / 12) * Math.PI * 2 + ri * 0.43;
+              const cx = bx + Math.cos(ang) * rad;
+              const cz = bz + Math.sin(ang) * rad;
+              const okDepth = !spawnBedAt || spawnBedAt(cx + worldOffsetX, cz + worldOffsetZ) <= minBed;
+              if (okDepth && isSpawnClear(cx, cz, len, false)) {
+                fresh.ai.x = cx;
+                fresh.ai.z = cz;
+                resolved = true;
+              }
+            }
+          }
+        }
+        fresh.boat.x = fresh.ai.x + worldOffsetX;
+        fresh.boat.z = fresh.ai.z + worldOffsetZ;
+        fresh.boat.yaw = fresh.ai.yaw;
+        fresh.boat.heading = (fresh.ai.yaw * 180) / Math.PI;
+      }
+      takenSpawns.push({ x: fresh.ai.x, z: fresh.ai.z, length: len, river: isRiver });
+      return fresh;
     });
     for (const oldV of extraDamaged) nextVessels.push(oldV);
     vessels = nextVessels;
@@ -6493,6 +6867,61 @@ export async function createTradeVessels({
     const windVec = env?.windVec ?? [8, 0];
     const stormFlag = Boolean(env?.storm);
     const swellDirRad = Math.atan2(windVec?.[1] ?? 0, windVec?.[0] ?? 8);
+
+    // Coordinate live harbor dock reservations & FIFO waiting queue before stepping autopilots.
+    assignHarborBerthsAndQueue(vessels, {
+      dt,
+      elapsedSec,
+      storm: stormFlag,
+      avoidVessels: env?.avoidVessels ?? null,
+      worldOffsetX,
+      worldOffsetZ,
+    });
+
+    // Enforce water-safe non-overlap hull separation between live sea vessels so no two hulls ever merge.
+    if (vessels.length > 1) {
+      for (let i = 0; i < vessels.length; i++) {
+        const va = vessels[i];
+        if (!va || va.route?.mode === 'river' || va.boat?.damage?.sunk || va.ai.state === 'sunk') continue;
+        for (let j = i + 1; j < vessels.length; j++) {
+          const vb = vessels[j];
+          if (!vb || vb.route?.mode === 'river' || vb.boat?.damage?.sunk || vb.ai.state === 'sunk') continue;
+          const fixedA = va.ai.state === 'docked' || va.ai.state === 'anchored';
+          const fixedB = vb.ai.state === 'docked' || vb.ai.state === 'anchored';
+          if (fixedA && fixedB) continue;
+          const dx = vb.ai.x - va.ai.x;
+          const dz = vb.ai.z - va.ai.z;
+          const sep = Math.hypot(dx, dz);
+          const minSep = Math.max(22, ((va.boat.length || 18) + (vb.boat.length || 18)) * 0.56);
+          if (sep >= minSep) continue;
+          const ux = sep > 1e-3 ? dx / sep : Math.cos((i * 1.7 + j * 2.3));
+          const uz = sep > 1e-3 ? dz / sep : Math.sin((i * 1.7 + j * 2.3));
+          const push = Math.min(4.5, (minSep - sep) * 0.45);
+          const shareA = fixedA ? 0 : (fixedB ? 1 : 0.5);
+          const shareB = fixedB ? 0 : (fixedA ? 1 : 0.5);
+          if (shareA > 0) {
+            const nx = va.ai.x - ux * push * shareA;
+            const nz = va.ai.z - uz * push * shareA;
+            if (!bedAt || bedAt(nx + worldOffsetX, nz + worldOffsetZ) <= -(va.boat.draft + 0.5)) {
+              va.ai.x = nx;
+              va.ai.z = nz;
+              va.boat.x = nx + worldOffsetX;
+              va.boat.z = nz + worldOffsetZ;
+            }
+          }
+          if (shareB > 0) {
+            const nx = vb.ai.x + ux * push * shareB;
+            const nz = vb.ai.z + uz * push * shareB;
+            if (!bedAt || bedAt(nx + worldOffsetX, nz + worldOffsetZ) <= -(vb.boat.draft + 0.5)) {
+              vb.ai.x = nx;
+              vb.ai.z = nz;
+              vb.boat.x = nx + worldOffsetX;
+              vb.boat.z = nz + worldOffsetZ;
+            }
+          }
+        }
+      }
+    }
 
     for (const v of vessels) {
       const dmg = v.boat.damage;

@@ -769,20 +769,28 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
   } else if (isWoodMat(m) || m == 28u || tvPaintedWood) {
     npbrMatId = 0u;
     npbrMask = select(1.0, 0.85, tvPaintedWood);
-    let transomFace = abs(in.normalLocal.z) > 0.72 && m != 15u;
-    npbrUV = select(vec2f(tvMetres.z + floor(course) * 0.41, tvMetres.y), vec2f(tvMetres.x + floor(course) * 0.41, tvMetres.y), transomFace);
-    npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), transomFace);
-    npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), transomFace);
-    npbrHintT = continuumQuat(tvTurn, select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), transomFace));
+    let tvTransomFace = abs(in.normalLocal.z) > 0.72;
+    npbrUV = select(vec2f(tvMetres.z + floor(course) * 0.41, tvMetres.y), vec2f(tvMetres.x + floor(course) * 0.41, tvMetres.y), tvTransomFace);
+    npbrDuDx = select(vec2f(npbrDxM.z, npbrDxM.y), vec2f(npbrDxM.x, npbrDxM.y), tvTransomFace);
+    npbrDuDy = select(vec2f(npbrDyM.z, npbrDyM.y), vec2f(npbrDyM.x, npbrDyM.y), tvTransomFace);
+    npbrHintT = continuumQuat(tvTurn, select(vec3f(0.0, 0.0, 1.0), vec3f(1.0, 0.0, 0.0), tvTransomFace));
   }
-  let npbrBasis = neuralPbrTangentBasis(n, npbrHintT);
   let npbrCamDist = distance(in.world, tvEye);
-  let npbr = evalNeuralPbr(npbrMatId, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrMask * (1.0 - tvWet * 0.25));
-  let npbrAlbedoWeight = select(1.0, 0.45, tvPaintedWood);
-  let npbrNormalWeight = select(1.0, 0.78, tvPaintedWood);
-  albedo = clamp(albedo * mix(vec3f(1.0), npbr.albedoMul, npbrAlbedoWeight), vec3f(0.004), vec3f(0.98));
-  rough = clamp(rough + npbr.roughDelta * (1.0 - tvWet * 0.55), 0.06, 0.98);
-  n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS * npbrNormalWeight * (1.0 - tvWet * 0.35));
+  var npbrCavityAO = 1.0;
+  var npbrAniso = 0.0;
+  var npbrT = vec3f(1.0, 0.0, 0.0);
+  if (npbrMask > 0.002 && NPBR.params.x > 0.04 && npbrCamDist < NPBR.params.w * 0.92) {
+    let npbrBasis = neuralPbrTangentBasis(n, npbrHintT);
+    let npbr = evalNeuralPbr(npbrMatId, npbrUV, npbrDuDx, npbrDuDy, npbrCamDist, npbrMask * (1.0 - tvWet * 0.25));
+    let npbrAlbedoWeight = select(1.0, 0.45, tvPaintedWood);
+    let npbrNormalWeight = select(1.0, 0.78, tvPaintedWood);
+    albedo = clamp(albedo * mix(vec3f(1.0), npbr.albedoMul, npbrAlbedoWeight), vec3f(0.004), vec3f(0.98));
+    rough = clamp(rough + npbr.roughDelta * (1.0 - tvWet * 0.55), 0.06, 0.98);
+    n = applyNeuralPbrNormal(n, npbrBasis, npbr.normalTS * npbrNormalWeight * (1.0 - tvWet * 0.35));
+    npbrCavityAO = npbr.cavityAO;
+    npbrAniso = npbr.aniso;
+    npbrT = npbrBasis[0];
+  }
   let sunDir = normalize(F.sunDir.xyz);
   let viewDir = normalize(tvEye - in.world);`,
     'trade vessels material eval'
@@ -791,14 +799,14 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
   out = neuralPbrReplaceRequired(
     out,
     /let\s+spec\s*=\s*select\(\s*vec3f\(\s*0(?:\.0?)?\s*\)\s*,\s*vesselSpecular\(\s*n\s*,\s*viewDir\s*,\s*sunDir\s*,\s*rough\s*,\s*f0\s*\)\s*\*\s*sunRad\s*\*\s*nDotL\s*,\s*nDotL\s*>\s*0(?:\.0?)?\s*\)\s*;/,
-    'let spec = select(vec3f(0.0), neuralPbrAnisoSpecular(n, npbrBasis, viewDir, sunDir, rough, npbr.aniso, f0) * sunRad * nDotL, nDotL > 0.0);',
+    'let spec = select(vec3f(0.0), select(vesselSpecular(n, viewDir, sunDir, rough, f0), neuralPbrAnisoSpecular(n, mat2x3f(npbrT, cross(n, npbrT)), viewDir, sunDir, rough, npbrAniso, f0), abs(npbrAniso) > 0.001) * sunRad * nDotL, nDotL > 0.0);',
     'trade vessels anisotropic specular'
   );
 
   out = neuralPbrReplaceRequired(
     out,
     /let\s+lit\s*=\s*diffTint\s*\*\s*amb\s*\*\s*0?\.82/,
-    'let lit = diffTint * amb * (0.82 * npbr.cavityAO)',
+    'let lit = diffTint * amb * (0.82 * npbrCavityAO)',
     'trade vessels cavity ao'
   );
 

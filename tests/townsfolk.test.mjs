@@ -143,12 +143,12 @@ test('the pass is told the date in hours from when the record began, and only wh
   dispatches.length = 0;
   folk.encode(pass(), start + 78 * HOUR + 1000);
   assert.deepEqual(writes.map((w) => w.label).filter((label) => /^townsfolk/.test(label)), []);
-  assert.deepEqual(dispatches.slice(0, 2 + TOWNSFOLK_MODELS), [
-    { pipeline: 'townsfolk reset', workgroups: 1 }, { pipeline: 'townsfolk walk', workgroups: 1 },
+  assert.deepEqual(dispatches.slice(0, 3 + TOWNSFOLK_MODELS), [
+    { pipeline: 'townsfolk reset', workgroups: 1 }, { pipeline: 'townsfolk intent', workgroups: 1 }, { pipeline: 'townsfolk walk', workgroups: 1 },
     ...Array.from({ length: TOWNSFOLK_MODELS }, (_, m) => ({ pipeline: 'crew continuum pose', counted: 'townsfolk counts', offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 })),
   ]);
   // Every walker here wears the man's body, so the woman's batch has no one to stand: its cut only empties its lists.
-  assert.deepEqual(dispatches.slice(2 + TOWNSFOLK_MODELS), [
+  assert.deepEqual(dispatches.slice(3 + TOWNSFOLK_MODELS), [
     { pipeline: 'crew continuum stand', workgroups: 60 }, { pipeline: 'continuum reset', workgroups: 1 }, { pipeline: 'continuum cut', workgroups: 60 },
     { pipeline: 'continuum reset', workgroups: 1 },
   ]);

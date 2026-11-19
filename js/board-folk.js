@@ -69,7 +69,30 @@ function folkWay(route, origin, heightAt, blocked) {
     if (blocked?.(x, z)) run = i + 1; else if (i - run > to - from) { from = run; to = i; }
   }
   if (to - from < 2) return { route, samples, fromDoor: false, whole: false, cut: true };
-  for (let i = from; i <= to; i++) { const x = points[i * 2], z = points[i * 2 + 1]; samples.push(x, heightAt(x, z), z, FOLK_LANE_M); }
+  // Measure real walkable lateral half-width when building obstacles (`blocked`) are known so villagers
+  // spread across wide streets, plazas, and quays instead of walking single-file in a 0.45 m slot.
+  const lateralRoomAt = (idx) => {
+    if (typeof blocked !== 'function') return FOLK_LANE_M;
+    const x = points[idx * 2], z = points[idx * 2 + 1];
+    const y0 = heightAt(x, z);
+    const i0 = Math.max(from, idx - 1), i1 = Math.min(to, idx + 1);
+    const dx = points[i1 * 2] - points[i0 * 2], dz = points[i1 * 2 + 1] - points[i0 * 2 + 1];
+    const len = Math.hypot(dx, dz) || 1;
+    const rx = dz / len, rz = -dx / len;
+    const probeSide = (sign) => {
+      let clear = FOLK_LANE_M;
+      for (const dist of [0.75, 1.20, 1.65, 2.10, 2.50]) {
+        const px = x + rx * sign * dist, pz = z + rz * sign * dist;
+        if (blocked(px, pz)) break;
+        const py = heightAt(px, pz);
+        if (!Number.isFinite(py) || py < 0.20 || Math.abs(py - y0) > 0.75) break;
+        clear = dist - 0.25;
+      }
+      return clear;
+    };
+    return Math.max(FOLK_LANE_M, Math.min(2.25, Math.min(probeSide(1), probeSide(-1))));
+  };
+  for (let i = from; i <= to; i++) { const x = points[i * 2], z = points[i * 2 + 1]; samples.push(x, heightAt(x, z), z, lateralRoomAt(i)); }
   return { route, samples, fromDoor: from === 0, whole: to === count - 1 && length <= FOLK_WAY_MOST_M, cut: from > 0 || to < count - 1 };
 }
 const sameWay = (a, b) => a.length === b.length && a.every((v, k) => v === b[k]);

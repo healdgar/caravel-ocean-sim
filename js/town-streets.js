@@ -785,9 +785,16 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     for (let k = 0; k < line.length; k++) {
       const [x, z] = line[k];
       const c = grid.at(x, z);
-      const halfWidth = c >= 0 && onWay[c] ? Math.min(widthOf(c) * 0.5, roomOf(c)) : narrowest * 0.5;
-      const onPier = (a.inst.kind === 'pier' || b.inst.kind === 'pier') && climbed[k] > 1.8;
-      routeSamples.push(x, climbed[k], z, Math.max(0, halfWidth - (onPier ? 1.15 : 0.45)));
+      const streetHalfW = c >= 0 && onWay[c] ? Math.min(Math.max(widthOf(c) * 0.5, 1.35), roomOf(c)) : narrowest * 0.5;
+      let deckMargin = -1;
+      for (const { inst, halfWidth: dHw } of decks) {
+        const { lx, lz } = worldToLocal(inst, x, z);
+        if (Math.abs(lx) <= dHw + 1.0 && Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M) {
+          deckMargin = Math.max(deckMargin, Math.max(0.35, dHw - Math.abs(lx) - 0.25));
+        }
+      }
+      const laneHalfW = deckMargin >= 0 ? deckMargin : Math.max(0.35, streetHalfW - 0.35);
+      routeSamples.push(x, climbed[k], z, laneHalfW);
     }
     return { first, count: line.length, length: (line.length - 1) * ROUTE_STEP_M };
   });

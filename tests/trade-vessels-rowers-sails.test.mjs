@@ -13,6 +13,7 @@ import {
   buildTradeVesselRoutes,
   sampleTradeVesselState,
   createVesselAutopilotState,
+  assignHarborBerthsAndQueue,
   stepTradeVesselAutopilot,
   REST_TO_POSED_WGSL,
   TRADE_VESSEL_CONTINUUM_MATERIAL,
@@ -525,4 +526,68 @@ test('Harbor stern z-separation, 0.000 mm collinear river-barge oars, over-gunwa
   const snippet = TRADE_VESSEL_VIEW.slice(start, TRADE_VESSEL_VIEW.indexOf('\n}', start) + 2);
   assert.match(snippet, /continuumMask\(v\.coverage[^;]*&\s*tradeVesselContinuumMask\(/, 'continuumFS keeps its samples through the shared split and the material\'s mask');
   assert.doesNotMatch(snippet, /\bdiscard\b/);
+});
+
+test('Trade ship hull textures use metric strakes (never unorm16-clamped in.uv.x), harbor berth scheduler queues excess ships cleanly, and COLREG brakes behind blocking ships', () => {
+  // 1. Hull strake courses derive strictly from metric tvMetres.y, not clamped continuum in.uv.x
+  assert.match(TRADE_VESSEL_VIEW, /let\s+course\s*=\s*tvMetres\.y\s*\/\s*0\.22\s*;/);
+  assert.doesNotMatch(TRADE_VESSEL_VIEW, /in\.uv\.x\s*\*\s*18\.0/);
+  assert.match(TRADE_VESSEL_VIEW, /let\s+transomFace\s*=\s*abs\(in\.normalLocal\.z\)\s*>\s*0\.72\s*;/);
+
+  // 2. Harbor berth reservation & FIFO waiting queue across 4 arriving ships and 2 docks
+  const berths = [
+    { key: 'berth:0', x: 0, y: 0, z: 0, rot: 0, shore: true },
+    { key: 'berth:1', x: 65, y: 0, z: 0, rot: 0, shore: true },
+  ];
+  const approachPts = [
+    { x: 0, y: 0, z: 320, acc: 0 },
+    { x: 0, y: 0, z: 90, acc: 230 },
+  ];
+  const makeInbound = (id, x, z) => {
+    const route = { id: `ship:${id}`, shipId: id, mode: 'sea', phase: 'in', waited: 0, portBerths: berths, pts: approachPts, totalLen: 230, phaseOffset: id * 0.1 };
+    const ai = createVesselAutopilotState(route, 2, { x, y: 0, z, yaw: 0, speed: 2.5, motion: 1, dist: 200 }, 0);
+    ai.wpIndex = 1;
+    return { route, ai, boat: { id: route.id, x, z, yaw: 0, speed: 2.5, length: 20, beam: 5.5, damage: { sunk: false } } };
+  };
+  const fleet = [
+    makeInbound(1, 0, 120),
+    makeInbound(2, 65, 125),
+    makeInbound(3, -15, 140),
+    makeInbound(4, 45, 150),
+  ];
+
+  assignHarborBerthsAndQueue(fleet, { dt: 0.1, elapsedSec: 10, storm: false });
+  assert.equal(fleet[0].ai.state, 'approaching', 'ship 1 claims first free dock');
+  assert.equal(fleet[1].ai.state, 'approaching', 'ship 2 claims second free dock');
+  assert.notEqual(fleet[0].ai.berthKey, fleet[1].ai.berthKey, 'ships 1 and 2 reserve distinct berths');
+  assert.equal(fleet[2].ai.state, 'waiting_berth', 'ship 3 queues when all docks are occupied');
+  assert.equal(fleet[3].ai.state, 'waiting_berth', 'ship 4 queues behind ship 3');
+  assert.equal(fleet[2].ai.queueRank, 0);
+  assert.equal(fleet[3].ai.queueRank, 1);
+
+  // Player ship mooring at berth:0 forces an approaching ship off berth:0 or into the queue
+  const playerAtBerth0 = [{ id: 'player', x: 2, z: 2, length: 18, beam: 4.8 }];
+  assignHarborBerthsAndQueue(fleet, { dt: 0.1, elapsedSec: 12, storm: false, avoidVessels: playerAtBerth0 });
+  assert.equal(fleet[0].ai.state, 'waiting_berth', 'ship approaching berth:0 yields to player moored there');
+  assert.equal(fleet[1].ai.berthKey, 'berth:1', 'ship at unobstructed berth:1 keeps its reservation');
+
+  // When ship 2 departs and clears berth:1, the front-of-queue waiting ship is promoted automatically
+  fleet[1].ai.state = 'departing';
+  fleet[1].ai.x = 65;
+  fleet[1].ai.z = 90;
+  assignHarborBerthsAndQueue(fleet, { dt: 0.1, elapsedSec: 15, storm: false, avoidVessels: playerAtBerth0 });
+  const promoted = fleet.filter((v) => v.ai.state === 'approaching');
+  assert.equal(promoted.length, 1, 'exactly one front-of-queue ship is promoted into the newly opened dock');
+  assert.equal(promoted[0].ai.berthKey, 'berth:1');
+
+  // 3. COLREG collision avoidance brakes to zero behind a stationary ship directly ahead
+  const trailRoute = { id: 'ship:trail', mode: 'sea', phase: 'in', pts: [{ x: 0, y: 0, z: 200, acc: 0 }, { x: 0, y: 0, z: -200, acc: 400 }], totalLen: 400, phaseOffset: 0.2 };
+  const trailAi = createVesselAutopilotState(trailRoute, 0, { x: 0, y: 0, z: 24, yaw: 0, speed: 3.2, motion: 1, dist: 176 }, 0);
+  trailAi.wpIndex = 1;
+  const blocker = [{ id: 'ship:block', x: 0, z: 0, yaw: 0, speed: 0, vx: 0, vz: 0, length: 18, beam: 5.0 }];
+  for (let i = 0; i < 12; i++) {
+    stepTradeVesselAutopilot(trailAi, trailRoute, 0, { dt: 0.25, elapsedSec: i * 0.25, windVec: [8, 0], avoidTargets: blocker, length: 18, beam: 5.0 });
+  }
+  assert.ok(trailAi.speed < 0.8, `trailing vessel brakes sharply behind dead-ahead blocker (speed=${trailAi.speed.toFixed(2)})`);
+  assert.ok(Math.hypot(trailAi.x, trailAi.z) > 12, 'trailing vessel does not plow through the stationary blocker');
 });

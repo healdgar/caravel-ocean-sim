@@ -291,3 +291,12 @@ test('whoever stands a post of the port walks no street, and says where they sta
   // And it reads as their own words.
   assert.match(folkSpeech({ id: 5, name: 'Aparicio Llano', age: 21, role: 'baker' }, null, watchDoing(post())), /You find me on watch at a gun of the Baluarte da Ribeira\.$/);
 });
+
+test('board folk streets measure real lateral room when obstacles are provided, spreading wide avenues while keeping narrow alleys tight', () => {
+  const origin = { x: 0, z: 0 }, heightAt = () => 3;
+  const asked = plan([person(42, { route: [0, 0, 20, 0] })], []);
+  const wide = boardFolkStreets({ plan: asked, origin, heightAt, blocked: () => false });
+  assert.ok(wide.samples[3] >= 2.0, `open street exposes wide lateral corridor (got ${wide.samples[3]})`);
+  const narrow = boardFolkStreets({ plan: asked, origin, heightAt, blocked: (_x, z) => Math.abs(z) > 0.65 });
+  assert.ok(narrow.samples[3] <= 0.55, `narrow alley clamps lateral half-width to stay clear of walls (got ${narrow.samples[3]})`);
+});
