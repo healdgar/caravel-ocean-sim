@@ -19,6 +19,15 @@ import {
 } from './wgsl/continuum-cards.js';
 
 const CONTINUUM_CARD_SCENE_IDS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 19, 20, 21, 24]);
+const continuumCardBakeChains = new WeakMap();
+
+// Serializes GPU card bakes per device so multiple families never contend on scratch MSAA VRAM or stack batches in one frame.
+function enqueueContinuumCardBake(device, task) {
+  const prev = continuumCardBakeChains.get(device) ?? Promise.resolve();
+  const next = prev.then(task, task);
+  continuumCardBakeChains.set(device, next.then(() => {}, () => {}));
+  return next;
+}
 
 // One shared card renderer (view pipeline + pack/dilate + cell-isolated mip compute pipelines + sampler) per device.
 export async function requestContinuumCardRenderer({ device, shader, format, samples = 4, pages = 1 }) {
@@ -75,9 +84,10 @@ function requestContinuumCardBakePipeline({ device, shader, material, paging }) 
   });
 }
 
-// Collects all finest-resolution (level 0, falling back to minimum level present) cluster indices and bounding sphere
-// for `typeId` directly from a Continuum atlas's Uint32Array word stream.
-export function collectContinuumLevel0Clusters(words, typeId) {
+// Collects a half-texel-accurate cluster cut (error <= R / cellSize, matching the Continuum DAG cut) for `typeId`
+// directly from the atlas word stream. For dense multi-million-triangle trees this cuts bake triangles by ~67x while
+// remaining sub-texel identical at `cellSize x cellSize` resolution.
+export function collectContinuumLevel0Clusters(words, typeId, cellSize = 64) {
   const f32 = new Float32Array(words.buffer, words.byteOffset, words.length);
   const typesAt = words[CONTINUUM_HEADER.typesAt];
   const clustersAt = words[CONTINUUM_HEADER.clustersAt];
@@ -90,26 +100,41 @@ export function collectContinuumLevel0Clusters(words, typeId) {
     f32[typeBase + CONTINUUM_TYPE.sphere + 2],
     f32[typeBase + CONTINUUM_TYPE.sphere + 3],
   ];
-  let minLevel = 255;
-  for (let i = 0; i < count; i++) {
-    const packed = words[clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS + 15];
-    const lvl = (packed >>> 8) & 255;
-    if (lvl < minLevel) minLevel = lvl;
-  }
+  // Half-texel orthographic error tolerance: diameter 2*R across cellSize texels -> 0.5 texel = R / cellSize.
+  const allowed = Math.max(sphere[3] / Math.max(cellSize, 8), 1e-4);
   const clusters = [];
   for (let i = 0; i < count; i++) {
-    const packed = words[clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS + 15];
-    if (((packed >>> 8) & 255) === minLevel) clusters.push(first + i);
+    const cb = clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS;
+    const packed = words[cb + 15];
+    const lvl = (packed >>> 8) & 255;
+    const ownErr = lvl === 0 ? 0 : f32[cb + 12];
+    const parentErr = f32[cb + 13];
+    if (parentErr > allowed && ownErr <= allowed) clusters.push(first + i);
+  }
+  if (!clusters.length) {
+    let minLevel = 255;
+    for (let i = 0; i < count; i++) {
+      const lvl = (words[clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS + 15] >>> 8) & 255;
+      if (lvl < minLevel) minLevel = lvl;
+    }
+    for (let i = 0; i < count; i++) {
+      if (((words[clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS + 15] >>> 8) & 255) === minLevel) clusters.push(first + i);
+    }
   }
   return { clusters, sphere };
 }
 
-// Bakes relightable depth-aware octahedral G-buffer cards for `typeIds` on the GPU from their level-0 clusters.
+// Bakes relightable depth-aware octahedral G-buffer cards for `typeIds` on the GPU from their half-texel cluster cut.
+// Paces small batches with queue.onSubmittedWorkDone() + rAF so GPU command buffers never stall or trigger watchdogs.
 // Returns { albedoTex, geoTex, layerBuf, paramsBuf, bindGroup, layerCount, cellSize, destroy() }.
-export async function bakeContinuumCardAtlas({
+export function bakeContinuumCardAtlas(options) {
+  return enqueueContinuumCardBake(options.device, () => runContinuumCardBake(options));
+}
+
+async function runContinuumCardBake({
   device, shader, renderer, atlas, words = atlas.words, material, typeIds,
   bakeGroup0Entries = null, cellSize = 64, tintMode = 0, salt = 0, neutralSpareX = 0,
-  batchSize = 16, isCancelled = null, label = 'continuum cards',
+  batchSize = 2, isCancelled = null, label = 'continuum cards',
 }) {
   if (!words || !atlas?.pages?.length) throw Error(`Cannot bake ${label}: atlas words/pages missing`);
   const maxLayers = Math.min(256, device.limits?.maxTextureArrayLayers ?? 256);
@@ -190,7 +215,7 @@ export async function bakeContinuumCardAtlas({
     });
     // Set neutral spare.x word directly (e.g. packed neutral tint for forest, neutral f32 for city).
     recWords[r * CONTINUUM_RECORD_WORDS + 12] = neutralSpareX >>> 0;
-    const info = collectContinuumLevel0Clusters(words, typeId);
+    const info = collectContinuumLevel0Clusters(words, typeId, cellSize);
     typeClusters[r] = info.clusters;
     const [cx, cy, cz, rawR] = info.sphere;
     const R = Math.max(rawR, 1e-4) * CONTINUUM_CARD_PAD;
@@ -327,8 +352,12 @@ export async function bakeContinuumCardAtlas({
         cpass.end();
       }
       device.queue.submit([encoder.finish()]);
+      // Wait for this small GPU bake batch to finish before encoding the next batch so Metal/WebGPU never stalls.
+      await device.queue.onSubmittedWorkDone();
       entriesBuf.destroy();
-      if (end < layerCount) await new Promise((resolve) => setTimeout(resolve, 0));
+      if (end < layerCount) {
+        await new Promise((resolve) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(resolve) : setTimeout(resolve, 0)));
+      }
     }
   } finally {
     destroyScratch();

@@ -146,52 +146,90 @@ fn forestStandOwn(tree:u32,touched:bool,near:f32,lane:u32)->vec2f{
  return vec2f(f32(slot),clamp(forestWindState[2u+u32(slot)].z,0.0,1.0));
 }
 @compute @workgroup_size(1)fn forestStandReset(){atomicStore(&forestStood[3],0u);}
-@compute @workgroup_size(64)fn forestStandRoots(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u){
+var<workgroup>forestStandCount:atomic<u32>;
+var<workgroup>forestStandBase:u32;
+@compute @workgroup_size(64)fn forestStandRoots(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u,@builtin(local_invocation_index)localIdx:u32){
  let i=id.x+id.y*groups.x*64u;
- if(i>=forestStand.counts.x){return;}
- let r=forestRoots[i];let scale=r.rootScale.w;
- if(!(scale>0.0)){return;}
- let model=u32(r.identity.x);let yaw=r.yawColour.x;
- // Fast conservative frustum + shadow-box cull before ground-lift texture loads, wind-lane atan2, force/capsule scans
- // and own-skeleton atomic probes: skips ~75% of roots that lie behind the camera or outside both frusta.
- let shift=forestStand.shift.xyz;
- let sphere=vec4f(forestStandTypeF(model,${T.sphere}u),forestStandTypeF(model,${T.sphere + 1}u),forestStandTypeF(model,${T.sphere + 2}u),forestStandTypeF(model,${T.sphere + 3}u));
- let coarseCentre=r.rootScale.xyz+forestStandTurn(yaw,sphere.xyz)*scale;
- let coarseRadius=sphere.w*scale*1.35+6.0;
- let coarseRel=coarseCentre+shift-F.camPos.xyz;
- if(forestStandOutside(earthCurve(coarseRel,F.camPos.y),coarseRadius)&&!(forestStand.counts.z!=0u&&forestStandShadowed(coarseCentre,coarseRadius))){return;}
- let coarseDist=length(coarseRel);
- // Where it stands as drawn: on the ground the land draws there (js/continuum-ground.js). It is struck, felled and
- // blown over where it truly stands (js/forest-trunks.js on the CPU).
- let position=r.rootScale.xyz+vec3f(0.0,continuumGroundLift(r.rootScale.xz+shift.xz),0.0);
- let felled=r.identity.w<0.0;let wounded=r.identity.w>0.0;let t=F.camPos.w;
- // Its skeleton: its lane's, and its own when near the eye or touched; distant crowns and felled trees skip wind math.
- var bones=vec3f(-1.0,-1.0,0.0);var sway=0.0;
- if(!felled&&forestWind.counts.z>model&&coarseDist<260.0){
-  let lane=model*${FOREST_WIND_LANES}u+forestWindLane(yaw,forestWindState[0].yz,i);
-  bones.x=f32(lane*FOREST_WIND_SKELETON);
-  sway=forestStandReach(lane*FOREST_WIND_SKELETON,sphere);
-  let near=distance(position+shift,F.camPos.xyz);
-  let touched=near<${FOREST_WIND_NEAR_M.toFixed(1)}||forestWindTouched(r.rootScale.xyz);
-  if(touched||near<${(FOREST_WIND_NEAR_M * 1.5).toFixed(1)}){
-   let own=forestStandOwn(i,touched,near,lane);
-   if(own.x>=0.0){
-    let skeleton=(forestWind.counts.z*${FOREST_WIND_LANES}u+u32(own.x))*FOREST_WIND_SKELETON;
-    bones=vec3f(bones.x,f32(skeleton),own.y);
-    sway=max(sway,forestStandReach(skeleton,sphere));
+ var keep=false;
+ var position=vec3f(0.0);var scale=0.0;var model=0u;var yaw=0.0;var felled=false;var wounded=false;
+ var bones=vec3f(-1.0,-1.0,0.0);var reach=0.0;var seed=0u;var r:ForestRoot;
+ if(i<forestStand.counts.x){
+  r=forestRoots[i];scale=r.rootScale.w;
+  if(scale>0.0){
+   model=u32(r.identity.x);yaw=r.yawColour.x;
+   // Fast conservative frustum + shadow-box cull before ground-lift texture loads, wind-lane atan2, force/capsule scans
+   // and own-skeleton atomic probes: skips ~75% of roots that lie behind the camera or outside both frusta.
+   let shift=forestStand.shift.xyz;
+   let sphere=vec4f(forestStandTypeF(model,${T.sphere}u),forestStandTypeF(model,${T.sphere + 1}u),forestStandTypeF(model,${T.sphere + 2}u),forestStandTypeF(model,${T.sphere + 3}u));
+   let coarseCentre=r.rootScale.xyz+forestStandTurn(yaw,sphere.xyz)*scale;
+   let coarseRadius=sphere.w*scale*1.35+6.0;
+   let coarseRel=coarseCentre+shift-F.camPos.xyz;
+   let inShadow=forestStand.counts.z!=0u&&forestStandShadowed(coarseCentre,coarseRadius);
+   let inView=!forestStandOutside(earthCurve(coarseRel,F.camPos.y),coarseRadius);
+   if(inView||inShadow){
+    let coarseDist=length(coarseRel);
+    felled=r.identity.w<0.0;wounded=r.identity.w>0.0;
+    // Its seed is where it stands, so its sample pattern and its thinning are its own however the trees are listed.
+    seed=forestWindHash(bitcast<u32>(r.rootScale.x)^forestWindHash(bitcast<u32>(r.rootScale.z)));
+    // Exact deterministic sub-pixel horizon pre-thinning (same hash/seed as continuumProfileThin, conservative sphere >= splat).
+    // Drops ~84% of sub-minPixels distant roots BEFORE ground-lift fetches, record writes, and continuumSelect workgroups.
+    var thinKept=true;
+    let minPx=forestStand.shift.w;
+    if(!inShadow&&!felled&&!wounded&&minPx>0.0&&coarseDist>300.0){
+     let focal=F.screen.y/max(2.0*length(F.camUp.xyz),1e-4);
+     let maxSpan=2.0*sphere.w*scale*focal/coarseDist;
+     if(maxSpan<minPx){
+      if(maxSpan<0.16*minPx){thinKept=false;}
+      else{
+       let kRatio=maxSpan/minPx;
+       let h=forestWindHash(seed*0x9e3779b9u+0x85ebca6bu);
+       if(f32(h&65535u)/65535.0>kRatio*kRatio){thinKept=false;}
+      }
+     }
+    }
+    if(thinKept){
+     // Where it stands as drawn: on the ground the land draws there (js/continuum-ground.js). It is struck, felled and
+     // blown over where it truly stands (js/forest-trunks.js on the CPU).
+     position=r.rootScale.xyz+vec3f(0.0,continuumGroundLift(r.rootScale.xz+shift.xz),0.0);
+     // Its skeleton: its lane's, and its own when near the eye or touched; distant crowns and felled trees skip wind math.
+     var sway=0.0;
+     if(!felled&&forestWind.counts.z>model&&coarseDist<260.0){
+      let lane=model*${FOREST_WIND_LANES}u+forestWindLane(yaw,forestWindState[0].yz,i);
+      bones.x=f32(lane*FOREST_WIND_SKELETON);
+      sway=forestStandReach(lane*FOREST_WIND_SKELETON,sphere);
+      let near=distance(position+shift,F.camPos.xyz);
+      let touched=near<${FOREST_WIND_NEAR_M.toFixed(1)}||forestWindTouched(r.rootScale.xyz);
+      if(touched||near<${(FOREST_WIND_NEAR_M * 1.5).toFixed(1)}){
+       let own=forestStandOwn(i,touched,near,lane);
+       if(own.x>=0.0){
+        let skeleton=(forestWind.counts.z*${FOREST_WIND_LANES}u+u32(own.x))*FOREST_WIND_SKELETON;
+        bones=vec3f(bones.x,f32(skeleton),own.y);
+        sway=max(sway,forestStandReach(skeleton,sphere));
+       }
+      }
+     }
+     // A tree felled lies within its own height of where it stood: its record's reach takes it in.
+     reach=select(0.0,sphere.w*scale,felled);
+     let radius=(sphere.w+sway*1.25+${(CONTINUUM_WIND_FLUTTER * 2).toFixed(3)})*scale+reach;
+     let centre=position+forestStandTurn(yaw,sphere.xyz)*scale;
+     let relative=centre+shift-F.camPos.xyz;
+     keep=!forestStandOutside(earthCurve(relative,F.camPos.y),radius)||(forestStand.counts.z!=0u&&forestStandShadowed(centre,radius));
+    }
    }
   }
  }
- // A tree felled lies within its own height of where it stood: its record's reach takes it in.
- let reach=select(0.0,sphere.w*scale,felled);
- let radius=(sphere.w+sway*1.25+${(CONTINUUM_WIND_FLUTTER * 2).toFixed(3)})*scale+reach;
- let centre=position+forestStandTurn(yaw,sphere.xyz)*scale;
- let relative=centre+shift-F.camPos.xyz;
- if(forestStandOutside(earthCurve(relative,F.camPos.y),radius)&&!(forestStand.counts.z!=0u&&forestStandShadowed(centre,radius))){return;}
- let slot=atomicAdd(&forestStood[3],1u);
+ // Workgroup-level slot compaction: 1 global atomicAdd per 64-lane workgroup instead of 64.
+ var localOff=0u;
+ if(keep){localOff=atomicAdd(&forestStandCount,1u);}
+ workgroupBarrier();
+ if(localIdx==0u){let n=atomicLoad(&forestStandCount);if(n>0u){forestStandBase=atomicAdd(&forestStood[3],n);}}
+ workgroupBarrier();
+ if(!keep){return;}
+ let slot=forestStandBase+localOff;
  if(slot>=forestStand.counts.y){return;}
  // What shot has done to it (js/forest-trunks.js): felled at the height it broke, falling toward its bearing over
  // ${FOREST_FALL_SECONDS} s; or wounded, the ball's side gouged. Bearings are turned into its type's own frame.
+ let t=F.camPos.w;
  var form=${F.STANDING}u;var held=vec4f(0.0);
  if(felled){
   let code=u32(r.identity.y);
@@ -209,8 +247,6 @@ fn forestStandOwn(tree:u32,touched:bool,near:f32,lane:u32)->vec2f{
  forestPoses[pose]=vec4f(bones,f32(form));
  forestPoses[pose+1u]=held;
  forestPoses[pose+2u]=vec4f(0.0);
- // Its seed is where it stands, so its sample pattern and its thinning are its own however the trees are listed.
- let seed=forestWindHash(bitcast<u32>(r.rootScale.x)^forestWindHash(bitcast<u32>(r.rootScale.z)));
  let half=yaw*0.5;
  let tag=model|(${CONTINUUM_KIND.WIND}u<<${CONTINUUM_KIND_SHIFT}u)|select(0u,${CONTINUUM_STRUCK >>> 0}u,felled||wounded);
  forestRecords[slot]=ContinuumRecord(vec4f(position,scale),vec4f(0.0,-sin(half),0.0,cos(half)),vec4u(tag,pose,seed,bitcast<u32>(reach)),vec4u(pack4x8unorm(vec4f(r.yawColour.yzw*0.5,0.0)),0u,0u,0u));

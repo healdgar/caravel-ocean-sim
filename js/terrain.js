@@ -1538,7 +1538,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const baked=await bakeContinuumCardAtlas({
         device,shader,renderer:cardRenderer,atlas,material:cityView.material,
         typeIds:placedTypes,bakeGroup0Entries,cellSize,tintMode:CONTINUUM_CARD_TINT_CITY,salt:1,
-        isCancelled:()=>made!==cityContinuumMade||terrainDisposed,label:'city cards',
+        batchSize:4,isCancelled:()=>made!==cityContinuumMade||terrainDisposed,label:'city cards',
       });
       if(!baked)return;
       if(made!==cityContinuumMade||terrainDisposed){baked.destroy();return;}

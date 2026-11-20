@@ -5,6 +5,7 @@
 // and worn by its material (js/wgsl/forest-continuum.js), cut and cast by the one cut (js/continuum-scene.js). This
 // module holds the roots, strikes and fells them, and keeps the wood a ball meets (js/forest-trunks.js).
 import {continuumGroundView} from './continuum-ground.js';
+import {continuumProfile} from './continuum-profiles.js';
 import {createTaskYieldBudget} from './task-yield.js';
 import {CONTINUUM_RECORD_WORDS,continuumRoom} from './continuum-format.js';
 import {CONTINUUM_ROW} from './wgsl/continuum-cut.js';
@@ -616,10 +617,13 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       capsules.forEach((c,k)=>windFloats.set(capsuleWords(c),FOREST_WIND_CAPSULE_AT(k)));
       device.queue.writeBuffer(windUniform,0,windBytes);windChanged=false;
     };
+    let lastStandMinPx=0;
     const writeStand=capacity=>{
-      if(!standChanged)return;
+      const minPx=continuumProfile('forest').minPixels;
+      if(!standChanged&&minPx===lastStandMinPx)return;
+      lastStandMinPx=minPx;
       standWords.set([activeRootCount,capacity,1,skeletonRoom],0);
-      standFloats.set([shiftX,0,shiftZ,0],4);
+      standFloats.set([shiftX,0,shiftZ,minPx],4);
       device.queue.writeBuffer(standUniform,0,standBytes);standChanged=false;
     };
     let standLayout=null,windLayout=null,windRest=null,windGroup=null,atlas=null,programs=null,view=null,forestCards=null;

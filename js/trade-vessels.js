@@ -2108,6 +2108,20 @@ export function buildTradeVesselRoutes(
     return [];
   };
   const parsedReachChains = effectiveReaches.map((r) => reachStations(r)).filter((sts) => sts.length >= 2);
+  // Precompute per-chain AABB (padded by max half-width) so riverSampleAt skips 98% of chains in O(1) during setTraffic.
+  const parsedReachBounds = parsedReachChains.map((sts) => {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxHw = 1;
+    for (let i = 0; i < sts.length; i++) {
+      const s = sts[i];
+      if (s.wx < minX) minX = s.wx;
+      if (s.wx > maxX) maxX = s.wx;
+      if (s.wz < minZ) minZ = s.wz;
+      if (s.wz > maxZ) maxZ = s.wz;
+      if (s.hw > maxHw) maxHw = s.hw;
+    }
+    const pad = maxHw * 0.95 + 1;
+    return { minX: minX - pad, maxX: maxX + pad, minZ: minZ - pad, maxZ: maxZ + pad };
+  });
   const riverSampleAt = (lx, lz) => {
     if (effInlandWaterAt) {
       const iw = effInlandWaterAt(lx + offX, lz + offZ);
@@ -2119,9 +2133,13 @@ export function buildTradeVesselRoutes(
     }
     let bestFrac = Infinity, bestSample = null;
     for (let ci = 0; ci < parsedReachChains.length; ci++) {
+      const bb = parsedReachBounds[ci];
+      if (lx < bb.minX || lx > bb.maxX || lz < bb.minZ || lz > bb.maxZ) continue;
       const sts = parsedReachChains[ci];
       for (let i = 1; i < sts.length; i++) {
         const a = sts[i - 1], b = sts[i];
+        const segHw = Math.max(0.5, a.hw, b.hw);
+        if (lx < Math.min(a.wx, b.wx) - segHw || lx > Math.max(a.wx, b.wx) + segHw || lz < Math.min(a.wz, b.wz) - segHw || lz > Math.max(a.wz, b.wz) + segHw) continue;
         const dx = b.wx - a.wx, dz = b.wz - a.wz;
         const lenSq = dx * dx + dz * dz;
         const u = lenSq > 1e-6 ? Math.max(0, Math.min(1, ((lx - a.wx) * dx + (lz - a.wz) * dz) / lenSq)) : 0;

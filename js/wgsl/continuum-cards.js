@@ -8,7 +8,7 @@ import { CONTINUUM_TYPE } from '../continuum-format.js';
 import { continuumKindsWGSL } from './continuum-kinds.js';
 import { continuumDataWGSL, continuumCommonWGSL, continuumTouchWGSL, CONTINUUM_SPLAT, CONTINUUM_SINGLE_PAGE } from './continuum-cut.js';
 
-export const CONTINUUM_CARD_GRID = 8;
+export const CONTINUUM_CARD_GRID = 6;
 export const CONTINUUM_CARD_VIEWS = CONTINUUM_CARD_GRID * CONTINUUM_CARD_GRID;
 export const CONTINUUM_CARD_ELEV_BIAS = -0.22;
 export const CONTINUUM_CARD_PAD = 1.03;
@@ -218,7 +218,6 @@ struct ContinuumCardVarying {
 
 struct ContinuumCardOut {
   @location(0) colour:vec4f,
-  @builtin(frag_depth) depth:f32,
   @builtin(sample_mask) mask:u32,
 };
 
@@ -238,8 +237,49 @@ fn continuumCardCityWash(tint:f32)->vec3f {
   return wash*(0.72+0.28*fract(tint));
 }
 
-fn continuumCardClip(world:vec3f)->vec4f {
-  return F.viewProj*vec4f(earthCurve(world+continuumShift()-F.camPos.xyz,F.camPos.y),1.0);
+fn continuumCardClipPulled(world:vec3f,pull:f32)->vec4f {
+  let relative=world+continuumShift()-F.camPos.xyz;
+  return F.viewProj*vec4f(earthCurve(relative*max(1.0-pull/max(length(relative),1e-3),0.05),F.camPos.y),1.0);
+}
+
+// Lean physical card finish matching landFinishShadowed without wasted GGX/env-reflection/moon/shadow taps on distant matte cards.
+fn continuumCardFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,roughness:f32,shadowVis:vec3f)->vec4f {
+  let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
+  let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+  let isPrimary=select(0.0,1.0,LAND.domain.w>0.05);
+  let inPrimaryDomain=isPrimary*smoothstep(0.0,0.08,edgeDist);
+  var bakedLight=vec3f(1.0,1.0,0.0);
+  if(inPrimaryDomain>0.001){
+    bakedLight=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).rgb;
+  }
+  let cloudSun=solarShadowVisibility(vec3f(cloudShadowAt(world*0.001,F.sunDir.xyz))).x;
+  let sunlight=mix(1.0,bakedLight.r,inPrimaryDomain)*cloudSun;
+  let valleyAO=clamp(1.0+bakedLight.b*inPrimaryDomain*0.48,0.70,1.14);
+  let effAmbVis=ambientVisibility*valleyAO;
+  let direct=sunIlluminance()*sunlight*solarShadowVisibility(shadowVis);
+  let skyDir=normalize(vec3f(n.x*0.65,max(n.y,0.12),n.z*0.65));
+  let skyIrr=textureSampleLevel(envCube,sampC,skyDir,6.0).rgb;
+  let hemiMix=clamp(n.y*0.5+0.5,0.0,1.0);
+  let ambient=skyIrr*mix(vec3f(0.48,0.44,0.38),vec3f(1.0),hemiMix);
+  let archShadow=smoothstep(0.14,0.58,effAmbVis);
+  let sunGroundBounce=direct*max(F.sunDir.y,0.0)*(1.0-max(n.y,0.0))*0.068*vec3f(0.84,0.74,0.58)*effAmbVis;
+  let diffuseTerm=direct*diffuse*(0.30+0.70*archShadow)/PI+ambient*effAmbVis+sunGroundBounce;
+  var col=albedo*diffuseTerm;
+  if(F.sunDir.y<=0.05){
+    let v=normalize(F.camPos.xyz-world);
+    let cloudMoon=lunarShadowVisibility(vec3f(cloudShadowAt(world*0.001,lunarDirection()))).x;
+    col+=lunarSurface(n,v,albedo,roughness,vec3f(0.04),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)*cloudMoon)*lunarShadowVisibility(shadowVis));
+  }
+  col=surfaceAir(col,world);
+  let cloudBaseM=CF.shape.x*1000.0;
+  let mountainVeil=smoothstep(max(320.0,cloudBaseM-260.0),max(580.0,cloudBaseM+320.0),world.y)*step(0.5,CF.screen.w);
+  if(mountainVeil>0.001){
+    let mSh=textureSampleLevel(cloudShadowMap,cloudShadowSampler,(world.xz*0.001+CF.advection.xy)/16.0+0.5,0.0).rg;
+    let veilAlpha=clamp(1.0-mSh.r,0.0,0.82)*mountainVeil;
+    let veilCol=skyAtmo(vec3f(0,1,0))*0.45+sunIlluminance()*0.20*mSh.r;
+    return vec4f(mix(col,veilCol,veilAlpha),1.0);
+  }
+  return vec4f(col,1.0);
 }
 
 @vertex fn continuumCardVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumCardVarying {
@@ -273,7 +313,8 @@ fn continuumCardClip(world:vec3f)->vec4f {
   let triCorner=array<vec2f,3>(vec2f(0.0,2.0),vec2f(-1.7320508,-1.0),vec2f(1.7320508,-1.0))[min(vertex,2u)];
   let worldOnPlane=centre+rightW*(triCorner.x*triR)+upW*(triCorner.y*triR)+vec3f(touched);
   let layer=select(0xffffffffu,cardLayers[model],model<arrayLength(&cardLayers));
-  out.position=continuumCardClip(worldOnPlane);
+  // Analytic front-pulled depth without frag_depth preserves full GPU Early-Z rejection against hills, buildings & front cards.
+  out.position=continuumCardClipPulled(worldOnPlane,baseR*0.28);
   out.worldOnPlane=worldOnPlane;
   out.corner=triCorner*perspBoost;
   out.centreRadius=vec4f(centre,baseR);
@@ -339,7 +380,7 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
   let handoffMask=continuumMask(v.coverage,v.position.xy,salt);
   let r2=dot(v.corner,v.corner);
   if(handoffMask==0u||r2>1.12){
-    return ContinuumCardOut(vec4f(0.0),0.0,0u);
+    return ContinuumCardOut(vec4f(0.0),0u);
   }
 
   let centre=v.centreRadius.xyz;
@@ -368,30 +409,37 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
     let w0=1.0-select(f.x,f.y,upper);
     let w1=select(f.y,f.x,upper);
     let w2=abs(f.x-f.y);
-    // Rigid architecture and ships use squared barycentric weights to stay razor-sharp on gables, windows and masts.
-    let sharpRigid=tintMode==${CONTINUUM_CARD_TINT_CITY}u||tintMode==${CONTINUUM_CARD_TINT_VESSEL}u;
-    let rw0=select(w0,w0*w0,sharpRigid);
-    let rw1=select(w1,w1*w1,sharpRigid);
-    let rw2=select(w2,w2*w2,sharpRigid);
-    let rwInv=1.0/max(rw0+rw1+rw2,1e-4);
-    let bw0=rw0*rwInv;let bw1=rw1*rwInv;let bw2=rw2*rwInv;
-    let doParallax=mipF<2.5;
-    let t0=continuumCardSampleCell(c0,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
-    let t1=continuumCardSampleCell(c1,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
-    let t2=continuumCardSampleCell(c2,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
-    alpha=bw0*t0.alpha+bw1*t1.alpha+bw2*t2.alpha;
-    if(tintMode==${CONTINUUM_CARD_TINT_VESSEL}u){
-      let maxA=max(t0.alpha,max(t1.alpha,t2.alpha));
-      alpha=mix(alpha,maxA,0.35*(1.0-smoothstep(1.2,2.5,mipF)));
+    // Far horizon cards (<= 10 px, mipF >= 2.6) sample only the single dominant octahedral view (2 taps vs 6-12).
+    if(mipF>=2.6){
+      let bestCell=select(select(c2,c1,w1>=w2),c0,w0>=w1&&w0>=w2);
+      let tb=continuumCardSampleCell(bestCell,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,false);
+      albedo=tb.albedo;alpha=tb.alpha;nLocal=tb.normalLocal;zLocal=tb.zLocal;matFlag=tb.matFlag;
+    }else{
+      // Rigid architecture and ships use squared barycentric weights to stay razor-sharp on gables, windows and masts.
+      let sharpRigid=tintMode==${CONTINUUM_CARD_TINT_CITY}u||tintMode==${CONTINUUM_CARD_TINT_VESSEL}u;
+      let rw0=select(w0,w0*w0,sharpRigid);
+      let rw1=select(w1,w1*w1,sharpRigid);
+      let rw2=select(w2,w2*w2,sharpRigid);
+      let rwInv=1.0/max(rw0+rw1+rw2,1e-4);
+      let bw0=rw0*rwInv;let bw1=rw1*rwInv;let bw2=rw2*rwInv;
+      let doParallax=mipF<1.6;
+      let t0=continuumCardSampleCell(c0,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
+      let t1=continuumCardSampleCell(c1,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
+      let t2=continuumCardSampleCell(c2,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
+      alpha=bw0*t0.alpha+bw1*t1.alpha+bw2*t2.alpha;
+      if(tintMode==${CONTINUUM_CARD_TINT_VESSEL}u){
+        let maxA=max(t0.alpha,max(t1.alpha,t2.alpha));
+        alpha=mix(alpha,maxA,0.35*(1.0-smoothstep(1.2,2.5,mipF)));
+      }
+      let wa0=bw0*max(t0.alpha,1e-4);
+      let wa1=bw1*max(t1.alpha,1e-4);
+      let wa2=bw2*max(t2.alpha,1e-4);
+      let waInv=1.0/max(wa0+wa1+wa2,1e-4);
+      albedo=(t0.albedo*wa0+t1.albedo*wa1+t2.albedo*wa2)*waInv;
+      nLocal=normalize(t0.normalLocal*wa0+t1.normalLocal*wa1+t2.normalLocal*wa2+vec3f(0.0,1e-5,0.0));
+      zLocal=(t0.zLocal*wa0+t1.zLocal*wa1+t2.zLocal*wa2)*waInv;
+      matFlag=(t0.matFlag*wa0+t1.matFlag*wa1+t2.matFlag*wa2)*waInv;
     }
-    let wa0=bw0*max(t0.alpha,1e-4);
-    let wa1=bw1*max(t1.alpha,1e-4);
-    let wa2=bw2*max(t2.alpha,1e-4);
-    let waInv=1.0/max(wa0+wa1+wa2,1e-4);
-    albedo=(t0.albedo*wa0+t1.albedo*wa1+t2.albedo*wa2)*waInv;
-    nLocal=normalize(t0.normalLocal*wa0+t1.normalLocal*wa1+t2.normalLocal*wa2+vec3f(0.0,1e-5,0.0));
-    zLocal=(t0.zLocal*wa0+t1.zLocal*wa1+t2.zLocal*wa2)*waInv;
-    matFlag=(t0.matFlag*wa0+t1.matFlag*wa1+t2.matFlag*wa2)*waInv;
   }else if(r2<=0.78){
     alpha=1.0;
   }
@@ -411,20 +459,17 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
   let cardMask=select(0u,continuumSamples(effAlpha,v.position.xy,v.coverage.w,cardSeed),effAlpha>0.03);
   let finalMask=handoffMask&cardMask;
   if(finalMask==0u){
-    return ContinuumCardOut(vec4f(0.0),0.0,0u);
+    return ContinuumCardOut(vec4f(0.0),0u);
   }
 
-  // Exact 3D surface position and reversed-Z depth from parallax-reprojected sphere coordinates.
+  // True 3D surface point for accurate lighting, shadows, and atmospheric perspective.
   let localHit=p0+rayLocal*clamp(zLocal,-0.95,0.95);
   let worldPos=centre+continuumQuat(v.turn,localHit*baseR);
-  let clipPos=continuumCardClip(worldPos);
-  let fragDepth=clamp(clipPos.z/max(clipPos.w,1e-4),0.0,1.0);
   let nWorld=normalize(continuumQuat(v.turn,nLocal));
   let nDotL=dot(nWorld,F.sunDir.xyz);
 
   var diffuse=max(nDotL,0.0);
   var ambient=0.46+0.35*max(nWorld.y,0.0);
-  var wet=0.0;
   var roughness=0.84;
   var shadowVis=vec3f(1.0);
 
@@ -443,8 +488,8 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
     diffuse=mix(barkDiff,leafDiff,isLeaf);
     ambient=mix(barkAmb,leafAmb,isLeaf);
     roughness=mix(0.88,0.68,isLeaf);
-    wet=mix(0.04,0.10,isLeaf);
-    shadowVis=landShadowVisibility(worldPos+F.sunDir.xyz*0.45,nWorld);
+    let shAt=worldPos+F.sunDir.xyz*0.45;
+    if(landShadowCoverage(shAt)>0.001){shadowVis=landShadowVisibility(shAt,nWorld);}
   }else if(tintMode==${CONTINUUM_CARD_TINT_CITY}u){
     let tint=bitcast<f32>(v.info.z);
     if(tint>=-150.0){
@@ -457,7 +502,7 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
     }
     ambient=0.42+0.32*max(nWorld.y,0.0);
     roughness=0.84;
-    shadowVis=landShadowVisibility(worldPos,nWorld);
+    if(landShadowCoverage(worldPos)>0.001){shadowVis=landShadowVisibility(worldPos,nWorld);}
   }else if(tintMode==${CONTINUUM_CARD_TINT_VESSEL}u){
     let isSail=clamp(matFlag,0.0,1.0);
     let backlit=max(-nDotL,0.0)*0.45*isSail;
@@ -466,8 +511,8 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
     roughness=mix(0.76,0.88,isSail);
   }
 
-  let finished=landFinishShadowed(worldPos,nWorld,albedo,diffuse,ambient,wet,roughness,shadowVis);
-  return ContinuumCardOut(finished,fragDepth,finalMask);
+  let finished=continuumCardFinish(worldPos,nWorld,albedo,diffuse,ambient,roughness,shadowVis);
+  return ContinuumCardOut(finished,finalMask);
 }
 `;
 }

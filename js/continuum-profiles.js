@@ -34,13 +34,13 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.45, taperMetres: 48, taperPower: 1.15, splatScale: 0.90, minPixels: 1.3, maxDistance: 1400, shadowMinError: 0.05, shadowMaxDistance: 200,
   }),
   city: normalizeContinuumProfile({
-    errorScale: 0.28, taperMetres: 420, taperPower: 1.05, splatScale: 6.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.28, shadowMaxDistance: 380,
+    errorScale: 0.28, taperMetres: 420, taperPower: 1.05, splatScale: 6.0, minPixels: 1.25, maxDistance: 0, shadowMinError: 0.28, shadowMaxDistance: 380,
   }),
   boulders: normalizeContinuumProfile({
     errorScale: 0.50, taperMetres: 420, taperPower: 1.0, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.05, shadowMaxDistance: 400,
   }),
   forest: normalizeContinuumProfile({
-    errorScale: 0.48, taperMetres: 260, taperPower: 1.05, splatScale: 11.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.55, shadowMaxDistance: 260,
+    errorScale: 0.48, taperMetres: 260, taperPower: 1.05, splatScale: 11.0, minPixels: 1.75, maxDistance: 0, shadowMinError: 0.55, shadowMaxDistance: 260,
   }),
   meadow: normalizeContinuumProfile({
     errorScale: 1.45, taperMetres: 120, taperPower: 1.20, splatScale: 1.1, minPixels: 2.0, maxDistance: 1500, shadowMinError: 0.22, shadowMaxDistance: 140,

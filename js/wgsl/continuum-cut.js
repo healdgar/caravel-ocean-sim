@@ -44,14 +44,14 @@ export const CONTINUUM_LIVE_WORD = CONTINUUM_DRAW_WORDS + CONTINUUM_VIEW_LISTS;
 export const CONTINUUM_DRAWS_BYTES = (CONTINUUM_LIVE_WORD + 1) * 4;
 export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 48;
 // The select's workgroups each cut this many instances, and are laid in rows of CONTINUUM_ROW.
-export const CONTINUUM_BATCH = 2;
+export const CONTINUUM_BATCH = 8;
 export const CONTINUUM_ROW = 8192;
 // How many cuts an instance may take, each at twice the last's pixel error, when its finest no longer fits the lists.
 export const CONTINUUM_LEVELS = 4;
-// Workgroup lanes and packed 8-bit cluster-test cache (4 clusters per u32 -> 14,336 clusters cached in 14 KB).
-// Total workgroup storage stays strictly under WebGPU's 16 KB guaranteed limit (~14.5 KB).
+// Workgroup lanes and packed 8-bit cluster-test cache (4 clusters per u32 -> 12,288 clusters cached in 12 KB).
+// Total workgroup storage stays strictly under WebGPU's 16 KB guaranteed limit (~14.2 KB).
 const CONTINUUM_WORKGROUP = 128;
-const CONTINUUM_KEPT_ITERS = 112;
+const CONTINUUM_KEPT_ITERS = 96;
 const CONTINUUM_KEPT_WORDS = (CONTINUUM_KEPT_ITERS / 4) * CONTINUUM_WORKGROUP;
 // The entries ahead of the lists that hold an instance's state for the frame.
 export const CONTINUUM_STATE_ENTRIES = 3;
@@ -359,6 +359,8 @@ var<workgroup> continuumCursor:array<atomic<u32>,${B * 3}>;
 var<workgroup> continuumKept:array<u32,CONTINUUM_KEPT_WORDS>;
 var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // real triangles the scene's error asks of each view list
 var<workgroup> continuumFrustum:array<vec4f,5>;         // unit-normal frustum planes, computed once per workgroup
+var<workgroup> continuumCardWant:array<u32,${B}>;       // 1 if slot wants a list-3 splat/card entry (batched once per workgroup)
+var<workgroup> continuumCardBase:u32;                   // reserved list-3 base entry for this workgroup
 fn continuumOutsideFast(at:vec3f,reach:f32)->bool {
   if(dot(at,at)<=reach*reach){return false;}
   let p=vec4f(at,1.0);
@@ -435,6 +437,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
   if(lane<CONTINUUM_BATCH){
     let instance=batch+lane;
     var tries=vec4u(0u);var cut=vec4f(1.0,1.0,1.0,0.0);var far=vec4u(CONTINUUM_FULL,0u,CONTINUUM_FULL,0u);var lift=vec2f(0.0);
+    var wantCard=0u;
     var record:ContinuumRecord;
     if(instance<atomicLoad(&continuumDraws[CONTINUUM_LIVE])){
       record=continuumRecords[instance];
@@ -522,9 +525,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
               if(share>0u){
                 splatScale=continuumProfileThin(span,select(away,0.0,isImportant),continuumView.limits,seed);
                 if(splatShare>0u&&splatScale>0.0){
-                  atomicAdd(&continuumCounted[3],1u);
-                  let at=continuumReserve(3u,1u);
-                  if(at!=CONTINUUM_FULL){continuumLists[at]=vec2u(instance,CONTINUUM_SPLAT_ENTRY<<28u);}
+                  wantCard=1u;
                 }
                 if(splatShare<255u){
                   for(var j=0u;j<CONTINUUM_LEVELS;j++){
@@ -549,13 +550,26 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+1u]=vec2u(bitcast<u32>(morph),pack2x16float(vec2f(splatScale,lift.y)));
       continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+2u]=vec2u(shadowShare,0u);
     }
-    continuumSlotRecord[lane]=record;continuumSlotCut[lane]=cut;continuumSlotTries[lane]=tries;continuumSlotFar[lane]=far;continuumSlotLift[lane]=lift.x;
+    continuumSlotRecord[lane]=record;continuumSlotCut[lane]=cut;continuumSlotTries[lane]=tries;continuumSlotFar[lane]=far;continuumSlotLift[lane]=lift.x;continuumCardWant[lane]=wantCard;
   }
   workgroupBarrier();
   if(lane==0u){
     var total=0u;
-    for(var k=0u;k<CONTINUUM_BATCH;k++){continuumSlotStart[k]=total;let t=continuumSlotTries[k];total+=max(t.x,t.y);}
+    var cardTotal=0u;
+    for(var k=0u;k<CONTINUUM_BATCH;k++){
+      continuumSlotStart[k]=total;
+      let t=continuumSlotTries[k];
+      total+=max(t.x,t.y);
+      let cw=continuumCardWant[k];
+      continuumCardWant[k]=cardTotal|(cw<<16u);
+      cardTotal+=cw;
+    }
     continuumSlotStart[CONTINUUM_BATCH]=total;
+    continuumCardBase=CONTINUUM_FULL;
+    if(cardTotal>0u){
+      atomicAdd(&continuumCounted[3],cardTotal);
+      continuumCardBase=continuumReserve(3u,cardTotal);
+    }
     if(total>0u){
       let m=F.viewProj;
       let w=vec4f(m[0].w,m[1].w,m[2].w,m[3].w);
@@ -566,6 +580,10 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     }
   }
   workgroupBarrier();
+  if(lane<CONTINUUM_BATCH&&continuumCardBase!=CONTINUUM_FULL){
+    let cw=continuumCardWant[lane];
+    if((cw>>16u)!=0u){continuumLists[continuumCardBase+(cw&65535u)]=vec2u(batch+lane,CONTINUUM_SPLAT_ENTRY<<28u);}
+  }
   let total=continuumSlotStart[CONTINUUM_BATCH];
   if(total>0u){
     // Every candidate cluster of the workgroup's instances tried by its lanes together, and counted at each level.
