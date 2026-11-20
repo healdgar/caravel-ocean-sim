@@ -303,6 +303,8 @@ fn skyAtmo(dir: vec3f) -> vec3f {
 // Solar disc + subtle Mie atmospheric aureole shared by air and refracted underwater views.
 export const SUN_DISK = /* wgsl */ `
 fn sunDisk(dir: vec3f) -> vec3f {
+  let sunVisDisk = celestialSolarVisibility();
+  if (sunVisDisk <= 0.0001) { return vec3f(0.0); }
   let c = dot(dir, F.sunDir.xyz);
   if (c < 0.96) { return vec3f(0.0); }
   let ang = sqrt(max(2.0 * (1.0 - c), 0.0));
@@ -319,11 +321,13 @@ fn sunDisk(dir: vec3f) -> vec3f {
     let rad = F.sunDir.w / (PI * SUN_ANG_R * SUN_ANG_R);
     out += rad * limb * edge;
   }
-  // Subtle physical Mie solar aureole / forward-scatter corona outside the photosphere edge.
-  let aureole = exp(-ang / (SUN_ANG_R * 4.5)) * 0.32 + exp(-ang / (SUN_ANG_R * 16.0)) * 0.045;
+  // Subtle physical Mie solar aureole / forward-scatter corona outside the photosphere edge,
+  // smoothly windowed to zero well before the c < 0.96 cutoff so no hard semicircle ring can ever appear.
+  let aureoleWin = smoothstep(0.96, 0.992, c);
+  let aureole = (exp(-ang / (SUN_ANG_R * 4.5)) * 0.32 + exp(-ang / (SUN_ANG_R * 16.0)) * 0.045) * aureoleWin;
   let lowSun = 0.65 + 0.85 * (1.0 - smoothstep(0.04, 0.42, F.sunDir.y));
   out += F.sunDir.w * (0.045 + 0.022 * F.atmo.x) * lowSun * aureole * (1.0 - edge * 0.85);
-  return out * trans;
+  return out * trans * sunVisDisk;
 }
 `;
 

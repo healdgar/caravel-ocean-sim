@@ -644,6 +644,24 @@ struct LandPit{normal:vec3f,cover:f32,soil:vec3f,relief:f32,sun:f32,sky:f32,pool
 // (Kaplanyan and Tokuyoshi's geometric specular antialiasing). Set where a normal has its relief.
 var<private> landNormalSpread:f32=0.0;
 var<private> landWindowEmission:vec3f=vec3f(0.0);
+// Realistic nocturnal household candle schedule shared across all city & port buildings:
+//   - Only a sparse minority of windows light up at dusk (~26%), never whole facades at once
+//   - Households progressively snuff candles as evening deepens into night (~26% -> ~4% at midnight)
+//   - Early risers / bakers relight a modest scattering (~14%) shortly before dawn, then snuff at sunrise
+//   - Per-window seed staggers turn-on and bedtime smoothly with zero hard pops when scrubbing time.
+fn landNightWindowFactor(sunDir:vec3f,winSeed:f32)->f32{
+  let darkEnv=1.0-smoothstep(-0.02,0.09,sunDir.y);
+  if(darkEnv<=0.001){return 0.0;}
+  // sunDir.x < 0 is west (evening/dusk), sunDir.x > 0 is east (pre-dawn); smooth blend across solar midnight.
+  let isDawn=smoothstep(-0.18,0.18,sunDir.x);
+  let eveDepth=smoothstep(-0.03,-0.46,sunDir.y);
+  let eveFrac=mix(0.27,0.04,eveDepth);
+  let dawnDepth=smoothstep(-0.02,-0.32,sunDir.y);
+  let dawnFrac=mix(0.15,0.04,dawnDepth);
+  let activeFrac=mix(eveFrac,dawnFrac,isDawn);
+  let lit=1.0-smoothstep(activeFrac-0.025,activeFrac+0.015,winSeed);
+  return darkEnv*lit;
+}
 fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32,shadowVis:vec3f)->vec4f{
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
@@ -1171,11 +1189,12 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
         surfaceWet=0.62*(1.0-frameMask*0.88);
         mirrorSpread=smoothstep(.04,.4,length(dx)+length(dy))*.03;
         ambientVisibility=(0.52+0.28*winShade)*winAO;
-        let candleSched=(1.0-smoothstep(-0.04,0.14,F.sunDir.y))*(1.0-clamp(structDmg*2.2,0.0,1.0));
-        if(candleSched>0.001){
+        let dmgIntact=1.0-clamp(structDmg*2.2,0.0,1.0);
+        if(F.sunDir.y<0.10&&dmgIntact>0.01){
           let winId=floor(world.x*0.35+world.z*0.35)*31.7+floor(world.y*0.32)*73.1;
           let winSeed=fract(sin(winId)*43758.5453);
-          if(winSeed>0.32){
+          let candleSched=landNightWindowFactor(F.sunDir.xyz,winSeed)*dmgIntact;
+          if(candleSched>0.001){
             let flicker=0.86+0.09*sin(F.camPos.w*5.4+winSeed*19.0)+0.05*cos(F.camPos.w*13.1-winSeed*29.0);
             let paneGlow=(0.60+0.40*(1.0-winUV.y))*(1.0-frameMask*0.90);
             let candleExp=1.0/max(F.post.x,1.0);
@@ -1286,10 +1305,13 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
         albedo=mix(albedo*mix(1.0,0.86,1.0-seen),within*shadeAlbedo,opening*seen);
         roughness=mix(roughness,0.62,opening*seen*(1.0-shut));
         relief=relief-opening*seen*0.004;
-        let candleSched=(1.0-smoothstep(-0.04,0.14,F.sunDir.y));
-        if(candleSched>0.001&&shut<0.5&&pick<0.3){
-          let flicker=0.86+0.09*sin(F.camPos.w*5.4+pick*19.0)+0.05*cos(F.camPos.w*13.1-pick*29.0);
-          landWindowEmission=vec3f(0.34,0.145,0.032)*(candleSched*flicker*opening*mix(0.35,1.0,seen)/max(F.post.x,1.0)*(0.5+pick));
+        if(F.sunDir.y<0.10&&shut<0.5){
+          let roomSeed=fract(sin(cell*78.233+11.7)*43758.5453);
+          let candleSched=landNightWindowFactor(F.sunDir.xyz,roomSeed);
+          if(candleSched>0.001){
+            let flicker=0.86+0.09*sin(F.camPos.w*5.4+pick*19.0)+0.05*cos(F.camPos.w*13.1-pick*29.0);
+            landWindowEmission=vec3f(0.34,0.145,0.032)*(candleSched*flicker*opening*mix(0.35,1.0,seen)/max(F.post.x,1.0)*(0.55+0.45*roomSeed));
+          }
         }
       }
     }

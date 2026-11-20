@@ -57,6 +57,7 @@ export async function createVesselRecoil({device,computePipe,posedBuffer,recoilM
   }catch(error){deltas.destroy();if(!owner.references){assets.records.destroy();owner.destroyed=true;}throw error;}
   owner.references++;let destroyed=false,active=false;
   return {assets,
+    get active(){return !destroyed&&active;},
     update(guns,boat){
       if(destroyed)return false;
       const scale=gunModelScale(boat);

@@ -406,9 +406,13 @@ export function retargetForestPackToProcedural(
       if (tended && (tended.none || isVeteran || isSatellite)) return -1;
 
       if (port && (port.clearRadius > 0 || port.waterfront?.length > 0)) {
-        const envPad = port.hasIndigenousSettlement ? 8.5 : 10;
+        const envPad = port.hasIndigenousSettlement ? 8.5 : (tended ? 4.5 : 10);
         const clearEnv = !portClearanceEnvelope(port, x, z, envPad);
+        // Never nuke board-designated gardens, olive groves, or planted town trees with the coarse radial disc;
+        // portClearanceEnvelope, secCityBlocked, and streetEdgeAt already keep them off buildings, walls, and streets.
         const clearRad =
+          !planted &&
+          !tended &&
           !port.hasIndigenousSettlement &&
           port.clearRadius > 0 &&
           Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38;
@@ -706,14 +710,14 @@ export function retargetForestPackToProcedural(
       const wild = [validLandCells, nearLandCells, midLandCells, farLandCells];
       [validLandCells, nearLandCells, midLandCells, farLandCells] = [tendedCells.all, tendedCells.near, tendedCells.mid, tendedCells.far];
       setBandCuts();
-      const maxTendedShare = country?.board ? 0.26 : 0.48;
-      const wildWeight = country?.board ? 4.5 : 1.35;
+      const maxTendedShare = country?.board ? 0.34 : 0.48;
+      const wildWeight = country?.board ? 3.2 : 1.35;
       const tendedShare = wild[0].length > 0
-        ? Math.min(maxTendedShare, Math.max(0.10, tendedCells.all.length / Math.max(1, tendedCells.all.length + wild[0].length * wildWeight)))
+        ? Math.min(maxTendedShare, Math.max(0.14, tendedCells.all.length / Math.max(1, tendedCells.all.length + wild[0].length * wildWeight)))
         : 1;
       const tendedBudget = Math.min(effectiveSecMaxRoots, totalPlaced + Math.round(Math.max(0, effectiveSecMaxRoots - totalPlaced) * tendedShare));
       const tendedSeed = (seed ^ 0x3c6ef372) >>> 0;
-      for (let step = 0; step < (tendedBudget - totalPlaced) * 7 && totalPlaced < tendedBudget; step++) {
+      for (let step = 0; step < (tendedBudget - totalPlaced) * 10 && totalPlaced < tendedBudget; step++) {
         const h1 = hash32Forest(tendedSeed + Math.imul(step, 0x9e3779b1));
         const h2 = hash32Forest(h1 ^ Math.imul(step, 0x85ebca6b) ^ 0x27d4eb2f);
         const [sx, sz] = drawCandidateXZ(h1, h2);
@@ -1080,7 +1084,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const landMaterial=landContinuumMaterial(landSource);
   // A city's buildings, through the one continuum: the city's material, shaded by the land's own surfaces, in a view
   // of its own (js/wgsl/city-continuum.js).
-  const cityViewPromise=requestContinuumView({device,shader,material:cityContinuumMaterial(citySource),format,samples});
+  const cityMaterial=cityContinuumMaterial(citySource);
+  const cityViewPromise=requestContinuumView({device,shader,material:cityMaterial,format,samples});
   // Ground boulders removed (smooth boulders disabled until redesigned).
   const boulderViewPromise=Promise.resolve(null);
   const terrainPipesPromise=Promise.all([
@@ -1092,7 +1097,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
     // The land's coarser cut of the same patches, morphed at the captures' own pixel error.
     requestContinuumCapture(wo,landMaterial),
-  ]):[null]);
+    // Waterfront piers, pilings, quay walls, and bridges captured below the waterline for physical water refraction.
+    requestContinuumCapture(wo,cityMaterial),
+  ]):[null,null]);
   submergedPipesPromise.catch(()=>{});
   // The rest of the land's programs, asked for now so that they compile while the land itself is being made. Left
   // until each is first needed, they compile one after another once it is.
@@ -1614,9 +1621,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let activeTownField=townField(proceduralPack?.port?.streets);
   let nearResources=[...resources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources,...neuralPbr.terrainResources];
   let cityGroup=bind(cityPipe,cityEntries(nearResources));const cityClouds=clouds.bindVolume(cityPipe,'shadow');
-  const [submerged]=await submergedPipesPromise;
+  const [submerged,citySubmerged]=await submergedPipesPromise;
   let submergedGroup=submerged?.bindGroup(landEntries(nearResources).map(([binding,resource])=>({binding,resource})));
   const submergedClouds=submerged?clouds.bindVolume(submerged.pipeline,'shadow'):null;
+  let citySubmergedGroup=citySubmerged?.bindGroup(cityEntries(nearResources).map(([binding,resource])=>({binding,resource})));
+  const citySubmergedClouds=citySubmerged?clouds.bindVolume(citySubmerged.pipeline,'shadow'):null;
   // The land: every piece cut and drawn through the one continuum (js/land-continuum.js, AGENTS.md rule 3). A piece is
   // the coast's own lattice ('0,0'; on Saba with the surveyed bay as a finer window in it) or a streamed section. One
   // is baked when it comes or its ground or a neighbour's changes, one a frame and the nearest first; every frame the
@@ -1934,6 +1943,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     nearResources=[...resources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources,...neuralPbr.terrainResources];
     cityGroup=bind(cityPipe,cityEntries(nearResources));
     submergedGroup=submerged?.bindGroup(landEntries(nearResources).map(([binding,resource])=>({binding,resource})));
+    citySubmergedGroup=citySubmerged?.bindGroup(cityEntries(nearResources).map(([binding,resource])=>({binding,resource})));
     landContinuum?.rebind('0,0',bind(landPipe,landEntries(nearResources)),submergedGroup??null);
     boulderContinuum?.rebind(nearResources);
     inlandWater?.rebind(nearResources);
@@ -3013,6 +3023,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(!submerged)return;
       // Above and below the water alike, the land's coarser cut of the same patches.
       submerged.bind(pass,above);landContinuum?.drawCapture(pass,submergedClouds);
+      // Draw submerged pier pilings, quay foundations, bridges, and waterfront masonry into the water refraction pass.
+      if(citySubmerged&&citySubmergedGroup&&citySubmergedClouds&&(cityContinuum?.count||portFractures)){
+        citySubmerged.bind(pass,above);
+        pass.setBindGroup(0,citySubmergedGroup);
+        pass.setBindGroup(1,citySubmergedClouds);
+        if(cityContinuum?.count){
+          pass.setBindGroup(citySubmerged.material.data.group,cityContinuum.dataGroup(citySubmerged.pipeline,citySubmerged.material));
+          cityContinuum.drawCaptureLists(pass);
+        }
+        portFractures?.drawCapture?.(pass,citySubmerged);
+      }
       meadowGrass?.drawSubmerged(pass,above);
       tradeVessels?.drawSubmerged?.(pass,above);
     },

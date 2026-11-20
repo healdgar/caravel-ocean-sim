@@ -1566,6 +1566,11 @@ function createFracturedContinuum({ device, continuum, grounded = null }) {
     },
     encode(pass) { scene?.encode(pass); },
     draw(pass, group, clouds) { scene?.draw(pass, group, clouds); },
+    drawCapture(pass, capture) {
+      if (!scene || !capture) return;
+      pass.setBindGroup(capture.material.data.group, scene.dataGroup(capture.pipeline, capture.material));
+      scene.drawCaptureLists(pass);
+    },
     drawShadow(pass) { scene?.drawShadow(pass); },
     continuumDraws() { return scene?.continuumDraws() ?? []; },
     setWorldOffset(x, z) { offsetX = x; offsetZ = z; scene?.setWorldOffset(x, z); },
@@ -1668,6 +1673,7 @@ export function createPortFractures({ device, port, groundAt, waterAt = null, da
     // In the frame's compute pass: every struck building's pieces cut at the scene's one pixel error.
     encode(pass) { drawn.encode(pass); },
     draw(pass, group, clouds) { drawn.draw(pass, group, clouds); },
+    drawCapture(pass, capture) { drawn.drawCapture(pass, capture); },
     drawShadow(pass) { drawn.drawShadow(pass); },
     continuumDraws() { return drawn.continuumDraws(); },
     setWorldOffset(x, z) { drawn.setWorldOffset(x, z); },

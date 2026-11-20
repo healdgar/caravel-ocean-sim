@@ -401,8 +401,11 @@ fn continuumTry(slot:u32,i:u32)->u32 {
         let cullAt=cullWorld+continuumShift()-F.camPos.xyz;
         let sea=continuumFlagged(record,CONTINUUM_SEA);
         let cullR=cull.w*cut.z;
+        // Skip per-cluster Hi-Z on low ground-draped clusters (e.g. meadow grass blades) where the terrain directly
+        // beneath them sits inside the same coarse Hi-Z depth tile on rolling slopes and would flicker them frame-to-frame.
+        let skipClusterHiZ=continuumFlagged(record,CONTINUUM_EXACT)||(continuumFlagged(record,CONTINUUM_GROUNDED)&&cullR<2.5);
         if(!continuumOutsideFast(select(earthCurve(cullAt,F.camPos.y),cullAt,sea),cullR)
-          &&(continuumFlagged(record,CONTINUUM_EXACT)||!continuumHiZOccluded(cullWorld,cullR,sea))){
+          &&(skipClusterHiZ||!continuumHiZOccluded(cullWorld,cullR,sea))){
           for(var j=0u;j<CONTINUUM_LEVELS;j++){
             let allowedJ=cut.y*continuumLevel(j);
             if(parentPx>allowedJ&&ownPx<=allowedJ){mask|=1u<<j;}
@@ -509,8 +512,11 @@ fn continuumTry(slot:u32,i:u32)->u32 {
           }
           // Afloat, the earth's curve does not bend it: the sea's own surface is drawn flat about the eye.
           let sea=continuumFlagged(record,CONTINUUM_SEA);
+          let lowGrounded=continuumFlagged(record,CONTINUUM_GROUNDED)&&continuumKindOf(record)==${CONTINUUM_KIND.WIND}u&&continuumFlagged(record,CONTINUUM_STRETCHED);
+          let hiZWorld=select(world,world+vec3f(0.0,0.9,0.0),lowGrounded);
+          let hiZReach=select(reach,reach+0.6,lowGrounded);
           let viewVisible=!continuumOutside(select(earthCurve(relative,F.camPos.y),relative,sea),reach)
-            &&(isImportant||continuumFlagged(record,CONTINUUM_EXACT)||away<=reach*1.4+4.0||!continuumHiZOccluded(world,reach,sea));
+            &&(isImportant||continuumFlagged(record,CONTINUUM_EXACT)||away<=reach*1.4+4.0||!continuumHiZOccluded(hiZWorld,hiZReach,sea));
           if(viewVisible){
             // Smooth outer-range hash dissolve when maxDistance > 0 (never a hard pop).
             let seed=record.tag.z*0x9e3779b9u+0x85ebca6bu;
@@ -1071,7 +1077,7 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
     ? 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { return surfaceAir(colour,world); }\n'
     // Under water the water's surface applies the air once; the call is kept so that every binding stays reachable.
     : 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { if(F.screen.x>=0.0&&captureMode.x<.5){return colour;} return surfaceAir(colour,world); }\n';
-  const body = material.prelude() + (material.core ? '' : CONTINUUM_CORE_WGSL) + continuumDataWGSL(material.data.group, material.data.binding, 'read', paging)
+  const body = material.prelude(pass) + (material.core ? '' : CONTINUUM_CORE_WGSL) + continuumDataWGSL(material.data.group, material.data.binding, 'read', paging)
     + continuumCommonWGSL(paging) + continuumKindsWGSL() + continuumTouchWGSL(paging) + CONTINUUM_SPLAT + CONTINUUM_SURFACE + continuumVaryingWGSL(material) + air + material.wgsl();
   // The samples a fragment keeps: its share of the handoff, and the material's mask and coverage where it has them.
   const mask = `continuumMask(v.coverage,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''}${material.coverage ? `&${material.name}Coverage(v,front)` : ''}`;
@@ -1089,8 +1095,9 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
 }
 `;
   }
+  const skipHigh = material.captureWatersideOnly ? 'if(captureMode.x<0.5&&listed.entry.x<continuumView.counts.x&&continuumRecords[listed.entry.x].place.y>5.0){var h:ContinuumVarying;h.position=CONTINUUM_HIDDEN;return h;}' : '';
   return capture.directive + body + /* wgsl */`
-@vertex fn continuumCaptureVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { var out=continuumVertex(vertex,listed,false);out.coverage.w=1u;return out; }
+@vertex fn continuumCaptureVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { ${skipHigh}var out=continuumVertex(vertex,listed,false);out.coverage.w=1u;return out; }
 fn waterCaptureMaterial(v:ContinuumVarying,front:bool)->vec4f { return ${material.name}Shade(v,front); }
 ` + capture.tail({ fragment: 'fn continuumCaptured(v:ContinuumVarying,front:bool)->vec4f', args: 'v,front', world: 'v.world' }) + /* wgsl */`
 // Its one sample kept as the view keeps its samples: by the handoff's share and the material's mask and coverage (what

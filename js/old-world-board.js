@@ -1851,8 +1851,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const lvl = Number.isFinite(river.levels?.[s]) ? river.levels[s] : oh - 0.55;
       rawProf[s] = Math.min(oh - 0.35, 0.72 * lvl + 0.28 * (oh - 0.35));
     }
-    const prof = pavMonotoneDesc(rawProf);
-    for (let s = 1; s < m; s++) prof[s] = Math.min(prof[s - 1], prof[s]);
+    // Enforce strictly descending water profile via running minimum (never averaging upward above valley floors!).
+    const prof = new Float32Array(m);
+    prof[0] = rawProf[0];
+    for (let s = 1; s < m; s++) prof[s] = Math.min(prof[s - 1], rawProf[s]);
 
     let stations = [];
     const flushReach = () => {
@@ -2121,7 +2123,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
       const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
       const tx = dx / dLen, tz = dz / dLen, nx = -tz, nz = tx;
-      const bankW = Math.max(1.85, Math.min(4.8, 1.45 + st[i].hw * 0.45));
+      const bankW = Math.max(2.4, Math.min(6.5, 1.8 + st[i].hw * 0.42));
       const crestHwL = (st[i].hwL ?? st[i].hw) + bankW;
       const crestHwR = (st[i].hwR ?? st[i].hw) + bankW;
       const lx = st[i].wx - nx * crestHwL, lz = st[i].wz - nz * crestHwL;
@@ -2132,8 +2134,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       st[i].crestHwL = crestHwL; st[i].crestHwR = crestHwR; st[i].crestHw = 0.5 * (crestHwL + crestHwR);
       st[i].lx = lx; st[i].lz = lz; st[i].ly = ly; st[i].rx = rx; st[i].rz = rz; st[i].ry = ry;
       if (clampInitialWy && !st[i].seaMouth) {
-        const natMin = Math.min(origAt(lx, lz), origAt(rx, rz));
-        const cap = Math.min(st[i].wy, Math.min(ly, ry) - 0.16, natMin - 0.30);
+        const natMin = Math.min(origAt(st[i].wx, st[i].wz), origAt(lx, lz), origAt(rx, rz));
+        const cap = Math.min(st[i].wy, Math.min(ly, ry) - 0.22, natMin - 0.32);
         st[i].wy = Math.max(0.06, cap);
       }
     }
@@ -2141,9 +2143,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   for (const chain of reachChains) {
     updateChainCrests(chain, true);
     const st = chain.stations;
-    const leveled = pavMonotoneDesc(st.map((s) => s.wy));
     for (let i = 0; i < st.length; i++) {
-      if (!st[i].seaMouth) st[i].wy = Math.max(0.06, Math.min(st[i].wy, leveled[i]));
+      if (!st[i].seaMouth) st[i].wy = Math.max(0.06, st[i].wy);
       else st[i].wy = Math.max(0.0, st[i].wy);
       if (i > 0) st[i].wy = Math.min(st[i].wy, st[i - 1].wy);
     }
@@ -2192,10 +2193,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
           trib[i].wy = Math.min(trib[i].wy, targetWy + Math.max(0, trib[i].wy - targetWy) * sm);
         }
       }
-      end.wy = targetWy;
-      for (let i = trib.length - 2; i >= 0; i--) {
-        trib[i].wy = Math.max(trib[i].wy, trib[i + 1].wy);
-      }
+      // Match tributary mouth to mainstem without ever lifting upstream stations above natural valley banks.
+      end.wy = Math.min(end.wy, targetWy);
       for (let i = 1; i < trib.length; i++) {
         trib[i].wy = Math.min(trib[i].wy, trib[i - 1].wy);
       }
@@ -2205,11 +2204,6 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (chain.isCanal) continue;
     for (let i = 1; i < chain.stations.length; i++) {
       chain.stations[i].wy = Math.min(chain.stations[i].wy, chain.stations[i - 1].wy);
-    }
-    let y = -Infinity;
-    for (let i = chain.stations.length - 1; i >= 0; i--) {
-      y = Math.max(y, chain.stations[i].wy);
-      chain.stations[i].wy = y;
     }
   }
 
@@ -2222,7 +2216,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const a = st[s], b = st[s1];
       const maxHw = Math.max(a.hw, b.hw);
       const baseFlatR = grid.step > 20 ? maxHw + 0.5 : maxHw * 0.72;
-      const outer = grid.step > 20 ? baseFlatR + Math.min(grid.step * 0.55, 8.0) : maxHw + 4.4;
+      // Grade river valley banks smoothly over >= 1.35 heightmap grid cells so coarse terrain never forms sawtooth cliffs.
+      const outer = grid.step > 20 ? baseFlatR + Math.min(grid.step * 0.65, 10.0) : maxHw + Math.max(grid.step * 1.35, Math.min(18.0, maxHw * 0.85 + 6.5));
       const scanR = Math.max(outer, maxHw + grid.step * 0.45);
       const i0 = Math.max(1, Math.floor((Math.min(a.wx, b.wx) - scanR - grid.x0) / grid.step));
       const i1 = Math.min(n - 2, Math.ceil((Math.max(a.wx, b.wx) + scanR - grid.x0) / grid.step));
@@ -2340,8 +2335,23 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       }
     }
   }
-  // Refresh outer bank crest heights (ly, ry) against the carved terrain surface so crests sit watertightly on heights.
-  for (const chain of reachChains) updateChainCrests(chain, false);
+  // Refresh outer bank crest heights (ly, ry) against the carved terrain surface, then guarantee every inland
+  // station's water surface stays strictly seated below BOTH bank crests so rivers never float above valley ground.
+  for (const chain of reachChains) {
+    updateChainCrests(chain, false);
+    const st = chain.stations;
+    for (let i = 0; i < st.length; i++) {
+      if (!st[i].seaMouth) {
+        const minBankY = Math.min(st[i].ly, st[i].ry);
+        if (minBankY > 0.24) {
+          st[i].wy = Math.max(0.06, Math.min(st[i].wy, minBankY - 0.16));
+        } else {
+          st[i].wy = Math.max(0.06, Math.min(st[i].wy, Math.max(0.06, minBankY - 0.04)));
+        }
+      }
+      if (i > 0) st[i].wy = Math.min(st[i].wy, st[i - 1].wy);
+    }
+  }
 
   // Convex hull helper for watertight 2D sub-grid terrain riverCuts clipping across junctions (zero dry-rim pyramid!).
   const convexHull2D = (pts) => {
@@ -2561,7 +2571,11 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const vertKind = isCanal ? 1.0 : Math.min(0.95, estuaryT * 0.95);
       const seaOpen = Math.max(0, Math.min(1, (estuaryT - 0.36) / 0.18));
       const jetDecay = hasSeaMouth ? (1 - 0.68 * Math.max(0, (estuaryT - 0.28) / 0.72)) : 1;
-      const hwL = (cur.hwL ?? cur.hw) + 0.45, hwR = (cur.hwR ?? cur.hw) + 0.45, hwMean = 0.5 * (hwL + hwR);
+      const bankW = Math.max(2.4, Math.min(6.5, 1.8 + cur.hw * 0.42));
+      // Tuck outer water edges cleanly into the rising bank slope (where bank height >= wy) so rivers seal watertightly
+      // with the ground on both sides with zero floating lip or dark air gap beneath the shoreline.
+      const bankTuck = (1 - seaOpen) * Math.min(bankW * 0.46, 2.2) + seaOpen * 0.45;
+      const hwL = (cur.hwL ?? cur.hw) + bankTuck, hwR = (cur.hwR ?? cur.hw) + bankTuck, hwMean = 0.5 * (hwL + hwR);
       const thal = cur.thalwegB ?? 0;
       // Check proximity just downstream of bridges to excite cutwater eddies.
       let pierWake = 0;
@@ -2582,7 +2596,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         const asymMul = isCanal ? (1 - 0.55 * edge * edge) : (0.16 + 0.92 * edgeTaper * (0.52 + 0.62 * thalFactor));
         const flankMinDepth = seaOpen * cur.depth * 0.65;
         const localDepth = Math.max(flankMinDepth, bt === -1.0 || bt === 1.0 ? 0.0 : cur.depth * asymMul);
-        const yOff = (edge > 0.95 ? -0.04 : edge > 0.65 ? -0.012 : 0.0) * (1 - seaOpen);
+        const yOff = (edge > 0.95 ? -0.08 : edge > 0.84 ? -0.02 : 0.0) * (1 - seaOpen);
 
         // Lateral velocity shear profile + bend separation counter-current on steep inner point bars + sea-mouth outflow fan.
         const distFromThal = bt - thal;

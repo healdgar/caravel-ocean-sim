@@ -242,9 +242,13 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     plumeRelY,
     seaBlendV
   );
+  // Prevent the ocean surface (at y = oceanDisp.y) from Z-fighting up through low tidal river-mouth reaches.
+  let tidalOceanFloor = oceanDisp.y + 0.045;
+  let baseSurfaceY = oceanDisp.y * vertW + splashY + relToOceanY;
+  let finalSurfaceY = select(baseSurfaceY, max(baseSurfaceY, tidalOceanFloor), estuaryT > 0.02 && posKind.y < 0.35);
   let shifted = vec3f(
     displacedXZ.x,
-    oceanDisp.y * vertW + splashY + relToOceanY,
+    finalSurfaceY,
     displacedXZ.y
   );
 

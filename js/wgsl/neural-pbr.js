@@ -181,9 +181,15 @@ fn evalNeuralPbr(
     vec4f(-0.78, -0.78, -0.44, -0.88),
     vec4f(0.78, 0.78, 0.44, 0.88)
   ) * strength;
+  // Anchor micro-albedo modulation to luminance with bounded chromatic drift and a strict ceiling on blue-channel
+  // spikes so close-up porous plaster, stone, and timber never develop unnatural slate-blue blotches.
+  let outLuma = dot(outA.xyz, vec3f(0.299, 0.587, 0.114));
+  var outChroma = (outA.xyz - vec3f(outLuma)) * 0.24;
+  outChroma.z = min(outChroma.z, 0.03);
+  let safeAlbedoLog = clamp(vec3f(outLuma) + outChroma, vec3f(-0.52), vec3f(0.45));
 
   return NeuralPbrSample(
-    exp2(outA.xyz),
+    exp2(safeAlbedoLog),
     outA.w * NPBR.params.z,
     outB.xy * NPBR.params.y,
     clamp(1.0 + outB.z, 0.45, 1.15),
@@ -446,20 +452,21 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
     'terrain private gloss var'
   );
 
-  // Unlock physical dry dielectric sky reflection & solar specular highlights for smooth microfacets
-  // (vitrified terracotta glaze, calcite limestone crystals, burnished stucco, foot-worn cobbles)
+  // Dry matte porous limewash/masonry/stone must NEVER gain fake wet-mirror envCube sky reflection (which creates
+  // bright blue puddles inside dry wall pores up close). Keep smoothFilm strictly for wet surfaces and bare metal,
+  // and only allow subtle direct sun GGX micro-glint (specMask) on smooth dry crystals/glaze.
   out = neuralPbrReplaceRequired(
     out,
     /let\s+smoothFilm\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.46\s*-\s*effRough\s*\)\s*\/\s*0?\.34\s*,\s*0(?:\.0?)?\s*,\s*1(?:\.0?)?\s*\)\s*\*\s*effWet\s*,\s*1(?:\.0?)?\s*,\s*isMetal\s*\)\s*;/,
-    `let npbrDryGloss=clamp((0.68-effRough)/0.42,0.0,1.0)*landNpbrGloss;
-  let smoothFilm=select(max(clamp((0.46-effRough)/0.34,0.0,1.0)*effWet,npbrDryGloss*0.52),1.0,isMetal);`,
+    `let npbrDryGloss=clamp((0.52-effRough)/0.34,0.0,1.0)*landNpbrGloss;
+  let smoothFilm=select(clamp((0.46-effRough)/0.34,0.0,1.0)*effWet,1.0,isMetal);`,
     'terrain smoothFilm'
   );
 
   out = neuralPbrReplaceRequired(
     out,
     /let\s+specMask\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.72\s*-\s*effRough\s*\)\s*\/\s*0?\.42\s*,\s*0(?:\.0?)?\s*,\s*1(?:\.0?)?\s*\)\s*\*\s*\(\s*0?\.08\s*\+\s*0?\.92\s*\*\s*effWet\s*\)\s*,\s*0?\.65\s*,\s*isMetal\s*\)\s*;/,
-    'let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*max(0.08+0.92*effWet,npbrDryGloss*0.64),0.65,isMetal);',
+    'let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*max(0.08+0.92*effWet,npbrDryGloss*0.28),0.65,isMetal);',
     'terrain specMask'
   );
 
@@ -552,14 +559,14 @@ function withNeuralPbrTerrainCommon(source, bindingAnchor, label, evalBlock, { g
   out = neuralPbrReplaceRequired(
     out,
     /let\s+smoothFilm\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.46\s*-\s*effRough\s*\)\s*\/\s*0?\.34\s*,\s*0(?:\.0?)?\s*,\s*1(?:\.0?)?\s*\)\s*\*\s*effWet\s*,\s*1(?:\.0?)?\s*,\s*isMetal\s*\)\s*;/,
-    `let npbrDryGloss=clamp((0.68-effRough)/0.42,0.0,1.0)*landNpbrGloss;
-  let smoothFilm=select(max(clamp((0.46-effRough)/0.34,0.0,1.0)*effWet,npbrDryGloss*0.52),1.0,isMetal);`,
+    `let npbrDryGloss=clamp((0.52-effRough)/0.34,0.0,1.0)*landNpbrGloss;
+  let smoothFilm=select(clamp((0.46-effRough)/0.34,0.0,1.0)*effWet,1.0,isMetal);`,
     `${label} smoothFilm`
   );
   out = neuralPbrReplaceRequired(
     out,
     /let\s+specMask\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.72\s*-\s*effRough\s*\)\s*\/\s*0?\.42\s*,\s*0(?:\.0?)?\s*,\s*1(?:\.0?)?\s*\)\s*\*\s*\(\s*0?\.08\s*\+\s*0?\.92\s*\*\s*effWet\s*\)\s*,\s*0?\.65\s*,\s*isMetal\s*\)\s*;/,
-    'let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*max(0.08+0.92*effWet,npbrDryGloss*0.64),0.65,isMetal);',
+    'let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*max(0.08+0.92*effWet,npbrDryGloss*0.28),0.65,isMetal);',
     `${label} specMask`
   );
   out = neuralPbrReplaceRequired(

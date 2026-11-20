@@ -15,21 +15,27 @@ async function vesselPosePipeline(device,computePipe,generic,dynamic=false){
   try{return await modes.get(key);}catch(error){modes.delete(key);throw error;}
 }
 
-function collectDynamicVesselIndices(vertexCount,mesh,rigData){
+function collectDynamicVesselIndices(vertexCount,mesh,rigData,recoilMap=null){
+  const set=new Set();
   if(rigData){
-    const verts=rigData.vertices,out=[];
-    for(let i=0;i<vertexCount;i++)if(verts[i*12]!==0)out.push(i);
-    return new Uint32Array(out);
-  }
-  if(mesh instanceof Float32Array&&mesh.length>=vertexCount*9){
-    const out=[];
+    const verts=rigData.vertices;
+    for(let i=0;i<vertexCount;i++)if(verts[i*12]!==0)set.add(i);
+  }else if(mesh instanceof Float32Array&&mesh.length>=vertexCount*9){
     for(let i=0;i<vertexCount;i++){
       const m=mesh[i*9+6],base=Math.floor(m),frac=m-base,uvx=mesh[i*9+7];
-      if(base===7||base===8||base===14||base===18||(base===12&&uvx>=100)||(frac>1e-4&&(base===9||base===13||base===19||base===10)))out.push(i);
+      if(base===7||base===8||base===14||base===18||(base===12&&uvx>=100)||(frac>1e-4&&(base===9||base===13||base===19||base===10)))set.add(i);
     }
-    return new Uint32Array(out);
+  }else{
+    return null;
   }
-  return null;
+  // Always reset gun recoil vertices in the dynamic pass so VESSEL_RECOIL_UPDATE never accumulates across frames
+  // without forcing a full-hull pose dispatch while sailing intact.
+  if(recoilMap?.guns?.length){
+    for(const gun of recoilMap.guns){
+      if(gun?.indices)for(const idx of gun.indices)if(idx<vertexCount)set.add(idx);
+    }
+  }
+  return Uint32Array.from(set).sort((a,b)=>a-b);
 }
 
 export async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,pristineMesh=null,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null,fracture=null,detail=null}){
@@ -61,7 +67,7 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
   // cutting pose compute threads by 65–95% across every ship model with bit-identical results.
   let dynamicPipeline=shared?.dynamicPipeline??null,dynamicBuffer=shared?.dynamicBuffer??null,dynamicCount=shared?.dynamicCount??-1,dynamicGroup=null;
   if(!shared){
-    const indices=collectDynamicVesselIndices(vertexCount,pristineMesh??mesh,rigData);
+    const indices=collectDynamicVesselIndices(vertexCount,pristineMesh??mesh,rigData,recoilMap);
     if(indices&&indices.length<vertexCount){
       dynamicCount=indices.length;
       if(dynamicCount>0){
@@ -123,10 +129,10 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;
       if(!initialized)throw Error('GPU rig state must be updated before dispatch');
-      const inplaceMutators=Boolean(recoil?.active||assembly?.active||shards?.active);
-      if(needsFullPose||inplaceMutators||dynamicCount<0){
+      const inplaceMutators=Boolean(assembly?.active||shards?.active);
+      if(needsFullPose||inplaceMutators||dynamicCount<0||(recoil?.active&&!dynamicGroup)){
         pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));
-        needsFullPose=inplaceMutators;
+        needsFullPose=inplaceMutators||Boolean(recoil?.active&&!dynamicGroup);
       }else if(dynamicCount>0&&dynamicGroup){
         pass.setPipeline(dynamicPipeline);pass.setBindGroup(0,dynamicGroup);pass.dispatchWorkgroups(Math.ceil(dynamicCount/64));
       }

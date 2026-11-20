@@ -5,6 +5,7 @@
 // (js/wgsl/terrain.js landOpaque) with a building's limewash, tiles and thatch, its age and its weathering. Its view is
 // a module of its own, the land's source its prelude (the land shades it, but does not carry it).
 import { CITY_CONTINUUM_KIND_Y, CITY_CONTINUUM_MATERIAL } from '../city-continuum.js';
+import { withCapturedAir } from '../water-optics.js';
 
 // A record's identity word, as a city's building holds it (f32): its tint (fract its tone, floor its limewash), or
 // CITY_CONTINUUM_AS_BUILT, worn as its builder made it (a coast's prefab, a struck prefab's pieces).
@@ -174,12 +175,13 @@ fn cityContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSa
 // The city's material (js/wgsl/continuum-cut.js), shaded with the land's module source (js/wgsl/terrain.js TERRAIN as
 // the terrain draws it), which holds the shared core, the frame and the land's bindings (groups 0 and 1).
 export function cityContinuumMaterial(landSource) {
+  const captured = withCapturedAir(landSource);
   return Object.freeze({
-    name: 'cityContinuum', prelude: () => landSource, core: true, data: CITY_CONTINUUM_DATA,
+    name: 'cityContinuum', prelude: (pass) => (pass === 'capture' ? captured : landSource), core: true, data: CITY_CONTINUUM_DATA,
     varyings: [['kind', 'vec2f'], ['leafUV', 'vec2f'], ['splatKinds', 'vec4f', true], ['splat', 'vec2f']],
     wgsl: () => CITY_CONTINUUM_MATERIAL_WGSL, salt: 1,
     // Every type, its far body and its splat are wound outward, so the far faces are left out.
-    cullMode: 'back', air: false, capture: false, visibility: true,
+    cullMode: 'back', air: false, capture: true, captureWatersideOnly: true, visibility: true,
     cardBake: CITY_CONTINUUM_CARD_BAKE,
   });
 }

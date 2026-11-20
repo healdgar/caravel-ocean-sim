@@ -456,8 +456,8 @@ function makeCountry(region, heights, port, explicitBaked = null) {
   const roadNear = roads.length ? indexRoads(roads, region) : null;
   // Trees line a road near the town and by stretches beyond it.
   const roadLined = (way, x, z) => beyondTown(x, z) < 600 || unit(oldWorldHash(way.id, Math.floor(way.arc / 260), 0x2ffd72db)) < 0.5;
-  const VEGETATION = [0, 0.18, 0.235, 0, 0, 0, 0, 0, 0.96];
-  const SOME_TREES = 0.18;
+  const VEGETATION = [0, 0.24, 0.28, 0, 0, 0, 0, 0, 0.96];
+  const SOME_TREES = 0.19;
 
   // What stands at a point of dry ground: its use, and how much of it bears trees (as the vegetation mask counts it).
   // A board's country keeps the colours of its geography: its parcels, roads and town ground are stamped onto them by
@@ -477,7 +477,10 @@ function makeCountry(region, heights, port, explicitBaked = null) {
       }
       if (use.hedged && hold.edge < 10) vegetation = Math.max(vegetation, SOME_TREES);
     }
-    if (urban > 0 && urban < 0.5) vegetation *= 1 - urban * 2;
+    // Preserve walled gardens and olive groves right outside the town walls instead of attenuating them below biome < 42.
+    if (urban > 0 && urban < 0.5 && kind !== OLD_WORLD_LAND.GARDEN && kind !== OLD_WORLD_LAND.OLIVES) {
+      vegetation *= 1 - urban * 2;
+    }
     const way = kind !== OLD_WORLD_LAND.CITY && kind !== OLD_WORLD_LAND.WOOD && roadNear ? roadNear(x, z) : null;
     if (way && way.distance < 14 && roadLined(way, x, z)) vegetation = Math.max(vegetation, SOME_TREES);
     return { kind, vegetation };

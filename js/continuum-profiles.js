@@ -22,10 +22,10 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.30, taperMetres: 600, taperPower: 1.0, splatScale: 5.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.02, shadowMaxDistance: 900,
   }),
   people: normalizeContinuumProfile({
-    errorScale: 0.36, taperMetres: 7.5, taperPower: 1.55, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.38, shadowMaxDistance: 80,
+    errorScale: 0.14, taperMetres: 9.0, taperPower: 1.55, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.38, shadowMaxDistance: 80,
   }),
   hair: normalizeContinuumProfile({
-    errorScale: 0.35, taperMetres: 14.0, taperPower: 1.50, splatScale: 0.85, minPixels: 1.0, maxDistance: 160, shadowMinError: 0.12, shadowMaxDistance: 65,
+    errorScale: 0.15, taperMetres: 18.0, taperPower: 1.50, splatScale: 0.85, minPixels: 1.0, maxDistance: 160, shadowMinError: 0.12, shadowMaxDistance: 65,
   }),
   animals: normalizeContinuumProfile({
     errorScale: 0.40, taperMetres: 32, taperPower: 1.15, splatScale: 1.0, minPixels: 1.1, maxDistance: 0, shadowMinError: 0.07, shadowMaxDistance: 240,
@@ -43,7 +43,7 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.44, taperMetres: 260, taperPower: 1.05, splatScale: 6.5, minPixels: 1.4, maxDistance: 0, shadowMinError: 0.55, shadowMaxDistance: 260,
   }),
   meadow: normalizeContinuumProfile({
-    errorScale: 1.45, taperMetres: 120, taperPower: 1.20, splatScale: 1.1, minPixels: 2.0, maxDistance: 1500, shadowMinError: 0.22, shadowMaxDistance: 140,
+    errorScale: 0.85, taperMetres: 240, taperPower: 1.15, splatScale: 0.45, minPixels: 0.75, maxDistance: 2400, shadowMinError: 0.22, shadowMaxDistance: 140,
   }),
   land: normalizeContinuumProfile({
     errorScale: 1.0, taperMetres: 0, taperPower: 1.0, splatScale: 1.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.0, shadowMaxDistance: 0,

@@ -350,7 +350,11 @@ fn crewShadeLit(v:CrewVertex,front:bool,baseIn:vec3f)->vec3f {
   let tWeave=(bp.x*44.0-bp.y*36.0+bp.z*40.0)*6.2831853;
   let gradFine=vec3f(cos(uWeave)*210.0,cos(vWeave)*210.0,cos(uWeave)*210.0)*(0.00018*fineFade);
   let gradTwill=vec3f(cos(tWeave)*44.0,-cos(tWeave)*36.0,cos(tWeave)*40.0)*(0.00055*twillFade);
-  let gradBp=gradFine+gradTwill;
+  let skinMicroFade=(1.0-smoothstep(0.0008,0.0038,bpFoot))*step(1e-6,bpFoot)*clamp(v.skin,0.0,1.0);
+  let pA=(bp.x*320.0+bp.y*290.0+bp.z*310.0)*6.2831853;
+  let pB=(bp.x*530.0-bp.y*470.0+bp.z*490.0)*6.2831853;
+  let gradSkin=vec3f(cos(pA)*320.0+cos(pB)*265.0,cos(pA)*290.0-cos(pB)*235.0,cos(pA)*310.0+cos(pB)*245.0)*(0.000042*skinMicroFade);
+  let gradBp=gradFine+gradTwill+gradSkin;
   let dhdx=dot(gradBp,dBpdx);let dhdy=dot(gradBp,dBpdy);
   let r1=cross(dPdy,nGeom);let r2=cross(nGeom,dPdx);
   let det=dot(dPdx,r1);

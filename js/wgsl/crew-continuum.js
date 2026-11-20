@@ -253,35 +253,37 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   let skinLuma=max(dot(skin.xyz,vec3f(0.299,0.587,0.114)),1e-3);
   let picLuma=dot(picture,vec3f(0.299,0.587,0.114));
 
-  // Luma-anchored skin tinting with blue-channel ceiling so cool Tripo shadow texels never blow up into lavender/grey pallor.
-  let lumaRatio=clamp(picLuma/skinLuma,0.72,1.18);
-  let softLuma=mix(1.0,lumaRatio,0.56);
-  let rawShade=clamp(picture/max(skin.xyz,vec3f(1e-3)),vec3f(0.72),vec3f(1.18));
-  let safeShade=vec3f(rawShade.r,rawShade.g,min(rawShade.b,lumaRatio*1.02));
-  var skinTone=actor.skin.rgb*mix(vec3f(softLuma),safeShade,0.14);
+  // Preserve full 4K/8K painted skin detail (cheeks, lips, eyelid creases, nostrils, pores) while transferring cleanly
+  // to each person's actor.skin.rgb with a gentle blue-channel ceiling so cool shadow texels never turn lavender/grey.
+  let lumaRatio=clamp(picLuma/skinLuma,0.34,1.52);
+  let softLuma=mix(1.0,lumaRatio,0.88);
+  let rawShade=clamp(picture/max(skin.xyz,vec3f(1e-3)),vec3f(0.34),vec3f(1.52));
+  let safeShade=vec3f(rawShade.r,rawShade.g,min(rawShade.b,lumaRatio*1.06));
+  var skinTone=actor.skin.rgb*mix(vec3f(softLuma),safeShade,0.62);
 
-  // Subtle healthy lip vermilion warmth on the mouth so lips stay natural rather than pale/grey.
+  // Gentle lip warmth reinforcement (4K/8K painted texture already carries natural lip color).
   let lipY=select(1.584,1.506,female);
   let lipZ=select(0.082,0.095,female);
   let lipD=length(vec2f(bodyPos.x/0.024,(bodyPos.y-lipY)/0.0085));
   let lipMask=step(lipZ,bodyPos.z)*(1.0-smoothstep(0.65,1.15,lipD));
-  skinTone=mix(skinTone,skinTone*vec3f(1.08,0.82,0.78),lipMask*0.42);
+  skinTone=mix(skinTone,skinTone*vec3f(1.06,0.88,0.86),lipMask*0.16);
 
   var baseOut=vec4f(picture,0.0);
-  if(region==3u||region==4u||region==0u){
-    // Preserve true eye opening (dark iris/pupil/lash-line and neutral/bright sclera) across all head regions so
-    // flat-interpolated region tags never paint flesh skin over sclera, irises, or eyelashes, while blending surrounding
-    // eyelid/socket skin seamlessly into actor.skin.
+  if(region==0u){
+    // Actual mesh eye vertices: preserve the 4K/8K painted iris, pupil, lash-line, and natural white sclera verbatim,
+    // only capping extreme specular highlights so eyes stay lifelike rather than chalky or muddy grey.
+    let eyeCol=min(picture,vec3f(0.76,0.74,0.72));
+    baseOut=vec4f(eyeCol,0.0);
+  }else if(region==3u||region==4u){
+    // Keep surrounding face/eyelid skin continuous in actor.skin; preserve any bright sclera or dark lash texels that
+    // cross a flat-interpolated triangle boundary right inside the eye opening without punching threshold holes into skin.
     let eyeY=select(1.659,1.584,female);
-    let eyeRel=vec2f((abs(bodyPos.x)-0.031)/0.0195,(bodyPos.y-eyeY)/0.0145);
-    let inEyeBox=step(0.024,bodyPos.z)*(1.0-smoothstep(0.82,1.22,dot(eyeRel,eyeRel)));
-    let rgWarmth=(picture.r-picture.g)/max(picture.r,1e-4);
-    let darkIrisLash=1.0-smoothstep(skinLuma*0.45,skinLuma*0.86,picLuma);
-    let neutralSclera=(1.0-smoothstep(0.24,0.40,rgWarmth))*smoothstep(skinLuma*0.20,skinLuma*0.50,picLuma);
-    let brightSclera=smoothstep(skinLuma*1.12,skinLuma*1.45,picLuma);
-    let eyeOpen=inEyeBox*max(darkIrisLash,max(neutralSclera,brightSclera));
-    // Clamp harsh baked Tripo catchlight spikes to natural linear sclera reflectance so eyes never look like chalky blisters.
-    let eyeCol=min(picture,vec3f(0.26,0.24,0.23));
+    let eyeRel=vec2f((abs(bodyPos.x)-0.031)/0.0175,(bodyPos.y-eyeY)/0.0115);
+    let inEyeBox=step(0.045,bodyPos.z)*(1.0-smoothstep(0.65,1.05,dot(eyeRel,eyeRel)));
+    let brightSclera=smoothstep(skinLuma*1.20,skinLuma*1.52,picLuma);
+    let darkIrisLash=1.0-smoothstep(skinLuma*0.26,skinLuma*0.56,picLuma);
+    let eyeOpen=inEyeBox*max(brightSclera,darkIrisLash);
+    let eyeCol=min(picture,vec3f(0.76,0.74,0.72));
     baseOut=vec4f(mix(skinTone,eyeCol,eyeOpen),1.0-eyeOpen);
   }else if(region==1u||region==2u){
     let median=crewWear[min(region,4u)];
@@ -291,7 +293,7 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
       baseOut=vec4f(worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2),0.0);
     }
   }
-  // Natural anatomical eyebrows seated squarely on the real brow ridge (replacing both the misaligned forehead band and white Tripo brows).
+  // Softly harmonize the painted 4K/8K eyebrows toward each person's actor.hair.rgb without stamping opaque stripes over skin.
   let axFace=abs(bodyPos.x);
   let browMinZ=select(0.066,0.078,female);
   if(baseOut.w>0.5&&bodyPos.z>browMinZ&&axFace>0.011&&axFace<0.054){
@@ -302,14 +304,14 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
     );
     let browEndX=select(0.051,0.046,female);
     let browXMask=smoothstep(0.013,0.018,axFace)*(1.0-smoothstep(browEndX-0.007,browEndX,axFace));
-    let browHalfH=select(0.0038,0.0029,female)*(0.65+0.35*browXMask);
-    let browYMask=1.0-smoothstep(browHalfH*0.45,browHalfH*1.15,abs(bodyPos.y-browArch));
-    let browCov=browXMask*browYMask;
+    let browHalfH=select(0.0042,0.0034,female)*(0.65+0.35*browXMask);
+    let browYMask=1.0-smoothstep(browHalfH*0.40,browHalfH*1.20,abs(bodyPos.y-browArch));
+    let browDark=1.0-smoothstep(skinLuma*0.58,skinLuma*0.95,picLuma);
+    let browCov=browXMask*browYMask*browDark;
     if(browCov>0.002){
       let hairCol=max(actor.hair.rgb,vec3f(0.012,0.010,0.008));
-      let browFiber=0.80+0.20*sin(axFace*1200.0+bodyPos.y*650.0);
-      let browTint=hairCol*browFiber;
-      baseOut=vec4f(mix(baseOut.rgb,browTint,browCov*0.86),mix(baseOut.w,0.0,browCov*0.86));
+      let browTint=hairCol*(0.75+0.35*clamp(picLuma/max(skinLuma*0.75,1e-3),0.2,1.2));
+      baseOut=vec4f(mix(baseOut.rgb,browTint,browCov*0.72),mix(baseOut.w,0.0,browCov*0.72));
     }
   }
   // Fibrous hair-root scalp under-coat: softly tints & texturizes the hair-bearing cranium inside the 3D strand hairline

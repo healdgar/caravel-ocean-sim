@@ -989,7 +989,9 @@ fn vesselSurvives(in:BoatVertex)->bool {
   // Captain's & Admiral's cabin candle lanterns glowing through stern and quarter-gallery windows
   // in the evening, night, and early morning (compensated for night exposure so they never cause bloom glare).
   if(!vesselWaterCapture){
-    let candleSchedule=1.0-smoothstep(-0.04,0.12,F.sunDir.y);
+    let darkEnv=1.0-smoothstep(-0.02,0.10,F.sunDir.y);
+    let deepNight=smoothstep(-0.12,-0.45,F.sunDir.y)*(1.0-smoothstep(-0.05,0.20,F.sunDir.x)*0.55);
+    let candleSchedule=darkEnv*mix(1.0,0.42,deepNight);
     if(candleSchedule>0.001){
       let candleExposure=1.0/max(F.post.x,1.0);
       if(in.material==11u){

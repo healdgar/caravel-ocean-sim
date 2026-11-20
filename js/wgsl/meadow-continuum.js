@@ -395,8 +395,10 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
 // upper bound of the records its blocks take at that grain, so no patch is ever stood past the scene's capacity.
 fn meadowGrainFrom(band: u32, s: i32) -> u32 { return select(u32(min((i32(band) - s) / 3 + 1, i32(MEADOW_GRAINS) - 1)), 0u, i32(band) < s); }
 @compute @workgroup_size(1) fn meadowStandBudget() {
+  // Keep near and mid bands (< ~256 m, band < 15) locked at grain=1 so walking or panning never flips nearby blocks
+  // between 4 m and 8 m grids (which would jump patch scale, drape corners, and cluster cuts).
   var s = i32(MEADOW_BANDS);
-  for (; s > -3 * i32(MEADOW_GRAINS); s--) {
+  for (; s > 15; s--) {
     var total = 0u;
     for (var b = 0u; b < MEADOW_BANDS; b++) { total += atomicLoad(&meadowBlockWork[MEADOW_COUNTS + b * MEADOW_GRAINS + meadowGrainFrom(b, s)]); }
     if (total <= cfg.params.z) { break; }
@@ -431,7 +433,8 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   // Its variant: the mix (lowland, upland, margin) with the most of its middle, one of four, and turned a quarter
   // turn one way or another about its middle, each by a hash of where it lies, so no variant's grain runs the same
   // way down a row of patches. Every variant's square is alike at its edge, so turned it still meets its neighbours.
-  let seed = meadowHash2(cell);
+  // Anchor seed & variant to the stable 4 m world center cell so distant grain coarsening keeps consistent grass tone.
+  let seed = meadowHash2(vec2i(floor(middle / MEADOW_PATCH)));
   let pick = meadowHash(seed ^ 0x68e31da4u);
   let mixes = meadowMixWeights(cover.g, middle);
   let model = select(select(0u, 1u, mixes.y > mixes.x), 2u, mixes.z > max(mixes.x, mixes.y)) * 4u + (pick & 3u);
@@ -459,8 +462,17 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   let c2 = anchor + meadowTurned(low + vec2f(0.0, span), turnCS);
   let c3 = anchor + meadowTurned(low + vec2f(span), turnCS);
   let stood = place.y + lifted;
-  var drape = vec4f(meadowDrawnGround(c0, shift), meadowDrawnGround(c1, shift), meadowDrawnGround(c2, shift), meadowDrawnGround(c3, shift)) - vec4f(stood);
-  drape -= vec4f(max(dot(drape, vec4f(0.25)) - (meadowDrawnGround(middle, shift) - stood), 0.0));
+  // Drape each corner squarely onto the drawn ground; on convex ridges add the small positive clearance needed so
+  // the patch's middle clears the crest rather than pushing the four corners under the terrain (which Z-fights).
+  let d0 = meadowDrawnGround(c0, shift) - stood;
+  let d1 = meadowDrawnGround(c1, shift) - stood;
+  let d2 = meadowDrawnGround(c2, shift) - stood;
+  let d3 = meadowDrawnGround(c3, shift) - stood;
+  let midGround = meadowDrawnGround(middle, shift) - stood;
+  let midGap = max(midGround - 0.25 * (d0 + d1 + d2 + d3), 0.0);
+  let distHint = length(vec3f(middle.x, stood, middle.y) + shift - F.camPos.xyz);
+  let antiZFight = min(0.12, distHint * 0.00035) * smoothstep(35.0, 140.0, distHint);
+  var drape = vec4f(d0, d1, d2, d3) + vec4f(midGap + antiZFight);
   // As tall as the meadow's lushness and billow grow it where each corner stands, pressed down by shot and blast and
   // sunk into a crater: the height is the ground's own field, so neighbours meet at one height and no row of patches
   // steps up or down from the next. Where the cover thins toward a path, a beach or a bank, its plants stand lower.
