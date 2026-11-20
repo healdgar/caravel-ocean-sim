@@ -27,6 +27,8 @@ import {CITY_TYPED_FLOATS,CITY_TYPES_WATERSIDE,compileCityBuildingType} from './
 import {cityContinuumMaterial} from './wgsl/city-continuum.js';
 import {requestCityContinuumAtlas,createCityContinuum} from './city-continuum-draw.js';
 import {requestContinuumPrograms,requestContinuumView,requestContinuumCapture} from './continuum-scene.js';
+import {CONTINUUM_CARD_TINT_CITY} from './wgsl/continuum-cards.js';
+import {requestContinuumCardRenderer,createContinuumCardSceneBindings,bakeContinuumCardAtlas} from './continuum-cards.js';
 import {createCityTargets} from './city-targets.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize,landCraterMark} from './land-craters.js';
 import {createLandBanks} from './land-banks.js';
@@ -1491,7 +1493,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Every building of a city, cut and drawn through the one continuum from the atlas baked for every type
   // (js/city-continuum-draw.js). The atlas and the cut's programs are asked for once a coast has a city. Those
   // shot down stand as pieces (js/building-fracture.js) and are left out.
-  let cityContinuumMade=0;
+  let cityContinuumMade=0,cityCardAtlas=null;
   // Which of a city's buildings stand on the land: all but its waterside works, by standsOnGround, and what hangs from a
   // building as that building does.
   const cityGrounded=city=>{
@@ -1507,6 +1509,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const setCityBuildings=async pack=>{
     const made=++cityContinuumMade;
     const old=cityContinuum;cityContinuum=null;if(old)retireGPU(()=>old.destroy());
+    const oldCards=cityCardAtlas;cityCardAtlas=null;if(oldCards)retireGPU(()=>oldCards.destroy());
     const city=pack?.city;
     if(!city?.typedCount)return;
     const [atlas,programs]=await Promise.all([requestCityContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format})]);
@@ -1516,6 +1519,33 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     for(const index of cityStruckIndices)cityContinuum.hide(index,1+(city.typedAttached?.[index]??0),true);
     for(const index of cityHitIndices)cityContinuum.strike(index,1+(city.typedAttached?.[index]??0),true);
     cityContinuum.setAim(cityAim);
+    // Bake relightable octahedral G-buffer cards for the unique building types placed in this city.
+    const counts=new Map();
+    for(let i=0;i<city.typedTypes.length;i++){const t=city.typedTypes[i];counts.set(t,(counts.get(t)??0)+1);}
+    const placedTypes=[...counts.entries()].sort((a,b)=>b[1]-a[1]).map(([t])=>t);
+    const targetScene=cityContinuum;
+    Promise.all([cloudsResolvedPromise,requestContinuumCardRenderer({device,shader,format,samples,pages:atlas.pages.length})]).then(async([resolvedClouds,cardRenderer])=>{
+      if(made!==cityContinuumMade||terrainDisposed||!resolvedClouds)return;
+      const archSamp=groundDetail.resources.find(([b])=>b===17)?.[1];
+      if(!archSamp||!groundDetail.archTextureView)return;
+      const bakeGroup0Entries=[
+        {binding:0,resource:archSamp},
+        {binding:1,resource:groundDetail.archTextureView},
+        {binding:2,resource:landSampler},
+        {binding:3,resource:nearAlbedo.createView()},
+      ];
+      const cellSize=placedTypes.length>80?32:64;
+      const baked=await bakeContinuumCardAtlas({
+        device,shader,renderer:cardRenderer,atlas,material:cityView.material,
+        typeIds:placedTypes,bakeGroup0Entries,cellSize,tintMode:CONTINUUM_CARD_TINT_CITY,salt:1,
+        isCancelled:()=>made!==cityContinuumMade||terrainDisposed,label:'city cards',
+      });
+      if(!baked)return;
+      if(made!==cityContinuumMade||terrainDisposed){baked.destroy();return;}
+      cityCardAtlas=baked;
+      const cardBindings=createContinuumCardSceneBindings({device,renderer:cardRenderer,resources,clouds:resolvedClouds});
+      targetScene.setCards(baked,cardRenderer,cardBindings);
+    }).catch(error=>console.error('City octahedral card bake failed:',error));
   };
   // The coast is not presented until its city has landed.
   await setCityBuildings(proceduralPack);
@@ -1650,7 +1680,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     Promise.resolve(null),
     proceduralPack?createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):Promise.resolve(null),
     proceduralPack?createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):Promise.resolve(null),
-    proceduralPack?createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):Promise.resolve(null),
+    proceduralPack?createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,clouds,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):Promise.resolve(null),
   ]);
   boulderContinuum=boulderRes;
   let inlandWater=inlandWaterRes;
@@ -2833,7 +2863,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
       biomeTexture?.destroy?.();
       boulderContinuum?.destroy();
-      cityContinuumMade++;cityContinuum?.destroy();cityContinuum=null;
+      cityContinuumMade++;cityContinuum?.destroy();cityContinuum=null;cityCardAtlas?.destroy();cityCardAtlas=null;
       inlandWater?.destroy?.();
       herds?.destroy?.();
       meadowGrass?.destroy?.();

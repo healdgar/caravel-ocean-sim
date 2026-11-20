@@ -813,6 +813,82 @@ fn forestContinuumShadowCoverage(v:ContinuumShadowVarying)->u32{
   },
 });
 
+// Octahedral G-buffer card bake hook (js/continuum-cards.js): renders pure unlit bark & leaf albedo, coverage,
+// tangent-mapped local normal, and matFlag (1 = leaf, 0 = bark) directly from the pack's native leaf/bark maps.
+const FOREST_CONTINUUM_CARD_BAKE = Object.freeze({
+  prelude: () => forestLeafMapsWGSL(0),
+  varyings: [['uv', 'vec2f'], ['colour', 'vec3f'], ['ao', 'vec2f'], ['layer', 'u32', true]],
+  wgsl: () => {
+    const M = FOREST_CONTINUUM_MATERIAL;
+    return /* wgsl */`
+fn forestCardLinear(c:vec3f)->vec3f{return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));}
+fn forestCardDetailSigned(d:vec4f)->vec4f{return vec4f(d.xyz*(255./127.)-vec3f(128./127.),d.a);}
+struct ForestCardSurface {pigment:vec4f,detail:vec4f};
+fn forestCardPair(albedo:texture_2d_array<f32>,normal:texture_2d_array<f32>,uv:vec2f,ux:vec2f,uy:vec2f,layer:i32,repeating:bool)->ForestCardSurface{
+ var r:ForestCardSurface;
+ if(repeating){r.pigment=textureSampleGrad(albedo,forestNativeRepeatSampler,uv,layer,ux,uy);r.detail=textureSampleGrad(normal,forestNativeRepeatSampler,uv,layer,ux,uy);}
+ else{r.pigment=textureSampleGrad(albedo,forestNativeSampler,uv,layer,ux,uy);r.detail=textureSampleGrad(normal,forestNativeSampler,uv,layer,ux,uy);}
+ r.detail=forestCardDetailSigned(r.detail);
+ return r;
+}
+fn forestCardReadNative(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->ForestCardSurface{
+ let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);let repeating=material.coordinates.z>0.;
+ if(family==0u){return forestCardPair(forestNativeAlbedo0,forestNativeNormal0,uv,ux,uy,layer,repeating);}
+ if(family==1u){return forestCardPair(forestNativeAlbedo1,forestNativeNormal1,uv,ux,uy,layer,repeating);}
+ if(family==2u){return forestCardPair(forestNativeAlbedo2,forestNativeNormal2,uv,ux,uy,layer,repeating);}
+ return forestCardPair(forestNativeAlbedo3,forestNativeNormal3,uv,ux,uy,layer,repeating);
+}
+fn forestCardMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy:vec2f)->vec3f{
+ let det=ux.x*uy.y-ux.y*uy.x;
+ let dir=select(-1.,1.,det>=0.);
+ let tangent=dx*uy.y-dy*ux.y;let bitangent=dy*ux.x-dx*uy.x;
+ var n=geometric;
+ if(abs(det)>1e-12&&dot(tangent,tangent)>1e-16&&dot(bitangent,bitangent)>1e-16&&dot(detail,detail)>1e-16){
+  let tRaw=tangent-geometric*dot(tangent,geometric);
+  let bRaw=bitangent-geometric*dot(bitangent,geometric);
+  if(dot(tRaw,tRaw)>1e-16&&dot(bRaw,bRaw)>1e-16){
+   let t=normalize(tRaw)*dir;let b=normalize(bRaw)*dir;
+   let s=normalize(vec3f(detail.xy,max(detail.z,0.28)));
+   n=normalize(t*s.x-b*s.y+geometric*s.z);
+  }
+ }
+ return n;
+}
+fn forestContinuumCardBakeVarying(s:ContinuumSurface,v:ptr<function,ContinuumCardBakeVarying>){
+ let layer=s.high&15u;let leaf=(s.high>>4u)&1u;
+ let word=unpack4x8unorm(s.word);
+ let uvLow=vec2f(continuumTypeF(s.model,${M.uvLow}u),continuumTypeF(s.model,${M.uvLow + 1}u));
+ let uvScale=vec2f(continuumTypeF(s.model,${M.uvScale}u),continuumTypeF(s.model,${M.uvScale + 1}u));
+ (*v).uv=uvLow+continuumUV(s.vertex)*uvScale;
+ let textured=layer!=${FOREST_CONTINUUM_UNTEXTURED}u;
+ (*v).colour=select(word.rgb*word.rgb,vec3f(1.0),textured);
+ (*v).ao=vec2f(f32((s.high>>5u)&255u)/255.0,word.a);
+ (*v).layer=select(FOREST_UNTEXTURED,continuumType(s.model,${M.firstLayer}u)+layer,textured)|(leaf<<16u);
+}
+fn forestContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSample{
+ let dx=dpdx(v.local);let dy=dpdy(v.local);let ux=dpdx(v.uv);let uy=dpdy(v.uv);
+ let layer=v.layer&0xffffu;let leaf=(v.layer>>16u)!=0u;let textured=layer!=FOREST_UNTEXTURED;
+ let material=forestNativeMaterials[select(0u,layer,textured)];
+ var surf:ForestCardSurface;
+ if(textured){surf=forestCardReadNative(material,v.uv,ux,uy);}
+ else{surf.pigment=vec4f(1.0);surf.detail=vec4f(0.0,0.0,1.0,0.9);}
+ let own=min(surf.pigment.rgb/max(surf.pigment.a,1.0/32.0),vec3f(1.0));
+ var col=own*v.colour;
+ if(leaf&&textured&&!front){col=mix(col,forestCardLinear(material.underside.rgb),material.optics.y);}
+ let exposure=clamp(v.ao.x,0.0,1.0);
+ let canopy=clamp(v.ao.y,0.0,1.0);
+ // Bake exact intra-crown exposure & canopy occlusion matching forestContinuumShade.
+ let crownAO=select(mix(0.38,1.0,min(canopy,select(1.0,mix(0.35,1.0,exposure),canopy>0.995&&exposure<0.995))),(0.30+0.70*exposure)*(0.38+0.62*canopy),leaf);
+ col*=crownAO;
+ let gN=normalize(v.normal)*select(-1.0,1.0,front);
+ let mappedN=select(gN,forestCardMappedNormal(gN,surf.detail.xyz,dx,dy,ux,uy),textured);
+ let alpha=select(1.0,clamp(surf.pigment.a*2.15,0.0,1.0),leaf&&textured);
+ return ContinuumCardSample(col,alpha,mappedN,select(0.0,1.0,leaf));
+}
+`;
+  },
+});
+
 // The forest's material (js/wgsl/continuum-cut.js), shaded with the land's module source (js/wgsl/terrain.js TERRAIN as
 // the terrain draws it), which holds the shared core, the frame and the land's finish (groups 0 and 1).
 export function forestContinuumMaterial(landSource) {
@@ -822,5 +898,6 @@ export function forestContinuumMaterial(landSource) {
     wgsl: forestContinuumMaterialWGSL, salt: 3,
     // Leaf cards are seen from both sides; the far body's back faces are its far side's leaves.
     cullMode: 'none', air: false, capture: false, coverage: true, shadow: FOREST_CONTINUUM_SHADOW,
+    cardBake: FOREST_CONTINUUM_CARD_BAKE,
   });
 }

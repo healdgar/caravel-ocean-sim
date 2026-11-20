@@ -86,6 +86,91 @@ fn cityContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
 }
 `;
 
+// Octahedral G-buffer card bake hook (js/continuum-cards.js): bakes pure unlit architectural PBR albedo, local normal,
+// and matFlag (1.0 = limewash wall, 0.5 = roof tile/thatch, 0.0 = window/stone/timber/iron) directly from archMaterialTex.
+const CITY_CONTINUUM_CARD_BAKE = Object.freeze({
+  prelude: () => /* wgsl */`
+@group(0) @binding(0) var cityCardArchSamp:sampler;
+@group(0) @binding(1) var cityCardArchTex:texture_2d_array<f32>;
+@group(0) @binding(2) var cityCardLandSamp:sampler;
+@group(0) @binding(3) var cityCardNearAlbedo:texture_2d<f32>;
+`,
+  varyings: [['kind', 'vec2f']],
+  wgsl: () => /* wgsl */`
+fn cityCardKind(high:u32,word:u32)->vec2f { return vec2f(f32(word&255u)+f32(word>>8u)/16777215.0,f32(high)/65535.0*${CITY_CONTINUUM_KIND_Y.toFixed(1)}); }
+fn cityContinuumCardBakeVarying(s:ContinuumSurface,v:ptr<function,ContinuumCardBakeVarying>) {
+  (*v).kind=cityCardKind(s.high,s.word);
+}
+fn cityContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSample {
+  let n=normalize(v.normal+vec3f(0.0,1e-6,0.0));
+  let dx=dpdx(v.local);let dy=dpdy(v.local);
+  let mat=floor(v.kind.x+0.01);
+  let portShade=clamp(v.kind.y,0.18,1.0);
+  let shadeAlbedo=0.52+0.48*portShade;
+  var archIdx=2;
+  var sc=vec2f(0.38,0.38);
+  var matFlag=0.0;
+  if(mat<10.5){archIdx=0;sc=vec2f(0.32,0.52);}
+  else if(mat<11.5){archIdx=1;sc=vec2f(0.70,0.80);}
+  else if(mat<12.5){archIdx=2;sc=vec2f(0.38,0.38);matFlag=1.0;}
+  else if(mat<13.5){archIdx=3;sc=vec2f(0.62,0.68);matFlag=0.5;}
+  else if(mat<14.5){archIdx=4;sc=vec2f(1.0,1.0);}
+  else if(mat<15.5){archIdx=5;sc=vec2f(0.55,0.62);matFlag=0.5;}
+  else if(mat<16.5){archIdx=6;sc=vec2f(0.42,0.42);}
+  else if(mat<17.5){archIdx=7;sc=vec2f(0.52,0.58);}
+  else if(mat<18.5){archIdx=8;sc=vec2f(0.65,0.65);}
+  else if(mat<19.5){archIdx=2;sc=vec2f(0.38,0.38);matFlag=1.0;}
+  // Planar/triplanar architectural UV in local building metres (matching ARCH_MATERIAL_PBR_FN).
+  let isWall=abs(n.y)<0.55;
+  let useZ=abs(n.x)>abs(n.z);
+  let uAxis=select(v.local.x,v.local.z,useZ);
+  let duAxis=select(dx.x,dx.z,useZ);
+  let dvAxis=select(dy.x,dy.z,useZ);
+  let archUV=select(v.local.xz*sc,vec2f(uAxis*sc.x,v.local.y*sc.y),isWall);
+  let archDx=select(dx.xz*sc,vec2f(duAxis*sc.x,dx.y*sc.y),isWall);
+  let archDy=select(dy.xz*sc,vec2f(dvAxis*sc.x,dy.y*sc.y),isWall);
+  let bldgUV=clamp(vec2f(v.kind.x-20.0,v.kind.y),vec2f(0.001),vec2f(0.999));
+  let winUV=clamp(vec2f((v.kind.x-14.02)/0.44,(v.kind.y-0.32)/0.64),vec2f(0.0),vec2f(1.0));
+  let sampUV=select(archUV,winUV,abs(mat-14.0)<0.5);
+  let sampDx=select(archDx,dpdx(winUV),abs(mat-14.0)<0.5);
+  let sampDy=select(archDy,dpdy(winUV),abs(mat-14.0)<0.5);
+  let texLayer=select(archIdx*2,8,abs(mat-14.0)<0.5);
+  let rawArch=textureSampleGrad(cityCardArchTex,cityCardArchSamp,sampUV,texLayer,sampDx,sampDy);
+  let rawAO=textureSampleGrad(cityCardArchTex,cityCardArchSamp,sampUV,texLayer+1,sampDx,sampDy).a;
+  let rawPhoto=textureSampleGrad(cityCardNearAlbedo,cityCardLandSamp,bldgUV,dpdx(bldgUV),dpdy(bldgUV)).rgb;
+  let archLin=pow(max(rawArch.rgb,vec3f(0.005)),vec3f(2.2));
+  var albedo=archLin*shadeAlbedo*(0.82+0.18*rawAO);
+  if(v.kind.x>=19.5){
+    albedo=pow(max(rawPhoto,vec3f(0.005)),vec3f(2.2));
+    matFlag=0.0;
+  }else if(abs(mat-14.0)<0.5){
+    let isGlazed=v.kind.y>0.25;
+    if(isGlazed){
+      let bDist=min(min(winUV.x,1.0-winUV.x),min(winUV.y,1.0-winUV.y));
+      let frame=max(1.0-smoothstep(0.075,0.098,bDist),max(1.0-smoothstep(0.028,0.044,abs(winUV.x-0.5)),1.0-smoothstep(0.026,0.042,abs(winUV.y-0.38))));
+      albedo=mix(archLin*(0.72+0.28*(0.84-0.14*winUV.y)),vec3f(0.082,0.056,0.036),frame);
+    }else{
+      albedo=vec3f(0.044,0.037,0.030)*portShade;
+    }
+    matFlag=0.0;
+  }else if(abs(mat-11.0)<0.5){
+    albedo*=vec3f(1.03,0.99,0.92);
+  }else if(abs(mat-12.0)<0.5||abs(mat-19.0)<0.5){
+    // Bake neutral white stucco with matching base dampness & shadeAlbedo; continuumCardFS applies exact limewash tint.
+    let damp=smoothstep(0.4,3.8,v.local.y);
+    let foot=1.0-smoothstep(0.0,0.85,v.local.y);
+    let baseTint=mix(vec3f(0.74,0.69,0.62),vec3f(0.98,0.95,0.90),damp)*mix(1.0,0.72,foot*(1.0-abs(n.y)));
+    albedo=archLin*baseTint*shadeAlbedo*(0.84+0.16*rawAO);
+  }else if(abs(mat-13.0)<0.5){
+    albedo=archLin*0.81*shadeAlbedo*(0.82+0.18*rawAO);
+  }else if(abs(mat-18.0)<0.5){
+    albedo=archLin*0.82*(0.68+0.32*portShade);
+  }
+  return ContinuumCardSample(albedo,1.0,n,matFlag);
+}
+`,
+});
+
 // The city's material (js/wgsl/continuum-cut.js), shaded with the land's module source (js/wgsl/terrain.js TERRAIN as
 // the terrain draws it), which holds the shared core, the frame and the land's bindings (groups 0 and 1).
 export function cityContinuumMaterial(landSource) {
@@ -95,5 +180,6 @@ export function cityContinuumMaterial(landSource) {
     wgsl: () => CITY_CONTINUUM_MATERIAL_WGSL, salt: 1,
     // Every type, its far body and its splat are wound outward, so the far faces are left out.
     cullMode: 'back', air: false, capture: false, visibility: true,
+    cardBake: CITY_CONTINUUM_CARD_BAKE,
   });
 }

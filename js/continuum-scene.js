@@ -281,10 +281,34 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     pass.setVertexBuffer(0, list, at * 8, n * 8);
     pass.drawIndirect(draws, index * 16);
   };
-  let count = 0, destroyed = false;
+  let count = 0, destroyed = false, cards = null;
+  const drawCards = (pass) => {
+    if (!cards) return;
+    pass.setPipeline(cards.renderer.pipeline);
+    pass.setBindGroup(0, cards.bindings.sceneGroup);
+    pass.setBindGroup(1, cards.bindings.cloudGroup);
+    pass.setBindGroup(2, cards.dataGroup);
+    pass.setBindGroup(3, cards.atlas.bindGroup);
+    drawList(pass, CONTINUUM_VIEW_LISTS - 1);
+  };
   const scene = {
     capacity, lists, list, draws, records, words, floats, poses: poses ?? ownPoses, paging,
     get count() { return count; },
+    get hasCards() { return Boolean(cards); },
+    // Attaches (or clears) a baked octahedral G-buffer card atlas (js/continuum-cards.js) for list 3.
+    // Ownership of `cardAtlas` stays with the caller (so scene resize/recreation can re-attach the same atlas).
+    setCards(cardAtlas, cardRenderer, cardBindings) {
+      if (destroyed) return;
+      if (!cardAtlas || !cardRenderer || !cardBindings) {
+        cards = null;
+        setFloat(7, 0);
+        return;
+      }
+      if (cardRenderer.paging !== paging) throw Error(`Card renderer paging (${cardRenderer.paging.pages}) does not match ${label} scene (${paging.pages})`);
+      const dataGroup = group(cardRenderer.pipeline.getBindGroupLayout(2), dataAt(0));
+      cards = { atlas: cardAtlas, renderer: cardRenderer, bindings: cardBindings, dataGroup };
+      setFloat(7, 1);
+    },
     // Instance `index`'s record (js/continuum-format.js writeContinuumRecord), on the CPU until sent.
     place(index, record) { onCPU(); writeContinuumRecord(words, floats, index, record); },
     // Instances `first`..`first + n` sent as they now stand.
@@ -349,23 +373,29 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       if (destroyed || !count || !visibilityGroups) return;
       pass.setPipeline(view.visibility.pipeline);
       pass.setBindGroup(0, visibilityGroups.frame); pass.setBindGroup(1, visibilityGroups.data);
-      for (let index = 0; index < CONTINUUM_VIEW_LISTS; index++) drawList(pass, index);
+      const limit = cards ? CONTINUUM_VIEW_LISTS - 1 : CONTINUUM_VIEW_LISTS;
+      for (let index = 0; index < limit; index++) drawList(pass, index);
     },
     drawEqual(pass, sceneGroup, second) {
       if (destroyed || !count || !equalDrawn || !view?.equalPipeline) return;
       if (visibilityGroups) scene.drawVisibility(pass);
       pass.setPipeline(view.equalPipeline);
       pass.setBindGroup(0, sceneGroup); pass.setBindGroup(1, second); pass.setBindGroup(view.material.data.group, equalDrawn);
-      for (let index = 0; index < CONTINUUM_VIEW_LISTS; index++) drawList(pass, index);
+      const limit = cards ? CONTINUUM_VIEW_LISTS - 1 : CONTINUUM_VIEW_LISTS;
+      for (let index = 0; index < limit; index++) drawList(pass, index);
+      drawCards(pass);
     },
-    // The view's four lists, one pipeline (with in-pass visibility first when the material is pure visibility-equal).
+    // The view's four lists, one pipeline (with in-pass visibility first when the material is pure visibility-equal,
+    // and the shared octahedral card pipeline for list 3 when cards are attached).
     // `sceneGroup` and `second` are the material's groups 0 and 1.
     draw(pass, sceneGroup, second) {
       if (destroyed || !count || !drawn) return;
       if (view.pureEqual && visibilityGroups) scene.drawVisibility(pass);
       pass.setPipeline(view.pipeline);
       pass.setBindGroup(0, sceneGroup); pass.setBindGroup(1, second); pass.setBindGroup(view.material.data.group, drawn);
-      for (let index = 0; index < CONTINUUM_VIEW_LISTS; index++) drawList(pass, index);
+      const limit = cards ? CONTINUUM_VIEW_LISTS - 1 : CONTINUUM_VIEW_LISTS;
+      for (let index = 0; index < limit; index++) drawList(pass, index);
+      drawCards(pass);
     },
     // Its coarse cut into a shadow map: `part` 'whole' (every surface), or into a ship's own maps 'solid' or 'canvas'
     // (js/shadows.js createVesselShadows). Its material's own shadow program casts it where it has one, its `own`

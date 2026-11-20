@@ -10,6 +10,8 @@ import {CONTINUUM_RECORD_WORDS,continuumRoom} from './continuum-format.js';
 import {CONTINUUM_ROW} from './wgsl/continuum-cut.js';
 import {CONTINUUM_WIND_BONES,CONTINUUM_WIND_POSE,CONTINUUM_WIND_SKELETON} from './wgsl/continuum-wind.js';
 import {createContinuumScene,requestContinuumAtlas,requestContinuumPrograms,requestContinuumView} from './continuum-scene.js';
+import {CONTINUUM_CARD_TINT_FOREST} from './wgsl/continuum-cards.js';
+import {requestContinuumCardRenderer,createContinuumCardSceneBindings,bakeContinuumCardAtlas} from './continuum-cards.js';
 import {loadForestContinuum,forestContinuumAssetsFor} from './forest-continuum.js';
 import {FOREST_CONTINUUM_STAND_BYTES,FOREST_CONTINUUM_STOOD_BYTES,FOREST_WIND_BASIS,FOREST_WIND_BYTES,FOREST_WIND_CAPSULES,FOREST_WIND_CAPSULE_AT,FOREST_WIND_EVENT,FOREST_WIND_FORCES,FOREST_WIND_FORCE_AT,FOREST_WIND_LANES,FOREST_WIND_OWN,forestContinuumMaterial,forestContinuumStandWGSL,forestWindSkeletons,forestWindStateBytes,forestWindStepWGSL} from './wgsl/forest-continuum.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,TREE_STRIKE_REACH_M,blastForestRoot,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,nearestForestRoot,reapplyForestStrikes,strikeForestTree} from './forest-trunks.js';
@@ -620,7 +622,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       standFloats.set([shiftX,0,shiftZ,0],4);
       device.queue.writeBuffer(standUniform,0,standBytes);standChanged=false;
     };
-    let standLayout=null,windLayout=null,windRest=null,windGroup=null,atlas=null,programs=null,view=null;
+    let standLayout=null,windLayout=null,windRest=null,windGroup=null,atlas=null,programs=null,view=null,forestCards=null;
     // One scene as large as the roots held: every root may stand in view at once, and every skeleton before them. Made
     // anew when the roots grow.
     const makeScene=()=>{
@@ -630,6 +632,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       const {room}=continuumRoom(atlas.types,new Array(atlas.types.length).fill(capacity));
       scene=createContinuumScene({device,atlas,programs,capacity,room,view,poseRoom:skeletonRoom+capacity*CONTINUUM_WIND_POSE,frame:frameUBO,shadowUniform,samples,label:'forest',written:true,profile:'forest'});
       scene.setCount(capacity);scene.setWorldOffset(shiftX,shiftZ);
+      if(forestCards)scene.setCards(forestCards.atlas,forestCards.renderer,forestCards.bindings);
       standGroup=standBindGroup();windGroup=windBindGroup();standChanged=true;
     };
     const standBindGroup=()=>device.createBindGroup({label:'forest stand',layout:standLayout,entries:[
@@ -763,6 +766,21 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     // The same surfaces cut its leaves' shadows (the forest material's shadow, its group 2).
     const surfaceOwn=[...surfaceEntries,{binding:8,resource:nativeSampler},{binding:9,resource:nativeRepeatSampler},{binding:10,resource:{buffer:materials}}];
     const surfaceGroup=device.createBindGroup({label:'forest surfaces',layout:view.pipeline.getBindGroupLayout(3),entries:surfaceOwn});
+    // Bake relightable octahedral G-buffer cards for all P tree types on the GPU once surfaces are ready.
+    requestContinuumCardRenderer({device,shader,format,samples,pages:atlas.pages.length}).then(async cardRenderer=>{
+      if(destroyed)return;
+      const cardBindings=createContinuumCardSceneBindings({device,renderer:cardRenderer,resources,clouds});
+      const cardAtlas=await bakeContinuumCardAtlas({
+        device,shader,renderer:cardRenderer,atlas,material:view.material,
+        typeIds:Array.from({length:P},(_,i)=>i),
+        bakeGroup0Entries:surfaceOwn,cellSize:64,tintMode:CONTINUUM_CARD_TINT_FOREST,salt:3,
+        isCancelled:()=>destroyed,label:'forest cards',
+      });
+      if(!cardAtlas)return;
+      if(destroyed){cardAtlas.destroy();return;}
+      forestCards={atlas:cardAtlas,renderer:cardRenderer,bindings:cardBindings};
+      scene?.setCards(cardAtlas,cardRenderer,cardBindings);
+    }).catch(error=>console.error('Forest octahedral card bake failed:',error));
     const continuumStats=atlas.manifest.totals;
     stats.continuum={types:continuumStats.types,clusters:continuumStats.clusters,vertices:continuumStats.vertices,atlasBytes:atlas.words.byteLength,firstLayers};
     // A ball finds its trees through these: one grid an array, built off the frame one after another, nearest
@@ -813,7 +831,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       return null;
     };
     const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes,strikeOrigin));};
-    const release=()=>{destroyed=true;abort.abort();for(const b of allocated)b.destroy();roots?.destroy();scene?.destroy();surfaces?.destroy();};
+    const release=()=>{destroyed=true;abort.abort();forestCards?.atlas?.destroy?.();forestCards=null;for(const b of allocated)b.destroy();roots?.destroy();scene?.destroy();surfaces?.destroy();};
     return {stats,trunksReady,
       get trunks(){return trunkGrid;},
       updatePack(nextPack){

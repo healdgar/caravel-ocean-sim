@@ -40,6 +40,8 @@ import { CONTINUUM_KIND, CONTINUUM_DAMAGED, CONTINUUM_IMPORTANT_FLAG, CONTINUUM_
 import { CONTINUUM_RECORD_WGSL } from './wgsl/continuum-cut.js';
 import { SHIP_RIDER_HEADER, SHIP_DRAPED_SAILS, SHIP_DRAPED_OARS, SHIP_DRAPED_BLOCK, SHIP_DRAPED_CANVAS, SHIP_DRAPED_OARED, SHIP_DRAPED_HELM } from './wgsl/ship-kinds.js';
 import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, uploadContinuumAtlas, createContinuumScene } from './continuum-scene.js';
+import { CONTINUUM_CARD_TINT_VESSEL } from './wgsl/continuum-cards.js';
+import { requestContinuumCardRenderer, createContinuumCardSceneBindings, bakeContinuumCardAtlas } from './continuum-cards.js';
 
 export const TRADE_VESSEL_VERTEX_FLOATS = 9; // pos(3), norm(3), material(1), uv(2)
 export const TRADE_VESSEL_INSTANCE_FLOATS = 12; // posYaw(4), attitudeScaleArch(4), animSink(4)
@@ -4808,6 +4810,64 @@ fn tradeVesselContinuumShadowTransmit(v:ContinuumShadowVarying)->vec3f {
 }
 `,
 });
+// Octahedral G-buffer card bake hook (js/continuum-cards.js): bakes pure unlit oak/pine/iron/rigging/canvas albedo,
+// local normal, and matFlag (1 = canvas sail for live backlit glow, 0 = hull/spars/rigging) directly from oakTex.
+const TRADE_VESSEL_CARD_BAKE = Object.freeze({
+  prelude: () => /* wgsl */`
+@group(0) @binding(0) var tvCardOakTex:texture_2d<f32>;
+@group(0) @binding(1) var tvCardOakSamp:sampler;
+`,
+  varyings: [['uv', 'vec2f'], ['material', 'u32', true]],
+  wgsl: () => /* wgsl */`
+fn tradeVesselContinuumCardBakeVarying(s:ContinuumSurface,v:ptr<function,ContinuumCardBakeVarying>) {
+  (*v).uv=continuumUV(s.vertex);
+  (*v).material=u32(max(bitcast<f32>(s.word),0.0));
+}
+fn tradeVesselContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSample {
+  let rawOak=textureSampleGrad(tvCardOakTex,tvCardOakSamp,v.uv,dpdx(v.uv),dpdy(v.uv)).rgb;
+  let timber=pow(max(rawOak,vec3f(0.01)),vec3f(2.2))*vec3f(0.56,0.51,0.45);
+  let m=v.material;
+  var albedo=timber*0.88;
+  var isSail=0.0;
+  if(m==0u){
+    let tar=1.0-smoothstep(-0.35,0.05,v.local.y);
+    albedo=mix(timber*0.93,vec3f(0.025,0.022,0.018),tar*0.88);
+  }else if(m==10u){
+    albedo=timber*vec3f(1.08,0.92,0.68);
+  }else if(m==16u){
+    albedo=timber*vec3f(0.20,0.18,0.15);
+  }else if(m==17u){
+    albedo=timber*vec3f(1.10,1.00,0.80);
+  }else if(m==1u||m==5u||m==6u||m==7u||m==14u||m==18u||m==28u){
+    albedo=timber*vec3f(0.88,0.84,0.76)*select(1.0,0.62,m==14u);
+  }else if(m==3u||m==8u||m==20u){
+    albedo=vec3f(0.038,0.037,0.036);
+  }else if(m==4u){
+    albedo=vec3f(0.018,0.014,0.011);
+  }else if(m==2u||m==12u||m==19u){
+    albedo=select(vec3f(0.29,0.22,0.135),vec3f(0.036,0.030,0.024),m==2u);
+  }else if(m==9u||m==13u){
+    isSail=1.0;
+    albedo=select(vec3f(0.64,0.59,0.49),vec3f(0.58,0.52,0.41),m==13u&&v.local.y<1.3);
+  }else if(m==11u){
+    albedo=vec3f(0.040,0.045,0.048);
+  }else if(m==21u||m==25u){
+    albedo=vec3f(0.48,0.28,0.065);
+  }else if(m==22u){
+    albedo=vec3f(0.32,0.13,0.065);
+  }else if(m==23u){
+    albedo=vec3f(0.48,0.41,0.29);
+  }else if(m==24u){
+    albedo=vec3f(0.44,0.19,0.095);
+  }else if(m==26u){
+    albedo=vec3f(0.020,0.042,0.10);
+  }
+  let n=normalize(v.normal+vec3f(0.0,1e-6,0.0))*select(-1.0,1.0,front);
+  return ContinuumCardSample(albedo,1.0,n,isSail);
+}
+`,
+});
+
 export const TRADE_VESSEL_CONTINUUM_MATERIAL = Object.freeze({
   name: 'tradeVesselContinuum', prelude: tradeVesselContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['local', 'vec3f'], ['normalLocal', 'vec3f'], ['uv', 'vec2f'], ['state', 'vec3f'], ['colour', 'vec3f'], ['ids', 'vec4u', true], ['turn', 'vec4f', true]],
@@ -4815,6 +4875,7 @@ export const TRADE_VESSEL_CONTINUUM_MATERIAL = Object.freeze({
   salt: 5,
   // Sails, awnings and planking are open shells, lit from whichever side is seen.
   cullMode: 'none', air: true, capture: true, mask: true, shadow: TRADE_VESSEL_CONTINUUM_SHADOW,
+  cardBake: TRADE_VESSEL_CARD_BAKE,
 });
 
 // Each archetype's DRAPED block (js/wgsl/ship-kinds.js), SHIP_DRAPED_BLOCK + 1 vec4f an archetype in archetype order:
@@ -5501,6 +5562,7 @@ export async function createTradeVessels({
   computePipe = null,
   oceanBridge = null,
   resources,
+  clouds = null,
   shadowFormat = 'depth32float',
   sharedCrew = null,
   waterOptics = null,
@@ -5665,11 +5727,33 @@ export async function createTradeVessels({
   // One scene of the one cut holds every vessel, each list's room as any mix of the archetypes may fill it.
   const { room } = continuumRoom(atlas.types, atlas.types.map(() => MAX_TRADE_VESSELS));
   const bufferOf = (curResources, binding) => curResources.find(([b]) => b === binding)?.[1]?.buffer ?? null;
-  const makeScene = (curResources) => createContinuumScene({
-    device, atlas, programs, capacity: MAX_TRADE_VESSELS, room, view, poses,
-    frame: bufferOf(curResources, 0), shadowUniform: bufferOf(curResources, 19), samples, label: 'trade vessel', profile: 'tradeVessels',
-  });
+  let tvCards = null;
+  const makeScene = (curResources) => {
+    const made = createContinuumScene({
+      device, atlas, programs, capacity: MAX_TRADE_VESSELS, room, view, poses,
+      frame: bufferOf(curResources, 0), shadowUniform: bufferOf(curResources, 19), samples, label: 'trade vessel', profile: 'tradeVessels',
+    });
+    if (tvCards) made.setCards(tvCards.atlas, tvCards.renderer, tvCards.bindings);
+    return made;
+  };
   let scene = makeScene(resources);
+  if (clouds) {
+    requestContinuumCardRenderer({ device, shader, format, samples, pages: atlas.pages.length }).then(async (cardRenderer) => {
+      if (destroyed) return;
+      const cardBindings = createContinuumCardSceneBindings({ device, renderer: cardRenderer, resources, clouds });
+      const cardAtlas = await bakeContinuumCardAtlas({
+        device, shader, renderer: cardRenderer, atlas, words: atlasWords, material: view.material,
+        typeIds: Array.from({ length: TRADE_VESSEL_ARCHETYPES }, (_, i) => i),
+        bakeGroup0Entries: [{ binding: 0, resource: oakView }, { binding: 1, resource: oakSampler }],
+        cellSize: 64, tintMode: CONTINUUM_CARD_TINT_VESSEL, salt: 5,
+        isCancelled: () => destroyed, label: 'trade vessel cards',
+      });
+      if (!cardAtlas) return;
+      if (destroyed) { cardAtlas.destroy(); return; }
+      tvCards = { atlas: cardAtlas, renderer: cardRenderer, bindings: cardBindings };
+      scene?.setCards(cardAtlas, cardRenderer, cardBindings);
+    }).catch((err) => console.error('Trade vessel octahedral card bake failed:', err));
+  }
   let sceneFrame = bufferOf(resources, 0), sceneShadow = bufferOf(resources, 19);
   // The records the scene last sent, which its cut reads.
   let sentIntact = 0;
@@ -7946,6 +8030,8 @@ export async function createTradeVessels({
       for (const b of deckOwned) b?.destroy?.();
       deckOwned.length = 0;
       deckHull?.destroy?.();
+      tvCards?.atlas?.destroy?.();
+      tvCards = null;
       scene.destroy();
       for (const b of [
         atlas, poses, hullDamageBuffer, waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,

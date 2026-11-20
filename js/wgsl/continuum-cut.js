@@ -105,7 +105,7 @@ ${reads}
 
 // What every pass knows of the atlas, the records and the pose buffer. Written when a module is, not as the bundle
 // loads: the kinds read constants that load later.
-const continuumCommonWGSL = (paging) => CONTINUUM_RECORD_WGSL + continuumWordWGSL(paging) + /* wgsl */`
+export const continuumCommonWGSL = (paging) => CONTINUUM_RECORD_WGSL + continuumWordWGSL(paging) + /* wgsl */`
 struct ContinuumView {
   counts:vec4u,             // instances, samples a pixel, 1 when shadows are cast, material salt
   scene:vec4f,              // the scene's pixel error, the world's offset x and z, unused
@@ -278,7 +278,7 @@ fn continuumShift()->vec3f { return vec3f(continuumView.scene.y,0.0,continuumVie
 
 // The data a pass binds, in this order from `first`: the atlas's first page, the records, the lists, the view, the
 // pose buffer; and its further pages from `pagesAt`.
-const continuumDataWGSL = (group, first, lists, paging, pagesAt = first + 5) => /* wgsl */`
+export const continuumDataWGSL = (group, first, lists, paging, pagesAt = first + 5) => /* wgsl */`
 @group(${group}) @binding(${first}) var<storage,read> continuumAtlas:array<u32>;
 @group(${group}) @binding(${first + 1}) var<storage,read> continuumRecords:array<ContinuumRecord>;
 @group(${group}) @binding(${first + 2}) var<storage,${lists}> continuumLists:array<vec2u>;
@@ -287,7 +287,7 @@ const continuumDataWGSL = (group, first, lists, paging, pagesAt = first + 5) => 
 ${Array.from({ length: paging.pages - 1 }, (_, p) => `@group(${group}) @binding(${pagesAt + p}) var<storage,read> continuumAtlas${p + 1}:array<u32>;`).join('\n')}
 `;
 // A drawing pass names every binding of its group once, on a path never taken, so the layout it derives holds them all.
-const continuumTouchWGSL = (paging) => /* wgsl */`
+export const continuumTouchWGSL = (paging) => /* wgsl */`
 fn continuumBindings()->f32 {
   if(continuumView.counts.y!=0xffffffffu){return 0.0;}
   return f32(continuumAtlas[0]${Array.from({ length: paging.pages - 1 }, (_, p) => `+continuumAtlas${p + 1}[0]`).join('')}+continuumRecords[0].tag.x+continuumLists[0].x)+continuumPoses[0].x;
@@ -514,6 +514,11 @@ fn continuumTry(slot:u32,i:u32)->u32 {
               let span=2.0*max(continuumTypeF(model,${CONTINUUM_TYPE.splatRx}u)*0.5*(stretch.x+stretch.z),continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*stretch.y)*record.place.w*focal/away;
               let basePixels=continuumImportance(continuumView.scene.x,isImportant);
               splatShare=u32(round(continuumProfileSplatShare(span,basePixels,continuumView.curve)*255.0));
+              // When relightable octahedral G-buffer cards are attached to this scene (continuumView.scene.w > 0.5),
+              // hand off directly from textured 3D clusters into the card (list 3) across the MSAA band, bypassing
+              // coarse polygonal far-body facets. Struck instances stay on clusters so felled/damaged shapes hold.
+              let hasCards=continuumView.scene.w>0.5&&!continuumFlagged(record,CONTINUUM_STRUCK);
+              if(hasCards){share=splatShare;splatShare=255u;}
               if(share>0u){
                 splatScale=continuumProfileThin(span,select(away,0.0,isImportant),continuumView.limits,seed);
                 if(splatShare>0u&&splatScale>0.0){
@@ -686,7 +691,7 @@ export function continuumBatchArgsWGSL() {
 // screen, between its height and its footprint by how steeply it is seen, so from above it is the ground it covers and
 // from the side the outline the bake measured. Its depth is drawn at its near side (pull), where the body's surface
 // would be.
-const CONTINUUM_SPLAT = /* wgsl */`
+export const CONTINUUM_SPLAT = /* wgsl */`
 struct ContinuumSplat { local:vec3f, world:vec3f, toward:vec3f, corner:vec2f, pull:f32 };
 fn continuumSplatCorner(record:ContinuumRecord,eye:vec3f,vertex:u32,thinned:f32)->ContinuumSplat {
   let model=continuumTypeOf(record);
@@ -935,12 +940,88 @@ struct ContinuumVisibilityOut { @location(0) colour:vec4f, @builtin(sample_mask)
 }
 `;
 
+// Relightable octahedral G-buffer card baker (AGENTS.md rule 3): renders each type's level-0 clusters from 36 biased
+// hemi-octahedral orthographic views into a 4x MSAA G-buffer (albedo + view-tangent normal + depth + material flag)
+// with zero discard. Group 0: the material's own pure-albedo textures; Group 1: continuumData + continuumCardViews.
+function continuumCardBakeWGSL(material) {
+  const hook = material.cardBake, name = material.name;
+  return /* wgsl */`
+${hook.prelude ? hook.prelude() : ''}
+struct ContinuumCardView { sphere:vec4f, right:vec4f, up:vec4f, dir:vec4f, info:vec4u };
+struct ContinuumCardSample { albedo:vec3f, alpha:f32, normal:vec3f, matFlag:f32 };
+@group(1) @binding(12) var<storage,read> continuumCardViews:array<ContinuumCardView>;
+struct ContinuumCardBakeVarying {
+  @builtin(position) position:vec4f,
+  @location(0) local:vec3f,
+  @location(1) normal:vec3f,
+  @location(2) @interpolate(flat) viewIdx:u32,
+  @location(3) @interpolate(flat) seed:u32,
+${hook.varyings ? continuumVaryingFields(hook.varyings, 4) : ''}
+};
+struct ContinuumCardBakeOut {
+  @location(0) albedo:vec4f,
+  @location(1) geo:vec4f,
+  @builtin(sample_mask) mask:u32,
+};
+${hook.wgsl()}
+@vertex fn continuumCardBakeVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumCardBakeVarying {
+  let touched=continuumBindings();
+  let viewIdx=listed.entry.x;
+  let what=listed.entry.y>>28u;
+  let item=listed.entry.y&0x0fffffffu;
+  var out:ContinuumCardBakeVarying;
+  if(what!=CONTINUUM_CLUSTER_ENTRY){out.position=CONTINUUM_HIDDEN;return out;}
+  let view=continuumCardViews[viewIdx];
+  let recordIdx=view.info.x;
+  let record=continuumRecords[recordIdx];
+  let corner=continuumClusterCorner(record,item,vertex);
+  if(!corner.shown){out.position=CONTINUUM_HIDDEN;return out;}
+  let R=max(view.sphere.w,1e-4);
+  let rel=(corner.posed.position-view.sphere.xyz)/R;
+  let px=dot(rel,view.right.xyz);
+  let py=dot(rel,view.up.xyz);
+  let pz=dot(rel,view.dir.xyz);
+  out.position=vec4f(px+touched,py,clamp(0.5-0.5*pz,0.0,1.0),1.0);
+  out.local=corner.posed.position;
+  out.normal=normalize(corner.posed.normal+vec3f(0.0,1e-6,0.0));
+  out.viewIdx=viewIdx;
+  out.seed=continuumHash(corner.vertex^(viewIdx*0x9e3779b9u));
+  var s:ContinuumSurface;
+  s.instance=recordIdx;s.what=CONTINUUM_CLUSTER_ENTRY;s.model=continuumTypeOf(record);s.vertex=corner.vertex;
+  s.record=record;s.local=corner.posed.position;s.world=corner.posed.position;s.normal=out.normal;
+  s.high=corner.high;s.word=corner.word;s.wear=0.0;s.corner=vec2f(0.0);s.optics=CONTINUUM_NEAR_OPTICS;s.albedo=vec4f(0.0);
+  ${name}CardBakeVarying(s,&out);
+  return out;
+}
+@fragment fn continuumCardBakeFS(v:ContinuumCardBakeVarying,@builtin(front_facing) front:bool)->ContinuumCardBakeOut {
+  let sample=${name}CardBake(v,front);
+  let view=continuumCardViews[v.viewIdx];
+  var n=normalize(sample.normal+vec3f(0.0,1e-6,0.0));
+  if(dot(n,view.dir.xyz)<0.0){n=-n;}
+  let nx=clamp(dot(n,view.right.xyz),-1.0,1.0);
+  let ny=clamp(dot(n,view.up.xyz),-1.0,1.0);
+  let depth01=clamp(v.position.z,0.0,1.0);
+  let a=clamp(sample.alpha,0.0,1.0);
+  let mask=select(0u,continuumSamples(a,v.position.xy,4u,v.seed),a>0.01);
+  return ContinuumCardBakeOut(vec4f(clamp(sample.albedo,vec3f(0.0),vec3f(4.0)),1.0),vec4f(nx,ny,depth01,clamp(sample.matFlag,0.0,1.0)),mask);
+}
+`;
+}
+
 // Every program of the one family, composed: the select ('select'), the shadow map's ('shadow': the kernel's, or a
-// material's `part` of it), the visibility prepass ('visibility'), and a material's view ('view') or under-water
-// capture ('capture', with `capture` the water's own tail: js/water-optics.js captureTail), for an atlas bound in
-// `paging`'s pages.
+// material's `part` of it), the visibility prepass ('visibility'), the octahedral card baker ('cardBake'), and a
+// material's view ('view') or under-water capture ('capture', with `capture` the water's own tail: js/water-optics.js
+// captureTail), for an atlas bound in `paging`'s pages.
 export function continuumModuleWGSL({ pass, material = null, capture = null, paging = CONTINUUM_SINGLE_PAGE, part = 'whole' }) {
   if (pass === 'select') return continuumSelectWGSL(paging);
+  if (pass === 'cardBake') {
+    if (!material?.cardBake) throw Error(`The ${material?.name ?? 'unknown'} material has no cardBake hook`);
+    return CONTINUUM_CORE_WGSL + continuumDataWGSL(1, 0, 'read', paging) + continuumCommonWGSL(paging)
+      + 'fn continuumPose(record:ContinuumRecord,part:u32,vertex:u32,p:ContinuumPosed)->ContinuumPosed { return p; }\n'
+      + continuumTouchWGSL(paging)
+      + /* wgsl */`struct ContinuumSurface { instance:u32, what:u32, model:u32, vertex:u32, record:ContinuumRecord, local:vec3f, world:vec3f, normal:vec3f, high:u32, word:u32, wear:f32, corner:vec2f, optics:vec4f, albedo:vec4f };\n`
+      + continuumCardBakeWGSL(material);
+  }
   if (pass === 'visibility') {
     return FRAME_WGSL + CONTINUUM_CORE_WGSL + continuumDataWGSL(1, 0, 'read', paging) + continuumCommonWGSL(paging) + continuumKindsWGSL() + continuumTouchWGSL(paging)
       + CONTINUUM_SPLAT + CONTINUUM_SURFACE + continuumVisibilityWGSL();

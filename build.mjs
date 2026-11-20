@@ -93,8 +93,8 @@ wgslModules.push('js/wgsl/skinned-pose.js');
 // The herds go first: board-folk.js reads herds.js's STREET_MOUNT_FLAG as it loads.
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/board-waterfront.js','js/place-landmarks.js','js/old-world-board.js','js/native-towns.js','js/colonial-towns.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
-order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
-wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
+order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/continuum-cards.js','js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
+wgslModules.push('js/wgsl/continuum-cards.js','js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/shallow-water.js','js/meadow-continuum.js','js/wgsl/meadow-continuum.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // Ships in the one continuum: the bodies' format and loading, ahead of the families that draw them (their kinds,
@@ -103,7 +103,7 @@ order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js');
 // The fleet's own ships in the same continuum (js/vessel-continuum.js), drawn by main.js.
 order.splice(order.indexOf('js/main.js'),0,'js/vessel-continuum.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
-order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/wgsl/boulder-continuum.js','js/continuum-scene.js','js/city-continuum-draw.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/wgsl/boulder-continuum.js','js/continuum-scene.js','js/continuum-cards.js','js/city-continuum-draw.js');
 // The land's continuum: its programs ahead of the land shader its drawing is appended to, its bake and cut ahead of the land.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
 wgslModules.push('js/wgsl/land-banks.js','js/wgsl/land-continuum.js');
