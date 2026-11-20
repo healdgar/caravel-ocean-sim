@@ -35,8 +35,8 @@ const STANDS = {
     harbourHeight: fullGrown ? 0.94 : undefined,
     // Closed copses & groves draw from the competitive intermixed stand-grown (`canopy`) cohort where neighboring
     // species competed for light & soil, while open-grown `veteran` specimens stand alone in parks/squares/roadsides.
-    tall: { cohort: 'canopy', mix: { oak: 0.3, chestnut: 0.22, maple: 0.18, elm: 0.18, birch: 0.12 }, scale: () => (fullGrown ? [1.0, 1.18] : [2.5, 3.19]), apart: 0.95 },
-    fill: { cohort: 'canopy', mix: { oak: 0.24, chestnut: 0.18, maple: 0.20, elm: 0.16, birch: 0.22 }, scale: () => (fullGrown ? [0.82, 1.02] : [2.0, 2.64]) },
+    tall: { cohort: 'canopy', mix: { oak: 0.3, chestnut: 0.22, maple: 0.18, elm: 0.18, birch: 0.12 }, scale: () => (fullGrown ? [1.06, 1.24] : [2.5, 3.19]), apart: 1.25 },
+    fill: { cohort: 'canopy', mix: { oak: 0.24, chestnut: 0.18, maple: 0.20, elm: 0.16, birch: 0.22 }, scale: () => (fullGrown ? [0.88, 1.08] : [2.0, 2.64]) },
   },
   // A ceiba's crown is sixty metres across, so its grove is twice the size.
   subtropical: {
@@ -45,7 +45,7 @@ const STANDS = {
     fill: { mix: { ceiba: 0.2, royal_palm: 0.48, palm: 0.32 }, scale: (species) => (species === 'ceiba' ? [1.3, 1.9] : [1.22, 1.54]) },
   },
 };
-const FILL_APART = 0.6, TALL_APART = 0.8;
+const FILL_APART = fullGrown ? 0.92 : 0.6, TALL_APART = fullGrown ? 1.02 : 0.8;
 const stand = STANDS[packName];
 if (!stand) throw Error(`No stand is named for ${packName}`);
 // A grove is laid out on a grid of 128 squares a side: a tree whose crown comes within four of them of its

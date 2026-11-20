@@ -601,21 +601,15 @@
           },
           "normal": {
             "file": "oak-bark-normal.png",
-            "bytes": 1573114,
-            "sha256": "511b53d35405a19dacde3c9996e5487f14d47e20c0c45f54751532c866518528",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-normal.png"
+            "bytes": 917393,
+            "sha256": "cd7bc1e843077f0042d97f8a79fa0fc6d39f9f16f45a94a5d66a5c7547364d7a",
+            "encoding": "linear"
           },
           "roughnessMap": {
             "file": "oak-bark-roughness.png",
-            "bytes": 722342,
-            "sha256": "99ea11ee38b47cb4df40af0987b4139d65b55f7ec936f8fdc4f94b732bba5b48",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-roughness.png"
+            "bytes": 207816,
+            "sha256": "9f06eca96cea5b90d1cb5059601cd03c7aedf09c1be67558f06ed757d1f9df94",
+            "encoding": "linear"
           }
         },
         {
@@ -1487,21 +1481,15 @@
           },
           "normal": {
             "file": "maple-bark-normal.png",
-            "bytes": 1587963,
-            "sha256": "4f8fb2a6129936467a61080c4ebddc25bd681dd17372f816facbeb558ccff1e0",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-normal.png"
+            "bytes": 894828,
+            "sha256": "a93d6da8ab2421aa3cfef4493746fce15992c478f5023075d3b5d848fac7c1cd",
+            "encoding": "linear"
           },
           "roughnessMap": {
             "file": "maple-bark-roughness.png",
-            "bytes": 699793,
-            "sha256": "bfe9c30fba924bce4d65dcd1c5a310b9b903d4875f0d1c696cd2fdbc7f4db491",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-roughness.png"
+            "bytes": 208433,
+            "sha256": "93199e2847ced825726a77a00f88a221eb7f65ba1d2dafed4d8f7b206bad9604",
+            "encoding": "linear"
           }
         },
         {
@@ -2308,21 +2296,15 @@
           },
           "normal": {
             "file": "birch-bark-normal.png",
-            "bytes": 1654402,
-            "sha256": "0e4b1b4fadecf78fdfff0bfb7be4d7109784ed6bd9e1a50e080e00c500333153",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-normal.png"
+            "bytes": 681078,
+            "sha256": "9e3697567d4139cef24c0a2263a3908e4a8ca0c5f176f44262ee3deb9a2bb290",
+            "encoding": "linear"
           },
           "roughnessMap": {
             "file": "birch-bark-roughness.png",
-            "bytes": 611351,
-            "sha256": "e1e19b5d64eba902341451d9fea33d666778b8179a1f187020f38fe26c62a457",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-roughness.png"
+            "bytes": 213767,
+            "sha256": "5677dbc160714b6bb0b3071be99e9fa55cca3df4dd9f8a338f48e2afa6f0d358",
+            "encoding": "linear"
           }
         },
         {
@@ -3141,21 +3123,15 @@
           },
           "normal": {
             "file": "elm-bark-normal.png",
-            "bytes": 1567147,
-            "sha256": "a5a5cbadc52cb5b2df66d4b8945c0e3866386200e44df5d95699aef3aad5af05",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-normal.png"
+            "bytes": 887596,
+            "sha256": "1e38c26d933628f5ca223475a3643b7a1e5940dcb79a7f240019a339d358436a",
+            "encoding": "linear"
           },
           "roughnessMap": {
             "file": "elm-bark-roughness.png",
-            "bytes": 689572,
-            "sha256": "a98a475c280123ca73b79394cf2648b6f80bb709dcf7871b0783278aaad1767c",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-roughness.png"
+            "bytes": 201999,
+            "sha256": "0ee21362f11201deaf1b6b316fdf8a17306d6565f88ad896924a2548f91c20b1",
+            "encoding": "linear"
           }
         },
         {
@@ -4027,21 +4003,15 @@
           },
           "normal": {
             "file": "chestnut-bark-normal.png",
-            "bytes": 1578693,
-            "sha256": "03daec2499b7601ca0d7955e5858997831ee0c232189dd101fd2508d9bf3a6f6",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-normal.png"
+            "bytes": 733884,
+            "sha256": "d2adb6cd10120ab817365303de805a025d0fa913f11761cbef9b3ee0926c9929",
+            "encoding": "linear"
           },
           "roughnessMap": {
             "file": "chestnut-bark-roughness.png",
-            "bytes": 683789,
-            "sha256": "7f9177f0501578e8cfd3cc3723db30851fab7688f0f496f87234d7711af7e945",
-            "encoding": "linear",
-            "width": 512,
-            "height": 1024,
-            "sourceArchiveMember": "surface-bark-roughness.png"
+            "bytes": 161913,
+            "sha256": "a241a1d83a0b2e567f21548daed4f4c13de15d4109da96cf21d573964e0f1615",
+            "encoding": "linear"
           }
         },
         {

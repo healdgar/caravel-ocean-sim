@@ -4,7 +4,7 @@
 // oracle isolates the depth-target aliasing optimization, not cloud physics.
 import { FRAME_WGSL, ATMO_CORE_WGSL } from '../../js/wgsl/common.js';
 import { SKY_RENDER_FUNCS } from '../../js/wgsl/sky.js';
-import { CLOUD_DENSITY, CLOUD_LIGHT, CLOUD_FIELD_MIPS, CLOUD_SAMPLE, CLOUD_BINDINGS, CLOUD_CAMERA_RAYS } from '../../js/wgsl/clouds.js';
+import { CLOUD_DENSITY, CLOUD_SHADOW, CLOUD_LIGHT, CLOUD_FIELD_MIPS, CLOUD_SAMPLE, CLOUD_BINDINGS, CLOUD_CAMERA_RAYS } from '../../js/wgsl/clouds.js';
 
 const CLOUD_FRAME_BINDINGS = /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
@@ -15,9 +15,10 @@ const CLOUD_FRAME_BINDINGS = /* wgsl */ `
 
 export async function createReferenceVolumetricClouds({ device, frameUBO, transView, skyView, sampler, computePipe, fieldSize = [128, 64, 128] }) {
   const U = GPUTextureUsage, B = GPUBufferUsage;
-  const [densityPipe, lightPipe, mipPipe, rayPipe, resolvePipe] = await Promise.all([
+  const [densityPipe, lightPipe, shadowPipe, mipPipe, rayPipe, resolvePipe] = await Promise.all([
     computePipe(CLOUD_DENSITY, 'cloud density'),
     computePipe(CLOUD_LIGHT, 'cloud lighting'),
+    computePipe(CLOUD_SHADOW, 'cloud shadow'),
     computePipe(CLOUD_FIELD_MIPS, 'cloud field mips'),
     computePipe(FRAME_WGSL + ATMO_CORE_WGSL + CLOUD_FRAME_BINDINGS + SKY_RENDER_FUNCS + CLOUD_SAMPLE + CLOUD_CAMERA_RAYS, 'cloud rays'),
     computePipe(FRAME_WGSL + CLOUD_BINDINGS + CLOUD_RESOLVE, 'cloud resolve'),
@@ -26,17 +27,23 @@ export async function createReferenceVolumetricClouds({ device, frameUBO, transV
   const bakeUniform = device.createBuffer({ label:'cloud bake', size:32, usage:B.UNIFORM | B.COPY_DST });
   const data = new Float32Array(32), bake = new Float32Array(8), previous = new Float32Array(19);
   const levels = 4;
+  const shadowSize = 256;
   const volume = label => device.createTexture({ label, dimension:'3d', size:fieldSize,
     mipLevelCount:levels, format:'rgba16float', usage:U.TEXTURE_BINDING | U.STORAGE_BINDING | U.COPY_SRC });
   const density = volume('cloud density field'), lighting = volume('cloud light field');
+  const shadowMap = device.createTexture({ label:'cloud shadow map', size:[shadowSize,shadowSize], format:'rgba16float',
+    usage:U.TEXTURE_BINDING | U.STORAGE_BINDING | U.COPY_SRC });
   const fieldSampler = device.createSampler({ magFilter:'linear', minFilter:'linear', mipmapFilter:'linear',
     addressModeU:'repeat', addressModeV:'clamp-to-edge', addressModeW:'repeat' });
+  const shadowSampler = device.createSampler({ magFilter:'linear', minFilter:'linear',
+    addressModeU:'repeat', addressModeV:'repeat' });
   const view = (texture, mip) => texture.createView({ baseMipLevel:mip, mipLevelCount:1 });
   const group = (pipe, index, entries) => device.createBindGroup({ layout:pipe.getBindGroupLayout(index),
     entries:entries.map(([binding, resource]) => ({binding,resource})) });
   const volumeEntries = [[0,{buffer:uniform}],[1,density.createView()],[2,lighting.createView()],[3,fieldSampler]];
   const bgDensity = group(densityPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)]]);
   const bgLight = group(lightPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)],[2,fieldSampler],[3,view(lighting,0)]]);
+  const bgShadow = group(shadowPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)],[2,fieldSampler],[3,shadowMap.createView()]]);
   const bgMips = [];
   for(let m=1;m<levels;m++) bgMips.push(group(mipPipe,0,[[0,view(density,m-1)],[1,view(lighting,m-1)],[2,view(density,m)],[3,view(lighting,m)]]));
   const bgRayVolume = group(rayPipe,1,volumeEntries);
@@ -58,7 +65,7 @@ export async function createReferenceVolumetricClouds({ device, frameUBO, transV
     raw=target('cloud raw','rgba16float');rawDepth=target('cloud depth','r32float');
     colors=[target('cloud history A','rgba16float'),target('cloud history B','rgba16float')];
     depths=[target('cloud depth A','r32float'),target('cloud depth B','r32float')];
-    rayGroup=group(rayPipe,0,[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,raw.createView()],[5,rawDepth.createView()]]);
+    rayGroup=group(rayPipe,0,[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,raw.createView()],[5,rawDepth.createView()],[6,shadowMap.createView()],[7,shadowSampler]]);
     resolveGroups=[0,1].map(i=>group(resolvePipe,0,[[0,{buffer:frameUBO}],[1,raw.createView()],[2,rawDepth.createView()],
       [3,colors[1-i].createView()],[4,depths[1-i].createView()],[5,sampler],[6,colors[i].createView()],[7,depths[i].createView()]]));
     if(skyPipeline)skyGroups=colors.map(t=>group(skyPipeline,1,[[4,t.createView()]]));
@@ -97,6 +104,7 @@ export async function createReferenceVolumetricClouds({ device, frameUBO, transV
     if(densityDirty){pass.setPipeline(densityPipe);pass.setBindGroup(0,bgDensity);pass.dispatchWorkgroups(...fieldSize.map(n=>Math.ceil(n/4)));}
     if(lightDirty){
       pass.setPipeline(lightPipe);pass.setBindGroup(0,bgLight);pass.dispatchWorkgroups(...fieldSize.map(n=>Math.ceil(n/4)));
+      pass.setPipeline(shadowPipe);pass.setBindGroup(0,bgShadow);pass.dispatchWorkgroups(Math.ceil(shadowSize/8),Math.ceil(shadowSize/8));
       pass.setPipeline(mipPipe);
       for(let m=1;m<levels;m++){pass.setBindGroup(0,bgMips[m-1]);pass.dispatchWorkgroups(...fieldSize.map(n=>Math.ceil(Math.max(1,n>>m)/4)));}
     }
@@ -112,7 +120,7 @@ export async function createReferenceVolumetricClouds({ device, frameUBO, transV
     get output(){return colors[current];},
     get density(){return density;},
     get historyValid(){return data[27]===1;},
-    destroy(){for(const t of [density,lighting,raw,rawDepth,...colors,...depths])t?.destroy();uniform.destroy();bakeUniform.destroy();},
+    destroy(){for(const t of [density,lighting,shadowMap,raw,rawDepth,...colors,...depths])t?.destroy();uniform.destroy();bakeUniform.destroy();},
   };
 }
 export const CLOUD_RESOLVE = /* wgsl */ `
@@ -124,10 +132,42 @@ export const CLOUD_RESOLVE = /* wgsl */ `
 @group(0) @binding(5) var linearSampler:sampler;
 @group(0) @binding(6) var resolved:texture_storage_2d<rgba16float,write>;
 @group(0) @binding(7) var depthOut:texture_storage_2d<r32float,write>;
+fn cloudClean4(v:vec4f)->vec4f {
+  let bad=(v!=v)|((bitcast<vec4u>(v)&vec4u(0x7fffffffu))>=vec4u(0x7f800000u));
+  let safe=select(v,vec4f(0.0),bad);
+  return vec4f(clamp(safe.rgb,vec3f(0.0),vec3f(6.0e4)),clamp(safe.a,0.0,1.0));
+}
+fn cloudScalarFinite(x:f32)->bool {
+  return (x==x)&&!(x!=x)&&((bitcast<u32>(x)&0x7fffffffu)<0x7f800000u);
+}
+fn cloudSampleCatmullRom(tex:texture_2d<f32>,samp:sampler,uv:vec2f,texSize:vec2f)->vec4f {
+  let pos=uv*texSize;
+  let tc1=floor(pos-0.5)+0.5;
+  let f=pos-tc1;
+  let f2=f*f;let f3=f2*f;
+  let w0=f2-0.5*(f3+f);
+  let w1=1.5*f3-2.5*f2+1.0;
+  let w3=0.5*(f3-f2);
+  let w2=1.0-w0-w1-w3;
+  let w12=w1+w2;
+  let inv=1.0/texSize;
+  let tc0=(tc1-1.0)*inv;
+  let tc3=(tc1+2.0)*inv;
+  let tc12=(tc1+w2/max(w12,vec2f(1e-5)))*inv;
+  let c0=textureSampleLevel(tex,samp,vec2f(tc12.x,tc0.y),0.0)*(w12.x*w0.y);
+  let c1=textureSampleLevel(tex,samp,vec2f(tc0.x,tc12.y),0.0)*(w0.x*w12.y);
+  let c2=textureSampleLevel(tex,samp,vec2f(tc12.x,tc12.y),0.0)*(w12.x*w12.y);
+  let c3=textureSampleLevel(tex,samp,vec2f(tc3.x,tc12.y),0.0)*(w3.x*w12.y);
+  let c4=textureSampleLevel(tex,samp,vec2f(tc12.x,tc3.y),0.0)*(w12.x*w3.y);
+  let wSum=w12.x*w0.y+w0.x*w12.y+w12.x*w12.y+w3.x*w12.y+w12.x*w3.y;
+  return (c0+c1+c2+c3+c4)/max(wSum,1e-5);
+}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let size=vec2i(textureDimensions(resolved));let p=vec2i(id.xy);if(any(p>=size)){return;}
-  let current=textureLoad(rawColor,p,0);let distance=textureLoad(rawDepth,p,0).r;
+  let current=cloudClean4(textureLoad(rawColor,p,0));
+  let rawDist=textureLoad(rawDepth,p,0).r;
+  let distance=select(0.0,rawDist,cloudScalarFinite(rawDist));
   var result=current;
   if(CF.shape.w>0.5 && current.a>0.0001 && distance>0.0){
     let uv=(vec2f(p)+0.5)/vec2f(size);let ndc=uv*vec2f(2,-2)+vec2f(-1,1);
@@ -137,19 +177,23 @@ fn main(@builtin(global_invocation_id) id:vec3u){
     let previous=CF.previousView*vec4f(world-CF.previousCamera.xyz,1.0);
     let at=previous.xy/max(previous.w,0.0001)*vec2f(0.5,-0.5)+0.5;
     if(previous.w>0.0 && all(at>vec2f(0)) && all(at<vec2f(1))){
-      let oldDepth=textureLoad(historyDepth,clamp(vec2i(at*vec2f(size)),vec2i(0),size-1),0).r;
+      let previousDepth=textureLoad(historyDepth,clamp(vec2i(at*vec2f(size)),vec2i(0),size-1),0).r;
+      let rawOld=cloudSampleCatmullRom(history,linearSampler,at,vec2f(size));
+      let historyFinite=!(any(rawOld!=rawOld)||!(previousDepth==previousDepth))&&cloudScalarFinite(previousDepth)&&all((bitcast<vec4u>(rawOld)&vec4u(0x7fffffffu))<vec4u(0x7f800000u));
       let expected=length(world-CF.previousCamera.xyz)*0.001;
-      if(abs(oldDepth-expected)<max(0.35,distance*0.15)){
+      if(historyFinite && abs(previousDepth-expected)<max(0.35,distance*0.15)){
         var lo=current;var hi=current;
         for(var y=-1;y<=1;y++){for(var x=-1;x<=1;x++){
-          let c=textureLoad(rawColor,clamp(p+vec2i(x,y),vec2i(0),size-1),0);lo=min(lo,c);hi=max(hi,c);
+          let c=cloudClean4(textureLoad(rawColor,clamp(p+vec2i(x,y),vec2i(0),size-1),0));lo=min(lo,c);hi=max(hi,c);
         }}
-        let old=clamp(textureSampleLevel(history,linearSampler,at,0.0),lo,hi);
+        let old=clamp(rawOld,lo,hi);
         let confidence=0.86*(1.0-saturate(abs(old.a-current.a)*2.0));
         result=mix(current,old,confidence);
       }
     }
   }
+  result=cloudClean4(result);
+  if(any(result!=result)){result=vec4f(0.0);}
   textureStore(resolved,p,result);textureStore(depthOut,p,vec4f(distance));
 }
 `;

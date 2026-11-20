@@ -55,7 +55,7 @@ const CONTINUUM_COMPUTE_SET = new Set(CONTINUUM_COMPUTE_PASSES);
 
 // Passes may begin before the first encoded compute pass starts. Preserve the
 // endpoint interval separately; only min(start)..max(end) encloses all samples.
-export function decodeGPUTimestamps(values,names,used) {
+export function decodeGPUTimestamps(values,names,used,minStart=0n) {
   let first=null,last=null,bloomFirst=null,bloomLast=null,contFirst=null,contLast=null;
   const passes={};
   for(let i=0;i<names.length;i++){
@@ -63,8 +63,8 @@ export function decodeGPUTimestamps(values,names,used) {
     if(!used[i])continue; // Unwritten slots may contain a previous frame's data.
     const start=values[i*2],end=values[i*2+1];
     if(end<start)return null;
-    // Dawn/Metal elides a compute pass that encoded zero dispatches, leaving start=0 (with end=0 or end>0).
-    if(start===0n)continue;
+    // Dawn/Metal elides a compute pass that encoded zero dispatches, leaving start=0 or stale timestamps from an earlier frame.
+    if(start===0n||(minStart>0n&&start<=minStart))continue;
     passes[name]=Number(end-start)/1e6;
     if(first===null||start<first)first=start;
     if(last===null||end>last)last=end;
@@ -80,7 +80,7 @@ export function decodeGPUTimestamps(values,names,used) {
   if(first===null)return null;
   passes.Bloom=bloomFirst===null?0:Number(bloomLast-bloomFirst)/1e6;
   if(contFirst!==null)passes['Continuum window']=Number(contLast-contFirst)/1e6;
-  return {windowMs:Number(last-first)/1e6,passes};
+  return {windowMs:Number(last-first)/1e6,passes,lastTs:last};
 }
 
 // Where the main thread's frame goes. A clock read per stage is cheap enough to leave running.
@@ -113,7 +113,7 @@ export function createGPUProfiler(device, requested=false, options=null) {
     modes.set('detail',mode);return mode;
   }
   const latest={},smoothed={},samples=[];
-  let collecting=false,pending=false,frame=0,pendingFrame=0,totalMs=0,sampleCount=0,droppedSamples=0,reading=Promise.resolve(),error='';
+  let collecting=false,pending=false,frame=0,pendingFrame=0,totalMs=0,sampleCount=0,droppedSamples=0,lastSampleTs=0n,reading=Promise.resolve(),error='';
   function sceneMs() {
     return smoothed.Scene ?? null;
   }
@@ -163,10 +163,11 @@ export function createGPUProfiler(device, requested=false, options=null) {
       const capture=pendingCapture,mode=capture.mode;
       reading=mode.staging.mapAsync(GPUMapMode.READ).then(()=>{
         const values=new BigUint64Array(mode.staging.getMappedRange());
-        const decoded=decodeGPUTimestamps(values,mode.names,capture.used);
+        const decoded=decodeGPUTimestamps(values,mode.names,capture.used,lastSampleTs);
         mode.staging.unmap();
         if(capture.epoch!==epoch)return; // A hidden/reopened panel must not mix timing modes.
         if(!decoded){droppedSamples++;return;}
+        if(decoded.lastTs>lastSampleTs)lastSampleTs=decoded.lastTs;
         for(const [name,ms] of Object.entries(decoded.passes)){
           latest[name]=ms;smoothed[name]=sampleCount?smoothed[name]*.8+ms*.2:ms;
         }

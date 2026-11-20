@@ -25,6 +25,33 @@ fn cloudNoise(p:vec3f,period:f32)->f32 {
     mix(mix(cloudHash(i+vec3f(0,0,1),period),cloudHash(i+vec3f(1,0,1),period),u.x),
     mix(cloudHash(i+vec3f(0,1,1),period),cloudHash(i+vec3f(1,1,1),period),u.x),u.y),u.z);
 }
+// Periodic 3D Worley / Alligator billow noise (baked only on densityDirty): rounded cauliflower
+// cells that tile seamlessly across the 16 km cloud domain.
+fn cloudHash3(p:vec3f,period:f32)->vec3f {
+  let q=vec3u(p-floor(p/period)*period);
+  var h=(q.x*1597334677u)^(q.y*3812015801u)^(q.z*2798796415u);
+  h=(h^(h>>16u))*2246822519u;
+  let r0=f32((h^(h>>16u))>>8u)/16777216.0;
+  h=(h*3266489917u)^0x9e3779b9u;
+  let r1=f32((h^(h>>16u))>>8u)/16777216.0;
+  h=(h*2246822519u)^0x85ebca6bu;
+  let r2=f32((h^(h>>16u))>>8u)/16777216.0;
+  return vec3f(r0,r1,r2);
+}
+fn cloudWorley3D(p:vec3f,period:f32)->f32 {
+  let base=floor(p);let f=fract(p);
+  var d2=2.0;
+  for(var z=-1;z<=1;z++){
+    for(var y=-1;y<=1;y++){
+      for(var x=-1;x<=1;x++){
+        let off=vec3f(f32(x),f32(y),f32(z));
+        let pt=off+cloudHash3(base+off,period)-f;
+        d2=min(d2,dot(pt,pt));
+      }
+    }
+  }
+  return smoothstep(0.04,0.92,1.0-sqrt(min(d2,1.0)));
+}
 fn cloudEllipsoid(p: vec3<f32>, center: vec3<f32>, radius: vec3<f32>) -> f32 {
   return 1.0 - length((p - center) / max(radius, vec3<f32>(0.01)));
 }

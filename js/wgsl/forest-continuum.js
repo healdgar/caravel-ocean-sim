@@ -511,8 +511,13 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
  let tangent=dx*uy.y-dy*ux.y;let bitangent=dy*ux.x-dx*uy.x;
  var n=geometric;
  if(abs(determinant)>1e-12&&dot(tangent,tangent)>1e-16&&dot(bitangent,bitangent)>1e-16&&dot(detail,detail)>1e-16){
-   let t=normalize(tangent)*direction;let b=normalize(bitangent)*direction;
-   let sampled=normalize(detail);n=normalize(t*sampled.x+b*sampled.y+geometric*sampled.z);
+   let tRaw=tangent-geometric*dot(tangent,geometric);
+   let bRaw=bitangent-geometric*dot(bitangent,geometric);
+   if(dot(tRaw,tRaw)>1e-16&&dot(bRaw,bRaw)>1e-16){
+     let t=normalize(tRaw)*direction;let b=normalize(bRaw)*direction;
+     let sampled=normalize(vec3f(detail.xy,max(detail.z,0.25)));
+     n=normalize(t*sampled.x+b*sampled.y+geometric*sampled.z);
+   }
  }
  return n;
 }
@@ -713,21 +718,14 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
   }
   let canopy=clamp(v.surface.y,0.,1.);
   if(!leaf){
-   // Bark: its maps, its grain close to, raw where shot has opened it.
+   // Bark: coherent furrowed maps, subtle crevice occlusion up close, raw wood where shot has opened it.
    let pale=v.colour*vec3f(2.7,2.2,1.5)+vec3f(.07,.055,.03);
    colour=forestOwnColour(surface.pigment)*mix(v.colour,pale,clamp(v.surface.z,0.,1.));
-   let barkClose=1.-smoothstep(8.,32.,viewDist);
-   var detailVec=surface.detail.xyz*vec3f(1.25+0.35*barkClose,1.25+0.35*barkClose,1.0);
-   if(barkClose>0.001){
-    let grainU=v.uv.x*46.0+sin(v.uv.y*9.5)*1.4;let grainV=v.uv.y*18.0;
-    let fissure=sin(grainU)*0.65+sin(grainU*2.3+grainV*0.7)*0.35;
-    let plate=cos(grainU)*0.65+cos(grainU*2.3+grainV*0.7)*0.35;
-    detailVec.x+=plate*0.18*barkClose;detailVec.y+=sin(grainV*2.1+grainU*0.4)*0.08*barkClose;
-    colour*=1.0+fissure*0.055*barkClose;
-   }
+   let detailVec=vec3f(surface.detail.xy*0.92,max(surface.detail.z,0.38));
    n=forestMappedNormal(n,detailVec,dx,dy,ux,uy)*select(-1.,1.,front);
-   roughness=clamp(surface.detail.a/max(surface.pigment.a,FOREST_THINNEST_COVERAGE),0.22,0.98);
-   wet=clamp(material.coordinates.w*(1.0-roughness),0.0,0.28);
+   let rawRough=surface.detail.a/max(surface.pigment.a,FOREST_THINNEST_COVERAGE);
+   roughness=clamp(rawRough,0.72,0.98);
+   wet=clamp(material.coordinates.w*(1.0-roughness)*0.45,0.0,0.12);
    // The light the specimen's own canopy lets through (not a sun shadow: the land's and the clouds' stay).
    let woodAO=min(canopy,select(1.0,mix(0.30,1.0,exposure),canopy>0.995&&exposure<0.995));
    diffuse=max(dot(n,F.sunDir.xyz),0.)*(.35+.65*woodAO);ambient=(.36+max(n.y,0.)*.25)*woodAO;

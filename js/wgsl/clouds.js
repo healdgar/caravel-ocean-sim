@@ -13,16 +13,51 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
   let size=textureDimensions(dst); if(any(id>=size)){return;}
   if(BAKE.shape.x<=0.001){textureStore(dst,vec3i(id),vec4f(0,0,0,-0.30));return;}
   let uv=(vec3f(id)+0.5)/vec3f(size);
-  let p=vec3f((uv.x-0.5)*16.0,uv.y*BAKE.shape.y,(uv.z-0.5)*16.0);
-  let detail=vec3f(cloudNoise(p*4.0,64.0),cloudNoise(p*8.0,128.0),cloudNoise(p*16.0,256.0));
+  // Altitude-ramped wind shear bends upper cumulus crowns gracefully while keeping periodic wrap exact.
+  let topShear=smoothstep(0.45,0.96,uv.y)*0.34;
+  let p=vec3f((uv.x-0.5)*16.0+topShear,uv.y*BAKE.shape.y,(uv.z-0.5)*16.0+topShear*0.55);
+  let billowCoarse=cloudWorley3D(p*1.25,20.0);
+  let billowFine=cloudWorley3D(p*2.5,40.0);
+  let rawDetail=vec3f(cloudNoise(p*4.0,64.0),cloudNoise(p*8.0,128.0),cloudNoise(p*16.0,256.0));
+  let detail=vec3f(mix(rawDetail.x,billowCoarse,0.48),mix(rawDetail.y,billowFine,0.42),rawDetail.z);
   let warp=(detail-0.5)*vec3f(0.32,0.24,0.32);
   let q=p+warp;
-  let shape=vec4f(cloudNoise(q*0.5,8.0),cloudNoise(q,16.0),cloudNoise(q*2.0,32.0),cloudNoise(q*4.0,64.0));
+  let shape=vec4f(mix(cloudNoise(q*0.5,8.0),billowCoarse,0.22),cloudNoise(q,16.0),cloudNoise(q*2.0,32.0),cloudNoise(q*4.0,64.0));
   let distortion=(shape.gba-0.5)*vec3f(0.64,0.36,0.64)+warp;
   let body=roundedCloudBody(p+distortion,shape,detail);
   let fade=smoothstep(0.02,0.13,uv.y)*(1.0-smoothstep(0.97,1.0,uv.y));
   let density=body.xy*1.6*fade;
   textureStore(dst,vec3i(id),vec4f(density,max(density.x,0.0),max(body.z,-0.30)));
+}
+`;
+
+// Periodic 2D sun-space cloud shadow transmittance map (baked only on lightDirty -> 0 ms steady state).
+// Used by CLOUD_CAMERA_RAYS for single-tap volumetric crepuscular sun shafts.
+export const CLOUD_SHADOW = CLOUD_BAKE_UNIFORM + /* wgsl */ `
+@group(0) @binding(1) var field:texture_3d<f32>;
+@group(0) @binding(2) var fieldSampler:sampler;
+@group(0) @binding(3) var dst:texture_storage_2d<rgba16float,write>;
+@compute @workgroup_size(8,8)
+fn main(@builtin(global_invocation_id) id:vec3u) {
+  let size=textureDimensions(dst);if(any(id.xy>=size)){return;}
+  if(BAKE.shape.x<=0.001){textureStore(dst,vec2i(id.xy),vec4f(1.0,0.0,0.0,1.0));return;}
+  let uv=(vec2f(id.xy)+0.5)/vec2f(size);
+  let sun=normalize(BAKE.sun.xyz);
+  let elev=max(sun.y,0.08);
+  let h=BAKE.shape.y;
+  let path=min(h/elev,12.0);
+  let step=path/24.0;
+  let baseP=vec3f((uv.x-0.5)*16.0,0.0,(uv.y-0.5)*16.0);
+  var tau=0.0;
+  for(var i=0u;i<24u;i++){
+    let p=baseP+sun*((f32(i)+0.5)*step);
+    let sy=p.y/h;
+    if(sy>1.0){break;}
+    let suv=vec3f(p.x/16.0+0.5,sy,p.z/16.0+0.5);
+    tau+=textureSampleLevel(field,fieldSampler,suv,0.0).r*step*BAKE.shape.w*4.0;
+    if(tau>14.0){break;}
+  }
+  textureStore(dst,vec2i(id.xy),vec4f(exp(-tau),min(tau,14.0),0.0,1.0));
 }
 `;
 
@@ -150,12 +185,29 @@ fn volumeSurfaceSunVisibility(ro:vec3f,rd:vec3f)->f32 {
   return exp(-optical);
 }
 struct CloudRay { color:vec4f, distance:f32 };
+fn cloudHG(cosTheta:f32,g:f32)->f32 {
+  let g2=g*g;
+  return (1.0-g2)/(4.0*3.14159265*pow(max(1.0+g2-2.0*g*cosTheta,1e-4),1.5));
+}
+fn cloudDualHG(cosTheta:f32,gFwd:f32,gBack:f32,blend:f32)->f32 {
+  return mix(cloudHG(cosTheta,gBack),cloudHG(cosTheta,gFwd),blend);
+}
 fn marchCloudsTo(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:vec3f,maxDistance:f32)->CloudRay {
   var out:CloudRay;out.color=vec4f(0);out.distance=0.0;
   if(CF.screen.w<0.5){return out;}
   var hit=cloudInterval(ro,rd);hit.y=min(hit.y,maxDistance);if(hit.y<=hit.x){return out;}
-  let phase=saturate(dot(rd,F.sunDir.xyz)*0.5+0.5);
-  let scatter=0.10+0.30*pow(phase,4.0);let silverPhase=pow(phase,24.0);
+  let cosSun=dot(rd,F.sunDir.xyz);
+  let phase=saturate(cosSun*0.5+0.5);
+  let silverPhase=pow(phase,24.0);
+  // Precompute dual-lobe Henyey-Greenstein phase across 3 multiple-scattering octaves (Wrenninge / Schneider).
+  let hg0=min(cloudDualHG(cosSun,0.78,-0.28,0.72)*2.6,2.2);
+  let hg1=min(cloudDualHG(cosSun,0.42,-0.16,0.72)*2.4,1.6);
+  let hg2=min(cloudDualHG(cosSun,0.20,-0.08,0.72)*2.2,1.2);
+  let powderBack=saturate(1.0-cosSun);
+  let moonDir=lunarDirection();
+  let moonPhase=saturate(dot(rd,moonDir)*0.5+0.5);
+  let moonScatter=0.10+0.30*pow(moonPhase,4.0);
+  let moonSilverBase=pow(moonPhase,24.0)*0.25;
   let extent=hit.y-hit.x;var tr=1.0;var color=vec3f(0);var depth=0.0;var weight=0.0;
   let skyDistance=skyAtmo(rd);
   for(var i=0u;i<budget;i++){
@@ -166,20 +218,25 @@ fn marchCloudsTo(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor
     let step=extent*((b*0.3+b*b*0.7)-(a*0.3+a*a*0.7));
     let t=start+step*jitter;let p=ro+rd*t;
     let lod=clamp(log2(max(step*0.35/0.125,1.0)),0.0,3.0);
+    // Conservative mip-3 max-bound empty-space skip avoids full light fetches in clear sky gaps.
+    if(cloudDensityAt(p,3.0).b<0.0004){continue;}
     let density=cloudDensityAt(p,lod);
-    let alpha=1.0-exp(-max(density.r,0.0)*step*CF.shape.z);
+    let rho=max(density.r,0.0);
+    let alpha=1.0-exp(-rho*step*CF.shape.z);
     if(alpha>0.00001){
       let light=textureSampleLevel(cloudLight,cloudSampler,cloudUV(p),lod);
       let visibility=saturate(light.b);let diffuse=saturate(light.r);let upper=saturate(light.g);let ao=clamp(light.a,0.18,1.0);
-      let root=sqrt(visibility);
+      let root=sqrt(visibility);let root4=sqrt(root);
+      // 3-octave multiple-scattering energy + Nubis crease/powder sugar darkening.
+      let powder=mix(1.0,1.0-0.42*exp(-rho*5.5),powderBack);
+      let crease=mix(0.72,1.0,ao);
+      let multiSun=(visibility*hg0+root*0.52*hg1+root4*0.26*hg2)*powder*crease;
       let direct=visibility*(0.20+0.80*diffuse);
-      let bounce=(0.035+0.18*sqrt(root))*(0.25+0.75*upper)*ao;
+      let bounce=(0.035+0.18*root4)*(0.25+0.75*upper)*ao;
       let ambient=(0.10+0.19*upper)*ao;
-      let silver=silverPhase*root*pow(max(1.0-diffuse,0.0),0.90)*(1.0-smoothstep(0.02,0.20,density.a))*0.25;
-      let moonPhase=saturate(dot(rd,lunarDirection())*.5+.5);
-      let moonScatter=.10+.30*pow(moonPhase,4.0);
-      let moonSilver=pow(moonPhase,24.0)*root*pow(max(1.0-diffuse,0.0),.90)*(1.0-smoothstep(.02,.20,density.a))*.25;
-      let lit=sunColor*((direct+scatter*visibility+bounce)*0.20+silver)+lunarCloudLight()*((direct+moonScatter*visibility+bounce)*.20+moonSilver)+skyColor*(ambient*2.4+0.15);
+      let silver=silverPhase*root*pow(max(1.0-diffuse,0.0),0.90)*(1.0-smoothstep(0.02,0.20,density.a))*0.28;
+      let moonSilver=moonSilverBase*root*pow(max(1.0-diffuse,0.0),0.90)*(1.0-smoothstep(0.02,0.20,density.a));
+      let lit=sunColor*((direct*0.62+multiSun*0.42+bounce)*0.20+silver)+lunarCloudLight()*((direct+moonScatter*visibility+bounce)*0.20+moonSilver)+skyColor*(ambient*2.4+0.15);
       let air=exp(-t*(0.009+F.atmo.x*0.003));
       let radiance=mix(skyDistance,lit,air);
       let contribution=tr*alpha;color+=contribution*radiance;depth+=contribution*t;weight+=contribution;
@@ -187,7 +244,9 @@ fn marchCloudsTo(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor
       if(tr<0.008){break;}
     }
   }
-  out.color=vec4f(color,clamp(1.0-tr,0.0,1.0));out.distance=depth/max(weight,0.00001);
+  let opacity=select(clamp(1.0-tr,0.0,1.0),1.0,tr<0.01);
+  if(tr<0.01&&weight>1e-5){color/=max(1.0-tr,1e-4);}
+  out.color=vec4f(color,opacity);out.distance=depth/max(weight,0.00001);
   return out;
 }
 fn marchClouds(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:vec3f)->CloudRay {
@@ -198,14 +257,56 @@ fn marchClouds(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:v
 export const CLOUD_CAMERA_RAYS = /* wgsl */ `
 @group(0) @binding(4) var colorOut:texture_storage_2d<rgba16float,write>;
 @group(0) @binding(5) var depthOut:texture_storage_2d<r32float,write>;
+@group(0) @binding(6) var cloudShadowMap:texture_2d<f32>;
+@group(0) @binding(7) var cloudShadowSampler:sampler;
+fn cloudCrepuscularShafts(ro:vec3f,rd:vec3f,jitter:f32,sunColor:vec3f,maxDist:f32)->vec3f {
+  if(CF.screen.w<0.5||F.sunDir.y<0.03){return vec3f(0.0);}
+  let cosSun=dot(rd,F.sunDir.xyz);
+  if(cosSun<0.05){return vec3f(0.0);}
+  // Only march below the cloud deck where broken cloud gaps cast visible crepuscular shafts.
+  var limit=min(maxDist,18.0);
+  if(rd.y>0.01&&ro.y<CF.shape.x){limit=min(limit,(CF.shape.x-ro.y)/rd.y);}
+  if(limit<=0.15){return vec3f(0.0);}
+  let elev=max(F.sunDir.y,0.08);
+  let sunRatio=F.sunDir.xz/elev;
+  let phase=0.22+1.65*pow(saturate(cosSun),6.0);
+  let lowSun=smoothstep(0.03,0.14,F.sunDir.y)*(1.0-0.55*smoothstep(0.35,0.85,F.sunDir.y));
+  let hazeGain=(0.0055+F.atmo.x*0.0028)*lowSun*phase;
+  var shaft=0.0;var meanVis=0.0;var wSum=0.0;
+  let steps=16u;
+  for(var i=0u;i<steps;i++){
+    let a=f32(i)/f32(steps);let b=f32(i+1u)/f32(steps);
+    let s0=0.08+(limit-0.08)*(a*a);let s1=0.08+(limit-0.08)*(b*b);
+    let ds=s1-s0;let t=s0+ds*jitter;
+    let p=ro+rd*t;
+    if(p.y<0.0){break;}
+    let dz=max(CF.shape.x-p.y,0.0);
+    let hitXZ=p.xz+sunRatio*dz;
+    let suv=(hitXZ+CF.advection.xy)/16.0+0.5;
+    let sunVis=textureSampleLevel(cloudShadowMap,cloudShadowSampler,suv,0.0).r;
+    let altW=exp(-p.y*0.55)*exp(-t*0.085)*ds;
+    shaft+=sunVis*altW;
+    meanVis+=altW;
+    wSum+=1.0;
+  }
+  // Contrast-preserve: suppress uniform clear-sky glow when there is no shadowing variation; let real broken shafts shine.
+  let avgVis=shaft/max(meanVis,1e-4);
+  let contrast=smoothstep(0.04,0.28,avgVis)*(1.0-0.72*smoothstep(0.88,0.995,avgVis));
+  return sunColor*(shaft*hazeGain*contrast);
+}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let size=textureDimensions(colorOut);if(any(id.xy>=size)){return;}
   let uv=(vec2f(id.xy)+0.5)/vec2f(size);let ndc=uv*vec2f(2,-2)+vec2f(-1,1);
   let rd=normalize(F.camFwd.xyz+ndc.x*F.camRight.xyz+ndc.y*F.camUp.xyz);
   let jitter=fract(cloudRayJitter(id.xy)+f32(u32(CF.screen.z)%64u)*0.61803398875);
-  let ray=marchClouds(F.camPos.xyz*0.001,rd,64u,jitter,sunIlluminance(),skyAtmo(vec3f(0,1,0)));
-  textureStore(colorOut,vec2i(id.xy),ray.color);textureStore(depthOut,vec2i(id.xy),vec4f(ray.distance));
+  let ro=F.camPos.xyz*0.001;
+  let sunCol=sunIlluminance();
+  let ray=marchClouds(ro,rd,64u,jitter,sunCol,skyAtmo(vec3f(0,1,0)));
+  let shaftLimit=select(18.0,ray.distance,ray.distance>0.1);
+  let shafts=cloudCrepuscularShafts(ro,rd,jitter,sunCol,shaftLimit);
+  let outCol=vec4f(ray.color.rgb+shafts*(1.0-ray.color.a*0.55),ray.color.a);
+  textureStore(colorOut,vec2i(id.xy),outCol);textureStore(depthOut,vec2i(id.xy),vec4f(ray.distance));
 }
 `;
 
@@ -225,6 +326,29 @@ fn cloudClean4(v:vec4f)->vec4f {
 fn cloudScalarFinite(x:f32)->bool {
   return (x==x)&&!(x!=x)&&((bitcast<u32>(x)&0x7fffffffu)<0x7f800000u);
 }
+// 5-tap Jimenez Catmull-Rom bicubic filter preserves crisp billowing cloud edges during temporal reprojection.
+fn cloudSampleCatmullRom(tex:texture_2d<f32>,samp:sampler,uv:vec2f,texSize:vec2f)->vec4f {
+  let pos=uv*texSize;
+  let tc1=floor(pos-0.5)+0.5;
+  let f=pos-tc1;
+  let f2=f*f;let f3=f2*f;
+  let w0=f2-0.5*(f3+f);
+  let w1=1.5*f3-2.5*f2+1.0;
+  let w3=0.5*(f3-f2);
+  let w2=1.0-w0-w1-w3;
+  let w12=w1+w2;
+  let inv=1.0/texSize;
+  let tc0=(tc1-1.0)*inv;
+  let tc3=(tc1+2.0)*inv;
+  let tc12=(tc1+w2/max(w12,vec2f(1e-5)))*inv;
+  let c0=textureSampleLevel(tex,samp,vec2f(tc12.x,tc0.y),0.0)*(w12.x*w0.y);
+  let c1=textureSampleLevel(tex,samp,vec2f(tc0.x,tc12.y),0.0)*(w0.x*w12.y);
+  let c2=textureSampleLevel(tex,samp,vec2f(tc12.x,tc12.y),0.0)*(w12.x*w12.y);
+  let c3=textureSampleLevel(tex,samp,vec2f(tc3.x,tc12.y),0.0)*(w3.x*w12.y);
+  let c4=textureSampleLevel(tex,samp,vec2f(tc12.x,tc3.y),0.0)*(w12.x*w3.y);
+  let wSum=w12.x*w0.y+w0.x*w12.y+w12.x*w12.y+w3.x*w12.y+w12.x*w3.y;
+  return (c0+c1+c2+c3+c4)/max(wSum,1e-5);
+}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let size=vec2i(textureDimensions(resolved));let p=vec2i(id.xy);if(any(p>=size)){return;}
@@ -241,7 +365,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
     let at=previous.xy/max(previous.w,0.0001)*vec2f(0.5,-0.5)+0.5;
     if(previous.w>0.0 && all(at>vec2f(0)) && all(at<vec2f(1))){
       let previousDepth=textureLoad(historyDepth,clamp(vec2i(at*vec2f(size)),vec2i(0),size-1),0).r;
-      let rawOld=textureSampleLevel(history,linearSampler,at,0.0);
+      let rawOld=cloudSampleCatmullRom(history,linearSampler,at,vec2f(size));
       let historyFinite=!(any(rawOld!=rawOld)||!(previousDepth==previousDepth))&&cloudScalarFinite(previousDepth)&&all((bitcast<vec4u>(rawOld)&vec4u(0x7fffffffu))<vec4u(0x7f800000u));
       let expected=length(world-CF.previousCamera.xyz)*0.001;
       if(historyFinite && abs(previousDepth-expected)<max(0.35,distance*0.15)){

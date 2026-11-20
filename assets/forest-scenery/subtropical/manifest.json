@@ -118,14 +118,14 @@
           },
           "normal": {
             "file": "royal-palm-bark-normal.png",
-            "bytes": 1627252,
-            "sha256": "82b3375621ac963a536a3f5b2aa085eaa4adb96187ec9f4838814348e8add471",
+            "bytes": 935968,
+            "sha256": "41134e904b54fef17c94cce83e7bbc99f4cd8fefc2886266dbc3cf0f852ec6a5",
             "encoding": "linear"
           },
           "roughnessMap": {
             "file": "royal-palm-bark-roughness.png",
-            "bytes": 725739,
-            "sha256": "30407ce6d60e9aac82b20a21786094aa2498b46c6645805cd15f0f493296d342",
+            "bytes": 220580,
+            "sha256": "9bd61c740a9319635d15e79e2aa448d647896e5e1e0f65200b2ec8b6ef7202cf",
             "encoding": "linear"
           },
           "roughness": 1,
@@ -303,14 +303,14 @@
           },
           "normal": {
             "file": "palm-bark-normal.png",
-            "bytes": 1604899,
-            "sha256": "99ee68b5d31179e0046f6388491308effa83f5eba4cfaddcba60dbb830275c44",
+            "bytes": 991835,
+            "sha256": "bf7ff335276aec52e34d9a103130b7c7fb3f00db650a2782daba083427ff9233",
             "encoding": "linear"
           },
           "roughnessMap": {
             "file": "palm-bark-roughness.png",
-            "bytes": 696289,
-            "sha256": "5d6e0ae7c1deafbee3294309ba43b5cd07ebd48b04aa730cb04f541196d8083e",
+            "bytes": 234820,
+            "sha256": "7c86dbfb9b1c9ded6dd247a3efb0b74eda6d34bffbbf2fb04aecfa4b0160e111",
             "encoding": "linear"
           },
           "roughness": 1,
@@ -488,14 +488,14 @@
           },
           "normal": {
             "file": "ceiba-bark-normal.png",
-            "bytes": 1676683,
-            "sha256": "43c0a6cb3b3e683a271b8b746b1214f924a8f5551daea5db0bcf61249371ac70",
+            "bytes": 511558,
+            "sha256": "12797949344153686be1efbe2664e23d2f62d0fca21f95da7e2112f57d3e1aee",
             "encoding": "linear"
           },
           "roughnessMap": {
             "file": "ceiba-bark-roughness.png",
-            "bytes": 645823,
-            "sha256": "7cfbcfb13dd0eeb75352add7e8cd0c887f994c939140cce3e0a69639b5116993",
+            "bytes": 174478,
+            "sha256": "d478f088a02f70dea2042d4d9304c1ecab5a4d80850d541c1b0c2c58c640729e",
             "encoding": "linear"
           },
           "roughness": 1,
@@ -673,14 +673,14 @@
           },
           "normal": {
             "file": "mangrove-bark-normal.png",
-            "bytes": 1624548,
-            "sha256": "95e7e514b96b82cc3600480f388717027a9ccd4ff82dac5565e962435345fdc0",
+            "bytes": 885833,
+            "sha256": "f3fddc9334bd6718de900184e164be2ace44c3d3cd10b7ab90387ee3805b5aab",
             "encoding": "linear"
           },
           "roughnessMap": {
             "file": "mangrove-bark-roughness.png",
-            "bytes": 712911,
-            "sha256": "fc9466213d57dc2ea750d6511a3f38395913dc409782285a09c5477399531aa7",
+            "bytes": 211100,
+            "sha256": "726d483ebf1442f7447b62f26cfa6e22aa0dca1eceb53858ee9e6f82ec13afa4",
             "encoding": "linear"
           },
           "roughness": 1,

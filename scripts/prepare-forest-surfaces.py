@@ -214,7 +214,7 @@ def bake_key(material):
 
 
 def reusable_blocks(pack, sharpen):
-    """Blocks another pack has already baked, by bake key, codec, kind and level."""
+    """Blocks another pack has already baked, by source SHA-256s, codec, kind and level."""
     folder = ROOT / 'assets/forest-scenery' / pack
     forest = json.loads((folder / 'manifest.json').read_text())
     materials = [material for prototype in forest['prototypes'] for material in prototype['nativeMaterials']]
@@ -231,7 +231,15 @@ def reusable_blocks(pack, sharpen):
                 for level in range(family['levels']):
                     size = block_count(max(1, family['width'] >> level), max(1, family['height'] >> level)) * BLOCK_BYTES
                     for row, layer in enumerate(family['layers']):
-                        found[(bake_key(materials[layer['material']]), codec, kind, level)] = raw[offset + row * size:offset + (row + 1) * size]
+                        mat = materials[layer['material']]
+                        src = layer.get('sources', {})
+                        key = (tuple(src.get(k) for k in ('albedo', 'normal', 'roughnessMap')),
+                               mat.get('wrap') == 'repeat', mat['name'].startswith('foliage'),
+                               None if src.get('roughnessMap') else round(float(mat['roughness']), 6))
+                        blocks = raw[offset + row * size:offset + (row + 1) * size]
+                        found[(key, codec, kind, level)] = blocks
+                        if kind == 'albedo':
+                            found[(('albedo', src.get('albedo'), mat.get('wrap') == 'repeat', mat['name'].startswith('foliage')), codec, kind, level)] = blocks
                     offset += size * count
     return found
 
@@ -295,10 +303,12 @@ def main():
                                'coverage': [round(float(level[0][..., 3].mean()), 6) for level in plain],
                                'terminal': [round(float(v), 6) for v in plain[-1][0][0, 0]]})
                 for level, (pigment, detail) in enumerate(chain):
+                    albedo_key = ('albedo', material['albedo']['sha256'], material.get('wrap') == 'repeat', material['name'].startswith('foliage'))
                     for kind, pixels in (('albedo', encode_pigment(pigment)), ('detail', encode_detail(detail))):
-                        if all((key, codec, kind, level) in reuse for codec in ('bc7', 'astc')):
+                        rkey = key if all((key, codec, kind, level) in reuse for codec in ('bc7', 'astc')) else (albedo_key if kind == 'albedo' else None)
+                        if rkey is not None and all((rkey, codec, kind, level) in reuse for codec in ('bc7', 'astc')):
                             for codec in ('bc7', 'astc'):
-                                jobs[(codec, kind, level, layer)] = pool.submit(lambda blocks: blocks, reuse[(key, codec, kind, level)])
+                                jobs[(codec, kind, level, layer)] = pool.submit(lambda blocks: blocks, reuse[(rkey, codec, kind, level)])
                             reused += 1
                             continue
                         png = Path(temporary) / f'{family_index}-{layer}-{level}-{kind}.png'

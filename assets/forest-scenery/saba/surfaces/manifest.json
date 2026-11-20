@@ -3,6 +3,8 @@
  "version": 1,
  "materialContract": "gene-surfaces-v3",
  "sharpen": 1.0,
+ "encoder": "builtin",
+ "reuses": "saba",
  "families": [
   {
    "width": 512,
@@ -14,8 +16,8 @@
      "name": "bark",
      "sources": {
       "albedo": "bec57a5718ce313435a1ddf513c52a6f6b5c8bfc02ceffd063fbe7b5a5176a3a",
-      "normal": "511b53d35405a19dacde3c9996e5487f14d47e20c0c45f54751532c866518528",
-      "roughnessMap": "99ea11ee38b47cb4df40af0987b4139d65b55f7ec936f8fdc4f94b732bba5b48"
+      "normal": "cd7bc1e843077f0042d97f8a79fa0fc6d39f9f16f45a94a5d66a5c7547364d7a",
+      "roughnessMap": "9f06eca96cea5b90d1cb5059601cd03c7aedf09c1be67558f06ed757d1f9df94"
      },
      "coverage": [
       1.0,
@@ -42,8 +44,8 @@
      "name": "bark",
      "sources": {
       "albedo": "1a1400cdfae64c658c8afe9094bb55d5c47c63dcd69319194e0876ea0e379c2b",
-      "normal": "4f8fb2a6129936467a61080c4ebddc25bd681dd17372f816facbeb558ccff1e0",
-      "roughnessMap": "bfe9c30fba924bce4d65dcd1c5a310b9b903d4875f0d1c696cd2fdbc7f4db491"
+      "normal": "a93d6da8ab2421aa3cfef4493746fce15992c478f5023075d3b5d848fac7c1cd",
+      "roughnessMap": "93199e2847ced825726a77a00f88a221eb7f65ba1d2dafed4d8f7b206bad9604"
      },
      "coverage": [
       1.0,
@@ -70,8 +72,8 @@
      "name": "bark",
      "sources": {
       "albedo": "92dbb6d852d8c62620fe1f9d306de78b0bc65933be4153d8fbd8c81485828304",
-      "normal": "0e4b1b4fadecf78fdfff0bfb7be4d7109784ed6bd9e1a50e080e00c500333153",
-      "roughnessMap": "e1e19b5d64eba902341451d9fea33d666778b8179a1f187020f38fe26c62a457"
+      "normal": "9e3697567d4139cef24c0a2263a3908e4a8ca0c5f176f44262ee3deb9a2bb290",
+      "roughnessMap": "5677dbc160714b6bb0b3071be99e9fa55cca3df4dd9f8a338f48e2afa6f0d358"
      },
      "coverage": [
       1.0,
@@ -98,8 +100,8 @@
      "name": "bark",
      "sources": {
       "albedo": "e43f4db9ebef374a41d894efb60543eb4968dc3708e9b239aaac90745cd454db",
-      "normal": "a5a5cbadc52cb5b2df66d4b8945c0e3866386200e44df5d95699aef3aad5af05",
-      "roughnessMap": "a98a475c280123ca73b79394cf2648b6f80bb709dcf7871b0783278aaad1767c"
+      "normal": "1e38c26d933628f5ca223475a3643b7a1e5940dcb79a7f240019a339d358436a",
+      "roughnessMap": "0ee21362f11201deaf1b6b316fdf8a17306d6565f88ad896924a2548f91c20b1"
      },
      "coverage": [
       1.0,
@@ -126,8 +128,8 @@
      "name": "bark",
      "sources": {
       "albedo": "e929ab50808b7e8907b46ddb517a14a2f65a2c4aad068a630a140380689005a4",
-      "normal": "03daec2499b7601ca0d7955e5858997831ee0c232189dd101fd2508d9bf3a6f6",
-      "roughnessMap": "7f9177f0501578e8cfd3cc3723db30851fab7688f0f496f87234d7711af7e945"
+      "normal": "d2adb6cd10120ab817365303de805a025d0fa913f11761cbef9b3ee0926c9929",
+      "roughnessMap": "a241a1d83a0b2e567f21548daed4f4c13de15d4109da96cf21d573964e0f1615"
      },
      "coverage": [
       1.0,
@@ -163,11 +165,11 @@
      },
      "detail": {
       "bytes": 3495440,
-      "sha256": "15881509f85fc8f7e8a69e0707a89b137173d2aa069f3b68015826455b6c6d8b",
+      "sha256": "74d0a96bfc7d14d708f8bdc7d8f13dcd3064998b7f5e6378ad5bf693e4a4e0d6",
       "gzip": {
        "file": "family-0-detail.bc7.bin.gz",
-       "bytes": 3245587,
-       "sha256": "a5206fa4889b663dd6be11d344613798839efb514a5395237fc22997a3b7b5de"
+       "bytes": 3012577,
+       "sha256": "4a59b955fcf6e6703856d8be64b00f6f0f0884238513bb75572abc9603f4da03"
       }
      }
     },
@@ -183,11 +185,11 @@
      },
      "detail": {
       "bytes": 3495440,
-      "sha256": "aba370c6b0db0f12c596625537b0c0e7e2cd8c6abc03e5c75ff7bb111f03e3ac",
+      "sha256": "797990080c11de3325cb292ce8531547b90a4519e19bc076f011b4c1e4c4f3e3",
       "gzip": {
        "file": "family-0-detail.astc.bin.gz",
-       "bytes": 2950539,
-       "sha256": "46021a69b4091252fc57705096331dfea8ae719463f8fd3506c40358b2209bc2"
+       "bytes": 2928170,
+       "sha256": "1138fecf100f1e1f60950fd457d4bb80407a7ff9c2002e4f0acdeece51813abc"
       }
      }
     }
@@ -695,7 +697,7 @@
       "gzip": {
        "file": "family-1-detail.bc7.bin.gz",
        "bytes": 758642,
-       "sha256": "7d7fc50e93df6e14d4eb0319944f3ceb4ead2628c8cb4f648ae9d29556c5e240"
+       "sha256": "1795fd2dc90ba4ec570510f9702d873d481a2ba4b5ef5a1d56dc94e5363f6773"
       }
      }
     },
@@ -715,7 +717,7 @@
       "gzip": {
        "file": "family-1-detail.astc.bin.gz",
        "bytes": 753529,
-       "sha256": "3c18830fdedeef438beda81fac070c8cdaffe2a24531fdf4d05d6ba3862c230e"
+       "sha256": "5224ee29d2bb5a0ed1dce6110cdc7140d03d8ebd276d50ca7b131fd279657a32"
       }
      }
     }

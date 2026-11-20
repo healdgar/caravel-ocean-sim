@@ -1,6 +1,6 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
-import { CLOUD_DENSITY, CLOUD_LIGHT, CLOUD_FIELD_MIPS, CLOUD_SAMPLE, CLOUD_BINDINGS, CLOUD_CAMERA_RAYS, CLOUD_RESOLVE } from './wgsl/clouds.js';
+import { CLOUD_DENSITY, CLOUD_SHADOW, CLOUD_LIGHT, CLOUD_FIELD_MIPS, CLOUD_SAMPLE, CLOUD_BINDINGS, CLOUD_CAMERA_RAYS, CLOUD_RESOLVE } from './wgsl/clouds.js';
 
 const CLOUD_FRAME_BINDINGS = /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
@@ -11,9 +11,10 @@ const CLOUD_FRAME_BINDINGS = /* wgsl */ `
 
 export async function createVolumetricClouds({ device, frameUBO, transView, skyView, sampler, computePipe, fieldSize = [128, 64, 128] }) {
   const U = GPUTextureUsage, B = GPUBufferUsage;
-  const [densityPipe, lightPipe, mipPipe, rayPipe, resolvePipe] = await Promise.all([
+  const [densityPipe, lightPipe, shadowPipe, mipPipe, rayPipe, resolvePipe] = await Promise.all([
     computePipe(CLOUD_DENSITY, 'cloud density'),
     computePipe(CLOUD_LIGHT, 'cloud lighting'),
+    computePipe(CLOUD_SHADOW, 'cloud shadow'),
     computePipe(CLOUD_FIELD_MIPS, 'cloud field mips'),
     computePipe(FRAME_WGSL + ATMO_CORE_WGSL + CLOUD_FRAME_BINDINGS + SKY_RENDER_FUNCS + CLOUD_SAMPLE + CLOUD_CAMERA_RAYS, 'cloud rays'),
     computePipe(FRAME_WGSL + CLOUD_BINDINGS + CLOUD_RESOLVE, 'cloud resolve'),
@@ -22,17 +23,23 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
   const bakeUniform = device.createBuffer({ label:'cloud bake', size:32, usage:B.UNIFORM | B.COPY_DST });
   const data = new Float32Array(32), bake = new Float32Array(8), previous = new Float32Array(19);
   const levels = 4;
+  const shadowSize = 256;
   const volume = label => device.createTexture({ label, dimension:'3d', size:fieldSize,
     mipLevelCount:levels, format:'rgba16float', usage:U.TEXTURE_BINDING | U.STORAGE_BINDING | U.COPY_SRC });
   const density = volume('cloud density field'), lighting = volume('cloud light field');
+  const shadowMap = device.createTexture({ label:'cloud shadow map', size:[shadowSize,shadowSize], format:'rgba16float',
+    usage:U.TEXTURE_BINDING | U.STORAGE_BINDING | U.COPY_SRC });
   const fieldSampler = device.createSampler({ magFilter:'linear', minFilter:'linear', mipmapFilter:'linear',
     addressModeU:'repeat', addressModeV:'clamp-to-edge', addressModeW:'repeat' });
+  const shadowSampler = device.createSampler({ magFilter:'linear', minFilter:'linear',
+    addressModeU:'repeat', addressModeV:'repeat' });
   const view = (texture, mip) => texture.createView({ baseMipLevel:mip, mipLevelCount:1 });
   const group = (pipe, index, entries) => device.createBindGroup({ layout:pipe.getBindGroupLayout(index),
     entries:entries.map(([binding, resource]) => ({binding,resource})) });
   const volumeEntries = [[0,{buffer:uniform}],[1,density.createView()],[2,lighting.createView()],[3,fieldSampler]];
   const bgDensity = group(densityPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)]]);
   const bgLight = group(lightPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)],[2,fieldSampler],[3,view(lighting,0)]]);
+  const bgShadow = group(shadowPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)],[2,fieldSampler],[3,shadowMap.createView()]]);
   const bgMips = [];
   for(let m=1;m<levels;m++) bgMips.push(group(mipPipe,0,[[0,view(density,m-1)],[1,view(lighting,m-1)],[2,view(density,m)],[3,view(lighting,m)]]));
   const bgRayVolume = group(rayPipe,1,volumeEntries);
@@ -56,7 +63,7 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
     depths=[target('cloud depth A','r32float'),target('cloud depth B','r32float')];
     // Ray depth is already the unfiltered temporal depth. Write its history
     // slot directly; resolve only reads it and the preceding frame's slot.
-    rayGroups=[0,1].map(i=>group(rayPipe,0,[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,raw.createView()],[5,depths[i].createView()]]));
+    rayGroups=[0,1].map(i=>group(rayPipe,0,[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,raw.createView()],[5,depths[i].createView()],[6,shadowMap.createView()],[7,shadowSampler]]));
     resolveGroups=[0,1].map(i=>group(resolvePipe,0,[[0,{buffer:frameUBO}],[1,raw.createView()],[2,depths[i].createView()],
       [3,colors[1-i].createView()],[4,depths[1-i].createView()],[5,sampler],[6,colors[i].createView()]]));
     if(skyPipeline)skyGroups=colors.map(t=>group(skyPipeline,1,[[4,t.createView()]]));
@@ -95,6 +102,7 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
     if(densityDirty){pass.setPipeline(densityPipe);pass.setBindGroup(0,bgDensity);pass.dispatchWorkgroups(...fieldSize.map(n=>Math.ceil(n/4)));}
     if(lightDirty){
       pass.setPipeline(lightPipe);pass.setBindGroup(0,bgLight);pass.dispatchWorkgroups(...fieldSize.map(n=>Math.ceil(n/4)));
+      pass.setPipeline(shadowPipe);pass.setBindGroup(0,bgShadow);pass.dispatchWorkgroups(Math.ceil(shadowSize/8),Math.ceil(shadowSize/8));
       pass.setPipeline(mipPipe);
       for(let m=1;m<levels;m++){pass.setBindGroup(0,bgMips[m-1]);pass.dispatchWorkgroups(...fieldSize.map(n=>Math.ceil(Math.max(1,n>>m)/4)));}
     }
@@ -110,6 +118,6 @@ export async function createVolumetricClouds({ device, frameUBO, transView, skyV
     get output(){return colors[current];},
     get density(){return density;},
     get historyValid(){return data[27]===1;},
-    destroy(){for(const t of [density,lighting,raw,...colors,...depths])t?.destroy();uniform.destroy();bakeUniform.destroy();},
+    destroy(){for(const t of [density,lighting,shadowMap,raw,...colors,...depths])t?.destroy();uniform.destroy();bakeUniform.destroy();},
   };
 }

@@ -27,7 +27,7 @@ import { CONTINUUM_CORE_WGSL, CONTINUUM_STEP_WORDS, CONTINUUM_HOPS, CONTINUUM_OP
 import {
   CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_CLUSTER_WORDS, CONTINUUM_VERTEX_WORDS, CONTINUUM_TRIANGLE_WORDS, CONTINUUM_NEVER,
   CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES, CONTINUUM_VIEW_LISTS,
-  CONTINUUM_TYPE_PIECES, CONTINUUM_TYPE_DETAIL_SHIFT, CONTINUUM_KIND_SHIFT, CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_BROKEN, CONTINUUM_EXACT, CONTINUUM_SEA,
+  CONTINUUM_TYPE_PIECES, CONTINUUM_TYPE_DETAIL_SHIFT, CONTINUUM_KIND, CONTINUUM_KIND_SHIFT, CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_BROKEN, CONTINUUM_EXACT, CONTINUUM_SEA,
   CONTINUUM_IMPORTANT_FLAG, CONTINUUM_SHATTERED, CONTINUUM_DAMAGED, CONTINUUM_STRETCHED, CONTINUUM_STREAMS, CONTINUUM_SURFACE_RANGE,
   CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY,
 } from '../continuum-format.js';
@@ -44,13 +44,15 @@ export const CONTINUUM_LIVE_WORD = CONTINUUM_DRAW_WORDS + CONTINUUM_VIEW_LISTS;
 export const CONTINUUM_DRAWS_BYTES = (CONTINUUM_LIVE_WORD + 1) * 4;
 export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 48;
 // The select's workgroups each cut this many instances, and are laid in rows of CONTINUUM_ROW.
-export const CONTINUUM_BATCH = 4;
+export const CONTINUUM_BATCH = 2;
 export const CONTINUUM_ROW = 8192;
 // How many cuts an instance may take, each at twice the last's pixel error, when its finest no longer fits the lists.
 export const CONTINUUM_LEVELS = 4;
-// How many of a workgroup's tried clusters keep their test between its passes; the rest are tried again.
-// Total workgroup storage stays strictly under WebGPU's 16 KB guaranteed limit (15.2 KB).
-const CONTINUUM_KEPT = 3584;
+// Workgroup lanes and packed 8-bit cluster-test cache (4 clusters per u32 -> 14,336 clusters cached in 14 KB).
+// Total workgroup storage stays strictly under WebGPU's 16 KB guaranteed limit (~14.5 KB).
+const CONTINUUM_WORKGROUP = 128;
+const CONTINUUM_KEPT_ITERS = 112;
+const CONTINUUM_KEPT_WORDS = (CONTINUUM_KEPT_ITERS / 4) * CONTINUUM_WORKGROUP;
 // The entries ahead of the lists that hold an instance's state for the frame.
 export const CONTINUUM_STATE_ENTRIES = 3;
 // How each draw reads its list: the list buffer bound as an instance-rate vertex buffer at the list's first entry.
@@ -300,7 +302,7 @@ export function continuumSelectWGSL(paging = CONTINUUM_SINGLE_PAGE) {
   const atlasVec4 = (at) => `vec4f(bitcast<f32>(continuumWord(${at})),bitcast<f32>(continuumWord(${at}+1u)),bitcast<f32>(continuumWord(${at}+2u)),bitcast<f32>(continuumWord(${at}+3u)))`;
   const alone = CONTINUUM_BROKEN | CONTINUUM_SHATTERED | CONTINUUM_DAMAGED | CONTINUUM_EXACT;
   const important = CONTINUUM_IMPORTANT_FLAG | CONTINUUM_STRUCK | CONTINUUM_BROKEN | CONTINUUM_DAMAGED | CONTINUUM_SHATTERED;
-  const B = CONTINUUM_BATCH, L = CONTINUUM_LEVELS;
+  const B = CONTINUUM_BATCH, L = CONTINUUM_LEVELS, W = CONTINUUM_WORKGROUP;
   return FRAME_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + continuumDataWGSL(0, 2, 'read_write', paging, CONTINUUM_SELECT_PAGES_AT) + continuumCommonWGSL(paging) + continuumKindsWGSL()
     + continuumGroundWGSL(0, CONTINUUM_GROUND_BINDING) + /* wgsl */`
 @group(0) @binding(0) var<uniform> F:Frame;
@@ -310,7 +312,8 @@ const CONTINUUM_SHADOW_TEXELS:f32=${CONTINUUM_SHADOW_TEXELS.toFixed(4)};
 const CONTINUUM_FULL:u32=0xffffffffu;
 const CONTINUUM_BATCH:u32=${B}u;
 const CONTINUUM_LEVELS:u32=${L}u;
-const CONTINUUM_KEPT:u32=${CONTINUUM_KEPT}u;
+const CONTINUUM_KEPT_ITERS:u32=${CONTINUUM_KEPT_ITERS}u;
+const CONTINUUM_KEPT_WORDS:u32=${CONTINUUM_KEPT_WORDS}u;
 const CONTINUUM_LIVE:u32=${CONTINUUM_LIVE_WORD}u;
 // The morph search reads the steps of the type in hand.
 var<private> continuumStepsAt:u32;
@@ -353,52 +356,80 @@ var<workgroup> continuumWanted:array<atomic<u32>,${B * 3 * L}>; // each instance
 var<workgroup> continuumChosen:array<vec4u,${B}>;       // the level its view's clusters and its shadow's are listed at
 var<workgroup> continuumBase:array<vec4u,${B}>;         // where its clusters, small clusters and shadow clusters go
 var<workgroup> continuumCursor:array<atomic<u32>,${B * 3}>;
-var<workgroup> continuumKept:array<u32,CONTINUUM_KEPT>;
+var<workgroup> continuumKept:array<u32,CONTINUUM_KEPT_WORDS>;
 var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // real triangles the scene's error asks of each view list
+var<workgroup> continuumFrustum:array<vec4f,5>;         // unit-normal frustum planes, computed once per workgroup
+fn continuumOutsideFast(at:vec3f,reach:f32)->bool {
+  if(dot(at,at)<=reach*reach){return false;}
+  let p=vec4f(at,1.0);
+  for(var i=0u;i<5u;i++){if(dot(continuumFrustum[i],p)< -reach){return true;}}
+  return false;
+}
 // The instance a workgroup's tried cluster belongs to.
 fn continuumSlotOf(f:u32)->u32 { var k=0u;for(var j=1u;j<CONTINUUM_BATCH;j++){if(f>=continuumSlotStart[j]){k=j;}} return k; }
 // One cluster of an instance tried at every level, by the core's own test, each sphere where its part's pose has it:
 // bit j whether the view lists it at level j, bit 4 + j the shadow map; bit 8 small; its triangles from bit 16. A part
-// posed out of sight takes its clusters with it.
+// posed out of sight takes its clusters with it. Evaluates cheapest bounds first so rejected clusters skip sphere/frustum reads.
 fn continuumTry(slot:u32,i:u32)->u32 {
   let record=continuumSlotRecord[slot];let cut=continuumSlotCut[slot];let tries=continuumSlotTries[slot];
   let at=continuumAtlas[${CONTINUUM_HEADER.clustersAt}u]+(tries.z+i)*${CONTINUUM_CLUSTER_WORDS}u;
   let packed=continuumWord(at+15u);let part=packed>>16u;let triangles=packed&255u;
-  let lod=continuumSphere(record,part,${atlasVec4('at')});
-  if(lod.w<0.0){return 0u;}
-  var tried=(triangles<<16u)|select(0u,256u,triangles<=${CONTINUUM_SMALL_CLUSTER}u);
   // A cluster of the finest level has nothing finer to hand over to: its own error (a skin's or a sway's pose slack)
   // never keeps it from being drawn once its parent is too coarse, so an eye however near, or inside, draws the finest.
-  let ownError=select(bitcast<f32>(continuumWord(at+12u))*cut.z,0.0,((packed>>8u)&255u)==0u);let parentError=bitcast<f32>(continuumWord(at+13u))*cut.z;
+  let ownError=select(bitcast<f32>(continuumWord(at+12u))*cut.z,0.0,((packed>>8u)&255u)==0u);
+  let parentError=bitcast<f32>(continuumWord(at+13u))*cut.z;
+  var mask=0u;
+  var checkedHide=false;
   if(i<tries.x){
     let shift=continuumShift()-F.camPos.xyz+vec3f(0.0,continuumSlotLift[slot],0.0);
-    let cull=continuumSphere(record,part,${atlasVec4('at+8u')});let cullAt=continuumPlace(record,cull.xyz)+shift;
-    if(!continuumOutside(select(earthCurve(cullAt,F.camPos.y),cullAt,continuumFlagged(record,CONTINUUM_SEA)),cull.w*cut.z)){
-      let parent=continuumSphere(record,part,${atlasVec4('at+4u')});
-      let own=continuumPlace(record,lod.xyz)+shift;let above=continuumPlace(record,parent.xyz)+shift;
+    let parent=continuumSphere(record,part,${atlasVec4('at+4u')});
+    checkedHide=true;
+    if(parent.w<0.0){return 0u;}
+    let above=continuumPlace(record,parent.xyz)+shift;
+    let parentPx=continuumPixels(parentError,cut.x,max(length(above)-parent.w*cut.z,CONTINUUM_NEAREST));
+    if(parentPx>cut.y){
+      let lod=continuumSphere(record,part,${atlasVec4('at')});
+      if(lod.w<0.0){return 0u;}
+      let own=continuumPlace(record,lod.xyz)+shift;
       let ownPx=continuumPixels(ownError,cut.x,max(length(own)-lod.w*cut.z,CONTINUUM_NEAREST));
-      let parentPx=continuumPixels(parentError,cut.x,max(length(above)-parent.w*cut.z,CONTINUUM_NEAREST));
-      for(var j=0u;j<CONTINUUM_LEVELS;j++){
-        let allowedJ=cut.y*continuumLevel(j);
-        if(parentPx>allowedJ&&ownPx<=allowedJ){tried|=1u<<j;}
+      if(ownPx<=cut.y*continuumLevel(CONTINUUM_LEVELS-1u)){
+        let cull=continuumSphere(record,part,${atlasVec4('at+8u')});
+        let cullAt=continuumPlace(record,cull.xyz)+shift;
+        if(!continuumOutsideFast(select(earthCurve(cullAt,F.camPos.y),cullAt,continuumFlagged(record,CONTINUUM_SEA)),cull.w*cut.z)){
+          for(var j=0u;j<CONTINUUM_LEVELS;j++){
+            let allowedJ=cut.y*continuumLevel(j);
+            if(parentPx>allowedJ&&ownPx<=allowedJ){mask|=1u<<j;}
+          }
+        }
       }
     }
   }
   // The shadow map's light is parallel: the same test with every sphere at unit distance under a unit focal length
   // compares errors directly against the error it allows. Its detail is cast at every level.
   if(i<tries.y){
-    if(i<tries.w){tried|=${((1 << L) - 1) << 4}u;}
+    var shdMask=0u;
+    if(i<tries.w){shdMask=${((1 << L) - 1) << 4}u;}
     else{
       let shdBase=cut.w*cut.z;
-      for(var j=0u;j<CONTINUUM_LEVELS;j++){
-        let allowedS=shdBase*continuumLevel(j);
-        if(parentError>allowedS&&ownError<=allowedS){tried|=16u<<j;}
+      if(parentError>shdBase&&ownError<=shdBase*continuumLevel(CONTINUUM_LEVELS-1u)){
+        for(var j=0u;j<CONTINUUM_LEVELS;j++){
+          let allowedS=shdBase*continuumLevel(j);
+          if(parentError>allowedS&&ownError<=allowedS){shdMask|=16u<<j;}
+        }
       }
     }
+    if(shdMask!=0u){
+      let kind=continuumKindOf(record);
+      if(!checkedHide&&(kind==${CONTINUUM_KIND.SHARDED}u||kind==${CONTINUUM_KIND.SKINNED}u)){
+        if(continuumSphere(record,part,${atlasVec4('at')}).w<0.0){return 0u;}
+      }
+      mask|=shdMask;
+    }
   }
-  return tried;
+  if(mask==0u){return 0u;}
+  return mask|(triangles<<16u)|select(0u,256u,triangles<=${CONTINUUM_SMALL_CLUSTER}u);
 }
-@compute @workgroup_size(64) fn continuumSelect(@builtin(workgroup_id) group:vec3u,@builtin(local_invocation_index) lane:u32){
+@compute @workgroup_size(${W}) fn continuumSelect(@builtin(workgroup_id) group:vec3u,@builtin(local_invocation_index) lane:u32){
   let batch=(group.x+group.y*${CONTINUUM_ROW}u)*CONTINUUM_BATCH;
   // Each of the first lanes decides how its instance is drawn, and lists its splat and far body.
   if(lane<CONTINUUM_BATCH){
@@ -520,25 +551,45 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     var total=0u;
     for(var k=0u;k<CONTINUUM_BATCH;k++){continuumSlotStart[k]=total;let t=continuumSlotTries[k];total+=max(t.x,t.y);}
     continuumSlotStart[CONTINUUM_BATCH]=total;
+    if(total>0u){
+      let m=F.viewProj;
+      let w=vec4f(m[0].w,m[1].w,m[2].w,m[3].w);
+      let x=vec4f(m[0].x,m[1].x,m[2].x,m[3].x);
+      let y=vec4f(m[0].y,m[1].y,m[2].y,m[3].y);
+      let raw=array<vec4f,5>(w+x,w-x,w+y,w-y,w);
+      for(var p=0u;p<5u;p++){continuumFrustum[p]=raw[p]/max(length(raw[p].xyz),1e-8);}
+    }
   }
   workgroupBarrier();
   let total=continuumSlotStart[CONTINUUM_BATCH];
-  // Every candidate cluster of the workgroup's instances tried by its lanes together, and counted at each level.
-  for(var f=lane;f<total;f+=64u){
-    let slot=continuumSlotOf(f);
-    let tried=continuumTry(slot,f-continuumSlotStart[slot]);
-    if(f<CONTINUUM_KEPT){continuumKept[f]=tried;}
-    let small=(tried>>8u)&1u;
-    for(var j=0u;j<CONTINUUM_LEVELS;j++){
-      if((tried&(1u<<j))!=0u){atomicAdd(&continuumWanted[(slot*3u+small)*CONTINUUM_LEVELS+j],1u);}
-      if((tried&(16u<<j))!=0u){atomicAdd(&continuumWanted[(slot*3u+2u)*CONTINUUM_LEVELS+j],1u);}
+  if(total>0u){
+    // Every candidate cluster of the workgroup's instances tried by its lanes together, and counted at each level.
+    var pack=0u;
+    for(var iter=0u;;iter++){
+      let f=iter*${W}u+lane;
+      if(f>=total){break;}
+      let slot=continuumSlotOf(f);
+      let tried=continuumTry(slot,f-continuumSlotStart[slot]);
+      let mask=tried&255u;
+      if(iter<CONTINUUM_KEPT_ITERS){
+        let sub=iter&3u;
+        if(sub==0u){pack=mask;}else{pack|=mask<<(sub*8u);}
+        if(sub==3u||f+${W}u>=total){continuumKept[(iter>>2u)*${W}u+lane]=pack;}
+      }
+      if(mask!=0u){
+        let small=(tried>>8u)&1u;
+        for(var j=0u;j<CONTINUUM_LEVELS;j++){
+          if((mask&(1u<<j))!=0u){atomicAdd(&continuumWanted[(slot*3u+small)*CONTINUUM_LEVELS+j],1u);}
+          if((mask&(16u<<j))!=0u){atomicAdd(&continuumWanted[(slot*3u+2u)*CONTINUUM_LEVELS+j],1u);}
+        }
+        if((mask&1u)!=0u){atomicAdd(&continuumCounted[small],tried>>16u);}
+      }
     }
-    if((tried&1u)!=0u){atomicAdd(&continuumCounted[small],tried>>16u);}
   }
   workgroupBarrier();
   // Each instance's clusters are listed at the finest level the lists hold whole. Where its larger clusters found room
   // and its small ones none, the room taken is left holding entries of nothing.
-  if(lane<CONTINUUM_BATCH){
+  if(total>0u&&lane<CONTINUUM_BATCH){
     var chosen=vec4u(CONTINUUM_LEVELS,CONTINUUM_LEVELS,0u,0u);var base=vec4u(0u);
     for(var j=0u;j<CONTINUUM_LEVELS;j++){
       let big=atomicLoad(&continuumWanted[(lane*3u)*CONTINUUM_LEVELS+j]);let small=atomicLoad(&continuumWanted[(lane*3u+1u)*CONTINUUM_LEVELS+j]);
@@ -560,25 +611,49 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     continuumChosen[lane]=chosen;continuumBase[lane]=base;
   }
   workgroupBarrier();
-  for(var f=lane;f<total;f+=64u){
-    let slot=continuumSlotOf(f);let i=f-continuumSlotStart[slot];
-    var tried=0u;
-    if(f<CONTINUUM_KEPT){tried=continuumKept[f];}else{tried=continuumTry(slot,i);}
-    let chosen=continuumChosen[slot];let base=continuumBase[slot];
-    let entry=vec2u(batch+slot,(continuumSlotTries[slot].z+i)|(CONTINUUM_CLUSTER_ENTRY<<28u));
-    let small=(tried>>8u)&1u;
-    if(chosen.x<CONTINUUM_LEVELS&&(tried&(1u<<chosen.x))!=0u){
-      continuumLists[select(base.x,base.y,small==1u)+atomicAdd(&continuumCursor[slot*3u+small],1u)]=entry;
-    }
-    if(chosen.y<CONTINUUM_LEVELS&&(tried&(16u<<chosen.y))!=0u){
-      continuumLists[base.z+atomicAdd(&continuumCursor[slot*3u+2u],1u)]=entry;
+  if(total>0u){
+    for(var iter=0u;;iter++){
+      let f=iter*${W}u+lane;
+      if(f>=total){break;}
+      var mask=0u;
+      var smallKnown=false;
+      var small=0u;
+      var slot=0u;
+      var i=0u;
+      if(iter<CONTINUUM_KEPT_ITERS){
+        mask=(continuumKept[(iter>>2u)*${W}u+lane]>>((iter&3u)*8u))&255u;
+        if(mask==0u){continue;}
+        slot=continuumSlotOf(f);i=f-continuumSlotStart[slot];
+      }else{
+        slot=continuumSlotOf(f);i=f-continuumSlotStart[slot];
+        let tried=continuumTry(slot,i);
+        mask=tried&255u;
+        if(mask==0u){continue;}
+        small=(tried>>8u)&1u;smallKnown=true;
+      }
+      let chosen=continuumChosen[slot];let base=continuumBase[slot];
+      let wantView=chosen.x<CONTINUUM_LEVELS&&(mask&(1u<<chosen.x))!=0u;
+      let wantShd=chosen.y<CONTINUUM_LEVELS&&(mask&(16u<<chosen.y))!=0u;
+      if(!wantView&&!wantShd){continue;}
+      let clusterIdx=continuumSlotTries[slot].z+i;
+      let entry=vec2u(batch+slot,clusterIdx|(CONTINUUM_CLUSTER_ENTRY<<28u));
+      if(wantView){
+        if(!smallKnown){
+          let at=continuumAtlas[${CONTINUUM_HEADER.clustersAt}u]+clusterIdx*${CONTINUUM_CLUSTER_WORDS}u;
+          small=select(0u,1u,(continuumWord(at+15u)&255u)<=${CONTINUUM_SMALL_CLUSTER}u);
+        }
+        continuumLists[select(base.x,base.y,small==1u)+atomicAdd(&continuumCursor[slot*3u+small],1u)]=entry;
+      }
+      if(wantShd){
+        continuumLists[base.z+atomicAdd(&continuumCursor[slot*3u+2u],1u)]=entry;
+      }
     }
   }
   // Each far body's pieces, and its shadow's.
   for(var k=0u;k<CONTINUUM_BATCH;k++){
     let far=continuumSlotFar[k];
-    if(far.x!=CONTINUUM_FULL){for(var c=lane;c<far.y;c+=64u){continuumLists[far.x+c]=vec2u(batch+k,c|(CONTINUUM_FAR_ENTRY<<28u));}}
-    if(far.z!=CONTINUUM_FULL){for(var c=lane;c<far.w;c+=64u){continuumLists[far.z+c]=vec2u(batch+k,c|(CONTINUUM_FAR_ENTRY<<28u));}}
+    if(far.x!=CONTINUUM_FULL){for(var c=lane;c<far.y;c+=${W}u){continuumLists[far.x+c]=vec2u(batch+k,c|(CONTINUUM_FAR_ENTRY<<28u));}}
+    if(far.z!=CONTINUUM_FULL){for(var c=lane;c<far.w;c+=${W}u){continuumLists[far.z+c]=vec2u(batch+k,c|(CONTINUUM_FAR_ENTRY<<28u));}}
   }
   // The real triangles the scene's error asked of this workgroup, for the census: once a workgroup.
   workgroupBarrier();
