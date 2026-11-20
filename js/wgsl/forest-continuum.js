@@ -516,7 +516,8 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
    if(dot(tRaw,tRaw)>1e-16&&dot(bRaw,bRaw)>1e-16){
      let t=normalize(tRaw)*direction;let b=normalize(bRaw)*direction;
      let sampled=normalize(vec3f(detail.xy,max(detail.z,0.25)));
-     n=normalize(t*sampled.x+b*sampled.y+geometric*sampled.z);
+     // Forest normal maps use OpenGL +Y=up (-row = -v), while bitangent b points along +v (+row).
+     n=normalize(t*sampled.x-b*sampled.y+geometric*sampled.z);
    }
  }
  return n;

@@ -834,16 +834,17 @@ fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:
   if(!wantNormal){return ArchPBR(albedo,vec3f(0.0),bS.a,1.0);}
   let nS=sampleArchNormalMip(oddLayer,uv,ddx,ddy);
   var tn=nS.rgb*2.0-1.0;
-  if(turned){tn=tn.yxz;}
+  // Architectural PBR normal maps use OpenGL +Y=up (-v); swapping u<->v negates both swapped axes.
+  if(turned){tn=vec3f(-tn.y,-tn.x,tn.z);}
   let ao=mix(1.0,nS.a,lodFade);
   var normalOffset=vec3f(0.0);
   if(isSlopedRoof){
     let slopeT=normalize(cross(tileTan,n));
-    normalOffset=(tileTan*tn.x+slopeT*tn.y)*lodFade;
+    normalOffset=(tileTan*tn.x-slopeT*tn.y)*lodFade;
   }else{
-    var localNOff=vec3f(tn.x*select(-1.0,1.0,bN.z>=0.0),tn.y,0.0);
-    if(isTop){localNOff=vec3f(tn.x,0.0,tn.y*select(-1.0,1.0,bN.y>=0.0));}
-    else if(isWallX){localNOff=vec3f(0.0,tn.y,tn.x*select(-1.0,1.0,bN.x>=0.0));}
+    var localNOff=vec3f(tn.x,tn.y,0.0);
+    if(isTop){localNOff=vec3f(tn.x,0.0,-tn.y);}
+    else if(isWallX){localNOff=vec3f(0.0,tn.y,tn.x);}
     localNOff*=lodFade;
     normalOffset=vec3f(localNOff.x*cY+localNOff.z*sY,localNOff.y,-localNOff.x*sY+localNOff.z*cY);
   }
