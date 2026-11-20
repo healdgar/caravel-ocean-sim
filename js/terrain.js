@@ -10,7 +10,7 @@ import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_ASSETS,
 import {loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {createPortFractures} from './building-fracture.js';
-import {layTownStreets,paveCityStreets,streetEdgeAt} from './town-streets.js';
+import {layTownStreets,paveCityStreets,streetEdgeAt,waterfrontDeckYAt} from './town-streets.js';
 import {layPortProps} from './port-props.js';
 import {bakedBoardFor,oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard,runtimeBoardPortKey,syncOldWorldHeights} from './old-world.js';
 import {nativeOwnGroundFor} from './native-towns.js';
@@ -1230,10 +1230,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   };
   // A struck building's pieces and stump stand where it stood: a boulder on the ground, a city's waterside works never.
   const fractureGrounded=(instance,[x,y,z])=>Boolean(instance.boulder)||(!(instance.city&&CITY_TYPES_WATERSIDE.has(instance.city.type))&&standsOnGround(x,y,z));
+  const archDeckSample=(x,z)=>{
+    const sec=proceduralPack?findNeighborSection(x,z):null;
+    const p=sec?.port??proceduralPack?.port;
+    const bridge=bridgeDeckYAt(x,z,p?.country?.bridges);
+    const wf=waterfrontDeckYAt(x,z,p?.waterfront);
+    return Math.max(bridge>0?bridge:-Infinity,wf);
+  };
   const groundSample=(x,z)=>{
     const base=baseGroundSample(x,z);
-    const deck=bridgeDeckYAt(x,z,proceduralPack?.port?.country?.bridges);
-    return deck>0?Math.max(base,deck):base;
+    const deck=archDeckSample(x,z);
+    return deck>base?deck:base;
   };
   const heightSample=(x,z)=>{
     if(proceduralPack){
@@ -2608,6 +2615,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
     surfaceHeight:(x,z)=>baseGroundSample(x-worldOffset.x,z-worldOffset.z),
     groundSample:(x,z)=>groundSample(x-worldOffset.x,z-worldOffset.z),
+    isOnDeckAt:(x,z)=>{
+      const lx=x-worldOffset.x,lz=z-worldOffset.z;
+      const deck=archDeckSample(lx,lz);
+      return deck>-1e6&&deck>=baseGroundSample(lx,lz)-0.08;
+    },
     hasLoadedHeightAt(x,z){
       const lx=x-worldOffset.x,lz=z-worldOffset.z;
       const half=activeRegion.span*0.5;

@@ -62,7 +62,7 @@ struct TownShot {start:vec3f,strike:f32,end:vec3f,blast:f32,reach:f32,seed:f32,p
 struct TownShots {count:u32,list:array<TownShot,${TOWN_SHOT_LIMIT}>};
 struct TownFate {mode:u32,since:f32,until:f32,runFor:f32,along:f32,going:f32,lane:f32,heading:f32,clock:f32,speed:f32,look:f32,how:u32};
 struct TownIntent {pos:vec4f,state:vec4f};
-struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32};
+struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32,onDeck:f32};
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<storage,read> walkers:array<Walker>;
 @group(0) @binding(2) var<storage,read> route:array<vec4f>;
@@ -92,11 +92,11 @@ fn townRoll(who:u32,salt:f32)->f32 {
 // The frame clock runs round, so a time past may read as later than now.
 fn secondsSince(since:f32,time:f32)->f32 {let age=time-since;return select(age,age+${SIM_CLOCK_LOOP_S.toFixed(1)},age<0.0);}
 fn turnTo(heading:f32,goal:f32)->f32 {return atan2(sin(goal-heading),cos(goal-heading));}
-// Decode packed (halfWidth, crossSlope) from route[k].w (backwards-compatible with raw halfWidth < 16.0).
-fn decodeRouteW(raw:f32)->vec2f {
-  if(raw<16.0){return vec2f(raw,0.0);}
+// Decode packed (halfWidth, crossSlope, onDeck) from route[k].w (backwards-compatible with raw halfWidth < 16.0).
+fn decodeRouteW(raw:f32)->vec3f {
+  if(raw<16.0){return vec3f(raw,0.0,0.0);}
   let v=u32(raw-16.0+0.5);
-  return vec2f(f32(v&511u)*0.01,f32(v>>9u)*0.001-0.5);
+  return vec3f(f32(v&511u)*0.01,f32((v>>9u)&2047u)*0.001-0.5,select(0.0,1.0,(v>>20u)!=0u));
 }
 // Somewhere on their way, at normalized lateral fraction latFrac in [-1, 1] of the full walkable half-width.
 fn wayAtLat(w:Walker,metres:f32,latFrac:f32)->TownSpot {
@@ -106,14 +106,17 @@ fn wayAtLat(w:Walker,metres:f32,latFrac:f32)->TownSpot {
   let r0=route[w.first+i];
   let r1=route[w.first+i+1u];
   let hereXYZ=mix(r0.xyz,r1.xyz,frac);
-  let ws=mix(decodeRouteW(r0.w),decodeRouteW(r1.w),frac);
+  let d0=decodeRouteW(r0.w);
+  let d1=decodeRouteW(r1.w);
+  let ws=mix(d0,d1,frac);
   let halfW=ws.x;
   let crossSlope=ws.y;
+  let onDeck=max(d0.z,d1.z);
   let ahead=route[w.first+min(i+3u,w.count-1u)].xz-route[w.first+u32(max(i32(i)-2,0))].xz;
   let forward=normalize(ahead+vec2f(1e-4,0.0));
   let latOff=clamp(latFrac,-1.0,1.0)*halfW;
   let aside=vec2f(forward.y,-forward.x)*latOff;
-  return TownSpot(vec3f(hereXYZ.x+aside.x,hereXYZ.y+latOff*crossSlope,hereXYZ.z+aside.y),forward,hereXYZ.xz,halfW);
+  return TownSpot(vec3f(hereXYZ.x+aside.x,hereXYZ.y+latOff*crossSlope,hereXYZ.z+aside.y),forward,hereXYZ.xz,halfW,onDeck);
 }
 // Somewhere on their way, on the side of it they are keeping to: +1 is the right hand going out along it.
 fn wayAt(w:Walker,metres:f32,lane:f32)->TownSpot {
@@ -485,11 +488,11 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     }
   }
   if(hidden){return;}
-  // Drawn on the ground the land draws there (js/continuum-ground.js) where they walk the land; not on a pier's deck
-  // nor in the sea. They are shot and fall where they truly are, above.
+  // Drawn on the ground the land draws there (js/continuum-ground.js) where they walk natural terrain; never on rigid
+  // architectural decks (stone quays, timber piers, or masonry bridges) nor in the sea.
   let dry=position.y>-0.02;
-  let onPierDeck=(w.flags&8u)!=0u&&position.y>1.75&&position.y<3.25&&spot.halfWidth<1.40;
-  if(dry&&!onPierDeck){position.y+=continuumGroundLift(position.xz);}
+  let onArchDeck=spot.onDeck>0.5||((w.flags&8u)!=0u&&position.y>1.75&&position.y<3.25&&spot.halfWidth<1.40);
+  if(dry&&!onArchDeck){position.y+=continuumGroundLift(position.xz);}
   let centerY=select(${(BODY_HEIGHT_M * 0.5).toFixed(3)},1.40,isMounted&&fate.mode==ABOUT);
   let relative=position+vec3f(0.0,centerY,0.0)-F.camPos.xyz;
   // Those out of sight are kept only for the shadow they may cast into it, and are never drawn themselves.

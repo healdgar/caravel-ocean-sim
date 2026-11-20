@@ -34,18 +34,42 @@ export const ROAMING_FIELD_SIZE = 1024;
 const FIELD_METRES_PER_TEXEL = 1;
 export const ROUTE_STEP_M = 1.25;
 export const WALKER_WORDS = 12;
-// Pack / unpack (halfWidth, crossSlope) into a route sample's 4th float (backwards-compatible with raw halfWidth < 16).
-export function packRouteHalfWidthSlope(hw, slope) {
-  if (Math.abs(slope) < 0.003) return hw;
+// Pack / unpack (halfWidth, crossSlope, onDeck) into a route sample's 4th float (backwards-compatible with raw halfWidth < 16).
+// Bit layout above 16 (fits well inside exact 24-bit IEEE-754 f32 mantissa):
+//   bits 0..8   (9b): halfWidth * 100 (0..5.11 m)
+//   bits 9..19 (11b): (clamp(slope, -0.5, 0.5) + 0.5) * 1000 (0..1000)
+//   bit  20     (1b): onDeck (1 = rigid architectural stone quay, timber pier, or bridge deck; skips terrain ground-lift)
+export function packRouteHalfWidthSlope(hw, slope, onDeck = false) {
+  if (!onDeck && Math.abs(slope) < 0.003) return hw;
   const hwCode = Math.max(0, Math.min(511, Math.round(hw * 100)));
   const slCode = Math.max(0, Math.min(1000, Math.round((Math.max(-0.5, Math.min(0.5, slope)) + 0.5) * 1000)));
-  return 16 + slCode * 512 + hwCode;
+  return 16 + (onDeck ? 1048576 : 0) + slCode * 512 + hwCode;
 }
 export function unpackRouteHalfWidthSlope(raw) {
-  if (!Number.isFinite(raw)) return [0, 0];
-  if (raw < 16) return [raw, 0];
+  if (!Number.isFinite(raw)) return [0, 0, false];
+  if (raw < 16) return [raw, 0, false];
   const v = Math.round(raw - 16);
-  return [(v & 511) * 0.01, (v >> 9) * 0.001 - 0.5];
+  return [(v & 511) * 0.01, ((v >>> 9) & 2047) * 0.001 - 0.5, (v >>> 20) !== 0];
+}
+// Walkable architectural top height of any stone quay or timber pier in `waterfront` at `(x, z)`, or -Infinity if none.
+export function waterfrontDeckYAt(x, z, waterfront) {
+  if (!waterfront?.length) return -Infinity;
+  let best = -Infinity;
+  for (let i = 0; i < waterfront.length; i++) {
+    const inst = waterfront[i];
+    if (!inst || inst.deck == null) continue;
+    const hw = (inst.width || 0) * 0.5 + 0.16;
+    const hl = (inst.length || 0) * 0.5 + 0.18;
+    const dx = x - inst.x, dz = z - inst.z;
+    if (dx * dx + dz * dz > (hw + hl) * (hw + hl)) continue;
+    const c = Math.cos(inst.yaw ?? 0), s = Math.sin(inst.yaw ?? 0);
+    const lx = dx * c - dz * s, lz = dx * s + dz * c;
+    if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) {
+      const top = (inst.y || 0) + inst.deck;
+      if (top > best) best = top;
+    }
+  }
+  return best;
 }
 const WALKING_SPEEDS = [1.0, 1.55];
 const INDOOR_SECONDS = [15, 80];
@@ -177,24 +201,52 @@ function worldToLocal(inst, x, z) {
 const SOLIDS_SQUARE_M = 24;
 export function townSolids(port, margin = 0.8) {
   const squares = new Map(), square = (i, j) => (i + 32768) * 65536 + (j + 32768);
-  for (const inst of port?.waterfront ?? []) {
-    if (deckOf(inst) || OPEN_AIR.has(inst.kind)) continue;
-    if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z) || !(inst.width > 0) || !(inst.length > 0)) continue;
-    const reach = Math.hypot(inst.width, inst.length) * 0.5 + margin;
-    const entry = { inst, c: Math.cos(inst.yaw ?? 0), s: Math.sin(inst.yaw ?? 0), hw: inst.width * 0.5 + margin, hl: inst.length * 0.5 + margin };
-    for (let i = Math.floor((inst.x - reach) / SOLIDS_SQUARE_M); i <= Math.floor((inst.x + reach) / SOLIDS_SQUARE_M); i++) {
-      for (let j = Math.floor((inst.z - reach) / SOLIDS_SQUARE_M); j <= Math.floor((inst.z + reach) / SOLIDS_SQUARE_M); j++) {
+  const pierEntries = [];
+  const addBox = (cx, cz, yaw, hw, hl, quayParapet = false) => {
+    const reach = Math.hypot(hw, hl);
+    const entry = { x: cx, z: cz, c: Math.cos(yaw), s: Math.sin(yaw), hw, hl, quayParapet };
+    for (let i = Math.floor((cx - reach) / SOLIDS_SQUARE_M); i <= Math.floor((cx + reach) / SOLIDS_SQUARE_M); i++) {
+      for (let j = Math.floor((cz - reach) / SOLIDS_SQUARE_M); j <= Math.floor((cz + reach) / SOLIDS_SQUARE_M); j++) {
         const at = square(i, j), list = squares.get(at);
         if (list) list.push(entry); else squares.set(at, [entry]);
       }
     }
+  };
+  for (const inst of port?.waterfront ?? []) {
+    if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z) || !(inst.width > 0) || !(inst.length > 0)) continue;
+    const yaw = inst.yaw ?? 0;
+    if (inst.kind === 'pier' && inst.deck != null) {
+      pierEntries.push({ x: inst.x, z: inst.z, c: Math.cos(yaw), s: Math.sin(yaw), hw: Math.max(1.2, inst.width * 0.5 - 0.85), hl: inst.length * 0.5 + 2.5 });
+      continue;
+    }
+    // Stone quays carry a 0.52 m parapet wall and mooring bollards/cleats along their seaward edge (-hl .. -hl + 0.95):
+    // mark that seaward coping strip solid so walkers stay cleanly on the paved deck instead of clipping through stone.
+    if (inst.kind === 'quay' && inst.deck != null) {
+      const stripHalfL = 0.52 + margin;
+      const localZ = -inst.length * 0.5 + 0.48;
+      const p = localToWorld(inst, 0, localZ);
+      addBox(p.x, p.z, yaw, inst.width * 0.5 + 0.2, stripHalfL, true);
+      continue;
+    }
+    if (deckOf(inst) || OPEN_AIR.has(inst.kind)) continue;
+    addBox(inst.x, inst.z, yaw, inst.width * 0.5 + margin, inst.length * 0.5 + margin, false);
   }
+  const onPierGangway = (x, z) => {
+    for (let i = 0; i < pierEntries.length; i++) {
+      const p = pierEntries[i], dx = x - p.x, dz = z - p.z;
+      if (Math.abs(dx * p.c - dz * p.s) <= p.hw && Math.abs(dx * p.s + dz * p.c) <= p.hl) return true;
+    }
+    return false;
+  };
   return (x, z) => {
     const list = squares.get(square(Math.floor(x / SOLIDS_SQUARE_M), Math.floor(z / SOLIDS_SQUARE_M)));
     if (!list) return false;
-    for (const { inst, c, s, hw, hl } of list) {
-      const dx = x - inst.x, dz = z - inst.z;
-      if (Math.abs(dx * c - dz * s) <= hw && Math.abs(dx * s + dz * c) <= hl) return true;
+    for (const { x: cx, z: cz, c, s, hw, hl, quayParapet } of list) {
+      const dx = x - cx, dz = z - cz;
+      if (Math.abs(dx * c - dz * s) <= hw && Math.abs(dx * s + dz * c) <= hl) {
+        if (quayParapet && pierEntries.length && onPierGangway(x, z)) continue;
+        return true;
+      }
     }
     return false;
   };
@@ -499,7 +551,10 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     const { lx, lz } = worldToLocal(inst, grid.x(c), grid.z(c));
     return Math.abs(lx) <= inst.width * 0.5 + margin && Math.abs(lz) <= inst.length * 0.5 + margin;
   };
-  for (const inst of nearby) {
+  // Process quays and buildings before piers so quay seaward parapets are blocked even over dry beach,
+  // while attached timber piers cleanly open their gangway entrance onto the quay deck.
+  const orderedNearby = [...nearby].sort((a, b) => (a.kind === 'pier' ? 1 : 0) - (b.kind === 'pier' ? 1 : 0));
+  for (const inst of orderedNearby) {
     const reach = Math.hypot(inst.width, inst.length) * 0.5 + WALL_CLEARANCE_M + CELL_M * 4;
     const i0 = Math.max(0, Math.floor((inst.x - reach - minX) / CELL_M)), i1 = Math.min(grid.nx - 1, Math.ceil((inst.x + reach - minX) / CELL_M));
     const j0 = Math.max(0, Math.floor((inst.z - reach - minZ) / CELL_M)), j1 = Math.min(grid.nz - 1, Math.ceil((inst.z + reach - minZ) / CELL_M));
@@ -509,8 +564,16 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       const c = j * grid.nx + i;
       if (deck) {
         const { lx, lz } = worldToLocal(inst, grid.x(c), grid.z(c));
-        const shoreBrow = inst.kind === 'pier' && lz > 0 && heightAt[c] >= -0.4 ? 6 : DECK_RUNS_ON_M;
-        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && lz >= -(inst.length * 0.5 + DECK_RUNS_ON_M) && lz <= inst.length * 0.5 + shoreBrow) grid.cost[c] = 1;
+        if (inst.kind === 'quay') {
+          const parapetInnerZ = -(inst.length * 0.5 - 1.65);
+          if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2) {
+            if (lz >= -(inst.length * 0.5 + 0.6) && lz < parapetInnerZ) grid.cost[c] = Infinity;
+            else if (lz >= parapetInnerZ && lz <= inst.length * 0.5 + DECK_RUNS_ON_M) grid.cost[c] = 1;
+          }
+        } else {
+          const shoreBrow = inst.kind === 'pier' && lz > 0 ? (heightAt[c] >= -0.4 ? 6 : 2.5) : DECK_RUNS_ON_M;
+          if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && lz >= -(inst.length * 0.5 + DECK_RUNS_ON_M) && lz <= inst.length * 0.5 + shoreBrow) grid.cost[c] = 1;
+        }
       } else if (!NOT_WALKED_ON.has(inst.kind)) {
         if (solid(inst, c, WALL_CLEARANCE_M)) grid.cost[c] = Infinity;
         else if (Number.isFinite(grid.cost[c]) && solid(inst, c, WALL_CLEARANCE_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
@@ -829,14 +892,20 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       let deckMargin = -1;
       for (const { inst, halfWidth: dHw } of decks) {
         const { lx, lz } = worldToLocal(inst, x, z);
-        if (Math.abs(lx) <= dHw + 1.0 && Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M) {
-          deckMargin = Math.max(deckMargin, Math.max(0.35, dHw - Math.abs(lx) - 0.25));
+        if (Math.abs(lx) <= inst.width * 0.5 + 0.16 && Math.abs(lz) <= inst.length * 0.5 + 0.18) {
+          if (inst.kind === 'quay') {
+            const zMargin = Math.max(0.35, Math.min(lz - (-inst.length * 0.5 + 1.45), inst.length * 0.5 - lz) - 0.25);
+            deckMargin = Math.max(deckMargin, zMargin);
+          } else {
+            deckMargin = Math.max(deckMargin, Math.max(0.35, dHw - Math.abs(lx) - 0.25));
+          }
         }
       }
-      const laneHalfW = deckMargin >= 0 ? deckMargin : Math.max(0.35, streetHalfW - 0.35);
+      const onDeck = deckMargin >= 0;
+      const laneHalfW = onDeck ? Math.min(deckMargin, 2.25) : Math.max(0.35, streetHalfW - 0.35);
       // Measure cross-street terrain slope on land so walkers offset laterally on hillside streets stand flush on the ground.
       let crossSlope = 0;
-      if (deckMargin < 0 && laneHalfW > 0.30) {
+      if (!onDeck && laneHalfW > 0.30) {
         const k0 = Math.max(0, k - 2), k1 = Math.min(line.length - 1, k + 3);
         const dx = line[k1][0] - line[k0][0], dz = line[k1][1] - line[k0][1];
         const len = Math.hypot(dx, dz) || 1;
@@ -848,7 +917,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
           crossSlope = (yPos - yNeg) / (2 * probeD);
         }
       }
-      routeSamples.push(x, climbed[k], z, packRouteHalfWidthSlope(laneHalfW, crossSlope));
+      routeSamples.push(x, climbed[k], z, packRouteHalfWidthSlope(laneHalfW, crossSlope, onDeck));
     }
     return { first, count: line.length, length: (line.length - 1) * ROUTE_STEP_M };
   });

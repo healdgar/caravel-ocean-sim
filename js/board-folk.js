@@ -53,7 +53,7 @@ export function isMountedSoul(person, { indigenous = false, crowdCount = 0, rout
 // some run through them: where `blocked(x, z)` says a point stands in one, the way is walked only along its
 // longest stretch in the open, and whoever takes it goes in at that building's wall. Returns the samples (none for
 // a way too short to walk), whether they begin at the door, and whether they reach the far end.
-function folkWay(route, origin, heightAt, blocked) {
+function folkWay(route, origin, heightAt, blocked, onDeckAt = null) {
   const samples = [];
   let length = 0;
   for (let k = 2; k < route.length; k += 2) length += Math.hypot(route[k] - route[k - 2], route[k + 1] - route[k - 1]);
@@ -72,8 +72,9 @@ function folkWay(route, origin, heightAt, blocked) {
   // Measure real walkable lateral half-width AND cross-street terrain slope so villagers & street mounts
   // stand flush on sloped hillside cobblestones even when offset laterally from the street centerline.
   const lateralInfoAt = (idx, y0) => {
-    if (typeof blocked !== 'function') return FOLK_LANE_M;
     const x = points[idx * 2], z = points[idx * 2 + 1];
+    const onDeck = Boolean(onDeckAt?.(x, z));
+    if (typeof blocked !== 'function') return packRouteHalfWidthSlope(FOLK_LANE_M, 0, onDeck);
     const i0 = Math.max(from, idx - 2), i1 = Math.min(to, idx + 3);
     const dx = points[i1 * 2] - points[i0 * 2], dz = points[i1 * 2 + 1] - points[i0 * 2 + 1];
     const len = Math.hypot(dx, dz) || 1;
@@ -93,6 +94,8 @@ function folkWay(route, origin, heightAt, blocked) {
     };
     const pos = probeSide(1), neg = probeSide(-1);
     const hw = Math.max(FOLK_LANE_M, Math.min(2.25, Math.min(pos.clear, neg.clear)));
+    // Rigid stone quays, piers, and bridges are flat architectural decks (zero cross-slope, zero terrain ground-lift).
+    if (onDeck) return packRouteHalfWidthSlope(hw, 0, true);
     // Measure cross-street slope right at the walker's actual walkable half-width so curbs/terraces beyond hw never skew footing.
     const probeD = Math.min(hw, 1.65);
     const yPos = heightAt(x + rx * probeD, z + rz * probeD);
@@ -100,7 +103,7 @@ function folkWay(route, origin, heightAt, blocked) {
     const crossSlope = Number.isFinite(yPos) && Number.isFinite(yNeg) && yPos > 0.15 && yNeg > 0.15
       ? (yPos - yNeg) / (2 * probeD)
       : (pos.sampleD + neg.sampleD > 0.2 ? (pos.sampleY - neg.sampleY) / (pos.sampleD + neg.sampleD) : 0);
-    return packRouteHalfWidthSlope(hw, crossSlope);
+    return packRouteHalfWidthSlope(hw, crossSlope, false);
   };
   for (let i = from; i <= to; i++) {
     const x = points[i * 2], z = points[i * 2 + 1], y0 = heightAt(x, z);
@@ -115,7 +118,7 @@ const sameWay = (a, b) => a.length === b.length && a.every((v, k) => v === b[k])
  * middle of the board's ground in the streets' own coordinates; `heightAt(x, z)` the ground there; `base` the port's
  * streets as they were laid (its ways, doors and those who walk between its own buildings), or null.
  */
-export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, kept = null, blocked = null, away = null, indigenous = null }) {
+export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, kept = null, blocked = null, away = null, indigenous = null, onDeckAt = null }) {
   const isIndigenous = Boolean(indigenous ?? base?.indigenous ?? asked?.indigenous);
   const about = (list) => away?.size ? list.filter((person) => !away.has(person.id)) : list;
   const plan = { ...asked, people: about(asked.people), others: about(asked.others) };
@@ -124,7 +127,7 @@ export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, k
   const samples = [], ways = [], taken = kept ? new Map() : null;
   let cut = 0;
   for (const person of plan.people) {
-    const before = kept?.get(person.id), way = before && sameWay(before.route, person.route) ? before : folkWay(person.route, origin, heightAt, blocked);
+    const before = kept?.get(person.id), way = before && sameWay(before.route, person.route) ? before : folkWay(person.route, origin, heightAt, blocked, onDeckAt);
     taken?.set(person.id, way);
     const first = ownSamples + samples.length / 4, count = way.samples.length / 4;
     if (way.cut) cut++;

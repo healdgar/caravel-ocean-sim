@@ -19,7 +19,7 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.32, taperMetres: 600, taperPower: 1.0, splatScale: 0.75, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.0, shadowMaxDistance: 0,
   }),
   tradeVessels: normalizeContinuumProfile({
-    errorScale: 0.32, taperMetres: 600, taperPower: 1.0, splatScale: 7.5, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.02, shadowMaxDistance: 900,
+    errorScale: 0.30, taperMetres: 600, taperPower: 1.0, splatScale: 5.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.02, shadowMaxDistance: 900,
   }),
   people: normalizeContinuumProfile({
     errorScale: 0.36, taperMetres: 7.5, taperPower: 1.55, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.38, shadowMaxDistance: 80,
@@ -34,13 +34,13 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.45, taperMetres: 48, taperPower: 1.15, splatScale: 0.90, minPixels: 1.3, maxDistance: 1400, shadowMinError: 0.05, shadowMaxDistance: 200,
   }),
   city: normalizeContinuumProfile({
-    errorScale: 0.28, taperMetres: 420, taperPower: 1.05, splatScale: 6.0, minPixels: 1.25, maxDistance: 0, shadowMinError: 0.28, shadowMaxDistance: 380,
+    errorScale: 0.24, taperMetres: 420, taperPower: 1.05, splatScale: 4.2, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.28, shadowMaxDistance: 380,
   }),
   boulders: normalizeContinuumProfile({
     errorScale: 0.50, taperMetres: 420, taperPower: 1.0, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.05, shadowMaxDistance: 400,
   }),
   forest: normalizeContinuumProfile({
-    errorScale: 0.48, taperMetres: 260, taperPower: 1.05, splatScale: 11.0, minPixels: 1.75, maxDistance: 0, shadowMinError: 0.55, shadowMaxDistance: 260,
+    errorScale: 0.44, taperMetres: 260, taperPower: 1.05, splatScale: 6.5, minPixels: 1.4, maxDistance: 0, shadowMinError: 0.55, shadowMaxDistance: 260,
   }),
   meadow: normalizeContinuumProfile({
     errorScale: 1.45, taperMetres: 120, taperPower: 1.20, splatScale: 1.1, minPixels: 2.0, maxDistance: 1500, shadowMinError: 0.22, shadowMaxDistance: 140,

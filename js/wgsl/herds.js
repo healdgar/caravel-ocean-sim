@@ -314,6 +314,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var routeHeader = 0u;
   var yokeSample = HerdRouteSample(vec2f(0.0), vec2f(0.0, 1.0), 0.0);
   var wayGroundY = -1000.0;
+  var streetMountOnDeck = false;
   var isPanicking = false;
 
   if (isStreetMount) {
@@ -351,8 +352,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       let s1 = routes[routeHeader + 2u + si + 1u];
       let sFrac = clamp(along - f32(si), 0.0, 1.0);
       let hereXYZ = mix(s0.xyz, s1.xyz, sFrac);
-      let w0 = select(vec2f(f32(u32(s0.w - 16.0 + 0.5) & 511u) * 0.01, f32(u32(s0.w - 16.0 + 0.5) >> 9u) * 0.001 - 0.5), vec2f(s0.w, 0.0), s0.w < 16.0);
-      let w1 = select(vec2f(f32(u32(s1.w - 16.0 + 0.5) & 511u) * 0.01, f32(u32(s1.w - 16.0 + 0.5) >> 9u) * 0.001 - 0.5), vec2f(s1.w, 0.0), s1.w < 16.0);
+      let v0 = u32(max(s0.w - 16.0, 0.0) + 0.5);
+      let v1 = u32(max(s1.w - 16.0, 0.0) + 0.5);
+      let w0 = select(vec2f(f32(v0 & 511u) * 0.01, f32((v0 >> 9u) & 2047u) * 0.001 - 0.5), vec2f(s0.w, 0.0), s0.w < 16.0);
+      let w1 = select(vec2f(f32(v1 & 511u) * 0.01, f32((v1 >> 9u) & 2047u) * 0.001 - 0.5), vec2f(s1.w, 0.0), s1.w < 16.0);
+      streetMountOnDeck = ((s0.w >= 16.0 && (v0 >> 20u) != 0u) || (s1.w >= 16.0 && (v1 >> 20u) != 0u));
       let ws = mix(w0, w1, sFrac);
       let aheadIdx = min(si + 3u, sampleCount - 1u);
       let behindIdx = u32(max(i32(si) - 2, 0));
@@ -597,7 +601,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // Drawn standing on the ground the land draws there (js/continuum-ground.js), where it stands on the land and not on
   // a deck or a street raised over it; street mounts mirror TOWNSFOLK_WALK's dry-land ground lift so horse & rider stay flush.
   if (isStreetMount) {
-    if (wy > -0.02) { wy += continuumGroundLift(worldXZ + shiftXZ); }
+    if (wy > -0.02 && !streetMountOnDeck) { wy += continuumGroundLift(worldXZ + shiftXZ); }
   } else if (wy <= herdGroundY(worldXZ) + 0.01) {
     wy += continuumGroundLift(worldXZ + shiftXZ);
   }
