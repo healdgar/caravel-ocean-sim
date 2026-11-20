@@ -245,23 +245,38 @@ fn crewScalpMode(actor:CrewActor,identity:u32,slot:u32)->f32 {
 fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scalpMode:f32)->vec4f {
   // Clean undressed anatomical base bodies:
   //   region 3 = skin (tinted seamlessly by each person's actor.skin.rgb — zero baked clothes, zero garment stains!)
-  //   region 4 = eyebrows (tinted by actor.hair.rgb)
-  //   region 0 = eyes (sclera & dark iris/pupil kept verbatim)
+  //   region 4 = legacy high-forehead brow tag -> treated as skin so no floating brow stripe ever appears on the forehead
+  //   region 0 = eye opening (sclera & iris kept verbatim; surrounding eyelids/sockets tinted as skin; true brow ridge tinted as hair)
   //   region 1/2 = fallback dyed cloth only if a legacy body is ever loaded
   let female=actor.skin.w>0.5&&actor.skin.w<1.5;
   let skin=crewWear[3u];
-  let bright=max(dot(picture,vec3f(0.3333)),1e-3);
-  let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
+  let skinLuma=max(dot(skin.xyz,vec3f(0.299,0.587,0.114)),1e-3);
+  let picLuma=dot(picture,vec3f(0.299,0.587,0.114));
+
+  // Luma-anchored skin tinting with blue-channel ceiling so cool Tripo shadow texels never blow up into lavender/grey pallor.
+  let lumaRatio=clamp(picLuma/skinLuma,0.72,1.18);
+  let softLuma=mix(1.0,lumaRatio,0.56);
+  let rawShade=clamp(picture/max(skin.xyz,vec3f(1e-3)),vec3f(0.72),vec3f(1.18));
+  let safeShade=vec3f(rawShade.r,rawShade.g,min(rawShade.b,lumaRatio*1.02));
+  var skinTone=actor.skin.rgb*mix(vec3f(softLuma),safeShade,0.14);
+
+  // Subtle healthy lip vermilion warmth on the mouth so lips stay natural rather than pale/grey.
+  let lipY=select(1.584,1.506,female);
+  let lipZ=select(0.082,0.095,female);
+  let lipD=length(vec2f(bodyPos.x/0.024,(bodyPos.y-lipY)/0.0085));
+  let lipMask=step(lipZ,bodyPos.z)*(1.0-smoothstep(0.65,1.15,lipD));
+  skinTone=mix(skinTone,skinTone*vec3f(1.08,0.82,0.78),lipMask*0.42);
 
   var baseOut=vec4f(picture,0.0);
-  if(region==3u){
-    let shade=clamp(picture/max(skin.xyz,vec3f(1e-3)),vec3f(0.55),vec3f(1.35));
-    let lumaShade=dot(shade,vec3f(0.299,0.587,0.114));
-    let tinted=actor.skin.rgb*mix(vec3f(lumaShade),shade,0.45);
-    baseOut=vec4f(tinted,1.0);
-  }else if(region==4u){
-    let hairCol=max(actor.hair.rgb,vec3f(0.012,0.010,0.008));
-    baseOut=vec4f(hairCol*(0.75+0.25*clamp(bright*2.2,0.0,1.2)),0.0);
+  if(region==3u||region==4u){
+    baseOut=vec4f(skinTone,1.0);
+  }else if(region==0u){
+    // Keep only the true eye opening (sclera, iris, pupil, lash-line); blend surrounding orange eyelids/sockets seamlessly to skin.
+    let eyeY=select(1.659,1.584,female);
+    let eyeRel=vec2f((abs(bodyPos.x)-0.031)/select(0.0155,0.0150,female),(bodyPos.y-eyeY)/select(0.0072,0.0078,female));
+    let rgWarmth=(picture.r-picture.g)/max(picture.r,1e-4);
+    let eyeOpen=step(select(0.055,0.068,female),bodyPos.z)*(1.0-smoothstep(0.75,1.15,dot(eyeRel,eyeRel)))*(1.0-smoothstep(0.24,0.42,rgWarmth));
+    baseOut=vec4f(mix(skinTone,picture,eyeOpen),1.0-eyeOpen);
   }else if(region==1u||region==2u){
     let median=crewWear[min(region,4u)];
     if(median.w>=0.5){
@@ -270,17 +285,38 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
       baseOut=vec4f(worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2),0.0);
     }
   }
+  // Natural anatomical eyebrows seated squarely on the real brow ridge (replacing both the misaligned forehead band and white Tripo brows).
+  let axFace=abs(bodyPos.x);
+  let browMinZ=select(0.066,0.078,female);
+  if(baseOut.w>0.5&&bodyPos.z>browMinZ&&axFace>0.011&&axFace<0.054){
+    let browArch=select(
+      1.6730+0.0058*smoothstep(0.015,0.039,axFace)-0.0026*smoothstep(0.041,0.052,axFace),
+      1.6005+0.0055*smoothstep(0.015,0.037,axFace)-0.0022*smoothstep(0.039,0.047,axFace),
+      female
+    );
+    let browEndX=select(0.051,0.046,female);
+    let browXMask=smoothstep(0.013,0.018,axFace)*(1.0-smoothstep(browEndX-0.007,browEndX,axFace));
+    let browHalfH=select(0.0038,0.0029,female)*(0.65+0.35*browXMask);
+    let browYMask=1.0-smoothstep(browHalfH*0.45,browHalfH*1.15,abs(bodyPos.y-browArch));
+    let browCov=browXMask*browYMask;
+    if(browCov>0.002){
+      let hairCol=max(actor.hair.rgb,vec3f(0.012,0.010,0.008));
+      let browFiber=0.80+0.20*sin(axFace*1200.0+bodyPos.y*650.0);
+      let browTint=hairCol*browFiber;
+      baseOut=vec4f(mix(baseOut.rgb,browTint,browCov*0.86),mix(baseOut.w,0.0,browCov*0.86));
+    }
+  }
   // Fibrous hair-root scalp under-coat: softly tints & texturizes the hair-bearing cranium inside the 3D strand hairline
   // with the person's darkened root hair pigment so bare scalp never flashes between locks from any angle or distance.
-  let crownY=select(1.805,1.762,female);
-  if(bodyPos.y>crownY-0.185&&region==3u&&scalpMode>0.5){
-    let midZ=select(-0.010,-0.012,female);
+  let crownY=select(1.770,1.692,female);
+  if(bodyPos.y>crownY-0.180&&baseOut.w>0.5&&scalpMode>0.5){
+    let midZ=select(-0.010,-0.003,female);
     let ax=abs(bodyPos.x);
     let rz=bodyPos.z-midZ;
     let wispNoise=sin(bodyPos.x*220.0+bodyPos.z*140.0)*0.0028+sin(bodyPos.x*470.0-bodyPos.y*280.0)*0.0014;
     let widowDip=0.005*exp(-((bodyPos.x/0.020)*(bodyPos.x/0.020)));
     let templeRec=0.011*exp(-(((ax-0.044)/0.020)*((ax-0.044)/0.020)));
-    let foreLine=(crownY-0.056)-widowDip+templeRec+wispNoise;
+    let foreLine=(crownY-0.046)-widowDip+templeRec+wispNoise;
     let frontMask=select(1.0,smoothstep(foreLine-0.004,foreLine+0.016,bodyPos.y),rz>0.008);
     let earDy=(bodyPos.y-(crownY-0.128))/0.038;
     let earDz=(rz+0.018)/0.030;

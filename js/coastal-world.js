@@ -3272,8 +3272,10 @@ export function buildCityTypeGeometry({ id = 0, kind = null, width, length, heig
     }
   };
 
-  // Helper to emit a 3D box (or battered frustum when topExpandX/Z != 0) in local coordinates
-  const emitBox = (toWorld, x0, x1, y0, y1, z0, z1, kind, shade = 0.84, includeBottom = false, topInset = 0) => {
+  // Helper to emit a 3D box (or battered frustum when topExpandX/Z != 0) in local coordinates.
+  // Closed solid manifold by default (`includeBottom = true`) so overhangs, jetties, arcades,
+  // brackets, lintels, cornices, balconies, and fractured pieces are never hollow underneath.
+  const emitBox = (toWorld, x0, x1, y0, y1, z0, z1, kind, shade = 0.84, includeBottom = true, topInset = 0) => {
     const p000 = toWorld(x0, y0, z0);
     const p100 = toWorld(x1, y0, z0);
     const p101 = toWorld(x1, y0, z1);
@@ -3306,14 +3308,15 @@ export function buildCityTypeGeometry({ id = 0, kind = null, width, length, heig
     pushSubdividedQuad(p001, p000, p010, p011, nz, ny, kind, shade * 0.88, isGlazedWin);
     pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06), isGlazedWin);
     if (includeBottom) {
-      pushQuad(p001, p101, p100, p000, kind, shade * 0.65, isGlazedWin);
+      pushSubdividedQuad(p001, p101, p100, p000, nx, nz, kind, shade * 0.65, isGlazedWin);
     }
   };
 
   // Helper to emit an N-sided cylindrical or conical prism (turrets, domes, cannon barrels, round columns)
   // Emits analytic smooth radial-and-slope normals per vertex so curved towers, domes, and columns shade smoothly
-  const emitCylinder = (toWorld, cx, cz, y0, y1, r0, r1, segs = 8, kind = 11, shade = 0.88, capTop = true) => {
+  const emitCylinder = (toWorld, cx, cz, y0, y1, r0, r1, segs = 8, kind = 11, shade = 0.88, capTop = true, capBottom = capTop) => {
     const topCenter = toWorld(cx, y1, cz);
+    const botCenter = toWorld(cx, y0, cz);
     const qKind = encodeArchKind(kind);
     const dy = Math.max(0.05, Math.abs(y1 - y0));
     const slopeNy = (r0 - r1) / dy;
@@ -3357,6 +3360,9 @@ export function buildCityTypeGeometry({ id = 0, kind = null, width, length, heig
       indices.push(i0, i1, i2, i0, i2, i3);
       if (capTop && r1 > 0.04) {
         pushTri(p01, p11, topCenter, kind, Math.min(1, shade * 1.05));
+      }
+      if (capBottom && r0 > 0.04) {
+        pushTri(p10, p00, botCenter, kind, shade * 0.65);
       }
     }
   };
@@ -3676,6 +3682,21 @@ export function buildCityTypeGeometry({ id = 0, kind = null, width, length, heig
           // Gable roof + masonry gable end triangles (inset 4cm from z0/z1 to prevent coplanar overlap with lower walls)
           pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, effRoofKind, roofShadeA);
           pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, effRoofKind, roofShadeB);
+          // Underside timber soffit boarding under projecting gable verges so overhanging roof eaves are solid from below
+          if (overhang > 0.01) {
+            const soffitDrop = 0.05;
+            const zIn0 = z0 + 0.04, zIn1 = z1 - 0.04;
+            const u00a = toWorld(rx0, yEave - soffitDrop, rz0), u00b = toWorld(rx0, yEave - soffitDrop, zIn0);
+            const u10a = toWorld(rx1, yEave - soffitDrop, rz0), u10b = toWorld(rx1, yEave - soffitDrop, zIn0);
+            const ur0a = toWorld(midX, yPeak - soffitDrop, rz0), ur0b = toWorld(midX, yPeak - soffitDrop, zIn0);
+            pushQuad(u00a, u00b, ur0b, ur0a, 10, timberShade * 0.72);
+            pushQuad(u10b, u10a, ur0a, ur0b, 10, timberShade * 0.72);
+            const u01a = toWorld(rx0, yEave - soffitDrop, zIn1), u01b = toWorld(rx0, yEave - soffitDrop, rz1);
+            const u11a = toWorld(rx1, yEave - soffitDrop, zIn1), u11b = toWorld(rx1, yEave - soffitDrop, rz1);
+            const ur1a = toWorld(midX, yPeak - soffitDrop, zIn1), ur1b = toWorld(midX, yPeak - soffitDrop, rz1);
+            pushQuad(u01a, u01b, ur1b, ur1a, 10, timberShade * 0.72);
+            pushQuad(u11b, u11a, ur1a, ur1b, 10, timberShade * 0.72);
+          }
           const gz0 = z0 + 0.04, gz1 = z1 - 0.04;
           const g00 = toWorld(x0, yEave, gz0), g10 = toWorld(x1, yEave, gz0), gr0 = toWorld(midX, yPeak - 0.08, gz0);
           const g01 = toWorld(x0, yEave, gz1), g11 = toWorld(x1, yEave, gz1), gr1 = toWorld(midX, yPeak - 0.08, gz1);
@@ -3921,7 +3942,7 @@ export function buildCityTypeGeometry({ id = 0, kind = null, width, length, heig
       emitCylinder(toWorld, -hw, -hl + 0.62, quayBaseY, quayDeckY + 0.52, 0.78, 0.74, 8, 11, 0.88, true);
       emitCylinder(toWorld, hw, -hl + 0.62, quayBaseY, quayDeckY + 0.52, 0.78, 0.74, 8, 11, 0.88, true);
       beginSection('quay_coping_deck_slab');
-      emitBox(toWorld, -hw - 0.12, hw + 0.12, yCoping, quayDeckY, -hl - 0.16, hl + 0.08, 11, 0.93, false);
+      emitBox(toWorld, -hw - 0.12, hw + 0.12, yCoping, quayDeckY, -hl - 0.16, hl + 0.08, 11, 0.93, true);
       const qs = Math.min(1, hw / 22);
       beginSection('quay_parapet_walls');
       if (hw >= 9) {

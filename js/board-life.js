@@ -161,7 +161,7 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
       pendingMaritime = null;
       model.hook('pilotMaritime', [report]).catch(() => {});
     }
-    const batchStride = Number.isFinite(stride) && stride > 0 ? stride : ((life.wanted - life.day > 6) ? 15 : 6);
+    const batchStride = Number.isFinite(stride) && stride > 0 ? stride : (life.lived === 0 ? 1 : (life.wanted - life.day > 6 ? 4 : 2));
     model.request('advance', { days: Math.min(batchStride, life.wanted - life.day) }).then(async (reply) => {
       life.lived += reply.day - life.day; life.day = reply.day;
       const lines = await model.request('view', { kind: 'ui', panel: 'advisor-annals', from: told + 1, n: 400 });

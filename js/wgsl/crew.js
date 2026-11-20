@@ -404,18 +404,20 @@ fn crewShadeLit(v:CrewVertex,front:bool,baseIn:vec3f)->vec3f {
   }
   let albedo=baseColor*mix(1.0,mix(.68,.92,v.skin),wet.x);
   let view=normalize(F.camPos.xyz-v.world);
-  // A little diffuse wrap softens facial terminators. Skin has a broad dry
-  // highlight; absorbed water darkens linen, surface water strengthens glints.
-  // Roughness values are authored material choices, not measured cloth/skin data.
-  let rough=clamp(mix(mix(.92,.62,v.skin),mix(.55,.38,v.skin),wet.y)+roughBias,0.08,0.99);
-  let wrap=.14*saturate(v.skin);
-  let diffuse=max(0.0,(dot(n,sun)+wrap)/(1.0+wrap))/(1.0+wrap);
-  let f0=vec3f(.04);
+  let skinAmt=saturate(v.skin);
+  // Pre-integrated warm hemoglobin subsurface scatter wrap on skin so facial shadow terminators stay warm and lifelike
+  // instead of turning greyish-lavender under cool sky ambient; cloth (skinAmt == 0) keeps the exact vessel lighting.
+  let rough=clamp(mix(mix(.92,.72,skinAmt),mix(.55,.40,skinAmt),wet.y)+roughBias,0.08,0.99);
+  let wrapRGB=vec3f(.38,.22,.14)*skinAmt;
+  let ndlRaw=dot(n,sun);
+  let diffRGB=max(vec3f(0.0),(vec3f(ndlRaw)+wrapRGB)/(vec3f(1.0)+wrapRGB))/(vec3f(1.0)+wrapRGB);
+  let skinAmb=mix(ambient,ambient*vec3f(1.08,1.00,0.90),skinAmt*0.45);
+  let f0=mix(vec3f(.04),vec3f(.028),skinAmt);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;
   let grazing=1.0-clamp(dot(n,view),0.0,1.0);
-  let clothSheen=grazing*grazing*grazing*grazing*(1.0-clamp(v.skin,0.0,1.0))*(1.0-wet.x*0.7)*${clothSheen.toFixed(4)};
-  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)+albedo*(direct*(diffuse/PI+clothSheen)+ambient*(1.0+clothSheen*0.5))+direct*spec*max(dot(n,sun),0.0)
+  let clothSheen=grazing*grazing*grazing*grazing*(1.0-skinAmt)*(1.0-wet.x*0.7)*${clothSheen.toFixed(4)};
+  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)+albedo*(direct*(diffRGB/PI+vec3f(clothSheen))+skinAmb*(1.0+clothSheen*0.5))+direct*spec*max(ndlRaw,0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
   return col;
 }

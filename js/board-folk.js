@@ -99,8 +99,13 @@ function folkWay(route, origin, heightAt, blocked) {
     };
     const pos = probeSide(1), neg = probeSide(-1);
     const hw = Math.max(FOLK_LANE_M, Math.min(2.25, Math.min(pos.clear, neg.clear)));
-    const spanD = pos.sampleD + neg.sampleD;
-    const crossSlope = spanD > 0.2 ? (pos.sampleY - neg.sampleY) / spanD : 0;
+    // Measure cross-street slope right at the walker's actual walkable half-width so curbs/terraces beyond hw never skew footing.
+    const probeD = Math.min(hw, 1.65);
+    const yPos = heightAt(x + rx * probeD, z + rz * probeD);
+    const yNeg = heightAt(x - rx * probeD, z - rz * probeD);
+    const crossSlope = Number.isFinite(yPos) && Number.isFinite(yNeg) && yPos > 0.15 && yNeg > 0.15
+      ? (yPos - yNeg) / (2 * probeD)
+      : (pos.sampleD + neg.sampleD > 0.2 ? (pos.sampleY - neg.sampleY) / (pos.sampleD + neg.sampleD) : 0);
     return packRouteW(hw, crossSlope);
   };
   for (let i = from; i <= to; i++) {

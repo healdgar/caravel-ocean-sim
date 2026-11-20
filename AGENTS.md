@@ -45,6 +45,7 @@ Every model family rendered across distance — people and their faces, animals,
 
 ## 4. Build & Repository Safeguards
 
+- **Fix architecturally, across the whole game**: Any time you solve a problem, check whether the root cause is architectural and should be fixed systematically across the entire codebase (all building generators, all vessel families, all characters/animals, all shaders/passes) rather than patching a single asset or call site.
 - Run `npm run build` after modifying any file under `js/` so `ocean.html`, `ocean.min.html`, and `docs/index.html` stay synchronized.
 - Never hand-edit coordinate fixes into procedural world generators; fix the procedural rule itself.
 - Do not modify `assets/board/game.js` or overwrite verified packs in `assets/forest-scenery/**` without running their canonical offline preparation and validation scripts.

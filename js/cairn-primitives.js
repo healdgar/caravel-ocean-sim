@@ -518,7 +518,7 @@ export function emitCairnScene(sceneSpec, helpers) {
           emitBox(primToWorld, x0, x0 + th, y0, y1, z0 + th, z1 - th, kind, shade * 0.94);
           emitBox(primToWorld, x1 - th, x1, y0, y1, z0 + th, z1 - th, kind, shade * 0.94);
         } else {
-          emitBox(primToWorld, x0, x1, y0, y1, z0, z1, kind, shade, Boolean(prim.includeBottom), topInset);
+          emitBox(primToWorld, x0, x1, y0, y1, z0, z1, kind, shade, prim.includeBottom !== false, topInset);
           const spanX = x1 - x0, spanY = y1 - y0, spanZ = z1 - z0;
           const shouldArticulate =
             prim.plain !== true &&
@@ -637,7 +637,7 @@ export function emitCairnScene(sceneSpec, helpers) {
           const merlonH = resolveNumeric(prim.merlonHeight, 0.78);
           const step = merlonW + merlonGap;
           for (let s = 0; s + merlonW <= len + 0.05; s += step) {
-            emitBox(wallToWorld, s, Math.min(len, s + merlonW), y1, y1 + merlonH, -th * 0.52, th * 0.52, 11, shade * 0.96, false, 0.04);
+            emitBox(wallToWorld, s, Math.min(len, s + merlonW), y1, y1 + merlonH, -th * 0.52, th * 0.52, 11, shade * 0.96, true, 0.04);
           }
         }
         return;
@@ -803,7 +803,7 @@ export function emitCairnScene(sceneSpec, helpers) {
           const r1 = Math.max(0.08, Math.cos(t1) * r);
           const y0 = yStart + Math.sin(t0) * h;
           const y1 = yStart + Math.sin(t1) * h;
-          emitCylinder(primToWorld, base[0], base[2], y0, y1, r0, r1, segs, kind, shade * (0.94 + 0.06 * (ring / rings)), ring === rings - 1);
+          emitCylinder(primToWorld, base[0], base[2], y0, y1, r0, r1, segs, kind, shade * (0.94 + 0.06 * (ring / rings)), ring === rings - 1, ring === 0);
           // Raised Pedra Lioz stone meridian ribs along each dome gore
           if (r >= 1.5 && typeof pushQuad === 'function') {
             const ribOut = Math.min(0.11, r * 0.028);
@@ -839,7 +839,7 @@ export function emitCairnScene(sceneSpec, helpers) {
         const rBottom = Math.max(0.08, resolveNumeric(prim.radiusBottom ?? prim.radius, 1.0));
         const rTop = pType === 'cone' ? Math.max(0.04, resolveNumeric(prim.radiusTop, 0.05)) : Math.max(0.04, resolveNumeric(prim.radiusTop ?? prim.radius, rBottom));
         const segs = Math.max(6, Math.min(18, Math.round(resolveNumeric(prim.radialSegments ?? prim.segments, 12))));
-        emitCylinder(primToWorld, base[0], base[2], base[1], base[1] + h, rBottom, rTop, segs, kind, shade, prim.openEnded !== true);
+        emitCylinder(primToWorld, base[0], base[2], base[1], base[1] + h, rBottom, rTop, segs, kind, shade, prim.openEnded !== true, prim.openEnded !== true);
         return;
       }
 
@@ -916,7 +916,7 @@ export function emitCairnScene(sceneSpec, helpers) {
         if (ring.length === 3) ears.push(ring.slice());
         for (const [a, b, c] of ears) {
           pushTri(primToWorld(P[a][0], y1, P[a][1]), primToWorld(P[b][0], y1, P[b][1]), primToWorld(P[c][0], y1, P[c][1]), kind, shade);
-          if (prim.includeBottom) pushTri(primToWorld(P[a][0], y0, P[a][1]), primToWorld(P[c][0], y0, P[c][1]), primToWorld(P[b][0], y0, P[b][1]), kind, shade * 0.8);
+          if (prim.includeBottom !== false) pushTri(primToWorld(P[a][0], y0, P[a][1]), primToWorld(P[c][0], y0, P[c][1]), primToWorld(P[b][0], y0, P[b][1]), kind, shade * 0.8);
         }
         return;
       }

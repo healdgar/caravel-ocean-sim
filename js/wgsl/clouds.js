@@ -334,7 +334,9 @@ fn main(@builtin(global_invocation_id) id:vec3u){
 // and the scene's terrain/city/forest solid shadow map, outputting (shaftRGB, linearDistKm) for bilateral upsampling.
 export function cloudShaftsWGSL(samples = 4) {
   const depthType = samples === 1 ? 'texture_depth_2d' : 'texture_depth_multisampled_2d';
-  const depthLoad = (p) => `textureLoad(sceneDepth,${p},0)`;
+  const depthReadFn = samples === 1
+    ? `fn shaftSceneDepth(p:vec2i)->f32 { return textureLoad(sceneDepth,p,0); }`
+    : `fn shaftSceneDepth(p:vec2i)->f32 { var d=0.0; for(var s=0;s<${samples};s++){ d=max(d,textureLoad(sceneDepth,p,s)); } return d; }`;
   return /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var transLUT:texture_2d<f32>;
@@ -345,6 +347,7 @@ export function cloudShaftsWGSL(samples = 4) {
 @group(0) @binding(6) var<uniform> landSH:ShadowFrame;
 @group(0) @binding(7) var landSolidShadow:texture_depth_2d;
 @group(0) @binding(8) var landShadowCompare:sampler_comparison;
+${depthReadFn}
 fn shaftHash(pix:vec2u)->f32 {
   var h=(pix.x*0x9e3779b9u)^(pix.y*0x85ebca6bu)^0x68bc21ebu;
   h=(h^(h>>16u))*0x7feb352du;h=(h^(h>>15u))*0x846ca68bu;h=h^(h>>16u);
@@ -373,23 +376,25 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
   let uv=(vec2f(id.xy)+0.5)/vec2f(size);let ndc=uv*vec2f(2.0,-2.0)+vec2f(-1.0,1.0);
   let rd=normalize(F.camFwd.xyz+ndc.x*F.camRight.xyz+ndc.y*F.camUp.xyz);
   let fullPix=min(vec2u(uv*vec2f(fullSize)),fullSize-vec2u(1u));
-  let distKm=shaftLinearDistKm(${depthLoad('vec2i(fullPix)')},rd);
+  let distKm=shaftLinearDistKm(shaftSceneDepth(vec2i(fullPix)),rd);
   let cosSun=dot(rd,F.sunDir.xyz);
-  if(CF.screen.w<0.5||F.sunDir.y<0.025||cosSun<0.04){
+  let sunCone=smoothstep(0.0,0.35,cosSun);
+  if(CF.screen.w<0.5||F.sunDir.y<0.025||sunCone<=0.0){
     textureStore(shaftOut,vec2i(id.xy),vec4f(0.0,0.0,0.0,distKm));
     return;
   }
   let ro=F.camPos.xyz*0.001;
-  var limit=min(distKm,16.0);
+  var limit=min(distKm,14.0);
   if(rd.y>0.01&&ro.y<CF.shape.x){limit=min(limit,(CF.shape.x-ro.y)/rd.y);}
-  if(limit<=0.04){
+  if(rd.y< -0.001){limit=min(limit,max(ro.y+0.02,0.02)/(-rd.y));}
+  if(limit<=0.03){
     textureStore(shaftOut,vec2i(id.xy),vec4f(0.0,0.0,0.0,distKm));
     return;
   }
   let jitter=fract(shaftHash(id.xy)+f32(u32(CF.screen.z)%64u)*0.61803398875);
-  let phase=0.20+1.75*pow(saturate(cosSun),6.0);
-  let lowSun=smoothstep(0.025,0.14,F.sunDir.y)*(1.0-0.52*smoothstep(0.35,0.85,F.sunDir.y));
-  let hazeGain=(0.0046+F.atmo.x*0.0024)*lowSun*phase;
+  let phase=sunCone*(0.14+1.65*pow(saturate(cosSun),5.0));
+  let lowSun=smoothstep(0.025,0.14,F.sunDir.y)*(1.0-0.55*smoothstep(0.32,0.82,F.sunDir.y));
+  let hazeGain=(0.0024+F.atmo.x*0.0014)*lowSun*phase;
   var shaft=0.0;var weightSum=0.0;var minVis=1.0;var maxVis=0.0;
   let steps=16u;
   for(var i=0u;i<steps;i++){
@@ -397,10 +402,10 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
     let s0=0.02+(limit-0.02)*(a*a);let s1=0.02+(limit-0.02)*(b*b);
     let ds=s1-s0;let t=s0+ds*jitter;
     let p=ro+rd*t;
-    if(p.y<-0.01){break;}
     var sunVis=cloudShadowAt(p,F.sunDir.xyz);
     if(t<0.32){sunVis*=solarShadowVisibility(vec3f(shaftLandShadow(p*1000.0))).x;}
-    let altW=exp(-max(p.y,0.0)*0.55)*exp(-t*0.085)*ds;
+    let groundFade=smoothstep(-0.02,0.04,p.y);
+    let altW=exp(-max(p.y,0.0)*0.65)*exp(-t*0.11)*groundFade*ds;
     shaft+=sunVis*altW;
     weightSum+=altW;
     minVis=min(minVis,sunVis);
@@ -408,9 +413,9 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
   }
   let avgVis=shaft/max(weightSum,1e-4);
   let variation=clamp(maxVis-minVis,0.0,1.0);
-  let contrast=smoothstep(0.03,0.24,avgVis)*clamp(1.0-0.78*smoothstep(0.86,0.995,avgVis)+variation*0.45,0.0,1.0);
+  let contrast=smoothstep(0.03,0.24,avgVis)*clamp(1.0-0.84*smoothstep(0.84,0.99,avgVis)+variation*0.55,0.0,1.0);
   let rgb=sunIlluminance()*(shaft*hazeGain*contrast);
-  textureStore(shaftOut,vec2i(id.xy),vec4f(clamp(rgb,vec3f(0.0),vec3f(8.0)),distKm));
+  textureStore(shaftOut,vec2i(id.xy),vec4f(clamp(rgb,vec3f(0.0),vec3f(4.0)),distKm));
 }
 `;
 }
@@ -419,11 +424,14 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
 // without bleeding across sharp foreground silhouettes (cliffs, roofs, masts, trees).
 export function cloudShaftsCompositeWGSL(samples = 4) {
   const depthType = samples === 1 ? 'texture_depth_2d' : 'texture_depth_multisampled_2d';
-  const depthLoad = (p) => `textureLoad(sceneDepth,${p},0)`;
+  const depthReadFn = samples === 1
+    ? `fn compSceneDepth(p:vec2i)->f32 { return textureLoad(sceneDepth,p,0); }`
+    : `fn compSceneDepth(p:vec2i)->f32 { var d=0.0; for(var s=0;s<${samples};s++){ d=max(d,textureLoad(sceneDepth,p,s)); } return d; }`;
   return /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var shaftTex:texture_2d<f32>;
 @group(0) @binding(2) var sceneDepth:${depthType};
+${depthReadFn}
 struct ShaftVO { @builtin(position) pos:vec4f, @location(0) ndc:vec2f };
 @vertex fn vs(@builtin(vertex_index) i:u32)->ShaftVO {
   let p=vec2f(f32((i<<1u)&2u),f32(i&2u))*2.0-1.0;
@@ -437,7 +445,7 @@ fn compLinearDistKm(depth:f32,rd:vec3f)->f32 {
 @fragment fn fs(in:ShaftVO)->@location(0) vec4f {
   let fullPix=vec2i(in.pos.xy);
   let rd=normalize(F.camFwd.xyz+in.ndc.x*F.camRight.xyz+in.ndc.y*F.camUp.xyz);
-  let distKm=compLinearDistKm(${depthLoad('fullPix')},rd);
+  let distKm=compLinearDistKm(compSceneDepth(fullPix),rd);
   let logD=log(max(distKm,0.005));
   let dim=vec2i(textureDimensions(shaftTex));
   let uv=in.pos.xy*F.screen.zw;
@@ -449,16 +457,14 @@ fn compLinearDistKm(depth:f32,rd:vec3f)->f32 {
   let t10=textureLoad(shaftTex,clamp(i0+vec2i(1,0),vec2i(0),maxC),0);
   let t01=textureLoad(shaftTex,clamp(i0+vec2i(0,1),vec2i(0),maxC),0);
   let t11=textureLoad(shaftTex,clamp(i0+vec2i(1,1),vec2i(0),maxC),0);
-  let w00=(1.0-f.x)*(1.0-f.y)*exp(-abs(logD-log(max(t00.a,0.005)))*6.0);
-  let w10=f.x*(1.0-f.y)*exp(-abs(logD-log(max(t10.a,0.005)))*6.0);
-  let w01=(1.0-f.x)*f.y*exp(-abs(logD-log(max(t01.a,0.005)))*6.0);
-  let w11=f.x*f.y*exp(-abs(logD-log(max(t11.a,0.005)))*6.0);
+  let w00=(1.0-f.x)*(1.0-f.y)*exp(-abs(logD-log(max(t00.a,0.005)))*8.0);
+  let w10=f.x*(1.0-f.y)*exp(-abs(logD-log(max(t10.a,0.005)))*8.0);
+  let w01=(1.0-f.x)*f.y*exp(-abs(logD-log(max(t01.a,0.005)))*8.0);
+  let w11=f.x*f.y*exp(-abs(logD-log(max(t11.a,0.005)))*8.0);
   let wSum=w00+w10+w01+w11;
   var col=vec3f(0.0);
-  if(wSum>1e-5){
+  if(wSum>1e-4){
     col=(t00.rgb*w00+t10.rgb*w10+t01.rgb*w01+t11.rgb*w11)/wSum;
-  }else{
-    col=(t00.rgb+t10.rgb+t01.rgb+t11.rgb)*0.25;
   }
   return vec4f(col,0.0);
 }

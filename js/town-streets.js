@@ -790,16 +790,31 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     const line = resample(eased, ROUTE_STEP_M);
     const first = routeSamples.length / 4;
     const heights = line.map(([x, z]) => surfaceAt(x, z));
-    // Over a step from ground to deck, a walker climbs rather than jumps.
-    const climbed = heights.map((_, k) => {
+    // Smooth only across abrupt ground-to-deck steps so hillside streets stay flush with the real ground instead of
+    // floating over concave slopes and corners.
+    const nearStep = heights.map((h, k) => {
+      for (let d = -2; d <= 2; d++) {
+        const a = heights[k + d], b = heights[k + d + 1];
+        if (a !== undefined && b !== undefined && Math.abs(b - a) > 0.32) return true;
+      }
+      return false;
+    });
+    const climbed = heights.map((h, k) => {
+      if (!nearStep[k]) return h;
       let sum = 0, weight = 0;
-      for (let d = -3; d <= 3; d++) {
-        const h = heights[k + d];
-        if (h === undefined) continue;
-        sum += h; weight++;
+      for (let d = -2; d <= 2; d++) {
+        const v = heights[k + d];
+        if (v === undefined) continue;
+        sum += v; weight++;
       }
       return sum / weight;
     });
+    const packRouteW = (hw, slope) => {
+      if (Math.abs(slope) < 0.003) return hw;
+      const hwCode = Math.max(0, Math.min(511, Math.round(hw * 100)));
+      const slCode = Math.max(0, Math.min(1000, Math.round((Math.max(-0.5, Math.min(0.5, slope)) + 0.5) * 1000)));
+      return 16 + slCode * 512 + hwCode;
+    };
     for (let k = 0; k < line.length; k++) {
       const [x, z] = line[k];
       const c = grid.at(x, z);
@@ -812,7 +827,21 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
         }
       }
       const laneHalfW = deckMargin >= 0 ? deckMargin : Math.max(0.35, streetHalfW - 0.35);
-      routeSamples.push(x, climbed[k], z, laneHalfW);
+      // Measure cross-street terrain slope on land so walkers offset laterally on hillside streets stand flush on the ground.
+      let crossSlope = 0;
+      if (deckMargin < 0 && laneHalfW > 0.30) {
+        const k0 = Math.max(0, k - 2), k1 = Math.min(line.length - 1, k + 3);
+        const dx = line[k1][0] - line[k0][0], dz = line[k1][1] - line[k0][1];
+        const len = Math.hypot(dx, dz) || 1;
+        const rx = dz / len, rz = -dx / len;
+        const probeD = Math.min(laneHalfW, 1.8);
+        const yPos = surfaceAt(x + rx * probeD, z + rz * probeD);
+        const yNeg = surfaceAt(x - rx * probeD, z - rz * probeD);
+        if (Number.isFinite(yPos) && Number.isFinite(yNeg) && yPos > 0.1 && yNeg > 0.1) {
+          crossSlope = (yPos - yNeg) / (2 * probeD);
+        }
+      }
+      routeSamples.push(x, climbed[k], z, packRouteW(laneHalfW, crossSlope));
     }
     return { first, count: line.length, length: (line.length - 1) * ROUTE_STEP_M };
   });

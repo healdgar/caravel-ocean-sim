@@ -902,6 +902,31 @@ globalThis.BOARD_MODEL = (() => {
     const activeCart = activeByMode('cart');
 
     const COACH_ROAD_GOODS = new Set(['cloth', 'silk', 'spice', 'tools']);
+    // On opening day (Day 0 of a newly thawed world before the first daily market tick runs),
+    // settlements hold real `s.stores` surplus (`spareOf > 0`) whose seller lots have not yet
+    // been listed on `mkt(s, g)`. List genuine spare surplus under living local folk (creating
+    // zero goods) so merchants, carters, and bargemen can lade real opening-day consignments.
+    const ensureOpeningMarketListing = (s) => {
+      if (!s || s.storage || !s.stores || typeof offer !== 'function' || typeof avail !== 'function') return;
+      for (const g of GOODS) {
+        if (avail(s, g, price(s, g) * 1.5) >= 3) return;
+      }
+      const folk = Array.isArray(s.folk) ? s.folk : [];
+      const sellers = folk.filter((p) => p && !p.dead && !(p.away && now < (p.away.until ?? 0)) && (p.tr === 'merchant' || p.tr === 'trader' || p.tr === 'chandler' || p.tr === 'spicer' || p.tr === 'farmer' || p.tr === 'peasant' || p.tr === 'weaver' || p.tr === 'smith'));
+      const pool = sellers.length ? sellers : folk.filter((p) => p && !p.dead && !(p.away && now < (p.away.until ?? 0)));
+      if (!pool.length) return;
+      let idx = 0;
+      for (const g of GOODS) {
+        const raw = Math.max(0, Number(s.stores[g]) || 0);
+        const sp = typeof spareOf === 'function' ? Math.max(0, Number(spareOf(s, g)) || 0) : raw;
+        const listQty = Math.min(raw * 0.65, sp);
+        if (listQty < 3) continue;
+        offer(s, g, pool[(idx++) % pool.length], listQty, price(s, g) * 0.9);
+      }
+    };
+    if (activeCart.length === 0 && activeRiver.length === 0 && activeSea.length === 0) {
+      for (let si = 0; si < S.length; si++) ensureOpeningMarketListing(S[si]);
+    }
     const rankGoodsForPair = (oi, di, isBoat, preferCoachGood = false) => {
       const o = S[oi], d = S[di];
       const list = [];
@@ -1058,6 +1083,7 @@ globalThis.BOARD_MODEL = (() => {
       }
     }
 
+    const openingSpread = force || now <= 0.01;
     if (activeSea.length < 3 && harborPorts.length >= 2 && typeof seaRoute === 'function') {
       const seaPairs = [];
       for (let a = 0; a < harborPorts.length; a++) {
@@ -1072,7 +1098,7 @@ globalThis.BOARD_MODEL = (() => {
         const pair = seaPairs[i % seaPairs.length];
         const forward = (i % 2) === 0;
         const poly = forward ? pair.poly : [...pair.poly].reverse();
-        const backdate = force ? (0.16 + ((i * 0.21) % 0.62)) : 0;
+        const backdate = openingSpread ? (0.16 + ((i * 0.21) % 0.62)) : 0;
         if (tryDispatchRoute('sea', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, backdate)) needSea--;
       }
     }
@@ -1090,7 +1116,7 @@ globalThis.BOARD_MODEL = (() => {
         if (!pr?.route?.poly || pr.route.poly.length < 2) continue;
         const forward = (i % 2) === 0;
         const poly = forward ? pr.route.poly : [...pr.route.poly].reverse();
-        const backdate = force ? (0.20 + ((i * 0.27) % 0.56)) : 0;
+        const backdate = openingSpread ? (0.20 + ((i * 0.27) % 0.56)) : 0;
         if (tryDispatchRoute('river', forward ? pr.a : pr.b, forward ? pr.b : pr.a, poly, pr.route.len || 400, backdate)) needRiv--;
       }
     }
@@ -1113,7 +1139,7 @@ globalThis.BOARD_MODEL = (() => {
             const pair = roadPairs[i % roadPairs.length];
             const forward = (i % 2) === 0;
             const poly = forward ? pair.poly : [...pair.poly].reverse();
-            const backdate = force ? (0.15 + ((i * 0.17) % 0.55)) : 0;
+            const backdate = openingSpread ? (0.15 + ((i * 0.17) % 0.55)) : 0;
             if (tryDispatchRoute('cart', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, backdate, true)) {
               hasCoachGood = true;
               if (needCart > 0) needCart--;
@@ -1124,7 +1150,7 @@ globalThis.BOARD_MODEL = (() => {
           const pair = roadPairs[i % roadPairs.length];
           const forward = (i % 2) === 0;
           const poly = forward ? pair.poly : [...pair.poly].reverse();
-          const backdate = force ? (0.18 + ((i * 0.19) % 0.58)) : 0;
+          const backdate = openingSpread ? (0.18 + ((i * 0.19) % 0.58)) : 0;
           if (tryDispatchRoute('cart', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, backdate, false)) needCart--;
         }
       }

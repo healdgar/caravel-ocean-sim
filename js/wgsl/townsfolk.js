@@ -488,7 +488,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   // Drawn on the ground the land draws there (js/continuum-ground.js) where they walk the land; not on a pier's deck
   // nor in the sea. They are shot and fall where they truly are, above.
   let dry=position.y>-0.02;
-  if(dry&&!((w.flags&8u)!=0u&&position.y>1.75)){position.y+=continuumGroundLift(position.xz);}
+  let onPierDeck=(w.flags&8u)!=0u&&position.y>1.75&&position.y<3.25&&spot.halfWidth<1.40;
+  if(dry&&!onPierDeck){position.y+=continuumGroundLift(position.xz);}
   let centerY=select(${(BODY_HEIGHT_M * 0.5).toFixed(3)},1.40,isMounted&&fate.mode==ABOUT);
   let relative=position+vec3f(0.0,centerY,0.0)-F.camPos.xyz;
   // Those out of sight are kept only for the shadow they may cast into it, and are never drawn themselves.

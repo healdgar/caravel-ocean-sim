@@ -115,7 +115,7 @@ function loadReferenceHead(id) {
   const grid = triangleGrid(pos, upperCorners, 0.025);
 
   let crownY = -9, foreZ = -9, occZ = 9, earY = headPos[1] + 0.055, earZ = headPos[2] - 0.005;
-  let noseY = headPos[1] + 0.032, noseZ = -9, lipUpperY = 0, lipZ = -9, chinY = 9;
+  let noseY = headPos[1] + 0.032, noseZ = -9, lipUpperY = 0, lipZ = -9, chinY = 9, chinFrontY = 0, chinZ = -9;
   for (let v = 0; v < pos.length / 3; v++) {
     const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
     if (Math.abs(x) < 0.08 && y > headPos[1] && y > crownY) crownY = y;
@@ -129,13 +129,19 @@ function loadReferenceHead(id) {
     if (Math.abs(x) < 0.015 && y > crownY - 0.175 && y < crownY - 0.145 && z > noseZ) {
       noseZ = z; noseY = y;
     }
-    if (Math.abs(x) < 0.020 && y > crownY - 0.192 && y < crownY - 0.176 && z > lipZ) {
+    // Philtrum / cutaneous upper lip sits strictly below the nostrils (crownY - 0.168) and above the mouth slit (crownY - 0.184).
+    if (Math.abs(x) < 0.018 && y > crownY - 0.178 && y < crownY - 0.168 && z > lipZ) {
       lipZ = z; lipUpperY = y;
     }
-    if (Math.abs(x) < 0.025 && y > crownY - 0.255 && y < crownY - 0.215 && z > headPos[2] + 0.05) {
+    // Chin prominence (pogonion): max forward Z in the chin band below the lower lip.
+    if (Math.abs(x) < 0.020 && y > crownY - 0.236 && y < crownY - 0.208 && z > chinZ) {
+      chinZ = z; chinFrontY = y;
+    }
+    if (Math.abs(x) < 0.025 && y > crownY - 0.245 && y < crownY - 0.215 && z > headPos[2] + 0.05) {
       if (y < chinY) chinY = y;
     }
   }
+  const mouthY = lipUpperY - 0.0105;
   const midZ = 0.5 * (foreZ + occZ);
   earY = crownY - 0.128;
   earZ = midZ - 0.018;
@@ -211,7 +217,7 @@ function loadReferenceHead(id) {
     return cur;
   }
 
-  return { id, headPos, neckPos, crownY, foreZ, occZ, midZ, earY, earZ, noseY, noseZ, lipUpperY, lipZ, chinY, raycast, repel };
+  return { id, headPos, neckPos, crownY, foreZ, occZ, midZ, earY, earZ, noseY, noseZ, lipUpperY, lipZ, mouthY, chinY, chinFrontY, chinZ, raycast, repel };
 }
 
 // Appends one 3D V-arched multi-segment hair strand (grass/rope ribbon with central ridge and tapered sharp tip)
@@ -637,93 +643,128 @@ function buildScalpGroom(ref, style, seed) {
 function buildBeardGroom(ref, style, seed) {
   const rand = mulberry32(seed);
   const mesh = createEmptyGroomMesh();
-  const oralOrigin = [0, ref.lipUpperY - 0.010, ref.midZ + 0.030];
+  const oralOrigin = [0, ref.lipUpperY + 0.001, ref.midZ + 0.024];
 
   const moustacheSkin = () => [[JOINT_HEAD, JOINT_UPPER_LIP, 0, 0], [0.68, 0.32, 0, 0], JOINT_HEAD];
   const beardSkin = (p, u) => {
-    const neckShare = style === 'sea-beard' && u > 0.55 ? Math.min(0.32, (u - 0.55) * 0.65) : 0;
+    const neckShare = style === 'sea-beard' && u > 0.65 ? Math.min(0.22, (u - 0.65) * 0.55) : 0;
     return [[JOINT_JAW, JOINT_HEAD, JOINT_NECK, 0], [0.72 - neckShare * 0.5, 0.28 - neckShare * 0.5, neckShare, 0], JOINT_JAW];
   };
 
-  // 1. Moustache locks (shared across moustache, iberian-barba, and sea-beard)
-  const mCount = style === 'moustache' ? 210 : 175;
+  // 1. Moustache locks: rooted squarely on the cutaneous upper lip / philtrum (strictly ABOVE the mouth slit and BELOW
+  //    the nostrils), sweeping outward laterally toward the mouth corners so the lower lip & mouth line stay crisp.
+  const mCount = style === 'moustache' ? 230 : 190;
   for (let i = 0; i < mCount; i++) {
-    const uX = ((i + 0.5) / mCount) * 2 - 1 + (rand() - 0.5) * 0.08;
-    const x = uX * 0.029;
-    // Keep philtrum notch slightly softer and strictly above mouth opening & below nostrils.
-    const y = ref.lipUpperY + 0.001 + (rand() - 0.35) * 0.0075 - (Math.abs(x) / 0.029) * 0.0045;
-    const dirRay = norm3([x, y - oralOrigin[1], ref.lipZ + 0.03 - oralOrigin[2]]);
+    const uX = ((i + 0.5) / mCount) * 2 - 1 + (rand() - 0.5) * 0.07;
+    const absU = Math.abs(uX);
+    const x = uX * 0.028;
+    // Arch gently from mid-philtrum down toward the outer mouth corners, staying strictly above the mouth slit!
+    const yTarget = ref.lipUpperY + 0.002 + (rand() - 0.45) * 0.0065 - (absU ** 1.4) * 0.0065;
+    const zSpan = Math.max(0.04, ref.lipZ - oralOrigin[2]);
+    const dirRay = norm3([x, yTarget - oralOrigin[1], zSpan]);
     const hit = ref.raycast(oralOrigin, dirRay, 0.02, 0.16);
     if (!hit) continue;
+    // Hard anatomical guard: never root below the mouth slit or on the underside of the nose tip!
+    const minHitY = ref.mouthY + 0.0030 - absU * 0.0035;
+    if (hit.point[1] < minHitY || hit.point[1] > ref.noseY - 0.009 || hit.point[2] < ref.lipZ - 0.028) continue;
     const sgn = x >= 0 ? 1 : -1;
     const segs = 5;
-    const len = (style === 'sea-beard' ? 0.024 : 0.018) + Math.abs(uX) * 0.014 + rand() * 0.007;
-    const baseW = 0.0019 + rand() * 0.0007;
-    const root = add3(hit.point, hit.normal, -0.0016);
+    const len = (style === 'sea-beard' ? 0.019 : 0.015) + absU * 0.011 + rand() * 0.005;
+    const baseW = 0.0018 + rand() * 0.0006;
+    const root = add3(hit.point, hit.normal, -0.0015);
     const pts = [root], widths = [baseW * 0.85], arches = [baseW * 0.38];
     let cur = [...hit.point];
-    let dir = norm3([sgn * (0.28 + Math.abs(uX) * 0.62), -0.68, 0.38]);
+    // Sweep outward laterally along the upper lip rather than straight down over the lower lip!
+    let dir = norm3([sgn * (0.64 + absU * 0.42), -0.34 - absU * 0.24, 0.28 - absU * 0.32]);
     for (let k = 1; k <= segs; k++) {
       const u = k / segs;
-      dir = norm3([dir[0] + sgn * 0.18 * u, dir[1] - 0.22 + (style === 'iberian-barba' && u > 0.6 ? 0.18 : 0), dir[2] - 0.12]);
+      const tipLift = style === 'iberian-barba' && u > 0.55 ? 0.22 : (style === 'moustache' && u > 0.60 ? 0.16 : 0);
+      dir = norm3([dir[0] + sgn * 0.24 * u, dir[1] - 0.16 + tipLift, dir[2] - 0.16]);
       let next = add3(cur, dir, len / segs);
-      next = ref.repel(next, 0.0018);
+      next = ref.repel(next, 0.0016);
       cur = next;
       pts.push(cur);
       const w = baseW * Math.max(0.14, 1 - (u ** 1.35) * 0.86);
       widths.push(w); arches.push(w * 0.4);
     }
-    appendStrand(mesh, pts, widths, arches, moustacheSkin, style === 'sea-beard' ? 0.35 : 0.20, rand(), 0.35 + rand() * 0.55, rand(), hit.normal);
+    appendStrand(mesh, pts, widths, arches, moustacheSkin, style === 'sea-beard' ? 0.28 : 0.16, rand(), 0.35 + rand() * 0.55, rand(), hit.normal);
   }
 
   if (style === 'moustache') return mesh;
 
-  // 2. Chin, soul-patch, and jawline/cheek beard strands
-  const bCount = style === 'sea-beard' ? 460 : 340;
-  const jawOrigin = [0, ref.chinY + 0.032, ref.midZ + 0.018];
-  for (let i = 0; i < bCount; i++) {
-    const uA = ((i + 0.5) / bCount) * 2 - 1 + (rand() - 0.5) * 0.06;
-    const maxAngle = style === 'sea-beard' ? 1.28 : 0.98;
-    const theta = uA * maxAngle;
-    const absT = Math.abs(theta);
-    const cheekH = style === 'sea-beard' ? 0.046 : 0.028;
-    const yTarget = ref.chinY + 0.004 + rand() * (0.026 + absT * cheekH);
-    // Keep lower lip vermilion & mouth slit clean!
-    if (Math.abs(theta) < 0.36 && yTarget > ref.lipUpperY - 0.020) {
-      if (Math.abs(theta) > 0.14 || yTarget > ref.lipUpperY - 0.014) continue;
-    }
-    const dirRay = norm3([Math.sin(theta) * 0.92, (yTarget - jawOrigin[1]) * 1.1 - 0.12, Math.cos(theta) * 0.95]);
-    const hit = ref.raycast(jawOrigin, dirRay, 0.02, 0.17);
-    if (!hit) continue;
-    if (hit.point[1] > ref.earY + 0.008) continue;
-
+  // 2. Chin, soul-patch, and jawline/cheek beard strands — rooted squarely on the FRONT of the chin and jawline
+  //    (never on the throat behind the chin!).
+  const jawOrigin = [0, ref.chinFrontY + 0.010, ref.midZ + 0.012];
+  const emitBeardStrand = (hit, absT, isSoulPatch = false) => {
     const phase = rand();
     const isChinCenter = absT < 0.42;
-    const segs = style === 'sea-beard' ? 7 : 6;
-    const len = style === 'sea-beard'
-      ? (isChinCenter ? 0.105 + rand() * 0.055 : 0.065 + rand() * 0.045)
-      : (isChinCenter ? 0.048 + rand() * 0.024 : 0.024 + rand() * 0.016);
-    const baseW = (style === 'sea-beard' ? 0.0042 : 0.0032) + rand() * 0.0012;
-    const root = add3(hit.point, hit.normal, -0.0018);
+    const segs = isSoulPatch ? 4 : (style === 'sea-beard' ? 7 : 6);
+    const len = isSoulPatch
+      ? (0.014 + rand() * 0.008)
+      : style === 'sea-beard'
+        ? (isChinCenter ? 0.088 + rand() * 0.044 : 0.056 + rand() * 0.036)
+        : (isChinCenter ? 0.040 + rand() * 0.020 : 0.020 + rand() * 0.014);
+    const baseW = (isSoulPatch ? 0.0022 : (style === 'sea-beard' ? 0.0040 : 0.0030)) + rand() * 0.0010;
+    const root = add3(hit.point, hit.normal, -0.0016);
     const pts = [root], widths = [baseW * 0.92], arches = [baseW * 0.38];
     let cur = [...hit.point];
-    let dir = norm3(add3(hit.normal, [0, -0.88, 0.20], 1.1));
+    // Grow forward-down along the natural chin silhouette instead of collapsing back toward the neck.
+    let dir = norm3(add3(hit.normal, [0, -0.82, 0.28], 1.05));
     for (let k = 1; k <= segs; k++) {
       const u = k / segs;
-      // Iberian barba tapers gently inward toward a classic 1550 pointed chin silhouette; sea-beard billows full and wavy.
-      const pointPull = style === 'iberian-barba' ? -cur[0] * 2.2 * u : -cur[0] * 0.35 * u;
-      const waveX = Math.sin(u * 8.5 + phase * 6.283) * (style === 'sea-beard' ? 0.0042 : 0.0018) * u;
-      const waveZ = Math.cos(u * 7.2 + phase * 6.283) * (style === 'sea-beard' ? 0.0035 : 0.0014) * u;
-      dir = norm3([dir[0] * 0.78 + pointPull, dir[1] - 0.45, dir[2] * 0.75 + 0.06]);
+      const pointPull = style === 'iberian-barba' ? -cur[0] * 1.9 * u : -cur[0] * 0.30 * u;
+      const waveX = Math.sin(u * 8.5 + phase * 6.283) * (style === 'sea-beard' ? 0.0038 : 0.0016) * u;
+      const waveZ = Math.cos(u * 7.2 + phase * 6.283) * (style === 'sea-beard' ? 0.0030 : 0.0012) * u;
+      dir = norm3([dir[0] * 0.78 + pointPull, dir[1] - 0.44, dir[2] * 0.78 + 0.08]);
       let next = add3(cur, dir, len / segs);
       next[0] += waveX; next[2] += waveZ;
-      next = ref.repel(next, 0.0022);
+      next = ref.repel(next, 0.0020);
       cur = next;
       pts.push(cur);
       const w = baseW * Math.max(0.14, 1 - (u ** 1.35) * 0.86);
       widths.push(w); arches.push(w * 0.4);
     }
-    appendStrand(mesh, pts, widths, arches, beardSkin, style === 'sea-beard' ? 0.78 : 0.40, phase, 0.30 + rand() * 0.60, rand(), hit.normal);
+    appendStrand(mesh, pts, widths, arches, beardSkin, isSoulPatch ? 0.12 : (style === 'sea-beard' ? 0.68 : 0.34), phase, 0.30 + rand() * 0.60, rand(), hit.normal);
+  };
+
+  // 2a. Dense front-chin & soul-patch coverage directly on the pogonion & chin curve.
+  const chinCount = style === 'sea-beard' ? 160 : 140;
+  for (let i = 0; i < chinCount; i++) {
+    const uX = ((i + 0.5) / chinCount) * 2 - 1 + (rand() - 0.5) * 0.08;
+    const x = uX * 0.032;
+    const isSoul = Math.abs(x) < 0.011 && rand() < 0.24;
+    const yTarget = isSoul
+      ? (ref.mouthY - 0.015 + rand() * 0.007)
+      : (ref.chinY + 0.006 + rand() * (ref.mouthY - 0.020 - (ref.chinY + 0.006)));
+    const zSpan = Math.max(0.05, ref.chinZ - jawOrigin[2]);
+    const dirRay = norm3([x, yTarget - jawOrigin[1], zSpan]);
+    const hit = ref.raycast(jawOrigin, dirRay, 0.02, 0.16);
+    if (!hit) continue;
+    // Strict front-chin guard: reject throat/neck hits behind the chin!
+    if (hit.point[1] < ref.chinY + 0.001 || hit.point[2] < ref.chinZ - 0.026) continue;
+    emitBeardStrand(hit, Math.abs(uX) * 0.35, isSoul);
+  }
+
+  // 2b. Jawline and lower-cheek beard strands sweeping from chin around both mandibles toward the sideburns.
+  const bCount = style === 'sea-beard' ? 360 : 250;
+  for (let i = 0; i < bCount; i++) {
+    const uA = ((i + 0.5) / bCount) * 2 - 1 + (rand() - 0.5) * 0.06;
+    const maxAngle = style === 'sea-beard' ? 1.24 : 0.94;
+    const theta = uA * maxAngle;
+    const absT = Math.abs(theta);
+    const cheekH = style === 'sea-beard' ? 0.050 : 0.030;
+    const yTarget = ref.chinY + 0.008 + rand() * (0.028 + absT * cheekH);
+    // Keep lower lip vermilion & mouth slit clean!
+    if (absT < 0.38 && yTarget > ref.mouthY - 0.018) continue;
+    const radEst = 0.080;
+    const dirRay = norm3([Math.sin(theta) * radEst, yTarget - jawOrigin[1], Math.cos(theta) * radEst]);
+    const hit = ref.raycast(jawOrigin, dirRay, 0.02, 0.16);
+    if (!hit) continue;
+    if (hit.point[1] > ref.earY + 0.004 || hit.point[1] < ref.chinY + 0.001) continue;
+    // Reject throat hits behind the jaw curve!
+    const minJawZ = ref.chinZ - 0.024 - Math.abs(hit.point[0]) * 1.15;
+    if (hit.point[2] < minJawZ) continue;
+    emitBeardStrand(hit, absT, false);
   }
   return mesh;
 }

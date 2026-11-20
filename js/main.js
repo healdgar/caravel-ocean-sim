@@ -5942,7 +5942,8 @@ async function main() {
     neuralPbr.setStrength(P.neuralPbr);
     mainPass.timestampWrites=profiler.writes('Scene');
     mainPass.colorAttachments[0].storeOp = 'discard';
-    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||cameraMediumBand||(useNeuralLight&&neuralPass.wantsDepth) ? 'store' : 'discard';
+    const shaftsActive = !cameraMediumBand && P.clouds > 0.001 && frameF[33] > 0.025 && frameF[115] < 0.5;
+    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||cameraMediumBand||shaftsActive||(useNeuralLight&&neuralPass.wantsDepth) ? 'store' : 'discard';
     // One pass for the whole scene keeps its multisampled attachments in tile memory. Whole hulls
     // come first: they neither discard nor blend, so what they hide is never shaded, sea included.
     if(drawProw){
@@ -6018,7 +6019,7 @@ async function main() {
     }
 
     volumetricShafts?.encode(enc,{
-      active:!cameraMediumBand&&P.clouds>0.001&&frameF[33]>0.025&&frameF[115]<0.5,
+      active:shaftsActive,
       width:W,height:H,depthView:mainPass.depthStencilAttachment.view,hdrView,
       timestampWrites:profiler.writes('Sun shafts'),
     });

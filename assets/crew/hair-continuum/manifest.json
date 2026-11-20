@@ -3,14 +3,14 @@
  "version": 3,
  "generator": "scripts/prepare-hair-continuum.mjs",
  "atlas": {
-  "words": 5405712,
+  "words": 5437269,
   "headerWords": 32,
-  "bytes": 21622848,
-  "sha256": "211ccb3ff6464b7684557df0f6bc7e9f2b0c99367eb5940c73025d35fac1590c",
+  "bytes": 21749076,
+  "sha256": "f15acdbeb6508ee9f8e9ab77cb50271c8cc04b37ef377d9e51288cd9f99a6e64",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 10364976,
-   "sha256": "eadae9a6f550d3c21fdba922f64bd2e3fc75bd89b25b31bf5b400eb25351d82f"
+   "bytes": 10421013,
+   "sha256": "234f4d200c44d43058dd12ad621e6a812b671ea16f969b4221459cc6159f9860"
   }
  },
  "types": [
@@ -487,14 +487,14 @@
    "id": "moustache",
    "sex": "male",
    "slot": "beard",
-   "vertices": 3360,
-   "triangles": 3780,
+   "vertices": 3504,
+   "triangles": 3942,
    "clusters": {
-    "count": 76,
+    "count": 79,
     "levels": 7,
     "roots": 1,
-    "finestTriangles": 3780,
-    "rootError": 0.003
+    "finestTriangles": 3942,
+    "rootError": 0.0027
    },
    "chain": {
     "cell": 0,
@@ -513,21 +513,21 @@
     "simplifyError": 0,
     "steps": 69,
     "coreTriangles": 6,
-    "depth": 4,
+    "depth": 5,
     "errorRange": [
      0,
      0.0093
     ],
     "inflateMax": 0.006,
-    "rootTriangles": 29,
-    "farFirst": 58,
-    "farFirstTriangles": 28,
+    "rootTriangles": 30,
+    "farFirst": 57,
+    "farFirstTriangles": 30,
     "handoffError": 0.0049
    },
    "splat": {
     "centre": [
      0,
-     1.5849,
+     1.5956,
      0.093
     ],
     "rx": 0.05,
@@ -539,14 +539,14 @@
    "id": "iberian-barba",
    "sex": "male",
    "slot": "beard",
-   "vertices": 9260,
-   "triangles": 10630,
+   "vertices": 10258,
+   "triangles": 11764,
    "clusters": {
-    "count": 221,
+    "count": 245,
     "levels": 12,
     "roots": 1,
-    "finestTriangles": 10630,
-    "rootError": 0.0053
+    "finestTriangles": 11764,
+    "rootError": 0.0054
    },
    "chain": {
     "cell": 0,
@@ -579,8 +579,8 @@
    "splat": {
     "centre": [
      0,
-     1.5214,
-     0.0906
+     1.5289,
+     0.0907
     ],
     "rx": 0.05,
     "ry": 0.05
@@ -591,14 +591,14 @@
    "id": "sea-beard",
    "sex": "male",
    "slot": "beard",
-   "vertices": 12920,
-   "triangles": 15110,
+   "vertices": 13996,
+   "triangles": 16358,
    "clusters": {
-    "count": 296,
+    "count": 322,
     "levels": 12,
     "roots": 1,
-    "finestTriangles": 15110,
-    "rootError": 0.0067
+    "finestTriangles": 16358,
+    "rootError": 0.0068
    },
    "chain": {
     "cell": 0,
@@ -623,7 +623,7 @@
      0.0361
     ],
     "inflateMax": 0.0144,
-    "rootTriangles": 2,
+    "rootTriangles": 3,
     "farFirst": 69,
     "farFirstTriangles": 6,
     "handoffError": 0.0361
@@ -631,7 +631,7 @@
    "splat": {
     "centre": [
      0,
-     1.4974,
+     1.5049,
      0.0965
     ],
     "rx": 0.0516,

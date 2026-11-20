@@ -52,7 +52,11 @@ export const VESSEL_DETAIL_STATIONS = VESSEL_DETAIL_COMMON + /* wgsl */ `
   let damage=vesselDetailPosed[v*2u+1u].w;
   let state=vesselDetailState;
   if(role==2u){
-    if(state.anchor.w<0.5){return;}
+    if(state.anchor.w<0.5){
+      vesselDetailPosed[v*2u]=vec4f(rest,0.0);
+      vesselDetailPosed[v*2u+1u]=vec4f(restNormal,damage);
+      return;
+    }
     let q=(rest-vesselDetailModel[4u].xyz)*s;
     let c=cos(state.anchorTurn.x);let si=sin(state.anchorTurn.x);
     let n=normalize(restNormal/s);
@@ -213,7 +217,7 @@ const VESSEL_DETAIL_QUAD=array<u32,6>(0u,1u,2u,0u,2u,3u);
       let p=mix(start,end,corner.x)+side*(corner.y*shape.x*0.5)+vec3f(0.0,corner.z*shape.y,0.0);
       let normals=array<vec3f,6>(vec3f(0.0,1.0,0.0),vec3f(0.0,-1.0,0.0),-side,side,-dir,dir);
       vesselDetailWrite(j,vesselDetailDesign(p),vesselDetailDesignNormal(normals[min(face,5u)]),shape.z,vec2f(corner.y*0.5+0.5,corner.x*length(d)),ship.rider,
-        out&&vessel&&progress>0.05&&length(d)>1e-3);
+        out&&vessel&&progress>0.05&&length(d)>1e-3&&length(d)<22.0);
       return;
     }
     let start=vesselDetailWorld(ship.at);
@@ -231,7 +235,7 @@ const VESSEL_DETAIL_QUAD=array<u32,6>(0u,1u,2u,0u,2u,3u);
     let pa=start+(end-start)*cat.x-vec3f(0.0,4.0*sag*cat.x*(1.0-cat.x),0.0);
     let pb=start+(end-start)*cat.y-vec3f(0.0,4.0*sag*cat.y*(1.0-cat.y),0.0);
     let ring=vesselDetailRing(pa,pb,lv.y,lv.z,shape.x,shape.y);
-    vesselDetailWrite(j,vesselDetailDesign(ring.p),vesselDetailDesignNormal(ring.n),shape.z,vesselDetailRopeUV(length(end-start)*mix(cat.x,cat.y,lv.z)),ship.rider,out);
+    vesselDetailWrite(j,vesselDetailDesign(ring.p),vesselDetailDesignNormal(ring.n),shape.z,vesselDetailRopeUV(length(end-start)*mix(cat.x,cat.y,lv.z)),ship.rider,out&&length(far-start)<48.0);
     return;
   }
   // Her anchor's rode, from the fairlead to the iron's eye: a bounded sag that straightens as it takes the strain and
