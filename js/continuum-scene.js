@@ -10,6 +10,7 @@ import { requestOnce } from './gpu-program-cache.js';
 import { continuumPixelError, packContinuumProfile } from './continuum-core.js';
 import { continuumProfile } from './continuum-profiles.js';
 import { continuumGroundView } from './continuum-ground.js';
+import { continuumHiZView, continuumHiZUniform, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from './continuum-hiz.js';
 import { CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, writeContinuumRecord, continuumAtlasTypes } from './continuum-format.js';
 import {
   CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_BATCH, CONTINUUM_STATE_ENTRIES,
@@ -66,11 +67,13 @@ export async function requestContinuumPrograms({ device, shader, shadowFormat, p
       requestContinuumShadow({ device, shader, shadowFormat, paging }),
     ]);
     const C = GPUShaderStage.COMPUTE, entry = (binding, buffer) => ({ binding, visibility: C, buffer: { type: buffer } });
-    // One layout for the reset and the cut, so one bind group serves both; the cut reads the land's ground field.
+    // One layout for the reset and the cut, so one bind group serves both; the cut reads the land's ground field and Hi-Z pyramid.
     const computeLayout = device.createBindGroupLayout({
       label: 'continuum cut', entries: [entry(0, 'uniform'), entry(1, 'uniform'), entry(2, 'read-only-storage'), entry(3, 'read-only-storage'), entry(4, 'storage'), entry(5, 'uniform'), entry(6, 'read-only-storage'), entry(7, 'storage'),
         { binding: CONTINUUM_GROUND_BINDING, visibility: C, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
-        ...Array.from({ length: paging.pages - 1 }, (_, p) => entry(CONTINUUM_SELECT_PAGES_AT + p, 'read-only-storage'))],
+        ...Array.from({ length: paging.pages - 1 }, (_, p) => entry(CONTINUUM_SELECT_PAGES_AT + p, 'read-only-storage')),
+        { binding: CONTINUUM_HIZ_TEXTURE_BINDING, visibility: C, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+        entry(CONTINUUM_HIZ_UNIFORM_BINDING, 'uniform')],
     });
     const layout = device.createPipelineLayout({ label: 'continuum cut', bindGroupLayouts: [computeLayout] });
     const [reset, select, batches] = await Promise.all([
@@ -249,7 +252,9 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
   const cut = device.createBindGroup({
     layout: P.computeLayout,
     entries: [...[[0, frame], [1, shadowUniform], ...dataAt(2, CONTINUUM_SELECT_PAGES_AT), [7, draws]].map(([binding, buffer]) => ({ binding, resource: { buffer } })),
-      { binding: CONTINUUM_GROUND_BINDING, resource: continuumGroundView(device) }],
+      { binding: CONTINUUM_GROUND_BINDING, resource: continuumGroundView(device) },
+      { binding: CONTINUUM_HIZ_TEXTURE_BINDING, resource: continuumHiZView(device) },
+      { binding: CONTINUUM_HIZ_UNIFORM_BINDING, resource: { buffer: continuumHiZUniform(device) } }],
   });
   const batching = batches ? new WeakMap() : null;
   const batchGroup = (stood) => {

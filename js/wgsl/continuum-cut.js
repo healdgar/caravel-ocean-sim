@@ -33,6 +33,7 @@ import {
 } from '../continuum-format.js';
 import { continuumKindsWGSL } from './continuum-kinds.js';
 import { CONTINUUM_GROUNDED, continuumGroundWGSL } from '../continuum-ground.js';
+import { CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING, continuumHiZWGSL } from '../continuum-hiz.js';
 
 // The vertices of one entry of each list.
 export const CONTINUUM_ENTRY_VERTICES = Object.freeze(CONTINUUM_ENTRY_TRIANGLES.map((n) => 3 * n));
@@ -304,7 +305,7 @@ export function continuumSelectWGSL(paging = CONTINUUM_SINGLE_PAGE) {
   const important = CONTINUUM_IMPORTANT_FLAG | CONTINUUM_STRUCK | CONTINUUM_BROKEN | CONTINUUM_DAMAGED | CONTINUUM_SHATTERED;
   const B = CONTINUUM_BATCH, L = CONTINUUM_LEVELS, W = CONTINUUM_WORKGROUP;
   return FRAME_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + continuumDataWGSL(0, 2, 'read_write', paging, CONTINUUM_SELECT_PAGES_AT) + continuumCommonWGSL(paging) + continuumKindsWGSL()
-    + continuumGroundWGSL(0, CONTINUUM_GROUND_BINDING) + /* wgsl */`
+    + continuumGroundWGSL(0, CONTINUUM_GROUND_BINDING) + continuumHiZWGSL(0, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING) + /* wgsl */`
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<uniform> SH:ShadowFrame;
 @group(0) @binding(7) var<storage,read_write> continuumDraws:array<atomic<u32>>;
@@ -396,8 +397,12 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       let ownPx=continuumPixels(ownError,cut.x,max(length(own)-lod.w*cut.z,CONTINUUM_NEAREST));
       if(ownPx<=cut.y*continuumLevel(CONTINUUM_LEVELS-1u)){
         let cull=continuumSphere(record,part,${atlasVec4('at+8u')});
-        let cullAt=continuumPlace(record,cull.xyz)+shift;
-        if(!continuumOutsideFast(select(earthCurve(cullAt,F.camPos.y),cullAt,continuumFlagged(record,CONTINUUM_SEA)),cull.w*cut.z)){
+        let cullWorld=continuumPlace(record,cull.xyz)+vec3f(0.0,continuumSlotLift[slot],0.0);
+        let cullAt=cullWorld+continuumShift()-F.camPos.xyz;
+        let sea=continuumFlagged(record,CONTINUUM_SEA);
+        let cullR=cull.w*cut.z;
+        if(!continuumOutsideFast(select(earthCurve(cullAt,F.camPos.y),cullAt,sea),cullR)
+          &&(continuumFlagged(record,CONTINUUM_EXACT)||!continuumHiZOccluded(cullWorld,cullR,sea))){
           for(var j=0u;j<CONTINUUM_LEVELS;j++){
             let allowedJ=cut.y*continuumLevel(j);
             if(parentPx>allowedJ&&ownPx<=allowedJ){mask|=1u<<j;}
@@ -504,7 +509,9 @@ fn continuumTry(slot:u32,i:u32)->u32 {
           }
           // Afloat, the earth's curve does not bend it: the sea's own surface is drawn flat about the eye.
           let sea=continuumFlagged(record,CONTINUUM_SEA);
-          if(!continuumOutside(select(earthCurve(relative,F.camPos.y),relative,sea),reach)){
+          let viewVisible=!continuumOutside(select(earthCurve(relative,F.camPos.y),relative,sea),reach)
+            &&(isImportant||continuumFlagged(record,CONTINUUM_EXACT)||away<=reach*1.4+4.0||!continuumHiZOccluded(world,reach,sea));
+          if(viewVisible){
             // Smooth outer-range hash dissolve when maxDistance > 0 (never a hard pop).
             let seed=record.tag.z*0x9e3779b9u+0x85ebca6bu;
             let rangeKept=isImportant||maxDist<=0.0||away<=maxDist*0.80||continuumProfileThin(999.0,away,continuumView.limits,seed)>0.0;

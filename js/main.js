@@ -72,6 +72,7 @@ import { createAdaptiveResolution, createAdaptivePolygons, POLYGON_COMFORT } fro
 import { continuumPixelError, setContinuumPixelError, aimContinuumPixelError, stepContinuumPixelError } from './continuum-core.js';
 import { continuumProfilesSnapshot, setContinuumProfile, resetContinuumProfiles } from './continuum-profiles.js';
 import { createContinuumCensus } from './continuum-census.js';
+import { createContinuumHiZ } from './continuum-hiz.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower, commandFriendlyFleet, stepVesselCombatAI } from './follower.js';
 import {readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,broadsideFormation,fleetModelCode,fleetViewBounds,createFleetWakePool,validateFleetDevice,normalizeVesselFaction,MAX_FOLLOWERS} from './fleet.js';
@@ -1125,6 +1126,13 @@ async function main() {
   const continuumCensus=qs.get('census')==='0'?null:createContinuumCensus(device);
   let censusSeen=null;
   window.oceanContinuumCensus=continuumCensus;
+  let continuumHiZ=null;
+  const hizDesired=qs.get('hiz')!=='0';
+  createContinuumHiZ({device,shader,samples:MSAA}).then(h=>{
+    h.setEnabled(hizDesired);
+    continuumHiZ=h;
+    window.oceanHiZ=h;
+  }).catch(err=>console.error('Continuum Hi-Z init failed:',err));
   let profileSummary='Waiting for frame timing…';
   const performancePanel=document.createElement('section');performancePanel.id='performance-panel';
   performancePanel.hidden=qs.get('profile')!=='1'||matchMedia('(max-width:900px), (pointer:coarse)').matches;
@@ -1223,6 +1231,7 @@ async function main() {
   const frameF = new Float32Array(CELESTIAL_FRAME_FLOATS);
   const atmoF = new Float32Array(4);
   const proj = new Float32Array(16), view = new Float32Array(16), viewProj = new Float32Array(16);
+  const hiZCam = { pos: [0, 0, 0], right: [1, 0, 0], up: [0, 1, 0], fwd: [0, 0, -1], projX: 1, projY: 1, near: 0.05 };
   const LOOP = SIM_CLOCK_LOOP_S;  // s, spectrum time loop (frequencies quantised to it)
   let needSpectrum = true, envFull = true;
   // Chart Course voyage (covert time warp); created once the dock/UI exists.
@@ -2335,6 +2344,11 @@ async function main() {
     f[20] = rx * tanX; f[21] = ry * tanX; f[22] = rz * tanX;
     f[24] = ux * tanY; f[25] = uy * tanY; f[26] = uz * tanY;
     f[28] = fx; f[29] = fy; f[30] = fz;
+    hiZCam.pos[0] = cam.x; hiZCam.pos[1] = cam.y; hiZCam.pos[2] = cam.z;
+    hiZCam.right[0] = rx; hiZCam.right[1] = ry; hiZCam.right[2] = rz;
+    hiZCam.up[0] = ux; hiZCam.up[1] = uy; hiZCam.up[2] = uz;
+    hiZCam.fwd[0] = fx; hiZCam.fwd[1] = fy; hiZCam.fwd[2] = fz;
+    hiZCam.projX = proj[0]; hiZCam.projY = proj[5]; hiZCam.near = near;
     const se = P.sunElev * D2R, sa = P.sunAzim * D2R;
     f[32] = Math.sin(sa) * Math.cos(se); f[33] = Math.sin(se); f[34] = -Math.cos(sa) * Math.cos(se); f[35] = 14.0;
     if(astronomy.mode==='astronomy')f.set(astronomy.state.sun.direction,32);
@@ -6011,6 +6025,13 @@ async function main() {
     if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(rp);
     dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);shallowWater.drawSpray(rp);weatherRenderer.draw(rp);
     rp.end();
+
+    continuumHiZ?.encode(enc,{
+      depthView:mainPass.depthStencilAttachment.view,width:W,height:H,
+      camPos:hiZCam.pos,camRight:hiZCam.right,camUp:hiZCam.up,camFwd:hiZCam.fwd,
+      projX:hiZCam.projX,projY:hiZCam.projY,near:hiZCam.near,
+      timestampWrites:profiler.writes('Hi-Z pyramid'),
+    });
 
     if(gunVolumes){
       gunEffects.resolveDepth(enc,mainPass.depthStencilAttachment.view,W,H);

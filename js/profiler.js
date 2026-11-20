@@ -10,7 +10,7 @@ export const GPU_PASS_NAMES = [
   ...Array.from({length:8},(_,i)=>['escort-'+(i+1)+' Solid shadows','escort-'+(i+1)+' Canvas shadows']).flat(),
   'Land shadows', 'Land canvas shadows', 'Land canvas shadow pack',
   'Submerged geometry', 'Above-water capture', 'Water reflection filter',
-  'Scene', 'Cannon smoke', 'Sun shafts', 'Underwater medium', 'Neural light pass',
+  'Scene', 'Hi-Z pyramid', 'Cannon smoke', 'Sun shafts', 'Underwater medium', 'Neural light pass',
   ...Array.from({length:8},(_,i)=>`Bloom down ${i}`),
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',
 ];
@@ -30,6 +30,7 @@ export const PRIMARY_GPU_PASS_NAMES = Object.freeze([
   'Above-water capture',
   'Water reflection filter',
   'Scene',
+  'Hi-Z pyramid',
   'Cannon smoke',
   'Sun shafts',
   'Underwater medium',
