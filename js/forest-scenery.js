@@ -754,7 +754,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     // The view's groups: the land's scene (its frame, sky, light and shadow map), the clouds, and the pack's maps.
     const sceneIds=[0,1,2,3,4,5,6,19,20,21,24];
     const sceneGroup=device.createBindGroup({label:'forest scene',layout:view.pipeline.getBindGroupLayout(0),entries:resources.filter(([i])=>sceneIds.includes(i)).map(([binding,resource])=>({binding,resource}))});
-    const cloudGroup=clouds.bindVolume(view.pipeline);
+    const cloudGroup=clouds.bindVolume(view.pipeline,'shadow');
     const surfaceEntries=[];
     for(let family=0;family<4;family++){
       const texture=surfaces.families[family]??surfaces.families[0];

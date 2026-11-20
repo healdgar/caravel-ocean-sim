@@ -772,7 +772,7 @@ export async function createMeadowGrass({
   // the land's resources or the craters change.
   let activeResources = resources;
   let standGroups = null, viewGroup = null, under = null;
-  const cloudGroup = clouds.bindVolume(view.pipeline);
+  const cloudGroup = clouds.bindVolume(view.pipeline, 'shadow');
   function buildGroups() {
     const land = new Map(activeResources);
     const craterLookupView = (boundCraters?.lookupTexture ?? fallbackCraterLookup).createView();
@@ -793,7 +793,7 @@ export async function createMeadowGrass({
     ]);
     const entries = MEADOW_VIEW_BINDINGS.map((binding) => ({ binding, resource: own.get(binding) ?? land.get(binding) }));
     viewGroup = device.createBindGroup({ label: 'meadow view', layout: view.pipeline.getBindGroupLayout(0), entries });
-    under = continuumCaptureDraw(submerged, entries, { bind: (pipeline) => clouds.bindVolume(pipeline) });
+    under = continuumCaptureDraw(submerged, entries, { bind: (pipeline) => clouds.bindVolume(pipeline, 'shadow') });
   }
 
   let curRegion = region;

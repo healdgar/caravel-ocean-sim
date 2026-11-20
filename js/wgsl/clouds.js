@@ -31,16 +31,21 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
 }
 `;
 
+export const CLOUD_SHADOW_SIZE = 256;
+
 // Periodic 2D sun-space cloud shadow transmittance map (baked only on lightDirty -> 0 ms steady state).
-// Used by CLOUD_CAMERA_RAYS for single-tap volumetric crepuscular sun shafts.
+// Writes both the 2D texture (for terrain, city, forest, meadow, herds, inland water & shafts)
+// and a 256x256 f32 storage grid (for oceanPipe, staying strictly <= 16 sampled textures).
 export const CLOUD_SHADOW = CLOUD_BAKE_UNIFORM + /* wgsl */ `
 @group(0) @binding(1) var field:texture_3d<f32>;
 @group(0) @binding(2) var fieldSampler:sampler;
 @group(0) @binding(3) var dst:texture_storage_2d<rgba16float,write>;
+@group(0) @binding(4) var<storage,read_write> dstGrid:array<f32>;
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u) {
   let size=textureDimensions(dst);if(any(id.xy>=size)){return;}
-  if(BAKE.shape.x<=0.001){textureStore(dst,vec2i(id.xy),vec4f(1.0,0.0,0.0,1.0));return;}
+  let flat=id.y*size.x+id.x;
+  if(BAKE.shape.x<=0.001){textureStore(dst,vec2i(id.xy),vec4f(1.0,0.0,0.0,1.0));dstGrid[flat]=1.0;return;}
   let uv=(vec2f(id.xy)+0.5)/vec2f(size);
   let sun=normalize(BAKE.sun.xyz);
   let elev=max(sun.y,0.08);
@@ -57,7 +62,9 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
     tau+=textureSampleLevel(field,fieldSampler,suv,0.0).r*step*BAKE.shape.w*4.0;
     if(tau>14.0){break;}
   }
-  textureStore(dst,vec2i(id.xy),vec4f(exp(-tau),min(tau,14.0),0.0,1.0));
+  let tr=exp(-tau);
+  textureStore(dst,vec2i(id.xy),vec4f(tr,min(tau,14.0),0.0,1.0));
+  dstGrid[flat]=tr;
 }
 `;
 
@@ -121,7 +128,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
 }
 `;
 
-export const CLOUD_BINDINGS = /* wgsl */ `
+const CLOUD_FRAME_STRUCT = /* wgsl */ `
 struct CloudFrame {
   previousView:mat4x4f,
   previousCamera:vec4f,
@@ -129,10 +136,63 @@ struct CloudFrame {
   shape:vec4f, // base, thickness, density, valid history
   screen:vec4f, // ray target width/height, frame number, active
 };
+`;
+
+export const CLOUD_BINDINGS = CLOUD_FRAME_STRUCT + /* wgsl */ `
 @group(1) @binding(0) var<uniform> CF:CloudFrame;
 @group(1) @binding(1) var cloudDensity:texture_3d<f32>;
 @group(1) @binding(2) var cloudLight:texture_3d<f32>;
 @group(1) @binding(3) var cloudSampler:sampler;
+`;
+
+// Single-tap 2D periodic cloud-shadow lookup for terrain, city, forest, meadow, herds, inland water & shafts.
+// Uses only 1 sampled 2D texture (saving a texture slot vs the old 2x 3D lookup) with exact wind advection.
+export const CLOUD_SHADOW_BINDINGS = CLOUD_FRAME_STRUCT + /* wgsl */ `
+@group(1) @binding(0) var<uniform> CF:CloudFrame;
+@group(1) @binding(5) var cloudShadowMap:texture_2d<f32>;
+@group(1) @binding(6) var cloudShadowSampler:sampler;
+fn cloudShadowRawAt(worldKm:vec3f,lightDir:vec3f)->vec2f {
+  if(CF.screen.w<0.5||lightDir.y<=0.0){return vec2f(1.0,0.0);}
+  let elev=max(lightDir.y,0.08);
+  let dz=max(CF.shape.x-worldKm.y,0.0);
+  let hitXZ=worldKm.xz+lightDir.xz*(dz/elev);
+  let suv=(hitXZ+CF.advection.xy)/16.0+0.5;
+  return textureSampleLevel(cloudShadowMap,cloudShadowSampler,suv,0.0).rg;
+}
+fn cloudShadowAt(worldKm:vec3f,lightDir:vec3f)->f32 {
+  return cloudShadowRawAt(worldKm,lightDir).r;
+}
+`;
+
+// Storage-buffer bilinear 2D cloud-shadow lookup for oceanPipe (0 extra sampled textures, keeps <= 16 limit).
+export const cloudShadowGridWGSL = (group, cfBinding, gridBinding) => /* wgsl */ `
+struct OceanCloudFrame {
+  previousView:mat4x4f,
+  previousCamera:vec4f,
+  advection:vec4f,
+  shape:vec4f,
+  screen:vec4f,
+};
+@group(${group}) @binding(${cfBinding}) var<uniform> oceanCF:OceanCloudFrame;
+@group(${group}) @binding(${gridBinding}) var<storage,read> oceanCloudShadowGrid:array<f32>;
+fn oceanCloudShadowAt(worldMeters:vec3f)->f32 {
+  if(oceanCF.screen.w<0.5||F.sunDir.y<=0.0){return 1.0;}
+  let elev=max(F.sunDir.y,0.08);
+  let dz=max(oceanCF.shape.x-worldMeters.y*0.001,0.0);
+  let hitXZ=worldMeters.xz*0.001+F.sunDir.xz*(dz/elev);
+  let suv=fract((hitXZ+oceanCF.advection.xy)/16.0+0.5);
+  let g=suv*${CLOUD_SHADOW_SIZE}.0-0.5;
+  let i0=vec2i(floor(g));
+  let f=fract(g);
+  let m=${CLOUD_SHADOW_SIZE - 1};
+  let x0=u32(i0.x&m);let x1=u32((i0.x+1)&m);
+  let y0=u32(i0.y&m);let y1=u32((i0.y+1)&m);
+  let s00=oceanCloudShadowGrid[y0*${CLOUD_SHADOW_SIZE}u+x0];
+  let s10=oceanCloudShadowGrid[y0*${CLOUD_SHADOW_SIZE}u+x1];
+  let s01=oceanCloudShadowGrid[y1*${CLOUD_SHADOW_SIZE}u+x0];
+  let s11=oceanCloudShadowGrid[y1*${CLOUD_SHADOW_SIZE}u+x1];
+  return mix(mix(s00,s10,f.x),mix(s01,s11,f.x),f.y);
+}
 `;
 
 // Shared by camera rays, reflection rays and sunlight occlusion. No screen-space
@@ -257,43 +317,6 @@ fn marchClouds(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:v
 export const CLOUD_CAMERA_RAYS = /* wgsl */ `
 @group(0) @binding(4) var colorOut:texture_storage_2d<rgba16float,write>;
 @group(0) @binding(5) var depthOut:texture_storage_2d<r32float,write>;
-@group(0) @binding(6) var cloudShadowMap:texture_2d<f32>;
-@group(0) @binding(7) var cloudShadowSampler:sampler;
-fn cloudCrepuscularShafts(ro:vec3f,rd:vec3f,jitter:f32,sunColor:vec3f,maxDist:f32)->vec3f {
-  if(CF.screen.w<0.5||F.sunDir.y<0.03){return vec3f(0.0);}
-  let cosSun=dot(rd,F.sunDir.xyz);
-  if(cosSun<0.05){return vec3f(0.0);}
-  // Only march below the cloud deck where broken cloud gaps cast visible crepuscular shafts.
-  var limit=min(maxDist,18.0);
-  if(rd.y>0.01&&ro.y<CF.shape.x){limit=min(limit,(CF.shape.x-ro.y)/rd.y);}
-  if(limit<=0.15){return vec3f(0.0);}
-  let elev=max(F.sunDir.y,0.08);
-  let sunRatio=F.sunDir.xz/elev;
-  let phase=0.22+1.65*pow(saturate(cosSun),6.0);
-  let lowSun=smoothstep(0.03,0.14,F.sunDir.y)*(1.0-0.55*smoothstep(0.35,0.85,F.sunDir.y));
-  let hazeGain=(0.0055+F.atmo.x*0.0028)*lowSun*phase;
-  var shaft=0.0;var meanVis=0.0;var wSum=0.0;
-  let steps=16u;
-  for(var i=0u;i<steps;i++){
-    let a=f32(i)/f32(steps);let b=f32(i+1u)/f32(steps);
-    let s0=0.08+(limit-0.08)*(a*a);let s1=0.08+(limit-0.08)*(b*b);
-    let ds=s1-s0;let t=s0+ds*jitter;
-    let p=ro+rd*t;
-    if(p.y<0.0){break;}
-    let dz=max(CF.shape.x-p.y,0.0);
-    let hitXZ=p.xz+sunRatio*dz;
-    let suv=(hitXZ+CF.advection.xy)/16.0+0.5;
-    let sunVis=textureSampleLevel(cloudShadowMap,cloudShadowSampler,suv,0.0).r;
-    let altW=exp(-p.y*0.55)*exp(-t*0.085)*ds;
-    shaft+=sunVis*altW;
-    meanVis+=altW;
-    wSum+=1.0;
-  }
-  // Contrast-preserve: suppress uniform clear-sky glow when there is no shadowing variation; let real broken shafts shine.
-  let avgVis=shaft/max(meanVis,1e-4);
-  let contrast=smoothstep(0.04,0.28,avgVis)*(1.0-0.72*smoothstep(0.88,0.995,avgVis));
-  return sunColor*(shaft*hazeGain*contrast);
-}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let size=textureDimensions(colorOut);if(any(id.xy>=size)){return;}
@@ -303,12 +326,144 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   let ro=F.camPos.xyz*0.001;
   let sunCol=sunIlluminance();
   let ray=marchClouds(ro,rd,64u,jitter,sunCol,skyAtmo(vec3f(0,1,0)));
-  let shaftLimit=select(18.0,ray.distance,ray.distance>0.1);
-  let shafts=cloudCrepuscularShafts(ro,rd,jitter,sunCol,shaftLimit);
-  let outCol=vec4f(ray.color.rgb+shafts*(1.0-ray.color.a*0.55),ray.color.a);
-  textureStore(colorOut,vec2i(id.xy),outCol);textureStore(depthOut,vec2i(id.xy),vec4f(ray.distance));
+  textureStore(colorOut,vec2i(id.xy),ray.color);textureStore(depthOut,vec2i(id.xy),vec4f(ray.distance));
 }
 `;
+
+// Half-res foreground depth-occluded volumetric sun shafts marching against both the 2D cloud shadow map
+// and the scene's terrain/city/forest solid shadow map, outputting (shaftRGB, linearDistKm) for bilateral upsampling.
+export function cloudShaftsWGSL(samples = 4) {
+  const depthType = samples === 1 ? 'texture_depth_2d' : 'texture_depth_multisampled_2d';
+  const depthLoad = (p) => `textureLoad(sceneDepth,${p},0)`;
+  return /* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var transLUT:texture_2d<f32>;
+@group(0) @binding(2) var skyLUT:texture_2d<f32>;
+@group(0) @binding(3) var sampC:sampler;
+@group(0) @binding(4) var sceneDepth:${depthType};
+@group(0) @binding(5) var shaftOut:texture_storage_2d<rgba16float,write>;
+@group(0) @binding(6) var<uniform> landSH:ShadowFrame;
+@group(0) @binding(7) var landSolidShadow:texture_depth_2d;
+@group(0) @binding(8) var landShadowCompare:sampler_comparison;
+fn shaftHash(pix:vec2u)->f32 {
+  var h=(pix.x*0x9e3779b9u)^(pix.y*0x85ebca6bu)^0x68bc21ebu;
+  h=(h^(h>>16u))*0x7feb352du;h=(h^(h>>15u))*0x846ca68bu;h=h^(h>>16u);
+  return f32(h>>8u)/16777216.0;
+}
+fn shaftLinearDistKm(depth:f32,rd:vec3f)->f32 {
+  if(depth<=0.0){return 18.0;}
+  let a=F.viewProj*vec4f(rd,0.0);let b=F.viewProj*vec4f(0.0,0.0,0.0,1.0);
+  return clamp(max(0.0,(b.z-depth*b.w)/(depth*a.w-a.z))*0.001,0.0,18.0);
+}
+fn shaftLandShadow(worldM:vec3f)->f32 {
+  if(landSH.origin.w<0.5){return 1.0;}
+  let p=landSH.lightView*vec4f(worldM-landSH.origin.xyz,1.0);
+  let uv=p.xy*vec2f(0.5,-0.5)+0.5;
+  let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+  let fade=smoothstep(0.0,0.06,edge)*step(0.0,p.z)*step(p.z,1.0);
+  if(fade<=0.0){return 1.0;}
+  let refZ=min(p.z-0.15/max(landSH.sun.w,1.0),0.99999);
+  let s=textureSampleCompareLevel(landSolidShadow,landShadowCompare,clamp(uv,vec2f(0.0),vec2f(1.0)),refZ);
+  return mix(1.0,s,fade);
+}
+@compute @workgroup_size(8,8)
+fn main(@builtin(global_invocation_id) id:vec3u) {
+  let size=textureDimensions(shaftOut);if(any(id.xy>=size)){return;}
+  let fullSize=textureDimensions(sceneDepth);
+  let uv=(vec2f(id.xy)+0.5)/vec2f(size);let ndc=uv*vec2f(2.0,-2.0)+vec2f(-1.0,1.0);
+  let rd=normalize(F.camFwd.xyz+ndc.x*F.camRight.xyz+ndc.y*F.camUp.xyz);
+  let fullPix=min(vec2u(uv*vec2f(fullSize)),fullSize-vec2u(1u));
+  let distKm=shaftLinearDistKm(${depthLoad('vec2i(fullPix)')},rd);
+  let cosSun=dot(rd,F.sunDir.xyz);
+  if(CF.screen.w<0.5||F.sunDir.y<0.025||cosSun<0.04){
+    textureStore(shaftOut,vec2i(id.xy),vec4f(0.0,0.0,0.0,distKm));
+    return;
+  }
+  let ro=F.camPos.xyz*0.001;
+  var limit=min(distKm,16.0);
+  if(rd.y>0.01&&ro.y<CF.shape.x){limit=min(limit,(CF.shape.x-ro.y)/rd.y);}
+  if(limit<=0.04){
+    textureStore(shaftOut,vec2i(id.xy),vec4f(0.0,0.0,0.0,distKm));
+    return;
+  }
+  let jitter=fract(shaftHash(id.xy)+f32(u32(CF.screen.z)%64u)*0.61803398875);
+  let phase=0.20+1.75*pow(saturate(cosSun),6.0);
+  let lowSun=smoothstep(0.025,0.14,F.sunDir.y)*(1.0-0.52*smoothstep(0.35,0.85,F.sunDir.y));
+  let hazeGain=(0.0046+F.atmo.x*0.0024)*lowSun*phase;
+  var shaft=0.0;var weightSum=0.0;var minVis=1.0;var maxVis=0.0;
+  let steps=16u;
+  for(var i=0u;i<steps;i++){
+    let a=f32(i)/f32(steps);let b=f32(i+1u)/f32(steps);
+    let s0=0.02+(limit-0.02)*(a*a);let s1=0.02+(limit-0.02)*(b*b);
+    let ds=s1-s0;let t=s0+ds*jitter;
+    let p=ro+rd*t;
+    if(p.y<-0.01){break;}
+    var sunVis=cloudShadowAt(p,F.sunDir.xyz);
+    if(t<0.32){sunVis*=solarShadowVisibility(vec3f(shaftLandShadow(p*1000.0))).x;}
+    let altW=exp(-max(p.y,0.0)*0.55)*exp(-t*0.085)*ds;
+    shaft+=sunVis*altW;
+    weightSum+=altW;
+    minVis=min(minVis,sunVis);
+    maxVis=max(maxVis,sunVis);
+  }
+  let avgVis=shaft/max(weightSum,1e-4);
+  let variation=clamp(maxVis-minVis,0.0,1.0);
+  let contrast=smoothstep(0.03,0.24,avgVis)*clamp(1.0-0.78*smoothstep(0.86,0.995,avgVis)+variation*0.45,0.0,1.0);
+  let rgb=sunIlluminance()*(shaft*hazeGain*contrast);
+  textureStore(shaftOut,vec2i(id.xy),vec4f(clamp(rgb,vec3f(0.0),vec3f(8.0)),distKm));
+}
+`;
+}
+
+// 4-tap log-depth bilateral upsample pass that additively composites half-res sun shafts onto hdrView
+// without bleeding across sharp foreground silhouettes (cliffs, roofs, masts, trees).
+export function cloudShaftsCompositeWGSL(samples = 4) {
+  const depthType = samples === 1 ? 'texture_depth_2d' : 'texture_depth_multisampled_2d';
+  const depthLoad = (p) => `textureLoad(sceneDepth,${p},0)`;
+  return /* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var shaftTex:texture_2d<f32>;
+@group(0) @binding(2) var sceneDepth:${depthType};
+struct ShaftVO { @builtin(position) pos:vec4f, @location(0) ndc:vec2f };
+@vertex fn vs(@builtin(vertex_index) i:u32)->ShaftVO {
+  let p=vec2f(f32((i<<1u)&2u),f32(i&2u))*2.0-1.0;
+  return ShaftVO(vec4f(p,0.0,1.0),p);
+}
+fn compLinearDistKm(depth:f32,rd:vec3f)->f32 {
+  if(depth<=0.0){return 18.0;}
+  let a=F.viewProj*vec4f(rd,0.0);let b=F.viewProj*vec4f(0.0,0.0,0.0,1.0);
+  return clamp(max(0.0,(b.z-depth*b.w)/(depth*a.w-a.z))*0.001,0.0,18.0);
+}
+@fragment fn fs(in:ShaftVO)->@location(0) vec4f {
+  let fullPix=vec2i(in.pos.xy);
+  let rd=normalize(F.camFwd.xyz+in.ndc.x*F.camRight.xyz+in.ndc.y*F.camUp.xyz);
+  let distKm=compLinearDistKm(${depthLoad('fullPix')},rd);
+  let logD=log(max(distKm,0.005));
+  let dim=vec2i(textureDimensions(shaftTex));
+  let uv=in.pos.xy*F.screen.zw;
+  let pos=uv*vec2f(dim)-0.5;
+  let i0=vec2i(floor(pos));
+  let f=fract(pos);
+  let maxC=dim-vec2i(1);
+  let t00=textureLoad(shaftTex,clamp(i0,vec2i(0),maxC),0);
+  let t10=textureLoad(shaftTex,clamp(i0+vec2i(1,0),vec2i(0),maxC),0);
+  let t01=textureLoad(shaftTex,clamp(i0+vec2i(0,1),vec2i(0),maxC),0);
+  let t11=textureLoad(shaftTex,clamp(i0+vec2i(1,1),vec2i(0),maxC),0);
+  let w00=(1.0-f.x)*(1.0-f.y)*exp(-abs(logD-log(max(t00.a,0.005)))*6.0);
+  let w10=f.x*(1.0-f.y)*exp(-abs(logD-log(max(t10.a,0.005)))*6.0);
+  let w01=(1.0-f.x)*f.y*exp(-abs(logD-log(max(t01.a,0.005)))*6.0);
+  let w11=f.x*f.y*exp(-abs(logD-log(max(t11.a,0.005)))*6.0);
+  let wSum=w00+w10+w01+w11;
+  var col=vec3f(0.0);
+  if(wSum>1e-5){
+    col=(t00.rgb*w00+t10.rgb*w10+t01.rgb*w01+t11.rgb*w11)/wSum;
+  }else{
+    col=(t00.rgb+t10.rgb+t01.rgb+t11.rgb)*0.25;
+  }
+  return vec4f(col,0.0);
+}
+`;
+}
 
 export const CLOUD_RESOLVE = /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;

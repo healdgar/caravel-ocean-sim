@@ -1564,10 +1564,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   };
   let activeTownField=townField(proceduralPack?.port?.streets);
   let nearResources=[...resources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources,...neuralPbr.terrainResources];
-  let cityGroup=bind(cityPipe,cityEntries(nearResources));const cityClouds=clouds.bindVolume(cityPipe);
+  let cityGroup=bind(cityPipe,cityEntries(nearResources));const cityClouds=clouds.bindVolume(cityPipe,'shadow');
   const [submerged]=await submergedPipesPromise;
   let submergedGroup=submerged?.bindGroup(landEntries(nearResources).map(([binding,resource])=>({binding,resource})));
-  const submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
+  const submergedClouds=submerged?clouds.bindVolume(submerged.pipeline,'shadow'):null;
   // The land: every piece cut and drawn through the one continuum (js/land-continuum.js, AGENTS.md rule 3). A piece is
   // the coast's own lattice ('0,0'; on Saba with the surveyed bay as a finer window in it) or a streamed section. One
   // is baked when it comes or its ground or a neighbour's changes, one a frame and the nearest first; every frame the
@@ -1645,7 +1645,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   landCentre(proceduralPack?.port?.riverCut);
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
-  const cloudLight=clouds.bindVolume(lightPipe,true);
   // Build inland water, herds, and trade vessels in parallel (ground boulders removed).
   const [boulderRes, inlandWaterRes, herdsRes, tradeVesselsRes] = await Promise.all([
     Promise.resolve(null),
@@ -2435,7 +2434,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // The land's cut and draw, its pits read from the crater tiles in the same draw.
   const landShared=()=>[...craters.resources(),...landBanks.resources()];
   landContinuum=createLandContinuum({device,pipelines:await requestLandContinuumPipelines({device,shader}),view:landPipe,capture:submerged??null,frame:frameUBO,grid:landGrid,shared:landShared(),profile:'land'});
-  landClouds=clouds.bindVolume(landPipe);
+  landClouds=clouds.bindVolume(landPipe,'shadow');
   landContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
   craters.onReallocate(()=>landContinuum?.setShared(landShared()));
   landBanks.onChange(()=>landContinuum?.setShared(landShared()));
@@ -2937,7 +2936,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(meadowGrass){split('Cut: meadow');meadowGrass.encode(p);}
       if(tradeVessels?.encode){split('Cut: trade vessels');tradeVessels.encode(p);}
       if((tick++%8)===0||changed){
-        p.setPipeline(lightPipe);p.setBindGroup(0,lightGroup);p.setBindGroup(1,cloudLight);p.dispatchWorkgroups(8,8);
+        p.setPipeline(lightPipe);p.setBindGroup(0,lightGroup);p.dispatchWorkgroups(8,8);
       }
       return p;
     },

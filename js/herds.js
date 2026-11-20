@@ -763,7 +763,7 @@ export async function createLivestockHerds({
     requestHerdsPipelines({ device, shader, format, samples }),
     requestAnimalContinuumAtlas(device),
   ]);
-  const cloudGroup = clouds.bindVolume(pipelines.view.pipeline);
+  const cloudGroup = clouds.bindVolume(pipelines.view.pipeline, 'shadow');
   const herdTypes = ANIMAL_CONTINUUM_TYPES.map((_, t) => t).filter((t) => t < HERD_SPECIES);
 
   const shotsBytes = new ArrayBuffer(HERD_SHOTS_WORDS * 4);

@@ -396,7 +396,7 @@ export async function createInlandWater({
   };
 
   let groups0 = [makeGroup0(resources, 0), makeGroup0(resources, 1)];
-  const group1 = clouds.bindVolume(pipeline);
+  const group1 = clouds.bindVolume(pipeline, 'shadow');
   let vertexBuf = null, indexBuf = null, indexCount = 0, chunks = [];
   const visibleSpans = new Int32Array(INLAND_CHUNK_GRID * INLAND_CHUNK_GRID * 2);
   const frustumPlanes = new Float32Array(24);

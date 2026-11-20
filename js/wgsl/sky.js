@@ -300,19 +300,30 @@ fn skyAtmo(dir: vec3f) -> vec3f {
 }
 `;
 
-// Solar disc shared by air and refracted underwater views.
+// Solar disc + subtle Mie atmospheric aureole shared by air and refracted underwater views.
 export const SUN_DISK = /* wgsl */ `
 fn sunDisk(dir: vec3f) -> vec3f {
   let c = dot(dir, F.sunDir.xyz);
+  if (c < 0.96) { return vec3f(0.0); }
   let ang = sqrt(max(2.0 * (1.0 - c), 0.0));
+  let trans = sampleTrans(camR(), max(dir.y, -0.01));
   let pix = F.screen.w * 2.0 * length(F.camUp.xyz) * 0.75;
   let edge = 1.0 - smoothstep(SUN_ANG_R - pix, SUN_ANG_R + pix, ang);
-  if (edge <= 0.0) { return vec3f(0.0); }
-  let x = min(ang / SUN_ANG_R, 1.0);
-  let mu = sqrt(max(1.0 - x * x, 0.0));
-  let limb = vec3f(1.0) - vec3f(0.397, 0.503, 0.652) * (1.0 - mu);
-  let rad = F.sunDir.w / (PI * SUN_ANG_R * SUN_ANG_R);
-  return rad * limb * edge * sampleTrans(camR(), max(dir.y, -0.01));
+  var out = vec3f(0.0);
+  if (edge > 0.0) {
+    let x = min(ang / SUN_ANG_R, 1.0);
+    let mu = sqrt(max(1.0 - x * x, 0.0));
+    // Eddington chromatic limb darkening (warm amber solar rim, blazing white photosphere core).
+    let eddington = pow(max(mu, 1e-4), 0.55);
+    let limb = mix(vec3f(1.0) - vec3f(0.397, 0.503, 0.652) * (1.0 - eddington), vec3f(1.0), 0.15 * eddington);
+    let rad = F.sunDir.w / (PI * SUN_ANG_R * SUN_ANG_R);
+    out += rad * limb * edge;
+  }
+  // Subtle physical Mie solar aureole / forward-scatter corona outside the photosphere edge.
+  let aureole = exp(-ang / (SUN_ANG_R * 4.5)) * 0.32 + exp(-ang / (SUN_ANG_R * 16.0)) * 0.045;
+  let lowSun = 0.65 + 0.85 * (1.0 - smoothstep(0.04, 0.42, F.sunDir.y));
+  out += F.sunDir.w * (0.045 + 0.022 * F.atmo.x) * lowSun * aureole * (1.0 - edge * 0.85);
+  return out * trans;
 }
 `;
 

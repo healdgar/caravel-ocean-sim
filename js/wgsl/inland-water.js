@@ -5,7 +5,7 @@
 // slope statistics, and physical wave-current coupling into coastal ocean swells.
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
-import { CLOUD_SAMPLE } from './clouds.js';
+import { CLOUD_SHADOW_BINDINGS } from './clouds.js';
 import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { COASTAL_WATER } from './terrain.js';
 import { surfaceWaveSource } from './surface-coupling.js';
@@ -29,7 +29,7 @@ struct InlandNearDomain {
 @group(0) @binding(9) var sampR: sampler;
 @group(0) @binding(10) var<storage, read> sunVis: array<f32, 4>;
 @group(0) @binding(12) var<uniform> nearTerrain: InlandNearDomain;
-` + surfaceWaveSource(0, 14, 15, 'sampC') + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + COASTAL_WATER + /* wgsl */ `
+` + surfaceWaveSource(0, 14, 15, 'sampC') + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SHADOW_BINDINGS + COASTAL_WATER + /* wgsl */ `
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
@@ -62,11 +62,7 @@ fn inlandShadowVis(world: vec3f) -> vec3f {
 }
 
 fn inlandCloudShadow(world: vec3f) -> f32 {
-  if (CF.screen.w <= 0.5 || F.sunDir.y <= 0.0) { return 1.0; }
-  let cMid = cloudUV(world * 0.001 + F.sunDir.xyz * (max(CF.shape.x, 0.5) / max(F.sunDir.y, 0.15)));
-  let cD = textureSampleLevel(cloudDensity, cloudSampler, clamp(cMid, vec3f(0.0), vec3f(1.0)), 1.0).r;
-  let cL = textureSampleLevel(cloudLight, cloudSampler, clamp(cMid, vec3f(0.0), vec3f(1.0)), 1.0).b;
-  return clamp(exp(-max(cD, 0.0) * CF.shape.z * 0.6) * mix(1.0, cL, 0.5), 0.0, 1.0);
+  return solarShadowVisibility(vec3f(cloudShadowAt(world * 0.001, F.sunDir.xyz))).x;
 }
 
 fn fresnelWater(c: f32) -> f32 {

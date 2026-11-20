@@ -33,6 +33,7 @@ export async function createReferenceVolumetricClouds({ device, frameUBO, transV
   const density = volume('cloud density field'), lighting = volume('cloud light field');
   const shadowMap = device.createTexture({ label:'cloud shadow map', size:[shadowSize,shadowSize], format:'rgba16float',
     usage:U.TEXTURE_BINDING | U.STORAGE_BINDING | U.COPY_SRC });
+  const shadowGrid = device.createBuffer({ label:'cloud shadow grid', size:shadowSize*shadowSize*4, usage:B.STORAGE });
   const fieldSampler = device.createSampler({ magFilter:'linear', minFilter:'linear', mipmapFilter:'linear',
     addressModeU:'repeat', addressModeV:'clamp-to-edge', addressModeW:'repeat' });
   const shadowSampler = device.createSampler({ magFilter:'linear', minFilter:'linear',
@@ -43,7 +44,7 @@ export async function createReferenceVolumetricClouds({ device, frameUBO, transV
   const volumeEntries = [[0,{buffer:uniform}],[1,density.createView()],[2,lighting.createView()],[3,fieldSampler]];
   const bgDensity = group(densityPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)]]);
   const bgLight = group(lightPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)],[2,fieldSampler],[3,view(lighting,0)]]);
-  const bgShadow = group(shadowPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)],[2,fieldSampler],[3,shadowMap.createView()]]);
+  const bgShadow = group(shadowPipe,0,[[0,{buffer:bakeUniform}],[1,view(density,0)],[2,fieldSampler],[3,shadowMap.createView()],[4,{buffer:shadowGrid}]]);
   const bgMips = [];
   for(let m=1;m<levels;m++) bgMips.push(group(mipPipe,0,[[0,view(density,m-1)],[1,view(lighting,m-1)],[2,view(density,m)],[3,view(lighting,m)]]));
   const bgRayVolume = group(rayPipe,1,volumeEntries);
@@ -65,7 +66,7 @@ export async function createReferenceVolumetricClouds({ device, frameUBO, transV
     raw=target('cloud raw','rgba16float');rawDepth=target('cloud depth','r32float');
     colors=[target('cloud history A','rgba16float'),target('cloud history B','rgba16float')];
     depths=[target('cloud depth A','r32float'),target('cloud depth B','r32float')];
-    rayGroup=group(rayPipe,0,[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,raw.createView()],[5,rawDepth.createView()],[6,shadowMap.createView()],[7,shadowSampler]]);
+    rayGroup=group(rayPipe,0,[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,raw.createView()],[5,rawDepth.createView()]]);
     resolveGroups=[0,1].map(i=>group(resolvePipe,0,[[0,{buffer:frameUBO}],[1,raw.createView()],[2,rawDepth.createView()],
       [3,colors[1-i].createView()],[4,depths[1-i].createView()],[5,sampler],[6,colors[i].createView()],[7,depths[i].createView()]]));
     if(skyPipeline)skyGroups=colors.map(t=>group(skyPipeline,1,[[4,t.createView()]]));
@@ -120,7 +121,7 @@ export async function createReferenceVolumetricClouds({ device, frameUBO, transV
     get output(){return colors[current];},
     get density(){return density;},
     get historyValid(){return data[27]===1;},
-    destroy(){for(const t of [density,lighting,shadowMap,raw,rawDepth,...colors,...depths])t?.destroy();uniform.destroy();bakeUniform.destroy();},
+    destroy(){for(const t of [density,lighting,shadowMap,raw,rawDepth,...colors,...depths])t?.destroy();uniform.destroy();bakeUniform.destroy();shadowGrid.destroy();},
   };
 }
 export const CLOUD_RESOLVE = /* wgsl */ `

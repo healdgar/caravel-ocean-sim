@@ -91,7 +91,7 @@ fn continuumShardedRotate(v:vec3f,axis:vec3f,c:f32,s:f32)->vec3f { return v*c+cr
 fn continuumShardedFlight(data:u32,shard:u32,p:ContinuumPosed)->ContinuumPosed {
   var pose=p;
   let count=u32(continuumPoses[data].y);
-  if(shard<count){let wear=continuumPoses[data+1u+count*4u+shard/4u];pose.wear=wear[shard%4u];}
+  if(shard<count){let wear=continuumPoses[data+1u+count*4u+shard/4u];pose.wear=abs(wear[shard%4u]);}
   let at=data+1u+shard*4u;
   let motion=continuumPoses[at+3u];
   if(shard>=count||motion.w< -1.5){return pose;}
@@ -115,7 +115,16 @@ fn continuumShardedFlight(data:u32,shard:u32,p:ContinuumPosed)->ContinuumPosed {
   pose.position=origin.xyz+relative+flight.xyz*free-vec3f(0.0,drop,0.0);
   return pose;
 }
-fn continuumShardedPose(record:ContinuumRecord,data:u32,part:u32,vertex:u32,p:ContinuumPosed)->ContinuumPosed { return continuumShardedFlight(data,part,p); }
+fn continuumShardedPose(record:ContinuumRecord,data:u32,part:u32,vertex:u32,p:ContinuumPosed)->ContinuumPosed {
+  var pose=continuumShardedFlight(data,part,p);
+  let count=u32(continuumPoses[data].y);
+  // Hide internal raw-cut faces of standing blocks until an adjacent piece actually breaks away (positive wear).
+  if(part>0u&&part<count&&continuumPoses[data+1u+part*4u+3u].w< -1.5){
+    let rawWear=continuumPoses[data+1u+count*4u+part/4u][part%4u];
+    if(rawWear<=0.0&&continuumSurfaceWear(vertex)>0.0){pose.hidden=true;}
+  }
+  return pose;
+}
 // A shard's sphere is carried with its centre; a shard turns about its pivot, which keeps the radius. The whole
 // instance is the type's sphere, its record's reach taking in its pieces in the air and on the ground.
 fn continuumShardedSphere(record:ContinuumRecord,data:u32,part:u32,sphere:vec4f)->vec4f {

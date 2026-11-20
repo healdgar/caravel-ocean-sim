@@ -6,6 +6,7 @@ import { SCENE_SHADOW_SAMPLE } from './shadows.js';
 // Ocean surface + sky background rendering.
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, ENV_SIZE, N, CASCADES, FOAM_MODEL } from './common.js';
 import { SKY_RENDER_FUNCS, SKY_CLOUD_FUNCS } from './sky.js';
+import { cloudShadowGridWGSL } from './clouds.js';
 import { WATER_TRANSMISSION, WATER_AIR_TRANSMISSION } from './water-optics.js';
 import { UNDERWATER_INTERFACE, waterCausticFunctions } from './underwater.js';
 
@@ -396,13 +397,23 @@ export function createCoastalOcean(coast,depthFirst){
 
 // The legacy shader remains available for isolated ocean probes. The scene
 // composes every submerged solid through this shared optical path.
-export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,cameraProbe=false){
+export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,cameraProbe=false,cloudShadows=false){
   const transmission=WATER_TRANSMISSION.replace('mix(body,hit.source.rgb,transmission)',
     'mix(body,hit.source.rgb*waterCausticFactorFiltered(waterSourcePosition(hit.uv,hit.source.a),world.y,waterCausticPixelFootprint(waterSourcePosition(hit.uv,hit.source.a))),transmission)');
   const code=oceanSource(coast,surfaceWaves)+transmission+WATER_AIR_TRANSMISSION
     +waterCausticFunctions({surfaceWaves,seaShadow:true})+UNDERWATER_INTERFACE
-    +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'');
+    +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'')
+    +(cloudShadows?cloudShadowGridWGSL(0,20,21):'');
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
+    .replace(
+      'let sunE = sunlight * solarShadowVisibility(surfaceShadow);\n  let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));',
+      cloudShadows
+        ? `let unoccludedSun = select(sunIlluminance(), sunlight / max(sunVis[0], 1e-4), sunVis[0] > 0.05);
+  let localSun = unoccludedSun * solarShadowVisibility(vec3f(oceanCloudShadowAt(in.rel + F.camPos.xyz))).x;
+  let sunE = localSun * solarShadowVisibility(surfaceShadow);
+  let waterSun = localSun * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));`
+        : 'let sunE = sunlight * solarShadowVisibility(surfaceShadow);\n  let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));'
+    )
     .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,
       `if(${cameraProbe?'cameraSea[9]==cameraSea[9]&&F.camPos.y==F.camPos.y&&F.camPos.y<cameraSea[9]-.005':'optics.w>.5&&optics.z==optics.z&&F.camPos.y==F.camPos.y&&F.camPos.y<optics.z-.005'}){
     return vec4f(underwaterBoundary(in.rel+F.camPos.xyz,nrm,V,skyHemi,foamMask,foamLit),1);

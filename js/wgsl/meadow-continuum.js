@@ -19,7 +19,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
-import { CLOUD_SAMPLE } from './clouds.js';
+import { CLOUD_SHADOW_BINDINGS } from './clouds.js';
 import { LAND_CRATER_SAMPLE_WGSL, LAND_CRATER_TEXELS, LAND_CRATER_CELL_M, LAND_CRATER_TILE_M } from './land-craters.js';
 import { CONTINUUM_RECORD_WGSL, CONTINUUM_ROW } from './continuum-cut.js';
 import { CONTINUUM_WIND_FORM, CONTINUUM_WIND_DRAPED_POSE } from './continuum-wind.js';
@@ -542,7 +542,7 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
 // ---------------------------------------------------------------------------------------------- the material
 // Group 0: the frame, the sky's light, the meadow's uniform, ground, cover map and shot, and the land's light, albedo
 // and shadow map. Group 1 is the clouds'; group 2 the scene's data; group 3 is left to the water's capture.
-const meadowContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + MEADOW_COMMON_WGSL + /* wgsl */ `
+const meadowContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SHADOW_BINDINGS + MEADOW_COMMON_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -819,14 +819,8 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let edgeDist = min(min(landUV.x, 1.0 - landUV.x), min(landUV.y, 1.0 - landUV.y));
   let inDomain = smoothstep(0.0, 0.08, edgeDist);
   let bakedLight = textureSampleLevel(landLight, sampC, clamp(landUV, vec2f(0.0), vec2f(1.0)), 0.0).rg;
-  var sunlight = bakedLight.r;
-  if (inDomain < 1.0 && CF.screen.w > 0.5 && F.sunDir.y > 0.0) {
-    let cMid = cloudUV(world * 0.001 + F.sunDir.xyz * (max(CF.shape.x, 0.5) / max(F.sunDir.y, 0.15)));
-    let cD = textureSampleLevel(cloudDensity, cloudSampler, clamp(cMid, vec3f(0.0), vec3f(1.0)), 1.0).r;
-    let cL = textureSampleLevel(cloudLight, cloudSampler, clamp(cMid, vec3f(0.0), vec3f(1.0)), 1.0).b;
-    let cloudVis = clamp(exp(-max(cD, 0.0) * CF.shape.z * 0.6) * mix(1.0, cL, 0.5), 0.0, 1.0);
-    sunlight = mix(cloudVis, bakedLight.r, inDomain);
-  }
+  let terrainSun = mix(1.0, bakedLight.r, inDomain);
+  let sunlight = terrainSun * solarShadowVisibility(vec3f(cloudShadowAt(world * 0.001, F.sunDir.xyz))).x;
   // The shadow map is drawn in the scene's frame, as the one cut casts into it.
   let shadowVis = meadowShadowVis(v.world, n);
   let direct = sunIlluminance() * sunlight * solarShadowVisibility(shadowVis);

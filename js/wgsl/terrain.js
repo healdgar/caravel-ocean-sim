@@ -1,6 +1,6 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
-import { CLOUD_SAMPLE } from './clouds.js';
+import { CLOUD_SHADOW_BINDINGS } from './clouds.js';
 import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
 import { LAND_CRATER_PIT } from './land-craters.js';
 import { GROUND_DETAIL_RENDER } from './ground-detail.js';
@@ -544,9 +544,10 @@ export const TERRAIN_LIGHT = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(6) var<uniform> LAND:Land;
 @group(0) @binding(7) var<uniform> nearTerrain:NearLand;
 @group(0) @binding(8) var<storage,read> nearElevation:array<f32>;
-` + LAND_SAMPLING + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
+` + LAND_SAMPLING + SKY_RENDER_FUNCS + /* wgsl */ `
 fn skyBodyVisibility(p:vec2f,h:f32,dir:vec3f)->f32{
-  var v=volumeSunVisibility(vec3f(p.x,h+8.0,p.y)*0.001,dir);
+  // Pure mountain terrain-on-terrain horizon shadow; live 2D cloud shadows are sampled per-fragment from cloudShadowMap.
+  var v=1.0;
   let horizontal=max(length(dir.xz),0.01);let direction=dir.xz/horizontal;
   for(var i=0u;i<16u;i++){
     let reach=28.0*pow(1.31,f32(i));
@@ -562,7 +563,11 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   let h=landHeight(p);
   var visibility=0.0;if(F.sunDir.y>0.0){visibility=skyBodyVisibility(p,h,F.sunDir.xyz);}
   var moonVisibility=0.0;if(lunarIrradiance()>0.0){moonVisibility=skyBodyVisibility(p,h,lunarDirection());}
-  textureStore(lightOut,vec2i(id.xy),vec4f(visibility,moonVisibility,0,1));
+  // Multiscale valley/ridge cavity AO stored in .b for zero-extra-fetch ravine darkening & crest relief.
+  let hAvg1=0.25*(landHeight(p+vec2f(45.0,0.0))+landHeight(p-vec2f(45.0,0.0))+landHeight(p+vec2f(0.0,45.0))+landHeight(p-vec2f(0.0,45.0)));
+  let hAvg2=0.25*(landHeight(p+vec2f(120.0,0.0))+landHeight(p-vec2f(120.0,0.0))+landHeight(p+vec2f(0.0,120.0))+landHeight(p-vec2f(0.0,120.0)));
+  let cavity=clamp((h-hAvg1)*0.055+(h-hAvg2)*0.024,-0.45,0.35);
+  textureStore(lightOut,vec2i(id.xy),vec4f(visibility,moonVisibility,cavity,1.0));
 }
 `;
 
@@ -580,7 +585,7 @@ struct Land {domain:vec4f};
 @group(0) @binding(19) var<uniform> landSH:ShadowFrame;
 @group(0) @binding(20) var landSolidShadow:texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare:sampler_comparison;
-` + LAND_CLOTH_SHADOW + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
+` + LAND_CLOTH_SHADOW + SKY_RENDER_FUNCS + CLOUD_SHADOW_BINDINGS + /* wgsl */ `
 // How far inside the shadow map a place lies: 0 at its edge and beyond, 1 well within. Reads no texture.
 fn landShadowCover(p:vec4f)->f32{
   let uv=p.xy*vec2f(0.5,-0.5)+0.5;
@@ -644,16 +649,12 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
   let isPrimary=select(0.0,1.0,LAND.domain.w>0.05);
   let inPrimaryDomain=isPrimary*smoothstep(0.0,0.08,edgeDist);
-  let bakedLight=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).rg;
-  // The light bake already holds clouds and terrain. Only ground outside it marches for itself.
-  var sunlight=bakedLight.r;
-  if(inPrimaryDomain<1.0 && CF.screen.w>0.5 && F.sunDir.y>0.0){
-    let cMid=cloudUV(world*0.001+F.sunDir.xyz*(max(CF.shape.x,0.5)/max(F.sunDir.y,0.15)));
-    let cD=textureSampleLevel(cloudDensity,cloudSampler,clamp(cMid,vec3f(0.0),vec3f(1.0)),1.0).r;
-    let cL=textureSampleLevel(cloudLight,cloudSampler,clamp(cMid,vec3f(0.0),vec3f(1.0)),1.0).b;
-    let cloudSunVis=clamp(exp(-max(cD,0.0)*CF.shape.z*0.6)*mix(1.0,cL,0.5),0.0,1.0);
-    sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
-  }
+  let bakedLight=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).rgb;
+  // Crisp real-time 2D cloud shadows everywhere paired with baked mountain horizon occlusion.
+  let cloudSun=solarShadowVisibility(vec3f(cloudShadowAt(world*0.001,F.sunDir.xyz))).x;
+  let sunlight=mix(1.0,bakedLight.r,inPrimaryDomain)*cloudSun;
+  let valleyAO=clamp(1.0+bakedLight.b*inPrimaryDomain*0.48,0.70,1.14);
+  let effAmbVis=ambientVisibility*valleyAO;
   // By day the map shades the sun; once the moon is the light it shades the moon and the sun is down.
   let direct=sunIlluminance()*sunlight*solarShadowVisibility(shadowVis);
   // Directional sky-hemisphere + ground/sea bounce irradiance from envCube
@@ -664,9 +665,9 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   let hemiMix=clamp(n.y*0.5+0.5,0.0,1.0);
   let ambient=mix(groundIrr*0.54,skyIrr,hemiMix);
   // Architectural cavity & eave self-shadowing + warm solar ground-bounce GI
-  let archShadow=smoothstep(0.14,0.58,ambientVisibility);
-  let sunGroundBounce=direct*max(F.sunDir.y,0.0)*(1.0-max(n.y,0.0))*0.068*vec3f(0.84,0.74,0.58)*ambientVisibility;
-  let diffuseTerm=direct*diffuse*(0.30+0.70*archShadow)/PI+ambient*ambientVisibility+sunGroundBounce;
+  let archShadow=smoothstep(0.14,0.58,effAmbVis);
+  let sunGroundBounce=direct*max(F.sunDir.y,0.0)*(1.0-max(n.y,0.0))*0.068*vec3f(0.84,0.74,0.58)*effAmbVis;
+  let diffuseTerm=direct*diffuse*(0.30+0.70*archShadow)/PI+ambient*effAmbVis+sunGroundBounce;
   let isMetal=wet<-0.01;
   let effWet=select(wet,0.0,isMetal);
   var col=albedo*(1.0-effWet*0.32)*diffuseTerm;
@@ -695,23 +696,22 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   reflDir.y=max(reflDir.y,-0.12);
   let envMip=clamp(effRough*7.0,0.4,7.0);
   let envSpec=textureSampleLevel(envCube,sampC,normalize(reflDir),envMip).rgb;
-  let reflStrength=fresnel*smoothFilm*(1.0-effRough*0.78)*(0.26+0.74*ambientVisibility);
+  let reflStrength=fresnel*smoothFilm*(1.0-effRough*0.78)*(0.26+0.74*effAmbVis);
   let skyRefl=envSpec*reflStrength;
   let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*(0.08+0.92*effWet),0.65,isMetal);
   col+=direct*min(specBRDF,1.5)*specMask*(0.25+0.75*archShadow)+skyRefl;
-  col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain))*lunarShadowVisibility(shadowVis));
+  let cloudMoon=lunarShadowVisibility(vec3f(cloudShadowAt(world*0.001,lunarDirection()))).x;
+  col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)*cloudMoon)*lunarShadowVisibility(shadowVis));
   col+=lightningSurface(n,v,albedo,effRough)+worldFireSurface(world,n,v,albedo,effRough)+landWindowEmission;
   col=surfaceAir(col,world);
-  // Clip cloud integration at high mountain surfaces: clouds behind mountain peaks
-  // stay hidden and low clouds in front veil upper slopes, while low coastal plains
-  // and beaches share the same clear aerial perspective as the ocean and forest canopy.
-  let mountainVeil=smoothstep(320.0,580.0,world.y)*step(0.5,CF.screen.w);
+  // Clip cloud integration at high mountain surfaces: high peaks entering the cloud deck get veiled
+  // directly from the 2D cloud shadow/optical-depth map (zero 3D texture reads).
+  let cloudBaseM=CF.shape.x*1000.0;
+  let mountainVeil=smoothstep(max(320.0,cloudBaseM-260.0),max(580.0,cloudBaseM+320.0),world.y)*step(0.5,CF.screen.w);
   if(mountainVeil>0.001){
-    let mUV=clamp(cloudUV(world*0.001),vec3f(0.0),vec3f(1.0));
-    let mD=textureSampleLevel(cloudDensity,cloudSampler,mUV,1.0).r;
-    let mL=textureSampleLevel(cloudLight,cloudSampler,mUV,1.0).b;
-    let veilAlpha=clamp(1.0-exp(-max(mD,0.0)*CF.shape.z*0.8),0.0,0.85)*mountainVeil;
-    let veilCol=skyAtmo(vec3f(0,1,0))*0.45+sunIlluminance()*0.20*mL;
+    let mSh=textureSampleLevel(cloudShadowMap,cloudShadowSampler,(world.xz*0.001+CF.advection.xy)/16.0+0.5,0.0).rg;
+    let veilAlpha=clamp(1.0-mSh.r,0.0,0.82)*mountainVeil;
+    let veilCol=skyAtmo(vec3f(0,1,0))*0.45+sunIlluminance()*0.20*mSh.r;
     return vec4f(mix(col,veilCol,veilAlpha),1.0);
   }
   return vec4f(col,1.0);
@@ -992,7 +992,25 @@ const TERRAIN_LAND_MATERIAL_BLOCK = /* wgsl */ `
     let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.42+crownBillow*0.42-crownGap*0.32;
     let rockRelief=stone*0.15+blocks*.24+cliffStrata*0.048+ledgeStep*0.042+cragFacet*0.035-fissure*0.075-coarseFissure*.11;
     relief=screeRelief*rockKeep+mix(soil,rockRelief,rocky*rockKeep);
-    ambientVisibility*=(1.0-crownGap*0.38)*(1.0-(fissure*0.22+coarseFissure*0.25)*rocky);
+    // Item 3: Valley/ridge macro cavity tone + domain-warped ridged dry-grass veins on open lowlands.
+    let macroCav=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).b*select(0.0,1.0,LAND.domain.w>0.05);
+    let valleyT=clamp(-macroCav*1.65,0.0,0.52)*(1.0-beachSand);
+    let ridgeT=clamp(macroCav*1.45,0.0,0.42)*(1.0-beachSand);
+    albedo*=mix(vec3f(1.0),vec3f(0.84,0.87,0.80),valleyT)*mix(vec3f(1.0),vec3f(1.08,1.05,0.96),ridgeT);
+    let veinFoot=footprint*0.022;
+    let veinFade=landDetailWeight(veinFoot)*(1.0-rocky)*(1.0-beachSand)*(1.0-effCanopy*0.68)*smoothstep(2.2,8.5,world.y);
+    if(veinFade>0.01){
+      let vw=vec2f(crownN2,crownN1)*1.85;
+      let vN=landFilteredNoise(world.xz*0.022+vw,veinFoot);
+      let vein=pow(clamp(1.0-abs(vN)*1.9,0.0,1.0),6.0)*veinFade;
+      let dryGrass=mix(albedo*vec3f(1.18,1.08,0.76),vec3f(0.24,0.20,0.13),0.35);
+      albedo=mix(albedo,dryGrass,vein*0.40);
+      relief-=vein*0.008;
+    }
+    // Item 4: Canopy-floor contact AO under dense forests beyond the real-time shadow-map range (260 m).
+    let farCanopyAO=effCanopy*(1.0-landShadowCoverage(world));
+    albedo*=1.0-farCanopyAO*0.24;
+    ambientVisibility*=(1.0-crownGap*0.38)*(1.0-(fissure*0.22+coarseFissure*0.25)*rocky)*(1.0-farCanopyAO*0.44);
     surfaceWet=max(swashGloss,basalWetRock*0.75);
     let baseRough=mix(0.89+vegetation*0.03-effCanopy*0.05+pores*0.055-rocky*0.09,0.76+pores*0.03,beachSand);
     roughness=clamp(mix(baseRough,mix(0.20,0.07,waterFilm),surfaceWet),0.07,0.98);

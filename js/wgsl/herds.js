@@ -13,7 +13,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { continuumGroundWGSL } from '../continuum-ground.js';
-import { CLOUD_SAMPLE } from './clouds.js';
+import { CLOUD_SHADOW_BINDINGS } from './clouds.js';
 import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CONTINUUM_KIND } from '../continuum-format.js';
@@ -684,7 +684,7 @@ const herdContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ 
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var envCube: texture_cube<f32>;
-` + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + /* wgsl */ `
+` + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SHADOW_BINDINGS + /* wgsl */ `
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
@@ -705,11 +705,7 @@ fn herdShadowVis(world: vec3f, normal: vec3f) -> vec3f {
 }
 
 fn herdCloudShadow(world: vec3f) -> f32 {
-  if (CF.screen.w <= 0.5 || F.sunDir.y <= 0.0) { return 1.0; }
-  let cMid = cloudUV(world * 0.001 + F.sunDir.xyz * (max(CF.shape.x, 0.5) / max(F.sunDir.y, 0.15)));
-  let cD = textureSampleLevel(cloudDensity, cloudSampler, clamp(cMid, vec3f(0.0), vec3f(1.0)), 1.0).r;
-  let cL = textureSampleLevel(cloudLight, cloudSampler, clamp(cMid, vec3f(0.0), vec3f(1.0)), 1.0).b;
-  return clamp(exp(-max(cD, 0.0) * CF.shape.z * 0.6) * mix(1.0, cL, 0.5), 0.0, 1.0);
+  return solarShadowVisibility(vec3f(cloudShadowAt(world * 0.001, F.sunDir.xyz))).x;
 }
 
 fn livestockCoatAlbedo(species: u32, coatCode: f32, texColor: vec3f, seed: f32, localXZ: vec2f) -> vec3f {

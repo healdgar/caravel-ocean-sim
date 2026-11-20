@@ -679,13 +679,33 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     if (y > shard.localMax[1]) shard.localMax[1] = y;
     if (lz > shard.localMax[2]) shard.localMax[2] = lz;
   };
+  const outwardQuad = (p, nx, ny, nz) => {
+    const g1 = crossOf([p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]], [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]]);
+    let d = g1[0] * nx + g1[1] * ny + g1[2] * nz;
+    if (Math.abs(d) < 1e-9) {
+      const g2 = crossOf([p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]], [p[3][0] - p[0][0], p[3][1] - p[0][1], p[3][2] - p[0][2]]);
+      d = g2[0] * nx + g2[1] * ny + g2[2] * nz;
+    }
+    return d < 0 ? [p[0], p[3], p[2], p[1]] : p;
+  };
+  const pushOutwardTri = (a, b, c) => {
+    const ia = a * STRIDE, ib = b * STRIDE, ic = c * STRIDE;
+    const ux = out[ib] - out[ia], uy = out[ib + 1] - out[ia + 1], uz = out[ib + 2] - out[ia + 2];
+    const vx = out[ic] - out[ia], vy = out[ic + 1] - out[ia + 1], vz = out[ic + 2] - out[ia + 2];
+    const gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx;
+    const nx = out[ia + 3] + out[ib + 3] + out[ic + 3], ny = out[ia + 4] + out[ib + 4] + out[ic + 4], nz = out[ia + 5] + out[ib + 5] + out[ic + 5];
+    if (gx * nx + gy * ny + gz * nz < 0) { const t = b; b = c; c = t; }
+    outIndices[indexCount] = a; outIndices[indexCount + 1] = b; outIndices[indexCount + 2] = c;
+    indexCount += 3;
+  };
   const emitQuad = (s, p, nx, ny, nz, kind, shade) => {
-    const v = pushVertex(s, p[0][0], p[0][1], p[0][2], nx, ny, nz, kind, shade);
-    pushVertex(s, p[1][0], p[1][1], p[1][2], nx, ny, nz, kind, shade);
-    pushVertex(s, p[2][0], p[2][1], p[2][2], nx, ny, nz, kind, shade);
-    pushVertex(s, p[3][0], p[3][1], p[3][2], nx, ny, nz, kind, shade);
+    const q = outwardQuad(p, nx, ny, nz);
+    const v = pushVertex(s, q[0][0], q[0][1], q[0][2], nx, ny, nz, kind, shade);
+    pushVertex(s, q[1][0], q[1][1], q[1][2], nx, ny, nz, kind, shade);
+    pushVertex(s, q[2][0], q[2][1], q[2][2], nx, ny, nz, kind, shade);
+    pushVertex(s, q[3][0], q[3][1], q[3][2], nx, ny, nz, kind, shade);
     pushQuadIndices(v);
-    if (s) for (let i = 0; i < 4; i++) noteBounds(shards[s], p[i][0], p[i][1], p[i][2]);
+    if (s) for (let i = 0; i < 4; i++) noteBounds(shards[s], q[i][0], q[i][1], q[i][2]);
   };
   for (let s = 0; s < geometry.length; s++) {
     if (s % 256 === 0) yield 'mesh';
@@ -702,8 +722,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         }
         return mapped;
       });
-      if (ids.length === 4) { outIndices.set([ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]], indexCount); indexCount += 6; }
-      else { outIndices.set(ids, indexCount); indexCount += 3; }
+      if (ids.length === 4) { pushOutwardTri(ids[0], ids[1], ids[2]); pushOutwardTri(ids[0], ids[2], ids[3]); }
+      else { pushOutwardTri(ids[0], ids[1], ids[2]); }
       if (shard) {
         const at = face.v[0] * STRIDE;
         const size = (face.max[0] - face.min[0]) + (face.max[1] - face.min[1]) + (face.max[2] - face.min[2]);
@@ -712,7 +732,9 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         shard.normalSum[2] += vertices[at + 5] * size;
       }
     }
-    for (const { corners: front, depth } of blocks) {
+    for (const { corners: rawFront, depth } of blocks) {
+      const n = unitOf([rawFront[0][3] + rawFront[2][3], rawFront[0][4] + rawFront[2][4], rawFront[0][5] + rawFront[2][5]]);
+      const front = outwardQuad(rawFront, n[0], n[1], n[2]);
       const rawKind = front[0][6] >= 19.5 ? RAW_STONE_KIND : front[0][6];
       const v = pushVertex(s, front[0][0], front[0][1], front[0][2], front[0][3], front[0][4], front[0][5], front[0][6], front[0][7]);
       for (let i = 1; i < 4; i++) pushVertex(s, front[i][0], front[i][1], front[i][2], front[i][3], front[i][4], front[i][5], front[i][6], front[i][7]);
@@ -720,7 +742,6 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
       if (shard) for (const q of front) noteBounds(shard, q[0], q[1], q[2]);
       if (depth <= 0) continue;
       const back = front.map((q) => [q[0] - q[3] * depth, q[1] - q[4] * depth, q[2] - q[5] * depth]);
-      const n = unitOf([front[0][3] + front[2][3], front[0][4] + front[2][4], front[0][5] + front[2][5]]);
       const shade = Math.min(front[0][7], front[1][7], front[2][7], front[3][7]) * 0.82;
       emitQuad(s, [back[3], back[2], back[1], back[0]], -n[0] * RAW_SURFACE, -n[1] * RAW_SURFACE, -n[2] * RAW_SURFACE, rawKind, shade);
       const midX = (front[0][0] + front[2][0]) * 0.5, midY = (front[0][1] + front[2][1]) * 0.5, midZ = (front[0][2] + front[2][2]) * 0.5;
@@ -728,7 +749,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         const j = (i + 1) % 4, ax = front[i], bx = front[j];
         let side = unitOf(crossOf([bx[0] - ax[0], bx[1] - ax[1], bx[2] - ax[2]], n));
         if (side[0] * (ax[0] - midX) + side[1] * (ax[1] - midY) + side[2] * (ax[2] - midZ) < 0) side = [-side[0], -side[1], -side[2]];
-        emitQuad(s, [[ax[0], ax[1], ax[2]], [bx[0], bx[1], bx[2]], back[j], back[i]], side[0] * RAW_SURFACE, side[1] * RAW_SURFACE, side[2] * RAW_SURFACE, rawKind, shade);
+        emitQuad(s, [[bx[0], bx[1], bx[2]], [ax[0], ax[1], ax[2]], back[i], back[j]], side[0] * RAW_SURFACE, side[1] * RAW_SURFACE, side[2] * RAW_SURFACE, rawKind, shade);
       }
       if (shard) {
         shard.volume += Math.hypot(front[1][0] - front[0][0], front[1][1] - front[0][1], front[1][2] - front[0][2]) * Math.hypot(front[3][0] - front[0][0], front[3][1] - front[0][1], front[3][2] - front[0][2]) * depth;
@@ -925,6 +946,7 @@ function anchorShards(shards, groundAt, floorAt) {
 export function createBuildingFractureState(fracture) {
   const state = createShipFractureState(fracture);
   state.scorch = new Float32Array(fracture.shardCount);
+  state.exposed = new Uint8Array(fracture.shardCount);
   state.scorchDirty = false;
   state.heap = new Map();
   return state;
@@ -974,12 +996,13 @@ function restHeight(fracture, shard, axis, angle) {
   return -lowest;
 }
 
-// A shard that has lost a neighbour shows the faces that were hidden against it. Any scorch above zero makes
-// the pose pass draw them, so a touch of it is enough.
+// A shard that has lost a neighbour shows the faces that were hidden against it. Positive wear in the pose
+// buffer tells continuumShardedPose that this standing shard has an exposed cut side.
 function exposeNeighbours(state, shard) {
   for (const n of shard.links) {
-    if (state.scorch[n] > 0) continue;
-    state.scorch[n] = 1e-3;
+    if (state.exposed[n]) continue;
+    state.exposed[n] = 1;
+    if (state.scorch[n] <= 0) state.scorch[n] = 1e-3;
     state.scorchDirty = true;
   }
 }
@@ -1439,7 +1462,14 @@ function createFracturedContinuum({ device, continuum, grounded = null }) {
     // The frame time at which the block's flight clock read 0 (main.js's looping simTime).
     d[0] = ((entry.state.epoch % SIM_CLOCK_LOOP_S) + SIM_CLOCK_LOOP_S) % SIM_CLOCK_LOOP_S;
   };
-  const copyWear = (entry) => { entry.data.set(entry.state.scorch, wearAt(entry)); entry.state.scorchDirty = false; };
+  const copyWear = (entry) => {
+    const dst = entry.data, at = wearAt(entry), scorch = entry.state.scorch, exposed = entry.state.exposed, broken = entry.state.broken;
+    for (let s = 0; s < entry.shardCount; s++) {
+      const w = scorch[s];
+      dst[at + s] = (exposed?.[s] || broken[s]) ? Math.max(w, 1e-3) : -w;
+    }
+    entry.state.scorchDirty = false;
+  };
   // Every struck building's body in one atlas, every block of flights in one buffer, and one scene that cuts them.
   const lay = (ready) => {
     const U = GPUBufferUsage;

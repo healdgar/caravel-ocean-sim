@@ -55,7 +55,7 @@ import { createWeatherState, createImpactDetector, STORM_WEATHER, WEATHER_TYPES 
 import { createWeatherRenderer, requestWeatherPipelines } from './weather.js';
 import { writeLateenUniform, yardTransferAvailable } from './lateen.js';
 import { packRopeChainUniform } from './rope-wave.js';
-import { createVolumetricClouds } from './clouds.js';
+import { createVolumetricClouds, createVolumetricShafts } from './clouds.js';
 import { createTerrain } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
 import { ISLAND, LANDFALL_VIEWS, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, findHistoricalColonialPort } from './terrain-model.js';
@@ -611,7 +611,7 @@ async function main() {
   // The open sea has no coastal wave code at all. Land brings its own pipeline with it.
   const oceanPipelines=coast=>{
     const label='ocean';
-    const modulePromise=shader(withCachedOceanLighting(withFleetHullCount(createOpticalOcean(coast?COASTAL_WATER:'',OCEAN_DEPTH,true,true),fleetCount)),coast?'coastal ocean':'open ocean');
+    const modulePromise=shader(withCachedOceanLighting(withFleetHullCount(createOpticalOcean(coast?COASTAL_WATER:'',OCEAN_DEPTH,true,true,true),fleetCount)),coast?'coastal ocean':'open ocean');
     const vertex=module=>({module,entryPoint:'vs',buffers:[{arrayStride:16,stepMode:'instance',attributes:[{shaderLocation:0,offset:0,format:'float32x4'}]}]});
     return Promise.all([
       modulePromise.then(module=>device.createRenderPipelineAsync({
@@ -847,10 +847,16 @@ async function main() {
   const bgFoamUpd=[0,1].map(i=>wakeIndices.map(w=>bg(foamUpdPipe,[{buffer:foamUBO},lvl(foamW[1-i],0),lvl(foamW[i],0),
     fullArr(dispTex),fullArr(derivTex),samplerSim,samplerSim,{buffer:wakePool.uniform},wakePool.views[w&1],interaction.sampler,
     null,null,{buffer:surfaceWaves.uniform},surfaceWaves.views[w>>1]],'foamupd'+i)));
+  const clouds = await cloudsPromise;
+  clouds.setSkyPipeline(skyPipe);
+  const bgEnvClouds = clouds.bindVolume(envPipe);
+  const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
+  const volumetricShaftsPromise = createVolumetricShafts({ device, frameUBO, transView, skyView, sampler: sampClamp, clouds, landShadows, shader, computePipe, format: HDR, samples: MSAA });
+  volumetricShaftsPromise.catch(() => {});
   const oceanResources=(i,w)=>[{buffer:frameUBO},transView,skyView,sampClamp,
     fullArr(dispTex),fullArr(derivTex),fullArr(momTex),foamTex.createView(),envCubeView,sampRepeat,
     fullArr(foamW[i]),{buffer:sunVisBuf},{buffer:fleetHullUBO},{buffer:wakePool.uniform},wakePool.views[w&1],interaction.sampler,
-    null,null,{buffer:surfaceWaves.uniform},surfaceWaves.views[w>>1]];
+    null,null,{buffer:surfaceWaves.uniform},surfaceWaves.views[w>>1],{buffer:clouds.uniform},{buffer:clouds.shadowGrid}];
   // Automatic layouts tie bind groups to one pipeline, so each variant of the ocean keeps its own.
   const oceanVariant=([pipe,depthPipe])=>({pipe,depthPipe,shadows:sceneShadows.bindSea(pipe,seaShadows.view),optics:null,
     groups:[0,1].map(i=>wakeIndices.map(w=>device.createBindGroup({label:'ocean'+i,layout:pipe.getBindGroupLayout(0),
@@ -861,12 +867,8 @@ async function main() {
   let coastalOcean=null;
   const bgSky=bg(skyPipe,[{buffer:frameUBO},transView,skyView,sampClamp,{buffer:sunVisBuf},celestial.view],'sky');
   window.oceanStartup?.stage('weather-wildlife','Preparing weather, scenery and wildlife…');
-  const clouds = await cloudsPromise;
-  clouds.setSkyPipeline(skyPipe);
-  const bgEnvClouds = clouds.bindVolume(envPipe);
-  const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
   const weather=createWeatherState();
-  let [terrain,weatherRenderer,,dolphins,gunEffects,gunSea,gunportSafety,hullContactProbe,probePipe]=await Promise.all([
+  let [terrain,weatherRenderer,,dolphins,gunEffects,gunSea,gunportSafety,hullContactProbe,probePipe,volumetricShafts]=await Promise.all([
     terrainPromise,
     weatherRendererPromise,
     anchorsPromise,
@@ -876,6 +878,7 @@ async function main() {
     gunportSafetyPromise,
     hullContactProbePromise,
     probePipePromise,
+    volumetricShaftsPromise,
   ]);
   // Every ball in the air is placed in the prop continuum, and drawn there.
   gunEffects.shot=props.shot;
@@ -6013,6 +6016,12 @@ async function main() {
       const effects=enc.beginRenderPass({colorAttachments:[{view:hdrView,loadOp:'load',storeOp:'store'}],timestampWrites:profiler.writes('Cannon smoke')});
       gunEffects.drawVolumes(effects);effects.end();
     }
+
+    volumetricShafts?.encode(enc,{
+      active:!cameraMediumBand&&P.clouds>0.001&&frameF[33]>0.025&&frameF[115]<0.5,
+      width:W,height:H,depthView:mainPass.depthStencilAttachment.view,hdrView,
+      timestampWrites:profiler.writes('Sun shafts'),
+    });
 
     underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);
     let neuralEncoded=false;
