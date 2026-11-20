@@ -4,7 +4,7 @@
 // the walkers the GPU already walks (js/wgsl/townsfolk.js): a way of samples and twelve words to each person, laid
 // once when a plan arrives. Nothing here runs by the frame. Every walker is a soul of the model: its number, name,
 // age, calling, what it is about and where it lives, so that whoever is seen can be asked after by name.
-import { ROUTE_STEP_M, WALKER_WORDS } from './town-streets.js';
+import { ROUTE_STEP_M, WALKER_WORDS, packRouteHalfWidthSlope } from './town-streets.js';
 import { buildStreetMountSeeds, STREET_MOUNT_FLAG } from './herds.js';
 
 // How long they stay where they went and at home between goings, in seconds, by what they went for.
@@ -71,12 +71,6 @@ function folkWay(route, origin, heightAt, blocked) {
   if (to - from < 2) return { route, samples, fromDoor: false, whole: false, cut: true };
   // Measure real walkable lateral half-width AND cross-street terrain slope so villagers & street mounts
   // stand flush on sloped hillside cobblestones even when offset laterally from the street centerline.
-  const packRouteW = (hw, slope) => {
-    if (Math.abs(slope) < 0.003) return hw;
-    const hwCode = Math.max(0, Math.min(511, Math.round(hw * 100)));
-    const slCode = Math.max(0, Math.min(1000, Math.round((Math.max(-0.5, Math.min(0.5, slope)) + 0.5) * 1000)));
-    return 16 + slCode * 512 + hwCode;
-  };
   const lateralInfoAt = (idx, y0) => {
     if (typeof blocked !== 'function') return FOLK_LANE_M;
     const x = points[idx * 2], z = points[idx * 2 + 1];
@@ -106,7 +100,7 @@ function folkWay(route, origin, heightAt, blocked) {
     const crossSlope = Number.isFinite(yPos) && Number.isFinite(yNeg) && yPos > 0.15 && yNeg > 0.15
       ? (yPos - yNeg) / (2 * probeD)
       : (pos.sampleD + neg.sampleD > 0.2 ? (pos.sampleY - neg.sampleY) / (pos.sampleD + neg.sampleD) : 0);
-    return packRouteW(hw, crossSlope);
+    return packRouteHalfWidthSlope(hw, crossSlope);
   };
   for (let i = from; i <= to; i++) {
     const x = points[i * 2], z = points[i * 2 + 1], y0 = heightAt(x, z);

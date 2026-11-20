@@ -370,8 +370,8 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
   let tintMode=cardParams.z;
   let salt=cardParams.w;
   let maxMip=log2(f32(cellSize));
-  let texelFoot=max(length(dcx),length(dcy))*0.5*f32(cellSize);
-  let mipF=clamp(log2(max(texelFoot,1.0)),0.0,maxMip);
+  let texelFoot=sqrt(max(length(dcx)*length(dcy),1e-12))*0.5*f32(cellSize);
+  let mipF=clamp(log2(max(texelFoot,1e-4))-0.55,0.0,maxMip);
   let ceilMip=min(ceil(mipF),maxMip);
   let halfTexel=min(0.5*exp2(ceilMip)/f32(cellSize),0.5);
   let invGrid=1.0/f32(grid);
@@ -409,20 +409,20 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
     let w0=1.0-select(f.x,f.y,upper);
     let w1=select(f.y,f.x,upper);
     let w2=abs(f.x-f.y);
-    // Far horizon cards (<= 10 px, mipF >= 2.6) sample only the single dominant octahedral view (2 taps vs 6-12).
-    if(mipF>=2.6){
+    // Far horizon cards (<= 10 px, mipF >= 2.4) sample only the single dominant octahedral view (2 taps vs 6-12).
+    if(mipF>=2.4){
       let bestCell=select(select(c2,c1,w1>=w2),c0,w0>=w1&&w0>=w2);
       let tb=continuumCardSampleCell(bestCell,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,false);
       albedo=tb.albedo;alpha=tb.alpha;nLocal=tb.normalLocal;zLocal=tb.zLocal;matFlag=tb.matFlag;
     }else{
-      // Rigid architecture and ships use squared barycentric weights to stay razor-sharp on gables, windows and masts.
+      // Sharpened barycentric weights prevent cross-view ghosting: cubic on rigid gables/masts, quadratic on foliage boughs.
       let sharpRigid=tintMode==${CONTINUUM_CARD_TINT_CITY}u||tintMode==${CONTINUUM_CARD_TINT_VESSEL}u;
-      let rw0=select(w0,w0*w0,sharpRigid);
-      let rw1=select(w1,w1*w1,sharpRigid);
-      let rw2=select(w2,w2*w2,sharpRigid);
+      let rw0=select(w0*w0,w0*w0*w0,sharpRigid);
+      let rw1=select(w1*w1,w1*w1*w1,sharpRigid);
+      let rw2=select(w2*w2,w2*w2*w2,sharpRigid);
       let rwInv=1.0/max(rw0+rw1+rw2,1e-4);
       let bw0=rw0*rwInv;let bw1=rw1*rwInv;let bw2=rw2*rwInv;
-      let doParallax=mipF<1.6;
+      let doParallax=mipF<1.8;
       let t0=continuumCardSampleCell(c0,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
       let t1=continuumCardSampleCell(c1,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
       let t2=continuumCardSampleCell(c2,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);

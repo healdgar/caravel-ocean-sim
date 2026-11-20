@@ -777,7 +777,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       const cardAtlas=await bakeContinuumCardAtlas({
         device,shader,renderer:cardRenderer,atlas,material:view.material,
         typeIds:Array.from({length:P},(_,i)=>i),
-        bakeGroup0Entries:surfaceOwn,cellSize:64,tintMode:CONTINUUM_CARD_TINT_FOREST,salt:3,
+        bakeGroup0Entries:surfaceOwn,cellSize:128,batchSize:1,tintMode:CONTINUUM_CARD_TINT_FOREST,salt:3,
         isCancelled:()=>destroyed,label:'forest cards',
       });
       if(!cardAtlas)return;

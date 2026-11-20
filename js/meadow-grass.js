@@ -20,7 +20,7 @@ import { terrainSurfaceSample } from './terrain-model.js';
 import { CITY_BLOCK_FLOATS, CITY_GROUND } from './old-world-city.js';
 import { INLAND_WATER_FLOATS } from './wgsl/inland-water.js';
 import { LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
-import { streetEdgeAt } from './town-streets.js';
+import { streetEdgeAt, unpackRouteHalfWidthSlope } from './town-streets.js';
 import { MEADOW_PATCH_METRES, MEADOW_MIX_ROLES, MEADOW_CONTINUUM_MATERIAL } from './meadow-continuum.js';
 import {
   MEADOW_MAX_SHOT_WAKES, MEADOW_MAX_BLAST_RINGS, MEADOW_WAKE_BUFFER_BYTES, MEADOW_BLOCK_PATCHES, MEADOW_WORK_HEADER, MEADOW_CONTINUUM_POSE,
@@ -480,10 +480,11 @@ export function buildMeadowCoverMap({
     }
     if (stObj.samples?.length >= 4) {
       const s = stObj.samples;
+      const sampleHw = (raw) => Math.min(8.0, Math.max(1.8, unpackRouteHalfWidthSlope(raw)[0] || 2.2));
       for (let k = 0; k + 3 < s.length; k += 4) {
-        const sx = s[k], sz = s[k + 2], hw = Math.max(1.8, s[k + 3] || 2.2);
+        const sx = s[k], sz = s[k + 2], hw = sampleHw(s[k + 3]);
         if (k + 7 < s.length && Math.hypot(s[k + 4] - sx, s[k + 6] - sz) < 18) {
-          carveTaperedCapsule(sx, sz, hw, s[k + 4], s[k + 6], Math.max(1.8, s[k + 7] || 2.2), 0.95, 2.5, 0);
+          carveTaperedCapsule(sx, sz, hw, s[k + 4], s[k + 6], sampleHw(s[k + 7]), 0.95, 2.5, 0);
         } else {
           carveTaperedCapsule(sx, sz, hw, sx, sz, hw, 0.95, 2.5, 0);
         }

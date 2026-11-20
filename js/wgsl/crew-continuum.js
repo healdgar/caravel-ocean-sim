@@ -268,15 +268,21 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   skinTone=mix(skinTone,skinTone*vec3f(1.08,0.82,0.78),lipMask*0.42);
 
   var baseOut=vec4f(picture,0.0);
-  if(region==3u||region==4u){
-    baseOut=vec4f(skinTone,1.0);
-  }else if(region==0u){
-    // Keep only the true eye opening (sclera, iris, pupil, lash-line); blend surrounding orange eyelids/sockets seamlessly to skin.
+  if(region==3u||region==4u||region==0u){
+    // Preserve true eye opening (dark iris/pupil/lash-line and neutral/bright sclera) across all head regions so
+    // flat-interpolated region tags never paint flesh skin over sclera, irises, or eyelashes, while blending surrounding
+    // eyelid/socket skin seamlessly into actor.skin.
     let eyeY=select(1.659,1.584,female);
-    let eyeRel=vec2f((abs(bodyPos.x)-0.031)/select(0.0155,0.0150,female),(bodyPos.y-eyeY)/select(0.0072,0.0078,female));
+    let eyeRel=vec2f((abs(bodyPos.x)-0.031)/0.0195,(bodyPos.y-eyeY)/0.0145);
+    let inEyeBox=step(0.024,bodyPos.z)*(1.0-smoothstep(0.82,1.22,dot(eyeRel,eyeRel)));
     let rgWarmth=(picture.r-picture.g)/max(picture.r,1e-4);
-    let eyeOpen=step(select(0.055,0.068,female),bodyPos.z)*(1.0-smoothstep(0.75,1.15,dot(eyeRel,eyeRel)))*(1.0-smoothstep(0.24,0.42,rgWarmth));
-    baseOut=vec4f(mix(skinTone,picture,eyeOpen),1.0-eyeOpen);
+    let darkIrisLash=1.0-smoothstep(skinLuma*0.45,skinLuma*0.86,picLuma);
+    let neutralSclera=(1.0-smoothstep(0.24,0.40,rgWarmth))*smoothstep(skinLuma*0.20,skinLuma*0.50,picLuma);
+    let brightSclera=smoothstep(skinLuma*1.12,skinLuma*1.45,picLuma);
+    let eyeOpen=inEyeBox*max(darkIrisLash,max(neutralSclera,brightSclera));
+    // Clamp harsh baked Tripo catchlight spikes to natural linear sclera reflectance so eyes never look like chalky blisters.
+    let eyeCol=min(picture,vec3f(0.26,0.24,0.23));
+    baseOut=vec4f(mix(skinTone,eyeCol,eyeOpen),1.0-eyeOpen);
   }else if(region==1u||region==2u){
     let median=crewWear[min(region,4u)];
     if(median.w>=0.5){

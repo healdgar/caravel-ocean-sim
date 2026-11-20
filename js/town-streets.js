@@ -34,6 +34,19 @@ export const ROAMING_FIELD_SIZE = 1024;
 const FIELD_METRES_PER_TEXEL = 1;
 export const ROUTE_STEP_M = 1.25;
 export const WALKER_WORDS = 12;
+// Pack / unpack (halfWidth, crossSlope) into a route sample's 4th float (backwards-compatible with raw halfWidth < 16).
+export function packRouteHalfWidthSlope(hw, slope) {
+  if (Math.abs(slope) < 0.003) return hw;
+  const hwCode = Math.max(0, Math.min(511, Math.round(hw * 100)));
+  const slCode = Math.max(0, Math.min(1000, Math.round((Math.max(-0.5, Math.min(0.5, slope)) + 0.5) * 1000)));
+  return 16 + slCode * 512 + hwCode;
+}
+export function unpackRouteHalfWidthSlope(raw) {
+  if (!Number.isFinite(raw)) return [0, 0];
+  if (raw < 16) return [raw, 0];
+  const v = Math.round(raw - 16);
+  return [(v & 511) * 0.01, (v >> 9) * 0.001 - 0.5];
+}
 const WALKING_SPEEDS = [1.0, 1.55];
 const INDOOR_SECONDS = [15, 80];
 const PAUSE_SECONDS = 9;
@@ -809,12 +822,6 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       }
       return sum / weight;
     });
-    const packRouteW = (hw, slope) => {
-      if (Math.abs(slope) < 0.003) return hw;
-      const hwCode = Math.max(0, Math.min(511, Math.round(hw * 100)));
-      const slCode = Math.max(0, Math.min(1000, Math.round((Math.max(-0.5, Math.min(0.5, slope)) + 0.5) * 1000)));
-      return 16 + slCode * 512 + hwCode;
-    };
     for (let k = 0; k < line.length; k++) {
       const [x, z] = line[k];
       const c = grid.at(x, z);
@@ -841,7 +848,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
           crossSlope = (yPos - yNeg) / (2 * probeD);
         }
       }
-      routeSamples.push(x, climbed[k], z, packRouteW(laneHalfW, crossSlope));
+      routeSamples.push(x, climbed[k], z, packRouteHalfWidthSlope(laneHalfW, crossSlope));
     }
     return { first, count: line.length, length: (line.length - 1) * ROUTE_STEP_M };
   });

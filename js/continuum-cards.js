@@ -133,7 +133,7 @@ export function bakeContinuumCardAtlas(options) {
 
 async function runContinuumCardBake({
   device, shader, renderer, atlas, words = atlas.words, material, typeIds,
-  bakeGroup0Entries = null, cellSize = 64, tintMode = 0, salt = 0, neutralSpareX = 0,
+  bakeGroup0Entries = null, cellSize = 64, gridSize = CONTINUUM_CARD_GRID, tintMode = 0, salt = 0, neutralSpareX = 0,
   batchSize = 2, isCancelled = null, label = 'continuum cards',
 }) {
   if (!words || !atlas?.pages?.length) throw Error(`Cannot bake ${label}: atlas words/pages missing`);
@@ -157,7 +157,8 @@ async function runContinuumCardBake({
   const bakePipeline = await requestContinuumCardBakePipeline({ device, shader, material, paging });
   if (isCancelled?.()) return null;
 
-  const grid = CONTINUUM_CARD_GRID;
+  const grid = Math.max(2, gridSize | 0);
+  const viewsPerType = grid * grid;
   const atlasDim = grid * cellSize;
   const mipLevels = Math.round(Math.log2(cellSize)) + 1;
   const layerCount = uniqueIds.length;
@@ -172,7 +173,7 @@ async function runContinuumCardBake({
     format: 'rgba8unorm', usage: T.TEXTURE_BINDING | T.STORAGE_BINDING,
   });
 
-  // Reusable single-layer 4x MSAA scratch targets (freed immediately after bake completes).
+  // Reusable single-layer 4x MSAA scratch targets (freed non-blockingly once GPU bake work completes).
   const msaaAlbedo = device.createTexture({ label: `${label} msaa albedo`, size: [atlasDim, atlasDim], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
   const msaaGeo = device.createTexture({ label: `${label} msaa geo`, size: [atlasDim, atlasDim], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
   const msaaDepth = device.createTexture({ label: `${label} msaa depth`, size: [atlasDim, atlasDim], sampleCount: 4, format: 'depth32float', usage: T.RENDER_ATTACHMENT });
@@ -190,7 +191,7 @@ async function runContinuumCardBake({
     return b;
   };
 
-  // Precompute view directions and tangent bases once for the 6x6 biased hemi-octahedral grid.
+  // Precompute view directions and tangent bases once for the grid x grid biased hemi-octahedral grid.
   const viewDirs = [], viewBases = [];
   for (let iy = 0; iy < grid; iy++) {
     for (let ix = 0; ix < grid; ix++) {
@@ -200,10 +201,10 @@ async function runContinuumCardBake({
     }
   }
 
-  // Build 1 neutral ContinuumRecord per baked type and 36 ContinuumCardView structs per type (80 bytes each).
+  // Build 1 neutral ContinuumRecord per baked type and viewsPerType ContinuumCardView structs per type (80 bytes each).
   const recWords = new Uint32Array(layerCount * CONTINUUM_RECORD_WORDS);
   const recFloats = new Float32Array(recWords.buffer);
-  const viewFloats = new Float32Array(layerCount * CONTINUUM_CARD_VIEWS * 20);
+  const viewFloats = new Float32Array(layerCount * viewsPerType * 20);
   const viewU32 = new Uint32Array(viewFloats.buffer);
   const typeClusters = new Array(layerCount);
 
@@ -219,8 +220,8 @@ async function runContinuumCardBake({
     typeClusters[r] = info.clusters;
     const [cx, cy, cz, rawR] = info.sphere;
     const R = Math.max(rawR, 1e-4) * CONTINUUM_CARD_PAD;
-    for (let v = 0; v < CONTINUUM_CARD_VIEWS; v++) {
-      const at = (r * CONTINUUM_CARD_VIEWS + v) * 20;
+    for (let v = 0; v < viewsPerType; v++) {
+      const at = (r * viewsPerType + v) * 20;
       const d = viewDirs[v], { right, up } = viewBases[v];
       viewFloats[at] = cx; viewFloats[at + 1] = cy; viewFloats[at + 2] = cz; viewFloats[at + 3] = R;
       viewFloats[at + 4] = right[0]; viewFloats[at + 5] = right[1]; viewFloats[at + 6] = right[2]; viewFloats[at + 7] = 0;
@@ -254,20 +255,36 @@ async function runContinuumCardBake({
   const dilateLayout = renderer.dilatePipeline.getBindGroupLayout(0);
   const mipLayout = renderer.mipPipeline.getBindGroupLayout(0);
 
-  const destroyScratch = () => {
+  let scratchFreed = false;
+  const destroyScratchNow = () => {
+    if (scratchFreed) return;
+    scratchFreed = true;
     for (const tex of [msaaAlbedo, msaaGeo, msaaDepth, resAlbedo, resGeo]) tex.destroy();
     for (const buf of tempBuffers) buf.destroy();
   };
+  const retireScratch = () => {
+    if (typeof device.queue?.onSubmittedWorkDone === 'function') {
+      device.queue.onSubmittedWorkDone().then(destroyScratchNow, destroyScratchNow);
+    } else {
+      destroyScratchNow();
+    }
+  };
+  const nextFrame = () => new Promise((resolve) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(resolve) : setTimeout(resolve, 0)));
 
+  let submittedAny = false;
   try {
     for (let start = 0; start < layerCount; start += batchSize) {
       if (isCancelled?.()) {
-        destroyScratch(); cardAlbedoTex.destroy(); cardGeoTex.destroy();
+        if (submittedAny && typeof device.queue?.onSubmittedWorkDone === 'function') {
+          device.queue.onSubmittedWorkDone().then(() => { cardAlbedoTex.destroy(); cardGeoTex.destroy(); }, () => {});
+        } else {
+          cardAlbedoTex.destroy(); cardGeoTex.destroy();
+        }
         return null;
       }
       const end = Math.min(layerCount, start + batchSize);
       let batchEntryCount = 0;
-      for (let r = start; r < end; r++) batchEntryCount += typeClusters[r].length * CONTINUUM_CARD_VIEWS;
+      for (let r = start; r < end; r++) batchEntryCount += typeClusters[r].length * viewsPerType;
       if (batchEntryCount === 0) continue;
 
       const entries = new Uint32Array(batchEntryCount * 2);
@@ -276,8 +293,8 @@ async function runContinuumCardBake({
       for (let r = start; r < end; r++) {
         const clusters = typeClusters[r];
         const firstForType = cursor;
-        for (let v = 0; v < CONTINUUM_CARD_VIEWS; v++) {
-          const globalViewIdx = r * CONTINUUM_CARD_VIEWS + v;
+        for (let v = 0; v < viewsPerType; v++) {
+          const globalViewIdx = r * viewsPerType + v;
           for (let c = 0; c < clusters.length; c++) {
             entries[cursor * 2] = globalViewIdx;
             entries[cursor * 2 + 1] = (clusters[c] | (CONTINUUM_CLUSTER_ENTRY << 28)) >>> 0;
@@ -288,6 +305,7 @@ async function runContinuumCardBake({
       }
       const entriesBuf = device.createBuffer({ label: `${label} bake entries`, size: entries.byteLength, usage: B.VERTEX | B.COPY_DST });
       device.queue.writeBuffer(entriesBuf, 0, entries);
+      tempBuffers.push(entriesBuf);
 
       const encoder = device.createCommandEncoder({ label: `${label} bake batch ${start}` });
       for (const { r, first, perView } of offsets) {
@@ -352,15 +370,13 @@ async function runContinuumCardBake({
         cpass.end();
       }
       device.queue.submit([encoder.finish()]);
-      // Wait for this small GPU bake batch to finish before encoding the next batch so Metal/WebGPU never stalls.
-      await device.queue.onSubmittedWorkDone();
-      entriesBuf.destroy();
-      if (end < layerCount) {
-        await new Promise((resolve) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(resolve) : setTimeout(resolve, 0)));
-      }
+      submittedAny = true;
+      // Pace tiny batches across frames WITHOUT blocking GPU-CPU onSubmittedWorkDone flushes (avoids Metal render stalls).
+      if (end < layerCount) await nextFrame();
     }
   } finally {
-    destroyScratch();
+    if (submittedAny) retireScratch();
+    else destroyScratchNow();
   }
 
   if (isCancelled?.()) {
