@@ -4762,11 +4762,14 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
 
   let sunDir = normalize(F.sunDir.xyz);
   let viewDir = normalize(tvEye - in.world);
-  let sunVis = solarShadowVisibility(tradeShadowVis(in.world, n, in.state.z));
+  let tvShadow = tradeShadowVis(in.world, n, in.state.z);
+  let sunVis = solarShadowVisibility(tvShadow);
   let sunRad = sunIlluminance() * sunVis;
   let nDotL = max(dot(n, sunDir), 0.0);
   let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35)));
-  let seaCol = skyAtmo(vec3f(0.0, 0.25, 0.0)) * 0.45 + F.waterCol.rgb * 0.65;
+  let skyZen = skyAtmo(vec3f(0.0, 0.25, 0.0));
+  let seaIrr = skyZen * 0.85 + sunIlluminance() * max(sunDir.y, 0.0) * 0.28 + lunarIlluminance() * max(lunarDirection().y, 0.0) * 0.28;
+  let seaCol = skyZen * 0.45 + F.waterCol.rgb * seaIrr * 0.65;
   let amb = vesselAmbient(n, skyCol, seaCol);
 
   let diffTint = albedo * (1.0 - metal);
@@ -4781,8 +4784,9 @@ fn tvShadeFragment(in: ContinuumVarying, front: bool) -> vec4f {
   let refl = reflect(-viewDir, n);
   let envCol = textureSampleLevel(envCube, sampC, refl, rough * 7.0).rgb;
   let envSpec = envCol * vesselEnvironment(n, viewDir, rough, f0) * select(0.28, 0.85, metal > 0.1 || rough < 0.25);
+  let moonLit = lunarSurface(n, viewDir, diffTint, rough, f0, lunarShadowVisibility(tvShadow));
 
-  let lit = diffTint * amb * 0.82 + direct + spec + envSpec + emitGlow;
+  let lit = diffTint * amb * 0.82 + direct + spec + envSpec + moonLit + emitGlow;
   return vec4f(continuumAir(lit, in.world), 1.0);
 }
 
@@ -4791,19 +4795,23 @@ fn tvFarShade(in: ContinuumVarying, front: bool) -> vec4f {
   let n = normalize(in.normal) * select(select(-1.0, 1.0, front), 1.0, in.coverage.x == CONTINUUM_SPLAT_ENTRY);
   let farSun = normalize(F.sunDir.xyz);
   let farView = normalize(continuumEye() - in.world);
-  let sunRad = sunIlluminance() * solarShadowVisibility(tradeShadowVis(in.world, n, in.state.z));
+  let farShadow = tradeShadowVis(in.world, n, in.state.z);
+  let sunRad = sunIlluminance() * solarShadowVisibility(farShadow);
   let nDotL = max(dot(n, farSun), 0.0);
   // The sun and sky her optical moments say reach what is seen of her: her canvas lets some through.
   let reach = continuumOpticLight(n, farSun, in.optics);
   let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35))) * reach.z;
-  let seaCol = (skyAtmo(vec3f(0.0, 0.25, 0.0)) * 0.45 + F.waterCol.rgb * 0.65) * reach.z;
+  let skyZen = skyAtmo(vec3f(0.0, 0.25, 0.0));
+  let seaIrr = skyZen * 0.85 + sunIlluminance() * max(farSun.y, 0.0) * 0.28 + lunarIlluminance() * max(lunarDirection().y, 0.0) * 0.28;
+  let seaCol = (skyZen * 0.45 + F.waterCol.rgb * seaIrr * 0.65) * reach.z;
   let amb = vesselAmbient(n, skyCol, seaCol);
   let rough = 0.86;
   let f0 = vec3f(0.04);
   let direct = (in.colour / PI) * sunRad * (nDotL * reach.x + reach.y);
   let spec = select(vec3f(0.0), vesselSpecular(n, farView, farSun, rough, f0) * sunRad * nDotL, nDotL > 0.0);
   let envSpec = textureSampleLevel(envCube, sampC, reflect(-farView, n), rough * 7.0).rgb * vesselEnvironment(n, farView, rough, f0) * 0.28;
-  return vec4f(continuumAir(in.colour * amb * 0.82 + direct + spec + envSpec, in.world), 1.0);
+  let moonLit = lunarSurface(n, farView, in.colour, rough, f0, lunarShadowVisibility(farShadow));
+  return vec4f(continuumAir(in.colour * amb * 0.82 + direct + spec + envSpec + moonLit, in.world), 1.0);
 }
 
 // Both shades in uniform control flow (the clusters' samples the oak and takes derivatives), the one drawn chosen.

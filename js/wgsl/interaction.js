@@ -544,7 +544,8 @@ fn sprayLight(p: vec3f) -> vec3f {
   let lip=smoothstep(0.72,0.98,o.uv.y);
   let foam=lip*(0.35+noise*0.45);
   let fresnel=0.04+0.65*pow(clamp(1.0-abs(dot(n,view)),0.0,1.0),5.0);
-  let color=mix(reflected*(0.45+fresnel)+F.waterCol.rgb*0.3,sprayLight(o.world),foam);
+  let sp=sprayLight(o.world);
+  let color=mix(reflected*(0.45+fresnel)+F.waterCol.rgb*sp*0.35,sp,foam);
   let ends=smoothstep(0.0,0.16,o.uv.x)*(1.0-smoothstep(0.84,1.0,o.uv.x));
   let holes=mix(1.0,smoothstep(0.25,0.58,noise),smoothstep(0.3,0.85,o.data.y)*smoothstep(0.3,0.95,o.uv.y));
   let fade=smoothstep(0.0,0.08,o.data.y)*(1.0-smoothstep(0.5,1.0,o.data.y));
