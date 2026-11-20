@@ -69,7 +69,7 @@ export function withFleetHullCount(source,count){
   return source.replace(declaration,'hulls:array<OceanHull,'+count+'>').replaceAll(OCEAN_HULL_MASK,oceanHullMask(count));
 }
 
-function oceanSource(coast='',surfaceWaves=false) { return FOAM_MODEL + HULL_PROFILE + (surfaceWaves?SCENE_WAKE_SAMPLE+surfaceWaveSource(0,18,19):FLEET_WAKE_SAMPLE) + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SCENE_SHADOW_SAMPLE + /* wgsl */ `
+function oceanSource(coast='',surfaceWaves=false,cloudShadows=false) { return FOAM_MODEL + HULL_PROFILE + (surfaceWaves?SCENE_WAKE_SAMPLE+surfaceWaveSource(0,18,19):FLEET_WAKE_SAMPLE) + FRAME_WGSL + ATMO_CORE_WGSL + RENDER_BINDINGS + SCENE_SHADOW_SAMPLE + /* wgsl */ `
 @group(0) @binding(4) var dispTex: texture_2d_array<f32>;
 @group(0) @binding(5) var derivTex: texture_2d_array<f32>;
 @group(0) @binding(6) var momTex: texture_2d_array<f32>;
@@ -243,8 +243,13 @@ ${OCEAN_HULL_MASK}
 
   let sunlight = sunIlluminance() * sunVis[0];
   let surfaceShadow = waterSurfaceShadow(in.rel+F.camPos.xyz);
-  let sunE = sunlight * solarShadowVisibility(surfaceShadow);
-  let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));
+  ${cloudShadows
+    ? `let unoccludedSun = select(sunIlluminance(), sunlight / max(sunVis[0], 1e-4), sunVis[0] > 0.05);
+  let localSun = unoccludedSun * solarShadowVisibility(vec3f(oceanCloudShadowAt(in.rel + F.camPos.xyz))).x;
+  let sunE = localSun * solarShadowVisibility(surfaceShadow);
+  let waterSun = localSun * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));`
+    : `let sunE = sunlight * solarShadowVisibility(surfaceShadow);
+  let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));`}
   let skyUp = textureSampleLevel(envCube, sampC, vec3f(0.0, 1.0, 0.0), ENV_MAXMIP).rgb;
   // average radiance of the whole upper hemisphere (incl. the bright horizon band)
   let skyHemi = skyUp * 0.4 + 0.15 * (
@@ -400,20 +405,11 @@ export function createCoastalOcean(coast,depthFirst){
 export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,cameraProbe=false,cloudShadows=false){
   const transmission=WATER_TRANSMISSION.replace('mix(body,hit.source.rgb,transmission)',
     'mix(body,hit.source.rgb*waterCausticFactorFiltered(waterSourcePosition(hit.uv,hit.source.a),world.y,waterCausticPixelFootprint(waterSourcePosition(hit.uv,hit.source.a))),transmission)');
-  const code=oceanSource(coast,surfaceWaves)+transmission+WATER_AIR_TRANSMISSION
+  const code=oceanSource(coast,surfaceWaves,cloudShadows)+transmission+WATER_AIR_TRANSMISSION
     +waterCausticFunctions({surfaceWaves,seaShadow:true})+UNDERWATER_INTERFACE
     +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'')
     +(cloudShadows?cloudShadowGridWGSL(0,20,21):'');
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
-    .replace(
-      'let sunE = sunlight * solarShadowVisibility(surfaceShadow);\n  let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));',
-      cloudShadows
-        ? `let unoccludedSun = select(sunIlluminance(), sunlight / max(sunVis[0], 1e-4), sunVis[0] > 0.05);
-  let localSun = unoccludedSun * solarShadowVisibility(vec3f(oceanCloudShadowAt(in.rel + F.camPos.xyz))).x;
-  let sunE = localSun * solarShadowVisibility(surfaceShadow);
-  let waterSun = localSun * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));`
-        : 'let sunE = sunlight * solarShadowVisibility(surfaceShadow);\n  let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));'
-    )
     .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,
       `if(${cameraProbe?'cameraSea[9]==cameraSea[9]&&F.camPos.y==F.camPos.y&&F.camPos.y<cameraSea[9]-.005':'optics.w>.5&&optics.z==optics.z&&F.camPos.y==F.camPos.y&&F.camPos.y<optics.z-.005'}){
     return vec4f(underwaterBoundary(in.rel+F.camPos.xyz,nrm,V,skyHemi,foamMask,foamLit),1);
