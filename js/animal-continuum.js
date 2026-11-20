@@ -56,6 +56,14 @@ export const ANIMAL_CONTINUUM_ASSETS = Object.freeze({
   'manifest.json': 'assets/animal-continuum/manifest.json',
   'atlas.bin.gz': 'assets/animal-continuum/atlas.bin.gz',
 });
+// High-resolution Tripo H3.1 livestock basecolor textures (0=sheep, 1=cattle, 2=swine, 3=horse),
+// spelled out literally so build.mjs publishes and versions every file.
+export const LIVESTOCK_TEXTURE_ASSETS = Object.freeze([
+  'assets/animal-continuum/livestock-sheep.jpg',
+  'assets/animal-continuum/livestock-cattle.jpg',
+  'assets/animal-continuum/livestock-swine.jpg',
+  'assets/animal-continuum/livestock-horse.jpg',
+]);
 
 export function validateAnimalContinuumManifest(manifest) {
   if (manifest?.format !== ANIMAL_CONTINUUM_FORMAT || manifest.version !== ANIMAL_CONTINUUM_VERSION) throw Error('Invalid animal continuum manifest: rebake it');

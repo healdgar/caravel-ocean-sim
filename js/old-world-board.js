@@ -1534,6 +1534,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
     // Attach physical sloped approach ramps at BOTH bridge ends whenever the bridge deck stands above the riverbank road,
     // so elevated bridges connect flush into the street regardless of coarse terrain heightfield grid spacing.
+    const ramps = { neg: null, pos: null };
     for (const dir of [-1, 1]) {
       const outX = ux * dir, outZ = uz * dir;
       const ex = x + outX * (length * 0.5), ez = z + outZ * (length * 0.5);
@@ -1548,9 +1549,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         const rx = ex + outX * (rampRun * 0.5 - 0.25), rz = ez + outZ * (rampRun * 0.5 - 0.25);
         pushTyped(rampType, rx, deck, rz, Math.atan2(outX, outZ), 0.5, 0);
         cityIndices.push(typedTypes.length - 1);
+        ramps[dir < 0 ? 'neg' : 'pos'] = { run: rampRun, drop: rampDrop };
       }
     }
-    return { length, cityIndices };
+    return { length, cityIndices, ramps };
   };
   // A track's bridge and road/street crossings: seated above channel flood levels with masonry or timber piers.
   const bridges = [];
@@ -1565,8 +1567,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + (isStone ? 2.45 : 2.05)) : -Infinity;
     const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + 0.42, minNavDeck);
     const width = isStone ? WORKS_BRIDGE.widths[0] : CITY_BUILDING_TYPES[CITY_TYPE.FOOTBRIDGE].width;
-    const { length: totalLen, cityIndices } = layBridge(x, z, ux, uz, span + 4.0, deck, isStone, width);
-    bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices, collapsed: false });
+    const { length: totalLen, cityIndices, ramps } = layBridge(x, z, ux, uz, span + 4.0, deck, isStone, width);
+    bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices, ramps, collapsed: false });
     stampBridgeApproach(x, z, ux, uz, totalLen, width, deck);
   }
   // A road's or arterial street's bridge where it crosses a river: stone, the road's width, bank to bank in arches.
@@ -1582,8 +1584,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + (isStone ? 2.45 : 2.05)) : -Infinity;
     const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise, minNavDeck);
     const bridgeWidth = isStone ? BOARD_ROAD_BRIDGE.width : CITY_BUILDING_TYPES[CITY_TYPE.FOOTBRIDGE].width;
-    const { length, cityIndices } = layBridge(x, z, q.ux, q.uz, reach * 2, deck, isStone, bridgeWidth);
-    bridges.push({ x, z, ux: q.ux, uz: q.uz, length, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone, cityIndices, collapsed: false });
+    const { length, cityIndices, ramps } = layBridge(x, z, q.ux, q.uz, reach * 2, deck, isStone, bridgeWidth);
+    bridges.push({ x, z, ux: q.ux, uz: q.uz, length, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone, cityIndices, ramps, collapsed: false });
     stampBridgeApproach(x, z, q.ux, q.uz, length, bridgeWidth, deck);
     built.roadBridges++;
   }
@@ -2296,17 +2298,19 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       for (const dir of [-1, 1]) {
         const outX = b.ux * dir, outZ = b.uz * dir;
         const ex = b.x + outX * halfLen, ez = b.z + outZ * halfLen;
+        const physRamp = b.ramps?.[dir < 0 ? 'neg' : 'pos'] ?? null;
         const hFar = fieldAt(heights, grid, ex + outX * 14.0, ez + outZ * 14.0);
         const hNear = fieldAt(heights, grid, ex + outX * 2.5, ez + outZ * 2.5);
         const drop = Math.max(0, deckTop - Math.min(hNear, hFar));
-        if (drop < 0.10) continue;
-        const rampLen = Math.max(9.0, Math.min(26.0, 5.5 + drop * 4.6));
+        if (drop < 0.10 && !physRamp) continue;
+        const rampLen = physRamp ? Math.max(physRamp.run + 4.5, 9.0) : Math.max(9.0, Math.min(26.0, 5.5 + drop * 4.6));
         const shoulderW = Math.max(5.0, drop * 2.5 + grid.step * 0.75);
         const pad = rampLen + shoulderW + grid.step;
         const i0 = Math.max(1, Math.floor((ex - pad - grid.x0) / grid.step));
         const i1 = Math.min(n - 2, Math.ceil((ex + pad - grid.x0) / grid.step));
         const j0 = Math.max(1, Math.floor((ez - pad - grid.z0) / grid.step));
         const j1 = Math.min(n - 2, Math.ceil((ez + pad - grid.z0) / grid.step));
+        const deckSurfTop = b.deckY + (b.isStone ? 0.10 : 0.06);
         for (let j = j0; j <= j1; j++) {
           const gz = grid.z0 + j * grid.step;
           for (let i = i0; i <= i1; i++) {
@@ -2318,8 +2322,22 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
             if (wet[k] && s < 0.6) continue;
             const lat = Math.abs(-(gx - ex) * outZ + (gz - ez) * outX);
             if (lat > roadHalfW + shoulderW) continue;
-            // Smooth S-curve along the ramp from full bridge deck height at s<=1.0 down to natural ground at s=rampLen
-            const uLong = Math.max(0, Math.min(1, (s - 1.0) / Math.max(1.0, rampLen - 1.0)));
+            // When a physical timber/stone approach ramp is attached, follow its exact sloped plane minus 0.16 m
+            // so earthen embankment seats flush at the bottom sill without poking dirt up through wooden planks.
+            let targetH = deckTop;
+            if (physRamp) {
+              const tRamp = Math.max(0, Math.min(1.0, (s + 0.25) / Math.max(0.5, physRamp.run)));
+              const rampDeckY = deckSurfTop - tRamp * physRamp.drop;
+              targetH = rampDeckY - (s < physRamp.run - 0.65 ? 0.18 : 0.04);
+              // Also clamp pre-existing hillside terrain strictly below the wooden/stone ramp planks so dirt never clips through!
+              if (s >= -0.5 && s <= physRamp.run - 0.45 && lat <= (b.halfWidth || 1.6) + 0.45 && heights[k] > rampDeckY - 0.14) {
+                heights[k] = rampDeckY - 0.14;
+              }
+            }
+            // Smooth S-curve along the ramp from bridge abutment/sill down to natural ground at s=rampLen
+            const uLong = physRamp
+              ? Math.max(0, Math.min(1, (s - Math.max(0.5, physRamp.run - 0.5)) / Math.max(1.5, rampLen - physRamp.run + 0.5)))
+              : Math.max(0, Math.min(1, (s - 1.0) / Math.max(1.0, rampLen - 1.0)));
             const wLong = 1 - uLong * uLong * (3 - 2 * uLong);
             const uLat = lat <= roadHalfW ? 0 : Math.min(1, (lat - roadHalfW) / Math.max(1.0, shoulderW));
             const wLat = 1 - uLat * uLat * (3 - 2 * uLat);
@@ -2328,7 +2346,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
             const w = wLong * wLat * wNose;
             if (w <= 1e-4) continue;
             const baseH = heights[k];
-            const raised = baseH + Math.max(0, deckTop - baseH) * w;
+            const raised = baseH + Math.max(0, targetH - baseH) * w;
             if (raised > heights[k]) heights[k] = raised;
           }
         }
@@ -2620,18 +2638,94 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         const froude = localSpeed / Math.sqrt(9.81 * Math.max(0.18, localDepth));
         const riffle = isCanal ? 0 : Math.min(1.48, Math.max(0, (froude - 0.16) * 1.35 + Math.max(0, slope - 0.008) * 18.0)) * (1 - seaOpen);
 
+        const wxV = cur.wx + nx * span;
+        const wzV = cur.wz + nz * span;
+        let effY = cur.wy + yOff;
+        let effDepth = localDepth;
+        let effBt = bt;
+        let effVx = vx;
+        let effVz = vz;
+        let effEddy = eddy;
+        // Seamless river-confluence blending: where this ribbon overlaps another river reach, clear the false bank
+        // edge/shallow brown strip, unify channel depth & flow, and yield the narrower tributary gently beneath the
+        // mainstem interior so overlapping water meshes never Z-fight or cut a brown shore seam across the confluence!
+        const confBucket = reachSegGrid.get(`${Math.floor(wxV / SEG_CELL)},${Math.floor(wzV / SEG_CELL)}`);
+        if (confBucket) {
+          let maxInOther = 0;
+          let maxYield = 0;
+          let bestOtherDepth = 0;
+          let bestOtherWy = effY;
+          let bestOtherVx = vx;
+          let bestOtherVz = vz;
+          let yieldDominant = false;
+          for (let k = 0; k < confBucket.length; k++) {
+            const seg = confBucket[k];
+            if (seg.oIdx === cIdx) continue;
+            const { a, b, abx, abz, ab2, maxR } = seg;
+            const tSeg = Math.max(0, Math.min(1, ((wxV - a.wx) * abx + (wzV - a.wz) * abz) / ab2));
+            const cx = a.wx + abx * tSeg, cz = a.wz + abz * tSeg;
+            const d = Math.hypot(wxV - cx, wzV - cz);
+            if (d >= maxR) continue;
+            const snx = a.nx + (b.nx - a.nx) * tSeg, snz = a.nz + (b.nz - a.nz) * tSeg;
+            const signedCross = (wxV - cx) * snx + (wzV - cz) * snz;
+            const hwLOther = (a.hwL ?? a.hw) + ((b.hwL ?? b.hw) - (a.hwL ?? a.hw)) * tSeg;
+            const hwROther = (a.hwR ?? a.hw) + ((b.hwR ?? b.hw) - (a.hwR ?? a.hw)) * tSeg;
+            const otherHwSide = signedCross < 0 ? hwLOther : hwROther;
+            const outerR = otherHwSide + 1.5;
+            if (d >= outerR) continue;
+            const innerR = Math.max(0.25, otherHwSide * 0.42);
+            const uIn = Math.max(0, Math.min(1, (outerR - d) / Math.max(0.4, outerR - innerR)));
+            const inOther = uIn * uIn * (3 - 2 * uIn);
+            if (inOther > maxInOther) {
+              maxInOther = inOther;
+              const otherDepth = a.depth + (b.depth - a.depth) * tSeg;
+              const otherWy = a.wy + (b.wy - a.wy) * tSeg;
+              const otherSpd = (a.speedCenter ?? 0.9) + ((b.speedCenter ?? 0.9) - (a.speedCenter ?? 0.9)) * tSeg;
+              const oTx = a.tx + (b.tx - a.tx) * tSeg, oTz = a.tz + (b.tz - a.tz) * tSeg;
+              const oTLen = Math.hypot(oTx, oTz) || 1;
+              bestOtherDepth = Math.max(bestOtherDepth, otherDepth);
+              bestOtherWy = otherWy;
+              bestOtherVx = (oTx / oTLen) * otherSpd * 0.85;
+              bestOtherVz = (oTz / oTLen) * otherSpd * 0.85;
+              const otherChain = reachChains[seg.oIdx];
+              const otherHwMean = 0.5 * (hwLOther + hwROther);
+              const isSubordinate = chain?.mouthJoin?.otherIdx === seg.oIdx
+                || (otherChain?.mouthJoin?.otherIdx !== cIdx && (hwMean < otherHwMean - 0.12 || (Math.abs(hwMean - otherHwMean) <= 0.12 && cIdx > seg.oIdx)));
+              yieldDominant = isSubordinate;
+              if (isSubordinate) {
+                const yOuter = otherHwSide * 0.96;
+                const yInner = otherHwSide * 0.56;
+                const uY = Math.max(0, Math.min(1, (yOuter - d) / Math.max(0.35, yOuter - yInner)));
+                maxYield = Math.max(maxYield, uY * uY * (3 - 2 * uY));
+              }
+            }
+          }
+          if (maxInOther > 0.001) {
+            effBt = bt * (1 - maxInOther);
+            effDepth = Math.max(localDepth, bestOtherDepth * (0.35 + 0.65 * maxInOther));
+            const cleanY = cur.wy + yOff * (1 - maxInOther);
+            effY = yieldDominant
+              ? cleanY * (1 - maxInOther) + bestOtherWy * maxInOther - 0.032 * maxYield
+              : Math.max(cleanY, bestOtherWy * maxInOther + cleanY * (1 - maxInOther));
+            const flowMix = yieldDominant ? maxInOther * 0.80 : maxInOther * 0.30;
+            effVx = vx + (bestOtherVx - vx) * flowMix;
+            effVz = vz + (bestOtherVz - vz) * flowMix;
+            effEddy = Math.min(1, effEddy * (1 - 0.55 * maxInOther));
+          }
+        }
+
         return pushWaterVert(
-          cur.wx + nx * span,
-          cur.wy + yOff,
-          cur.wz + nz * span,
+          wxV,
+          effY,
+          wzV,
           vertKind,
-          vx, vz,
+          effVx, effVz,
           cur.alongS ?? i * 2.5,
           hwMean,
-          localDepth,
-          bt,
+          effDepth,
+          effBt,
           thal,
-          eddy,
+          effEddy,
           riffle,
         );
       });

@@ -587,29 +587,75 @@ fn meadowShadowVis(world: vec3f, normal: vec3f) -> vec3f {
   let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, uv, refZ);
   return mix(vec3f(1.0), s * landClothShadow(uv, refZ), fade);
 }
-fn meadowTendrilCloud(bentXZ: vec2f, camDist: f32, windDir: vec2f, gust: f32) -> vec2f {
-  let pixel = camDist * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0);
-  let wTuft = 1.0 - smoothstep(0.035, 0.110, pixel);
-  if (wTuft <= 0.001) { return vec2f(0.5, 0.0); }
-  let acrossDir = vec2f(-windDir.y, windDir.x);
-  let dA = windDir * 0.961 + acrossDir * 0.276;
-  let sA = vec2f(-dA.y, dA.x);
-  let dB = windDir * 0.946 - acrossDir * 0.325;
-  let sB = vec2f(-dB.y, dB.x);
-  let uA = dot(bentXZ, dA);
-  let vA = dot(bentXZ, sA);
-  let uB = dot(bentXZ, dB);
-  let vB = dot(bentXZ, sB);
-  let envA = 0.5 + 0.5 * sin(uA * 3.15 + sin(vA * 2.45) * 1.45 - F.camPos.w * 1.05);
-  let envB = 0.5 + 0.5 * cos(uB * 2.75 - cos(vB * 2.95) * 1.35 - F.camPos.w * 0.88);
-  let wispA = sin(vA * 12.4 + sin(uA * 2.25) * 1.25) * envA;
-  let wispB = sin(vB * 16.8 - cos(uB * 2.85) * 1.15) * envB;
-  let slopeA = cos(vA * 12.4 + sin(uA * 2.25) * 1.25) * envA;
-  let slopeB = cos(vB * 16.8 - cos(uB * 2.85) * 1.15) * envB;
-  let signal = (wispA * 0.54 + wispB * 0.46) * wTuft;
-  let density = clamp(0.5 + signal * 0.26 + (gust - 0.5) * 0.05 * wTuft, 0.0, 1.0);
-  let crossTilt = (slopeA * 0.42 + slopeB * 0.36) * wTuft;
-  return vec2f(density, crossTilt);
+// Aperiodic isotropic hash-lattice value noise (zero sine stripes, zero checkerboard grids) for organic grass tussocks.
+fn meadowOrganicNoise(p: vec2f) -> f32 {
+  let i = vec2i(floor(p));
+  let f = p - floor(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  let a = f32(meadowHash2(i) & 65535u);
+  let b = f32(meadowHash2(i + vec2i(1, 0)) & 65535u);
+  let c = f32(meadowHash2(i + vec2i(0, 1)) & 65535u);
+  let d = f32(meadowHash2(i + vec2i(1, 1)) & 65535u);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y) * (2.0 / 65535.0) - 1.0;
+}
+
+// Multi-scale screen-footprint-filtered organic grass tuft, tussock & panicle detail field
+// (vec4f: density, crossTilt, oatCrest, clumpShadow). Every octave uses aperiodic rotated hash-lattice noise
+// band-limited strictly before Nyquist so grass detail continues organically across CLUSTER -> FAR -> SPLAT
+// all the way to the horizon with ZERO stripes, ZERO checkerboards, ZERO shimmer, and ZERO abrupt dropoff.
+fn meadowSwardDetail(bentXZ: vec2f, pixel: f32, windDir: vec2f, gust: f32) -> vec4f {
+  // Band 1: ~0.42 m crisp blade tufts & individual seed-head specks (near -> ~190 m)
+  let wFine = 1.0 - smoothstep(0.08, 0.28, pixel);
+  // Band 2: ~1.45 m organic meadow tussock clumps & golden-oat panicle clusters (near -> ~700 m)
+  let wMid = 1.0 - smoothstep(0.32, 1.25, pixel);
+  // Band 3: ~4.8 m irregular pasture turf patches & soil/sward mottling (mid -> horizon)
+  let wBroad = 1.0 - smoothstep(1.40, 5.20, pixel);
+
+  var sig = 0.0;
+  var tilt = 0.0;
+  var oat = 0.0;
+  var shadow = 0.0;
+
+  if (wFine > 0.001) {
+    // Rotated aperiodic dual-scale blade-clump grain (2.4 m^-1 and 4.6 m^-1)
+    let q0 = vec2f(bentXZ.x * 0.866 - bentXZ.y * 0.500, bentXZ.x * 0.500 + bentXZ.y * 0.866) * 2.35;
+    let q1 = vec2f(bentXZ.x * 0.342 + bentXZ.y * 0.940, -bentXZ.x * 0.940 + bentXZ.y * 0.342) * 4.55 + vec2f(19.3, -11.7);
+    let n0 = meadowOrganicNoise(q0);
+    let n1 = meadowOrganicNoise(q1);
+    let fSig = n0 * 0.58 + n1 * 0.42;
+    let fSlope = meadowOrganicNoise(q0 + vec2f(0.35, 0.0)) - n0;
+    sig += fSig * 0.82 * wFine;
+    tilt += fSlope * 0.72 * wFine;
+    oat += smoothstep(0.18, 0.72, fSig) * 0.56 * wFine;
+    shadow += (1.0 - smoothstep(-0.68, 0.05, fSig)) * 0.46 * wFine;
+  }
+
+  if (wMid > 0.001) {
+    // Rotated organic tussock clumps (0.72 m^-1 and 1.38 m^-1)
+    let r0 = vec2f(bentXZ.x * 0.643 - bentXZ.y * 0.766, bentXZ.x * 0.766 + bentXZ.y * 0.643) * 0.72 + vec2f(-31.4, 17.8);
+    let r1 = vec2f(bentXZ.x * 0.966 + bentXZ.y * 0.259, -bentXZ.x * 0.259 + bentXZ.y * 0.966) * 1.38 + vec2f(47.1, 29.2);
+    let m0 = meadowOrganicNoise(r0);
+    let m1 = meadowOrganicNoise(r1);
+    let mSig = m0 * 0.55 + m1 * 0.45;
+    let mSlope = meadowOrganicNoise(r1 + vec2f(0.35, 0.0)) - m1;
+    sig += mSig * 0.65 * wMid;
+    tilt += mSlope * 0.48 * wMid;
+    oat += smoothstep(0.16, 0.68, mSig) * 0.48 * wMid;
+    shadow += (1.0 - smoothstep(-0.64, 0.08, mSig)) * 0.38 * wMid;
+  }
+
+  if (wBroad > 0.001) {
+    // Broad natural meadow pasture mottling (0.21 m^-1 and 0.41 m^-1)
+    let s0 = vec2f(bentXZ.x * 0.788 + bentXZ.y * 0.616, -bentXZ.x * 0.616 + bentXZ.y * 0.788) * 0.21 + vec2f(13.7, -42.9);
+    let s1 = vec2f(bentXZ.x * 0.259 - bentXZ.y * 0.966, bentXZ.x * 0.966 + bentXZ.y * 0.259) * 0.41 + vec2f(-53.2, -18.6);
+    let bSig = meadowOrganicNoise(s0) * 0.60 + meadowOrganicNoise(s1) * 0.40;
+    sig += bSig * 0.42 * wBroad;
+    oat += smoothstep(0.15, 0.65, bSig) * 0.30 * wBroad;
+    shadow += (1.0 - smoothstep(-0.60, 0.12, bSig)) * 0.24 * wBroad;
+  }
+
+  let density = clamp(0.5 + sig * 0.28 + (gust - 0.5) * 0.05 * max(wFine, wMid), 0.0, 1.0);
+  return vec4f(density, clamp(tilt, -0.75, 0.75), clamp(oat, 0.0, 1.0), clamp(shadow, 0.0, 1.0));
 }
 `;
 
@@ -743,14 +789,25 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let unshiftedWorldXZ = v.world.xz;
   let fCov = meadowCoverAt(unshiftedWorldXZ);
   let marginFade = smoothstep(0.06, 0.55, fCov.r);
-  // A body or splat is as much sward as its sward hides of the ground from here; the rest is the ground's own colour.
-  let swardWeight = select(clamp(0.55 + 0.45 * smoothstep(0.06, 0.55, fCov.r), 0.0, 1.0), marginFade * clamp(v.blade.w, 0.0, 1.0), isContinuum);
+  // Screen-space world footprint (band-limits multi-scale tussock/panicle detail cleanly to the horizon with zero flicker).
+  let dxW = dpdx(unshiftedWorldXZ);
+  let dyW = dpdy(unshiftedWorldXZ);
+  let footPixel = max(max(length(dxW), length(dyW)), v.flow.z * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0));
+  let sd = meadowSwardDetail(unshiftedWorldXZ, footPixel, windDir, gust);
+
+  // A body or splat is as much sward as its sward hides of the ground from here, boosted cleanly so far-continuum
+  // patches match near 3D cluster density & contrast across the MSAA handoff without flattening into bare ground.
+  let farHides = clamp(v.blade.w * 1.24 + 0.14 * marginFade, 0.0, 1.0);
+  let swardWeight = select(clamp(0.55 + 0.45 * marginFade, 0.0, 1.0), marginFade * farHides, isContinuum);
+  // On collapsed far bodies & splats, modulate effective stalk height with band-limited tussock & panicle structure
+  // so sunlit golden-oat crests and inter-clump root AO continue seamlessly across the entire landscape.
+  let effAlong = select(along, clamp(along + (sd.x - 0.5) * 0.62 + sd.z * 0.28 - sd.w * 0.34, 0.08, 0.96), isContinuum);
 
   // Natural Iberian Meadow Albedo (ZERO 62% brown dirt washout!):
   //   - World-space moisture & lushness patches blend smoothly between lush emerald pasture,
   //     Mediterranean olive-sage fescue, and sun-warmed straw.
-  //   - Root base (along < 0.18) grounds gently with 20% warm soil/thatch tint + physical root AO (0.42 -> 1.0).
-  //   - Tall culm seed-heads (along > 0.78) warm toward sunlit golden oat!
+  //   - Root base (effAlong < 0.18) grounds gently with 20% warm soil/thatch tint + physical root AO (0.42 -> 1.0).
+  //   - Tall culm seed-heads (effAlong > 0.76) warm toward sunlit golden oat!
   let groundCol = meadowGroundColour(unshiftedWorldXZ);
   let mWarp = vec2f(sin(unshiftedWorldXZ.y * 0.042 + 1.7), cos(unshiftedWorldXZ.x * 0.038 - 0.9)) * 4.5;
   let mp = unshiftedWorldXZ + mWarp;
@@ -777,15 +834,15 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   );
   let tussockLum = clamp(v.colour.g / 0.142, 0.72, 1.28);
   var grassPigment = mix(v.colour * 1.06, patchGreen * tussockLum, 0.44);
-  // Warm tall culm seed-heads (along > 0.78) toward sunlit golden oat
-  let oatHeadT = smoothstep(0.76, 0.94, along);
+  // Warm tall culm seed-heads & distant tussock panicle crests toward sunlit golden oat
+  let oatHeadT = select(smoothstep(0.76, 0.94, along), clamp(smoothstep(0.72, 0.92, effAlong) * 0.70 + sd.z * 0.42, 0.0, 0.78), isContinuum);
   grassPigment = mix(grassPigment, goldenOatTip, oatHeadT * 0.82);
-  // Gentle 20% warm soil/thatch root grounding on along < 0.18
+  // Gentle 20% warm soil/thatch root grounding on effAlong < 0.18
   let warmSoil = mix(groundCol, vec3f(0.072, 0.066, 0.034), 0.45);
-  grassPigment = mix(grassPigment, warmSoil, 0.20 * (1.0 - smoothstep(0.0, 0.18, along)));
+  grassPigment = mix(grassPigment, warmSoil, 0.20 * (1.0 - smoothstep(0.0, 0.18, effAlong)));
 
   let organCol = mix(grassPigment, v.colour * 1.06, isFlower);
-  let ao = mix(0.42, 1.0, smoothstep(0.0, 0.55, along));
+  let ao = mix(0.42, 1.0, smoothstep(0.0, 0.55, effAlong)) * select(1.0, 1.0 - sd.w * 0.28, isContinuum);
   let shadedBladeCol = organCol * mix(1.0, ao, swardWeight * 0.75);
   var baseCol = mix(groundCol, shadedBladeCol, select(1.0, swardWeight, isContinuum));
 
@@ -813,17 +870,21 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
     baseCol = mix(baseCol, emberSoot, hotSinge * 0.88);
   }
 
-  let tf = meadowTendrilCloud(v.flow.xy, v.flow.z, windDir, gust);
-  var n = normalize(v.normal + vec3f(acrossDir.x * tf.y * 0.18, 0.03, acrossDir.y * tf.y * 0.18) * swardWeight);
+  let tf = sd.xy;
+  var n = normalize(v.normal + vec3f(acrossDir.x * tf.y * select(0.18, 0.28, isContinuum), 0.03, acrossDir.y * tf.y * select(0.18, 0.28, isContinuum)) * swardWeight);
   if (!frontFacing) { n = normalize(vec3f(-n.x * 0.55, abs(n.y), -n.z * 0.55)); }
 
   // Shimmering wind-ripple contrast across gust crests & upright lulls
   let crest = smoothstep(-0.38, 0.65, swell);
-  let tendrilHighlight = mix(1.0, mix(0.92, 1.09, tf.x), swardWeight);
+  let tendrilHighlight = mix(1.0, mix(select(0.92, 0.84, isContinuum), select(1.09, 1.15, isContinuum), tf.x), swardWeight);
   let windTone = mix(
     vec3f(1.0),
-    mix(vec3f(0.90, 0.94, 0.88), vec3f(1.14, 1.15, 1.02), crest),
-    swardWeight * (0.30 + 0.70 * along),
+    mix(
+      select(vec3f(0.90, 0.94, 0.88), vec3f(0.95, 0.97, 0.94), isContinuum),
+      select(vec3f(1.14, 1.15, 1.02), vec3f(1.07, 1.08, 1.01), isContinuum),
+      crest,
+    ),
+    swardWeight * (0.30 + 0.70 * effAlong),
   );
   let albedo = clamp(baseCol * tendrilHighlight * windTone, vec3f(0.0), vec3f(0.36));
 

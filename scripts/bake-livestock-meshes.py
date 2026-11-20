@@ -28,6 +28,7 @@ from mathutils import Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_BIN = os.path.join(ROOT, "assets", "wildlife", "livestock-1550.bin")
+OUT_TEX_DIR = os.path.join(ROOT, "assets", "animal-continuum")
 
 # Coordinate convention exported to Waterworld:
 #   X = right, Y = up (0 at ground), Z = forward (+Z is nose/poll, -Z is rump/tail).
@@ -226,24 +227,47 @@ def extract_part_records(bm, part_code, coat_fn):
     bm.verts.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
     bm.normal_update()
+    uv_layer = bm.loops.layers.uv.active
     verts = []
-    for i, v in enumerate(bm.verts):
-        p = v.co
-        n = v.normal.normalized() if v.normal.length > 1e-6 else Vector((0, 1, 0))
-        part_val = part_code(p) if callable(part_code) else float(part_code)
-        coat_val = coat_fn(i, p, n)
-        verts.append((p.x, p.y, p.z, n.x, n.y, n.z, part_val, coat_val))
     indices = []
+    # Keep smooth vertex normals across UV seams while splitting vertices ONLY where adjacent
+    # face loops carry distinct (u, v) coordinates so texture mapping is 100% crack-free.
+    vert_map = {}
+
+    def get_corner(loop):
+        v = loop.vert
+        if uv_layer is not None:
+            uv = loop[uv_layer].uv
+            u_gpu = max(0.0, min(1.0, float(uv.x) % 1.0 if float(uv.x) < 0.0 or float(uv.x) > 1.0 else float(uv.x)))
+            v_bl = max(0.0, min(1.0, float(uv.y) % 1.0 if float(uv.y) < 0.0 or float(uv.y) > 1.0 else float(uv.y)))
+            v_gpu = 1.0 - v_bl
+            key = (v.index, int(round(u_gpu * 4095.0)), int(round(v_gpu * 4095.0)))
+        else:
+            u_gpu, v_gpu = 0.0, 0.0
+            key = (v.index, 0, 0)
+        idx = vert_map.get(key)
+        if idx is None:
+            p = v.co
+            n = v.normal.normalized() if v.normal.length > 1e-6 else Vector((0, 1, 0))
+            part_val = part_code(p) if callable(part_code) else float(part_code)
+            coat_val = coat_fn(v.index, p, n)
+            idx = len(verts)
+            verts.append((p.x, p.y, p.z, n.x, n.y, n.z, part_val, coat_val, u_gpu, v_gpu))
+            vert_map[key] = idx
+        return idx
+
     for f in bm.faces:
-        v0, v1, v2 = f.verts[0], f.verts[1], f.verts[2]
+        l0, l1, l2 = f.loops[0], f.loops[1], f.loops[2]
+        v0, v1, v2 = l0.vert, l1.vert, l2.vert
         fn = (v1.co - v0.co).cross(v2.co - v0.co)
         avg_n = v0.normal + v1.normal + v2.normal
         if avg_n.length < 1e-6:
             avg_n = fn
+        i0, i1, i2 = get_corner(l0), get_corner(l1), get_corner(l2)
         if fn.dot(avg_n) < 0:
-            indices.extend([v0.index, v2.index, v1.index])
+            indices.extend([i0, i2, i1])
         else:
-            indices.extend([v0.index, v1.index, v2.index])
+            indices.extend([i0, i1, i2])
     return verts, indices
 
 
@@ -395,9 +419,32 @@ def sample_4k_texture_to_point_attribute(me):
     return True
 
 
+def export_tripo_basecolor(species_name, tex_size=1024):
+    """Exports the embedded Tripo basecolor image resized to tex_size x tex_size JPEG for GPU texture_2d_array."""
+    imgs = [im for im in bpy.data.images if im.size[0] >= 256 and im.size[1] >= 256]
+    if not imgs:
+        return None
+    img = next((im for im in imgs if "basecolor" in im.name.lower() or "color" in im.name.lower()), imgs[0])
+    os.makedirs(OUT_TEX_DIR, exist_ok=True)
+    out_path = os.path.join(OUT_TEX_DIR, f"livestock-{species_name}.jpg")
+    dup = img.copy()
+    try:
+        dup.scale(tex_size, tex_size)
+        scene = bpy.context.scene
+        scene.render.image_settings.file_format = "JPEG"
+        scene.render.image_settings.color_mode = "RGB"
+        scene.render.image_settings.quality = 92
+        dup.save_render(out_path, scene=scene)
+        print(f"[tripo] Saved {tex_size}x{tex_size} basecolor texture: {out_path} ({os.path.getsize(out_path)/1024:.1f} KB)")
+    finally:
+        bpy.data.images.remove(dup)
+    return out_path
+
+
 def import_tripo_quadruped(glb_path, spec_meta):
-    """Imports a Tripo H3.1 4K GLB, strips twin sheep if needed, samples 4K basecolor to POINT colors,
-    welds UV seams into a crack-free watertight manifold, decimates to target_faces, and aligns/grounds.
+    """Imports a Tripo H3.1 4K GLB, strips twin sheep if needed, exports 1024x1024 basecolor JPEG,
+    samples 4K basecolor to POINT colors (for far-body/splat fallback), welds UV-seam duplicates while
+    preserving loop UVs, decimates with UV-seam delimiting to target_faces, and aligns/grounds.
     Returns (bm, vert_linear_rgb_list).
     """
     clear_scene()
@@ -414,6 +461,9 @@ def import_tripo_quadruped(glb_path, spec_meta):
     obj = bpy.context.view_layer.objects.active
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
+    # Export 1024x1024 high-res Tripo basecolor JPEG before any mesh edits
+    export_tripo_basecolor(spec_meta["name"], tex_size=1024)
+
     # 1. Single Merino sheep extraction: strip twin sheep at X > 0.0 immediately after transform_apply!
     if spec_meta["name"] == "sheep":
         bm_strip = bmesh.new()
@@ -426,22 +476,23 @@ def import_tripo_quadruped(glb_path, spec_meta):
             obj.data.update()
         bm_strip.free()
 
-    # 2. Sample 4096x4096 basecolor onto per-vertex POINT FLOAT_COLOR BEFORE welding UV seams!
+    # 2. Sample 4096x4096 basecolor onto per-vertex POINT FLOAT_COLOR for far-body & splat colour parity,
+    #    while KEEPING obj.data.uv_layers intact for crisp GPU texture mapping!
     has_tex = sample_4k_texture_to_point_attribute(obj.data)
-    while obj.data.uv_layers:
-        obj.data.uv_layers.remove(obj.data.uv_layers[0])
 
-    # 3. Weld UV-seam duplicate vertices BEFORE decimation so DECIMATE operates on a single crack-free manifold!
+    # 3. Weld coincident UV-seam vertices (Blender WELD preserves per-loop UV coordinates!),
+    #    then decimate with UV delimiting so UV seams and texture islands stay 100% undistorted!
     weld = obj.modifiers.new(name="WeldUVSeams", type="WELD")
     weld.merge_threshold = 0.00015
     bpy.ops.object.modifier_apply(modifier=weld.name)
 
-    target_faces = spec_meta.get("targetFaces", 3400)
+    target_faces = spec_meta.get("targetFaces", 12000)
     if len(obj.data.polygons) > target_faces:
         dec = obj.modifiers.new(name="TripoDec", type="DECIMATE")
         dec.decimate_type = "COLLAPSE"
         dec.ratio = float(target_faces) / float(len(obj.data.polygons))
         dec.use_collapse_triangulate = True
+        dec.delimit = {"UV"}
         bpy.ops.object.modifier_apply(modifier=dec.name)
 
     # Read mesh + baked vertex linear RGB colors into BMesh
@@ -526,7 +577,7 @@ def import_tripo_quadruped(glb_path, spec_meta):
 
 
 def build_sheep(tripo_dir):
-    meta = {"name": "sheep", "neckPivot": (0.0, 0.56, 0.28), "legY": 0.36, "frontZ": 0.26, "backZ": -0.30, "height": 0.82, "targetFaces": 3400}
+    meta = {"name": "sheep", "neckPivot": (0.0, 0.56, 0.28), "legY": 0.36, "frontZ": 0.26, "backZ": -0.30, "height": 0.82, "targetFaces": 12000}
     glb = find_tripo_glb(tripo_dir, "sheep")
     vert_rgb = None
     if glb:
@@ -579,7 +630,7 @@ def build_sheep(tripo_dir):
 
 
 def build_cattle(tripo_dir):
-    meta = {"name": "cattle", "neckPivot": (0.0, 1.06, 0.62), "legY": 0.78, "frontZ": 0.56, "backZ": -0.64, "height": 1.52, "targetFaces": 3800}
+    meta = {"name": "cattle", "neckPivot": (0.0, 1.06, 0.62), "legY": 0.78, "frontZ": 0.56, "backZ": -0.64, "height": 1.52, "targetFaces": 12000}
     glb = find_tripo_glb(tripo_dir, "cattle")
     vert_rgb = None
     if glb:
@@ -642,7 +693,7 @@ def build_cattle(tripo_dir):
 
 
 def build_swine(tripo_dir):
-    meta = {"name": "swine", "neckPivot": (0.0, 0.42, 0.28), "legY": 0.28, "frontZ": 0.25, "backZ": -0.30, "height": 0.66, "targetFaces": 3000}
+    meta = {"name": "swine", "neckPivot": (0.0, 0.42, 0.28), "legY": 0.28, "frontZ": 0.25, "backZ": -0.30, "height": 0.66, "targetFaces": 10000}
     glb = find_tripo_glb(tripo_dir, "swine")
     vert_rgb = None
     if glb:
@@ -988,7 +1039,7 @@ def build_gineta_saddle_and_tack(horse_bm, neck_pivot):
 
 
 def build_horse(tripo_dir):
-    meta = {"name": "horse", "neckPivot": (0.0, 1.22, 0.54), "legY": 0.90, "frontZ": 0.50, "backZ": -0.58, "height": 1.84, "targetFaces": 4200}
+    meta = {"name": "horse", "neckPivot": (0.0, 1.22, 0.54), "legY": 0.90, "frontZ": 0.50, "backZ": -0.58, "height": 1.84, "targetFaces": 14000}
     glb = find_tripo_glb(tripo_dir, "horse")
     vert_rgb = None
     if glb:
@@ -1216,17 +1267,21 @@ def build_progressive_collapse(verts, indices, target_core_tris=20):
 
 def pack_livestock_binary(species_list, out_path):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    chunks = [struct.pack("<4sIII", b"LSTK", 1, len(species_list), 0)]
+    # Version 2: adds per-vertex uint16 (u, v) texture coordinates (20 bytes/vert) and omits legacy
+    # per-vertex morph tables (superseded by scripts/prepare-animal-continuum.mjs).
+    chunks = [struct.pack("<4sIII", b"LSTK", 2, len(species_list), 0)]
     for sp in species_list:
         raw_verts = sp["verts"]
-        # Pre-quantize positions to int16 millimeters and strip any sub-mm degenerate triangles before collapse!
+        # Pre-quantize positions to int16 millimeters and strip any sub-mm degenerate triangles
         verts = []
         q_pos = []
         for r in raw_verts:
             qx = max(-32767, min(32767, int(round(r[0] * 1000.0)))) * 0.001
             qy = max(-32767, min(32767, int(round(r[1] * 1000.0)))) * 0.001
             qz = max(-32767, min(32767, int(round(r[2] * 1000.0)))) * 0.001
-            verts.append((qx, qy, qz, r[3], r[4], r[5], r[6], r[7]))
+            u_val = float(r[8]) if len(r) > 8 else 0.0
+            v_val = float(r[9]) if len(r) > 9 else 0.0
+            verts.append((qx, qy, qz, r[3], r[4], r[5], r[6], r[7], u_val, v_val))
             q_pos.append(Vector((qx, qy, qz)))
         clean_indices = []
         raw_idx = sp["indices"]
@@ -1237,18 +1292,18 @@ def pack_livestock_binary(species_list, out_path):
             area2 = (q_pos[b] - q_pos[a]).cross(q_pos[c] - q_pos[a]).length
             if area2 > 1.5e-7:
                 clean_indices.extend([a, b, c])
-        sorted_idx, morph_words, core_tris, total_steps = build_progressive_collapse(verts, clean_indices, target_core_tris=20)
         vc = len(verts)
-        ic = len(sorted_idx)
-        print(f"Packed {sp['name']}: {vc} verts, {ic // 3} tris -> {core_tris} core tris across {total_steps} half-edge collapses")
+        ic = len(clean_indices)
+        use_u32_idx = vc >= 65535
+        print(f"Packed {sp['name']} (v2 UV): {vc} verts, {ic // 3} tris")
         meta = struct.pack(
             "<8f4I",
             sp["neckPivot"][0], sp["neckPivot"][1], sp["neckPivot"][2],
-            sp["legY"], sp["frontZ"], sp["backZ"], sp["height"], float(core_tris),
-            vc, ic, total_steps, 0,
+            sp["legY"], sp["frontZ"], sp["backZ"], sp["height"], 0.0,
+            vc, ic, 0, 1 if use_u32_idx else 0,
         )
         chunks.append(meta)
-        v_buf = bytearray(vc * 16)
+        v_buf = bytearray(vc * 20)
         for i, r in enumerate(verts):
             px = max(-32767, min(32767, int(round(r[0] * 1000.0))))
             py = max(-32767, min(32767, int(round(r[1] * 1000.0))))
@@ -1258,18 +1313,20 @@ def pack_livestock_binary(species_list, out_path):
             nz = max(-16384, min(16384, int(round(r[5] * 16384.0))))
             pt = max(-32767, min(32767, int(round(r[6] * 1000.0))))
             ct = max(-32767, min(32767, int(round(r[7]))))
-            struct.pack_into("<8h", v_buf, i * 16, px, py, pz, nx, ny, nz, pt, ct)
+            u16 = max(0, min(65535, int(round(max(0.0, min(1.0, r[8])) * 65535.0))))
+            v16 = max(0, min(65535, int(round(max(0.0, min(1.0, r[9])) * 65535.0))))
+            struct.pack_into("<8h2H", v_buf, i * 20, px, py, pz, nx, ny, nz, pt, ct, u16, v16)
         chunks.append(bytes(v_buf))
 
-        i_buf = bytearray(ic * 2 + ((ic * 2) % 4))
-        for k, idx_val in enumerate(sorted_idx):
-            struct.pack_into("<H", i_buf, k * 2, idx_val)
+        if use_u32_idx:
+            i_buf = bytearray(ic * 4)
+            for k, idx_val in enumerate(clean_indices):
+                struct.pack_into("<I", i_buf, k * 4, idx_val)
+        else:
+            i_buf = bytearray(ic * 2 + ((ic * 2) % 4))
+            for k, idx_val in enumerate(clean_indices):
+                struct.pack_into("<H", i_buf, k * 2, idx_val)
         chunks.append(bytes(i_buf))
-
-        m_buf = bytearray(len(morph_words) * 4)
-        for k, w in enumerate(morph_words):
-            struct.pack_into("<I", m_buf, k * 4, w)
-        chunks.append(bytes(m_buf))
 
     blob = b"".join(chunks)
     with open(out_path, "wb") as f:

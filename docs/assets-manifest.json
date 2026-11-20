@@ -715,14 +715,34 @@
     "sha256": "3153e6d8b3b6cd98a16727e900f31f15125259c80e400eddaf98d9c053045520"
   },
   "assets/animal-continuum/manifest.json": {
-    "url": "assets/animal-continuum/manifest.401bf68e45335b49.json",
-    "bytes": 25570,
-    "sha256": "401bf68e45335b493559718a5a415ef06d12df9bac7c6d2adf7c9a5b2ca8586f"
+    "url": "assets/animal-continuum/manifest.3ee62978c4d684da.json",
+    "bytes": 25591,
+    "sha256": "3ee62978c4d684dab10c06ac7322b679ebde35142e3c99ce8de959df4515498c"
   },
   "assets/animal-continuum/atlas.bin.gz": {
-    "url": "assets/animal-continuum/atlas.bin.f201e916f4e45754.gz",
-    "bytes": 1751609,
-    "sha256": "f201e916f4e4575478b7310e6efd05b03052f2b5bf982d7f8e2ec373a4117b34"
+    "url": "assets/animal-continuum/atlas.bin.1ad7929de0072128.gz",
+    "bytes": 2429361,
+    "sha256": "1ad7929de0072128e76bd8ebe618136c41680aba288fb8e75b0ebce36403ec45"
+  },
+  "assets/animal-continuum/livestock-sheep.jpg": {
+    "url": "assets/animal-continuum/livestock-sheep.eefa9785e56ea52c.jpg",
+    "bytes": 216078,
+    "sha256": "eefa9785e56ea52cd3beb0a2c5168eec49085b8d4b25fc2c8f9f178fdda1f717"
+  },
+  "assets/animal-continuum/livestock-cattle.jpg": {
+    "url": "assets/animal-continuum/livestock-cattle.c3c4e928c6c649d7.jpg",
+    "bytes": 187699,
+    "sha256": "c3c4e928c6c649d78f05205193a3369d206b7b6aed9ebe5e50d09d7bc7c86939"
+  },
+  "assets/animal-continuum/livestock-swine.jpg": {
+    "url": "assets/animal-continuum/livestock-swine.0281e8f87787f391.jpg",
+    "bytes": 254076,
+    "sha256": "0281e8f87787f3919ea90b936f46285d8b3d0b3e8303790feea34641806af82e"
+  },
+  "assets/animal-continuum/livestock-horse.jpg": {
+    "url": "assets/animal-continuum/livestock-horse.7483465309721d30.jpg",
+    "bytes": 218145,
+    "sha256": "7483465309721d3027d52d0cf9d6b631066975afb2b8e5c9b2ee0c4a309ae328"
   },
   "assets/wildlife/whale.glb": {
     "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",

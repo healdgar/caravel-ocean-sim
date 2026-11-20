@@ -945,6 +945,8 @@ const herdContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ 
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
 @group(0) @binding(3) var sampC: sampler;
 @group(0) @binding(4) var envCube: texture_cube<f32>;
+@group(0) @binding(11) var livestockAlbedo: texture_2d_array<f32>;
+@group(0) @binding(12) var livestockSampler: sampler;
 ` + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SHADOW_BINDINGS + /* wgsl */ `
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
@@ -1184,6 +1186,7 @@ fn herdContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>)
   let species = min(${HERD_SPECIES - 1}u, s.model);
   let seed = bitcast<f32>(s.record.spare.x);
   (*v).flags = s.record.spare.y;
+  (*v).uv = vec2f(0.5);
   if (s.what == CONTINUUM_SPLAT_ENTRY) {
     let toward = s.normal;
     let lift = continuumQuat(s.record.turn, vec3f(0.0, 1.0, 0.0));
@@ -1205,6 +1208,9 @@ fn herdContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>)
     coat = coatA;
     ao = clamp(0.42 + 0.33 * clamp(rest.y / max(continuumTypeF(s.model, ${ANIMAL_CONTINUUM_MATERIAL.height}u), 0.4), 0.0, 1.0) + 0.23 * (0.5 + 0.5 * s.normal.y), 0.12, 0.96);
   }
+  if (species < 4u && s.what == CONTINUUM_CLUSTER_ENTRY) {
+    (*v).uv = continuumUV(s.vertex);
+  }
   // Far, the sky its optical moments say reaches what is seen of the beast, morphed with its points.
   if (s.what == CONTINUUM_FAR_ENTRY) { ao = clamp(s.optics.x, 0.08, 0.98); }
   (*v).coatInfo = vec4f(coat, ao, seed, f32(species));
@@ -1214,10 +1220,34 @@ fn herdContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>)
 
 fn herdContinuumShade(v: ContinuumVarying, front: bool) -> vec4f {
   let species = min(${HERD_SPECIES - 1}u, u32(round(v.coatInfo.w)));
+  // Sample the 4-layer Tripo H3.1 livestock albedo texture array in uniform control flow for hardware trilinear + anisotropic mipmapping.
+  let mapSample = textureSample(livestockAlbedo, livestockSampler, v.uv, min(species, 3u)).rgb;
+  let dxW = dpdx(v.world);
+  let dyW = dpdy(v.world);
+  let duv = max(length(dpdx(v.uv)), length(dpdy(v.uv)));
+  let mapLum = dot(mapSample, vec3f(0.2126, 0.7152, 0.0722));
+  let dMapLumX = dpdx(mapLum);
+  let dMapLumY = dpdy(mapLum);
   var coatCode = v.coatInfo.x;
   var ao = v.coatInfo.y;
   var zone = select(u32(round(coatCode)), 0u, coatCode >= 16.0);
   var localXZ = v.localXZ;
+  var texColor = v.texColor;
+  var n = normalize(v.normal);
+  let isTexturedCluster = v.coverage.x == CONTINUUM_CLUSTER_ENTRY && species < 4u && coatCode >= 16.0;
+  if (isTexturedCluster) {
+    texColor = mapSample;
+    // Subtle micro-relief normal perturbation from high-res wool/hide albedo gradient (filtered by UV footprint so zero shimmer).
+    let bumpFade = 1.0 - smoothstep(0.008, 0.045, duv);
+    let sx = cross(dyW, n);
+    let sy = cross(n, dxW);
+    let det = dot(dxW, sx);
+    if (bumpFade > 0.01 && abs(det) > 1e-6) {
+      let bumpScale = select(0.0028, 0.0055, species == 0u) * bumpFade;
+      let grad = ((dMapLumX * bumpScale) * sx + (dMapLumY * bumpScale) * sy) / det;
+      n = normalize(n - clamp(grad, vec3f(-0.28), vec3f(0.28)));
+    }
+  }
   if (v.coverage.x == CONTINUUM_SPLAT_ENTRY) {
     // A splat's upper half is a vehicle's tilt or roof (zone 2); a saddled horse's crest, its saddlecloth (zone 6).
     let uv = v.localXZ;
@@ -1229,14 +1259,14 @@ fn herdContinuumShade(v: ContinuumVarying, front: bool) -> vec4f {
     ao = clamp(0.56 + 0.34 * uv.y, 0.25, 0.95);
     localXZ = uv * 0.5;
   }
-  let albedo = livestockCoatAlbedo(species, coatCode, v.texColor, v.coatInfo.z, localXZ);
-  return vec4f(shadeHerdSurface(v.world, normalize(v.normal), albedo, ao, species, zone), 1.0);
+  let albedo = livestockCoatAlbedo(species, coatCode, texColor, v.coatInfo.z, localXZ);
+  return vec4f(shadeHerdSurface(v.world, n, albedo, ao, species, zone), 1.0);
 }
 `;
 
 // The herds' material (js/wgsl/continuum-cut.js). Their bodies are closed and wound outward.
 export const HERD_CONTINUUM_MATERIAL_SPEC = Object.freeze({
   name: 'herdContinuum', prelude: herdContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
-  varyings: [['coatInfo', 'vec4f'], ['localXZ', 'vec2f'], ['texColor', 'vec3f'], ['flags', 'u32', true]],
+  varyings: [['coatInfo', 'vec4f'], ['localXZ', 'vec2f'], ['texColor', 'vec3f'], ['uv', 'vec2f'], ['flags', 'u32', true]],
   wgsl: HERD_CONTINUUM_MATERIAL_WGSL, salt: 11, cullMode: 'back', air: false, capture: false,
 });

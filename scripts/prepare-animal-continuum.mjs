@@ -231,14 +231,30 @@ const placeOf = (n) => [(n % 4096) / 4095, Math.floor(n / 4096) / 4095];
 const KIND_COAT = 2 ** -16, KIND_WORD = 2 ** -24;
 
 function herdType(id, mesh) {
-  const vehicle = id >= 4, F = mesh.vertices, shards = vehicle ? vehicleShards(mesh) : null;
+  const vehicle = id >= 4, F = mesh.vertices, uvs = !vehicle && mesh.uvs ? mesh.uvs : null, shards = vehicle ? vehicleShards(mesh) : null;
   const rig = { neck: [...mesh.neckPivot, ANIMAL_CONTINUUM_GRAZE_PITCH[id]], legs: [mesh.legY, mesh.frontZ, mesh.backZ, mesh.height] };
   const skinOf = (v) => (vehicle ? [[shards[v], 1]] : livestockSkin(F[v * 8 + 6], F[v * 8 + 1], mesh.legY));
-  // The coat (zone + its shade, or 16 + RGB555), which a far triangle wears too.
-  const body = bakeSource(ANIMAL_CONTINUUM_TYPES[id], mesh.indices, (v) => [...F.subarray(v * 8, v * 8 + 6), F[v * 8 + 7] * KIND_COAT, 0],
+  // The coat (zone + its shade, or 16 + RGB555) plus real Tripo UV place in kind[1] for livestock.
+  const body = bakeSource(ANIMAL_CONTINUUM_TYPES[id], mesh.indices, (v) => [
+      ...F.subarray(v * 8, v * 8 + 6),
+      F[v * 8 + 7] * KIND_COAT,
+      uvs ? place24(uvs[v * 2], uvs[v * 2 + 1]) * KIND_WORD : 0,
+    ],
     (v) => (vehicle ? shards[v] : herdSegment(F[v * 8 + 6])),
     // A horse's tack is left out of its far body: it lies over the coat, a few centimetres proud, and a beast without it hides it.
     vehicle ? null : (t) => [0, 1, 2].some((k) => F[mesh.indices[t * 3 + k] * 8 + 6] < 8.5));
+  // Feed true 2D UV coordinates directly to MeshoptSimplifier so cluster collapses preserve UV seams & texture fidelity.
+  if (uvs) {
+    body.uv = (welded) => {
+      const out = new Float32Array(welded.count * 2);
+      for (let w = 0; w < welded.count; w++) {
+        const src = welded.corner[w];
+        out[w * 2] = uvs[src * 2];
+        out[w * 2 + 1] = uvs[src * 2 + 1];
+      }
+      return out;
+    };
+  }
   // The coat's linear colour where it is textured (16 + RGB555), for the splat.
   const colourOf = (v) => {
     const coat = F[v * 8 + 7];
@@ -258,8 +274,11 @@ function herdType(id, mesh) {
   }
   const jointsOf = vehicle ? (p) => vehicleJoints(rig, p) : (p) => livestockJoints(rig, p);
   return {
-    id, family: vehicle ? 'vehicle' : 'livestock', rig, body, skinOf, colourOf, poses: poses.map(jointsOf), felled: poses.map((p) => !!p.felled), wordOf: (kind) => continuumFloatWord(kind[0] / KIND_COAT),
-    sourceTriangles: mesh.indices.length / 3, sourceBytes: [F, mesh.indices, Float32Array.from([...rig.neck, ...rig.legs])],
+    id, family: vehicle ? 'vehicle' : 'livestock', rig, body, skinOf, colourOf, poses: poses.map(jointsOf), felled: poses.map((p) => !!p.felled),
+    wordOf: (kind) => continuumFloatWord(kind[0] / KIND_COAT),
+    ...(uvs ? { uvOf: (kind) => packContinuumUV(placeOf(Math.round(kind[1] / KIND_WORD))) } : {}),
+    sourceTriangles: mesh.indices.length / 3,
+    sourceBytes: [F, ...(uvs ? [uvs] : []), mesh.indices, Float32Array.from([...rig.neck, ...rig.legs])],
   };
 }
 function seaType(id, stroke, mesh) {

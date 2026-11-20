@@ -4681,7 +4681,7 @@ async function main() {
       if(folkPlan.keptFor!==base){folkPlan.keptFor=base;folkPlan.kept.clear();folkPlan.solids=townSolids(port);}
       // Whoever stands a post of the port's forts today walks no street.
       const garrison=port.garrison,posted=garrison?.watch?garrison.posted??=new Set(garrison.soldiers.map(s=>s.soul?.id).filter(id=>id!=null)):null,away=firstMate?new Set([...(posted??[]),firstMate.id]):posted;
-      port.streets=boardFolkStreets({plan,origin:region,heightAt:(px,pz)=>terrain.groundSample(px+offset.x,pz+offset.z),onDeckAt:(px,pz)=>terrain.isOnDeckAt?.(px+offset.x,pz+offset.z)??false,base,kept:folkPlan.kept,blocked:folkPlan.solids,away});
+      port.streets=boardFolkStreets({plan,origin:region,heightAt:(px,pz)=>terrain.groundSample(px+offset.x,pz+offset.z),onDeckAt:(px,pz)=>terrain.isOnDeckAt?.(px+offset.x,pz+offset.z)??false,bridgeAt:(px,pz)=>terrain.bridgeSurfaceAt?.(px+offset.x,pz+offset.z)??null,base,kept:folkPlan.kept,blocked:folkPlan.solids,away});
       townsfolk.refresh(port);
       Object.assign(folkPlan,{day:plan.day,x,z,at:performance.now(),laidMs:performance.now()-began,laid:folkPlan.laid+1});
     }).catch(error=>{console.warn('The board\'s townsfolk:',error);folkPlan.at=performance.now();}).finally(()=>{folkPlan.asking=false;});

@@ -53,7 +53,7 @@ export function isMountedSoul(person, { indigenous = false, crowdCount = 0, rout
 // some run through them: where `blocked(x, z)` says a point stands in one, the way is walked only along its
 // longest stretch in the open, and whoever takes it goes in at that building's wall. Returns the samples (none for
 // a way too short to walk), whether they begin at the door, and whether they reach the far end.
-function folkWay(route, origin, heightAt, blocked, onDeckAt = null) {
+function folkWay(route, origin, heightAt, blocked, onDeckAt = null, bridgeAt = null) {
   const samples = [];
   let length = 0;
   for (let k = 2; k < route.length; k += 2) length += Math.hypot(route[k] - route[k - 2], route[k + 1] - route[k - 1]);
@@ -65,7 +65,22 @@ function folkWay(route, origin, heightAt, blocked, onDeckAt = null) {
     const at = i * ROUTE_STEP_M;
     while (leg + 2 < route.length && at > before + span) { before += span; leg += 2; span = Math.hypot(route[leg] - route[leg - 2], route[leg + 1] - route[leg - 1]); }
     const t = span > 0 ? Math.min(1, (at - before) / span) : 0;
-    const x = points[i * 2] = origin.x + route[leg - 2] + (route[leg] - route[leg - 2]) * t, z = points[i * 2 + 1] = origin.z + route[leg - 1] + (route[leg + 1] - route[leg - 1]) * t;
+    let x = origin.x + route[leg - 2] + (route[leg] - route[leg - 2]) * t;
+    let z = origin.z + route[leg - 1] + (route[leg + 1] - route[leg - 1]) * t;
+    // Guide walkers crossing a bridge or its physical timber/stone approach ramps cleanly inside the handrails!
+    const br = bridgeAt?.(x, z);
+    if (br) {
+      const safeAcross = Math.max(0.25, br.halfWidth - 0.30);
+      if (br.across > safeAcross) {
+        const b = br.bridge;
+        const ux = b.ux || 0, uz = b.uz || 1;
+        const clamped = Math.sign(br.signedAcross || 1) * safeAcross;
+        x = b.x + ux * br.signedAlong - uz * clamped;
+        z = b.z + uz * br.signedAlong + ux * clamped;
+      }
+    }
+    points[i * 2] = x;
+    points[i * 2 + 1] = z;
     if (blocked?.(x, z)) run = i + 1; else if (i - run > to - from) { from = run; to = i; }
   }
   if (to - from < 2) return { route, samples, fromDoor: false, whole: false, cut: true };
@@ -73,7 +88,13 @@ function folkWay(route, origin, heightAt, blocked, onDeckAt = null) {
   // stand flush on sloped hillside cobblestones even when offset laterally from the street centerline.
   const lateralInfoAt = (idx, y0) => {
     const x = points[idx * 2], z = points[idx * 2 + 1];
-    const onDeck = Boolean(onDeckAt?.(x, z));
+    const br = bridgeAt?.(x, z);
+    const onBridge = Boolean(br && br.y >= y0 - 0.12);
+    const onDeck = Boolean(onBridge || onDeckAt?.(x, z));
+    if (onBridge) {
+      const bridgeHw = Math.max(0.32, Math.min(2.25, br.halfWidth - br.across - 0.12));
+      return packRouteHalfWidthSlope(bridgeHw, 0, true);
+    }
     if (typeof blocked !== 'function') return packRouteHalfWidthSlope(FOLK_LANE_M, 0, onDeck);
     const i0 = Math.max(from, idx - 2), i1 = Math.min(to, idx + 3);
     const dx = points[i1 * 2] - points[i0 * 2], dz = points[i1 * 2 + 1] - points[i0 * 2 + 1];
@@ -118,7 +139,7 @@ const sameWay = (a, b) => a.length === b.length && a.every((v, k) => v === b[k])
  * middle of the board's ground in the streets' own coordinates; `heightAt(x, z)` the ground there; `base` the port's
  * streets as they were laid (its ways, doors and those who walk between its own buildings), or null.
  */
-export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, kept = null, blocked = null, away = null, indigenous = null, onDeckAt = null }) {
+export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, kept = null, blocked = null, away = null, indigenous = null, onDeckAt = null, bridgeAt = null }) {
   const isIndigenous = Boolean(indigenous ?? base?.indigenous ?? asked?.indigenous);
   const about = (list) => away?.size ? list.filter((person) => !away.has(person.id)) : list;
   const plan = { ...asked, people: about(asked.people), others: about(asked.others) };
@@ -127,7 +148,7 @@ export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, k
   const samples = [], ways = [], taken = kept ? new Map() : null;
   let cut = 0;
   for (const person of plan.people) {
-    const before = kept?.get(person.id), way = before && sameWay(before.route, person.route) ? before : folkWay(person.route, origin, heightAt, blocked, onDeckAt);
+    const before = kept?.get(person.id), way = before && sameWay(before.route, person.route) ? before : folkWay(person.route, origin, heightAt, blocked, onDeckAt, bridgeAt);
     taken?.set(person.id, way);
     const first = ownSamples + samples.length / 4, count = way.samples.length / 4;
     if (way.cut) cut++;

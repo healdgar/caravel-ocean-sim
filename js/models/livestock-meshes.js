@@ -16,6 +16,8 @@ export function decodeLivestockPack(arrayBuffer) {
   if (dv.byteLength < 16 || dv.getUint32(0, true) !== 0x4b54534c) {
     throw new Error("Invalid livestock continuum binary header");
   }
+  const version = dv.getUint32(4, true);
+  const hasUV = version >= 2;
   const speciesCount = dv.getUint32(8, true);
   let off = 16;
   const out = [];
@@ -29,11 +31,14 @@ export function decodeLivestockPack(arrayBuffer) {
     const height = dv.getFloat32(off + 24, true);
     const vc = dv.getUint32(off + 32, true);
     const ic = dv.getUint32(off + 36, true);
+    const idxFlags = dv.getUint32(off + 44, true);
     off += 48;
 
+    const vStride = hasUV ? 20 : 16;
     const verts = new Float32Array(vc * 8);
+    const uvs = hasUV ? new Float32Array(vc * 2) : null;
     for (let i = 0; i < vc; i++) {
-      const vo = off + i * 16, w = i * 8;
+      const vo = off + i * vStride, w = i * 8;
       verts[w] = dv.getInt16(vo, true) * 0.001;
       verts[w + 1] = dv.getInt16(vo + 2, true) * 0.001;
       verts[w + 2] = dv.getInt16(vo + 4, true) * 0.001;
@@ -47,13 +52,22 @@ export function decodeLivestockPack(arrayBuffer) {
       verts[w + 6] = dv.getInt16(vo + 12, true) * 0.001;
       const ctRaw = dv.getInt16(vo + 14, true);
       verts[w + 7] = ctRaw < 0 ? (-ctRaw) * 0.001 : (ctRaw > 0 ? 16.0 + ctRaw : 0.0);
+      if (hasUV) {
+        uvs[i * 2] = dv.getUint16(vo + 16, true) / 65535;
+        uvs[i * 2 + 1] = dv.getUint16(vo + 18, true) / 65535;
+      }
     }
-    off += vc * 16;
+    off += vc * vStride;
 
     const indices = new Uint32Array(ic);
-    for (let k = 0; k < ic; k++) indices[k] = dv.getUint16(off + k * 2, true);
-    off += ic * 2 + ((ic * 2) % 4);
-    off += vc * 8;
+    if (hasUV && (idxFlags & 1)) {
+      for (let k = 0; k < ic; k++) indices[k] = dv.getUint32(off + k * 4, true);
+      off += ic * 4;
+    } else {
+      for (let k = 0; k < ic; k++) indices[k] = dv.getUint16(off + k * 2, true);
+      off += ic * 2 + ((ic * 2) % 4);
+    }
+    if (!hasUV) off += vc * 8;
 
     out.push(Object.freeze({
       name: LIVESTOCK_NAMES[s] ?? ("species_" + s),
@@ -63,6 +77,7 @@ export function decodeLivestockPack(arrayBuffer) {
       backZ,
       height,
       vertices: verts,
+      uvs,
       indices,
       indexCount: ic,
     }));

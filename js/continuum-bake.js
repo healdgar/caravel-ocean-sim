@@ -1427,7 +1427,7 @@ function bakeFar(type, welded) {
 // weldDrawn makes it; it must then bring `far`.
 export async function bakeContinuumBody(body) {
   await MeshoptSimplifier.ready;
-  const welded = body.welded ?? weldDrawn(body), clusters = await bakeClusters(welded, { groupError: body.groupError?.(welded) ?? null });
+  const welded = body.welded ?? weldDrawn(body), clusters = await bakeClusters(welded, { uv: body.uv?.(welded) ?? welded.kind, groupError: body.groupError?.(welded) ?? null });
   const far = body.far ? bakeFar(body.far, weldDrawn(body.far)) : bakeFar(body, welded);
   continuumFarFirst(clusters, far);
   return { welded, clusters, far };

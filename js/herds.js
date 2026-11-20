@@ -7,7 +7,7 @@
 // clusters, far body or splat and casts its shadow, and the herds' material shades whatever it chose.
 import { requestOnce } from './gpu-program-cache.js';
 import { ANIMAL_CONTINUUM_TYPES } from './animal-continuum.js';
-import { requestAnimalContinuumAtlas, createAnimalScene } from './animal-scene.js';
+import { requestAnimalContinuumAtlas, requestLivestockTextures, createAnimalScene } from './animal-scene.js';
 import { requestContinuumPrograms, requestContinuumView } from './continuum-scene.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { ROUTE_STEP_M, WALKER_WORDS } from './town-streets.js';
@@ -55,24 +55,62 @@ const caravanHash = (a, b) => {
   return (h >>> 0) / 4294967296;
 };
 
-export function bridgeDeckYAt(wx, wz, bridges) {
-  if (!bridges || !bridges.length) return 0;
-  let best = 0;
+// Physical deck & sloped approach-ramp surface query matching rendered 3D geometry in js/old-world-works.js
+// (WORKS_FOOTBRIDGE, WORKS_FOOTBRIDGE_RAMP, WORKS_STONE_BRIDGE, WORKS_STONE_BRIDGE_RAMP) 1:1.
+export function bridgeSurfaceAt(wx, wz, bridges) {
+  if (!bridges || !bridges.length) return null;
+  let best = null;
   for (const b of bridges) {
     if (!b || b.collapsed || !Number.isFinite(b.deckY)) continue;
+    const ux = b.ux || 0, uz = b.uz || 1;
+    const halfLen = (b.length || 12) * 0.5;
+    const maxRampRun = Math.max(b.ramps?.neg?.run || 0, b.ramps?.pos?.run || 0, 2.0);
     const dx = wx - b.x, dz = wz - b.z;
-    const halfLen = (b.length || 12) * 0.52;
-    const halfW = (b.halfWidth || 2.1) + 0.65;
-    if (Math.abs(dx) > halfLen + 14 && Math.abs(dz) > halfLen + 14) continue;
-    const along = Math.abs(dx * (b.ux || 0) + dz * (b.uz || 1));
-    const across = Math.abs(-dx * (b.uz || 1) + dz * (b.ux || 0));
-    if (along <= halfLen + 5.5 && across <= halfW) {
-      const ramp = along <= halfLen ? 1 : Math.max(0, 1 - (along - halfLen) / 5.5);
-      const y = b.deckY * ramp;
-      if (y > best) best = y;
+    const bound = halfLen + maxRampRun + 3.0;
+    if (Math.abs(dx) > bound || Math.abs(dz) > bound) continue;
+    const signedAlong = dx * ux + dz * uz;
+    const along = Math.abs(signedAlong);
+    const signedAcross = -dx * uz + dz * ux;
+    const across = Math.abs(signedAcross);
+    const deckTopOff = b.isStone ? 0.10 : 0.06;
+    const railInset = b.isStone ? 0.42 : 0.24;
+    const deckHalfW = Math.max(0.85, (b.halfWidth || 1.6) - (b.isStone ? 0.05 : 0.08));
+    if (across > deckHalfW + 0.28) continue;
+
+    let y = -Infinity;
+    const endRamp = signedAlong >= 0 ? b.ramps?.pos : b.ramps?.neg;
+    const s = along - halfLen;
+    if (along <= halfLen) {
+      // Main span deck top (wooden planks +0.06 m, stone paving +0.10 m); small outer apron when no ramp overlaps.
+      y = (!b.isStone && !endRamp && along > halfLen - 1.05) ? (b.deckY - 0.02) : (b.deckY + deckTopOff);
+    }
+    if (endRamp && s >= -0.35 && s <= endRamp.run + 0.65) {
+      const tRamp = Math.max(0, Math.min(1.06, (s + 0.25) / Math.max(0.5, endRamp.run)));
+      const rampY = b.deckY + deckTopOff - tRamp * endRamp.drop;
+      if (rampY > y) y = rampY;
+    } else if (!endRamp && s > 0 && s <= 1.6) {
+      // Short smooth threshold onto graded earthen embankment when no physical ramp was required.
+      const sillY = b.deckY + (b.isStone ? 0.10 : -0.02) - 0.26 * (s / 1.6);
+      if (sillY > y) y = sillY;
+    }
+    if (y > -1e5 && (!best || y > best.y)) {
+      best = {
+        y,
+        bridge: b,
+        halfWidth: Math.max(0.45, (b.halfWidth || 1.6) - railInset),
+        deckHalfWidth: deckHalfW,
+        signedAlong,
+        signedAcross,
+        across,
+        onRamp: s > 0 && Boolean(endRamp),
+      };
     }
   }
   return best;
+}
+
+export function bridgeDeckYAt(wx, wz, bridges) {
+  return bridgeSurfaceAt(wx, wz, bridges)?.y ?? 0;
 }
 
 function segmentNearBridge(ax, az, bx, bz, bridges) {
@@ -760,9 +798,10 @@ export async function createLivestockHerds({
     if (data.byteLength) device.queue.writeBuffer(buf, 0, data);
     return buf;
   };
-  const [pipelines, atlas] = await Promise.all([
+  const [pipelines, atlas, livestockTex] = await Promise.all([
     requestHerdsPipelines({ device, shader, format, samples }),
     requestAnimalContinuumAtlas(device),
+    requestLivestockTextures(device),
   ]);
   const cloudGroup = clouds.bindVolume(pipelines.view.pipeline, 'shadow');
   const herdTypes = ANIMAL_CONTINUUM_TYPES.map((_, t) => t).filter((t) => t < HERD_SPECIES);
@@ -811,6 +850,10 @@ export async function createLivestockHerds({
   function rebuildGroups() {
     if (!state) return;
     const baseEntries = activeResources.filter(([id]) => wantedBindings.has(id)).map(([binding, resource]) => ({ binding, resource }));
+    baseEntries.push(
+      { binding: 11, resource: livestockTex.view },
+      { binding: 12, resource: livestockTex.sampler },
+    );
     state.viewGroup = device.createBindGroup({ label: 'livestock herds', layout: pipelines.view.pipeline.getBindGroupLayout(0), entries: baseEntries });
   }
 

@@ -18,7 +18,7 @@ import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
-import {bridgeDeckYAt,createLivestockHerds} from './herds.js';
+import {bridgeDeckYAt,bridgeSurfaceAt,createLivestockHerds} from './herds.js';
 import {createMeadowGrass} from './meadow-grass.js';
 import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
@@ -2630,6 +2630,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const lx=x-worldOffset.x,lz=z-worldOffset.z;
       const deck=archDeckSample(lx,lz);
       return deck>-1e6&&deck>=baseGroundSample(lx,lz)-0.08;
+    },
+    bridgeSurfaceAt:(x,z)=>{
+      const lx=x-worldOffset.x,lz=z-worldOffset.z;
+      const sec=proceduralPack?findNeighborSection(lx,lz):null;
+      const p=sec?.port??proceduralPack?.port;
+      return bridgeSurfaceAt(lx,lz,p?.country?.bridges);
     },
     hasLoadedHeightAt(x,z){
       const lx=x-worldOffset.x,lz=z-worldOffset.z;

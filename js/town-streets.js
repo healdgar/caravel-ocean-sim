@@ -586,6 +586,45 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       }
     }
   }
+  const bridges = port?.country?.bridges ?? [];
+  const bridgeAt = (x, z) => {
+    if (!bridges.length) return null;
+    let best = null;
+    for (const b of bridges) {
+      if (!b || b.collapsed || !Number.isFinite(b.deckY)) continue;
+      const ux = b.ux || 0, uz = b.uz || 1;
+      const halfLen = (b.length || 12) * 0.5;
+      const maxRampRun = Math.max(b.ramps?.neg?.run || 0, b.ramps?.pos?.run || 0, 2.0);
+      const dx = x - b.x, dz = z - b.z;
+      const bound = halfLen + maxRampRun + 3.0;
+      if (Math.abs(dx) > bound || Math.abs(dz) > bound) continue;
+      const signedAlong = dx * ux + dz * uz;
+      const along = Math.abs(signedAlong);
+      const across = Math.abs(-dx * uz + dz * ux);
+      const deckTopOff = b.isStone ? 0.10 : 0.06;
+      const railInset = b.isStone ? 0.42 : 0.24;
+      const deckHalfW = Math.max(0.85, (b.halfWidth || 1.6) - (b.isStone ? 0.05 : 0.08));
+      if (across > deckHalfW + 0.28) continue;
+      let y = -Infinity;
+      const endRamp = signedAlong >= 0 ? b.ramps?.pos : b.ramps?.neg;
+      const s = along - halfLen;
+      if (along <= halfLen) {
+        y = (!b.isStone && !endRamp && along > halfLen - 1.05) ? (b.deckY - 0.02) : (b.deckY + deckTopOff);
+      }
+      if (endRamp && s >= -0.35 && s <= endRamp.run + 0.65) {
+        const tRamp = Math.max(0, Math.min(1.06, (s + 0.25) / Math.max(0.5, endRamp.run)));
+        const rampY = b.deckY + deckTopOff - tRamp * endRamp.drop;
+        if (rampY > y) y = rampY;
+      } else if (!endRamp && s > 0 && s <= 1.6) {
+        const sillY = b.deckY + (b.isStone ? 0.10 : -0.02) - 0.26 * (s / 1.6);
+        if (sillY > y) y = sillY;
+      }
+      if (y > -1e5 && (!best || y > best.y)) {
+        best = { y, halfWidth: Math.max(0.45, (b.halfWidth || 1.6) - railInset), across };
+      }
+    }
+    return best;
+  };
   const surfaceAt = (x, z) => {
     const gy = groundAt(x, z);
     let y = gy;
@@ -594,6 +633,8 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       if (Math.abs(lx) > halfWidth + 1.2) continue;
       if (Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M && top > y) y = top;
     }
+    const br = bridgeAt(x, z);
+    if (br && br.y > y) y = br.y;
     return y;
   };
 
@@ -906,6 +947,10 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
             deckMargin = Math.max(deckMargin, Math.max(0.35, dHw - Math.abs(lx) - 0.25));
           }
         }
+      }
+      const br = bridgeAt(x, z);
+      if (br && br.y >= climbed[k] - 0.12) {
+        deckMargin = Math.max(deckMargin, Math.max(0.32, br.halfWidth - br.across - 0.12));
       }
       const onDeck = deckMargin >= 0;
       const laneHalfW = onDeck ? Math.min(deckMargin, 2.25) : Math.max(0.35, streetHalfW - 0.35);

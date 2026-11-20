@@ -23,7 +23,7 @@ import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
 import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
 import { BOULDER_CONTINUUM_ASSETS } from './js/boulder-continuum.js';
 import { SHIP_CONTINUUM_ASSETS } from './js/ship-continuum.js';
-import { ANIMAL_CONTINUUM_ASSETS } from './js/animal-continuum.js';
+import { ANIMAL_CONTINUUM_ASSETS, LIVESTOCK_TEXTURE_ASSETS } from './js/animal-continuum.js';
 import { CONTINUUM_BAKE_ASSETS } from './js/continuum-bake-client.js';
 import { BAKED_BOARDS, BAKED_WORLDS } from './js/board-model.js';
 import { bundleContinuumBakeWorker } from './scripts/continuum-bake-worker-bundle.mjs';
@@ -195,8 +195,9 @@ for(const file of Object.values(PROP_CONTINUUM_ASSETS))runtimeAssetTypes.set(fil
 // The boulder continuum's atlas (scripts/prepare-boulder-continuum.mjs), kept in git: ground-cover rocks are drawn
 // from nothing else.
 for(const file of Object.values(BOULDER_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
-// The animal continuum's atlas (scripts/prepare-animal-continuum.mjs), kept in git: every animal is drawn from nothing else.
+// The animal continuum's atlas (scripts/prepare-animal-continuum.mjs) and Tripo H3.1 livestock basecolor textures.
 for(const file of Object.values(ANIMAL_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
+for(const file of LIVESTOCK_TEXTURE_ASSETS)runtimeAssetTypes.set(file,'image/jpeg');
 // The one simplifier (js/continuum-bake.js) bundled for the page's bake workers (js/continuum-bake-worker.js), written
 // only when it changes.
 {
