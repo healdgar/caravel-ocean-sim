@@ -10,6 +10,7 @@ import { CREW_WALK_CYCLE_METRES } from '../crew-motion.js';
 import { CREW_CONTINUUM_ORDER_IMPORTANT, CREW_CONTINUUM_ORDER_MOUNTED, CREW_CONTINUUM_PLACED_WGSL } from './crew-continuum.js';
 import { HUMAN_MORPH_WGSL } from './human-morph.js';
 import { continuumGroundWGSL } from '../continuum-ground.js';
+import { worldBodiesWGSL } from '../world-bodies.js';
 
 // The two bodies of a town: walker flags bit 0 says which a person wears, a man's or a woman's.
 export const TOWNSFOLK_MODELS = 2;
@@ -74,6 +75,7 @@ struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32,onDec
 @group(0) @binding(8) var<storage,read_write> moisture:array<vec2f>;
 ` + continuumGroundWGSL(0, 9) + /* wgsl */ `
 @group(0) @binding(10) var<storage,read_write> intents:array<TownIntent>;
+` + worldBodiesWGSL(0, 11, 'read_write') + /* wgsl */ `
 const ABOUT=${TOWN_ABOUT}u;const AFRAID=${TOWN_AFRAID}u;const FALLING=${TOWN_FALLING}u;const DOWN=${TOWN_DOWN}u;
 fn inFrustum(relative:vec3f,radius:f32)->bool {
   let clip=F.viewProj*vec4f(relative,1);
@@ -97,6 +99,25 @@ fn decodeRouteW(raw:f32)->vec3f {
   if(raw<16.0){return vec3f(raw,0.0,0.0);}
   let v=u32(raw-16.0+0.5);
   return vec3f(f32(v&511u)*0.01,f32((v>>9u)&2047u)*0.001-0.5,select(0.0,1.0,(v>>20u)!=0u));
+}
+// Somewhere on their way, at explicit lateral offset latOff metres from the route centerline.
+fn wayAtOffset(w:Walker,metres:f32,latOff:f32)->TownSpot {
+  let along=metres/${ROUTE_STEP_M.toFixed(4)};
+  let i=min(u32(max(along,0.0)),w.count-2u);
+  let frac=clamp(along-f32(i),0.0,1.0);
+  let r0=route[w.first+i];
+  let r1=route[w.first+i+1u];
+  let hereXYZ=mix(r0.xyz,r1.xyz,frac);
+  let d0=decodeRouteW(r0.w);
+  let d1=decodeRouteW(r1.w);
+  let ws=mix(d0,d1,frac);
+  let halfW=ws.x;
+  let crossSlope=ws.y;
+  let onDeck=max(d0.z,d1.z);
+  let ahead=route[w.first+min(i+3u,w.count-1u)].xz-route[w.first+u32(max(i32(i)-2,0))].xz;
+  let forward=normalize(ahead+vec2f(1e-4,0.0));
+  let aside=vec2f(forward.y,-forward.x)*latOff;
+  return TownSpot(vec3f(hereXYZ.x+aside.x,hereXYZ.y+clamp(latOff,-halfW,halfW)*crossSlope,hereXYZ.z+aside.y),forward,hereXYZ.xz,halfW,onDeck);
 }
 // Somewhere on their way, at normalized lateral fraction latFrac in [-1, 1] of the full walkable half-width.
 fn wayAtLat(w:Walker,metres:f32,latFrac:f32)->TownSpot {
@@ -138,6 +159,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   if(id.x>=arrayLength(&walkers)){return;}
   let w=walkers[id.x];
   let fate=fates[id.x];
+  let isMounted=(w.flags&16u)!=0u;
+  if(id.x<WB_WALKER_MAX){worldBodies[WB_WALKER_BASE+id.x]=WorldBody(vec4f(0.0),vec4f(0.0));}
   if(fate.mode!=ABOUT){
     intents[id.x]=TownIntent(vec4f(0.0),vec4f(0.0));
     return;
@@ -147,7 +170,6 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     intents[id.x]=TownIntent(vec4f(0.0),vec4f(0.0));
     return;
   }
-  let isMounted=(w.flags&16u)!=0u;
   let walking=w.length/w.speed;
   let leg=walking+w.pauseFor+w.indoors;
   let clk=select(fate.clock,0.0,isMounted);
@@ -164,12 +186,27 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let walked=min(w.length,(min(inLeg,stopAt)+max(0.0,inLeg-stopAt-w.pauseFor))*w.speed);
   let metres=select(walked,w.length-walked,back);
   let going=select(1.0,-1.0,back);
+  if(isMounted&&id.x<WB_MOUNT_POSE_MAX){
+    let mp=worldBodies[WB_MOUNT_POSE_BASE+id.x];
+    if(mp.dir.w>0.5){
+      let mStopped=mp.dir.z>0.5;
+      let how=2u|4u|select(0u,8u,mStopped);
+      intents[id.x]=TownIntent(vec4f(mp.pos.xyz,0.9),vec4f(mp.pos.w,select(w.speed*mp.dir.y,0.0,mStopped),going,f32(how)));
+      return;
+    }
+  }
   let init=(fate.how&1u)!=0u;
-  let latFrac=select(select(going*w.side,clamp(fate.lane,-1.0,1.0),init),going*w.side,isMounted);
-  let spot=wayAtLat(w,metres,latFrac);
+  let base0=wayAtOffset(w,metres,0.0);
+  let curLatM=select(going*w.side*base0.halfWidth,fate.lane,init);
+  let spot=wayAtOffset(w,metres,select(curLatM,going*w.side*base0.halfWidth,isMounted));
   let facing=spot.forward*going;
+  let yaw=select(atan2(facing.x,facing.y),fate.heading,init&&!isMounted);
   let how=2u|select(0u,4u,isMounted)|select(0u,8u,stopped);
-  intents[id.x]=TownIntent(vec4f(spot.position,spot.halfWidth),vec4f(atan2(facing.x,facing.y),select(w.speed,0.0,stopped),going,f32(how)));
+  intents[id.x]=TownIntent(vec4f(spot.position,spot.halfWidth),vec4f(yaw,select(w.speed,0.0,stopped),going,f32(how)));
+  if(!isMounted&&id.x<WB_WALKER_MAX){
+    let bFlags=WB_FLAG_ACTIVE|WB_FLAG_HUMAN|select(0u,WB_FLAG_STOPPED,stopped);
+    worldBodies[WB_WALKER_BASE+id.x]=WorldBody(vec4f(spot.position,0.36),vec4f(yaw,0.0,select(w.speed,0.0,stopped),f32(bFlags)));
+  }
 }
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
   // Rain and sleet wet them. Snow and hail do not, and neither does anything else the frame happens to carry. Those in
@@ -203,10 +240,14 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   }
   let isMounted=(w.flags&16u)!=0u;
   var metres=fate.along;var going=fate.going;var lane=fate.lane;var walked=0.0;var ran=0.0;var stopped=false;var hidden=false;
+  var mountPosApplied=false;var bodyHeading=0.0;var useBodyHeading=false;
   var spot:TownSpot;
   if(fate.mode==ABOUT){
     // After dark most are home.
-    if(w.abroad>.1+.9*smoothstep(-.1,.14,F.sunDir.y)){return;}
+    if(w.abroad>.1+.9*smoothstep(-.1,.14,F.sunDir.y)){
+      if(id.x<WB_WALKER_MAX){worldBodies[WB_WALKER_BASE+id.x]=WorldBody(vec4f(0.0),vec4f(0.0));}
+      return;
+    }
     // Out along the route, a stop on the way perhaps, then indoors; then the same way back.
     let walking=w.length/w.speed;
     let leg=walking+w.pauseFor+w.indoors;
@@ -216,48 +257,73 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     let inLeg=turn-select(0.0,leg,back);
     // At the end of the leg they go indoors, unless where they went is in the open.
     let arrived=inLeg>=walking+w.pauseFor;
-    if(arrived&&((w.flags>>select(2u,1u,back))&1u)==0u){return;}
+    if(arrived&&((w.flags>>select(2u,1u,back))&1u)==0u){
+      if(id.x<WB_WALKER_MAX){worldBodies[WB_WALKER_BASE+id.x]=WorldBody(vec4f(0.0),vec4f(0.0));}
+      return;
+    }
     let stopAt=walking*w.pauseAt;
     stopped=arrived||(w.pauseFor>0.0&&inLeg>=stopAt&&inLeg<stopAt+w.pauseFor);
     walked=min(w.length,(min(inLeg,stopAt)+max(0.0,inLeg-stopAt-w.pauseFor))*w.speed);
     metres=select(walked,w.length-walked,back);
     going=select(1.0,-1.0,back);
     if(isMounted){
-      // Street-mounted riders stay bit-for-bit locked to their horse in js/wgsl/herds.js (pure time, fixed w.side).
-      spot=wayAt(w,metres,going);
+      // Street-mounted riders lock 1:1 to their steered horse's resolved saddle pose in worldBodies (js/wgsl/herds.js).
+      var usedMountPose=false;
+      if(id.x<WB_MOUNT_POSE_MAX){
+        let mp=worldBodies[WB_MOUNT_POSE_BASE+id.x];
+        if(mp.dir.w>0.5){
+          let mFwd=vec2f(sin(mp.pos.w),cos(mp.pos.w));
+          spot=TownSpot(mp.pos.xyz,mFwd,mp.pos.xz,0.45,1.0);
+          walked=mp.dir.x;
+          stopped=mp.dir.z>0.5;
+          bodyHeading=mp.pos.w;
+          useBodyHeading=true;
+          mountPosApplied=true;
+          usedMountPose=true;
+        }
+      }
+      if(!usedMountPose){spot=wayAt(w,metres,going);}
       lane=going;
     }else{
       let init=(fate.how&1u)!=0u;
       let dt=select(0.0,clamp(secondsSince(fate.since,time),0.0,0.25),init);
-      let prefFrac=going*w.side;
+      let baseCenter=wayAtOffset(w,metres,0.0);
+      let halfW=max(baseCenter.halfWidth,0.12);
+      let prefLatM=going*w.side*halfW;
       // When turning around at an open-air end (e.g. a pier head), switch immediately to the new right-hand lane.
       let turnedAround=init&&(fate.going*going<0.0);
-      var latFrac=select(prefFrac,clamp(fate.lane,-1.0,1.0),init&&!turnedAround);
-      let baseSpot=wayAtLat(w,metres,latFrac);
+      var curLatM=select(prefLatM,fate.lane,init&&!turnedAround);
+      let baseSpot=wayAtOffset(w,metres,curLatM);
       let facing0=baseSpot.forward*going;
       let right0=vec2f(facing0.y,-facing0.x);
-      let halfW=max(baseSpot.halfWidth,0.05);
-      let curRightM=latFrac*going*halfW;
+      let curRightM=curLatM*going;
       let prefRightM=w.side*halfW;
-      let rSelf=0.42;
+      let rSelf=0.38;
       var steerRightM=0.0;
       var pushRightM=0.0;
       var pushFwdM=0.0;
       var moveFrac=1.0;
+      var sawStatic=false;
+      var hardBlocked=false;
+      var minCloseGap=9.0;
+      var closeSide=0.0;
+      // 1. Pedestrian-to-pedestrian physical collision, lateral passing & shoulder-squeeze.
       let totalW=arrayLength(&walkers);
       for(var j=0u;j<totalW;j++){
         if(j==id.x){continue;}
         let oi=intents[j];
         let oHow=u32(oi.state.w+0.5);
-        if((oHow&2u)==0u){continue;}
+        if((oHow&2u)==0u||(oHow&4u)!=0u){continue;} // mounted horses are handled with full capsules in worldBodies below
         let dXZ=vec2f(oi.pos.x-baseSpot.position.x,oi.pos.z-baseSpot.position.z);
         if(abs(dXZ.x)>4.2||abs(dXZ.y)>4.2||abs(oi.pos.y-baseSpot.position.y)>1.6){continue;}
         let dist=length(dXZ);
         if(dist>4.2){continue;}
         let fwd=dot(dXZ,facing0);
         let lat=dot(dXZ,right0);
-        let rOther=select(0.42,0.88,(oHow&4u)!=0u);
+        let rOther=0.38;
         let rSum=rSelf+rOther;
+        let gap=dist-rSum;
+        if(gap<minCloseGap&&fwd>-0.45&&fwd<1.35){minCloseGap=gap;closeSide=select(-1.0,1.0,lat>=0.0);}
         let oDir=vec2f(sin(oi.state.x),cos(oi.state.x));
         let sameDir=dot(facing0,oDir);
         let oStopped=(oHow&8u)!=0u||oi.state.y<0.05;
@@ -265,73 +331,139 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
         let oRightPos=curRightM+lat;
         let roomRight=halfW-oRightPos;
         let roomLeft=oRightPos+halfW;
-        // Lateral passing: shift into available lateral road/dock space around oncoming, mounted, or slower walkers.
-        if(fwd>-0.45&&fwd<3.8&&abs(lat)<rSum*1.55&&halfW>0.26){
+        if(fwd>-0.45&&fwd<3.8&&abs(lat)<rSum*1.65&&halfW>0.26){
           let prox=1.0-clamp(max(fwd,0.0)/3.8,0.0,1.0);
           var passDir=select(-1.0,1.0,roomRight>=roomLeft);
           if(sameDir<-0.25&&roomRight>=rSum*0.80){passDir=1.0;}
           else if(sameDir>=-0.25&&roomLeft>=rSum*0.85&&oi.state.y<w.speed*0.95){passDir=-1.0;}
-          let needClear=max(0.0,rSum*1.12-abs(lat));
-          steerRightM+=passDir*(0.38+needClear)*prox;
+          let needClear=max(0.0,rSum*1.20-abs(lat));
+          steerRightM+=passDir*(0.42+needClear)*prox;
         }
-        // Orderly queuing without deadlocks: never trap returning pier walkers or freeze behind open-air loiterers.
-        if(!stopped&&fwd>0.02&&fwd<rSum+0.68&&abs(lat)<rSum*0.92){
-          let canPassSide=max(roomLeft,roomRight)>=rSum*0.88;
+        if(!stopped&&fwd>0.02&&fwd<rSum+0.72&&abs(lat)<rSum*0.94){
+          let canPassSide=max(roomLeft,roomRight)>=rSum*0.92;
           if(sameDir>=-0.25){
             if(!canPassSide&&!oStopped){
-              let qCap=clamp((fwd-rSum*0.95)/0.68,0.0,1.0);
-              let matchAhead=select(0.0,clamp(oi.state.y/max(w.speed,0.15),0.0,1.0),fwd>rSum*0.98);
-              moveFrac=min(moveFrac,max(qCap,matchAhead*clamp((fwd-rSum*0.92)/0.35,0.0,1.0)));
-            }else if(abs(lat)<rSum*0.65){
-              // Plenty of lateral room or walker ahead is standing still: slow briefly to step around, never freeze.
-              moveFrac=min(moveFrac,select(0.45,0.38,oStopped));
+              let qCap=clamp((fwd-rSum*0.98)/0.72,0.0,1.0);
+              let matchAhead=select(0.0,clamp(oi.state.y/max(w.speed,0.15),0.0,1.0),fwd>rSum*1.00);
+              moveFrac=min(moveFrac,max(qCap,matchAhead*clamp((fwd-rSum*0.94)/0.35,0.0,1.0)));
+            }else if(abs(lat)<rSum*0.72){
+              moveFrac=min(moveFrac,select(0.42,0.34,oStopped));
             }
-          }else if(!canPassSide&&abs(lat)<rSum*0.72){
-            // Opposing traffic in a narrow pinch: leaving-end walkers (going < 0) take right-of-way so piers never jam.
+          }else if(!canPassSide&&abs(lat)<rSum*0.78){
             let yieldToOther=(going>0.0&&oGoing<0.0)||((going*oGoing>0.0)&&(facing0.x<oDir.x));
             if(yieldToOther){
-              moveFrac=min(moveFrac,clamp((fwd-rSum*0.85)/0.65,0.26,0.65));
+              moveFrac=min(moveFrac,clamp((fwd-rSum*0.92)/0.65,0.08,0.58));
             }
           }
         }
-        // Soft non-merging separation clamped strictly inside the walkable corridor.
+        // Hard non-penetration projection so people occupy physical space and cannot walk through each other.
         if(dist<rSum){
           let pen=rSum-dist;
-          let latSign=select(select(-1.0,1.0,lat<0.0),select(-1.0,1.0,id.x>j),abs(lat)<0.04);
-          pushRightM+=latSign*pen*0.62;
-          let edgeBlocked=(latSign>0.0&&curRightM>halfW-0.12)||(latSign<0.0&&curRightM<-halfW+0.12)||halfW<0.30;
-          if(edgeBlocked&&fwd>=0.0&&!oStopped){pushFwdM-=pen*0.42;}
-          else if(fwd>0.0&&dist<rSum*0.68&&!oStopped){pushFwdM-=pen*0.24;}
+          let latSign=select(select(-1.0,1.0,lat<0.0),select(-1.0,1.0,id.x>j),abs(lat)<0.05);
+          pushRightM+=latSign*(pen+0.02)*0.92;
+          let edgeBlocked=(latSign>0.0&&curRightM>halfW-0.14)||(latSign<0.0&&curRightM<-halfW+0.14)||halfW<0.34;
+          if(edgeBlocked&&fwd>=0.0){pushFwdM-=pen*0.72;moveFrac=min(moveFrac,0.08);}
+          else if(fwd>0.0&&dist<rSum*0.78){pushFwdM-=pen*0.45;}
         }
       }
-      // Bounded stall breaker (stored in fate.look): if throttled for >1.8 s, smoothly release queuing so no one can trap.
+      // 2. Cross-family GPU physical bodies: ashore captain, static square monuments/wells/stalls, horses, livestock & wagons.
+      let wbHdr=worldBodies[WB_HEADER_SLOT].pos;
+      let nStatic=min(u32(wbHdr.x+0.5),WB_STATIC_MAX);
+      let nHerds=min(u32(wbHdr.y+0.5),WB_HERD_MAX);
+      for(var passKind=0u;passKind<3u;passKind++){
+        var bStart=WB_CAPTAIN_SLOT;
+        var bEnd=WB_CAPTAIN_SLOT+1u;
+        if(passKind==1u){bStart=WB_STATIC_BASE;bEnd=WB_STATIC_BASE+nStatic;}
+        else if(passKind==2u){bStart=WB_HERD_BASE;bEnd=WB_HERD_BASE+nHerds;}
+        for(var bi=bStart;bi<bEnd;bi++){
+          let ob=worldBodies[bi];
+          if(ob.pos.w<=0.01){continue;}
+          let dXZ=ob.pos.xz-baseSpot.position.xz;
+          if(abs(dXZ.x)>6.5||abs(dXZ.y)>6.5||abs(ob.pos.y-baseSpot.position.y)>2.5){continue;}
+          let oFlags=u32(ob.dir.w+0.5);
+          if((oFlags&WB_FLAG_ACTIVE)==0u){continue;}
+          let isStat=(oFlags&WB_FLAG_STATIC)!=0u;
+          let isCap=(oFlags&WB_FLAG_CAPTAIN)!=0u;
+          let isVeh=(oFlags&WB_FLAG_VEHICLE)!=0u;
+          let isMount=(oFlags&WB_FLAG_MOUNT)!=0u;
+          let obDir=vec2f(sin(ob.dir.x),cos(ob.dir.x));
+          let ct=wbCapsuleContact(baseSpot.position.xz,facing0,0.0,rSelf,ob.pos.xz,obDir,ob.dir.y,ob.pos.w);
+          let sep=ct.xy;
+          let gap=ct.z;
+          let pen=ct.w;
+          let fwd=dot(dXZ,facing0);
+          let lat=dot(dXZ,right0);
+          if(!isStat&&gap<minCloseGap&&fwd>-0.5&&fwd<1.8){minCloseGap=gap;closeSide=select(-1.0,1.0,lat>=0.0);}
+          let lookGap=select(select(1.45,2.2,isCap||isMount),3.0,isStat||isVeh);
+          let backDist=select(-1.2,-2.6,isStat||isVeh);
+          if(fwd>backDist&&fwd<5.8&&gap<lookGap){
+            if(isStat){sawStatic=true;}
+            let prox=1.0-clamp(max(gap,0.0)/lookGap,0.0,1.0);
+            let sideSign=select(select(-1.0,1.0,lat<0.0),select(-1.0,1.0,(id.x&1u)==0u),abs(lat)<0.10);
+            let clearNeed=max(0.0,(rSelf+ob.pos.w+select(0.45,1.05,isStat||isVeh))-abs(lat));
+            steerRightM+=sideSign*(0.48+clearNeed)*prox*select(1.05,2.05,isStat||isCap||isVeh);
+          }
+          if(!stopped&&fwd>0.05&&gap<select(0.65,1.10,isVeh||isMount||isCap)&&abs(lat)<(rSelf+ob.pos.w)*0.95){
+            let qCap=clamp(gap/select(0.65,1.10,isVeh||isMount||isCap),0.0,1.0);
+            moveFrac=min(moveFrac,qCap);
+            if(isStat||isCap||isVeh||isMount){hardBlocked=true;}
+          }
+          if(pen>0.0){
+            if(isStat){sawStatic=true;}
+            hardBlocked=true;
+            let latPush=dot(sep,right0);
+            let fwdPush=dot(sep,facing0);
+            let pSign=select(sign(latPush),select(-1.0,1.0,lat<0.0),abs(latPush)<0.12);
+            pushRightM+=pSign*(pen+select(0.03,0.12,isStat))*1.05;
+            if(fwdPush<-0.15){pushFwdM-=pen*0.75;moveFrac=min(moveFrac,0.04);}
+          }
+        }
+      }
+      // Stall breaker ONLY releases human-vs-human pinches after 3.2 s; NEVER ghosts through solid monuments, captain, horses, or wagons.
       var stallS=select(0.0,clamp(fate.look,0.0,6.0),init&&!turnedAround);
-      if(!stopped&&moveFrac<0.40&&dt>0.0){stallS=min(stallS+dt,6.0);}
+      if(!stopped&&moveFrac<0.35&&!hardBlocked&&dt>0.0){stallS=min(stallS+dt,6.0);}
       else if(dt>0.0){stallS=max(stallS-dt*1.8,0.0);}
-      let escape=smoothstep(1.8,3.4,stallS);
+      let escape=select(smoothstep(3.2,4.8,stallS),0.0,hardBlocked);
       moveFrac=max(moveFrac,escape);
-      pushFwdM*=(1.0-escape);
-      let wantRightM=clamp(prefRightM+clamp(steerRightM,-halfW*1.2,halfW*1.2),-halfW,halfW);
-      let maxStep=max(0.04,dt*1.65);
+      let effPushFwd=select(pushFwdM*(1.0-escape),pushFwdM,hardBlocked);
+      let maxLat=max(halfW,select(halfW,5.0,sawStatic));
+      let wantRightM=clamp(prefRightM+clamp(steerRightM,-maxLat*1.35,maxLat*1.35),-maxLat,maxLat);
+      let maxStep=max(0.04,dt*select(1.85,2.8,sawStatic||hardBlocked));
       let smoothRightM=curRightM+clamp(wantRightM-curRightM,-maxStep,maxStep);
-      let finalRightM=clamp(smoothRightM+clamp(pushRightM,-0.80,0.80),-halfW,halfW);
-      latFrac=clamp((finalRightM*going)/halfW,-1.0,1.0);
+      let finalRightM=clamp(smoothRightM+clamp(pushRightM,-1.15,1.15),-maxLat,maxLat);
+      let finalLatM=finalRightM*going;
+      let latVel=select(0.0,(finalRightM-curRightM)/max(dt,0.016),dt>1e-4);
       if(!stopped&&moveFrac<0.995&&dt>0.0){
         fate.clock-=dt*(1.0-moveFrac);
-        let backStep=clamp(pushFwdM,-0.45,0.0);
+        let backStep=clamp(effPushFwd,-0.55,0.0);
         metres=clamp(metres+going*backStep,0.0,w.length);
-        if(moveFrac<0.16){stopped=true;}
-      }else if(pushFwdM<-0.01){
-        metres=clamp(metres+going*clamp(pushFwdM,-0.45,0.0),0.0,w.length);
+        if(moveFrac<0.14){stopped=true;}
+      }else if(effPushFwd<-0.01){
+        metres=clamp(metres+going*clamp(effPushFwd,-0.55,0.0),0.0,w.length);
       }
-      spot=wayAtLat(w,metres,latFrac);
+      spot=wayAtOffset(w,metres,finalLatM);
+      // Visible physical body-turning & close-pass shoulder-squeeze when moving around people, animals, monuments, or the captain!
+      let baseYaw=atan2(facing0.x,facing0.y);
+      let travelVec=facing0*max(0.35,w.speed*moveFrac)+right0*clamp(latVel,-1.9,1.9);
+      let steerYaw=select(baseYaw,atan2(travelVec.x,travelVec.y),!stopped&&abs(latVel)>0.06);
+      let squeezeAmt=select(0.0,clamp(1.0-max(minCloseGap,0.0)/0.48,0.0,1.0),!stopped&&minCloseGap<0.48);
+      let targetYaw=steerYaw-closeSide*0.44*squeezeAmt;
+      let prevYaw=select(baseYaw,fate.heading,init&&!turnedAround);
+      let maxTurn=max(0.10,dt*5.0);
+      bodyHeading=prevYaw+clamp(turnTo(prevYaw,targetYaw),-maxTurn,maxTurn);
+      useBodyHeading=true;
       lane=going;
       fate.since=time;
-      fate.lane=latFrac;
+      fate.lane=finalLatM;
       fate.going=going;
+      fate.heading=bodyHeading;
       fate.look=stallS;
       fate.how=1u;
       fates[id.x]=fate;
+      if(id.x<WB_WALKER_MAX){
+        let bFlags=WB_FLAG_ACTIVE|WB_FLAG_HUMAN|select(0u,WB_FLAG_STOPPED,stopped);
+        worldBodies[WB_WALKER_BASE+id.x]=WorldBody(vec4f(spot.position,0.36),vec4f(bodyHeading,0.0,select(w.speed*moveFrac,0.0,stopped),f32(bFlags)));
+      }
     }
   }else if(fate.mode==AFRAID){
     ran=clamp(age-${TOWN_STARTLE_S.toFixed(2)},0.0,fate.runFor);
@@ -346,7 +478,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   }
   var position=spot.position;
   let facing=spot.forward*going;
-  var heading=atan2(facing.x,facing.y);
+  var heading=select(atan2(facing.x,facing.y),bodyHeading,useBodyHeading);
   if(fate.mode>=FALLING){heading=fate.heading;}
   else if(fate.mode==AFRAID){
     if(fate.runFor>0.0){heading=fate.heading+turnTo(fate.heading,heading)*smoothstep(0.0,.3,age);}
@@ -491,7 +623,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   // Drawn on the ground the land draws there (js/continuum-ground.js) where they walk natural terrain; never on rigid
   // architectural decks (stone quays, timber piers, or masonry bridges) nor in the sea.
   let dry=position.y>-0.02;
-  let onArchDeck=spot.onDeck>0.5||((w.flags&8u)!=0u&&position.y>1.75&&position.y<3.25&&spot.halfWidth<1.40);
+  let onArchDeck=mountPosApplied||spot.onDeck>0.5||((w.flags&8u)!=0u&&position.y>1.75&&position.y<3.25&&spot.halfWidth<1.40);
   if(dry&&!onArchDeck){position.y+=continuumGroundLift(position.xz);}
   let centerY=select(${(BODY_HEIGHT_M * 0.5).toFixed(3)},1.40,isMounted&&fate.mode==ABOUT);
   let relative=position+vec3f(0.0,centerY,0.0)-F.camPos.xyz;

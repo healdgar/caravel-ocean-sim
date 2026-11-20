@@ -5827,6 +5827,7 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   if (country?.watch) port.watch = country.watch;
   // The forts, batteries and watchtowers of its board, as built: their guns and posts are manned from its watch.
   port.works = country?.works ?? [];
+  port.furniture = country?.furniture ?? [];
   if (!pack.skipPortPlacement) {
     settlePortOnWaterfront(port, heights, region, country?.waterfront ?? []);
     // A board's town's roads are its board's alone.

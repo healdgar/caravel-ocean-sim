@@ -13,6 +13,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { continuumGroundWGSL } from '../continuum-ground.js';
+import { worldBodiesWGSL } from '../world-bodies.js';
 import { CLOUD_SHADOW_BINDINGS } from './clouds.js';
 import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
@@ -189,11 +190,26 @@ const HERD_STAMPEDE_SPAN_S: f32 = 14.0;
 @group(0) @binding(9) var<storage, read> routes: array<vec4f>;
 @group(0) @binding(10) var<uniform> shots: HerdShots;
 @group(0) @binding(11) var<storage, read_write> fates: array<HerdFate>;
-` + continuumGroundWGSL(0, 12) + HERD_JOINTS_WGSL + /* wgsl */ `
+` + continuumGroundWGSL(0, 12) + /* wgsl */ `
+@group(0) @binding(13) var<storage, read_write> herdAvoid: array<vec4f>;
+` + worldBodiesWGSL(0, 14, 'read_write') + HERD_JOINTS_WGSL + /* wgsl */ `
 
 // Not drawn this frame.
 fn herdGone(idx: u32) {
   herdRecords[idx] = ContinuumRecord(vec4f(0.0), vec4f(0.0, 0.0, 0.0, 1.0), vec4u(CONTINUUM_GONE, idx * HERD_POSE_VEC4S, idx, 0u), vec4u(0u));
+  if (idx < WB_HERD_MAX) {
+    worldBodies[WB_HERD_BASE + idx] = WorldBody(vec4f(0.0), vec4f(0.0));
+  }
+}
+fn herdBodyDims(species: u32, scale: f32) -> vec2f {
+  if (species == 0u) { return vec2f(0.36, 0.38) * scale; }
+  if (species == 1u) { return vec2f(0.56, 0.88) * scale; }
+  if (species == 2u) { return vec2f(0.32, 0.36) * scale; }
+  if (species == 3u) { return vec2f(0.50, 0.98) * scale; }
+  return vec2f(1.15, 1.65) * scale;
+}
+fn herdTurnDelta(fromYaw: f32, toYaw: f32) -> f32 {
+  return atan2(sin(toYaw - fromYaw), cos(toYaw - fromYaw));
 }
 // Stood at the drawn (shifted) world place, turned to its heading and pitched to its slope, at its scale; its joints
 // posed by its walk and its fate; its spare words its coat seed and its herd flags (1 tack), for its material.
@@ -315,10 +331,27 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var yokeSample = HerdRouteSample(vec2f(0.0), vec2f(0.0, 1.0), 0.0);
   var wayGroundY = -1000.0;
   var streetMountOnDeck = false;
+  var streetMountStopped = false;
+  var streetMountWalkerIdx = 0xffffffffu;
+  var streetMountHalfW = 0.45;
+  var streetMountCrossSlope = 0.0;
+  var streetMountCenterY = 0.0;
+  var streetMountCenterXZ = vec2f(0.0);
+  var streetMountForward = vec2f(0.0, 1.0);
+  var streetMountGoing = 1.0;
+  var streetMountSide = 0.35;
+  var streetMountSpeed = 2.5;
   var isPanicking = false;
+  let shiftXZ = vec2f(nearTerrain.grid.y, nearTerrain.grid.z);
+  let scale = seed.traits.y;
 
   if (isStreetMount) {
-    // Urban street mount coupled 1:1 with TOWNSFOLK_WALK wayAt(w, metres, lane).
+    // Urban street mount coupled 1:1 with TOWNSFOLK_WALK via worldBodies[WB_MOUNT_POSE_BASE + walkerIdx].
+    let rawWIdx = seed.traits.w;
+    if (rawWIdx >= 0.0 && rawWIdx < f32(WB_MOUNT_POSE_MAX)) {
+      streetMountWalkerIdx = u32(rawWIdx + 0.5);
+      worldBodies[WB_MOUNT_POSE_BASE + streetMountWalkerIdx] = WorldBody(vec4f(0.0), vec4f(0.0));
+    }
     routeHeader = u32(seed.anchor.x);
     let mHead0 = routes[routeHeader];      // (sampleCount, lengthM, speed, indoors)
     let mHead1 = routes[routeHeader + 1u]; // (pauseAt, pauseFor, side, walkerFlags)
@@ -331,21 +364,28 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let side = mHead1.z;
     let wFlags = u32(mHead1.w + 0.5);
     let abroad = -roamR - 10.0;
+    streetMountSide = side;
+    streetMountSpeed = speed;
 
     if (fate.status.x < 1.5) {
       if (abroad > 0.1 + 0.9 * smoothstep(-0.1, 0.14, F.sunDir.y)) { return; }
+      let av0 = herdAvoid[idx];
+      let hasInit = av0.z >= 0.5;
+      let clkDelay = select(0.0, av0.y, hasInit);
       let walking = lengthM / speed;
       let leg = walking + pauseFor + indoors;
-      let turn = fract(t / (2.0 * leg) + phase) * 2.0 * leg;
+      let turn = fract((t - clkDelay) / (2.0 * leg) + phase) * 2.0 * leg;
       let back = turn >= leg;
       let inLeg = turn - select(0.0, leg, back);
       let arrived = inLeg >= walking + pauseFor;
       if (arrived && ((wFlags >> select(2u, 1u, back)) & 1u) == 0u) { return; }
       let stopAt = walking * pauseAt;
       let stopped = arrived || (pauseFor > 0.0 && inLeg >= stopAt && inLeg < stopAt + pauseFor);
+      streetMountStopped = stopped;
       let walked = min(lengthM, (min(inLeg, stopAt) + max(0.0, inLeg - stopAt - pauseFor)) * speed);
       let metres = select(walked, lengthM - walked, back);
       let going = select(1.0, -1.0, back);
+      streetMountGoing = going;
       let along = metres / ${ROUTE_STEP_M.toFixed(4)};
       let si = min(u32(max(along, 0.0)), max(sampleCount, 2u) - 2u);
       let s0 = routes[routeHeader + 2u + si];
@@ -358,14 +398,20 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       let w1 = select(vec2f(f32(v1 & 511u) * 0.01, f32((v1 >> 9u) & 2047u) * 0.001 - 0.5), vec2f(s1.w, 0.0), s1.w < 16.0);
       streetMountOnDeck = ((s0.w >= 16.0 && (v0 >> 20u) != 0u) || (s1.w >= 16.0 && (v1 >> 20u) != 0u));
       let ws = mix(w0, w1, sFrac);
+      streetMountHalfW = max(ws.x, 0.45);
+      streetMountCrossSlope = ws.y;
+      streetMountCenterY = hereXYZ.y;
+      streetMountCenterXZ = hereXYZ.xz;
       let aheadIdx = min(si + 3u, sampleCount - 1u);
       let behindIdx = u32(max(i32(si) - 2, 0));
       let ahead = routes[routeHeader + 2u + aheadIdx].xz - routes[routeHeader + 2u + behindIdx].xz;
       let forward = normalize(ahead + vec2f(1e-4, 0.0));
-      let latOff = going * side * ws.x;
-      let aside = vec2f(forward.y, -forward.x) * latOff;
+      streetMountForward = forward;
+      let prefLat = going * side * ws.x;
+      let curLat = select(prefLat, av0.x, hasInit);
+      let aside = vec2f(forward.y, -forward.x) * curLat;
       worldXZ = vec2f(hereXYZ.x + aside.x, hereXYZ.z + aside.y);
-      wayGroundY = hereXYZ.y + latOff * ws.y;
+      wayGroundY = hereXYZ.y + curLat * ws.y;
       let facing = forward * going;
       walkYaw = atan2(facing.x, facing.y);
       rolled = walked;
@@ -500,9 +546,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     walkYaw = select(flockHeading + 0.55 * sin(phase * 3.1 + floor((t + phase * 4.456) / 28.0)), atan2(vel.x, vel.y), velLen > 1e-4);
   }
 
-  let shiftXZ = vec2f(nearTerrain.grid.y, nearTerrain.grid.z);
-  let scale = seed.traits.y;
-
   // Apply existing panic/stampede or felled state BEFORE evaluating new incoming shots.
   if (!isVehicle && fate.status.x > 0.5 && fate.status.x < 1.5) {
     let panicAge = herdSecondsSince(fate.status.y, t);
@@ -522,6 +565,202 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     } else {
       fate.status.x = 0.0;
       fates[idx] = fate;
+    }
+  }
+
+  // Unified GPU physical-space collision, anticipatory steering & body-turning (js/world-bodies.js).
+  // Every live animal and street mount occupies real 2D capsule volume and steers cleanly around
+  // static square monuments (Pelourinhos, wells, stalls), the ashore captain, vehicles, other animals, and pedestrians.
+  let selfDims = herdBodyDims(species, scale);
+  let selfR = selfDims.x;
+  let selfHL = selfDims.y;
+  if (!isVehicle && !isHitch && fate.status.x < 1.5 && !isPanicking) {
+    let av = herdAvoid[idx];
+    let hasInit = av.z >= 0.5;
+    let dt = select(0.0, clamp(herdSecondsSince(av.z - 1.0, t), 0.0, 0.25), hasInit);
+    let hdr = worldBodies[WB_HEADER_SLOT].pos;
+    let nStatic = min(u32(hdr.x + 0.5), WB_STATIC_MAX);
+    let nHerds = min(u32(hdr.y + 0.5), WB_HERD_MAX);
+    let nWalkers = min(u32(hdr.z + 0.5), WB_WALKER_MAX);
+
+    if (isStreetMount) {
+      let curLat = select(streetMountGoing * streetMountSide * streetMountHalfW, av.x, hasInit);
+      let curDelay = select(0.0, av.y, hasInit);
+      let selfW = worldXZ + shiftXZ;
+      let facing0 = streetMountForward * streetMountGoing;
+      let right0 = vec2f(facing0.y, -facing0.x);
+      let curRightM = curLat * streetMountGoing;
+      let prefRightM = streetMountSide * streetMountHalfW;
+      let selfY = select(herdGroundY(worldXZ), wayGroundY, wayGroundY > -500.0);
+
+      var steerRightM = 0.0;
+      var pushRightM = 0.0;
+      var moveFrac = 1.0;
+      var sawStatic = false;
+      var sawNear = false;
+
+      // Scan captain (slot 1), static square obstacles, all other herds/mounts/vehicles, and pedestrians.
+      for (var passKind = 0u; passKind < 4u; passKind++) {
+        var bStart = WB_CAPTAIN_SLOT;
+        var bEnd = WB_CAPTAIN_SLOT + 1u;
+        if (passKind == 1u) { bStart = WB_STATIC_BASE; bEnd = WB_STATIC_BASE + nStatic; }
+        else if (passKind == 2u) { bStart = WB_HERD_BASE; bEnd = WB_HERD_BASE + nHerds; }
+        else if (passKind == 3u) { bStart = WB_WALKER_BASE; bEnd = WB_WALKER_BASE + nWalkers; }
+        for (var bi = bStart; bi < bEnd; bi++) {
+          if (passKind == 2u && bi == WB_HERD_BASE + idx) { continue; }
+          if (passKind == 3u && streetMountWalkerIdx < WB_WALKER_MAX && bi == WB_WALKER_BASE + streetMountWalkerIdx) { continue; }
+          let ob = worldBodies[bi];
+          if (ob.pos.w <= 0.01) { continue; }
+          let dXZ = ob.pos.xz - selfW;
+          if (abs(dXZ.x) > 7.5 || abs(dXZ.y) > 7.5 || abs(ob.pos.y - selfY) > 2.6) { continue; }
+          let oFlags = u32(ob.dir.w + 0.5);
+          if ((oFlags & WB_FLAG_ACTIVE) == 0u) { continue; }
+          let isStat = (oFlags & WB_FLAG_STATIC) != 0u;
+          let isCap = (oFlags & WB_FLAG_CAPTAIN) != 0u;
+          let isVeh = (oFlags & WB_FLAG_VEHICLE) != 0u;
+          let isPeerMount = (oFlags & (WB_FLAG_MOUNT | WB_FLAG_ANIMAL)) != 0u;
+          let obDir = vec2f(sin(ob.dir.x), cos(ob.dir.x));
+          let ct = wbCapsuleContact(selfW, facing0, selfHL, selfR, ob.pos.xz, obDir, ob.dir.y, ob.pos.w);
+          let sep = ct.xy; // from B to A
+          let gap = ct.z;
+          let pen = ct.w;
+          let fwd = dot(dXZ, facing0);
+          let lat = dot(dXZ, right0);
+          let lookDist = select(select(3.6, 4.8, isPeerMount || isCap), 6.2, isStat || isVeh);
+          let backDist = select(-1.4, -2.8, isStat || isVeh);
+          if (fwd > backDist && fwd < lookDist && gap < select(1.4, 2.8, isStat || isVeh)) {
+            sawNear = true;
+            if (isStat) { sawStatic = true; }
+            let prox = 1.0 - clamp(max(gap, 0.0) / select(1.8, 3.2, isStat || isVeh), 0.0, 1.0);
+            let sideSign = select(select(-1.0, 1.0, lat < 0.0), select(-1.0, 1.0, (idx & 1u) == 0u), abs(lat) < 0.12);
+            let sameDir = dot(facing0, obDir);
+            var passSign = sideSign;
+            if (!isStat && sameDir < -0.25) { passSign = 1.0; }
+            let clearNeed = max(0.0, (selfR + ob.pos.w + select(0.45, 1.15, isStat || isVeh)) - abs(lat));
+            let gain = select(select(0.65, 1.15, isPeerMount || isCap), 2.1, isStat || isVeh);
+            steerRightM += passSign * (0.45 + clearNeed) * prox * gain;
+          }
+          if (!streetMountStopped && fwd > 0.10 && gap < select(0.65, 1.25, isStat || isVeh || isPeerMount) && abs(lat) < (selfR + ob.pos.w) * 0.92) {
+            let qCap = clamp(gap / select(0.65, 1.25, isStat || isVeh || isPeerMount), 0.0, 1.0);
+            if (isStat || isCap || isVeh) {
+              moveFrac = min(moveFrac, max(0.22, qCap));
+            } else {
+              let oStopped = (oFlags & WB_FLAG_STOPPED) != 0u || ob.dir.z < 0.08;
+              let yieldTie = !isPeerMount || (idx > (bi - WB_HERD_BASE));
+              if (yieldTie || oStopped) { moveFrac = min(moveFrac, max(0.05, qCap)); }
+            }
+          }
+          if (pen > 0.0) {
+            if (isStat) { sawStatic = true; }
+            let latPush = dot(sep, right0);
+            let pushSign = select(sign(latPush), select(-1.0, 1.0, lat < 0.0), abs(latPush) < 0.15);
+            let wPush = select(select(0.65, 1.05, isCap || isVeh), 1.65, isStat);
+            pushRightM += pushSign * (pen + select(0.05, 0.22, isStat)) * wPush;
+            if (fwd > 0.0) { moveFrac = min(moveFrac, 0.06); }
+          }
+        }
+      }
+
+      let maxLat = max(streetMountHalfW, select(0.55, 5.6, sawStatic));
+      let wantRightM = clamp(prefRightM + clamp(steerRightM, -maxLat * 1.4, maxLat * 1.4), -maxLat, maxLat);
+      let latRate = select(1.85, 3.6, sawStatic || abs(pushRightM) > 0.05);
+      let maxLatStep = max(0.03, dt * latRate);
+      let smoothRightM = curRightM + clamp(wantRightM - curRightM, -maxLatStep, maxLatStep);
+      let finalRightM = clamp(smoothRightM + clamp(pushRightM, -1.6, 1.6), -maxLat, maxLat);
+      let newLat = finalRightM * streetMountGoing;
+      let latVel = select(0.0, (finalRightM - curRightM) / max(dt, 0.016), dt > 1e-4);
+      let newDelay = curDelay + select(0.0, dt * (1.0 - moveFrac), !streetMountStopped && dt > 0.0);
+
+      let asideNew = vec2f(streetMountForward.y, -streetMountForward.x) * newLat;
+      worldXZ = streetMountCenterXZ + asideNew;
+      let onWideSquare = abs(newLat) > streetMountHalfW + 0.18 && !streetMountOnDeck;
+      wayGroundY = select(streetMountCenterY + newLat * streetMountCrossSlope, herdGroundY(worldXZ), onWideSquare);
+      if (moveFrac < 0.14) { streetMountStopped = true; }
+      moveAmt = select(clamp((streetMountSpeed * moveFrac) / 2.2, 0.20, 1.0), 0.0, streetMountStopped);
+
+      // Turn the horse's physical heading smoothly into the maneuver when curving around obstacles/crowds.
+      let baseYaw = atan2(facing0.x, facing0.y);
+      let travelVec = facing0 * max(0.45, streetMountSpeed * moveFrac) + right0 * clamp(latVel, -2.4, 2.4);
+      let targetYaw = select(baseYaw, atan2(travelVec.x, travelVec.y), !streetMountStopped && (sawNear || abs(latVel) > 0.06));
+      let prevYaw = select(baseYaw, av.w, hasInit);
+      let maxTurn = max(0.08, dt * 3.0);
+      walkYaw = prevYaw + clamp(herdTurnDelta(prevYaw, targetYaw), -maxTurn, maxTurn);
+      herdAvoid[idx] = vec4f(newLat, newDelay, t + 1.0, walkYaw);
+    } else {
+      // Pasture livestock & loose caravan droves/riders: 2D world-space capsule avoidance + body turning.
+      let nomXZ = worldXZ;
+      let curOff = select(vec2f(0.0), av.xy, hasInit);
+      let curXZ = nomXZ + curOff;
+      let selfW = curXZ + shiftXZ;
+      let selfDir = vec2f(sin(walkYaw), cos(walkYaw));
+      let selfRight = vec2f(selfDir.y, -selfDir.x);
+      let selfY = herdGroundY(curXZ);
+
+      var steerXZ = vec2f(0.0);
+      var pushXZ = vec2f(0.0);
+      var moveFrac = 1.0;
+
+      for (var passKind = 0u; passKind < 4u; passKind++) {
+        var bStart = WB_CAPTAIN_SLOT;
+        var bEnd = WB_CAPTAIN_SLOT + 1u;
+        if (passKind == 1u) { bStart = WB_STATIC_BASE; bEnd = WB_STATIC_BASE + nStatic; }
+        else if (passKind == 2u) { bStart = WB_HERD_BASE; bEnd = WB_HERD_BASE + nHerds; }
+        else if (passKind == 3u) { bStart = WB_WALKER_BASE; bEnd = WB_WALKER_BASE + nWalkers; }
+        for (var bi = bStart; bi < bEnd; bi++) {
+          if (passKind == 2u && bi == WB_HERD_BASE + idx) { continue; }
+          let ob = worldBodies[bi];
+          if (ob.pos.w <= 0.01) { continue; }
+          let dXZ = ob.pos.xz - selfW;
+          if (abs(dXZ.x) > 5.5 || abs(dXZ.y) > 5.5 || abs(ob.pos.y - selfY) > 2.4) { continue; }
+          let oFlags = u32(ob.dir.w + 0.5);
+          if ((oFlags & WB_FLAG_ACTIVE) == 0u) { continue; }
+          let isStat = (oFlags & WB_FLAG_STATIC) != 0u;
+          let isCap = (oFlags & WB_FLAG_CAPTAIN) != 0u;
+          let isVeh = (oFlags & WB_FLAG_VEHICLE) != 0u;
+          let obDir = vec2f(sin(ob.dir.x), cos(ob.dir.x));
+          let ct = wbCapsuleContact(selfW, selfDir, selfHL, selfR, ob.pos.xz, obDir, ob.dir.y, ob.pos.w);
+          let sep = ct.xy;
+          let gap = ct.z;
+          let pen = ct.w;
+          let fwd = dot(dXZ, selfDir);
+          let lat = dot(dXZ, selfRight);
+          let lookGap = select(1.15, 2.2, isStat || isCap || isVeh);
+          if (gap < lookGap && fwd > -0.4) {
+            let prox = 1.0 - clamp(max(gap, 0.0) / lookGap, 0.0, 1.0);
+            let tang = select(-selfRight, selfRight, lat < 0.0);
+            steerXZ += (sep * 0.65 + tang * 0.85) * prox * select(0.9, 1.8, isStat || isCap || isVeh);
+            if (fwd > 0.1 && gap < 0.45 && abs(lat) < (selfR + ob.pos.w) * 0.8) {
+              moveFrac = min(moveFrac, clamp(gap / 0.45, 0.12, 1.0));
+            }
+          }
+          if (pen > 0.0) {
+            let wPush = select(0.58, 1.0, isStat || isCap || isVeh);
+            pushXZ += sep * (pen + 0.02) * wPush;
+            if (fwd > 0.0) { moveFrac = min(moveFrac, 0.15); }
+          }
+        }
+      }
+
+      let decay = exp(-dt * 0.45);
+      let stepVec = clamp(steerXZ, vec2f(-2.0), vec2f(2.0)) * dt * 1.35 + clamp(pushXZ, vec2f(-0.75), vec2f(0.75));
+      let candOff = curOff * decay + stepVec;
+      let maxOff = max(abs(roamR) + 3.0, 5.2);
+      let candLen = length(candOff);
+      let clampedOff = select(candOff, candOff * (maxOff / candLen), candLen > maxOff);
+      let candXZ = nomXZ + clampedOff;
+      let drySafe = herdGroundY(candXZ) >= 0.40 || (travelling && routeDeckY > 0.25);
+      let finalOff = select(curOff, clampedOff, drySafe);
+      worldXZ = nomXZ + finalOff;
+      let dispVel = select(vec2f(0.0), (finalOff - curOff) / max(dt, 0.016), dt > 1e-4);
+      let baseSpd = select(0.65, 1.25, species == 3u) * moveAmt * moveFrac;
+      let combinedV = selfDir * baseSpd + dispVel;
+      let vLen = length(combinedV);
+      let prevYaw = select(walkYaw, av.w, hasInit);
+      let targetYaw = select(walkYaw, atan2(combinedV.x, combinedV.y), vLen > 0.18);
+      let maxTurn = max(0.06, dt * 2.4);
+      walkYaw = prevYaw + clamp(herdTurnDelta(prevYaw, targetYaw), -maxTurn, maxTurn);
+      moveAmt = max(moveAmt * moveFrac, clamp(length(dispVel) / 1.4, 0.0, 0.85));
+      herdAvoid[idx] = vec4f(finalOff.x, finalOff.y, t + 1.0, walkYaw);
     }
   }
 
@@ -673,7 +912,25 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // An intact hitch thins at the horizon as one, keyed by its route and place in the train.
   let useHitchMid = isHitch && (flags & 14u) == 0u && !isPanicking;
   let thinSeed = select(idx, u32(max(floor(seed.anchor.x * 131.0 + seed.anchor.y * 17.0), 0.0)), useHitchMid);
-  herdStand(idx, species, vec3f(worldXZ.x + shiftXZ.x, wy, worldXZ.y + shiftXZ.y), walkYaw, slopePitch, scale, continuumFlags, thinSeed, flags,
+  let outWorldPos = vec3f(worldXZ.x + shiftXZ.x, wy, worldXZ.y + shiftXZ.y);
+  if (idx < WB_HERD_MAX) {
+    let bFlags = WB_FLAG_ACTIVE
+      | select(WB_FLAG_ANIMAL, WB_FLAG_VEHICLE, isVehicle)
+      | select(0u, WB_FLAG_MOUNT, isStreetMount)
+      | select(0u, WB_FLAG_STOPPED, moveAmt < 0.06 || fate.status.x >= 1.5);
+    let effSpd = select(select(0.9, 2.2, species == 3u) * moveAmt, streetMountSpeed * moveAmt, isStreetMount);
+    worldBodies[WB_HERD_BASE + idx] = WorldBody(
+      vec4f(outWorldPos, selfR),
+      vec4f(walkYaw, selfHL, effSpd, f32(bFlags))
+    );
+  }
+  if (isStreetMount && streetMountWalkerIdx < WB_MOUNT_POSE_MAX && fate.status.x < 1.5) {
+    worldBodies[WB_MOUNT_POSE_BASE + streetMountWalkerIdx] = WorldBody(
+      vec4f(outWorldPos, walkYaw),
+      vec4f(rolled, moveAmt, select(0.0, 1.0, streetMountStopped || moveAmt < 0.05), 1.0)
+    );
+  }
+  herdStand(idx, species, outWorldPos, walkYaw, slopePitch, scale, continuumFlags, thinSeed, flags,
     vec4f(walkPhase, moveAmt, select(grazeAmt, tongueYaw, isVehicle), select(tailPhase, tonguePitch, isVehicle)),
     vec3f(hitAge, hitDirAngle - walkYaw, coatSeed));
 }

@@ -117,6 +117,7 @@ import { createStoryteller, mateShortlist, storytellerScene } from './storytelle
 import { createMateFigure, mateDoing, stepMateFigure } from './first-mate.js';
 import { mateAbout, mateCandidateAccount, mateCandidateLine, mateCounsel, mateReply, mateTopics } from './mate-counsel.js';
 import { WALKER_WORDS, townSolids } from './town-streets.js';
+import { worldBodiesForDevice } from './world-bodies.js';
 import { bakedBoardFor, runtimeBoardFor, runtimeBoardPortKey } from './old-world.js';
 import { createProps } from './props.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
@@ -1267,7 +1268,7 @@ async function main() {
   function ashoreOpen(x,z){
     if(!terrain||!(terrain.groundSample(x,z)>=ASHORE_DRY_M))return false;
     const port=terrain.port,offset=terrain.getWorldOffset(),lx=x-offset.x,lz=z-offset.z;
-    if(ashore.solidsOf!==port){ashore.solidsOf=port;ashore.solids=townSolids(port,ASHORE_BODY_M);}
+    if(ashore.solidsOf!==port){ashore.solidsOf=port;ashore.solids=townSolids(port,ASHORE_BODY_M,{includeFurniture:true});}
     return !ashore.solids(lx,lz)&&!terrain.cityTargets?.inside(lx,lz,ASHORE_BODY_M);
   }
   const activeLandViews=terrain?.views??LANDFALL_VIEWS;
@@ -5866,9 +5867,17 @@ async function main() {
       cp=enc.beginComputePass({timestampWrites:writes});
       return cp;
     }:null;
+    const worldBodies=worldBodiesForDevice(device);
     if(terrain){
+      const wbOff=terrain.getWorldOffset?.()??{x:0,z:0};
+      worldBodies.setStaticObstacles(terrain.port?.furniture,wbOff);
+      const capSpd=ashore.on&&Number.isFinite(ashore.prevX)?Math.hypot(cam.x-ashore.prevX,cam.z-ashore.prevZ)/Math.max(dt,0.016):0;
+      ashore.prevX=cam.x;ashore.prevZ=cam.z;
+      worldBodies.setCaptain(ashore.on,cam.x,cam.y-ASHORE_EYE_M,cam.z,cam.yaw,capSpd);
       splitComputePass?.('Continuum land');
       cp=terrain.encode(cp,skyChanged,frameF,splitComputePass)??cp;
+    }else{
+      worldBodies.setCaptain(false);
     }
     if(!profiler.deepTrace)splitComputePass?.('Continuum people + props');
     if(townsfolk?.people){

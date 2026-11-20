@@ -2519,6 +2519,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(country.watch)portObj.watch=country.watch;
       // Its works and its waterfront as the board stands them now; the dock, ways and props are read from them again.
       portObj.works=country.works??[];
+      portObj.furniture=country.furniture??[];
       settlePortOnWaterfront(portObj,heights,activeRegion,country.waterfront??[]);
       const sampleGround=(x,z)=>terrainSurfaceSample(heights,x,z,activeRegion);
       portObj.streets=layTownStreets(portObj,sampleGround,{suppressSyntheticCountryRoads:true});

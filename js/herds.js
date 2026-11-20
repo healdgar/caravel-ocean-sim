@@ -12,6 +12,7 @@ import { requestContinuumPrograms, requestContinuumView } from './continuum-scen
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { ROUTE_STEP_M, WALKER_WORDS } from './town-streets.js';
 import { continuumGroundView } from './continuum-ground.js';
+import { worldBodiesForDevice } from './world-bodies.js';
 import {
   HERD_CONTINUUM_MATERIAL_SPEC,
   HERD_FATE_FLOATS,
@@ -233,7 +234,7 @@ export function buildStreetMountSeeds(streets, { originOffset = { x: 0, z: 0 }, 
       routes.push(samples[so] - ox, samples[so + 1], samples[so + 2] - oz, samples[so + 3]);
     }
     const coatSeed = 0.02 + caravanHash(look ^ (i * 131), 29) * 0.96;
-    seeds.push(header, 0, -10 - abroad, phase, 10 + coatSeed, 1.0, 3, 0);
+    seeds.push(header, 0, -10 - abroad, phase, 10 + coatSeed, 1.0, 3, i);
     walkerIndices.push(i);
   }
   return {
@@ -772,6 +773,9 @@ export async function createLivestockHerds({
   const shotsBuf = mkBuf('livestock shots', shotsU32, B.UNIFORM);
   const cpuFates = new Float32Array(MAX_HERDS * HERD_FATE_FLOATS);
   const fatesBuf = mkBuf('livestock fates', cpuFates, B.STORAGE);
+  const cpuAvoid = new Float32Array(MAX_HERDS * 4);
+  const avoidBuf = mkBuf('livestock avoid', cpuAvoid, B.STORAGE);
+  const worldBodies = worldBodiesForDevice(device);
   const shotFlights = new Map();
   let shotsSentLastFrame = 0;
   let simClockSec = 0;
@@ -822,6 +826,8 @@ export async function createLivestockHerds({
       s * HERD_FATE_FLOATS,
       (e - s) * HERD_FATE_FLOATS,
     );
+    cpuAvoid.fill(0, s * 4, e * 4);
+    device.queue.writeBuffer(avoidBuf, s * 16, cpuAvoid, s * 4, (e - s) * 4);
   }
 
   function setHerds(herdData) {
@@ -871,6 +877,7 @@ export async function createLivestockHerds({
     const rawPasture = isMobile ? Math.round(rawCount * 0.55) : rawCount;
     const pastureCount = Math.min(rawPasture, Math.max(0, MAX_HERDS - travelCount));
     const count = pastureCount + travelCount;
+    worldBodies.setHerdCount(count);
     if (!count) return;
 
     const baseRouteVec4s = Math.floor(travellers.routes.length / 4);
@@ -918,6 +925,8 @@ export async function createLivestockHerds({
         { binding: 11, resource: { buffer: fatesBuf } },
         // The ground the land draws, which a beast is drawn standing on (js/continuum-ground.js).
         { binding: 12, resource: continuumGroundView(device) },
+        { binding: 13, resource: { buffer: avoidBuf } },
+        { binding: 14, resource: { buffer: worldBodies.buffer } },
       ],
     });
 
@@ -1063,9 +1072,11 @@ export async function createLivestockHerds({
     },
     destroy() {
       ACTIVE_HERDS_BY_DEVICE.delete(device);
+      worldBodies.setHerdCount(0);
       releaseState(true);
       shotsBuf.destroy();
       fatesBuf.destroy();
+      avoidBuf.destroy();
     },
   };
   if (device && typeof device === 'object') {

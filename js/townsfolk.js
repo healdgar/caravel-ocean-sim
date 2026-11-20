@@ -19,6 +19,7 @@ import {
 } from './wgsl/townsfolk.js';
 import { WALKER_WORDS } from './town-streets.js';
 import { continuumGroundView } from './continuum-ground.js';
+import { worldBodiesForDevice } from './world-bodies.js';
 import { CREW_CONTINUUM_PLACED_WORDS } from './wgsl/crew-continuum.js';
 import {
   createCrewContinuumBatch, createCrewContinuumPoser, createCrewContinuumWorldHull, crewContinuumBodyFor, crewContinuumRestPlaces,
@@ -172,6 +173,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   const hull = createCrewContinuumWorldHull(device, 'townsfolk ship stand-in');
   // Dry but for the rain, and in the sea: the walk pass writes both each frame.
   const moisture = device.createBuffer({ label: 'townsfolk moisture', size: TOWNSFOLK_MOISTURE_SLOTS * 8, usage: B.STORAGE });
+  const worldBodies = worldBodiesForDevice(device);
 
   // Each body's clips and rest places, baked from its own rig when a town first wants them.
   const rigs = new Map();
@@ -231,6 +233,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     for (const made of [...crowd.posers, ...crowd.batches]) made.destroy();
     delete crowd.port.townsfolkWatch;
     linkedHerds()?.setStreetMounts?.(null);
+    worldBodies.setWalkerCount(0);
     crowd = null;
   }
   function buildCrowd(port) {
@@ -243,6 +246,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     if (!bodies) return;
     const rigsOfTown = bodies.map((body) => rigOf(body.standIn.animator));
     const people = Math.max(1, Math.round(streets.people * (isMobile ? MOBILE_SHARE : 1)));
+    worldBodies.setWalkerCount(people);
     const mountSeeds = assignStreetMountsToWalkers(streets, { indigenous, maxPeople: people });
     port.streetMounts = mountSeeds;
     linkedHerds()?.setStreetMounts?.(indigenous ? null : mountSeeds);
@@ -284,6 +288,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
         { binding: 2, resource: { buffer: route } },
         { binding: 7, resource: { buffer: fates } },
         { binding: 10, resource: { buffer: intents } },
+        { binding: 11, resource: { buffer: worldBodies.buffer } },
       ],
     });
     const walkGroup = device.createBindGroup({
@@ -291,7 +296,8 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
       entries: [...[frameUBO, walkers, route, placed, counts, uniform, shots, fates, moisture].map((b, binding) => ({ binding, resource: { buffer: b } })),
         // The ground the land draws, which they are drawn walking on (js/continuum-ground.js).
         { binding: 9, resource: continuumGroundView(device) },
-        { binding: 10, resource: { buffer: intents } }],
+        { binding: 10, resource: { buffer: intents } },
+        { binding: 11, resource: { buffer: worldBodies.buffer } }],
     });
     const countedOf = (m) => ({ buffer: counts, offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 });
     const main = [{ buffer: frameUBO }, { buffer: hull }, { buffer: joints }, { buffer: actors }, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: moisture }, skyView, { binding: 13, resource: shared.captainTexView }, { binding: 14, resource: shared.captainSampler }];

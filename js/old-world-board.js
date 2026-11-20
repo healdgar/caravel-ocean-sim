@@ -1242,16 +1242,30 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   }
 
   /* ---- the open places: a well on a green; on a market place its cross, and stalls round it ---- */
+  const furniture = [];
   const open = (x, z, reach) => inside(x, z, 8) && heightAt(x, z) > BOARD_DRY_M && !hitsRiverCorridor(footprint(x, z, reach, reach, 0), -1.0) && !taken(footprint(x, z, reach, reach, 0), 0.5) && !placed.some(x, z, reach, (o) => rectDist(o, x, z) <= reach * 0.5);
   squares.forEach((p, at) => {
     if (p.kind === 'ground') return;
-    if (p.kind === 'park') { if (open(p.x, p.z, 4.2)) furnish(CITY_TYPE.WELL, p.x, heightAt(p.x, p.z), p.z, boardHashUnit(at, 79) * Math.PI, 0, 0.5); return; }
-    if (open(p.x, p.z, 3.2)) furnish(CITY_TYPE.MARKET_CROSS, p.x, heightAt(p.x, p.z), p.z, 0, 0, 0.5);
+    if (p.kind === 'park') {
+      if (open(p.x, p.z, 4.2)) {
+        const y = heightAt(p.x, p.z), yaw = boardHashUnit(at, 79) * Math.PI;
+        furnish(CITY_TYPE.WELL, p.x, y, p.z, yaw, 0, 0.5);
+        furniture.push({ kind: 'well', x: p.x, y, z: p.z, yaw, width: 4.2, length: 4.2, radius: 2.15, halfLen: 0 });
+      }
+      return;
+    }
+    if (open(p.x, p.z, 3.2)) {
+      const y = heightAt(p.x, p.z);
+      furnish(CITY_TYPE.MARKET_CROSS, p.x, y, p.z, 0, 0, 0.5);
+      furniture.push({ kind: 'market_cross', x: p.x, y, z: p.z, yaw: 0, width: 3.6, length: 3.6, radius: 2.35, halfLen: 0 });
+    }
     const place = places[p.place], n = place.kind === 'capital' ? 12 : 7;
     for (let k = 0; k < n; k++) {
       const a = k / n * 2 * Math.PI + 0.3, far = squareRadius(p, p.x + Math.cos(a), p.z + Math.sin(a)) * 0.62, x = p.x + Math.cos(a) * far, z = p.z + Math.sin(a) * far;
       if (!open(x, z, 3.6)) continue;
-      furnish(CITY_TYPE.STALL, x, heightAt(x, z), z, -a, BOARD_STALL_CLOTHS[(k * 3 + place.name.length) % BOARD_STALL_CLOTHS.length], boardHashUnit(at * 31 + k, 83));
+      const y = heightAt(x, z);
+      furnish(CITY_TYPE.STALL, x, y, z, -a, BOARD_STALL_CLOTHS[(k * 3 + place.name.length) % BOARD_STALL_CLOTHS.length], boardHashUnit(at * 31 + k, 83));
+      furniture.push({ kind: 'stall', x, y, z, yaw: -a, width: 2.8, length: 3.6, radius: 1.65, halfLen: 0.50 });
       stalls++;
     }
   });
@@ -2989,6 +3003,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     works: workRecords,
     // The quays, moles, slipways and careening sheds laid along the shore, as built: the port's berths, ways and footing.
     waterfront,
+    // Town-square solid furniture (market crosses/Pelourinhos, stone wells, market stalls) for GPU body avoidance & player collision.
+    furniture,
     // The landmarks its record pins, as stood.
     landmarks,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each

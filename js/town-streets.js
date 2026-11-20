@@ -199,7 +199,7 @@ function worldToLocal(inst, x, z) {
 // quay or mole is walked on; a slipway or careening shed is walked round. The works are sorted into squares once,
 // since every point of every way the people of a founded board take is asked (js/board-folk.js).
 const SOLIDS_SQUARE_M = 24;
-export function townSolids(port, margin = 0.8) {
+export function townSolids(port, margin = 0.8, { includeFurniture = false } = {}) {
   const squares = new Map(), square = (i, j) => (i + 32768) * 65536 + (j + 32768);
   const pierEntries = [];
   const addBox = (cx, cz, yaw, hw, hl, quayParapet = false) => {
@@ -230,6 +230,12 @@ export function townSolids(port, margin = 0.8) {
     }
     if (deckOf(inst) || OPEN_AIR.has(inst.kind)) continue;
     addBox(inst.x, inst.z, yaw, inst.width * 0.5 + margin, inst.length * 0.5 + margin, false);
+  }
+  if (includeFurniture) {
+    for (const f of port?.furniture ?? []) {
+      if (!Number.isFinite(f?.x) || !Number.isFinite(f?.z) || !(f.width > 0) || !(f.length > 0)) continue;
+      addBox(f.x, f.z, f.yaw ?? 0, f.width * 0.5 + margin, f.length * 0.5 + margin, false);
+    }
   }
   const onPierGangway = (x, z) => {
     for (let i = 0; i < pierEntries.length; i++) {
