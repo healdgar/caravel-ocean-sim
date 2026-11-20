@@ -1092,8 +1092,10 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
       pbr=sampleArchMaterialPBR(archMatIdx,world,n,dx,dy,archScale,archLodFade,instYaw,timberGrain);
     }
     if(in.kind.x<10.5){
-      // Kind 10: MaterialCraft-cooked dressed Iberian oak, Spanish cedar & pitch-pine timber
-      albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.07+detailB*0.03);
+      // Kind 10: MaterialCraft-cooked dressed Iberian oak, weathered cedar & pitch-pine timber
+      let timberLuma=dot(pbr.albedo,vec3f(0.299,0.587,0.114));
+      let agedTimber=mix(vec3f(timberLuma),pbr.albedo,0.72)*vec3f(0.93,0.96,1.02);
+      albedo=agedTimber*shadeAlbedo*(0.96+detailA*0.07+detailB*0.03);
       archNormalOffset=pbr.normalOffset*0.32;
       relief=detailA*0.0024*archLodFade;
       roughness=clamp(pbr.roughness-0.16+detailB*0.025,0.44,0.72);
@@ -1106,8 +1108,8 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
       // Kind 11: MaterialCraft-cooked coursed Pedra Lioz & coral-limestone ashlar masonry
       let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
       let damp=smoothstep(0.2,3.8,world.y);
-      let liozWarmth=vec3f(1.03,0.99,0.92);
-      let stoneBase=pbr.albedo*mix(vec3f(0.75,0.72,0.66),liozWarmth,damp)*(0.96+detailA*0.06+detailB*0.03);
+      let liozWarmth=vec3f(1.00,0.99,0.96);
+      let stoneBase=pbr.albedo*mix(vec3f(0.76,0.75,0.72),liozWarmth,damp)*(0.96+detailA*0.06+detailB*0.03);
       let tidalMoss=(1.0-smoothstep(0.18,1.55,world.y))*vertWall*clamp(0.55+0.45*detailA,0.0,1.0);
       let fouledStone=mix(stoneBase,vec3f(0.085,0.135,0.056),tidalMoss*0.62);
       albedo=fouledStone*shadeAlbedo;
@@ -1116,18 +1118,20 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
       roughness=clamp(pbr.roughness+(1.0-damp)*0.05+tidalMoss*0.12,0.62,0.92);
       ambientVisibility=(0.46+0.34*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<12.5){
-      // Kind 12: MaterialCraft-cooked warm Iberian limewashed stucco & golden ochre / pale almagre plaster
+      // Kind 12: MaterialCraft-cooked Iberian limewashed stucco & weathered limestone plaster
       let damp=smoothstep(0.5,4.2,world.y);
       let wallVar=fract(instYaw*2.37+in.leafUV.x*1.73);
-      let ochreTint=mix(vec3f(1.02,0.99,0.94),vec3f(1.05,0.90,0.72),smoothstep(0.42,0.92,wallVar)*0.48);
-      let warmStucco=pbr.albedo*mix(vec3f(0.73,0.68,0.60),ochreTint,damp);
+      let stLuma=dot(pbr.albedo,vec3f(0.299,0.587,0.114));
+      let chalkBase=mix(vec3f(stLuma),pbr.albedo,0.58);
+      let plasterTint=mix(vec3f(0.99,0.98,0.96),vec3f(0.95,0.91,0.84),smoothstep(0.45,0.92,wallVar)*0.45);
+      let warmStucco=chalkBase*mix(vec3f(0.76,0.74,0.70),plasterTint,damp);
       albedo=warmStucco*shadeAlbedo*(0.97+detailA*0.05+detailB*0.03);
       archNormalOffset=pbr.normalOffset*0.42;
       relief=detailA*0.005*archLodFade;
       roughness=clamp(pbr.roughness+detailB*0.03,0.70,0.92);
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<13.5){
-      // Kind 13: MaterialCraft-cooked fired terracotta barrel roof tiles (telha mourisca / tejas curvas)
+      // Kind 13: MaterialCraft-cooked weathered Iberian clay barrel roof tiles (sun-baked muted terracotta, umber & lichen)
       let horizLen=length(n.xz);
       let eaveDir=select(vec3f(1.0,0.0,0.0),vec3f(-n.z,0.0,n.x)/max(horizLen,1e-4),horizLen>0.08);
       let slopeDir=normalize(cross(eaveDir,n));
@@ -1137,16 +1141,18 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
       let slopeDy=dot(dy,slopeDir)*2.6;
       let courseWave=landFilteredCourse(slopeCoord,slopeDx,slopeDy,1.8);
       let courseStep=max(0.0,courseWave-0.26)*archLodFade;
-      albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.07+flute*0.025-courseStep*0.04);
-      // A city's roofs are not of one firing: some new and orange, some bleached, some gone
-      // brown, some grey with lichen. in.leafUV.x is the building's own age, y its mark.
+      let rawTile=pbr.albedo*shadeAlbedo*(0.96+detailA*0.07+flute*0.025-courseStep*0.04);
+      // Temper neon-orange kiln saturation into realistic earthy sun-baked clay sienna & dusty terracotta.
+      let tileLuma=dot(rawTile,vec3f(0.299,0.587,0.114));
+      albedo=mix(vec3f(tileLuma)*vec3f(1.08,0.88,0.74),rawTile*vec3f(0.84,0.88,0.96),0.48);
+      // A city's roofs are not of one firing: muted terracotta, bleached buff-clay, weathered brown umber, and grey lichen.
       if(in.leafUV.y<-0.5){
         let age=in.leafUV.x;
         let grey=dot(albedo,vec3f(0.3,0.5,0.2));
-        // Old tile browns and loses its orange; lichen greys the oldest; a new roof is paler.
-        albedo=mix(albedo,grey*vec3f(1.20,0.86,0.60),smoothstep(0.3,0.95,age)*0.58);
-        albedo=mix(albedo,grey*vec3f(0.98,1.0,0.82),smoothstep(0.55,1.0,fract(age*5.3))*(0.22+0.18*detailA));
-        albedo=albedo*mix(1.08,0.84,fract(age*3.7));
+        // Old tile browns and loses its chroma; lichen greys the oldest; sun-bleached tiles turn dusty tan.
+        albedo=mix(albedo,grey*vec3f(1.06,0.90,0.76),smoothstep(0.22,0.90,age)*0.64);
+        albedo=mix(albedo,grey*vec3f(0.95,0.96,0.88),smoothstep(0.48,0.98,fract(age*5.3))*(0.28+0.20*detailA));
+        albedo=albedo*mix(1.04,0.82,fract(age*3.7));
       }
       archNormalOffset=pbr.normalOffset*0.72;
       relief=detailA*0.003*archLodFade;
@@ -1260,20 +1266,22 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
       // windows and door counted out along the wall: in.leafUV is bays across and storeys up.
       let tint=floor(in.kind.y);
       let tone=0.72+0.28*fract(in.kind.y);
-      var wash=vec3f(1.0,0.985,0.95);
+      var wash=vec3f(0.98,0.98,0.96);
       // Past the washes, the paints of a street's cloth and boards (js/old-world-buildings.js CITY_PAINT).
       if(tint>9.5){wash=vec3f(0.085,0.075,0.068);}
-      else if(tint>8.5){wash=vec3f(0.30,0.165,0.085);}
+      else if(tint>8.5){wash=vec3f(0.24,0.165,0.105);}
       else if(tint>7.5){wash=vec3f(0.095,0.185,0.045);}
-      else if(tint>6.5){wash=vec3f(0.62,0.40,0.075);}
+      else if(tint>6.5){wash=vec3f(0.48,0.36,0.14);}
       else if(tint>5.5){wash=vec3f(0.060,0.135,0.300);}
-      else if(tint>4.5){wash=vec3f(0.44,0.070,0.036);}
-      else if(tint>3.5){wash=vec3f(0.78,0.74,0.68);}
-      else if(tint>2.5){wash=vec3f(0.96,0.80,0.74);}
-      else if(tint>1.5){wash=vec3f(0.95,0.84,0.62);}
-      else if(tint>0.5){wash=vec3f(0.98,0.93,0.82);}
+      else if(tint>4.5){wash=vec3f(0.38,0.085,0.055);}
+      else if(tint>3.5){wash=vec3f(0.80,0.79,0.76);}
+      else if(tint>2.5){wash=vec3f(0.90,0.83,0.80);}
+      else if(tint>1.5){wash=vec3f(0.91,0.86,0.77);}
+      else if(tint>0.5){wash=vec3f(0.95,0.93,0.88);}
       let damp=max(smoothstep(0.5,4.2,world.y),step(4.5,tint));
-      let stucco=pbr.albedo*wash*mix(vec3f(0.74,0.69,0.62),vec3f(1.0,0.97,0.92),damp);
+      let stBaseLuma=dot(pbr.albedo,vec3f(0.299,0.587,0.114));
+      let neutralPlaster=mix(vec3f(stBaseLuma),pbr.albedo,select(0.58,0.75,tint>4.5));
+      let stucco=neutralPlaster*wash*mix(vec3f(0.76,0.74,0.70),vec3f(0.99,0.98,0.96),damp);
       albedo=stucco*tone*(0.97+detailA*0.05+detailB*0.03);
       archNormalOffset=pbr.normalOffset*0.42;
       relief=detailA*0.005*archLodFade;

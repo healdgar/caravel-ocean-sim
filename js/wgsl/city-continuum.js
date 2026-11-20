@@ -154,16 +154,23 @@ fn cityContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSa
       albedo=vec3f(0.044,0.037,0.030)*portShade;
     }
     matFlag=0.0;
+  }else if(abs(mat-10.0)<0.5){
+    let tLuma=dot(archLin,vec3f(0.299,0.587,0.114));
+    albedo=mix(vec3f(tLuma),archLin,0.72)*vec3f(0.93,0.96,1.02)*shadeAlbedo*(0.82+0.18*rawAO);
   }else if(abs(mat-11.0)<0.5){
-    albedo*=vec3f(1.03,0.99,0.92);
+    albedo*=vec3f(1.00,0.99,0.96);
   }else if(abs(mat-12.0)<0.5||abs(mat-19.0)<0.5){
-    // Bake neutral white stucco with matching base dampness & shadeAlbedo; continuumCardFS applies exact limewash tint.
+    // Bake neutral chalky limewash stucco matching landSurface; continuumCardFS applies exact limewash tint.
     let damp=smoothstep(0.4,3.8,v.local.y);
     let foot=1.0-smoothstep(0.0,0.85,v.local.y);
-    let baseTint=mix(vec3f(0.74,0.69,0.62),vec3f(0.98,0.95,0.90),damp)*mix(1.0,0.72,foot*(1.0-abs(n.y)));
-    albedo=archLin*baseTint*shadeAlbedo*(0.84+0.16*rawAO);
+    let stLuma=dot(archLin,vec3f(0.299,0.587,0.114));
+    let neutralArch=mix(vec3f(stLuma),archLin,0.58);
+    let baseTint=mix(vec3f(0.76,0.74,0.70),vec3f(0.99,0.98,0.96),damp)*mix(1.0,0.72,foot*(1.0-abs(n.y)));
+    albedo=neutralArch*baseTint*shadeAlbedo*(0.84+0.16*rawAO);
   }else if(abs(mat-13.0)<0.5){
-    albedo=archLin*0.81*shadeAlbedo*(0.82+0.18*rawAO);
+    let rawT=archLin*0.81*shadeAlbedo*(0.82+0.18*rawAO);
+    let tLuma=dot(rawT,vec3f(0.299,0.587,0.114));
+    albedo=mix(vec3f(tLuma)*vec3f(1.06,0.89,0.76),rawT*vec3f(0.84,0.88,0.96),0.44);
   }else if(abs(mat-18.0)<0.5){
     albedo=archLin*0.82*(0.68+0.32*portShade);
   }

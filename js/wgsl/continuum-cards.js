@@ -223,17 +223,17 @@ struct ContinuumCardOut {
 
 fn continuumCardCityWash(tint:f32)->vec3f {
   let idx=floor(tint);
-  var wash=vec3f(1.0,0.985,0.95);
+  var wash=vec3f(0.98,0.98,0.96);
   if(idx>9.5){wash=vec3f(0.085,0.075,0.068);}
-  else if(idx>8.5){wash=vec3f(0.30,0.165,0.085);}
+  else if(idx>8.5){wash=vec3f(0.24,0.165,0.105);}
   else if(idx>7.5){wash=vec3f(0.095,0.185,0.045);}
-  else if(idx>6.5){wash=vec3f(0.62,0.40,0.075);}
+  else if(idx>6.5){wash=vec3f(0.48,0.36,0.14);}
   else if(idx>5.5){wash=vec3f(0.060,0.135,0.300);}
-  else if(idx>4.5){wash=vec3f(0.44,0.070,0.036);}
-  else if(idx>3.5){wash=vec3f(0.78,0.74,0.68);}
-  else if(idx>2.5){wash=vec3f(0.96,0.80,0.74);}
-  else if(idx>1.5){wash=vec3f(0.95,0.84,0.62);}
-  else if(idx>0.5){wash=vec3f(0.98,0.93,0.82);}
+  else if(idx>4.5){wash=vec3f(0.38,0.085,0.055);}
+  else if(idx>3.5){wash=vec3f(0.80,0.79,0.76);}
+  else if(idx>2.5){wash=vec3f(0.90,0.83,0.80);}
+  else if(idx>1.5){wash=vec3f(0.91,0.86,0.77);}
+  else if(idx>0.5){wash=vec3f(0.95,0.93,0.88);}
   return wash*(0.72+0.28*fract(tint));
 }
 
