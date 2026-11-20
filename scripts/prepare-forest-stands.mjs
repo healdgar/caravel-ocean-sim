@@ -33,8 +33,10 @@ const STANDS = {
     // Full-grown trees by a harbour are planted at this share of their size inland, and a grove's are as much
     // smaller there (js/forest-groves.js). A stand that names none keeps that module's own share.
     harbourHeight: fullGrown ? 0.94 : undefined,
-    tall: { cohort: 'veteran', mix: { oak: 0.3, chestnut: 0.2, maple: 0.18, elm: 0.17, birch: 0.15 }, scale: () => (fullGrown ? [1.0, 1.2] : [2.5, 3.19]), apart: 1.05 },
-    fill: { cohort: 'canopy', mix: { oak: 0.3, chestnut: 0.2, maple: 0.18, elm: 0.17, birch: 0.15 }, scale: () => (fullGrown ? [0.94, 1.14] : [2.0, 2.64]) },
+    // Closed copses & groves draw from the competitive intermixed stand-grown (`canopy`) cohort where neighboring
+    // species competed for light & soil, while open-grown `veteran` specimens stand alone in parks/squares/roadsides.
+    tall: { cohort: 'canopy', mix: { oak: 0.3, chestnut: 0.22, maple: 0.18, elm: 0.18, birch: 0.12 }, scale: () => (fullGrown ? [1.0, 1.18] : [2.5, 3.19]), apart: 0.95 },
+    fill: { cohort: 'canopy', mix: { oak: 0.24, chestnut: 0.18, maple: 0.20, elm: 0.16, birch: 0.22 }, scale: () => (fullGrown ? [0.82, 1.02] : [2.0, 2.64]) },
   },
   // A ceiba's crown is sixty metres across, so its grove is twice the size.
   subtropical: {

@@ -29,69 +29,217 @@ import subprocess
 import sys
 import time
 
-# (species, seed) — canopy ('mature') and veteran ('old') ages are pulled directly from
-# forestmodeler's own `gardenplans.plan.life_stages(SPECIES[species](seed))`!
-# Long-lived old-growth species (old >= 80 yr: oak 168, chestnut 218, elm 148, maple 86) use
-# forestmodeler's canonical ancient-tree grower settings (`resolution=2.5, steps_per_cycle=1`,
-# matching forestmodeler/scripts/render_ancient_gallery.py); shorter-lived species (birch 34,
-# blueberry 25) use `resolution=1.0, steps_per_cycle=2`. All 12 prototypes use
-# `native_tree_render.blade_meshes(..., individual_cutout=True, lod_tier='hero')` — 100%
-# native-size individual folded leaves with zero card enlargement.
-SPECIES_SEEDS = (
-    ('oak', 101),
-    ('chestnut', 101),
-    ('maple', 101),
-    ('elm', 303),
-    ('birch', 202),
-    ('blueberry', 303),
+# (species, seed, open_age, grove_age) — ALL 12 prototypes are grown at true `resolution=1.0, steps_per_cycle=2`:
+#   * `veteran` (0..5): stand-alone open-grown specimens (grown alone in full sky at res=1.0 so natural open-grown
+#     self-pruning and fine shoot branching develop cleanly without coarse res=2.5 artifacts).
+#   * `canopy` (6..11): competitive intermixed grove/copse stand (grown together in lockstep sharing one
+#     SiteShadowGrid + SiteSoilField with `share_light=True` at res=1.0 so mixed species genuinely compete for light
+#     and soil, self-pruning shaded lower limbs into real woodland trunks).
+SPECIES_SPECS = (
+    ('oak', 101, 60, 60),
+    ('chestnut', 101, 68, 65),
+    ('maple', 101, 48, 48),
+    ('elm', 303, 62, 60),
+    ('birch', 202, 34, 28),
+    ('blueberry', 303, 25, 18),
 )
+SPECIES_SEEDS = tuple((sp, seed) for sp, seed, _, _ in SPECIES_SPECS)
 PROTOTYPE_ORDER = (
     tuple((sp, 'veteran', seed) for sp, seed in SPECIES_SEEDS)
     + tuple((sp, 'canopy', seed) for sp, seed in SPECIES_SEEDS)
 )
 
 LATITUDE = 39.0
+GROVE_SPACING_METRES = 5.4
 FIELD_CELL_METRES = 0.6
 MIDDLE_CELLS_IN_HEIGHT = 40
 BAKER_MIDDLE_CELL_METRES = 0.15
 
 
-def _grow_one_species(job):
-    """Worker function for parallel ColonizingGrower execution across all 6 Portugal species."""
-    source_str, species, seed, latitude = job
+def _grow_open_specimen(job):
+    """Worker function for parallel resolution=1.0 open-grown stand-alone ColonizingGrower execution."""
+    source_str, species, seed, age_yr, latitude = job
     if source_str not in sys.path:
         sys.path.insert(0, source_str)
     from gardenplans.grow_colonize import ColonizingGrower
     from gardenplans.light import Environment
-    from gardenplans.plan import SPECIES, life_stages
+    from gardenplans.plan import SPECIES
     from gardenplans.scenery import _measure_grown
     from gardenplans.sky import SkyModel
 
     t0 = time.perf_counter()
-    plan0 = SPECIES[species](seed)
-    stages = dict(life_stages(plan0))
-    can_age = int(round(stages['mature']))
-    vet_age = int(round(stages['old']))
-    res = 2.5 if vet_age >= 80 else 1.0
-    spc = 1 if vet_age >= 80 else 2
     plan = dataclasses.replace(
-        plan0,
-        growth_cycles=vet_age,
+        SPECIES[species](seed),
+        growth_cycles=age_yr,
         background_mortality=0.0,
         senescent_mortality=0.0,
     )
     grower = ColonizingGrower(
         plan,
         Environment(extinction=plan.light_extinction, sky=SkyModel(latitude=latitude)),
-        checkpoints=(float(can_age), float(vet_age)),
-        steps_per_cycle=spc,
-        resolution=res,
+        checkpoints=(float(age_yr),),
+        steps_per_cycle=2,
+        resolution=1.0,
     )
     grower.grow()
-    h_v, c_v, d_v, _ = _measure_grown(grower, float(vet_age))
-    h_c, c_c, d_c, _ = _measure_grown(grower, float(can_age))
+    h, cr, dbh, basal = _measure_grown(grower, float(age_yr))
     dt = time.perf_counter() - t0
-    return (species, seed, can_age, vet_age, res, spc, plan, grower, (h_c, c_c, d_c), (h_v, c_v, d_v), dt)
+    return (species, seed, age_yr, plan, grower, (h, cr, dbh, basal), dt)
+
+
+def _grow_gap_pioneer_stand(source_str, latitude):
+    """Grow shade-intolerant pioneer birch & understory blueberry in a sunlit gap competing side-by-side at res=1.0."""
+    if source_str not in sys.path:
+        sys.path.insert(0, source_str)
+    import numpy as np
+    from gardenplans import tiered_forest as tf
+    from gardenplans.grow_colonize import ColonizingGrower
+    from gardenplans.light import Environment
+    from gardenplans.plan import SPECIES
+    from gardenplans.scenery import _measure_grown
+    from gardenplans.site_fields import SiteShadowGrid, SiteSoilField
+    from gardenplans.sky import SkyModel
+
+    t0 = time.perf_counter()
+    sky = SkyModel(latitude=latitude)
+    sh, cl, so = SiteShadowGrid(), {}, SiteSoilField()
+    members = [
+        ('birch_nb', 'birch', 611, 28, (0.0, 0.0)),
+        ('birch', 'birch', 719, 28, (3.2, 0.0)),
+        ('oak_nb', 'oak', 821, 28, (-2.8, 2.4)),
+        ('blueberry', 'blueberry', 712, 22, (1.4, -2.2)),
+    ]
+    k_ext = float(np.mean([SPECIES[sp](1).light_extinction for _, sp, _, _, _ in members]))
+    entries = []
+    for tag, sp, sd, age, pos in members:
+        plan = dataclasses.replace(SPECIES[sp](sd), growth_cycles=age, background_mortality=0.0, senescent_mortality=0.0)
+        env = Environment(extinction=k_ext, sky=sky)
+        env.shadow = sh
+        env.claims = cl
+        env.soil = so
+        g = ColonizingGrower(plan, env, checkpoints=(float(age),), steps_per_cycle=2, resolution=1.0, origin=pos, share_light=True)
+        entries.append((tag, sp, sd, age, plan, g, g.steps()))
+    done = [False] * len(entries)
+    for _yr in range(28):
+        for i, e in enumerate(entries):
+            if done[i]:
+                continue
+            try:
+                next(e[6])
+            except StopIteration:
+                done[i] = True
+        sh.reset()
+        cl.clear()
+        so.reset()
+        for e in entries:
+            e[5].flush_foliage()
+        for e in entries:
+            e[5].claim_soil()
+        for e in entries:
+            e[5].read_soil()
+    out = {}
+    for tag, sp, sd, age, plan, g, it in entries:
+        for _ in it:
+            pass
+        if tag in ('birch', 'blueberry'):
+            tf._recenter_grower_to_local_origin(g)
+            h, cr, dbh, basal = _measure_grown(g, float(age))
+            out[sp] = (sd, age, plan, g, (h, cr, dbh, basal))
+    print(f'  competitive gap pioneer stand finished in {time.perf_counter() - t0:.1f} s', flush=True)
+    return out
+
+
+def _grow_competitive_grove(source_str, specs, latitude):
+    """Grow Portugal canopy species in lockstep inside one shared SiteShadowGrid + SiteSoilField at resolution=1.0."""
+    if source_str not in sys.path:
+        sys.path.insert(0, source_str)
+    import math
+    import numpy as np
+    from gardenplans import tiered_forest as tf
+    from gardenplans.grow_colonize import ColonizingGrower
+    from gardenplans.light import Environment
+    from gardenplans.plan import SPECIES
+    from gardenplans.scenery import _measure_grown
+    from gardenplans.site_fields import SiteShadowGrid, SiteSoilField
+    from gardenplans.sky import SkyModel
+
+    t0 = time.perf_counter()
+    sky_model = SkyModel(latitude=latitude)
+    canopy_specs = [s for s in specs if s[0] not in ('birch', 'blueberry')]
+    k_ext = float(np.mean([SPECIES[sp](1).light_extinction for sp, _, _, _ in canopy_specs]))
+    shared_shadow = SiteShadowGrid()
+    shared_claims = {}
+    shared_soil = SiteSoilField()
+
+    # Arrange the 4 canopy trees on a tight intermixed competitive ring (GROVE_SPACING_METRES apart)
+    # so oak, chestnut, maple, and elm genuinely compete for sky and soil.
+    n_can = len(canopy_specs)
+    r_can = GROVE_SPACING_METRES / (2.0 * math.sin(math.pi / max(n_can, 2)))
+    places = {}
+    for idx, (sp, _, _, _) in enumerate(canopy_specs):
+        ang = math.radians(45.0) + idx * (2.0 * math.pi / n_can)
+        places[sp] = (r_can * math.cos(ang), r_can * math.sin(ang))
+
+    max_years = max(grove_age for _, _, _, grove_age in canopy_specs)
+    entries = []
+    for sp, seed, _, grove_age in canopy_specs:
+        # Distinct seed from open specimen so grove & open trees have independent branch geometry
+        g_seed = seed + 409
+        start_yr = max(0, max_years - grove_age)
+        plan = dataclasses.replace(
+            SPECIES[sp](g_seed),
+            growth_cycles=grove_age,
+            background_mortality=0.0,
+            senescent_mortality=0.0,
+        )
+        env = Environment(extinction=k_ext, sky=sky_model)
+        env.shadow = shared_shadow
+        env.claims = shared_claims
+        env.soil = shared_soil
+        g = ColonizingGrower(
+            plan,
+            env,
+            checkpoints=(float(grove_age),),
+            steps_per_cycle=2,
+            resolution=1.0,
+            origin=places[sp],
+            share_light=True,
+        )
+        entries.append((sp, g_seed, grove_age, start_yr, plan, g, g.steps()))
+
+    done = [False] * len(entries)
+    for yr in range(max_years):
+        for idx, (sp, _, _, start_yr, _, _, it) in enumerate(entries):
+            if yr < start_yr or done[idx]:
+                continue
+            try:
+                next(it)
+            except StopIteration:
+                done[idx] = True
+        shared_shadow.reset()
+        shared_claims.clear()
+        shared_soil.reset()
+        active = [idx for idx, e in enumerate(entries) if yr >= e[3]]
+        for idx in active:
+            entries[idx][5].flush_foliage()
+        for idx in active:
+            entries[idx][5].claim_soil()
+        for idx in active:
+            entries[idx][5].read_soil()
+        if (yr + 1) % 10 == 0 or yr + 1 == max_years:
+            print(f'  competitive grove year {yr + 1:2d}/{max_years} ({time.perf_counter() - t0:.1f} s)', flush=True)
+
+    out = {}
+    for sp, g_seed, grove_age, _, plan, g, it in entries:
+        for _ in it:
+            pass
+        tf._recenter_grower_to_local_origin(g)
+        h, cr, dbh, basal = _measure_grown(g, float(grove_age))
+        out[sp] = (g_seed, grove_age, plan, g, (h, cr, dbh, basal))
+    print(f'  competitive canopy grove finished in {time.perf_counter() - t0:.1f} s', flush=True)
+    # Pioneer birch & understory blueberry grow in a sunlit competitive gap rather than deep 37yr closed oak shade.
+    out.update(_grow_gap_pioneer_stand(source_str, latitude))
+    return out
 
 
 def sha256(raw):
@@ -143,44 +291,55 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
 
-    # Grow all 6 species in parallel using forestmodeler's own life_stages(plan) mature & old ages
-    # (cached to work/grown_species.pkl so subsequent runs skip the 6-minute growth phase).
-    cache_pkl = work / 'grown_species.pkl'
-    grown_by_species = {}
+    # Grow Track A (6 open-grown stand-alone trees in parallel at res=1.0, spc=2) AND Track B (1 competitive
+    # intermixed 6-species grove sharing SiteShadowGrid + SiteSoilField at res=1.0, spc=2) concurrently!
+    cache_pkl = work / 'grown_res1_open_and_grove.pkl'
+    open_by_species, grove_by_species = {}, {}
     if cache_pkl.exists():
-        grown_by_species = pickle.loads(cache_pkl.read_bytes())
-        print(f'loaded cached grown skeletons from {cache_pkl}', flush=True)
+        open_by_species, grove_by_species = pickle.loads(cache_pkl.read_bytes())
+        print(f'loaded cached res=1.0 open + competitive grove skeletons from {cache_pkl}', flush=True)
     else:
-        jobs = [(str(source), sp, seed, LATITUDE) for sp, seed in SPECIES_SEEDS]
-        with concurrent.futures.ProcessPoolExecutor(max_workers=len(jobs)) as pool:
-            for species, seed, can_age, vet_age, res, spc, plan, grower, m_c, m_v, dt in pool.map(_grow_one_species, jobs):
-                grown_by_species[species] = (can_age, vet_age, res, spc, plan, grower)
-                h_c, c_c, _d_c = m_c
-                h_v, c_v, d_v = m_v
+        open_jobs = [(str(source), sp, seed, open_age, LATITUDE) for sp, seed, open_age, _ in SPECIES_SPECS]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=len(open_jobs) + 1) as pool:
+            grove_fut = pool.submit(_grow_competitive_grove, str(source), SPECIES_SPECS, LATITUDE)
+            open_futs = [pool.submit(_grow_open_specimen, job) for job in open_jobs]
+            for fut in open_futs:
+                species, seed, age_yr, plan, grower, (h, cr, dbh, basal), dt = fut.result()
+                open_by_species[species] = (seed, age_yr, plan, grower, (h, cr, dbh, basal))
                 print(
-                    f'{species:9s} res={res} spc={spc}  '
-                    f'canopy {can_age:3d}yr ({h_c:4.1f}m, {c_c:4.1f}m r)  '
-                    f'veteran {vet_age:3d}yr ({h_v:4.1f}m, {c_v:4.1f}m r, {d_v:5.1f}cm dbh)  '
-                    f'({dt:.1f} s)',
+                    f'OPEN   {species:9s} res=1.0 spc=2 {age_yr:2d}yr  '
+                    f'H={h:5.2f}m  crownR={cr:5.2f}m  dbh={dbh:5.1f}cm  ({dt:.1f} s)',
                     flush=True,
                 )
-        cache_pkl.write_bytes(pickle.dumps(grown_by_species))
+            grove_by_species = grove_fut.result()
+            for sp, _, _, _ in SPECIES_SPECS:
+                g_seed, grove_age, _, _, (h, cr, dbh, _) = grove_by_species[sp]
+                print(
+                    f'GROVE  {sp:9s} res=1.0 spc=2 {grove_age:2d}yr  '
+                    f'H={h:5.2f}m  crownR={cr:5.2f}m  dbh={dbh:5.1f}cm  (competitive intermixed)',
+                    flush=True,
+                )
+        cache_pkl.write_bytes(pickle.dumps((open_by_species, grove_by_species)))
 
     grown, grower_of_skel, record = [], {}, []
-    for index, (species, cohort, seed) in enumerate(PROTOTYPE_ORDER):
-        can_age, vet_age, res, spc, plan, grower = grown_by_species[species]
-        age = vet_age if cohort == 'veteran' else can_age
-        height, crown, dbh, basal = _measure_grown(grower, float(age))
+    for index, (species, cohort, _seed) in enumerate(PROTOTYPE_ORDER):
+        if cohort == 'veteran':
+            seed, age, plan, grower, (_, _, _, basal) = open_by_species[species]
+            mode_tag = 'open-grown'
+        else:
+            seed, age, plan, grower, (_, _, _, basal) = grove_by_species[species]
+            mode_tag = 'competitive-grove'
         grown.append((index, species, cohort, float(age), plan, grower))
         grower_of_skel[id(grower.skeleton)] = grower
         record.append({
             'id': index,
             'species': species,
             'cohort': cohort,
+            'growthMode': mode_tag,
             'age': age,
             'seed': seed,
-            'resolution': res,
-            'stepsPerCycle': spc,
+            'resolution': 1.0,
+            'stepsPerCycle': 2,
             'basalRadius': round(float(basal), 4),
         })
 
@@ -242,7 +401,7 @@ def main():
     clock = time.perf_counter()
     result = tf.bake_tiered_forest(
         baker_cli._build_subtropical_island_field(), work, stand='portugal', stem='portugal_forest', n_stems=24, seed=42,
-        prototype_age=60.0, veteran_age=168.0, growth_mode='isolated', cohorts=('veteran', 'canopy'), resolution=2.5,
+        prototype_age=60.0, veteran_age=65.0, growth_mode='dense_interspecies', cohorts=('veteran', 'canopy'), resolution=1.0,
         field_cell_m=FIELD_CELL_METRES, latitude=LATITUDE,
     )
     print(f'baked in {time.perf_counter() - clock:.0f} s', flush=True)
@@ -334,7 +493,7 @@ def main():
         'bake': {
             'script': 'scripts/bake-forest-mature-pack.py',
             'forestmodeler': revision,
-            'growth': 'native forestmodeler ColonizingGrower at life_stages() mature/old ages (res=2.5/spc=1 for >=80yr, res=1.0/spc=2 for <80yr) + hero wood + native_tree_render.blade_meshes (1:1 native leaves, zero card enlargement)',
+            'growth': 'native forestmodeler ColonizingGrower at resolution=1.0, steps_per_cycle=2: open-grown stand-alone trees (veteran) + lockstep intermixed competitive stand sharing SiteShadowGrid & SiteSoilField (canopy) + hero wood + native_tree_render.blade_meshes',
             'latitudeDegrees': LATITUDE,
             'fieldCellMetres': FIELD_CELL_METRES,
             'middleCellsInHeight': MIDDLE_CELLS_IN_HEIGHT,

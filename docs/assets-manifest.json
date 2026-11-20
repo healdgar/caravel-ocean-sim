@@ -680,9 +680,9 @@
     "sha256": "5930aabe392ff7eccf0d59bdd87b71b48a6dc597b3525f9a972cf8db10ce50c2"
   },
   "assets/forest-scenery/portugal/continuum/atlas.bin.gz": {
-    "url": "assets/forest-scenery/portugal/continuum/atlas.bin.fdf6215a60c61a90.gz",
-    "bytes": 381941654,
-    "sha256": "fdf6215a60c61a907c41c6bc2b78549253c81aaa12da20040e993a2ac6c48e50"
+    "url": "assets/forest-scenery/portugal/continuum/atlas.bin.895b0d80074131c7.gz",
+    "bytes": 337723061,
+    "sha256": "895b0d80074131c7ac3759ae65fd5e267eee864f1bc135c4e9d567aa0ce764ca"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
     "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.03aaf54ab8042358.gz",
@@ -1065,9 +1065,9 @@
     "sha256": "7284cb491666b5f0d0d6b2719a615ca5c01ef603a676f7741b2ac72a0bac6b25"
   },
   "assets/forest-scenery/portugal/continuum/manifest.json": {
-    "url": "assets/forest-scenery/portugal/continuum/manifest.22c79feeaa1c2054.json",
-    "bytes": 108941,
-    "sha256": "22c79feeaa1c20548cf611548906e30f8a0ec81a228aa39c648de8ab59787bba"
+    "url": "assets/forest-scenery/portugal/continuum/manifest.71564486f344ac22.json",
+    "bytes": 109236,
+    "sha256": "71564486f344ac222b81321543d9c2f22e513cb2408698c2c635b738b39863f5"
   },
   "assets/forest-scenery/saba/manifest.json": {
     "url": "assets/forest-scenery/saba/manifest.c8150c188c640786.json",
@@ -1615,14 +1615,14 @@
     "sha256": "bf8fb128ceff809a174ed02935a73b2ddeff2c809fa614ee69f594b8c87a644a"
   },
   "assets/forest-scenery/portugal/manifest.json": {
-    "url": "assets/forest-scenery/portugal/manifest.45c5f975e5765083.json",
-    "bytes": 73992,
-    "sha256": "45c5f975e5765083df43abe577f9086828d2e87e48498768a1a7acd3d15ebbb1"
+    "url": "assets/forest-scenery/portugal/manifest.9823eb72a5c0ae7e.json",
+    "bytes": 74363,
+    "sha256": "9823eb72a5c0ae7eea1dcd156b2fe5c53101febd0725c06ecdb3149cbd7667bd"
   },
   "assets/forest-scenery/portugal/roots.bin.gz": {
-    "url": "assets/forest-scenery/portugal/roots.bin.e37c195ac2384421.gz",
-    "bytes": 1083,
-    "sha256": "e37c195ac23844210aff6f5f50abea441574ae02a3fe042db181fc5d0402e275"
+    "url": "assets/forest-scenery/portugal/roots.bin.2702bd4a5536d949.gz",
+    "bytes": 1086,
+    "sha256": "2702bd4a5536d949fed74d6aa641bb3c54efa7a7016a91eb327f9d215ea634fd"
   },
   "assets/forest-scenery/portugal/oak-veteran-bark-albedo.png": {
     "url": "assets/forest-scenery/portugal/oak-veteran-bark-albedo.bec57a5718ce3134.png",
@@ -1985,14 +1985,14 @@
     "sha256": "655ebefdf1e5a1ab1ef2bd7bbc59319f08d39537e1cab6c796c1d54b31b78329"
   },
   "assets/forest-scenery/portugal/groves/manifest.json": {
-    "url": "assets/forest-scenery/portugal/groves/manifest.fbfc9c801674466f.json",
-    "bytes": 674,
-    "sha256": "fbfc9c801674466fc040c935bff213cbe2b377967a570e6b8a24d7d56dcaee2c"
+    "url": "assets/forest-scenery/portugal/groves/manifest.29d29dd969954c7c.json",
+    "bytes": 684,
+    "sha256": "29d29dd969954c7c7c7da74dea657576f5b8fa1e467639447ea9179e3c71df29"
   },
   "assets/forest-scenery/portugal/groves/trees.bin.gz": {
-    "url": "assets/forest-scenery/portugal/groves/trees.bin.9c2f4c55a86fb0e6.gz",
-    "bytes": 5913,
-    "sha256": "9c2f4c55a86fb0e62e94b33fc507da6b40658e0e4577b67db7d89e9c4326cc6f"
+    "url": "assets/forest-scenery/portugal/groves/trees.bin.83ad3bcc0a534625.gz",
+    "bytes": 17614,
+    "sha256": "83ad3bcc0a534625e40b75b4e94083738236ef24193146a6d7937368b2be66bd"
   },
   "assets/forest-scenery/subtropical/groves/manifest.json": {
     "url": "assets/forest-scenery/subtropical/groves/manifest.85615c46ef0d8e34.json",
