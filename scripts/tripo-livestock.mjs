@@ -120,14 +120,22 @@ async function findCachedGlb(dir) {
   return null;
 }
 
-export async function runBake({ fromTripoDir = OUT_DIR, run = execFileAsync } = {}) {
+export async function runBake({ fromTripoDir = OUT_DIR, continuum = true, run = execFileAsync } = {}) {
   const script = path.join(ROOT, 'scripts', 'bake-livestock-meshes.py');
   const args = ['-b', '-P', script, '--', '--from-tripo', fromTripoDir];
   const { stdout, stderr } = await run(BLENDER_BIN, args, { timeout: 360000, maxBuffer: 16 * 1024 * 1024 });
   if (stderr && /Error:|Traceback/i.test(stderr)) {
     throw new Error(redact(stderr));
   }
-  return stdout;
+  if (!continuum) return stdout;
+  // Chain directly into the animal continuum bake so UV streams, 1024px basecolor textures,
+  // cluster hierarchies, and far bodies stay synchronized whenever Tripo livestock are rebaked.
+  const continuumScript = path.join(ROOT, 'scripts', 'prepare-animal-continuum.mjs');
+  const { stdout: cOut, stderr: cErr } = await run(process.execPath, [continuumScript], { timeout: 600000, maxBuffer: 16 * 1024 * 1024 });
+  if (cErr && /Error:/i.test(cErr)) {
+    throw new Error(redact(cErr));
+  }
+  return `${stdout}${stdout.endsWith('\n') ? '' : '\n'}${cOut}`;
 }
 
 async function main() {

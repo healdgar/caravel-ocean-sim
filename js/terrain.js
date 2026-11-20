@@ -10,7 +10,7 @@ import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_ASSETS,
 import {loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {createPortFractures} from './building-fracture.js';
-import {layTownStreets,paveCityStreets,streetEdgeAt,waterfrontDeckYAt} from './town-streets.js';
+import {bridgeDeckYAt,bridgeSurfaceAt,layTownStreets,paveCityStreets,streetEdgeAt,waterfrontDeckYAt} from './town-streets.js';
 import {layPortProps} from './port-props.js';
 import {bakedBoardFor,oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard,runtimeBoardPortKey,syncOldWorldHeights} from './old-world.js';
 import {nativeOwnGroundFor} from './native-towns.js';
@@ -18,7 +18,7 @@ import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
-import {bridgeDeckYAt,bridgeSurfaceAt,createLivestockHerds} from './herds.js';
+import {createLivestockHerds} from './herds.js';
 import {createMeadowGrass} from './meadow-grass.js';
 import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
