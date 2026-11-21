@@ -213,12 +213,12 @@ struct ContinuumCardVarying {
   @location(6) @interpolate(flat) cardUpLocal:vec3f,
   @location(7) @interpolate(flat) coverage:vec4u,
   @location(8) @interpolate(flat) info:vec4u, // layer, model, spareX, 0
-  @location(9) @interpolate(flat) place:vec3f,
+  @location(9) @interpolate(flat) place:vec3f
 };
 
 struct ContinuumCardOut {
   @location(0) colour:vec4f,
-  @builtin(sample_mask) mask:u32,
+  @builtin(sample_mask) mask:u32
 };
 
 fn continuumCardCityWash(tint:f32)->vec3f {

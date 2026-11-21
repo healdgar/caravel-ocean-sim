@@ -962,7 +962,13 @@ struct ContinuumShadowCloth { @location(0) colour:vec4f, @builtin(sample_mask) m
   out.colour=vec4f(${name}ShadowTransmit(v),1.0);
   out.mask=${mask};
   return out;
-}` : `@fragment fn continuumShadowFS(v:ContinuumShadowVarying)->@builtin(sample_mask) u32 { return ${mask}; }`}
+}` : /* wgsl */`
+// Return a struct rather than a bare @builtin(sample_mask) u32 so Apple WebKit's parseFragmentReturnType
+// never records a scalar MTLDataTypeUInt (33) at location(0) via returnTypeLocation().value_or(0).
+struct ContinuumShadowMask { @builtin(sample_mask) mask:u32 };
+@fragment fn continuumShadowFS(v:ContinuumShadowVarying)->ContinuumShadowMask {
+  return ContinuumShadowMask(${mask});
+}`}
 `;
 }
 
@@ -970,7 +976,7 @@ const continuumVisibilityWGSL = () => /* wgsl */`
 @group(0) @binding(0) var<uniform> F:Frame;
 struct ContinuumVisibilityVarying {
   @invariant @builtin(position) position:vec4f,
-  @location(0) @interpolate(flat) coverage:vec4u,
+  @location(0) @interpolate(flat) coverage:vec4u
 };
 @vertex fn continuumVisibilityVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVisibilityVarying {
   let touched=continuumBindings();
@@ -1020,7 +1026,7 @@ ${hook.varyings ? continuumVaryingFields(hook.varyings, 4) : ''}
 struct ContinuumCardBakeOut {
   @location(0) albedo:vec4f,
   @location(1) geo:vec4f,
-  @builtin(sample_mask) mask:u32,
+  @builtin(sample_mask) mask:u32
 };
 ${hook.wgsl()}
 @vertex fn continuumCardBakeVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumCardBakeVarying {

@@ -26,7 +26,9 @@ const outRoot = path.join(cfDir, 'public', 'waterworld');
 fs.rmSync(cfDir, { recursive: true, force: true });
 fs.mkdirSync(outRoot, { recursive: true });
 
-fs.copyFileSync(path.join(docsDir, 'index.html'), path.join(outRoot, 'index.html'));
+const indexHtmlPath = path.join(docsDir, 'index.html');
+const indexHtmlSha256 = createHash('sha256').update(fs.readFileSync(indexHtmlPath)).digest('hex');
+fs.copyFileSync(indexHtmlPath, path.join(outRoot, 'index.html'));
 fs.copyFileSync(manifestPath, path.join(outRoot, 'assets-manifest.json'));
 
 const MAX_PART_BYTES = 20 * 1024 * 1024;
@@ -94,6 +96,7 @@ const STREAM_MANIFEST = ${JSON.stringify(streamManifest)};
 
 const ROBOTS_HEADER = 'noindex, nofollow, noarchive';
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable, no-transform';
+const INDEX_HTML_ETAG = '"${indexHtmlSha256.slice(0, 16)}"';
 
 export default {
   async fetch(request, env, ctx) {
@@ -293,7 +296,9 @@ export default {
       headers.set('Access-Control-Allow-Origin', '*');
       headers.set('Cache-Control', IMMUTABLE_CACHE);
     } else if (url.pathname === '/waterworld/' || url.pathname === '/waterworld/index.html') {
-      headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
+      headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+      headers.set('CDN-Cache-Control', 'no-store');
+      headers.set('ETag', INDEX_HTML_ETAG);
     }
     return new Response(res.body, { status: res.status, headers });
   },
