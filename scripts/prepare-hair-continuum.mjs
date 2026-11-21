@@ -335,14 +335,14 @@ function sampleScalpFollicles(ref, targetCount, rand, { tonsure = false } = {}) 
     const [hx, hy, hz] = hit.point;
     const ax = Math.abs(hx);
 
-    // Front forehead & temple M-contour: keep forehead, brows, and eyes completely clear.
+    // Front forehead & temple M-contour: keep forehead, brows, and eyes completely clear while sealing temples/sideburns.
     if (hz > ref.midZ + 0.012) {
       const widowDip = 0.006 * Math.exp(-((hx / 0.018) ** 2));
-      const templeRecede = 0.010 * Math.exp(-(((ax - 0.044) / 0.018) ** 2));
+      const templeRecede = 0.005 * Math.exp(-(((ax - 0.044) / 0.018) ** 2));
       const hairlineY = (ref.crownY - 0.050) - widowDip + templeRecede;
-      const sideburnZone = ax > 0.056 && hz < ref.midZ + 0.046;
+      const sideburnZone = ax > 0.052 && hz < ref.midZ + 0.048;
       if (!sideburnZone && hy < hairlineY) continue;
-      if (sideburnZone && hy < ref.earY - 0.008) continue;
+      if (sideburnZone && hy < ref.earY - 0.010) continue;
     }
     // Clean arch around the ear pinna so ears are crisp and never skewered at the root.
     const earDy = (hy - ref.earY) / 0.035, earDz = (hz - ref.earZ) / 0.027;
@@ -571,6 +571,41 @@ function buildScalpGroom(ref, style, seed) {
     }
   }
 
+  // Broad shingled temple & sideburn under-coat locks so light gaps never flash at the temples between locks.
+  {
+    const centerAnchor = [0, ref.crownY - 0.095, ref.midZ - 0.004];
+    for (const sgn of [-1, 1]) {
+      for (let t = 0; t < 38; t++) {
+        const f = t / 37;
+        const yTarget = (ref.crownY - 0.042) * (1 - f) + (ref.earY - 0.006) * f + (rand() - 0.5) * 0.006;
+        const zTarget = (ref.midZ + 0.044) * (1 - f * 0.55) + (ref.earZ + 0.022) * (f * 0.55) + (rand() - 0.5) * 0.008;
+        const rayDir = norm3([sgn * (0.072 + rand() * 0.012), yTarget - centerAnchor[1], zTarget - centerAnchor[2]]);
+        const hit = ref.raycast(centerAnchor, rayDir, 0.04, 0.18);
+        if (!hit) continue;
+        const [hx, hy, hz] = hit.point;
+        const earDy = (hy - ref.earY) / 0.034, earDz = (hz - ref.earZ) / 0.026;
+        if (Math.abs(hx) > 0.052 && earDy * earDy + earDz * earDz < 1.0) continue;
+        const segs = 4, tLen = (style === 'cropped-curls' || tonsure) ? (0.034 + rand() * 0.014) : (0.056 + rand() * 0.024);
+        const bW = 0.0096 + rand() * 0.0020;
+        const pts = [add3(hit.point, hit.normal, -0.0005)];
+        const widths = [bW * 0.95], arches = [bW * 0.26];
+        let cur = add3(hit.point, hit.normal, 0.0014);
+        let dir = norm3(add3(hit.normal, [sgn * 0.10, -0.52 - f * 0.25, -0.68], 1.15));
+        for (let k = 1; k <= segs; k++) {
+          const u = k / segs;
+          dir = norm3([dir[0] * 0.80, dir[1] - 0.42 * u, dir[2] * 0.82 - 0.14]);
+          const next = ref.repel(add3(cur, dir, tLen / segs), 0.0022 + u * 0.0014);
+          dir = norm3(sub3(next, cur));
+          cur = next;
+          pts.push(cur);
+          const w = bW * Math.max(0.20, 1 - u * 0.78);
+          widths.push(w); arches.push(w * 0.26);
+        }
+        appendStrand(mesh, pts, widths, arches, skinFn, 0.18, rand(), 0.34 + rand() * 0.44, rand(), hit.normal);
+      }
+    }
+  }
+
   // Secondary structural feature strands: wind-whipped queue tail, coiled chignon bun, or woven Renaissance crown plaits!
   if (style === 'mariner-queue') {
     for (let q = 0; q < 96; q++) {
@@ -702,29 +737,29 @@ function buildBeardGroom(ref, style, seed) {
     const len = isSoulPatch
       ? (0.014 + rand() * 0.008)
       : style === 'sea-beard'
-        ? (isChinCenter ? 0.088 + rand() * 0.044 : 0.056 + rand() * 0.036)
+        ? (isChinCenter ? 0.056 + rand() * 0.026 : 0.044 + rand() * 0.024)
         : (isChinCenter ? 0.040 + rand() * 0.020 : 0.020 + rand() * 0.014);
-    const baseW = (isSoulPatch ? 0.0022 : (style === 'sea-beard' ? 0.0040 : 0.0030)) + rand() * 0.0010;
+    const baseW = (isSoulPatch ? 0.0022 : (style === 'sea-beard' ? 0.0044 : 0.0030)) + rand() * 0.0010;
     const root = add3(hit.point, hit.normal, -0.0016);
     const pts = [root], widths = [baseW * 0.92], arches = [baseW * 0.38];
     let cur = [...hit.point];
-    // Grow forward-down along the natural chin silhouette instead of collapsing back toward the neck.
-    let dir = norm3(add3(hit.normal, [0, -0.82, 0.28], 1.05));
+    // Grow forward-down along the natural full 1550 chin & jaw silhouette without pinching into a narrow tassel.
+    let dir = norm3(add3(hit.normal, [0, -0.82, 0.24], 1.05));
     for (let k = 1; k <= segs; k++) {
       const u = k / segs;
-      const pointPull = style === 'iberian-barba' ? -cur[0] * 1.9 * u : -cur[0] * 0.30 * u;
-      const waveX = Math.sin(u * 8.5 + phase * 6.283) * (style === 'sea-beard' ? 0.0038 : 0.0016) * u;
-      const waveZ = Math.cos(u * 7.2 + phase * 6.283) * (style === 'sea-beard' ? 0.0030 : 0.0012) * u;
-      dir = norm3([dir[0] * 0.78 + pointPull, dir[1] - 0.44, dir[2] * 0.78 + 0.08]);
+      const pointPull = style === 'iberian-barba' ? -cur[0] * 1.9 * u : -cur[0] * 0.12 * u;
+      const waveX = Math.sin(u * 8.5 + phase * 6.283) * (style === 'sea-beard' ? 0.0034 : 0.0016) * u;
+      const waveZ = Math.cos(u * 7.2 + phase * 6.283) * (style === 'sea-beard' ? 0.0026 : 0.0012) * u;
+      dir = norm3([dir[0] * 0.80 + pointPull, dir[1] - 0.44, dir[2] * 0.78 + 0.06]);
       let next = add3(cur, dir, len / segs);
       next[0] += waveX; next[2] += waveZ;
       next = ref.repel(next, 0.0020);
       cur = next;
       pts.push(cur);
-      const w = baseW * Math.max(0.14, 1 - (u ** 1.35) * 0.86);
+      const w = baseW * Math.max(0.18, 1 - (u ** 1.40) * 0.82);
       widths.push(w); arches.push(w * 0.4);
     }
-    appendStrand(mesh, pts, widths, arches, beardSkin, isSoulPatch ? 0.12 : (style === 'sea-beard' ? 0.68 : 0.34), phase, 0.30 + rand() * 0.60, rand(), hit.normal);
+    appendStrand(mesh, pts, widths, arches, beardSkin, isSoulPatch ? 0.12 : (style === 'sea-beard' ? 0.52 : 0.34), phase, 0.30 + rand() * 0.60, rand(), hit.normal);
   };
 
   // 2a. Dense front-chin & soul-patch coverage directly on the pogonion & chin curve.
@@ -746,13 +781,13 @@ function buildBeardGroom(ref, style, seed) {
   }
 
   // 2b. Jawline and lower-cheek beard strands sweeping from chin around both mandibles toward the sideburns.
-  const bCount = style === 'sea-beard' ? 360 : 250;
+  const bCount = style === 'sea-beard' ? 420 : 250;
   for (let i = 0; i < bCount; i++) {
     const uA = ((i + 0.5) / bCount) * 2 - 1 + (rand() - 0.5) * 0.06;
-    const maxAngle = style === 'sea-beard' ? 1.24 : 0.94;
+    const maxAngle = style === 'sea-beard' ? 1.32 : 0.94;
     const theta = uA * maxAngle;
     const absT = Math.abs(theta);
-    const cheekH = style === 'sea-beard' ? 0.050 : 0.030;
+    const cheekH = style === 'sea-beard' ? 0.056 : 0.030;
     const yTarget = ref.chinY + 0.008 + rand() * (0.028 + absT * cheekH);
     // Keep lower lip vermilion & mouth slit clean!
     if (absT < 0.38 && yTarget > ref.mouthY - 0.018) continue;
@@ -798,11 +833,11 @@ function buildFarHairShell(ref, mesh, spec) {
   if (isBeard) {
     // Tight jawline/lip ellipsoid strictly below nostrils so far beards never touch eyes or nose.
     const cx = 0;
-    const cy = spec.id === 'moustache' ? ref.lipUpperY - 0.004 : (spec.id === 'sea-beard' ? ref.chinY - 0.020 : ref.chinY + 0.004);
+    const cy = spec.id === 'moustache' ? ref.lipUpperY - 0.004 : (spec.id === 'sea-beard' ? ref.chinY - 0.008 : ref.chinY + 0.004);
     const cz = spec.id === 'moustache' ? ref.lipZ - 0.002 : ref.lipZ - 0.018;
-    const rx = spec.id === 'moustache' ? 0.032 : (spec.id === 'sea-beard' ? 0.068 : 0.052);
-    const ry = spec.id === 'moustache' ? 0.010 : (spec.id === 'sea-beard' ? 0.072 : 0.038);
-    const rz = spec.id === 'moustache' ? 0.016 : (spec.id === 'sea-beard' ? 0.056 : 0.044);
+    const rx = spec.id === 'moustache' ? 0.032 : (spec.id === 'sea-beard' ? 0.072 : 0.052);
+    const ry = spec.id === 'moustache' ? 0.010 : (spec.id === 'sea-beard' ? 0.054 : 0.038);
+    const rz = spec.id === 'moustache' ? 0.016 : (spec.id === 'sea-beard' ? 0.054 : 0.044);
     const maxY = ref.lipUpperY + 0.005;
     const pushBeardVert = (dx, dy, dz) => {
       let x = cx + dx * rx;

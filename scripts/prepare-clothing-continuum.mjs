@@ -413,6 +413,9 @@ function createClothMesh() {
     parts.push(lead);
     return id;
   }
+  function addTri(a, b, c) {
+    indices.push(a, b, c);
+  }
   function addQuad(a, b, c, d) {
     indices.push(a, b, c, a, c, d);
   }
@@ -453,7 +456,7 @@ function createClothMesh() {
       parts: Uint32Array.from(parts),
     };
   }
-  return { addVertex, addQuad, addTube, finalize };
+  return { addVertex, addTri, addQuad, addTube, finalize };
 }
 
 // --------------------------------------------------------------------------- Reusable tailored garment building blocks
@@ -637,35 +640,80 @@ function addBeltAndBuckle(mesh, body, {
 }
 
 function addShoes(mesh, body, {
-  channel = CH.LEATHER, fabric = FAB.LEATHER, cuffY = 0.115,
+  channel = CH.LEATHER, fabric = FAB.LEATHER, cuffY = 0.115, cuffClr = 0.008,
 }) {
+  const nT = 22;
+  const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   for (let side = 0; side < 2; side++) {
     const fb = body.feet[side];
     const footJoint = side === 0 ? CREW_SLOT.foot_l : CREW_SLOT.foot_r;
     const ballJoint = side === 0 ? CREW_SLOT.ball_l : CREW_SLOT.ball_r;
     const cx = (fb.minX + fb.maxX) * 0.5;
-    const hx = (fb.maxX - fb.minX) * 0.5 + 0.012;
-    const cz = (fb.minZ + fb.maxZ) * 0.5;
-    const hz = (fb.maxZ - fb.minZ) * 0.5 + 0.015;
-    const y0 = Math.max(0.0, fb.minY + 0.002);
-    const nY = 6, nT = 18;
+    const hx = (fb.maxX - fb.minX) * 0.5 + 0.006;
+    const zToeOut = fb.maxZ + 0.008;
+    const zHeelOut = fb.minZ - 0.007;
+    const czMid = (zToeOut + zHeelOut) * 0.5;
+    const y0 = Math.max(0.0, fb.minY);
+    const leg0 = body.sampleLeg(side, cuffY, 0);
+    const axc = leg0.xc, azc = leg0.zc;
+    const ankleR = Array.from({ length: nT }, (_, it) => body.sampleLeg(side, cuffY, (it / nT) * Math.PI * 2).r + cuffClr);
+    const dToe = Math.max(0.08, zToeOut - azc);
+    const dHeel = Math.max(0.04, azc - zHeelOut);
+
+    const footXZ = (th, scale) => {
+      const ct = Math.cos(th), st = Math.sin(th);
+      const wS = ct >= 0 ? (1.02 - 0.14 * ct * ct) : (1.00 - 0.16 * ct * ct);
+      const xcTh = axc * (0.5 - 0.5 * ct) + cx * (0.5 + 0.5 * ct);
+      const fx0 = xcTh + st * hx * wS;
+      const fz0 = azc + (ct >= 0 ? ct * dToe : ct * dHeel);
+      return [cx + (fx0 - cx) * scale, czMid + (fz0 - czMid) * scale];
+    };
+    const ankleXZ = (it, rDel) => {
+      const th = (it / nT) * Math.PI * 2;
+      const r = Math.max(0.025, ankleR[it] + rDel);
+      return [axc + Math.sin(th) * r, azc + Math.cos(th) * r];
+    };
+
+    const yToeTop = y0 + 0.044;
+    const yVamp = yToeTop + (cuffY - yToeTop) * 0.44;
+    const yThroat = yToeTop + (cuffY - yToeTop) * 0.76;
+    const profile = [
+      ['sole_in', y0, 0.00, 0.00, 0.42, 0.000, 0.00],
+      ['sole_out', y0, 0.00, 0.00, 1.00, 0.000, 0.08],
+      ['welt', y0 + 0.009, 0.00, 0.00, 1.03, 0.000, 0.16],
+      ['wall', y0 + 0.022, 0.04, 0.12, 1.00, 0.000, 0.28],
+      ['toe_box', y0 + 0.035, 0.20, 0.36, 0.99, 0.000, 0.42],
+      ['vamp0', yToeTop, 0.52, 0.72, 0.98, 0.000, 0.56],
+      ['vamp1', yVamp, 0.82, 0.92, 0.98, 0.000, 0.70],
+      ['throat', yThroat, 0.96, 0.98, 0.98, 0.000, 0.82],
+      ['collar', cuffY, 1.00, 1.00, 1.00, 0.002, 0.92],
+      ['rim_top', cuffY + 0.002, 1.00, 1.00, 1.00, -0.001, 0.96],
+      ['rim_in', cuffY - 0.016, 1.00, 1.00, 1.00, -0.004, 1.00],
+    ];
     const rings = [];
-    for (let iy = 0; iy < nY; iy++) {
-      const f = iy / (nY - 1);
-      const y = y0 + f * (cuffY - y0);
-      const taperZ = f > 0.45 ? 1 - (f - 0.45) * 0.65 : 1.0;
-      const shiftZ = f > 0.45 ? -(f - 0.45) * hz * 0.55 : 0;
+    for (const [kind, yBase, fbFr, fbBk, fScale, rDel, vUV] of profile) {
       const row = [];
       for (let it = 0; it < nT; it++) {
-        const uFrac = it / nT;
-        const th = uFrac * Math.PI * 2;
-        const x = cx + Math.sin(th) * hx * (f > 0.5 ? 0.88 : 1.0);
-        const z = cz + shiftZ + Math.cos(th) * hz * taperZ;
-        const toeW = Math.max(0, Math.min(1, (z - cz) / Math.max(0.04, hz)));
-        const ao = 0.78 + 0.14 * f;
+        const uFrac = it / nT, th = uFrac * Math.PI * 2, ct = Math.cos(th);
+        const fw = sstep(-0.30, 0.30, ct);
+        const blend = fbBk * (1 - fw) + fbFr * fw;
+        const [fx, fz] = footXZ(th, fScale);
+        const [ax, az] = ankleXZ(it, rDel);
+        const x = fx * (1 - blend) + ax * blend;
+        const z = fz * (1 - blend) + az * blend;
+        let y = yBase;
+        if (kind === 'sole_in' || kind === 'sole_out') {
+          y = Math.max(0.0, yBase + (ct < -0.20 ? -0.003 : (ct < 0.25 ? 0.002 : 0.0)));
+        } else if (kind === 'welt') {
+          y = Math.max(0.005, yBase + (ct < -0.20 ? -0.002 : 0.0));
+        } else if ((kind === 'toe_box' || kind === 'vamp0') && ct > 0) {
+          y = yBase + 0.005 * (1 - ct * 0.5);
+        }
+        const toeW = Math.max(0, Math.min(1, (z - czMid) / Math.max(0.04, dToe)));
+        const ao = 0.78 + 0.14 * vUV;
         row.push(mesh.addVertex(
           x, y, z,
-          packClothWord(channel, fabric, ao, uFrac * 2, f),
+          packClothWord(channel, fabric, ao, uFrac * 2, vUV),
           [footJoint, ballJoint],
           [1 - toeW * 0.45, toeW * 0.45],
           0, uFrac,
@@ -674,6 +722,17 @@ function addShoes(mesh, body, {
       rings.push(row);
     }
     mesh.addTube(rings, true);
+    // Close bottom sole completely with center pole (outward -Y normal)
+    const botIdx = mesh.addVertex(
+      cx, Math.max(0.0, y0), czMid,
+      packClothWord(channel, fabric, 0.76, 0.5, 0.0),
+      [footJoint, ballJoint], [0.75, 0.25], 0, 0.5,
+    );
+    const r0 = rings[0];
+    for (let s = 0; s < nT; s++) {
+      const s2 = (s + 1) % nT;
+      mesh.addTri(botIdx, r0[s2], r0[s]);
+    }
   }
 }
 
@@ -731,7 +790,7 @@ function addLegTrousers(mesh, body, {
           const uFrac = it / 18;
           const th = uFrac * Math.PI * 2;
           const e = body.sampleLeg(side, y, th);
-          const r = e.r + 0.010;
+          const r = e.r + 0.014;
           const x = e.xc + Math.sin(th) * r;
           const z = e.zc + Math.cos(th) * r;
           const [j, w] = body.nearestSkin(x, y, z, (v) => body.pos[v * 3] * (side === 0 ? 1 : -1) > -0.01);

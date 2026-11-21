@@ -519,5 +519,5 @@ function makeCountry(region, heights, port, explicitBaked = null) {
     return use.kind === OLD_WORLD_LAND.GARDEN ? GARDEN_TREES : use.kind === OLD_WORLD_LAND.OLIVES ? OLIVE_TREES : NO_TREES;
   };
 
-  return { city, people, year, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood.stamp, places: stood.places, watch: stood.watch, works: stood.works, waterfront: stood.waterfront, furniture: stood.furniture ?? [], landmarks: stood.landmarks, inlandWater: stood.inlandWater, ponds: stood.ponds, herds: stood.herds, loneTrees: stood.loneTrees, bridges: stood.bridges, riverCut: stood.riverCut, riverReaches: stood.riverReaches };
+  return { city, people, year, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood.stamp, places: stood.places, watch: stood.watch, works: stood.works, waterfront: stood.waterfront, furniture: stood.furniture ?? [], landmarks: stood.landmarks, inlandWater: stood.inlandWater, ponds: stood.ponds, herds: stood.herds, rebuildHerds: stood.rebuildHerds, loneTrees: stood.loneTrees, bridges: stood.bridges, riverCut: stood.riverCut, riverReaches: stood.riverReaches };
 }

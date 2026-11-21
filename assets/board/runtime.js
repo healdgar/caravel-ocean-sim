@@ -253,6 +253,50 @@ globalThis.BOARD_MODEL = (() => {
     return { kind: 'person', card, links };
   }
 
+  function buildArmySoldierInspect(personId) {
+    if (!W || !Array.isArray(W.armies)) return null;
+    let soldier = null, army = null;
+    for (const a of W.armies) {
+      if (!a || a.gone || !Array.isArray(a.men)) continue;
+      const found = a.men.find((p) => p && p.id === personId);
+      if (found) { soldier = found; army = a; break; }
+    }
+    if (!soldier || !army) return null;
+    const S = W.settlements || [];
+    const name = typeof folkName === 'function' ? folkName(soldier) : String(soldier.name || soldier.gn || `Soldier #${personId}`);
+    const age = Math.max(1, Math.round(typeof ageYrs === 'function' ? ageYrs(soldier) : (Number(soldier.age) || 24)));
+    const role = String(soldier.tr || 'soldier');
+    const homeS = soldier.home >= 0 ? S[soldier.home] : (army.home >= 0 ? S[army.home] : S[army.at ?? 0]);
+    const atS = S[army.at ?? 0] || homeS;
+    const homeName = homeS?.name || 'the marches';
+    const atName = atS?.name || homeName;
+    const houseName = W.houses?.[army.house]?.name || 'the Crown';
+    const cmd = army.commander != null && typeof notableById === 'function' ? notableById(army.commander) : null;
+    const links = [];
+    if (cmd) links.push({ label: cmd.name, code: `p${NOTABLE_PERSON_BASE + cmd.id}` });
+    const lifeLines = [];
+    if (Array.isArray(soldier.life) && soldier.life.length) {
+      for (const ev of soldier.life.slice(-8)) {
+        const txt = typeof ev === 'string' ? ev : ev?.text;
+        if (txt) lifeLines.push(String(txt));
+      }
+    } else {
+      const bornYr = (typeof AD === 'function' ? AD() : 1550) - age;
+      lifeLines.push(soldier.merc ? `Hired sell-sword born circa AD ${bornYr}` : `Born circa AD ${bornYr} of ${homeName}`);
+      lifeLines.push(`Mustered into ${army.name} (${houseName})`);
+    }
+    const card = [
+      `${name} — ${age}, ${soldier.merc ? 'hired soldier' : 'sworn man-at-arms'} · ${role} · ${atName}`,
+      `Now serving in ${army.name} (${army.state || 'idle'}) at ${atName}${cmd ? ` under ${cmd.name}` : ''}`,
+      `Home ${soldier.merc ? 'Camp & road (hired company)' : homeName}`,
+      `Host ${army.name} (${Math.round(army.strength || army.men.length)} men, ${houseName})`,
+      `Personal status ${soldier.merc ? 'Sell-sword' : 'Levied householder'}`,
+      `Life`,
+      ...lifeLines,
+    ].join('\n');
+    return { kind: 'person', card, links };
+  }
+
   function touchMaritimePersonLife(soul, defaults = {}) {
     if (!soul || !Number.isInteger(soul.id)) return null;
     const store = ensureMaritimeLivesStore();
@@ -908,15 +952,13 @@ globalThis.BOARD_MODEL = (() => {
     // zero goods) so merchants, carters, and bargemen can lade real opening-day consignments.
     const ensureOpeningMarketListing = (s) => {
       if (!s || s.storage || !s.stores || typeof offer !== 'function' || typeof avail !== 'function') return;
-      for (const g of GOODS) {
-        if (avail(s, g, price(s, g) * 1.5) >= 3) return;
-      }
       const folk = Array.isArray(s.folk) ? s.folk : [];
       const sellers = folk.filter((p) => p && !p.dead && !(p.away && now < (p.away.until ?? 0)) && (p.tr === 'merchant' || p.tr === 'trader' || p.tr === 'chandler' || p.tr === 'spicer' || p.tr === 'farmer' || p.tr === 'peasant' || p.tr === 'weaver' || p.tr === 'smith'));
       const pool = sellers.length ? sellers : folk.filter((p) => p && !p.dead && !(p.away && now < (p.away.until ?? 0)));
       if (!pool.length) return;
       let idx = 0;
       for (const g of GOODS) {
+        if (avail(s, g, price(s, g) * 1.5) >= 3) continue;
         const raw = Math.max(0, Number(s.stores[g]) || 0);
         const sp = typeof spareOf === 'function' ? Math.max(0, Number(spareOf(s, g)) || 0) : raw;
         const listQty = Math.min(raw * 0.65, sp);
@@ -1156,21 +1198,154 @@ globalThis.BOARD_MODEL = (() => {
       }
     }
 
-    // 3. Ground local river fishing & ferry boats (`W.riverBoats`) strictly in real `s.folk` fishers/boatmen
-    // and real `s.stores.fish` / riverside settlement stocks (never inventing 24 unstaffed 900000+ ghost boats).
+    // 3. Ground local river fishing & ferry boats (`W.riverBoats`) strictly in real `s.folk` fishers/boatmen,
+    // real multi-endpoint economic corridors (settlement ↔ settlement or settlement ↔ estuary), and real
+    // settlement stores (never placing boats on isolated upland creeks or headwaters past the last village).
     if (!Array.isArray(W.riverBoats)) W.riverBoats = [];
-    W.riverBoats = W.riverBoats.filter((b) => b && !b.sunk && !(b.pilotId >= 900000));
     const distPt = (a, b) => Math.hypot((b.x || 0) - (a.x || 0), (b.z || 0) - (a.z || 0));
-    const nearestSettlement = (pt) => {
-      let best = 0, bestD = Infinity;
-      for (let si = 0; si < S.length; si++) {
-        const sp = S[si]?.pos;
-        if (!sp) continue;
-        const d = distPt(pt, sp);
-        if (d < bestD) { bestD = d; best = si; }
+    const hubSettlement = S.find((s) => s?.harbor) || S[0] || null;
+    const hubSi = hubSettlement ? Math.max(0, S.indexOf(hubSettlement)) : 0;
+    const hubName = String(hubSettlement?.name || W?.capital?.name || 'Harbor');
+    const estuaryName = /^lisbo[an]?$/i.test(hubName) ? 'Tagus Estuary' : `${hubName} Estuary`;
+
+    const isNearSea = (pt) => {
+      if (!pt || !W.water || typeof toCell !== 'function' || typeof inB !== 'function' || typeof cIdx !== 'function') return false;
+      const cx0 = toCell(pt.x), cz0 = toCell(pt.z);
+      const rad = Math.max(1, Math.ceil(120 / (typeof CELL === 'number' && CELL > 0 ? CELL : 40)));
+      for (let dz = -rad; dz <= rad; dz++) {
+        for (let dx = -rad; dx <= rad; dx++) {
+          const cx = cx0 + dx, cz = cz0 + dz;
+          if (!inB(cx, cz) || W.water[cIdx(cx, cz)] !== 1) continue;
+          if (Math.hypot(cellX(cx) - pt.x, cellZ(cz) - pt.z) <= 120) return true;
+        }
       }
-      return best;
+      return false;
     };
+
+    const rivStrips = Array.isArray(W.rivStrips) ? W.rivStrips : [];
+    const stripEndSea = rivStrips.map((q) => {
+      if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) return [false, false];
+      return [isNearSea(q.pts[0]), isNearSea(q.pts[q.pts.length - 1])];
+    });
+    // Propagate sea connectivity through river confluences (strip endpoints meeting a sea-connected strip within 32 m).
+    let seaChanged = true;
+    for (let pass = 0; pass < 4 && seaChanged; pass++) {
+      seaChanged = false;
+      for (let ri = 0; ri < rivStrips.length; ri++) {
+        const q = rivStrips[ri];
+        if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) continue;
+        for (const endIdx of [0, 1]) {
+          if (stripEndSea[ri][endIdx]) continue;
+          const endPt = endIdx === 0 ? q.pts[0] : q.pts[q.pts.length - 1];
+          for (let rj = 0; rj < rivStrips.length; rj++) {
+            if (rj === ri || (!stripEndSea[rj][0] && !stripEndSea[rj][1])) continue;
+            const o = rivStrips[rj];
+            if (!o || o.canal || !Array.isArray(o.pts) || o.pts.length < 4) continue;
+            for (let k = 0; k < o.pts.length; k++) {
+              if (distPt(endPt, o.pts[k]) <= 32) {
+                stripEndSea[ri][endIdx] = true;
+                seaChanged = true;
+                break;
+              }
+            }
+            if (stripEndSea[ri][endIdx]) break;
+          }
+        }
+      }
+    }
+
+    const economicCorridors = [];
+    const validRiverIndices = new Set();
+    for (let ri = 0; ri < rivStrips.length; ri++) {
+      const q = rivStrips[ri];
+      if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) continue;
+      const pts = q.pts;
+      const cumLen = new Float64Array(pts.length);
+      for (let k = 1; k < pts.length; k++) cumLen[k] = cumLen[k - 1] + distPt(pts[k - 1], pts[k]);
+      const rawWaypoints = [];
+      for (let si = 0; si < S.length; si++) {
+        const s = S[si];
+        if (!s?.pos) continue;
+        const reachRadius = Math.max(Math.min(Number(s.extentR) || 120, 380), 260);
+        let bestK = -1, bestD = Infinity;
+        for (let k = 0; k < pts.length; k++) {
+          const d = distPt(pts[k], s.pos);
+          if (d < bestD) { bestD = d; bestK = k; }
+        }
+        if (bestK >= 0 && bestD <= reachRadius) {
+          rawWaypoints.push({ kind: 'settlement', si, name: String(s.name || `Place ${si + 1}`), k: bestK, dist: bestD });
+        }
+      }
+      if (!rawWaypoints.length) continue;
+      if (stripEndSea[ri][0] && !rawWaypoints.some((w) => distPt(pts[w.k], pts[0]) <= 140)) {
+        rawWaypoints.push({ kind: 'estuary', si: -1, name: estuaryName, k: 0, dist: 0 });
+      }
+      if (stripEndSea[ri][1] && !rawWaypoints.some((w) => distPt(pts[w.k], pts[pts.length - 1]) <= 140)) {
+        rawWaypoints.push({ kind: 'estuary', si: -1, name: estuaryName, k: pts.length - 1, dist: 0 });
+      }
+      rawWaypoints.sort((a, b) => a.k - b.k || a.dist - b.dist);
+      // Keep distinct economic endpoints ordered along the strip.
+      const waypoints = [];
+      for (const wp of rawWaypoints) {
+        const prev = waypoints[waypoints.length - 1];
+        if (prev && prev.si === wp.si && prev.kind === wp.kind) {
+          if (wp.dist < prev.dist) waypoints[waypoints.length - 1] = wp;
+          continue;
+        }
+        waypoints.push(wp);
+      }
+      const hasSettlement = waypoints.some((w) => w.kind === 'settlement');
+      if (!hasSettlement || waypoints.length < 2) continue;
+
+      const addLeg = (wpA, wpB, legIdx) => {
+        if (!wpA || !wpB || wpA.k === wpB.k) return;
+        if (wpA.si >= 0 && wpA.si === wpB.si) return;
+        if (wpA.kind !== 'settlement' && wpB.kind !== 'settlement') return;
+        const kLo = Math.min(wpA.k, wpB.k);
+        const kHi = Math.max(wpA.k, wpB.k);
+        if (kHi - kLo < 3) return;
+        const segLen = cumLen[kHi] - cumLen[kLo];
+        if (segLen < 140) return;
+        let hwSum = 0;
+        for (let k = kLo; k <= kHi; k++) hwSum += q.hw?.[k] ?? 2;
+        const avgHw = hwSum / (kHi - kLo + 1);
+        if (avgHw < 1.35) return;
+        const slice = pts.slice(kLo, kHi + 1).map((p) => ({ x: p.x, z: p.z }));
+        const fromWp = wpA.k <= wpB.k ? wpA : wpB;
+        const toWp = wpA.k <= wpB.k ? wpB : wpA;
+        validRiverIndices.add(ri);
+        economicCorridors.push({
+          ri,
+          legIdx,
+          key: `${ri}:${fromWp.si}>${toWp.si}:${kLo}-${kHi}`,
+          pts: slice,
+          totalLen: segLen,
+          avgHw,
+          fromWp,
+          toWp,
+        });
+      };
+
+      let addedAny = false;
+      for (let wi = 0; wi + 1 < waypoints.length; wi++) {
+        const before = economicCorridors.length;
+        addLeg(waypoints[wi], waypoints[wi + 1], wi);
+        if (economicCorridors.length > before) addedAny = true;
+      }
+      if (!addedAny) {
+        addLeg(waypoints[0], waypoints[waypoints.length - 1], 0);
+      }
+    }
+
+    // Purge any sunk, ghost-piloted, or non-economic-corridor boats (e.g. legacy saves with isolated creeks).
+    W.riverBoats = W.riverBoats.filter((b) => {
+      if (!b || b.sunk || (b.pilotId >= 900000)) return false;
+      if (!validRiverIndices.has(b.riverIdx)) return false;
+      if (!b.from || !b.to) return false;
+      if (b.si >= 0 && b.destSi >= 0 && b.si === b.destSi) return false;
+      return true;
+    });
+
     let riverFolkCount = 0, totalFishStore = 0;
     for (const s of S) {
       if (!s || !(s.riverside || s.river || s.harbor)) continue;
@@ -1179,67 +1354,61 @@ globalThis.BOARD_MODEL = (() => {
         if (p && !p.dead && (p.tr === 'fisher' || p.tr === 'boatman')) riverFolkCount++;
       }
     }
-    const targetLocalRiverBoats = riverFolkCount >= 3
+    const targetLocalRiverBoats = (riverFolkCount >= 3 && economicCorridors.length > 0)
       ? Math.min(8, Math.max(1, Math.min(Math.floor(riverFolkCount / 3), 1 + Math.floor(totalFishStore / 45))))
       : 0;
-    if (W.riverBoats.length > targetLocalRiverBoats && targetLocalRiverBoats > 0) {
+    if (W.riverBoats.length > targetLocalRiverBoats) {
       W.riverBoats.length = targetLocalRiverBoats;
     }
     const RIVER_PARCEL_GOODS = ['fish', 'grain', 'wine', 'timber', 'salt', 'char', 'ore'];
     const pickRiverParcel = (si, idSalt) => {
       const worldSeed = typeof SEED === 'number' ? SEED : 1550;
-      const stores = S[si]?.stores || {};
+      const safeSi = si >= 0 && si < S.length ? si : hubSi;
+      const stores = S[safeSi]?.stores || {};
       if ((Number(stores.fish) || 0) >= 2 && (idSalt % 2 === 0)) {
         return { good: 'fish', qty: Math.min(5, Math.max(2, Math.round(Math.min(5, Number(stores.fish) * 0.08)))) };
       }
       const availGoods = RIVER_PARCEL_GOODS.filter((g) => (Number(stores[g]) || 0) >= 2);
-      if (!availGoods.length) return { good: 'fish', qty: 2 };
+      if (!availGoods.length) return { good: 'fish', qty: Math.min(2, Math.max(1, Math.floor(Number(stores.fish) || 1))) };
       const good = availGoods[maritimeHash(worldSeed, idSalt, 17) % availGoods.length];
       const qty = Math.min(5, Math.max(2, Math.min(Math.floor(Number(stores[good]) || 2), 2 + (maritimeHash(worldSeed, idSalt, 23) % 4))));
       return { good, qty };
     };
-    if (W.riverBoats.length < targetLocalRiverBoats && Array.isArray(W.rivStrips) && W.rivStrips.length > 0 && S.length > 0) {
-      const existingByKey = new Set(W.riverBoats.map((b) => `${b.riverIdx}:${b.slotCopy ?? b.id}`));
+    if (W.riverBoats.length < targetLocalRiverBoats && economicCorridors.length > 0 && S.length > 0) {
+      const existingByKey = new Set(W.riverBoats.map((b) => `${b.corridorKey ?? b.riverIdx}:${b.slotCopy ?? b.id}`));
       let nextId = W.riverBoats.reduce((m, b) => Math.max(m, Number(b?.id) || 0), 0) + 1;
-      const reaches = [];
-      for (let ri = 0; ri < W.rivStrips.length; ri++) {
-        const q = W.rivStrips[ri];
-        if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) continue;
-        let totalLen = 0, hwSum = 0;
-        for (let k = 0; k < q.pts.length; k++) {
-          hwSum += q.hw?.[k] ?? 2;
-          if (k > 0) totalLen += distPt(q.pts[k - 1], q.pts[k]);
-        }
-        const avgHw = hwSum / q.pts.length;
-        if (totalLen >= 140 && avgHw >= 1.35) {
-          reaches.push({ ri, pts: q.pts, totalLen, avgHw });
-        }
-      }
-      reaches.sort((a, b) => b.totalLen - a.totalLen || a.ri - b.ri);
-      for (let idx = 0; idx < reaches.length && W.riverBoats.length < targetLocalRiverBoats; idx++) {
-        const r = reaches[idx];
-        const copies = Math.max(1, Math.min(3, Math.round(r.totalLen / 480)));
-        for (let copy = 0; copy < copies && W.riverBoats.length < targetLocalRiverBoats; copy++) {
-          const slotKey = `${r.ri}:${copy}`;
+      economicCorridors.sort((a, b) => b.totalLen - a.totalLen || a.ri - b.ri || a.legIdx - b.legIdx);
+      // Deal 1 boat per distinct corridor first, then optional second boat on longer corridors.
+      for (let copy = 0; copy < 2 && W.riverBoats.length < targetLocalRiverBoats; copy++) {
+        for (let idx = 0; idx < economicCorridors.length && W.riverBoats.length < targetLocalRiverBoats; idx++) {
+          const r = economicCorridors[idx];
+          if (copy > 0 && r.totalLen < 900) continue;
+          const slotKey = `${r.key}:${copy}`;
           if (existingByKey.has(slotKey)) continue;
           existingByKey.add(slotKey);
           const forward = ((idx + copy) % 2) === 0;
+          const startWp = forward ? r.fromWp : r.toWp;
+          const endWp = forward ? r.toWp : r.fromWp;
           const pts = (forward ? r.pts : [...r.pts].reverse()).map((p) => ({ x: p.x, z: p.z }));
-          const si = nearestSettlement(pts[0]);
-          const destSi = nearestSettlement(pts[pts.length - 1]);
+          const si = startWp.si;
+          const destSi = endWp.si;
+          const staffSi = si >= 0 ? si : (destSi >= 0 ? destSi : hubSi);
           const tripSpan = Math.max(2.1, +(r.totalLen / 360).toFixed(2));
-          const phaseOffset = +((((copy + 0.5) / copies) + ((idx * 0.173) % 0.19)) % 1).toFixed(4);
+          const phaseOffset = +((((copy + 0.5) / 2) + ((idx * 0.173) % 0.37)) % 1).toFixed(4);
           const departDay = now - phaseOffset * tripSpan;
           const id = nextId++;
-          const parcel = pickRiverParcel(si, id);
+          const parcel = pickRiverParcel(staffSi, id);
           W.riverBoats.push({
             id,
             slotCopy: copy,
+            corridorKey: r.key,
             key: `rb:${id}`,
             shipName: parcel.good === 'fish' ? `Barca de Pesca ${id}` : `Barca do Rio ${id}`,
             riverIdx: r.ri,
             si,
             destSi,
+            from: startWp.name,
+            to: endWp.name,
             phase: 'shuttle',
             scale: +(0.76 + ((id * 0.037) % 0.14)).toFixed(2),
             tripSpan,
@@ -1263,8 +1432,9 @@ globalThis.BOARD_MODEL = (() => {
     const staffedRiverBoats = [];
     for (const b of W.riverBoats) {
       if (!b || b.sunk) continue;
-      if (!b.good || !(b.qty >= 2)) {
-        const parcel = pickRiverParcel(b.si ?? 0, b.id || 1);
+      const homeSi = b.si >= 0 ? b.si : (b.destSi >= 0 ? b.destSi : hubSi);
+      if (!b.good || !(b.qty >= 1)) {
+        const parcel = pickRiverParcel(homeSi, b.id || 1);
         b.good = parcel.good;
         b.qty = parcel.qty;
       }
@@ -1272,20 +1442,37 @@ globalThis.BOARD_MODEL = (() => {
         b.phaseOffset = +((((b.id || 1) * 0.29) % 0.92) + 0.04).toFixed(4);
       }
       if (now >= (b.arriveDay ?? -Infinity)) {
-        const prevSi = b.si;
-        b.si = b.destSi ?? prevSi;
-        b.destSi = prevSi ?? b.si;
+        // Transfer actual available cargo parcel between endpoints without minting goods.
+        const srcIdx = b.si >= 0 ? b.si : hubSi;
+        const dstIdx = b.destSi >= 0 ? b.destSi : hubSi;
+        const srcS = S[srcIdx], dstS = S[dstIdx];
+        if (srcS?.stores && dstS?.stores && srcIdx !== dstIdx && b.good && b.qty > 0) {
+          const availStock = Math.max(0, Number(srcS.stores[b.good]) || 0);
+          const moved = Math.min(availStock, Math.max(0, Number(b.qty) || 0));
+          if (moved > 0) {
+            srcS.stores[b.good] = Math.max(0, availStock - moved);
+            dstS.stores[b.good] = (Number(dstS.stores[b.good]) || 0) + moved;
+          }
+        }
+        const prevSi = b.si, prevFrom = b.from;
+        b.si = b.destSi;
+        b.destSi = prevSi;
+        b.from = b.to;
+        b.to = prevFrom;
         b.forward = !b.forward;
+        if (Array.isArray(b.points) && b.points.length >= 2) b.points = [...b.points].reverse();
         const span = Math.max(2.0, b.tripSpan || 3.2);
         b.departDay = now;
         b.arriveDay = now + span;
-        const nextParcel = pickRiverParcel(b.si ?? 0, (b.id || 1) + Math.floor(now));
+        const nextHomeSi = b.si >= 0 ? b.si : (b.destSi >= 0 ? b.destSi : hubSi);
+        const nextParcel = pickRiverParcel(nextHomeSi, (b.id || 1) + Math.floor(now));
         b.good = nextParcel.good;
         b.qty = nextParcel.qty;
       }
+      const staffSi = b.si >= 0 ? b.si : (b.destSi >= 0 ? b.destSi : hubSi);
       let pilotFolk = findFolkById(b.pilotId);
       if (!pilotFolk || usedRiverFolk.has(pilotFolk.id)) {
-        pilotFolk = pickOrPromoteBoatman(b.si ?? 0, 'pilot', usedRiverFolk);
+        pilotFolk = pickOrPromoteBoatman(staffSi, 'pilot', usedRiverFolk);
       } else {
         usedRiverFolk.add(pilotFolk.id);
       }
@@ -1294,15 +1481,15 @@ globalThis.BOARD_MODEL = (() => {
       b.pilot = {
         id: pilotFolk.id,
         name: safeFolkName(pilotFolk),
-        settlementId: pilotFolk.si ?? b.si ?? 0,
+        settlementId: pilotFolk.si ?? staffSi,
         trade: 'boatman',
       };
       if (!b.merchant || usedRiverFolk.has(b.merchant.id) || b.merchant.id >= 900000) {
-        const merchFolk = pickOrPromoteBoatman(b.si ?? 0, 'merchant', usedRiverFolk);
+        const merchFolk = pickOrPromoteBoatman(staffSi, 'merchant', usedRiverFolk);
         b.merchant = merchFolk ? {
           id: merchFolk.id,
           name: safeFolkName(merchFolk),
-          settlementId: merchFolk.si ?? b.si ?? 0,
+          settlementId: merchFolk.si ?? staffSi,
           trade: merchFolk.tr || 'merchant',
         } : null;
       } else if (b.merchant?.id != null) {
@@ -1317,17 +1504,17 @@ globalThis.BOARD_MODEL = (() => {
         nextOars.push({
           id: oarFolk.id,
           name: safeFolkName(oarFolk),
-          settlementId: oarFolk.si ?? b.si ?? 0,
+          settlementId: oarFolk.si ?? staffSi,
           trade: 'boatman',
         });
       }
       while (nextOars.length < targetOars) {
-        const oarFolk = pickOrPromoteBoatman(b.si ?? 0, 'oarsman', usedRiverFolk);
+        const oarFolk = pickOrPromoteBoatman(staffSi, 'oarsman', usedRiverFolk);
         if (!oarFolk) break;
         nextOars.push({
           id: oarFolk.id,
           name: safeFolkName(oarFolk),
-          settlementId: oarFolk.si ?? b.si ?? 0,
+          settlementId: oarFolk.si ?? staffSi,
           trade: 'boatman',
         });
       }
@@ -1336,6 +1523,35 @@ globalThis.BOARD_MODEL = (() => {
       staffedRiverBoats.push(b);
     }
     W.riverBoats = staffedRiverBoats;
+  }
+
+  // Day-0 baked worlds are frozen before the first monthly livestock (day % 30 === 18) and
+  // domain/standing-host (day % 30 === 20) ticks fire, leaving all herds at 0 and W.armies empty.
+  // Execute those genuine Castle & Commons monthly handlers cleanly through Day 21 on wake.
+  async function ensureFoundingMonthSettled() {
+    if (!W || !W.clock || !Array.isArray(W.settlements) || !W.settlements.length) return;
+    if (day() >= 21) return;
+    const hasHerds = W.settlements.some((s) => Boolean(s?.hm));
+    const hasArmies = Array.isArray(W.armies) && W.armies.some((a) => a && !a.gone && (a.strength > 0 || a.men?.length > 0));
+    if (hasHerds && hasArmies) return;
+    await STORAGE_OUTCOMES.wait();
+    if (typeof peoplePrepare === 'function') peoplePrepare();
+    if (day() < 18 || !hasHerds) {
+      W.clock.day = 18;
+      if (typeof dailyLabourBegin === 'function') dailyLabourBegin(W.clock.day);
+      if (typeof tickLivestock === 'function') tickLivestock();
+      if (typeof dailyLabourEnd === 'function') dailyLabourEnd();
+    }
+    if (day() < 20 || !hasArmies) {
+      W.clock.day = 20;
+      if (typeof dailyLabourBegin === 'function') dailyLabourBegin(W.clock.day);
+      if (typeof tickDomains === 'function') tickDomains();
+      if (typeof tickMilitary === 'function') tickMilitary();
+      if (typeof dailyLabourEnd === 'function') dailyLabourEnd();
+    }
+    if (day() < 21) W.clock.day = 21;
+    if (STORAGE_OUTCOMES.journal?.flush) await STORAGE_OUTCOMES.journal.flush();
+    await STORAGE_OUTCOMES.wait();
   }
 
   async function found({ seed, fate = 1, era }, progress = null) {
@@ -1351,6 +1567,7 @@ globalThis.BOARD_MODEL = (() => {
     beginChronicle();
     // The model first gives each household its roof at the turn of a year. Here they are wanted from the first day.
     for (const s of W.settlements) if (!(s.folk || []).some((p) => p.bh)) houseFolk(s);
+    await ensureFoundingMonthSettled();
     ensureMaritimeWorldRoutes({ force: true });
     return board();
   }
@@ -1576,6 +1793,7 @@ globalThis.BOARD_MODEL = (() => {
     if (!program()) throw new Error('A world is taken up only by a host that names its program');
     STORAGE_OUTCOMES.journal = journal();
     await worldLoad(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), { sourceSHA256: program(), outcomeJournal: STORAGE_OUTCOMES.journal });
+    await ensureFoundingMonthSettled();
     ensureMaritimeWorldRoutes({ force: true });
     return board();
   }
@@ -1621,6 +1839,10 @@ globalThis.BOARD_MODEL = (() => {
             const notableAns = buildNotablePersonInspect(pid - NOTABLE_PERSON_BASE);
             if (notableAns) return notableAns;
           }
+          if (typeof findPerson === 'function' && !findPerson(pid)) {
+            const soldierAns = buildArmySoldierInspect(pid);
+            if (soldierAns) return soldierAns;
+          }
         } else if (/^n\d+$/.test(codeStr)) {
           const notableAns = buildNotablePersonInspect(Number(codeStr.slice(1)));
           if (notableAns) return notableAns;
@@ -1652,8 +1874,8 @@ globalThis.BOARD_MODEL = (() => {
         const rbId = Number(rbKey.slice(2));
         const b = (W?.riverBoats || []).find((q) => q && !q.sunk && (q.id === rbId || String(q.key) === rbKey));
         if (b) {
-          const home = W.settlements?.[b.si]?.name || 'Harbor';
-          const dest = W.settlements?.[b.destSi]?.name || home;
+          const home = b.from || W.settlements?.[b.si]?.name || 'Harbor';
+          const dest = b.to || W.settlements?.[b.destSi]?.name || 'Estuary';
           const mid = b.points?.[Math.floor((b.points.length - 1) / 2)] || b.points?.[0] || { x: 0, z: 0 };
           const oarNames = Array.isArray(b.oarsmen) && b.oarsmen.length ? b.oarsmen.map((o) => o.name).join(', ') : '4 hired oarsmen';
           return {
@@ -1916,6 +2138,30 @@ globalThis.BOARD_MODEL = (() => {
   // How a building stands: whole, a roofless ruin, alight, or a heap.
   const STANDINGS = ['sound', 'ruin', 'burning', 'rubble'];
 
+  function settlementHerds(s) {
+    const out = { sheep: 0, cattle: 0, horses: 0, swine: 0 };
+    if (!s) return out;
+    const st = s.stores || {};
+    for (const k of ['sheep', 'cattle', 'horses', 'swine']) {
+      out[k] = Math.max(0, Number(st[k]) || 0);
+    }
+    if (out.sheep + out.cattle + out.horses + out.swine < 0.5 && s._owners && typeof s._owners.values === 'function') {
+      for (const rec of s._owners.values()) {
+        const a = rec?.animals;
+        if (!a) continue;
+        for (const k of ['sheep', 'cattle', 'horses', 'swine']) {
+          out[k] += Math.max(0, Number(a[k]) || 0);
+        }
+      }
+    }
+    return {
+      sheep: Math.round(out.sheep),
+      cattle: Math.round(out.cattle),
+      horses: Math.round(out.horses),
+      swine: Math.round(out.swine),
+    };
+  }
+
   function board() {
     const places = W.settlements.map((s, at) => ({
       name: s.name, kind: s.kind, role: s.role, culture: s.cult, people: Math.round(s.pop), x: r1(s.pos.x), z: r1(s.pos.z),
@@ -1942,12 +2188,7 @@ globalThis.BOARD_MODEL = (() => {
       // Who mans it: whoever holds it, the hosts within it and the first of its watch, by name (`watch`).
       watch: watchKept(at),
       // Its standing herds on the pastures and mast-woods, and any dammed pond raised on its stream.
-      herds: {
-        sheep: Math.max(0, Math.round(s.stores?.sheep || 0)),
-        cattle: Math.max(0, Math.round(s.stores?.cattle || 0)),
-        horses: Math.max(0, Math.round(s.stores?.horses || 0)),
-        swine: Math.max(0, Math.round(s.stores?.swine || 0)),
-      },
+      herds: settlementHerds(s),
       pond: s.lake && s.lake.poly?.length > 2 && s.lake.dam ? {
         level: r1(s.lake.y), area: Math.round(s.lake.area || 0), points: line(s.lake.poly),
         dam: {
@@ -2646,22 +2887,29 @@ globalThis.BOARD_MODEL = (() => {
   function riverBoats() {
     ensureMaritimeWorldRoutes();
     const out = [];
+    const S = W?.settlements || [];
+    const hubName = String((S.find((s) => s?.harbor) || S[0])?.name || W?.capital?.name || 'Harbor');
+    const estuaryName = /^lisbo[an]?$/i.test(hubName) ? 'Tagus Estuary' : `${hubName} Estuary`;
     for (let i = 0; i < (W?.riverBoats || []).length; i++) {
       const b = W.riverBoats[i];
       if (!b || b.sunk || !Array.isArray(b.points) || b.points.length < 2) continue;
       const oarsList = Array.isArray(b.oarsmen) ? b.oarsmen : [];
       const oarsCount = oarsList.length ? oarsList.length : (Number.isFinite(b.oarsmen) ? b.oarsmen : 4);
-      const homePort = W?.settlements?.[b.si ?? 0]?.name || 'Ribatejo';
+      const fromName = String(b.from || (b.si >= 0 ? S[b.si]?.name : estuaryName) || 'Ribatejo');
+      const toName = String(b.to || (b.destSi >= 0 ? S[b.destSi]?.name : estuaryName) || estuaryName);
+      const homePort = (b.si >= 0 ? S[b.si]?.name : (b.destSi >= 0 ? S[b.destSi]?.name : hubName)) || 'Ribatejo';
       const shipName = b.shipName || `Barca do Tejo ${b.id ?? (i + 1)}`;
       const good = String(b.good || 'fish');
-      const qty = Math.max(2, Math.min(5, Math.round(b.qty || 3)));
+      const qty = Math.max(1, Math.min(5, Math.round(b.qty || 3)));
       out.push({
         id: b.id,
         key: b.key || `rb:${b.id}`,
         shipName,
         homePort,
+        from: fromName,
+        to: toName,
         si: b.si ?? 0,
-        destSi: b.destSi ?? b.si ?? 0,
+        destSi: b.destSi ?? -1,
         riverIdx: b.riverIdx ?? 0,
         phase: b.phase || 'shuttle',
         scale: Number.isFinite(b.scale) ? b.scale : 0.78,
@@ -3073,6 +3321,123 @@ globalThis.BOARD_MODEL = (() => {
     };
   }
 
+  // Live per-settlement livestock counts directly from Castle & Commons (`s.stores` with household `s._owners` fallback).
+  function herds() {
+    if (!W || !Array.isArray(W.settlements)) {
+      return { day: 0, places: [], totals: { sheep: 0, cattle: 0, horses: 0, swine: 0, total: 0 } };
+    }
+    const totals = { sheep: 0, cattle: 0, horses: 0, swine: 0, total: 0 };
+    const places = W.settlements.map((s, si) => {
+      const h = settlementHerds(s);
+      totals.sheep += h.sheep;
+      totals.cattle += h.cattle;
+      totals.horses += h.horses;
+      totals.swine += h.swine;
+      return {
+        si,
+        name: String(s?.name || `Place ${si + 1}`),
+        sheep: h.sheep,
+        cattle: h.cattle,
+        horses: h.horses,
+        swine: h.swine,
+      };
+    });
+    totals.total = totals.sheep + totals.cattle + totals.horses + totals.swine;
+    return { day: day(), places, totals };
+  }
+
+  // Live standing & field armies, commanders, named soldiers, noble houses, and active wars/feuds directly from `W`.
+  function armies() {
+    if (!W) return { day: 0, war: false, feuds: [], houses: [], armies: [] };
+    const now = day();
+    const S = W.settlements || [];
+    const H = W.houses || [];
+    const feuds = (W.feuds || [])
+      .filter((f) => f && !f.over)
+      .map((f) => ({
+        a: f.a,
+        b: f.b,
+        aName: String(H[f.a]?.name || ''),
+        bName: String(H[f.b]?.name || ''),
+        name: String(f.name || ''),
+        start: f.start ?? 0,
+        until: f.until ?? 0,
+      }));
+    const houses = H.map((h, hi) => ({
+      index: hi,
+      name: String(h?.name || ''),
+      seat: h?.seat ?? 0,
+      seatName: String(S[h?.seat]?.name || ''),
+      sigilHue: Array.isArray(h?.sigilHue) ? [...h.sigilHue] : (h?.sigilHue ?? null),
+      gold: Math.round(Number(hi === 0 ? W.treasury : h?.gold) || 0),
+      loyalty: Math.round(Number(h?.loyalty) || 0),
+      exiled: Boolean(h?.exiled),
+      crown: Boolean(h?.crown || hi === 0),
+    }));
+    const armyList = (W.armies || [])
+      .filter((a) => a && !a.gone && ((Number(a.strength) || 0) > 0 || (a.men?.length || 0) > 0))
+      .map((a) => {
+        const pos = typeof armySimPos === 'function' ? armySimPos(a) : (S[a.at]?.pos || { x: 0, z: 0 });
+        const houseObj = H[a.house] || null;
+        const poly = Array.isArray(a.poly) && a.poly.length >= 2
+          ? a.poly
+          : (Array.isArray(a.path) && a.path.length >= 2 ? a.path : null);
+        let tx = pos.x, tz = pos.z;
+        if (poly && (a.state === 'march' || a.state === 'rout')) {
+          const span = Math.max(0.01, (a.arriveDay ?? now) - (a.departDay ?? now));
+          const frac = Math.max(0, Math.min(1, (now - (a.departDay ?? now)) / span));
+          const nextIdx = Math.min(poly.length - 1, Math.max(1, Math.ceil(frac * (poly.length - 1))));
+          const wp = poly[nextIdx] || poly[poly.length - 1];
+          if (wp && Number.isFinite(wp.x) && Number.isFinite(wp.z)) { tx = wp.x; tz = wp.z; }
+        } else if (a.target && typeof a.target === 'object' && Number.isFinite(a.target.x) && Number.isFinite(a.target.z)) {
+          tx = a.target.x; tz = a.target.z;
+        } else {
+          const tgtIdx = Number.isInteger(a.to) ? a.to : (Number.isInteger(a.target) ? a.target : a.at);
+          const tgtPos = S[tgtIdx]?.pos || S[a.at]?.pos || pos;
+          if (tgtPos) { tx = tgtPos.x; tz = tgtPos.z; }
+        }
+        const cmd = a.commander != null && typeof notableById === 'function' ? notableById(a.commander) : null;
+        const commander = cmd ? {
+          id: NOTABLE_PERSON_BASE + cmd.id,
+          notableId: cmd.id,
+          name: String(cmd.name || ''),
+          age: Math.max(1, Math.round(Number(cmd.age) || 30)),
+          role: notableRoleLabel(cmd),
+        } : null;
+        const men = [];
+        for (const p of a.men || []) {
+          if (!p || p.dead) continue;
+          men.push({
+            id: p.id,
+            name: typeof folkName === 'function' ? folkName(p) : String(p.name || p.gn || ''),
+            age: r1(typeof ageYrs === 'function' ? ageYrs(p) : (Number(p.age) || 24)),
+            role: String(p.tr || 'soldier'),
+            merc: Boolean(p.merc),
+          });
+          if (men.length >= 48) break;
+        }
+        return {
+          id: a.id,
+          name: String(a.name || ''),
+          house: a.house ?? 0,
+          houseName: String(houseObj?.name || ''),
+          sigilHue: Array.isArray(houseObj?.sigilHue) ? [...houseObj.sigilHue] : (houseObj?.sigilHue ?? null),
+          standing: Boolean(a.standing),
+          state: String(a.state || 'idle'),
+          at: a.at ?? 0,
+          home: a.home ?? a.at ?? 0,
+          strength: Math.round(Number(a.strength) || a.men?.length || 0),
+          horses: Math.round(Number(a.horses) || 0),
+          supply: Math.round(Number(a.supply) || 0),
+          pos: { x: r1(pos.x), z: r1(pos.z), sea: Boolean(pos.sea) },
+          target: { tx: r1(tx), tz: r1(tz) },
+          commander,
+          men,
+        };
+      });
+    return { day: now, war: Boolean(W.war), feuds, houses, armies: armyList };
+  }
+
   // Purely read-only unpadded economic & civic diagnostics directly from `W`.
   function diagnostics(place = 0) {
     if (!W) return null;
@@ -3110,7 +3475,13 @@ globalThis.BOARD_MODEL = (() => {
       if (h?.journey && now <= (h.journey.arrive ?? -Infinity)) mountedTravellers++;
     }
     let buildings = 0, ruins = 0, streets = 0;
+    const herdsTotal = { sheep: 0, cattle: 0, horses: 0, swine: 0, total: 0 };
     for (const st of S) {
+      const sh = settlementHerds(st);
+      herdsTotal.sheep += sh.sheep;
+      herdsTotal.cattle += sh.cattle;
+      herdsTotal.horses += sh.horses;
+      herdsTotal.swine += sh.swine;
       for (const b of st?.buildings || []) {
         if (!b || b.removed || b.state === 'gone') continue;
         if (b.state === 'sound') buildings++;
@@ -3120,6 +3491,10 @@ globalThis.BOARD_MODEL = (() => {
         if (t && !t.hidden && !t.gone && t.kind !== 'edge' && (t.pts?.length || 0) > 1) streets++;
       }
     }
+    herdsTotal.total = herdsTotal.sheep + herdsTotal.cattle + herdsTotal.horses + herdsTotal.swine;
+    const liveArmies = (W.armies || []).filter((a) => a && !a.gone && ((Number(a.strength) || 0) > 0 || (a.men?.length || 0) > 0));
+    const totalMenInArms = liveArmies.reduce((sum, a) => sum + Math.round(Number(a.strength) || a.men?.length || 0), 0);
+    const activeFeuds = (W.feuds || []).filter((f) => f && !f.over).length;
     const projects = (W.projects || []).filter((q) => q && !q.dead).length;
     const roads = (W.roads || []).filter((r) => r && Array.isArray(r.drawn || r.path)).length;
     const mon = W.monarch && W.monarch.alive ? {
@@ -3164,9 +3539,23 @@ globalThis.BOARD_MODEL = (() => {
         streets,
         roads,
       },
+      military: {
+        armiesCount: liveArmies.length,
+        totalMenInArms,
+        atWar: Boolean(W.war),
+        activeFeuds,
+        garrison: Math.round(Number(s?.garrison) || 0),
+        militia: Math.round(Number(s?.militia) || 0),
+      },
+      governance: {
+        taxRate: typeof MOD !== 'undefined' && Number.isFinite(MOD?.tax) ? Math.round(MOD.tax) : null,
+        crownTreasury: +(Number(W.treasury) || 0).toFixed(1),
+        housesCount: (W.houses || []).filter((h) => h && !h.exiled).length,
+        herdsTotal,
+      },
       monarch: mon,
     };
   }
 
-  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans, riverBoats, ships, market, trade, pilotMaritime, diagnostics };
+  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans, riverBoats, ships, herds, armies, market, trade, pilotMaritime, diagnostics };
 })();

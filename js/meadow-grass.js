@@ -32,7 +32,7 @@ const MEADOW_COVER_MOBILE = 1024;
 // The most records the stand pass may write a frame (the patches in view and in the shadow map's box), held further
 // to what the device lets one buffer bind: Lisbon's dock stands about 1.07M. A view that asks more than the scene holds
 // is stood coarser far off (meadowStandBudget), never short near.
-const MEADOW_CONTINUUM_CAPACITY = 1 << 21, MEADOW_CONTINUUM_MOBILE_CAPACITY = 1 << 18;
+const MEADOW_CONTINUUM_CAPACITY = 1 << 21, MEADOW_CONTINUUM_MOBILE_CAPACITY = 1 << 18, MEADOW_CONTINUUM_SECONDARY_CAPACITY = 1 << 17;
 // The ground meadows stop at.
 const MEADOW_WATERLINE = 0.75;
 
@@ -659,7 +659,7 @@ export async function createMeadowGrass({
   board = null,
   inlandWater = null,
   craters = null,
-  elevation,
+  elevation = null,
   nearDomain,
   resources,
   clouds,
@@ -668,7 +668,9 @@ export async function createMeadowGrass({
   shadowFormat = LAND_SHADOW_FORMAT,
   waterOptics = null,
   isMobile = false,
-  coverSize = isMobile ? MEADOW_COVER_MOBILE : MEADOW_COVER_DESKTOP,
+  isSecondary = false,
+  coverSize = (isMobile || isSecondary) ? MEADOW_COVER_MOBILE : MEADOW_COVER_DESKTOP,
+  capacityLimit = null,
   worldOffset = null,
 }) {
   if (!(pack?.words?.length > 0) || !pack.manifest) return null;
@@ -696,12 +698,16 @@ export async function createMeadowGrass({
   };
 
   // One scene of every patch the stand pass may write a frame, as many as the device binds in one buffer (a patch's
-  // pose data is its largest share), its room split evenly over the variants.
-  const wanted = isMobile ? MEADOW_CONTINUUM_MOBILE_CAPACITY : MEADOW_CONTINUUM_CAPACITY;
+  // pose data is its largest share), its room split evenly over the variants. Secondary coastal sections share the
+  // exact same GPU atlas & compiled pipelines with compact cover/capacity so neighbor tiles add minimal VRAM.
+  const defaultCapacity = isSecondary
+    ? (isMobile ? (1 << 16) : MEADOW_CONTINUUM_SECONDARY_CAPACITY)
+    : (isMobile ? MEADOW_CONTINUUM_MOBILE_CAPACITY : MEADOW_CONTINUUM_CAPACITY);
+  const wanted = Number.isFinite(capacityLimit) && capacityLimit > 0 ? Math.floor(capacityLimit) : defaultCapacity;
   const most = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / (MEADOW_CONTINUUM_POSE * 16));
   const perType = Math.floor(Math.min(wanted, most) / atlas.types.length);
   const { capacity, room } = continuumRoom(atlas.types, atlas.types.map(() => perType));
-  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: 'meadow', written: true, profile: 'meadow' });
+  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: isSecondary ? 'meadow secondary' : 'meadow', written: true, profile: 'meadow' });
   scene.setCount(capacity);
   scene.setWorldOffset(worldOffset?.x ?? 0, worldOffset?.z ?? 0);
   const stood = mkBuf('meadow stood', MEADOW_CONTINUUM_STOOD_BYTES, B.STORAGE | B.INDIRECT);
@@ -713,6 +719,7 @@ export async function createMeadowGrass({
   const cfgBuf = mkBuf('meadow continuum cfg', MEADOW_CONTINUUM_CFG_BYTES, B.UNIFORM | B.COPY_DST);
   cfgU.set([samples, coverSize, capacity, 1], 4);
   cfgF.set([continuumPixelError(), MEADOW_GUST_WAVE, 0, 0], 16);
+  cfgU[22] = isSecondary ? 0 : 1; // cfg.more.z: 1 when primary section (landLight valid), 0 for secondary sections
   // Each mix's colour and cover from above, the mean of its variants (meadowMixMean): a colour word holds three
   // square roots of a linear colour.
   const words = pack.words, floats = new Float32Array(words.buffer, words.byteOffset, words.length), M = MEADOW_CONTINUUM_MATERIAL;
@@ -762,12 +769,36 @@ export async function createMeadowGrass({
   device.queue.writeTexture({ texture: fallbackCraterField }, new Uint16Array(4), { offset: 0 }, [1, 1, 1]);
 
   const coverTexture = device.createTexture({
-    label: 'meadow cover',
+    label: isSecondary ? 'meadow secondary cover' : 'meadow cover',
     size: [coverSize, coverSize],
     format: 'rgba8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
-  const elevationView = elevation.createView(), coverView = coverTexture.createView();
+  let ownedElevation = null;
+  let ownedElevSize = 0;
+  let elevationView = elevation ? elevation.createView() : null;
+  const coverView = coverTexture.createView();
+  const syncOwnedElevation = (reg, hArr) => {
+    if (elevation || !hArr?.length) return false;
+    const nextSize = reg?.size || Math.round(Math.sqrt(hArr.length));
+    if (!(nextSize >= 2) || hArr.length < nextSize * nextSize) return false;
+    let resized = false;
+    if (!ownedElevation || ownedElevSize !== nextSize) {
+      ownedElevation?.destroy();
+      ownedElevSize = nextSize;
+      ownedElevation = device.createTexture({
+        label: isSecondary ? 'meadow secondary elevation' : 'meadow elevation',
+        size: [nextSize, nextSize],
+        format: 'r32float',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      elevationView = ownedElevation.createView();
+      resized = true;
+    }
+    const src = hArr instanceof Float32Array ? hArr : new Float32Array(hArr);
+    device.queue.writeTexture({ texture: ownedElevation }, src, { bytesPerRow: nextSize * 4 }, [nextSize, nextSize]);
+    return resized;
+  };
 
   // The stand pass's bind groups, one a pass, and the view's and capture's groups: rebuilt when the region's blocks,
   // the land's resources or the craters change.
@@ -775,6 +806,7 @@ export async function createMeadowGrass({
   let standGroups = null, viewGroup = null, under = null;
   const cloudGroup = clouds.bindVolume(view.pipeline, 'shadow');
   function buildGroups() {
+    if (!elevationView) return;
     const land = new Map(activeResources);
     const craterLookupView = (boundCraters?.lookupTexture ?? fallbackCraterLookup).createView();
     const craterFieldView = (boundCraters?.fieldTexture ?? fallbackCraterField).createView({ dimension: '2d-array' });
@@ -818,6 +850,7 @@ export async function createMeadowGrass({
     if (next.city !== undefined) curCity = next.city;
     if (next.board !== undefined) curBoard = next.board;
     if (next.inlandWater !== undefined) curInlandWater = next.inlandWater;
+    const elevResized = syncOwnedElevation(curRegion, curHeights);
     const map = buildMeadowCoverMap({
       region: curRegion,
       heights: curHeights,
@@ -845,7 +878,7 @@ export async function createMeadowGrass({
     cfgI.set([blocks.first[0], blocks.first[1], blocks.across[0], blocks.across[1]], 12);
     cfgU[21] = blockCount;
     syncCraterCfg(curRegion);
-    if (grown) buildGroups();
+    if (grown || elevResized) buildGroups();
   }
 
   function bindCraters(nextCraters = null) {
@@ -968,6 +1001,7 @@ export async function createMeadowGrass({
       patchMetres: MEADOW_PATCH_METRES,
       coverSize,
       coast,
+      isSecondary: Boolean(isSecondary),
       submerged: submerged !== null,
       capacity,
       room,
@@ -1041,6 +1075,35 @@ export async function createMeadowGrass({
       fallbackCraterLookup.destroy();
       fallbackCraterField.destroy();
       coverTexture.destroy();
+      ownedElevation?.destroy();
+      ownedElevation = null;
     },
   };
+}
+
+// Lightweight helper for attaching real procedural meadow grass to a loaded neighbor coastal section.
+// Shares the already-uploaded GPU meadow atlas and compiled pipelines via requestContinuumAtlas,
+// using compact 1024 cover & 1<<17 capacity and returning null immediately for pure-ocean tiles.
+export async function createSectionMeadowGrass(section, ctx) {
+  if (!section?.region || !section?.heights?.length || !section?.resources || !ctx?.pack) return null;
+  const h = section.heights;
+  let hasLand = false;
+  for (let i = 0; i < h.length; i++) {
+    if (h[i] >= MEADOW_WATERLINE) { hasLand = true; break; }
+  }
+  if (!hasLand) return null;
+  return createMeadowGrass({
+    ...ctx,
+    region: section.region,
+    heights: section.heights,
+    biome: section.biome ?? null,
+    beaches: section.beaches ?? null,
+    port: section.port ?? null,
+    city: section.city ?? null,
+    board: section.board ?? null,
+    inlandWater: section.inlandWater ?? null,
+    elevation: section.elevation ?? null,
+    resources: section.resources,
+    isSecondary: true,
+  });
 }

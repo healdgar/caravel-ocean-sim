@@ -4385,6 +4385,12 @@ export function synthesizeCoastalAlbedo(
   const rgba = new Uint8Array(size * size * 4);
   // A board's country shows its 1550 geography, not what a satellite sees there today.
   const country = portPlacement?._resolvedCountry ?? oldWorldCountry(region, heights, portPlacement);
+  // Regional bioclimatic palette so open procedural hillsides & neighbor tiles match primary boards & meadows seamlessly.
+  const climateProfile = estimateLocalClimateProfile(region.latitude, region.longitude, region);
+  const climateZone = climateProfile?.climate ?? region.climate ?? 'tropical';
+  const isMediterranean = climateZone === 'mediterranean';
+  const isTemperate = climateZone === 'temperate' || climateZone === 'boreal';
+  const isArid = climateZone === 'arid';
 
   for (let j = 0; j < size; j++) {
     const v = (j + 0.5) / size;
@@ -4417,16 +4423,54 @@ export function synthesizeCoastalAlbedo(
       const fineGrain = (coastalValueNoise2D(u * 68, v * 68, seed ^ 0x55aa55aa) - 0.5) * 14;
       const canopyMottle = (coastalFbm2D(x * 0.0085, z * 0.0085, seed ^ 0x3c6ef372, 3) - 0.5) * 2;
 
-      // Base inland colour: continuous blend between coastal earth, baked 3D-like multi-species canopy domes, and stratified cliff stone
+      // Base inland colour: continuous blend between climate-appropriate pasture/earth, baked canopy domes, and stratified cliff stone
       const canopyBlend = coastalSmoothstep(0.08, 0.72, veg);
-      const soilR = 88 + sandNoise * 6;
-      const soilG = 96 + sandNoise * 6;
-      const soilB = 64 + sandNoise * 4;
-      let lushR = 29 + canopyMottle * 6 + fineGrain * 0.30;
-      let lushG = 66 + canopyMottle * 10 + fineGrain * 0.40;
-      let lushB = 30 + canopyMottle * 5 + fineGrain * 0.25;
-      if (canopyBlend > 0.01) {
-        // Multi-scale baked distant canopy domes: ~11m mid-story crowns + ~24m emergent ceiba/mahogany crowns
+      const pastureWarm = coastalSmoothstep(
+        0.24,
+        0.78,
+        coastalFbm2D(x * 0.0032 + 1.9, z * 0.0032 - 2.3, 0x2f6e2b1d, 3) + canopyMottle * 0.16,
+      );
+      let soilR = 88 + sandNoise * 6;
+      let soilG = 96 + sandNoise * 6;
+      let soilB = 64 + sandNoise * 4;
+      let lushBaseR = 25;
+      let lushBaseG = 60;
+      let lushBaseB = 26;
+      let forestBlend = canopyBlend;
+      if (isMediterranean) {
+        // Warm Iberian Mediterranean pasture & olive-fescue hillsides matching board-stamp.js & meadow sward
+        const oliveMix = coastalSmoothstep(0.08, 0.55, canopyBlend);
+        soilR = 104 + pastureWarm * 38 - oliveMix * 12 + sandNoise * 5 + fineGrain * 0.25;
+        soilG = 110 + pastureWarm * 24 - oliveMix * 5 + sandNoise * 5 + fineGrain * 0.28;
+        soilB = 64 + pastureWarm * 22 - oliveMix * 6 + sandNoise * 3 + fineGrain * 0.18;
+        lushBaseR = 40;
+        lushBaseG = 72;
+        lushBaseB = 36;
+        // Keep open non-forested slopes (canopyBlend < 0.55) in warm Mediterranean pasture; transition to oak/pine canopy only on dense woods
+        forestBlend = coastalSmoothstep(0.45, 0.90, canopyBlend);
+      } else if (isTemperate) {
+        const meadowMix = coastalSmoothstep(0.08, 0.55, canopyBlend);
+        soilR = 96 + pastureWarm * 26 - meadowMix * 10 + sandNoise * 5 + fineGrain * 0.24;
+        soilG = 112 + pastureWarm * 16 - meadowMix * 4 + sandNoise * 5 + fineGrain * 0.28;
+        soilB = 62 + pastureWarm * 14 - meadowMix * 6 + sandNoise * 3 + fineGrain * 0.18;
+        lushBaseR = 34;
+        lushBaseG = 68;
+        lushBaseB = 34;
+        forestBlend = coastalSmoothstep(0.42, 0.88, canopyBlend);
+      } else if (isArid) {
+        soilR = 136 + pastureWarm * 26 + sandNoise * 6 + fineGrain * 0.30;
+        soilG = 122 + pastureWarm * 20 + sandNoise * 5 + fineGrain * 0.25;
+        soilB = 82 + pastureWarm * 16 + sandNoise * 4 + fineGrain * 0.20;
+        lushBaseR = 62;
+        lushBaseG = 76;
+        lushBaseB = 44;
+        forestBlend = coastalSmoothstep(0.45, 0.90, canopyBlend);
+      }
+      let lushR = lushBaseR + 4 + canopyMottle * 6 + fineGrain * 0.30;
+      let lushG = lushBaseG + 6 + canopyMottle * 10 + fineGrain * 0.40;
+      let lushB = lushBaseB + 4 + canopyMottle * 5 + fineGrain * 0.25;
+      if (forestBlend > 0.01) {
+        // Multi-scale baked distant canopy domes: ~11m mid-story crowns + ~24m emergent crowns
         const c1 = coastalValueNoise2D(x * 0.088 + canopyMottle * 0.7, z * 0.088 - canopyMottle * 0.7, seed ^ 0x1b873593);
         const c1East = coastalValueNoise2D((x + 3.5) * 0.088 + canopyMottle * 0.7, (z - 2.5) * 0.088 - canopyMottle * 0.7, seed ^ 0x1b873593);
         const c2 = coastalValueNoise2D(x * 0.042, z * 0.042, seed ^ 0x85ebca6b);
@@ -4436,14 +4480,14 @@ export function synthesizeCoastalAlbedo(
         const crownSunSlope = Math.max(-0.45, Math.min(0.55, (c1 - c1East) * 2.4 - (sx * 0.28 - sz * 0.22)));
         const speciesHue = coastalValueNoise2D(x * 0.026 + 4.1, z * 0.026 - 2.7, seed ^ 0xc2b2ae35);
         const crownShade = (0.72 + 0.42 * crownDome + 0.34 * crownSunSlope) * (1 - 0.38 * crownGap);
-        lushR = (25 + canopyMottle * 6 + speciesHue * 11 + Math.max(0, crownSunSlope) * 14 + fineGrain * 0.26) * crownShade;
-        lushG = (60 + canopyMottle * 11 + speciesHue * 14 + Math.max(0, crownSunSlope) * 18 + fineGrain * 0.36) * crownShade;
-        lushB = (26 + canopyMottle * 5 + (1 - speciesHue) * 7 + fineGrain * 0.22) * crownShade;
+        lushR = (lushBaseR + canopyMottle * 6 + speciesHue * 11 + Math.max(0, crownSunSlope) * 14 + fineGrain * 0.26) * crownShade;
+        lushG = (lushBaseG + canopyMottle * 11 + speciesHue * 14 + Math.max(0, crownSunSlope) * 18 + fineGrain * 0.36) * crownShade;
+        lushB = (lushBaseB + canopyMottle * 5 + (1 - speciesHue) * 7 + fineGrain * 0.22) * crownShade;
       }
       // A board's country is stamped over these colours on the GPU (js/board-stamp.js).
-      const forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
-      const forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
-      const forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
+      const forestR = soilR * (1 - forestBlend) + lushR * forestBlend;
+      const forestG = soilG * (1 - forestBlend) + lushG * forestBlend;
+      const forestB = soilB * (1 - forestBlend) + lushB * forestBlend;
       const cloudCliffShift =
         region.coastalArchetype === 'volcanic-island' ? coastalSmoothstep(130, 360, h) * 0.22 : 0;
       const cliffWeight = coastalSmoothstep(0.34 + cloudCliffShift, 0.70 + cloudCliffShift, slope) * (1 - canopyBlend * 0.55);
@@ -5819,6 +5863,7 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
       riverReaches: country.riverReaches ?? null,
       ponds: country.ponds ?? null,
       bridges: country.bridges ?? null,
+      rebuildHerds: country.rebuildHerds ?? null,
     };
     port.riverCut = country.riverCut ?? null;
   }

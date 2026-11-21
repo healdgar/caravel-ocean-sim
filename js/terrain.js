@@ -19,7 +19,7 @@ import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
 import {createLivestockHerds} from './herds.js';
-import {createMeadowGrass} from './meadow-grass.js';
+import {createMeadowGrass,createSectionMeadowGrass} from './meadow-grass.js';
 import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
@@ -1718,17 +1718,34 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
   }
   // Stream the 186 MiB meadow grass atlas asynchronously so Frame 0 never stalls waiting for grass tufts.
-  let meadowGrass=null;
+  let meadowGrass=null,loadedMeadowPack=null;
   const meadowGrassStats={loaded:false,error:meadowFailure};
+  const attachSectionMeadow=(rec)=>{
+    if(!rec||rec.meadowGrass||rec._meadowPending||!loadedMeadowPack||terrainDisposed)return;
+    // Attach real procedural meadow grass to all adjacent coastal land sections (covering 24.5 km × 24.5 km continuously).
+    if(Math.max(Math.abs(rec.secX|0),Math.abs(rec.secZ|0))>1)return;
+    rec._meadowPending=true;
+    createSectionMeadowGrass(rec,{
+      device,shader,pack:loadedMeadowPack,nearDomain,clouds,format,samples,
+      shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset,
+    }).then(m=>{
+      rec._meadowPending=false;
+      if(terrainDisposed||loadedSections.get(rec.key)!==rec){m?.destroy?.();return;}
+      rec.meadowGrass=m;
+      if(craters)m?.bindCraters?.(craters);
+    }).catch(()=>{rec._meadowPending=false;});
+  };
   const meadowReadyPromise=(async()=>{
     const meadowPack=await meadowPromise;
     if(!meadowPack||terrainDisposed)return null;
+    loadedMeadowPack=meadowPack;
     try{
       const made=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset});
       if(terrainDisposed){made?.destroy?.();return null;}
       meadowGrass=made;
       if(craters)meadowGrass.bindCraters?.(craters);
       if(meadowGrass?.stats)Object.assign(meadowGrassStats,meadowGrass.stats);
+      for(const sec of loadedSections.values())attachSectionMeadow(sec);
       return meadowGrass;
     }catch(error){meadowFailure=error.message;meadowGrassStats.error=meadowFailure;return null;}
   })();
@@ -1816,6 +1833,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(loadedSections.get(rec.key)===rec||!loadedSections.has(rec.key))landPiece(rec.key,null);
     portDamage?.capture(rec.port);
     rec.portFractures?.destroy();
+    rec.meadowGrass?.destroy?.();rec.meadowGrass=null;
     rec.uniform?.destroy?.();
     rec.albedo?.destroy?.();
     rec.biomeTexture?.destroy?.();
@@ -1913,6 +1931,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const rebuiltAlbedo=synthesizeCoastalAlbedo(sReg,adjRec.heights,adjRec.beaches,adjRec.port,adjRec.biome,null);
     device.queue.writeTexture({texture:adjRec.albedo},rebuiltAlbedo,{bytesPerRow:sReg.albedoSize*4},[sReg.albedoSize,sReg.albedoSize]);
     regenerateTextureMips(adjRec.albedo,sReg.albedoSize);
+    adjRec.meadowGrass?.sync?.({region:sReg,heights:adjRec.heights,biome:adjRec.biome,beaches:adjRec.beaches,port:adjRec.port});
   }
 
   function rebuildNeighborTreeInstances(){
@@ -1976,6 +1995,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     );
     const rec=buildSectionGPURecord(secPack);
     loadedSections.set(key,rec);
+    attachSectionMeadow(rec);
     for(const [dx,dz,adjEdge] of [[-1,0,'east'],[1,0,'west'],[0,-1,'south'],[0,1,'north']]){
       const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
       if(adj&&!adj.connectedEdges?.[adjEdge])restitchNeighborSection(adj);
@@ -2026,6 +2046,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
             rec.state='grown';
             rec.generationCount=(prevRec?.generationCount??0)+1;
             loadedSections.set(key,rec);
+            attachSectionMeadow(rec);
             if(prevRec)retireGPU(()=>destroySectionRecord(prevRec));
             queuedSections.delete(key);
             portsDirty=true;
@@ -2524,6 +2545,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         riverReaches:country.riverReaches??null,
         ponds:country.ponds??null,
         bridges:country.bridges??null,
+        rebuildHerds:country.rebuildHerds??null,
       };
       portObj.riverCut=country.riverCut??null;
       if(country.watch)portObj.watch=country.watch;
@@ -2607,10 +2629,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     continuumSources(){
       const pieceDraws=[...(portFractures?.continuumDraws?.()??[])];
       for(const sec of loadedSections.values())if(sec.portFractures)pieceDraws.push(...(sec.portFractures.continuumDraws?.()??[]));
+      const meadowDraws=[...(meadowGrass?.continuumDraws?.()??[])];
+      for(const sec of loadedSections.values())if(sec.meadowGrass)meadowDraws.push(...(sec.meadowGrass.continuumDraws?.()??[]));
       return [
         ['forest',forest?.continuumDraws?.()],
         ['boulders',boulderContinuum?.continuumDraws?.()],
-        ['meadow',meadowGrass?.continuumDraws?.()],
+        ['meadow',meadowDraws],
         ['herds',herds?.continuumDraws?.()],
         ['trade vessels',tradeVessels?.continuumDraws?.()],
         ['city',cityContinuum?.continuumDraws?.()],
@@ -2756,6 +2780,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     refreshBoardFabric,
     get meadowGrass(){return meadowGrass;},
     meadowGrassStats,
+    syncHerdsFromBoard(herdsSnap){
+      const rebuild=proceduralPack?.port?.country?.rebuildHerds??proceduralPack?.port?._resolvedCountry?.rebuildHerds;
+      if(!rebuild||!herdsSnap?.places||!herds)return 0;
+      const nextHerds=rebuild(herdsSnap.places);
+      proceduralPack.herds=nextHerds??null;
+      herds.setHerds?.(proceduralPack.herds);
+      return nextHerds?Math.floor(nextHerds.length/8):0;
+    },
     get bridges(){return proceduralPack?.port?.country?.bridges??[];},
     getLoadedSections(){
       const half=activeRegion.span*0.5;
@@ -2862,6 +2894,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       worldOffset.x=nx;worldOffset.z=nz;
       cityContinuum?.setWorldOffset(nx,nz);forest?.setWorldOffset(nx,nz);
       boulderContinuum?.setWorldOffset(nx,nz);meadowGrass?.setWorldOffset(nx,nz);
+      for(const sec of loadedSections.values())sec.meadowGrass?.setWorldOffset?.(nx,nz);
       landContinuum?.setWorldOffset(nx,nz);
       writeNearDomainUniform();
     },
@@ -2882,6 +2915,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       worldOffset.x=0;worldOffset.z=0;
       cityContinuum?.setWorldOffset(0,0);forest?.setWorldOffset(0,0);
       boulderContinuum?.setWorldOffset(0,0);meadowGrass?.setWorldOffset(0,0);
+      for(const sec of loadedSections.values())sec.meadowGrass?.setWorldOffset?.(0,0);
       landContinuum?.setWorldOffset(0,0);
       writeNearDomainUniform();
       lastCamera=null;
@@ -3005,6 +3039,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(forest){split('Cut: forest');forest.encode(p);}
       if(herds){split('Cut: herds');herds.encode(p);}
       if(meadowGrass){split('Cut: meadow');meadowGrass.encode(p);}
+      for(const sec of loadedSections.values())if(sec.meadowGrass&&(!lastCamera||isSectionVisible(sec.region,lastCamera,lastView,9500)))sec.meadowGrass.encode(p);
       if(tradeVessels?.encode){split('Cut: trade vessels');tradeVessels.encode(p);}
       if((tick++%8)===0||changed){
         p.setPipeline(lightPipe);p.setBindGroup(0,lightGroup);p.dispatchWorkgroups(8,8);
@@ -3017,8 +3052,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         cityContinuum?.draw(pass,cityGroup,cityClouds);
         if(portFractures&&isSectionVisible(activeRegion,camera,viewProjection,9000))portFractures.draw(pass,cityGroup,cityClouds);
         for(const sec of loadedSections.values())if(sec.portFractures&&isSectionVisible(sec.region,camera,viewProjection,6500))sec.portFractures.draw(pass,sec.cityGroup,cityClouds);
-      }else if(which==='meadow')meadowGrass?.draw(pass);
-      else if(which==='forest')forest?.draw(pass);
+      }else if(which==='meadow'){
+        meadowGrass?.draw(pass);
+        for(const sec of loadedSections.values())if(sec.meadowGrass&&isSectionVisible(sec.region,camera,viewProjection,9500))sec.meadowGrass.draw(pass);
+      }else if(which==='forest')forest?.draw(pass);
       else if(which==='other'){
         if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,8500))boulderContinuum.draw(pass);
         if(herds&&isSectionVisible(activeRegion,camera,viewProjection,4500))herds.draw(pass);
@@ -3041,6 +3078,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         portFractures?.drawCapture?.(pass,citySubmerged);
       }
       meadowGrass?.drawSubmerged(pass,above);
+      for(const sec of loadedSections.values())sec.meadowGrass?.drawSubmerged?.(pass,above);
       tradeVessels?.drawSubmerged?.(pass,above);
     },
     drawOpaqueCity(pass,camera={x:0,y:6,z:0},viewProjection=null){
@@ -3064,6 +3102,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       // Sample-mask feedback foliage draws strictly after all opaque surfaces (AGENTS.md rule 2 TBDR discipline).
       forest?.draw(pass);
       meadowGrass?.draw(pass);
+      for(const sec of loadedSections.values())if(sec.meadowGrass&&(!lastCamera||isSectionVisible(sec.region,lastCamera,lastView,9500)))sec.meadowGrass.draw(pass);
     },
     draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
       this.drawOpaqueCity(pass,camera,viewProjection);
@@ -3086,6 +3125,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       forest?.drawShadow?.(pass);
       herds?.drawShadow?.(pass);
       meadowGrass?.drawShadow(pass);
+      for(const sec of loadedSections.values())if(sec.meadowGrass&&isSectionVisible(sec.region,camera,null,400))sec.meadowGrass.drawShadow(pass);
       tradeVessels?.drawShadow?.(pass);
     },
     // What casts canvas into the land's canvas map (js/shadows.js createLandShadows): the fleet's sails, while any

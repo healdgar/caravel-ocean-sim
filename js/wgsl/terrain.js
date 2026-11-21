@@ -1010,20 +1010,22 @@ const TERRAIN_LAND_MATERIAL_BLOCK = /* wgsl */ `
     let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.42+crownBillow*0.42-crownGap*0.32;
     let rockRelief=stone*0.15+blocks*.24+cliffStrata*0.048+ledgeStep*0.042+cragFacet*0.035-fissure*0.075-coarseFissure*.11;
     relief=screeRelief*rockKeep+mix(soil,rockRelief,rocky*rockKeep);
-    // Item 3: Valley/ridge macro cavity tone + domain-warped ridged dry-grass veins on open lowlands.
+    // Item 3: Valley/ridge macro cavity tone + soft multi-scale organic pasture/turf mottling on open lowlands (no zero-crossing contour rings).
     let macroCav=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).b*select(0.0,1.0,LAND.domain.w>0.05);
     let valleyT=clamp(-macroCav*1.65,0.0,0.52)*(1.0-beachSand);
     let ridgeT=clamp(macroCav*1.45,0.0,0.42)*(1.0-beachSand);
     albedo*=mix(vec3f(1.0),vec3f(0.84,0.87,0.80),valleyT)*mix(vec3f(1.0),vec3f(1.08,1.05,0.96),ridgeT);
-    let veinFoot=footprint*0.022;
-    let veinFade=landDetailWeight(veinFoot)*(1.0-rocky)*(1.0-beachSand)*(1.0-effCanopy*0.68)*smoothstep(2.2,8.5,world.y);
-    if(veinFade>0.01){
-      let vw=vec2f(crownN2,crownN1)*1.85;
-      let vN=landFilteredNoise(world.xz*0.022+vw,veinFoot);
-      let vein=pow(clamp(1.0-abs(vN)*1.9,0.0,1.0),6.0)*veinFade;
-      let dryGrass=mix(albedo*vec3f(1.18,1.08,0.76),vec3f(0.24,0.20,0.13),0.35);
-      albedo=mix(albedo,dryGrass,vein*0.40);
-      relief-=vein*0.008;
+    let turfFoot=footprint*0.018;
+    let turfFade=landDetailWeight(turfFoot)*(1.0-rocky)*(1.0-beachSand)*(1.0-effCanopy*0.68)*smoothstep(2.2,8.5,world.y);
+    if(turfFade>0.01){
+      let mBroad=landFilteredNoise(world.xz*0.014+vec2f(11.3,-7.9),footprint*0.014);
+      let mMid=landFilteredNoise(vec2f(world.x*0.031-world.z*0.024,world.x*0.024+world.z*0.031)+vec2f(crownN2,crownN1)*0.65,footprint*0.039);
+      let mottle=clamp(0.5+0.34*mBroad+0.24*mMid,0.0,1.0);
+      let warmPasture=mix(albedo*vec3f(1.14,1.07,0.82),vec3f(0.21,0.19,0.11),0.22);
+      let lushPasture=albedo*vec3f(0.92,1.04,0.92);
+      let turfCol=mix(lushPasture,warmPasture,smoothstep(0.22,0.82,mottle));
+      albedo=mix(albedo,turfCol,turfFade*0.36);
+      relief+=(mottle-0.5)*0.006*turfFade;
     }
     // Item 4: Canopy-floor contact AO under dense forests beyond the real-time shadow-map range (260 m).
     let farCanopyAO=effCanopy*(1.0-landShadowCoverage(world));

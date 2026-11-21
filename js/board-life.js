@@ -84,6 +84,10 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     riverBoats: () => need().then(() => model.hook('riverBoats')),
     // Foreign merchant ships calling at the board's harbours (`W.ships`).
     ships: () => need().then(() => model.hook('ships')),
+    // Live per-settlement livestock counts directly from Castle & Commons (`s.stores` / `s._owners`).
+    herds: () => need().then(() => model.hook('herds')),
+    // Live standing & field armies, commanders, named soldiers, noble houses, and active wars/feuds (`W.armies`).
+    armies: () => need().then(() => model.hook('armies')),
     // Live commodity prices, available stock, and monthly demand at any settlement on the board.
     market: (place = 0) => need().then(() => model.hook('market', [place])),
     // Unpadded read-only economic, demographic, traffic, and urban-fabric diagnostics from W.
@@ -122,10 +126,11 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
         }
         model.on.fault = (fault) => state('failed', String(fault?.error || fault));
         const summary = await model.ready;
-        world = { program: model.program, day: left?.day ?? summary.day, year: summary.year ?? baked.year };
+        const settledDay = Number.isFinite(summary?.day) ? summary.day : (left?.day ?? 0);
+        world = { program: model.program, day: settledDay, year: summary?.year ?? baked.year };
         const foundedBoard = (life.resumed != null && left?.board) ? left.board : await model.hook('board');
         if (foundedBoard) await onFounded?.(foundedBoard);
-        life.day = summary.day; told = summary.day; life.keptDay = summary.day; life.wanted = Math.max(life.wanted, summary.day);
+        life.day = settledDay; told = settledDay; life.keptDay = settledDay; life.wanted = Math.max(life.wanted, settledDay);
         life.status = await model.request('view', { kind: 'ui', panel: 'advisor-state' });
         state('alive');
         if (life.resumed == null && keep) keepNow();
@@ -142,7 +147,9 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
         if (model.program !== world.program) throw new Error('The frozen world was saved by another program than the one here');
         model.on.fault = (fault) => state('failed', String(fault?.error || fault));
         const summary = await model.ready;
-        life.day = summary.day; told = summary.day; life.keptDay = summary.day; life.wanted = Math.max(life.wanted, summary.day);
+        const settledDay = Number.isFinite(summary?.day) ? summary.day : (world.day ?? 0);
+        world = { ...world, day: settledDay, year: summary?.year ?? world.year };
+        life.day = settledDay; told = settledDay; life.keptDay = settledDay; life.wanted = Math.max(life.wanted, settledDay);
         life.status = await model.request('view', { kind: 'ui', panel: 'advisor-state' });
         state('alive');
       }

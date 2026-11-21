@@ -397,6 +397,127 @@ function fillBoardFigure(index, size, points, value) {
  * placed there, whose own buildings and streets the board gives way to. `LAND` is OLD_WORLD_LAND, `fieldAt` and
  * `distanceTo` the lattice's own readers (js/old-world.js).
  */
+export function buildHerdsFromBoardPlaces({
+  places, fields, uses, town, grid, ox, oz, heightAt, edgeOf, inside, nearPad, streetEdge, LAND, fieldAt, herdsByPlace = null,
+}) {
+  const pastureByPlace = Array.from({ length: places.length }, () => []);
+  const stubbleByPlace = Array.from({ length: places.length }, () => []);
+  const woodByPlace = Array.from({ length: places.length }, () => []);
+  const wildPastures = [];
+  fields.forEach((field, id) => {
+    const fx = ox + field.x, fz = oz + field.z;
+    if (!inside(fx, fz, 28) || heightAt(fx, fz) < 1.35) return;
+    if (fieldAt(town.urban, grid, fx, fz) > 0.2 || fieldAt(town.inland, grid, fx, fz) < 6) return;
+    const clearEdge = edgeOf(id, fx, fz);
+    if (clearEdge < 7) return;
+    const rec = { id, x: fx, z: fz, r: Math.min(28, Math.max(5.5, clearEdge - 2.5)), heading: field.heading || 0 };
+    const useKind = uses[id]?.kind;
+    if (field.place >= 0 && field.place < places.length) {
+      if (useKind === LAND.PASTURE) pastureByPlace[field.place].push(rec);
+      else if (useKind === LAND.FALLOW || useKind === LAND.OLIVES || useKind === LAND.CORN) stubbleByPlace[field.place].push(rec);
+      else if (useKind === LAND.WOOD || useKind === LAND.SCRUB) woodByPlace[field.place].push(rec);
+    } else if (useKind === LAND.PASTURE || useKind === LAND.SCRUB) {
+      wildPastures.push(rec);
+    }
+  });
+
+  const herdCountsFor = (pi) => {
+    if (Array.isArray(herdsByPlace)) {
+      const match = herdsByPlace.find((e) => e && e.si === pi) || herdsByPlace[pi] || null;
+      if (match) return match;
+    }
+    return places[pi]?.herds || null;
+  };
+
+  let totalRawHerds = 0;
+  for (let pi = 0; pi < places.length; pi++) {
+    const h = herdCountsFor(pi);
+    if (h) totalRawHerds += (h.sheep || 0) + (h.cattle || 0) + (h.swine || 0) + (h.horses || 0);
+  }
+  const MAX_HERD_HEAD = 1440;
+  const herdScale = totalRawHerds > MAX_HERD_HEAD ? MAX_HERD_HEAD / totalRawHerds : 1;
+  const herdFloats = [];
+  const speciesScale = [[0.90, 0.22], [0.92, 0.18], [0.88, 0.24], [0.94, 0.14]];
+
+  const placeFlock = (pool, fallbackPool, countWanted, species, seedSalt, useCount) => {
+    const list = pool.length ? pool : fallbackPool;
+    if (!list.length || countWanted <= 0) return;
+    const flockSize = species === 0 ? 12 : species === 2 ? 9 : 7;
+    let left = countWanted, fIdx = 0;
+    while (left > 0 && herdFloats.length < MAX_HERD_HEAD * 8) {
+      const take = Math.min(left, flockSize);
+      left -= take;
+      // Round-robin across distinct parcels (least-used first, deterministic order) — zero replacement collisions.
+      let pick = list[0];
+      let bestUse = useCount.get(pick.id) || 0;
+      for (let li = 1; li < list.length && bestUse > 0; li++) {
+        const cand = list[li];
+        const u = useCount.get(cand.id) || 0;
+        if (u < bestUse) {
+          bestUse = u;
+          pick = cand;
+        }
+      }
+      useCount.set(pick.id, bestUse + 1);
+      fIdx++;
+      const flockYaw = (pick.heading || 0) + (boardHashUnit(seedSalt + fIdx, 41) - 0.5) * 1.2;
+      const shareShift = bestUse > 0 ? Math.min(pick.r * 0.34, 6.5) : 0;
+      const shareAng = bestUse * 2.39996 + species * 0.7;
+      const cx = pick.x + Math.cos(shareAng) * shareShift;
+      const cz = pick.z + Math.sin(shareAng) * shareShift;
+      const spreadR = Math.max(3.5, pick.r * (bestUse > 0 ? 0.45 : 0.62));
+      for (let m = 0; m < take; m++) {
+        const hSeed = seedSalt * 131 + fIdx * 37 + m;
+        const ang = boardHashUnit(hSeed, 3) * 2 * Math.PI;
+        const rad = Math.sqrt(boardHashUnit(hSeed, 7)) * spreadR;
+        const ax = cx + Math.cos(ang) * rad, az = cz + Math.sin(ang) * rad;
+        if (!inside(ax, az, 16) || heightAt(ax, az) < 1.1 || nearPad(ax, az) || streetEdge(ax, az, 4) < 1.8) continue;
+        const roamR = Math.max(2.2, Math.min(11.5, pick.r * 0.34));
+        const phase = boardHashUnit(hSeed, 13) * 2 * Math.PI;
+        const coatSeed = boardHashUnit(hSeed, 19);
+        const [sBase, sSpan] = speciesScale[species];
+        const sc = sBase + boardHashUnit(hSeed, 23) * sSpan;
+        herdFloats.push(ax, az, roamR, phase, coatSeed, sc, species, flockYaw);
+      }
+    }
+  };
+
+  // Match Castle & Commons' grazing ecology (`game.js:10358`): closest pastures for horses & cattle,
+  // broadest pastures + stubble for sheep, and mast-woods/scrub for swine.
+  for (let pi = 0; pi < places.length; pi++) {
+    const place = places[pi];
+    const px = place?.x ?? ox, pz = place?.z ?? oz;
+    const d2 = (r) => (r.x - px) * (r.x - px) + (r.z - pz) * (r.z - pz);
+    const nearPast = [...pastureByPlace[pi]].sort((a, b) => d2(a) - d2(b) || a.id - b.id);
+    const widePast = [...pastureByPlace[pi]].sort((a, b) => b.r - a.r || d2(a) - d2(b) || a.id - b.id);
+    const nearStub = [...stubbleByPlace[pi]].sort((a, b) => d2(a) - d2(b) || a.id - b.id);
+    const wideStub = [...stubbleByPlace[pi]].sort((a, b) => b.r - a.r || d2(a) - d2(b) || a.id - b.id);
+    const nearWood = [...woodByPlace[pi]].sort((a, b) => d2(a) - d2(b) || a.id - b.id);
+    const nearWild = [...wildPastures].sort((a, b) => d2(a) - d2(b) || a.id - b.id);
+    const horsePool = nearPast.length ? [...nearPast, ...nearStub] : nearStub;
+    const cattlePool = [...nearPast, ...nearStub];
+    const sheepPool = [...widePast, ...wideStub];
+    const swinePool = nearWood.length ? [...nearWood, ...nearPast] : nearPast;
+    const useCount = new Map();
+
+    if (totalRawHerds > 0) {
+      const h = herdCountsFor(pi);
+      if (!h) continue;
+      const scaleCnt = (nHead) => nHead > 0 ? Math.max(Math.min(nHead, 4), Math.round(nHead * herdScale)) : 0;
+      placeFlock(horsePool, nearWild, scaleCnt(h.horses || 0), 3, pi * 97 + 4, useCount);
+      placeFlock(cattlePool, nearWild, scaleCnt(h.cattle || 0), 1, pi * 97 + 2, useCount);
+      placeFlock(sheepPool, nearWild, scaleCnt(h.sheep || 0), 0, pi * 97 + 1, useCount);
+      placeFlock(swinePool, nearWild, scaleCnt(h.swine || 0), 2, pi * 97 + 3, useCount);
+    } else {
+      // Static pre-baked Day-0 JSON before boardLife wakes: modest starter flocks dealt round-robin across pastures.
+      placeFlock(cattlePool, nearWild, Math.min(8, nearPast.length * 2), 1, pi * 97 + 2, useCount);
+      placeFlock(sheepPool, nearWild, Math.min(18, nearPast.length * 3), 0, pi * 97 + 1, useCount);
+      placeFlock(swinePool, nearWild, Math.min(6, nearWood.length * 2), 2, pi * 97 + 3, useCount);
+    }
+  }
+  return herdFloats.length ? new Float32Array(herdFloats) : null;
+}
+
 export function layBoardCountry({ baked, region, grid, heights = null, heightAt, port, wet, LAND, fieldAt, distanceTo }) {
   const started = typeof performance === 'object' ? performance.now() : 0;
   const board = baked.board, ox = region.x, oz = region.z, half = region.span / 2;
@@ -3000,79 +3121,11 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   /* ---- roads between places are already trimmed and registered before building placement above ---- */
 
   /* ---- standing livestock herds on pastures, rough commons and oak woods ---- */
-  const pastureByPlace = Array.from({ length: places.length }, () => []);
-  const woodByPlace = Array.from({ length: places.length }, () => []);
-  const wildPastures = [];
-  fields.forEach((field, id) => {
-    const fx = ox + field.x, fz = oz + field.z;
-    if (!inside(fx, fz, 28) || heightAt(fx, fz) < 1.35) return;
-    if (fieldAt(town.urban, grid, fx, fz) > 0.2 || fieldAt(town.inland, grid, fx, fz) < 6) return;
-    const clearEdge = edgeOf(id, fx, fz);
-    if (clearEdge < 7) return;
-    const rec = { id, x: fx, z: fz, r: Math.min(28, Math.max(5.5, clearEdge - 2.5)), heading: field.heading || 0 };
-    const useKind = uses[id].kind;
-    if (field.place >= 0 && field.place < places.length) {
-      if (useKind === LAND.PASTURE || useKind === LAND.OLIVES || useKind === LAND.FALLOW) pastureByPlace[field.place].push(rec);
-      else if (useKind === LAND.WOOD || useKind === LAND.SCRUB) woodByPlace[field.place].push(rec);
-    } else if (useKind === LAND.PASTURE || useKind === LAND.SCRUB) {
-      wildPastures.push(rec);
-    }
+  const rebuildHerds = (herdsByPlace = null) => buildHerdsFromBoardPlaces({
+    places, fields, uses, town, grid, ox, oz, heightAt, edgeOf, inside, nearPad, streetEdge, LAND, fieldAt, herdsByPlace,
   });
-  let totalRawHerds = 0;
-  for (const p of places) {
-    const h = p.herds;
-    if (h) totalRawHerds += (h.sheep || 0) + (h.cattle || 0) + (h.swine || 0) + (h.horses || 0);
-  }
-  const MAX_HERD_HEAD = 1440;
-  const herdScale = totalRawHerds > MAX_HERD_HEAD ? MAX_HERD_HEAD / totalRawHerds : 1;
-  const herdFloats = [];
-  const speciesScale = [[0.90, 0.22], [0.92, 0.18], [0.88, 0.24], [0.94, 0.14]];
-  const placeFlock = (pool, fallbackPool, countWanted, species, seedSalt) => {
-    const list = pool.length ? pool : fallbackPool.length ? fallbackPool : wildPastures;
-    if (!list.length || countWanted <= 0) return;
-    const flockSize = species === 0 ? 12 : species === 2 ? 9 : 7;
-    let left = countWanted, fIdx = 0;
-    while (left > 0 && herdFloats.length < MAX_HERD_HEAD * 8) {
-      const take = Math.min(left, flockSize);
-      left -= take;
-      const pick = list[Math.floor(boardHashUnit(seedSalt + fIdx * 17, species + 11) * list.length) % list.length];
-      fIdx++;
-      const flockYaw = (pick.heading || 0) + (boardHashUnit(seedSalt + fIdx, 41) - 0.5) * 1.2;
-      for (let m = 0; m < take; m++) {
-        const hSeed = seedSalt * 131 + fIdx * 37 + m;
-        const ang = boardHashUnit(hSeed, 3) * 2 * Math.PI;
-        const rad = Math.sqrt(boardHashUnit(hSeed, 7)) * pick.r * 0.62;
-        const ax = pick.x + Math.cos(ang) * rad, az = pick.z + Math.sin(ang) * rad;
-        if (!inside(ax, az, 16) || heightAt(ax, az) < 1.1 || nearPad(ax, az) || streetEdge(ax, az, 4) < 1.8) continue;
-        const roamR = Math.max(2.2, Math.min(11.5, pick.r * 0.34));
-        const phase = boardHashUnit(hSeed, 13) * 2 * Math.PI;
-        const coatSeed = boardHashUnit(hSeed, 19);
-        const [sBase, sSpan] = speciesScale[species];
-        const sc = sBase + boardHashUnit(hSeed, 23) * sSpan;
-        herdFloats.push(ax, az, roamR, phase, coatSeed, sc, species, flockYaw);
-      }
-    }
-  };
-  if (totalRawHerds > 0) {
-    places.forEach((place, pi) => {
-      const h = place.herds;
-      if (!h) return;
-      const scaleCnt = (nHead) => nHead > 0 ? Math.max(Math.min(nHead, 4), Math.round(nHead * herdScale)) : 0;
-      placeFlock(pastureByPlace[pi], wildPastures, scaleCnt(h.sheep || 0), 0, pi * 97 + 1);
-      placeFlock(pastureByPlace[pi], wildPastures, scaleCnt(h.cattle || 0), 1, pi * 97 + 2);
-      placeFlock(woodByPlace[pi], pastureByPlace[pi], scaleCnt(h.swine || 0), 2, pi * 97 + 3);
-      placeFlock(pastureByPlace[pi], wildPastures, scaleCnt(h.horses || 0), 3, pi * 97 + 4);
-    });
-  } else {
-    // Un-lived day-0 boards without exported herd counts still carry modest starter flocks on their pastures.
-    places.forEach((_, pi) => {
-      placeFlock(pastureByPlace[pi], wildPastures, Math.min(18, pastureByPlace[pi].length * 3), 0, pi * 97 + 1);
-      placeFlock(pastureByPlace[pi], wildPastures, Math.min(8, pastureByPlace[pi].length * 2), 1, pi * 97 + 2);
-      placeFlock(woodByPlace[pi], pastureByPlace[pi], Math.min(6, woodByPlace[pi].length * 2), 2, pi * 97 + 3);
-    });
-  }
-  const herds = herdFloats.length ? new Float32Array(herdFloats) : null;
-  built.herds = herdFloats.length / 8;
+  const herds = rebuildHerds();
+  built.herds = herds ? herds.length / 8 : 0;
 
   /* ---- lone trees and copses of the model's open country, marshes and scrub outside dense woods ---- */
   const rawLone = board.loneTrees ?? [];
@@ -3102,7 +3155,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     },
   };
   return {
-    plan, town, roads, parcelAt, places, seat, inlandWater, ponds, herds, loneTrees, bridges,
+    plan, town, roads, parcelAt, places, seat, inlandWater, ponds, herds, rebuildHerds, loneTrees, bridges,
     riverCut: riverCuts.length ? { cuts: riverCuts, bankVerts: new Float32Array(bankVerts), bankIndices: new Uint32Array(bankIndices) } : null,
     riverReaches,
     // Who mans the seat, by the model's own roll on the board's day: its port's posts are manned from it (js/crew.js).

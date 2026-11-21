@@ -127,20 +127,29 @@ fn humanMorphPackW(childness:f32,elderness:f32,isRider:bool)->u32 {
 const HUMAN_MORPH_BODY_INSET_BIT:u32=1u<<17u;
 
 // Smooth watertight inward clearance inset strictly under upper/lower garment coverage on clothed body meshes
-// (100% opaque & TBDR-safe; leaves head, neck, forearms, hands, lower calves & feet 100% untouched!).
+// (100% opaque & TBDR-safe; leaves head, neck, wrists, hands & feet y < 0.09 100% untouched!).
 fn humanBodyUnderClothInset(p:vec3f,n:vec3f,spareZ:u32,spareW:u32)->vec3f {
   if((spareW&HUMAN_MORPH_BODY_INSET_BIT)==0u){return p;}
   let female=(spareZ&2u)!=0u;
   let shY=select(1.419,1.385,female);
-  // Trunk + upper arm sleeve core + hips/thighs strictly covered by 1550 shirts/bodices/trousers/skirts
-  let trunkY=humanMorphS5(0.46,0.58,p.y)*(1.0-humanMorphS5(shY-0.05,shY+0.02,p.y));
+  // Trunk + hips/thighs strictly covered by 1550 shirts/bodices/trousers/skirts.
+  // Keep front neckline (n.z > 0.25) untouched above shY-0.06, while extending back/shoulder-blade clearance
+  // (n.z <= 0.15) up to shY+0.03 so leaning walk strides never poke bare back skin through chemises/bodices.
+  let backBias=1.0-humanMorphS5(0.05,0.35,n.z);
+  let topCut=shY+mix(-0.04,0.035,backBias);
+  let trunkY=humanMorphS5(0.44,0.56,p.y)*(1.0-humanMorphS5(topCut-0.04,topCut+0.03,p.y));
   let armX=1.0-humanMorphS5(0.24,0.34,abs(p.x));
-  let thighCover=humanMorphS5(0.46,0.58,p.y)*(1.0-humanMorphS5(0.84,0.94,p.y))*armX;
-  let chestCover=humanMorphS5(0.84,0.94,p.y)*(1.0-humanMorphS5(shY-0.05,shY+0.02,p.y))*armX;
-  let cover=clamp(max(thighCover,chestCover),0.0,1.0);
-  if(cover<0.001){return p;}
-  // Inset gently along inward normal (2.2 cm max) so bare back/chest/thigh skin never pokes through cloth at any LOD or child scale
-  let insetAmt=0.022*cover*trunkY;
+  let trunkInset=select(0.024,0.028,female)*trunkY*armX;
+  // Covered calves/shins (y in [0.09..0.60]): extra clearance on females so backward leg swing inside
+  // blended-weight long skirts never pokes calf skin through the skirt back; feet y < 0.085 stay untouched!
+  let calfMask=humanMorphS5(0.085,0.13,p.y)*(1.0-humanMorphS5(0.50,0.62,p.y))*(1.0-humanMorphS5(0.26,0.34,abs(p.x)));
+  let calfInset=select(0.015,0.024,female)*calfMask;
+  // Upper & mid arms covered by sleeves (|x| in [0.18..0.46]): smooth 1.2 cm inset; wrists & hands stay untouched!
+  let armMaskY=humanMorphS5(1.16,1.25,p.y)*(1.0-humanMorphS5(shY+0.05,shY+0.12,p.y));
+  let armMaskX=humanMorphS5(0.18,0.24,abs(p.x))*(1.0-humanMorphS5(0.42,0.48,abs(p.x)));
+  let armInset=0.012*armMaskX*armMaskY;
+  let insetAmt=max(trunkInset,max(calfInset,armInset));
+  if(insetAmt<0.0002){return p;}
   return p-n*insetAmt;
 }
 

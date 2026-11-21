@@ -72,7 +72,7 @@ struct MeadowCfg {
   crater: vec4f, // the crater field's origin x, z, its tile metres, 1 when bound
   blocks: vec4i, // the region's first block x, z; blocks across x, z
   scene: vec4f,  // the scene's pixel error (js/continuum-core.js), the gust's wave number, 0, 0
-  more: vec4u,   // 0, blocks in the region, 0, 0
+  more: vec4u,   // 0, blocks in the region, 1 when primary section (landLight valid), 0
   mixes: array<vec4f, 3>, // each mix's (lowland, upland, margin) colour (linear) and cover from above: its variants' mean
 };
 struct ShotWake {
@@ -121,7 +121,7 @@ fn meadowGroundY(p: vec2f, domain: vec4f, elevTex: texture_2d<f32>) -> f32 {
   return select(d + (1.0 - f.x) * (c - d) + (1.0 - f.y) * (b - d), a + f.x * (b - a) + f.y * (c - a), f.x + f.y <= 1.0);
 }
 fn meadowDomainUV(unshiftedXZ: vec2f) -> vec2f {
-  return clamp((unshiftedXZ - cfg.domain.xy) / cfg.domain.z + 0.5, vec2f(0.0005), vec2f(0.9995));
+  return clamp((unshiftedXZ - cfg.domain.xy) / cfg.domain.z + 0.5, vec2f(0.0002), vec2f(0.9998));
 }
 // The cover map at a point: how much grass grows (r), its role (g: 0 lowland, 0.5 upland, 1 margin), its lushness (b).
 fn meadowCoverAt(unshiftedXZ: vec2f) -> vec4f {
@@ -418,7 +418,7 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   let half = MEADOW_PATCH * 0.5 * g;
   let middle = origin + vec2f(half);
   let uv = (middle - cfg.domain.xy) / cfg.domain.z + 0.5;
-  if (any(uv <= vec2f(0.002)) || any(uv >= vec2f(0.998))) { return; }
+  if (any(uv <= vec2f(0.0002)) || any(uv >= vec2f(0.9998))) { return; }
   // Grass where the cover map grows it at its middle or a corner (a coarse patch: anywhere on a lattice of at most
   // five points a side over it), on dry ground.
   let cover = meadowCoverAt(middle);
@@ -721,8 +721,12 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
     let coarse = clamp((f32(state.y & 65535u) + bitcast<f32>(state.z) - farFirst) / max(steps - farFirst, 1.0), 0.0, 1.0);
     let inside = max(abs(s.local.x - MEADOW_PATCH * 0.5), abs(s.local.z - MEADOW_PATCH * 0.5));
     let whole = max(max(0.75, smoothstep(0.0, 0.15, coarse)), smoothstep(MEADOW_PATCH * 0.5 - 0.5, MEADOW_PATCH * 0.5, inside));
-    colour = mix(s.albedo.rgb, mean.rgb, whole);
-    hides = meadowHides(mix(s.albedo.a, mean.a, whole), dot(normalize(eye - s.world), slope));
+    let toward = normalize(s.world - eye);
+    let top = meadowColourOf(continuumType(s.model, ${M.top}u));
+    let side = meadowColourOf(continuumType(s.model, ${M.side}u)) * mean.rgb / max(top, vec3f(1e-4));
+    let dirMean = mix(side, mean.rgb, abs(toward.y));
+    colour = mix(s.albedo.rgb, dirMean, whole);
+    hides = meadowHides(mix(s.albedo.a, mean.a, whole), dot(-toward, slope));
   } else {
     // The splat: seen from above, the mean of the mixes growing here, as the far body's coarse colour is; from the
     // side, the variant's side colour in proportion.
@@ -789,19 +793,33 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let unshiftedWorldXZ = v.world.xz;
   let fCov = meadowCoverAt(unshiftedWorldXZ);
   let marginFade = smoothstep(0.06, 0.55, fCov.r);
-  // Screen-space world footprint (band-limits multi-scale tussock/panicle detail cleanly to the horizon with zero flicker).
+  // Screen-space world footprint: cap grazing-angle foreshortening against isotropic pixel size so
+  // eye-level sightlines (~5 deg depression) preserve fine & mid tussock/panicle structure across CLUSTER -> FAR -> SPLAT
+  // while still band-limiting cleanly before Nyquist with zero shimmer.
   let dxW = dpdx(unshiftedWorldXZ);
   let dyW = dpdy(unshiftedWorldXZ);
-  let footPixel = max(max(length(dxW), length(dyW)), v.flow.z * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0));
+  let isoFoot = v.flow.z * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0);
+  let anisoFoot = min(max(length(dxW), length(dyW)), isoFoot * 2.0);
+  let footPixel = mix(isoFoot, anisoFoot, 0.35);
   let sd = meadowSwardDetail(unshiftedWorldXZ, footPixel, windDir, gust);
 
-  // A body or splat is as much sward as its sward hides of the ground from here, boosted cleanly so far-continuum
-  // patches match near 3D cluster density & contrast across the MSAA handoff without flattening into bare ground.
-  let farHides = clamp(v.blade.w * 1.24 + 0.14 * marginFade, 0.0, 1.0);
+  let view = normalize(F.camPos.xyz - world);
+  let viewGrazing = clamp(1.0 - abs(dot(view, normalize(v.normal))), 0.0, 1.0);
+  let horizGraze = clamp(1.0 - abs(view.y), 0.0, 1.0);
+  let grazeFactor = smoothstep(0.18, 0.88, max(viewGrazing, horizGraze));
+
+  // A body or splat is as much sward as its sward hides of the ground from here: Beer-Lambert optical depth through
+  // upright blades rises toward 1.0 at eye-level grazing sightlines so FAR/SPLAT never wash into bare dirt.
+  let farHidesBase = clamp(v.blade.w * 1.24 + 0.14 * marginFade, 0.0, 1.0);
+  let farHides = mix(farHidesBase, 1.0, grazeFactor * 0.82);
   let swardWeight = select(clamp(0.55 + 0.45 * marginFade, 0.0, 1.0), marginFade * farHides, isContinuum);
-  // On collapsed far bodies & splats, modulate effective stalk height with band-limited tussock & panicle structure
-  // so sunlit golden-oat crests and inter-clump root AO continue seamlessly across the entire landscape.
-  let effAlong = select(along, clamp(along + (sd.x - 0.5) * 0.62 + sd.z * 0.28 - sd.w * 0.34, 0.08, 0.96), isContinuum);
+  // On collapsed far bodies & splats, horizontal sightlines across tall upright culms see the sunlit upper golden-oat
+  // canopy rather than the occluded roots below; bias effAlong upward smoothly with grazeFactor + tussock structure.
+  let effAlong = select(
+    along,
+    clamp(along + 0.24 * grazeFactor + (sd.x - 0.5) * 0.58 + sd.z * 0.30 - sd.w * (0.34 - 0.14 * grazeFactor), 0.10, 0.98),
+    isContinuum,
+  );
 
   // Natural Iberian Meadow Albedo (ZERO 62% brown dirt washout!):
   //   - World-space moisture & lushness patches blend smoothly between lush emerald pasture,
@@ -835,7 +853,11 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let tussockLum = clamp(v.colour.g / 0.142, 0.72, 1.28);
   var grassPigment = mix(v.colour * 1.06, patchGreen * tussockLum, 0.44);
   // Warm tall culm seed-heads & distant tussock panicle crests toward sunlit golden oat
-  let oatHeadT = select(smoothstep(0.76, 0.94, along), clamp(smoothstep(0.72, 0.92, effAlong) * 0.70 + sd.z * 0.42, 0.0, 0.78), isContinuum);
+  let oatHeadT = select(
+    smoothstep(0.76, 0.94, along),
+    clamp(smoothstep(0.66, 0.92, effAlong) * (0.72 + 0.22 * grazeFactor) + sd.z * (0.42 + 0.18 * grazeFactor) + 0.14 * grazeFactor, 0.0, 0.94),
+    isContinuum,
+  );
   grassPigment = mix(grassPigment, goldenOatTip, oatHeadT * 0.82);
   // Gentle 20% warm soil/thatch root grounding on effAlong < 0.18
   let warmSoil = mix(groundCol, vec3f(0.072, 0.066, 0.034), 0.45);
@@ -877,20 +899,18 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   // Shimmering wind-ripple contrast across gust crests & upright lulls
   let crest = smoothstep(-0.38, 0.65, swell);
   let tendrilHighlight = mix(1.0, mix(select(0.92, 0.84, isContinuum), select(1.09, 1.15, isContinuum), tf.x), swardWeight);
+  let windTrough = select(vec3f(0.90, 0.94, 0.88), mix(vec3f(0.93, 0.96, 0.91), vec3f(0.90, 0.94, 0.88), grazeFactor), isContinuum);
+  let windPeak = select(vec3f(1.14, 1.15, 1.02), mix(vec3f(1.10, 1.11, 1.02), vec3f(1.15, 1.16, 1.02), grazeFactor), isContinuum);
   let windTone = mix(
     vec3f(1.0),
-    mix(
-      select(vec3f(0.90, 0.94, 0.88), vec3f(0.95, 0.97, 0.94), isContinuum),
-      select(vec3f(1.14, 1.15, 1.02), vec3f(1.07, 1.08, 1.01), isContinuum),
-      crest,
-    ),
+    mix(windTrough, windPeak, crest),
     swardWeight * (0.30 + 0.70 * effAlong),
   );
   let albedo = clamp(baseCol * tendrilHighlight * windTone, vec3f(0.0), vec3f(0.36));
 
   let landUV = (unshiftedWorldXZ - cfg.domain.xy) / cfg.domain.z + 0.5;
   let edgeDist = min(min(landUV.x, 1.0 - landUV.x), min(landUV.y, 1.0 - landUV.y));
-  let inDomain = smoothstep(0.0, 0.08, edgeDist);
+  let inDomain = select(0.0, smoothstep(0.0, 0.08, edgeDist), cfg.more.z != 0u);
   let bakedLight = textureSampleLevel(landLight, sampC, clamp(landUV, vec2f(0.0), vec2f(1.0)), 0.0).rg;
   let terrainSun = mix(1.0, bakedLight.r, inDomain);
   let sunlight = terrainSun * solarShadowVisibility(vec3f(cloudShadowAt(world * 0.001, F.sunDir.xyz))).x;
@@ -899,16 +919,16 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let direct = sunIlluminance() * sunlight * solarShadowVisibility(shadowVis);
 
   let nDotL = max(dot(n, F.sunDir.xyz), 0.0);
-  let wrap = max(0.0, dot(n, F.sunDir.xyz) * 0.50 + 0.50) * (0.14 + 0.14 * along) * swardWeight;
-  let view = normalize(F.camPos.xyz - world);
+  let wrap = max(0.0, dot(n, F.sunDir.xyz) * 0.50 + 0.50) * (0.14 + 0.14 * effAlong) * swardWeight;
 
   // Forward subsurface sunlight translucency (backscatter through bent golden-green upper blades & panicles)
   let sunFwd = pow(max(dot(-view, F.sunDir.xyz), 0.0), 2.1);
   let backTransmission = max(0.0, -dot(n, F.sunDir.xyz)) * 0.50 + 0.50;
   let backscatter = (0.28 * backTransmission + 0.92 * sunFwd)
-                  * smoothstep(0.24, 0.88, along)
+                  * smoothstep(0.24, 0.88, effAlong)
                   * (0.65 + 0.55 * gust)
                   * (0.70 + 0.30 * tf.x)
+                  * select(1.0, 1.0 + 0.25 * grazeFactor, isContinuum)
                   * swardWeight;
 
   let skyDir = normalize(vec3f(n.x * 0.65, max(n.y, 0.12), n.z * 0.65));
@@ -926,7 +946,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let fiberTan = normalize(vec3f(windDir.x * (0.36 + 0.56 * flatGust), max(0.18, 0.78 - 0.50 * flatGust), windDir.y * (0.36 + 0.56 * flatGust)));
   let tDotH = clamp(dot(fiberTan, h), -1.0, 1.0);
   let sinTH = sqrt(max(0.0, 1.0 - tDotH * tDotH));
-  let troughFlatten = smoothstep(0.28, 0.86, flatGust) * (0.25 + 0.75 * along);
+  let troughFlatten = smoothstep(0.28, 0.86, flatGust) * (0.25 + 0.75 * effAlong);
   let waveSheen = (pow(sinTH, 14.0) * (0.010 + 0.036 * crest * troughFlatten)
                 + pow(nDotH, 16.0) * 0.028 * troughFlatten * (0.35 + 0.65 * graze))
                 * max(F.sunDir.y, 0.03) * swardWeight;

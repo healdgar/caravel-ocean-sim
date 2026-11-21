@@ -648,7 +648,7 @@ export function formatEconDiagnostics(diag) {
   if (!diag) return 'Waiting for board simulation…';
   const mon = diag.monarch?.title ? ` · ${diag.monarch.title}` : '';
   const riders = (diag.traffic?.envoys ?? 0) + (diag.traffic?.mountedTravellers ?? 0);
-  return [
+  const lines = [
     `Day ${Math.floor(diag.day ?? 0)} · ${diag.dateLabel ?? ''} (${diag.season ?? ''}, AD ${diag.year ?? 1550})${mon}`,
     `Pop ${(diag.pop ?? 0).toLocaleString('en-US')} (Realm ${(diag.realmPop ?? 0).toLocaleString('en-US')}) · ${(diag.households ?? 0).toLocaleString('en-US')} households`,
     `Crown ${Math.round(diag.crownTreasury ?? 0).toLocaleString('en-US')} cr · Town Chest ${Math.round(diag.townChest ?? 0).toLocaleString('en-US')} cr · Purses ${Math.round(diag.householdCoin ?? 0).toLocaleString('en-US')} cr`,
@@ -656,7 +656,18 @@ export function formatEconDiagnostics(diag) {
     `Wine ${Math.round(diag.stores?.wine ?? 0)} (${Number(diag.prices?.wine ?? 0).toFixed(2)}) · Spice ${Math.round(diag.stores?.spice ?? 0)} (${Number(diag.prices?.spice ?? 0).toFixed(2)})`,
     `Ships ${diag.traffic?.ships ?? 0} · Wagons ${diag.traffic?.cartCaravans ?? 0} · Barges ${diag.traffic?.riverCaravans ?? 0} · Mounted Riders ${riders}`,
     `Buildings ${(diag.fabric?.buildings ?? 0).toLocaleString('en-US')} · Active Scaffolds ${diag.fabric?.projects ?? 0} · Roads ${diag.fabric?.roads ?? 0}`,
-  ].join('\n');
+  ];
+  if (diag.military || diag.governance) {
+    const mil = diag.military ?? {};
+    const gov = diag.governance ?? {};
+    const warLabel = mil.atWar ? 'AT WAR' : (mil.activeFeuds > 0 ? `${mil.activeFeuds} feud${mil.activeFeuds === 1 ? '' : 's'}` : 'Peace');
+    lines.push(`Armies ${mil.armiesCount ?? 0} (${(mil.totalMenInArms ?? 0).toLocaleString('en-US')} in arms) · Garrison ${mil.garrison ?? 0} · ${warLabel}`);
+    const herds = mil.herdsTotal ?? gov.herdsTotal ?? null;
+    const herdsStr = herds != null ? ` · Herds ${Math.round(herds).toLocaleString('en-US')} head` : '';
+    const unrestPct = Math.round((diag.unrest ?? 0) * 100);
+    lines.push(`Houses ${gov.housesCount ?? 0} · Unrest ${unrestPct}% · Prosperity ${Math.round(diag.prosperity ?? 0)}${herdsStr}`);
+  }
+  return lines.join('\n');
 }
 
 export function bindEconSimControls(detailsEl, { onRate = null, onStep = null } = {}) {

@@ -109,6 +109,7 @@ import {vesselVerticalScale} from './hull.js';
 import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
 import { createCrew, createFortSoldiers, requestCrewPipelines, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
 import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
+import { createBoardArmies } from './board-armies.js';
 import { createBoardLife } from './board-life.js';
 import { BOARD_KEEP_CAREER, forgetKeptBoards, keepBoard, keptBoard } from './board-keep.js';
 import { boardFolkStreets, folkDoing, watchDoing } from './board-folk.js';
@@ -822,11 +823,12 @@ async function main() {
   // The same entries for her continuum's water capture (js/water-optics.js), omitting Neural PBR (bindings 16-17).
   const vesselCaptureEntries=v=>vesselGroupEntries(v).map((resource,binding)=>({binding,resource})).filter(e=>e.binding!==16&&e.binding!==17);
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
-  let fortSoldiers=null,mateSoldiers=null,townsfolk=null;
+  let fortSoldiers=null,mateSoldiers=null,townsfolk=null,boardArmies=null;
   window.oceanTownsfolk=null;
+  window.oceanArmies=null;
   const props=createProps({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,waterOptics});
   window.oceanProps=props;
-  // Launch shore garrison, shore party (mate + captain), and townsfolk concurrently in the background so they don't
+  // Launch shore garrison, shore party (mate + captain), townsfolk, and standing armies concurrently in the background so they don't
   // stall Frame 0 serially while their 34 MiB soldier/villager atlases stream in.
   const shoreFolkReadyPromise=sharedCrew?Promise.all([
     createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics})
@@ -835,6 +837,8 @@ async function main() {
       .then(r=>{mateSoldiers=r;}).catch(error=>{console.error('The first mate\'s figure:',error);}),
     createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)})
       .then(r=>{townsfolk=r;window.oceanTownsfolk=r;}).catch(error=>{console.error('Townsfolk initialization:',error);}),
+    createBoardArmies({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics})
+      .then(r=>{boardArmies=r;window.oceanArmies=r;}).catch(error=>{console.error('Board armies initialization:',error);}),
   ]):Promise.resolve();
   const spindriftPromise=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
   const weatherRendererPromise=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
@@ -4412,7 +4416,7 @@ async function main() {
     // Each vessel's cut: what of her the scene, her shadow and the water's captures draw this frame.
     for(const v of vessels)v.continuum.encode(cp,v.boat.showProw);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
-    fortSoldiers?.encodePose(cp);mateSoldiers?.encodePose(cp);
+    fortSoldiers?.encodePose(cp);mateSoldiers?.encodePose(cp);boardArmies?.encodePose(cp);
     boardLife?.tick(gameDateMs());caravanClock(gameDateMs());
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
     wakePool.commit();
@@ -4552,14 +4556,18 @@ async function main() {
     syncBoardMarket();
     caravanPlan.at=-Infinity;
     folkPlan.at=-Infinity;
+    armyPlan.at=-Infinity;armyPlan.day=-1;
+    herdPlan.at=-Infinity;herdPlan.day=-1;
     tendCaravans(performance.now());
     tendFolk(performance.now());
+    tendArmies(performance.now());
+    tendHerds(performance.now());
     await refreshBoardFabricIfReady();
     const diag=await boardLife.diagnostics(0).catch(()=>null);
     if(diag){econLastDiag=diag;econSimUI?.setTelemetry(diag);}
     return diag;
   }
-  function pollEconDiagnostics(now){
+  function pollEconDiagnostics(now, force = false){
     if(!boardLife||boardLife.state!=='alive')return;
     econSimUI?.setCatchup(boardLife.day,boardLife.wanted,boardLife.busy);
     if(econTimeScale>1&&Number.isFinite(boardLife.day)){
@@ -4571,7 +4579,7 @@ async function main() {
       }
     }
     const panelVisible=!panel.classList.contains('hidden')&&Boolean(econSimDetails?.open);
-    if((!panelVisible&&econTimeScale<=1)||econDiagBusy||now-econLastDiagAt<650)return;
+    if((!force&&!panelVisible&&econTimeScale<=1)||econDiagBusy||(!force&&now-econLastDiagAt<650))return;
     econDiagBusy=true;
     econLastDiagAt=now;
     boardLife.diagnostics(0).then(diag=>{
@@ -4633,7 +4641,9 @@ async function main() {
           recordBoardHistoricalLog();
           if(hasLivePortContact())captureLivePortIntel();
           caravanPlan.frames=0;caravanPlan.at=-Infinity;tendCaravans(performance.now());
-          pollEconDiagnostics(performance.now());
+          armyPlan.frames=0;armyPlan.at=-Infinity;armyPlan.day=-1;tendArmies(performance.now());
+          herdPlan.frames=0;herdPlan.at=-Infinity;herdPlan.day=-1;tendHerds(performance.now());
+          pollEconDiagnostics(performance.now(),true);
         }
       }});
     window.oceanBoard=boardLife;boardLife.start();
@@ -4714,6 +4724,54 @@ async function main() {
       Object.assign(caravanPlan,{day:answer?.day??boardLife.day,count:combinedRoad.length,seen:herds,at:performance.now(),lastList:combinedRoad,lastAnswer:answer,origin});
       syncBoardMarket();
     }).catch(error=>{console.warn('The board\'s caravans:',error);caravanPlan.at=performance.now();}).finally(()=>{caravanPlan.asking=false;});
+  }
+  // Real standing and field armies from the Castle & Commons simulation (js/board-armies.js).
+  const ARMY_CHECK_FRAMES=45,ARMY_WAIT_MS=5000;
+  const armyPlan={asking:false,day:-1,at:-Infinity,frames:0,seen:null};
+  function tendArmies(now){
+    const fastEcon=isEconFastForward();
+    const checkEvery=fastEcon?10:ARMY_CHECK_FRAMES;
+    const waitMs=fastEcon?350:ARMY_WAIT_MS;
+    if(!boardArmies||!terrain?.baseRegion||boardLife?.state!=='alive'||armyPlan.asking)return;
+    if(armyPlan.seen===boardArmies&&boardLife.day===armyPlan.day)return;
+    if((armyPlan.frames++%checkEvery)&&armyPlan.day>=0)return;
+    if(now-armyPlan.at<waitMs&&armyPlan.day>=0)return;
+    if(typeof boardLife.armies!=='function')return;
+    armyPlan.asking=true;
+    boardLife.armies().then(snap=>{
+      if(!boardArmies||!terrain?.baseRegion)return;
+      const region=terrain.baseRegion;
+      const off=terrain.getWorldOffset?.()??{x:0,z:0};
+      boardArmies.setArmies(snap,{
+        origin:{x:region.x,z:region.z},
+        groundAt:(x,z)=>terrain.surfaceHeight(x+off.x,z+off.z),
+        places:terrain?.port?.country?.places??null,
+        furniture:terrain?.port?.furniture??null,
+        solids:terrain?.port?townSolids(terrain.port):null,
+      });
+      armyPlan.day=snap?.day??boardLife.day;
+      armyPlan.seen=boardArmies;
+      armyPlan.at=performance.now();
+    }).catch(error=>{console.warn('The board\'s armies:',error);armyPlan.at=performance.now();}).finally(()=>{armyPlan.asking=false;});
+  }
+  // Real pasture livestock from Castle & Commons (`s.stores` / `s._owners`), synced without rebuilding the city.
+  const herdPlan={asking:false,day:-1,at:-Infinity,frames:0,seen:null,count:0};
+  function tendHerds(now){
+    const herds=terrain?.herds;
+    if(!herds||!terrain?.syncHerdsFromBoard||boardLife?.state!=='alive'||herdPlan.asking)return;
+    if(herdPlan.seen===herds&&boardLife.day===herdPlan.day)return;
+    if((herdPlan.frames++%45)&&herdPlan.day>=0)return;
+    if(now-herdPlan.at<5000&&herdPlan.day>=0)return;
+    if(typeof boardLife.herds!=='function')return;
+    herdPlan.asking=true;
+    boardLife.herds().then(snap=>{
+      if(terrain?.herds!==herds)return;
+      const placed=terrain.syncHerdsFromBoard(snap);
+      herdPlan.day=snap?.day??boardLife.day;
+      herdPlan.seen=herds;
+      herdPlan.count=placed;
+      herdPlan.at=performance.now();
+    }).catch(error=>{console.warn('The board\'s herds:',error);herdPlan.at=performance.now();}).finally(()=>{herdPlan.asking=false;});
   }
   function caravanClock(dateMs){
     const herds=terrain?.herds,day=boardLife?.dayAt?.(dateMs);
@@ -4820,31 +4878,35 @@ async function main() {
   // place (js/crew.js), each figure one of its soldiers or of its watch, named and asked after as the townsfolk are.
   const watchSeen=()=>{const garrison=fortSoldiers?.state;return garrison?.watch&&garrison.port===terrain?.port?garrison.soldiers:null;};
   const watchOnScreen=(s,rect)=>s.soul&&s.visible!==false&&s.casualtyState!=='fallen'?folkStandsAt(s.position[0],s.position[1],s.position[2],rect):null;
+  const armyFolkSeen=()=>{const list=boardArmies?.locate?.();return list?.length?list:null;};
+  const armyFolkOnScreen=(s,rect,off)=>s.soul&&s.visible!==false?folkStandsAt(s.position[0]+off.x,s.position[1],s.position[2]+off.z,rect):null;
   const shipFolkSeen=()=>{const vs=terrain?.tradeVessels?.locate?.();if(!vs?.length)return null;const out=[];for(const v of vs)for(const d of v.deckPeople??[])out.push(d);return out.length?out:null;};
   const shipFolkOnScreen=(d,rect,off)=>d.soul?folkStandsAt(d.x+off.x,d.y,d.z+off.z,rect):null;
-  const anyFolkActive=()=>Boolean(folkSeen()||watchSeen()||mateAshore?.figure.visible||(terrain?.tradeVessels?.count??0)>0);
+  const anyFolkActive=()=>Boolean(folkSeen()||watchSeen()||armyFolkSeen()||mateAshore?.figure.visible||(terrain?.tradeVessels?.count??0)>0);
   const folkAbout=(streets,index,stride)=>folkDoing(streets.souls[index],stride,streets.walkers[index*WALKER_WORDS+8]);
   // Whoever is under a point of the window, of those who stand tall enough there to be made out. Of several within
   // reach of it, the one nearer the eye is meant unless another is much nearer the point: whoever stands in front
   // hides those behind (a wall between is not known here).
   function folkUnder(clientX,clientY){
-    const streets=folkSeen(),posts=watchSeen(),decks=shipFolkSeen();
-    if(!streets&&!posts&&!decks&&!mateAshore?.figure.visible)return null;
+    const streets=folkSeen(),posts=watchSeen(),armies=armyFolkSeen(),decks=shipFolkSeen();
+    if(!streets&&!posts&&!armies&&!decks&&!mateAshore?.figure.visible)return null;
     const rect=canvas.getBoundingClientRect(),px=clientX-rect.left,py=clientY-rect.top,count=streets?Math.min(streets.souls.length,townsfolk.people):0;
     const off=terrain?.getWorldOffset?.()??{x:0,z:0};
-    let best=-1,post=null,shipHit=null,least=Infinity;
+    let best=-1,post=null,armyHit=null,shipHit=null,least=Infinity;
     const nearer=seen=>{
       if(!seen||seen.tall<FOLK_LEAST_PX)return false;
       const reach=Math.max(FOLK_REACH_PX,seen.tall*.6), d=Math.hypot(seen.x-px,seen.y-py)/reach,score=seen.depth*(.5+d);
       if(!(d<1&&score<least))return false;
       least=score;return true;
     };
-    for(let i=0;i<count;i++)if(nearer(folkOnScreen(streets,i,rect))){best=i;post=null;shipHit=null;}
-    for(const s of posts??[])if(nearer(watchOnScreen(s,rect))){post=s;shipHit=null;}
-    for(const d of decks??[])if(nearer(shipFolkOnScreen(d,rect,off))){shipHit=d;post=null;}
+    for(let i=0;i<count;i++)if(nearer(folkOnScreen(streets,i,rect))){best=i;post=null;armyHit=null;shipHit=null;}
+    for(const s of posts??[])if(nearer(watchOnScreen(s,rect))){post=s;armyHit=null;shipHit=null;}
+    for(const a of armies??[])if(nearer(armyFolkOnScreen(a,rect,off))){armyHit=a;post=null;shipHit=null;}
+    for(const d of decks??[])if(nearer(shipFolkOnScreen(d,rect,off))){shipHit=d;post=null;armyHit=null;}
     const mate=mateAshore?.figure;
     if(mate?.visible&&nearer(folkStandsAt(mate.position[0],mate.position[1],mate.position[2],rect)))return {mate:true,soul:mate.soul,doing:mateDoing(mateAshore)};
     if(shipHit)return {ship:shipHit,soul:shipHit.soul,doing:shipHit.doing};
+    if(armyHit)return {army:armyHit,soul:armyHit.soul,doing:`Serving in ${armyHit.hostName}${armyHit.state&&armyHit.state!=='idle'?' ('+armyHit.state+')':''}`};
     if(post)return {post,soul:post.soul,doing:watchDoing(post)};
     if(best<0)return null;
     return {index:best,soul:streets.souls[best],doing:folkAbout(streets,best,folkWalker(streets,best))};
@@ -4854,6 +4916,8 @@ async function main() {
     if(index>=0&&index<townsfolk.people)return folkAbout(streets,index,folkWalker(streets,index));
     const deck=shipFolkSeen()?.find(d=>d.soul?.id===id);
     if(deck)return deck.doing;
+    const armyHit=armyFolkSeen()?.find(a=>a.soul?.id===id);
+    if(armyHit)return `Serving in ${armyHit.hostName}${armyHit.state&&armyHit.state!=='idle'?' ('+armyHit.state+')':''}`;
     const post=watchSeen()?.find(s=>s.soul?.id===id);
     return post?watchDoing(post):firstMate?.id===id?mateDoing(mateAshore):'';
   }
@@ -4890,7 +4954,8 @@ async function main() {
     folkName.hidden=!found;canvas.style.cursor=found?'pointer':'';
     if(found){
       const shipTag=found.ship?(found.ship.shipName?' · '+found.ship.shipName+(found.ship.homePort?' ('+found.ship.homePort+')':''):''):'';
-      folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.ship?shipTag:found.post?' · '+found.post.role:found.mate?' · first mate':'');
+      const armyTag=found.army?(' · '+found.army.hostName):'';
+      folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.ship?shipTag:found.army?armyTag:found.post?' · '+found.post.role:found.mate?' · first mate':'');
       folkName.style.left=x+'px';folkName.style.top=y+'px';
     }
   }
@@ -4908,7 +4973,7 @@ async function main() {
     },
     // Where walker `index` stands in the world now, or null while they are indoors.
     where(index){const streets=folkSeen(),stride=streets&&index<townsfolk.people?folkWalker(streets,index):null;return stride&&{x:stride.position.x,y:stride.position.y,z:stride.position.z};},
-    ask(id){const streets=folkSeen(),soul=streets?.souls.find(one=>one?.id===id)??shipFolkSeen()?.find(d=>d.soul?.id===id)?.soul??watchSeen()?.find(s=>s.soul?.id===id)?.soul;return soul?folkCard.show(soul,folkWhereabouts(id)):boardLife.person(id);},
+    ask(id){const streets=folkSeen(),soul=streets?.souls.find(one=>one?.id===id)??shipFolkSeen()?.find(d=>d.soul?.id===id)?.soul??armyFolkSeen()?.find(a=>a.soul?.id===id)?.soul??watchSeen()?.find(s=>s.soul?.id===id)?.soul;return soul?folkCard.show(soul,folkWhereabouts(id)):boardLife.person(id);},
     // The port's posts and who stands each: the model's roll the forts were manned from, and every figure of them as
     // seen now ({x, y, tall} on the screen, null out of sight), with their soul, their post and what they are at.
     get watch(){return fortSoldiers?.state?.watch??null;},
@@ -4919,6 +4984,10 @@ async function main() {
     get ships(){
       const rect=canvas.getBoundingClientRect(),off=terrain?.getWorldOffset?.()??{x:0,z:0};
       return (shipFolkSeen()??[]).map(d=>{const seen=shipFolkOnScreen(d,rect,off);return {soul:d.soul,station:d.station,vesselId:d.vesselId,shipName:d.shipName,homePort:d.homePort,doing:d.doing,at:{x:d.x+off.x,y:d.y,z:d.z+off.z},seen:seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall,depth:seen.depth}};});
+    },
+    get armies(){
+      const rect=canvas.getBoundingClientRect(),off=terrain?.getWorldOffset?.()??{x:0,z:0};
+      return (armyFolkSeen()??[]).map(a=>{const seen=armyFolkOnScreen(a,rect,off);return {soul:a.soul,hostName:a.hostName,houseName:a.houseName,state:a.state,at:{x:a.position[0]+off.x,y:a.position[1],z:a.position[2]+off.z},seen:seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall,depth:seen.depth}};});
     },
   };
   // The storyteller (js/storyteller.js): a dungeon master in the player's agent app, and in the story the captain's
@@ -5356,7 +5425,7 @@ async function main() {
           const stageProf={writes:()=>idx<shadowPasses?ts(idx++):undefined};
           landShadows.encode(encoder,stageProf,p=>{
             terrain.drawShadow(p,camSnap,frameF);props?.drawShadow?.(p);townsfolk?.drawShadow?.(p);
-            fortSoldiers?.drawShadow?.(p);mateSoldiers?.drawShadow?.(p);dolphins.drawShadow(p);marineLife.drawShadow(p);
+            fortSoldiers?.drawShadow?.(p);mateSoldiers?.drawShadow?.(p);boardArmies?.drawShadow?.(p);dolphins.drawShadow(p);marineLife.drawShadow(p);
           },clothFn);
         });
       }
@@ -5401,7 +5470,7 @@ async function main() {
       await runSceneSubpass('Scene (all MSAA)',rp=>{
         for(const v of hullsSnap)v.continuum.draw(rp,(pipeline,far)=>vesselOwnGroups(v,pipeline,far));
         for(const v of hullsSnap)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
-        fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);townsfolk?.draw(rp);props?.draw(rp);
+        fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);boardArmies?.draw(rp);townsfolk?.draw(rp);props?.draw(rp);
         terrain?.drawOpaqueCity?.(rp,camSnap,frameF);
         drawOceanDepth(rp);
         terrain?.drawOpaqueLand?.(rp,camSnap,frameF);
@@ -5416,7 +5485,7 @@ async function main() {
       });
       await runSceneSubpass('Scene: People+Props',rp=>{
         for(const v of hullsSnap)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
-        fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);townsfolk?.draw(rp);props?.draw(rp);
+        fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);boardArmies?.draw(rp);townsfolk?.draw(rp);props?.draw(rp);
       });
       if(terrain){
         await runSceneSubpass('Scene: Land',rp=>terrain.drawFamily(rp,'land',camSnap,frameF));
@@ -5721,7 +5790,8 @@ async function main() {
       fortSoldiers?.update(castleDuel.port,dt,P.windSpeed,cam,false);
     }
     tendMate(dt);
-    townsfolk?.follow(terrain?.ports,cam);tendFolk(now);tendCaravans(now);
+    townsfolk?.follow(terrain?.ports,cam);tendFolk(now);tendCaravans(now);tendArmies(now);tendHerds(now);
+    boardArmies?.update(dt,cam,terrain?.getWorldOffset?.());
     props?.follow(terrain?.ports,cam);
     terrain?.updatePortDamage?.(simTime);
     const tvStorm=Boolean((weather?.intensity??0)>0.55||P.windSpeed>=15);
@@ -5928,7 +5998,7 @@ async function main() {
         terrain.drawShadow(pass,terrainCamera,frameF);
         props?.drawShadow?.(pass);
         townsfolk?.drawShadow?.(pass);
-        fortSoldiers?.drawShadow?.(pass);mateSoldiers?.drawShadow?.(pass);
+        fortSoldiers?.drawShadow?.(pass);mateSoldiers?.drawShadow?.(pass);boardArmies?.drawShadow?.(pass);
         // A dolphin's leap or a whale's breach shades what it rises beside.
         dolphins.drawShadow(pass);marineLife.drawShadow(pass);
       },terrain.clothShadow());
@@ -5943,7 +6013,7 @@ async function main() {
       v.continuum.drawCapture(underwater,false,()=>vesselCaptureEntries(v),v.ownGroups);
       if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(underwater);
     }
-    fortSoldiers?.drawSubmerged(underwater);mateSoldiers?.drawSubmerged(underwater);
+    fortSoldiers?.drawSubmerged(underwater);mateSoldiers?.drawSubmerged(underwater);boardArmies?.drawSubmerged(underwater);
     townsfolk?.drawSubmerged(underwater);
     props?.drawSubmerged(underwater);
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
@@ -5956,7 +6026,7 @@ async function main() {
         v.continuum.drawCapture(aboveWater,true,()=>vesselCaptureEntries(v),v.ownGroups);
         if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(aboveWater,true);
       }
-      fortSoldiers?.drawSubmerged(aboveWater,true);mateSoldiers?.drawSubmerged(aboveWater,true);
+      fortSoldiers?.drawSubmerged(aboveWater,true);mateSoldiers?.drawSubmerged(aboveWater,true);boardArmies?.drawSubmerged(aboveWater,true);
       townsfolk?.drawSubmerged(aboveWater,true);
       props?.drawSubmerged(aboveWater,true);
       dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
@@ -5983,7 +6053,7 @@ async function main() {
     // Whole hulls through their cuts: clusters, far body and splat, each keeping its own samples of a pixel.
     for(const v of hulls)v.continuum.draw(rp,(pipeline,far)=>vesselOwnGroups(v,pipeline,far));
     for(const v of vessels)if(drawProw&&v.boat.showProw&&vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
-    fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);
+    fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);boardArmies?.draw(rp);
     townsfolk?.draw(rp);
     props?.draw(rp);
     frameStages.mark('GPU commands');
@@ -6109,7 +6179,7 @@ async function main() {
     if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
     if(continuumCensus?.idle){
       // People and their strand hair across every company, the garrison, the mate, the town and the decks of passing vessels.
-      const allPeopleDraws=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
+      const allPeopleDraws=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(boardArmies?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
       const people=allPeopleDraws.filter(d=>!d.hair);
       const hair=allPeopleDraws.filter(d=>d.hair);
       // The sea's animals beside the land's (the herds, among terrain's sources).

@@ -410,12 +410,12 @@ fn crewShadeLit(v:CrewVertex,front:bool,baseIn:vec3f)->vec3f {
   let view=normalize(F.camPos.xyz-v.world);
   let skinAmt=saturate(v.skin);
   // Pre-integrated warm hemoglobin subsurface scatter wrap on skin so facial shadow terminators stay warm and lifelike
-  // without blowing up into crimson blotches on darker skin; cloth (skinAmt == 0) keeps the exact vessel lighting.
-  let rough=clamp(mix(mix(.92,.72,skinAmt),mix(.55,.40,skinAmt),wet.y)+roughBias,0.08,0.99);
-  let wrapRGB=vec3f(.20,.14,.10)*skinAmt;
+  // without blowing up into orange plastic highlights or crimson blotches; cloth (skinAmt == 0) keeps exact vessel lighting.
+  let rough=clamp(mix(mix(.92,.80,skinAmt),mix(.55,.44,skinAmt),wet.y)+roughBias,0.08,0.99);
+  let wrapRGB=vec3f(.14,.10,.08)*skinAmt;
   let ndlRaw=dot(n,sun);
   let diffRGB=max(vec3f(0.0),(vec3f(ndlRaw)+wrapRGB)/(vec3f(1.0)+wrapRGB))/(vec3f(1.0)+wrapRGB);
-  let skinAmb=mix(ambient,ambient*vec3f(1.08,1.00,0.90),skinAmt*0.45);
+  let skinAmb=mix(ambient,ambient*vec3f(1.03,1.00,0.96),skinAmt*0.40);
   let f0=mix(vec3f(.04),vec3f(.028),skinAmt);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;

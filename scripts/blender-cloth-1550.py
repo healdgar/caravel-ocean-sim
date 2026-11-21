@@ -391,26 +391,36 @@ class BodySurface:
 _ACTIVE_DONOR = None
 
 
-def enforce_body_clearance(obj, donor, min_clr):
-    """Mathematically guarantees every vertex of the cloth surface sits at least min_clr outside the high-res Tripo body."""
-    if donor is None or min_clr <= 0.0:
+def enforce_body_clearance(obj, donor, min_clr, peplum_flare=None):
+    """Mathematically guarantees every vertex of the cloth surface sits at least min_clr outside the high-res Tripo body.
+    When peplum_flare=(z_start, z_bot, extra_clr) is set on untucked outer doublets/jerkins/tunics, enforces a smooth
+    outward peplum flare below z_start so cloth physics never collapses the lower skirt into trouser/breechcloth hips."""
+    if donor is None or (min_clr <= 0.0 and peplum_flare is None):
         return
     mesh = obj.data
     pushed = 0
     for v in mesh.vertices:
+        req = min_clr
+        if peplum_flare is not None:
+            z_start, z_bot, extra_clr = peplum_flare
+            if v.co.z < z_start:
+                ft = max(0.0, min(1.0, (z_start - v.co.z) / max(0.06, z_start - z_bot)))
+                req = max(req, min_clr + extra_clr * (ft ** 1.15))
+        if req <= 0.0:
+            continue
         ok, loc, nrm, _fi = donor.closest_point_on_mesh(v.co)
         if not ok:
             continue
         delta = v.co - loc
         sd = delta.dot(nrm)
-        if sd < min_clr:
-            v.co = loc + nrm * min_clr
+        if sd < req:
+            v.co = loc + nrm * req
             pushed += 1
     if pushed:
         mesh.update()
 
 
-def make_cloth_object(name, verts, faces, pin_weights, chan_fab_uv, flex_phase, cloth_cfg=None, solidify=0.0028, subsurf=1, sim_frames=26, min_clr=0.010):
+def make_cloth_object(name, verts, faces, pin_weights, chan_fab_uv, flex_phase, cloth_cfg=None, solidify=0.0028, subsurf=1, sim_frames=26, min_clr=0.010, peplum_flare=None):
     """Creates a Blender mesh, runs real physical CLOTH simulation + SUBSURF + SOLIDIFY, and returns the evaluated mesh object."""
     mesh = bpy.data.meshes.new(name + '_mesh')
     mesh.from_pydata(verts, [], faces)
@@ -514,8 +524,8 @@ def make_cloth_object(name, verts, faces, pin_weights, chan_fab_uv, flex_phase, 
     sm.iterations = 2
     bpy.ops.object.modifier_apply(modifier=sm.name)
 
-    # Guaranteed geometric body clearance BEFORE solidify so ZERO vertices ever intersect skin!
-    enforce_body_clearance(obj, _ACTIVE_DONOR, min_clr)
+    # Guaranteed geometric body clearance BEFORE solidify so ZERO vertices ever intersect skin (or collapse untucked peplums)!
+    enforce_body_clearance(obj, _ACTIVE_DONOR, min_clr, peplum_flare=peplum_flare)
 
     if solidify > 0.0:
         sol = obj.modifiers.new('Solidify', 'SOLIDIFY')
@@ -559,6 +569,11 @@ def build_tube(rings, closed_u=True):
     return verts, faces, pin, cfu, fp
 
 
+def _sstep(a, b, x):
+    t = max(0.0, min(1.0, (x - a) / (b - a))) if abs(b - a) > 1e-6 else (1.0 if x >= b else 0.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
 # --------------------------------------------------------------------------- Tailored 1550 garment pattern builders
 def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearance=0.020,
                       flare_bot=0.0, v_neck=0.0, scoop=0.0, stand_collar=0.0,
@@ -600,11 +615,21 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
                     z += stand_collar * ((yt - 0.60) / 0.40)
 
             env_r, yc = surf.sample_torso(min(surf.t_z1, max(surf.t_z0, z)), th)
-            bot_flare = flare_bot * (max(0.0, 1.0 - bf * 2.0) ** 1.5)
-            pleat_w = (0.5 + 0.5 * math.cos(th * pleats)) * pleat_amp * (1.0 - bf * 0.5) if pleats > 0 else 0.0
-            # Never apply negative tuck_drop that pulls the lower back/waist cloth inside the spine skin!
-            tuck_drop = 0.0
-            r = env_r + clearance + tuck_drop + bot_flare + pleat_w
+            if tucked:
+                # Tucked upper garment: smoothly tuck waist hem inward (clearance - 6mm below z=1.02, >= 14mm outside body)
+                # and flatten pleats below waist so outer trousers/skirt waistband & belt wrap cleanly outside!
+                tuck_t = _sstep(1.02, 0.96, z)
+                tuck_drop = -0.006 * tuck_t
+                bot_flare = 0.0
+                pleat_w = (0.5 + 0.5 * math.cos(th * pleats)) * pleat_amp * (1.0 - bf * 0.5) * (1.0 - tuck_t) if pleats > 0 else 0.0
+            else:
+                # Untucked outer doublet/jerkin/tunic: flare lower peplum smoothly below the belt line (z <= 1.025)
+                # so the skirt clears the trouser/breechcloth hips while the belt wraps cleanly outside at z ~ 1.03!
+                tuck_drop = 0.0
+                flare_t = max(0.0, (1.025 - z) / max(0.08, 1.025 - z_bot))
+                bot_flare = flare_bot * (flare_t ** 1.35)
+                pleat_w = (0.5 + 0.5 * math.cos(th * pleats)) * pleat_amp * (1.0 - bf * 0.5) if pleats > 0 else 0.0
+            r = env_r + max(0.014, clearance + tuck_drop) + bot_flare + pleat_w
 
             if in_yoke:
                 collar_r = neck_r + (0.012 if stand_collar > 0 else 0.016)
@@ -625,14 +650,14 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
             elif bodice_lace and cos_f > 0.985 and 0.14 < bf < 0.88 and not in_yoke:
                 ch, fab = CH_LINEN, FAB_LINEN
 
-            # Pin collar/yoke firmly + firm pin at tucked bottom hem so torso drapes naturally without riding up!
+            # Pin collar/yoke firmly + firm pin at tucked waist hem so torso drapes naturally without riding up!
             pw = 0.0
             if in_yoke:
                 pw = 0.65 + 0.35 * yt
-            elif tucked and bf < 0.10:
+            elif tucked and bf < 0.16:
                 pw = 1.0
-            elif tucked and bf < 0.22:
-                pw = 0.80 * (1.0 - (bf - 0.10) / 0.12)
+            elif tucked and bf < 0.30:
+                pw = 0.80 * (1.0 - (bf - 0.16) / 0.14)
             elif not shoulder_yoke and bf > 0.80:
                 pw = 1.0
 
@@ -641,7 +666,12 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
         rings.append(row)
 
     v, f, p, cfu, fp = build_tube(rings, True)
-    return make_cloth_object(name, v, f, p, cfu, fp, cloth_cfg=cloth_cfg, solidify=solidify, subsurf=subsurf, sim_frames=sim_frames, min_clr=max(0.016, clearance * 0.58))
+    cfg = dict(cloth_cfg) if cloth_cfg is not None else None
+    if cfg is not None:
+        cfg['pin_offset'] = 0.015 if tucked else max(0.024, clearance * 0.75)
+    min_c = 0.014 if tucked else max(0.024, clearance * 0.72)
+    pf = None if (tucked or flare_bot <= 0.0) else (1.025, z_bot, flare_bot * 0.95)
+    return make_cloth_object(name, v, f, p, cfu, fp, cloth_cfg=cfg, solidify=solidify, subsurf=subsurf, sim_frames=sim_frames, min_clr=min_c, peplum_flare=pf)
 
 
 def build_sleeves_piece(surf, name, *, x_end_frac=0.58, n_x=22, n_t=28, clearance=0.018,
@@ -649,9 +679,13 @@ def build_sleeves_piece(surf, name, *, x_end_frac=0.58, n_x=22, n_t=28, clearanc
                         channel=CH_SHIRT, fabric=FAB_LINEN, sleeve_flex=0.22,
                         cloth_cfg=None, solidify=0.0024, subsurf=1, sim_frames=24, x0_frac=0.95):
     objs = []
-    # Start cleanly at the outer shoulder seam (x0_frac=0.95) so contrasting chemise sleeves never bury inside the bodice chest!
+    # Start cleanly at the outer shoulder seam so sleeves blend smoothly into the torso armscye without lumps!
     x0 = surf.arm_x0 * x0_frac
     x1 = surf.arm_x0 + (surf.arm_x1 - surf.arm_x0) * x_end_frac
+    cfg = dict(cloth_cfg) if cloth_cfg is not None else None
+    if cfg is not None:
+        cfg['pin_offset'] = max(0.015, clearance * 0.82)
+    min_c = max(0.012, clearance * 0.60)
     for side in range(2):
         sgn = 1.0 if side == 0 else -1.0
         rings = []
@@ -663,26 +697,27 @@ def build_sleeves_piece(surf, name, *, x_end_frac=0.58, n_x=22, n_t=28, clearanc
                 vf = it / n_t
                 th = vf * math.tau
                 env_r, yc, zc = surf.sample_arm(side, max(surf.arm_x0, ax), th)
-                # Taper sleeve-cap smoothly out from inside the bodice armscye (uf=0) to avoid shoulder-seam z-fighting!
-                cap = 0.014 * math.sin(min(1.0, uf / 0.32) * math.pi) if uf < 0.32 else 0.0
-                puff = puff_amp * math.sin(uf * math.pi) * (0.85 + 0.15 * math.cos(th * 8))
-                cuff = 0.009 * math.sin(((uf - 0.85) / 0.15) * math.pi) if (rolled_cuff and uf > 0.85) else 0.0
-                armscye_tuck = -0.006 * (1.0 - uf / 0.14) if uf < 0.14 else 0.0
+                # Smooth armscye-to-sleeve transition: gentle deltoid ease with zero sudden shoulder lump or pinch!
+                armscye_tuck = -0.003 * (1.0 - _sstep(0.0, 0.22, uf))
+                cap = 0.004 * math.sin(min(1.0, uf / 0.36) * math.pi) * (0.40 + 0.60 * max(0.0, math.sin(th))) if uf < 0.36 else 0.0
+                puff = puff_amp * (math.sin(uf * math.pi) ** 1.25) * (0.94 + 0.06 * math.cos(th * 6))
+                # Clean tailored cuff band without pinched double-wall sausage bulge
+                cuff = 0.0035 * _sstep(0.86, 0.94, uf) if rolled_cuff else 0.0
                 r = env_r + clearance + armscye_tuck + cap + puff + cuff
                 x = ax * sgn
                 y = yc + math.cos(th) * surf.front_y * r
                 z = zc + math.sin(th) * r
 
                 ch, fab = channel, fabric
-                if cuff_trim and uf > 0.86:
+                if cuff_trim and uf >= 0.87:
                     ch, fab = CH_LINEN, FAB_LINEN
 
-                # Pin shoulder seam & cuff band so middle of sleeve puffs and drapes under real gravity!
+                # Pin shoulder seam & cuff band smoothly at matching clearance so mid-sleeve drapes naturally!
                 pw = 0.0
                 if uf < 0.16:
                     pw = 1.0 - uf / 0.16 * 0.35
                 elif uf > 0.88:
-                    pw = 0.90
+                    pw = 0.85
                 elif math.sin(th) > 0.45:
                     # Gentle top-of-arm support so sleeve hangs cleanly below arm
                     pw = 0.35 * (math.sin(th) - 0.45) / 0.55
@@ -691,7 +726,7 @@ def build_sleeves_piece(surf, name, *, x_end_frac=0.58, n_x=22, n_t=28, clearanc
                 row.append(((x, y, z), pw, ch, fab, uf * 2.5, vf * 2.0, fl, vf + side * 0.5))
             rings.append(row)
         v, f, p, cfu, fp = build_tube(rings, True)
-        objs.append(make_cloth_object(f'{name}_s{side}', v, f, p, cfu, fp, cloth_cfg=cloth_cfg, solidify=solidify, subsurf=subsurf, sim_frames=sim_frames))
+        objs.append(make_cloth_object(f'{name}_s{side}', v, f, p, cfu, fp, cloth_cfg=cfg, solidify=solidify, subsurf=subsurf, sim_frames=sim_frames, min_clr=min_c))
     return objs
 
 
@@ -709,12 +744,12 @@ def build_pleated_skirt(surf, name, *, z_waist, z_hem=0.10, n_z=30, n_t=64,
             uf = it / n_t
             th = uf * math.tau
             env_r, yc = surf.sample_torso(max(surf.t_z0, z), th)
-            bell = down ** 0.80
+            bell = down ** 1.10
             base_r = env_r + waist_clr
             target_r = math.hypot(math.sin(th) * hem_rx, math.cos(th) * hem_rz)
-            pleat_w = math.cos(th * pleats) * pleat_amp * (down ** 0.85)
+            pleat_w = math.cos(th * pleats) * pleat_amp * (down ** 0.95)
             side = 0 if math.sin(th) >= 0 else 1
-            leg_mask = max(0.0, min(1.0, (0.88 - z) / 0.14))
+            leg_mask = max(0.0, min(1.0, (0.86 - z) / 0.14))
             if leg_mask > 0.0:
                 lr, lxc, lyc = surf.sample_leg(side, min(surf.l_z1, max(surf.l_z0, z)), th)
                 leg_out = math.hypot(lxc + math.sin(th) * (lr + 0.072), (lyc - yc) + math.cos(th) * surf.front_y * (lr + 0.072)) * leg_mask
@@ -739,8 +774,11 @@ def build_pleated_skirt(surf, name, *, z_waist, z_hem=0.10, n_z=30, n_t=64,
         rings.append(row)
 
     v, f, p, cfu, fp = build_tube(rings, True)
-    skirt_cfg = {'mass': 0.42, 'tension': 18.0, 'compression': 10.0, 'shear': 10.0, 'bending': 0.35, 'air_damping': 2.0, 'col_dist': 0.012}
-    return [make_cloth_object(name, v, f, p, cfu, fp, cloth_cfg=skirt_cfg, solidify=0.0030, subsurf=1, sim_frames=sim_frames, min_clr=0.018)]
+    skirt_cfg = {
+        'mass': 0.42, 'tension': 18.0, 'compression': 10.0, 'shear': 10.0, 'bending': 0.35,
+        'air_damping': 2.0, 'col_dist': 0.012, 'pin_offset': max(0.020, waist_clr * 0.92),
+    }
+    return [make_cloth_object(name, v, f, p, cfu, fp, cloth_cfg=skirt_cfg, solidify=0.0030, subsurf=1, sim_frames=sim_frames, min_clr=max(0.018, waist_clr * 0.72))]
 
 
 def build_leg_trousers(surf, name, *, z_waist, z_knee, z_ankle=None,
@@ -855,11 +893,11 @@ def build_leg_trousers(surf, name, *, z_waist, z_knee, z_ankle=None,
 
     trou_cfg = {
         'mass': 0.36, 'tension': 20.0, 'compression': 12.0, 'shear': 10.0, 'bending': 0.55,
-        'air_damping': 2.0, 'pin_offset': max(0.021, clr_hip * 0.85),
+        'air_damping': 2.0, 'pin_offset': max(0.022, clr_hip * 0.92),
     }
-    objs = [make_cloth_object(name + '_body', verts, faces, pin, cfu, fp, cloth_cfg=trou_cfg, solidify=0.0028, subsurf=1, sim_frames=sim_frames, min_clr=0.012)]
+    objs = [make_cloth_object(name + '_body', verts, faces, pin, cfu, fp, cloth_cfg=trou_cfg, solidify=0.0028, subsurf=1, sim_frames=sim_frames, min_clr=0.014)]
 
-    # Fitted wool stockings / hose below knee (optional)
+    # Fitted wool stockings / hose below knee (generous 14mm clearance so shins/calves never poke through during knee bend!)
     if hose_ch is not None and z_ankle is not None:
         for side in range(2):
             h_rings = []
@@ -871,11 +909,11 @@ def build_leg_trousers(surf, name, *, z_waist, z_knee, z_ankle=None,
                     uf = it / 22.0
                     th = uf * math.tau
                     lr, xc, yc = surf.sample_leg(side, z, th)
-                    r = lr + 0.009
+                    r = lr + 0.014
                     row.append(((xc + math.sin(th) * r, yc + math.cos(th) * surf.front_y * r, z), 1.0, hose_ch, FAB_WOOL, uf * 2, f * 2, 0.0, uf))
                 h_rings.append(row)
             hv, hf, hp, hcfu, hfp = build_tube(h_rings, True)
-            objs.append(make_cloth_object(f'{name}_hose{side}', hv, hf, hp, hcfu, hfp, cloth_cfg=None, solidify=0.0018, subsurf=1, sim_frames=0, min_clr=0.005))
+            objs.append(make_cloth_object(f'{name}_hose{side}', hv, hf, hp, hcfu, hfp, cloth_cfg=None, solidify=0.0022, subsurf=1, sim_frames=0, min_clr=0.010))
     return objs
 
 
@@ -951,32 +989,117 @@ def build_buttons(surf, name, *, z_bot, z_top, count=7, clr=0.024):
     )
 
 
-def build_shoes(surf, name, *, channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105):
+def build_shoes(surf, name, *, channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105, cuff_clr=0.008):
+    """Builds a REAL closed physical 3D Renaissance leather shoe / low ankle boot conforming tightly to surf.feet[side]:
+    flat closed bottom sole with subtle heel step, rounded enclosed toe box, closed sloped vamp/instep, and snug ankle
+    collar hugs surf.sample_leg(side, cuff_z, th) + cuff_clr with a clean rolled inner rim."""
     objs = []
+    n_t = 24
     for side in range(2):
         fb = surf.feet[side]
         cx = 0.5 * (fb['min_x'] + fb['max_x'])
-        hx = 0.5 * (fb['max_x'] - fb['min_x']) + 0.004
-        cy = 0.5 * (fb['min_y'] + fb['max_y'])
-        hy = 0.5 * (fb['max_y'] - fb['min_y']) + 0.006
-        z0 = max(0.0, fb['min_z'] + 0.001)
+        hx = 0.5 * (fb['max_x'] - fb['min_x']) + 0.006
+        y_toe = fb['min_y'] if surf.front_y < 0 else fb['max_y']
+        y_heel = fb['max_y'] if surf.front_y < 0 else fb['min_y']
+        y_toe_out = y_toe + surf.front_y * 0.008
+        y_heel_out = y_heel - surf.front_y * 0.007
+        z0 = max(0.0, fb['min_z'])
+
+        # Sample exact ankle collar center & per-angle radii at cuff_z
+        ankle_r = []
+        _, axc, ayc = surf.sample_leg(side, cuff_z, 0.0)
+        for it in range(n_t):
+            th = (it / n_t) * math.tau
+            ar, _, _ = surf.sample_leg(side, cuff_z, th)
+            ankle_r.append(ar + cuff_clr)
+
+        d_toe = max(0.08, abs(y_toe_out - ayc))
+        d_heel = max(0.04, abs(ayc - y_heel_out))
+        cy_mid = 0.5 * (y_toe_out + y_heel_out)
+
+        def foot_xy(th, scale=1.0):
+            ct = math.cos(th)
+            st = math.sin(th)
+            w_s = (1.02 - 0.14 * (ct * ct)) if ct >= 0 else (1.00 - 0.16 * (ct * ct))
+            xc_th = axc * (0.5 - 0.5 * ct) + cx * (0.5 + 0.5 * ct)
+            fx0 = xc_th + st * hx * w_s
+            dy0 = ct * d_toe if ct >= 0 else ct * d_heel
+            fy0 = ayc + surf.front_y * dy0
+            return cx + (fx0 - cx) * scale, cy_mid + (fy0 - cy_mid) * scale
+
+        def ankle_xy(it, r_delta=0.0):
+            th = (it / n_t) * math.tau
+            r = max(0.025, ankle_r[it] + r_delta)
+            return axc + math.sin(th) * r, ayc + math.cos(th) * surf.front_y * r
+
+        # Ring profile from closed sole bottom -> sole welt -> enclosed toe box -> sloped vamp -> snug ankle collar -> inner rim tuck
+        # Each entry: (ring_kind, z_val, front_blend, back_blend, foot_scale, r_delta, v_uv)
+        z_toe_top = z0 + 0.044
+        z_vamp = z0 + 0.044 + (cuff_z - (z0 + 0.044)) * 0.42
+        z_throat = z0 + 0.044 + (cuff_z - (z0 + 0.044)) * 0.74
+        profile = [
+            ('sole_in',  z0,          0.00, 0.00, 0.42,  0.000, 0.00),
+            ('sole_out', z0,          0.00, 0.00, 1.00,  0.000, 0.08),
+            ('welt',     z0 + 0.009,  0.00, 0.00, 1.03,  0.000, 0.16),
+            ('wall',     z0 + 0.022,  0.04, 0.12, 1.00,  0.000, 0.28),
+            ('toe_box',  z0 + 0.035,  0.20, 0.36, 0.99,  0.000, 0.42),
+            ('vamp0',    z_toe_top,   0.52, 0.72, 0.98,  0.000, 0.56),
+            ('vamp1',    z_vamp,      0.82, 0.92, 0.98,  0.000, 0.70),
+            ('throat',   z_throat,    0.96, 0.98, 0.98,  0.000, 0.82),
+            ('collar',   cuff_z,      1.00, 1.00, 1.00,  0.002, 0.92),
+            ('rim_top',  cuff_z + 0.002, 1.00, 1.00, 1.00, -0.001, 0.96),
+            ('rim_in',   cuff_z - 0.016, 1.00, 1.00, 1.00, -0.004, 1.00),
+        ]
+
         rings = []
-        n_z, n_t = 8, 22
-        for iz in range(n_z):
-            f = iz / (n_z - 1)
-            z = z0 + f * (cuff_z - z0)
-            taper_y = 1.0 - (f - 0.34) * 0.66 if f > 0.34 else (1.01 if f < 0.16 else 1.0)
-            shift_y = -surf.front_y * (f - 0.34) * hy * 0.54 if f > 0.34 else 0.0
+        for (kind, z_base, fb_fr, fb_bk, f_scale, r_del, v_uv) in profile:
             row = []
             for it in range(n_t):
                 uf = it / n_t
                 th = uf * math.tau
-                x = cx + math.sin(th) * hx * (0.82 if f > 0.45 else 0.96)
-                y = cy + shift_y + math.cos(th) * surf.front_y * hy * taper_y
-                row.append(((x, y, z), 1.0, channel, fabric, uf * 2.0, f, 0.0, uf))
+                ct = math.cos(th)
+                front_w = _sstep(-0.30, 0.30, ct)
+                blend = fb_bk * (1.0 - front_w) + fb_fr * front_w
+                fx, fy = foot_xy(th, f_scale)
+                ax, ay = ankle_xy(it, r_del)
+                x = fx * (1.0 - blend) + ax * blend
+                y = fy * (1.0 - blend) + ay * blend
+                # Subtle 4mm Renaissance leather heel step & midfoot arch on sole bottom
+                if kind in ('sole_in', 'sole_out'):
+                    heel_step = -0.003 if ct < -0.20 else (0.002 if ct < 0.25 else 0.0)
+                    z = max(0.0, z_base + heel_step)
+                elif kind == 'welt':
+                    heel_step = -0.002 if ct < -0.20 else 0.0
+                    z = max(0.005, z_base + heel_step)
+                elif kind in ('toe_box', 'vamp0') and ct > 0.0:
+                    # Smoothly arch the closed toe cap / instep slightly higher over the ball and instep
+                    z = z_base + 0.005 * (1.0 - ct * 0.5)
+                else:
+                    z = z_base
+                row.append(((x, y, z), 1.0, channel, fabric, uf * 2.0, v_uv, 0.0, uf))
             rings.append(row)
+
         v, f, p, cfu, fp = build_tube(rings, True)
-        objs.append(make_cloth_object(f'{name}_shoe{side}', v, f, p, cfu, fp, cloth_cfg=None, solidify=0.0028, subsurf=1, sim_frames=0, min_clr=0.004))
+        # Close bottom sole completely with center pole connected to inner sole ring (outward -Z normal!)
+        bot_idx = len(v)
+        v.append((cx, cy_mid, max(0.0, z0)))
+        p.append(1.0)
+        cfu.append((channel, fabric, 0.5, 0.0))
+        fp.append((0.0, 0.5))
+        for s in range(n_t):
+            s2 = (s + 1) % n_t
+            f.append((bot_idx, s2, s))
+
+        shoe_obj = make_cloth_object(
+            f'{name}_shoe{side}', v, f, p, cfu, fp,
+            cloth_cfg=None, solidify=0.0, subsurf=1, sim_frames=0, min_clr=0.004,
+        )
+        # Keep flat bottom sole strictly above ground (z >= 0.0)
+        for vt in shoe_obj.data.vertices:
+            if vt.co.z < 0.0:
+                vt.co.z = 0.0
+        shoe_obj.data.update()
+        objs.append(shoe_obj)
     return objs
 
 
@@ -1215,100 +1338,100 @@ def build_one_garment(surf, body_ctx, spec_id, slot, sim_frames):
 
     objs = []
     if spec_id == 'male-linen-shirt':
-        objs.append(build_torso_piece(surf, 'shirt_body', z_bot=0.84, clearance=0.024, v_neck=0.085, tucked=True,
+        objs.append(build_torso_piece(surf, 'shirt_body', z_bot=0.94, clearance=0.024, v_neck=0.085, tucked=True,
                                       pleats=10, pleat_amp=0.005, channel=CH_SHIRT, fabric=FAB_LINEN,
                                       cloth_cfg=linen_cfg, solidify=0.0026, sim_frames=sim_frames, hem_flex=0.14))
-        objs.extend(build_sleeves_piece(surf, 'shirt_slv', x_end_frac=0.56, clearance=0.022, puff_amp=0.015,
+        objs.extend(build_sleeves_piece(surf, 'shirt_slv', x_end_frac=0.56, clearance=0.022, puff_amp=0.011,
                                         rolled_cuff=True, channel=CH_SHIRT, fabric=FAB_LINEN,
                                         cloth_cfg=linen_cfg, solidify=0.0024, sim_frames=sim_frames))
     elif spec_id == 'male-doublet':
-        objs.append(build_torso_piece(surf, 'dbl_body', z_bot=0.83, clearance=0.026, flare_bot=0.032,
+        objs.append(build_torso_piece(surf, 'dbl_body', z_bot=0.84, clearance=0.034, flare_bot=0.036,
                                       stand_collar=0.040, collar_ch=CH_LINEN, channel=CH_SHIRT, fabric=FAB_WOOL,
                                       cloth_cfg=wool_cfg, solidify=0.0038, sim_frames=sim_frames, hem_flex=0.12))
-        objs.extend(build_sleeves_piece(surf, 'dbl_slv', x_end_frac=0.88, clearance=0.022, puff_amp=0.014,
+        objs.extend(build_sleeves_piece(surf, 'dbl_slv', x_end_frac=0.88, clearance=0.022, puff_amp=0.009,
                                         cuff_trim=True, rolled_cuff=False, channel=CH_SHIRT, fabric=FAB_WOOL,
-                                        cloth_cfg=wool_cfg, solidify=0.0032, sim_frames=sim_frames))
-        objs.append(build_buttons(surf, 'dbl', z_bot=0.96, z_top=1.42, count=7, clr=0.028))
+                                        cloth_cfg=wool_cfg, solidify=0.0030, sim_frames=sim_frames))
+        objs.append(build_buttons(surf, 'dbl', z_bot=0.96, z_top=1.42, count=7, clr=0.036))
     elif spec_id == 'male-soldier-jerkin':
-        objs.extend(build_sleeves_piece(surf, 'jrk_slv', x_end_frac=0.84, clearance=0.022, puff_amp=0.012,
+        objs.extend(build_sleeves_piece(surf, 'jrk_slv', x_end_frac=0.84, clearance=0.022, puff_amp=0.008,
                                         cuff_trim=True, rolled_cuff=False, channel=CH_LINEN, fabric=FAB_LINEN,
                                         cloth_cfg=linen_cfg, solidify=0.0024, sim_frames=sim_frames))
-        objs.append(build_torso_piece(surf, 'jrk_body', z_bot=0.82, clearance=0.028, flare_bot=0.028,
+        objs.append(build_torso_piece(surf, 'jrk_body', z_bot=0.84, clearance=0.034, flare_bot=0.036,
                                       stand_collar=0.032, channel=CH_BUFF, fabric=FAB_LEATHER,
-                                      cloth_cfg=leather_cfg, solidify=0.0044, sim_frames=sim_frames, hem_flex=0.08))
-        objs.append(build_buttons(surf, 'jrk', z_bot=0.95, z_top=1.40, count=6, clr=0.030))
+                                      cloth_cfg=leather_cfg, solidify=0.0042, sim_frames=sim_frames, hem_flex=0.08))
+        objs.append(build_buttons(surf, 'jrk', z_bot=0.95, z_top=1.40, count=6, clr=0.038))
     elif spec_id == 'female-chemise-blouse':
-        objs.append(build_torso_piece(surf, 'blouse_body', z_bot=0.86, clearance=0.028, scoop=0.068, tucked=True,
+        objs.append(build_torso_piece(surf, 'blouse_body', z_bot=0.94, clearance=0.026, scoop=0.068, tucked=True,
                                       pleats=12, pleat_amp=0.005, channel=CH_SHIRT, fabric=FAB_LINEN,
                                       cloth_cfg=linen_cfg, solidify=0.0026, sim_frames=sim_frames, hem_flex=0.10))
-        objs.extend(build_sleeves_piece(surf, 'blouse_slv', x_end_frac=0.58, clearance=0.022, puff_amp=0.020,
+        objs.extend(build_sleeves_piece(surf, 'blouse_slv', x_end_frac=0.58, clearance=0.022, puff_amp=0.014,
                                         rolled_cuff=True, channel=CH_SHIRT, fabric=FAB_LINEN,
-                                        cloth_cfg=linen_cfg, solidify=0.0022, sim_frames=sim_frames, x0_frac=1.02))
+                                        cloth_cfg=linen_cfg, solidify=0.0022, sim_frames=sim_frames, x0_frac=0.98))
     elif spec_id == 'female-laced-bodice':
-        objs.extend(build_sleeves_piece(surf, 'bod_slv', x_end_frac=0.56, clearance=0.022, puff_amp=0.022,
+        objs.extend(build_sleeves_piece(surf, 'bod_slv', x_end_frac=0.56, clearance=0.022, puff_amp=0.015,
                                         rolled_cuff=True, channel=CH_LINEN, fabric=FAB_LINEN,
-                                        cloth_cfg=linen_cfg, solidify=0.0022, sim_frames=sim_frames, x0_frac=1.04))
-        objs.append(build_torso_piece(surf, 'bod_body', z_bot=0.86, clearance=0.028, scoop=0.075, tucked=True,
+                                        cloth_cfg=linen_cfg, solidify=0.0022, sim_frames=sim_frames, x0_frac=0.99))
+        objs.append(build_torso_piece(surf, 'bod_body', z_bot=0.94, clearance=0.026, scoop=0.075, tucked=True,
                                       collar_ch=CH_LINEN, bodice_lace=True, channel=CH_SHIRT, fabric=FAB_WOOL,
                                       cloth_cfg=wool_cfg, solidify=0.0032, sim_frames=sim_frames, hem_flex=0.06))
     elif spec_id == 'indigenous-tunic-m':
-        objs.append(build_torso_piece(surf, 'tun_body', z_bot=0.78, clearance=0.026, flare_bot=0.026, scoop=0.060,
+        objs.append(build_torso_piece(surf, 'tun_body', z_bot=0.82, clearance=0.034, flare_bot=0.036, scoop=0.060,
                                       hem_trim=True, pleats=8, pleat_amp=0.006, channel=CH_SHIRT, fabric=FAB_COTTON,
                                       cloth_cfg=linen_cfg, solidify=0.0028, sim_frames=sim_frames, hem_flex=0.28))
-        objs.extend(build_sleeves_piece(surf, 'tun_slv', x_end_frac=0.30, clearance=0.022, puff_amp=0.008,
+        objs.extend(build_sleeves_piece(surf, 'tun_slv', x_end_frac=0.30, clearance=0.022, puff_amp=0.006,
                                         rolled_cuff=False, channel=CH_SHIRT, fabric=FAB_COTTON,
                                         cloth_cfg=linen_cfg, solidify=0.0026, sim_frames=sim_frames))
     elif spec_id == 'indigenous-huipil-f':
-        objs.append(build_torso_piece(surf, 'hup_body', z_bot=0.80, clearance=0.026, flare_bot=0.030, scoop=0.058,
+        objs.append(build_torso_piece(surf, 'hup_body', z_bot=0.83, clearance=0.034, flare_bot=0.036, scoop=0.058,
                                       hem_trim=True, pleats=10, pleat_amp=0.006, channel=CH_SHIRT, fabric=FAB_COTTON,
                                       cloth_cfg=linen_cfg, solidify=0.0028, sim_frames=sim_frames, hem_flex=0.30))
-        objs.extend(build_sleeves_piece(surf, 'hup_slv', x_end_frac=0.32, clearance=0.024, puff_amp=0.010,
+        objs.extend(build_sleeves_piece(surf, 'hup_slv', x_end_frac=0.32, clearance=0.024, puff_amp=0.007,
                                         rolled_cuff=False, channel=CH_SHIRT, fabric=FAB_COTTON,
                                         cloth_cfg=linen_cfg, solidify=0.0026, sim_frames=sim_frames))
     elif spec_id == 'male-mariner-slops':
         objs.extend(build_leg_trousers(surf, 'slops', z_waist=z_waist + 0.048, z_knee=0.42,
                                        clr_hip=0.030, clr_thigh=0.036, clr_knee=0.022, slop_puff=0.026, pleat_freq=10,
                                        channel=CH_TROUSERS, fabric=FAB_WOOL, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'slops', z_center=z_waist + 0.032, clr=0.036))
-        objs.extend(build_shoes(surf, 'slops', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.115))
+        objs.extend(build_belt_and_buckle(surf, 'slops', z_center=z_waist + 0.032, clr=0.038))
+        objs.extend(build_shoes(surf, 'slops', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.115, cuff_clr=0.008))
     elif spec_id == 'male-trunk-hose':
-        objs.extend(build_leg_trousers(surf, 'trunk', z_waist=z_waist + 0.048, z_knee=0.54, z_ankle=0.09,
-                                       clr_hip=0.028, clr_thigh=0.044, clr_knee=0.024, slop_puff=0.038, pleat_freq=14,
+        objs.extend(build_leg_trousers(surf, 'trunk', z_waist=z_waist + 0.042, z_knee=0.54, z_ankle=0.09,
+                                       clr_hip=0.025, clr_thigh=0.044, clr_knee=0.024, slop_puff=0.038, pleat_freq=14,
                                        hose_ch=CH_HOSE, channel=CH_TROUSERS, fabric=FAB_WOOL, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'trunk', z_center=z_waist + 0.032, clr=0.038))
-        objs.extend(build_shoes(surf, 'trunk', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.155))
+        objs.extend(build_belt_and_buckle(surf, 'trunk', z_center=z_waist + 0.032, clr=0.044))
+        objs.extend(build_shoes(surf, 'trunk', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.155, cuff_clr=0.018))
     elif spec_id == 'female-pleated-skirt':
-        objs.extend(build_pleated_skirt(surf, 'skirt', z_waist=z_waist + 0.032, z_hem=0.10, waist_clr=0.024,
+        objs.extend(build_pleated_skirt(surf, 'skirt', z_waist=z_waist + 0.038, z_hem=0.10, waist_clr=0.030,
                                         hem_rx=0.43, hem_rz=0.40, pleats=16, pleat_amp=0.020,
                                         channel=CH_TROUSERS, fabric=FAB_WOOL, apron=False, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'skirt', z_center=z_waist + 0.022, half_h=0.018, clr=0.030, belt_ch=CH_LEATHER, buckle_ch=None))
-        objs.extend(build_shoes(surf, 'skirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.10))
+        objs.extend(build_belt_and_buckle(surf, 'skirt', z_center=z_waist + 0.026, half_h=0.018, clr=0.038, belt_ch=CH_LEATHER, buckle_ch=None))
+        objs.extend(build_shoes(surf, 'skirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105, cuff_clr=0.008))
     elif spec_id == 'female-apron-skirt':
-        objs.extend(build_pleated_skirt(surf, 'askirt', z_waist=z_waist + 0.032, z_hem=0.10, waist_clr=0.024,
+        objs.extend(build_pleated_skirt(surf, 'askirt', z_waist=z_waist + 0.038, z_hem=0.10, waist_clr=0.030,
                                         hem_rx=0.43, hem_rz=0.40, pleats=16, pleat_amp=0.020,
                                         channel=CH_TROUSERS, fabric=FAB_WOOL, apron=True, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'askirt', z_center=z_waist + 0.022, half_h=0.018, clr=0.032, belt_ch=CH_LINEN, buckle_ch=None))
-        objs.extend(build_shoes(surf, 'askirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.10))
+        objs.extend(build_belt_and_buckle(surf, 'askirt', z_center=z_waist + 0.026, half_h=0.018, clr=0.040, belt_ch=CH_LINEN, buckle_ch=None))
+        objs.extend(build_shoes(surf, 'askirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105, cuff_clr=0.008))
     elif spec_id == 'indigenous-breechcloth-m':
         objs.extend(build_pleated_skirt(surf, 'breech', z_waist=z_waist + 0.020, z_hem=0.46, n_z=18, n_t=40,
-                                        waist_clr=0.018, hem_rx=0.28, hem_rz=0.25, pleats=10, pleat_amp=0.012,
+                                        waist_clr=0.022, hem_rx=0.28, hem_rz=0.25, pleats=10, pleat_amp=0.012,
                                         channel=CH_TROUSERS, fabric=FAB_COTTON, hem_trim=True, max_flex=0.55, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'breech', z_center=z_waist + 0.016, half_h=0.022, clr=0.028, belt_ch=CH_TRIM, buckle_ch=None))
-        objs.extend(build_shoes(surf, 'breech', channel=CH_BUFF, fabric=FAB_LEATHER, cuff_z=0.105))
+        objs.extend(build_belt_and_buckle(surf, 'breech', z_center=z_waist + 0.024, half_h=0.022, clr=0.044, belt_ch=CH_TRIM, buckle_ch=None))
+        objs.extend(build_shoes(surf, 'breech', channel=CH_BUFF, fabric=FAB_LEATHER, cuff_z=0.105, cuff_clr=0.008))
     elif spec_id == 'indigenous-wrap-skirt-f':
         objs.extend(build_pleated_skirt(surf, 'wrap', z_waist=z_waist + 0.020, z_hem=0.16, n_z=24, n_t=48,
-                                        waist_clr=0.018, hem_rx=0.35, hem_rz=0.31, pleats=12, pleat_amp=0.014,
+                                        waist_clr=0.022, hem_rx=0.35, hem_rz=0.31, pleats=12, pleat_amp=0.014,
                                         channel=CH_TROUSERS, fabric=FAB_COTTON, hem_trim=True, max_flex=0.72, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'wrap', z_center=z_waist + 0.016, half_h=0.022, clr=0.028, belt_ch=CH_TRIM, buckle_ch=None))
-        objs.extend(build_shoes(surf, 'wrap', channel=CH_BUFF, fabric=FAB_LEATHER, cuff_z=0.10))
+        objs.extend(build_belt_and_buckle(surf, 'wrap', z_center=z_waist + 0.024, half_h=0.022, clr=0.044, belt_ch=CH_TRIM, buckle_ch=None))
+        objs.extend(build_shoes(surf, 'wrap', channel=CH_BUFF, fabric=FAB_LEATHER, cuff_z=0.105, cuff_clr=0.008))
     elif spec_id == 'shoulder-cloak':
         objs.extend(build_shoulder_cloak(surf, 'cloak', sim_frames=sim_frames))
     elif spec_id == 'female-riding-breeches':
-        objs.extend(build_leg_trousers(surf, 'fbreeches', z_waist=z_waist + 0.032, z_knee=0.34, z_ankle=0.09,
-                                       clr_hip=0.022, clr_thigh=0.026, clr_knee=0.016, slop_puff=0.014, pleat_freq=8,
+        objs.extend(build_leg_trousers(surf, 'fbreeches', z_waist=z_waist + 0.038, z_knee=0.34, z_ankle=0.09,
+                                       clr_hip=0.030, clr_thigh=0.028, clr_knee=0.018, slop_puff=0.014, pleat_freq=8,
                                        hose_ch=CH_LEATHER, channel=CH_TROUSERS, fabric=FAB_WOOL, sim_frames=sim_frames))
-        objs.extend(build_belt_and_buckle(surf, 'fbreeches', z_center=z_waist + 0.020, half_h=0.018, clr=0.026, belt_ch=CH_LEATHER, buckle_ch=CH_BRASS))
-        objs.extend(build_shoes(surf, 'fbreeches', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.14))
+        objs.extend(build_belt_and_buckle(surf, 'fbreeches', z_center=z_waist + 0.026, half_h=0.018, clr=0.038, belt_ch=CH_LEATHER, buckle_ch=CH_BRASS))
+        objs.extend(build_shoes(surf, 'fbreeches', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.145, cuff_clr=0.018))
     else:
         raise RuntimeError(f'Unknown garment {spec_id}')
 

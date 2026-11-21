@@ -2636,48 +2636,66 @@ export function buildTradeVesselRoutes(
 
   const routeOnRiverGraph = (rawPairs, desiredScale = 0.96) => {
     if (!riverGraphNodes.length || !Array.isArray(rawPairs) || rawPairs.length < 2) return null;
-    const sx = ox + rawPairs[0].x, sz = oz + rawPairs[0].z;
-    const ex = ox + rawPairs[rawPairs.length - 1].x, ez = oz + rawPairs[rawPairs.length - 1].z;
-    const mx = ox + rawPairs[rawPairs.length >> 1].x, mz = oz + rawPairs[rawPairs.length >> 1].z;
+    const worldPairs = rawPairs.map((p) => ({ x: ox + p.x, z: oz + p.z }));
+    const sx = worldPairs[0].x, sz = worldPairs[0].z;
+    const ex = worldPairs[worldPairs.length - 1].x, ez = worldPairs[worldPairs.length - 1].z;
 
+    // Project a world point onto its closest node in `comp.nodes`.
+    const closestInComp = (comp, wx, wz) => {
+      let bestId = -1, bestD = Infinity;
+      for (const nid of comp.nodes) {
+        const n = riverGraphNodes[nid];
+        const d = Math.hypot(n.wx - wx, n.wz - wz);
+        if (d < bestD) { bestD = d; bestId = nid; }
+      }
+      return { nid: bestId, d: bestD };
+    };
+
+    // Keep snapped endpoints strictly bounded within the boat's `[pairs[0], pairs[last]]` corridor
+    // rather than overshooting to dead-end tips of a reach.
     let bestComp = null;
     let bestScore = Infinity;
     for (let ci = 0; ci < riverGraphComponents.length; ci++) {
       const comp = riverGraphComponents[ci];
       if (comp.approxLen < 65) continue;
-      let sNode = -1, sD = Infinity;
-      let eNode = -1, eD = Infinity;
-      let mD = Infinity;
-      for (const nid of comp.nodes) {
-        const n = riverGraphNodes[nid];
-        const ds = Math.hypot(n.wx - sx, n.wz - sz);
-        const de = Math.hypot(n.wx - ex, n.wz - ez);
-        const dm = Math.hypot(n.wx - mx, n.wz - mz);
-        if (ds < sD) { sD = ds; sNode = nid; }
-        if (de < eD) { eD = de; eNode = nid; }
-        if (dm < mD) mD = dm;
+      const sHit = closestInComp(comp, sx, sz);
+      const eHit = closestInComp(comp, ex, ez);
+      let sNode = sHit.nid, sD = sHit.d;
+      let eNode = eHit.nid, eD = eHit.d;
+      // If a narrow/bridged end of the sim polyline lies slightly outside the navigable sub-reach,
+      // clamp the start/end station strictly inward along `worldPairs` (never outward past the endpoints).
+      if (sD > 260 || eD > 260) {
+        const step = Math.max(1, Math.floor(worldPairs.length / 48));
+        let firstIn = null, lastIn = null;
+        for (let k = 0; k < worldPairs.length; k += step) {
+          const hit = closestInComp(comp, worldPairs[k].x, worldPairs[k].z);
+          if (hit.d <= 220) {
+            if (!firstIn) firstIn = hit;
+            lastIn = hit;
+          }
+        }
+        const tailHit = closestInComp(comp, ex, ez);
+        if (tailHit.d <= 220) {
+          if (!firstIn) firstIn = tailHit;
+          lastIn = tailHit;
+        }
+        if (firstIn && lastIn && firstIn.nid !== lastIn.nid) {
+          sNode = firstIn.nid; sD = firstIn.d;
+          eNode = lastIn.nid; eD = lastIn.d;
+        }
       }
-      const score = Math.min(sD + eD, mD * 2 + Math.min(sD, eD));
+      if (sD > 360 || eD > 360 || sNode < 0 || eNode < 0 || sNode === eNode) continue;
+      const score = sD + eD;
       if (score < bestScore) {
         bestScore = score;
         bestComp = { comp, compIdx: ci, sNode, eNode, sD, eD };
       }
     }
-    if (!bestComp || Math.min(bestComp.sD, bestComp.eD) > 900) return null;
+    if (!bestComp) return null;
 
     const { dist, prev } = dijkstraRiverFrom(bestComp.sNode);
-    let targetNode = bestComp.eNode;
-    if (!Number.isFinite(dist[targetNode]) || dist[targetNode] < 65) {
-      let farNode = -1, farDist = 0;
-      for (const nid of bestComp.comp.nodes) {
-        if (Number.isFinite(dist[nid]) && dist[nid] > farDist) {
-          farDist = dist[nid];
-          farNode = nid;
-        }
-      }
-      if (farDist < 65 || farNode < 0) return null;
-      targetNode = farNode;
-    }
+    const targetNode = bestComp.eNode;
+    if (!Number.isFinite(dist[targetNode]) || dist[targetNode] < 65) return null;
 
     const nodePath = [];
     const subIndices = new Set();
@@ -2686,6 +2704,7 @@ export function buildTradeVesselRoutes(
       if (Number.isInteger(riverGraphNodes[cur]?.subIdx)) subIndices.add(riverGraphNodes[cur].subIdx);
       if (cur === bestComp.sNode) break;
     }
+    if (nodePath[nodePath.length - 1] !== bestComp.sNode) return null;
     nodePath.reverse();
     const built = buildDenseRouteFromNodePath(nodePath, desiredScale);
     if (!built) return null;
@@ -3101,46 +3120,6 @@ export function buildTradeVesselRoutes(
       totalLen: poly.totalLen,
       phaseOffset,
     });
-  }
-
-  // Supplement any navigable rendered river reaches (`hw >= 2.2 m`, `depth >= 0.55 m`, bridge-clear)
-  // ONLY when not already served by a board river route (`riverBoat:*` or `caravan:*`).
-  if (navSubChains.length > 0 && routes.length < MAX_TRADE_VESSELS) {
-    const navigable = navSubChains
-      .map((sc, subIdx) => ({ sc, subIdx }))
-      .filter(({ sc }) => sc.length >= 150)
-      .sort((a, b) => b.sc.length - a.sc.length);
-    for (let ri = 0; ri < navigable.length && routes.length < MAX_TRADE_VESSELS; ri++) {
-      const { sc: reach, subIdx } = navigable[ri];
-      const firstNode = riverGraphNodes[reach.nodeIds[0]];
-      const reachComp = firstNode?.comp ?? -1;
-      if (coveredRiverSubIndices.has(subIdx) || (reachComp >= 0 && coveredRiverComps.has(reachComp))) continue;
-      const sts = reach.stations;
-      const sampleProbes = [sts[0], sts[sts.length >> 1], sts[sts.length - 1]];
-      const alreadyCovered = routes.some((rt) =>
-        rt.mode === 'river'
-        && Array.isArray(rt.pts)
-        && sampleProbes.some((sp) => sp && rt.pts.some((q) => Math.hypot(q.x - sp.wx, q.z - sp.wz) < 210)),
-      );
-      if (alreadyCovered) continue;
-      const bargeBaseBeam = getTradeVesselArchetype(4).beam || 3.0;
-      const bargeScale = Math.max(0.76, Math.min(0.98, Math.max(0.92, (reach.minHw - 0.55) / (bargeBaseBeam * 0.5))));
-      const built = buildDenseRouteFromNodePath(reach.nodeIds, bargeScale);
-      if (!built || built.totalLen < 120) continue;
-      const boats = built.totalLen > 920 ? 2 : 1;
-      for (let b = 0; b < boats && routes.length < MAX_TRADE_VESSELS; b++) {
-        routes.push({
-          id: `reach:${subIdx}:${b}`, mode: 'river', phase: 'shuttle',
-          archetype: 4, scale: built.scale * (b === 0 ? 1.0 : 0.96),
-          depart: 0, arrive: 1, berth: null,
-          kind: 'river barge',
-          cargo: { fish: 2 + (b & 1) },
-          pilot: null, oarsmen: 4,
-          pts: built.pts, totalLen: built.totalLen,
-          phaseOffset: (((hashU32(subIdx + 1, 13) % 1000) / 1000) + b * 0.5) % 1.0,
-        });
-      }
-    }
   }
 
   return routes.slice(0, MAX_TRADE_VESSELS);
