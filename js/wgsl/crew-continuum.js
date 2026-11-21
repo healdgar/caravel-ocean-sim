@@ -254,12 +254,12 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   let picLuma=dot(picture,vec3f(0.299,0.587,0.114));
 
   // Preserve full 4K/8K painted skin detail (cheeks, lips, eyelid creases, nostrils, pores) while transferring cleanly
-  // to each person's actor.skin.rgb with a gentle blue-channel ceiling so cool shadow texels never turn lavender/grey.
-  let lumaRatio=clamp(picLuma/skinLuma,0.34,1.52);
-  let softLuma=mix(1.0,lumaRatio,0.88);
-  let rawShade=clamp(picture/max(skin.xyz,vec3f(1e-3)),vec3f(0.34),vec3f(1.52));
-  let safeShade=vec3f(rawShade.r,rawShade.g,min(rawShade.b,lumaRatio*1.06));
-  var skinTone=actor.skin.rgb*mix(vec3f(softLuma),safeShade,0.62);
+  // to each person's actor.skin.rgb with a tight shade range so baked highlights or shadows never blow out or bruise.
+  let lumaRatio=clamp(picLuma/skinLuma,0.60,1.24);
+  let softLuma=mix(1.0,lumaRatio,0.82);
+  let rawShade=clamp(picture/max(skin.xyz,vec3f(1e-3)),vec3f(0.60),vec3f(1.24));
+  let safeShade=vec3f(rawShade.r,rawShade.g,min(rawShade.b,lumaRatio*1.04));
+  var skinTone=actor.skin.rgb*mix(vec3f(softLuma),safeShade,0.58);
 
   // Gentle lip warmth reinforcement (4K/8K painted texture already carries natural lip color).
   let lipY=select(1.584,1.506,female);
@@ -269,23 +269,23 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   skinTone=mix(skinTone,skinTone*vec3f(1.06,0.88,0.86),lipMask*0.16);
 
   var baseOut=vec4f(picture,0.0);
-  if(region==0u){
-    // Actual mesh eye vertices: preserve the 4K/8K painted iris, pupil, lash-line, and natural white sclera verbatim,
-    // only capping extreme specular highlights so eyes stay lifelike rather than chalky or muddy grey.
-    let eyeCol=min(picture,vec3f(0.76,0.74,0.72));
-    baseOut=vec4f(eyeCol,0.0);
-  }else if(region==3u||region==4u){
-    // Keep surrounding face/eyelid skin continuous in actor.skin; preserve any bright sclera or true dark pupil/iris
-    // texels strictly inside the palpebral fissure with a soft feathered transition so shadowed eyelid creases never smudge.
-    let eyeX=select(0.0275,0.0300,female);
-    let eyeY=select(1.654,1.579,female);
-    let eyeRel=vec2f((abs(bodyPos.x)-eyeX)/0.0145,(bodyPos.y-eyeY)/0.0085);
-    let inEyeBox=smoothstep(0.048,0.062,bodyPos.z)*(1.0-smoothstep(0.35,1.00,dot(eyeRel,eyeRel)));
-    let brightSclera=smoothstep(skinLuma*1.18,skinLuma*1.48,picLuma);
-    let lowWarmth=1.0-smoothstep(0.10,0.24,picture.r-picture.b);
-    let darkIrisLash=(1.0-smoothstep(skinLuma*0.16,skinLuma*0.36,picLuma))*lowWarmth;
-    let eyeOpen=inEyeBox*max(brightSclera,darkIrisLash);
-    let eyeCol=min(picture,vec3f(0.76,0.74,0.72));
+  if(region==0u||region==3u||region==4u){
+    // Treat region 0, 3, and 4 uniformly as skin so stray Tripo eye-region spills onto eyelids/brows/forehead/nose
+    // NEVER bypass actor.skin.rgb! Keep natural warm-off-white sclera (<=0.62) and dark iris/pupil strictly inside
+    // the tight anatomical eye opening ellipse (radius < 0.72), with zero chalky eyelids or brow blotches.
+    let eyeX=select(0.0315,0.0345,female);
+    let eyeY=select(1.6585,1.5825,female);
+    let eyeZ=select(0.064,0.072,female);
+    let eyeRx=select(0.0155,0.0145,female);
+    let eyeRy=select(0.0062,0.0060,female);
+    let eyeRel=vec2f((abs(bodyPos.x)-eyeX)/eyeRx,(bodyPos.y-eyeY)/eyeRy);
+    let eyeR2=dot(eyeRel,eyeRel);
+    let inEyeOpen=smoothstep(eyeZ,eyeZ+0.008,bodyPos.z)*(1.0-smoothstep(0.28,0.5184,eyeR2));
+    let lowWarmth=1.0-smoothstep(0.08,0.20,picture.r-picture.b);
+    let darkIrisLash=(1.0-smoothstep(skinLuma*0.22,skinLuma*0.46,picLuma))*lowWarmth;
+    let softSclera=select(0.0,smoothstep(skinLuma*0.92,skinLuma*1.28,picLuma)*lowWarmth,region==0u);
+    let eyeOpen=inEyeOpen*max(darkIrisLash,softSclera);
+    let eyeCol=min(picture,vec3f(0.62,0.60,0.57));
     baseOut=vec4f(mix(skinTone,eyeCol,eyeOpen),1.0-eyeOpen);
   }else if(region==1u||region==2u){
     let median=crewWear[min(region,4u)];
@@ -636,24 +636,22 @@ fn hairContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let view=normalize(F.camPos.xyz-v.world);
   let H=normalize(sun+view);
 
-  // Marschner / Kajiya-Kay dual-lobe anisotropic hair fiber highlights:
-  //   R-lobe: cuticular surface glint shifted slightly toward root
-  //   TRT-lobe: internal pigment-tinted sheen shifted toward tip
+  // Soft natural matte-satin Marschner / Kajiya-Kay hair fiber sheen (no glossy plastic crown band).
   let T1=normalize(T-n*0.09);
   let T2=normalize(T+n*0.15);
   let sinTH1=sqrt(max(0.0,1.0-clamp(dot(T1,H),-1.0,1.0)*clamp(dot(T1,H),-1.0,1.0)));
   let sinTH2=sqrt(max(0.0,1.0-clamp(dot(T2,H),-1.0,1.0)*clamp(dot(T2,H),-1.0,1.0)));
   let atten=smoothstep(-0.25,0.45,dot(n,sun))*rootAO;
-  let specR=pow(sinTH1,mix(48.0,110.0,wet.y))*mix(0.022,0.058,wet.y)*atten;
-  let tintTRT=pow(max(albedo,vec3f(0.010)),vec3f(0.75))*1.45;
-  let specTRT=pow(sinTH2,22.0)*0.068*atten*(1.0-wet.x*0.35)*tintTRT;
+  let specR=pow(sinTH1,mix(36.0,88.0,wet.y))*mix(0.007,0.030,wet.y)*atten;
+  let tintTRT=pow(max(albedo,vec3f(0.010)),vec3f(0.75))*1.15;
+  let specTRT=pow(sinTH2,18.0)*0.026*atten*(1.0-wet.x*0.35)*tintTRT;
 
-  // Soft wrapped fiber diffuse + backlit forward scatter through thin wisps & strand tips.
+  // Soft wrapped fiber diffuse + subtle backlit scatter through strand tips.
   let wrapDiff=max(0.0,(dot(n,sun)+0.32)/1.32)/3.14159265*rootAO;
-  let backScatter=pow(clamp(dot(-sun,view),0.0,1.0),4.0)*(0.18+0.42*along)*atten*albedo*1.4;
-  let skyGlint=textureSampleLevel(envCube,sampC,reflect(-view,n),5.5).rgb*0.014*rootAO;
-  let rough=mix(0.76,0.44,wet.y);
-  let f0=vec3f(0.04);
+  let backScatter=pow(clamp(dot(-sun,view),0.0,1.0),4.0)*(0.12+0.26*along)*atten*albedo*1.1;
+  let skyGlint=textureSampleLevel(envCube,sampC,reflect(-view,n),6.2).rgb*0.005*rootAO;
+  let rough=mix(0.84,0.48,wet.y);
+  let f0=vec3f(0.022);
   let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))
     +lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)
     +albedo*(direct*wrapDiff+ambient)+direct*(vec3f(specR)+specTRT+backScatter)+skyGlint*F.windP[1].w;
@@ -822,39 +820,31 @@ fn clothingContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let isLeather=(fab==2u);
   let isBrass=(fab==3u);
 
-  // Nyquist-band-limited multi-scale fabric micro-normal perturbation & albedo thread modulation:
-  //   fab 0/4 (linen/cotton): crisp orthogonal plain-weave warp/weft + hand-loomed yarn slub
-  //   fab 1   (wool):         45-deg Renaissance diagonal twill wales + cross-nap texture
-  //   fab 2   (leather):      organic pebbled hide grain + subtle hide mottling
-  //   fab 3   (brass):        smooth burnished metal with faint hammered patina
+  // Nyquist-band-limited high-frequency woven textile grain (zero coarse corduroy/stripe moire):
+  //   fab 0/4 (linen/cotton): ~260/m subtle orthogonal plain weave
+  //   fab 1   (wool):         ~190/m soft diagonal twill nap
+  //   fab 2   (leather):      ~180/m fine organic pebble grain
+  //   fab 3   (brass):        smooth burnished metal
   let bpFoot=max(length(dBpdx),length(dBpdy));
-  let fineVis=(1.0-smoothstep(0.0008,0.0034,bpFoot))*step(1e-6,bpFoot);
-  let medVis=(1.0-smoothstep(0.0028,0.013,bpFoot))*step(1e-6,bpFoot);
+  let fineVis=(1.0-smoothstep(0.0007,0.0028,bpFoot))*step(1e-6,bpFoot);
   let tau=6.2831853;
 
-  // Linen / cotton plain weave
-  let uLin=(bp.x+bp.z*0.72)*240.0*tau;
-  let vLin=bp.y*240.0*tau;
-  let sLinU=bp.y*58.0*tau+sin(bp.x*22.0)*1.4;
-  let sLinV=(bp.x-bp.z)*52.0*tau;
-  let gLin=vec3f(cos(uLin)*sin(vLin)*240.0,sin(uLin)*cos(vLin)*240.0,cos(uLin)*sin(vLin)*172.8)*(0.00040*fineVis)
-    +vec3f(cos(sLinV)*52.0,cos(sLinU)*58.0,-cos(sLinV)*52.0)*(0.00042*medVis);
-  let modLin=sin(uLin)*sin(vLin)*0.052*fineVis+(sin(sLinU)*0.6+sin(sLinV)*0.4)*0.032*medVis;
+  // Linen / cotton fine plain weave (~260/m)
+  let uLin=(bp.x+bp.z*0.72)*260.0*tau;
+  let vLin=bp.y*260.0*tau;
+  let gLin=vec3f(cos(uLin)*sin(vLin)*260.0,sin(uLin)*cos(vLin)*260.0,cos(uLin)*sin(vLin)*187.2)*(0.00014*fineVis);
+  let modLin=sin(uLin)*sin(vLin)*0.018*fineVis;
 
-  // Wool diagonal twill
-  let tW1=(bp.x*165.0-bp.y*165.0+bp.z*140.0)*tau;
-  let tW2=(bp.x*90.0+bp.y*95.0-bp.z*85.0)*tau;
-  let gWool=vec3f(cos(tW1)*165.0,-cos(tW1)*165.0,cos(tW1)*140.0)*(0.00048*fineVis)
-    +vec3f(cos(tW2)*90.0,cos(tW2)*95.0,-cos(tW2)*85.0)*(0.00034*medVis);
-  let modWool=sin(tW1)*0.058*fineVis+sin(tW2)*0.034*medVis;
+  // Wool fine twill (~190/m)
+  let tW1=(bp.x*190.0-bp.y*190.0+bp.z*165.0)*tau;
+  let gWool=vec3f(cos(tW1)*190.0,-cos(tW1)*190.0,cos(tW1)*165.0)*(0.00015*fineVis);
+  let modWool=sin(tW1)*0.022*fineVis;
 
-  // Leather pebble grain
-  let l1=(bp.x*175.0+bp.y*145.0-bp.z*160.0)*tau;
-  let l2=(bp.x*135.0-bp.y*185.0+bp.z*125.0)*tau;
-  let l3=(bp.x*52.0+bp.y*46.0+bp.z*58.0)*tau;
-  let gLeath=vec3f(cos(l1)*sin(l2)*175.0+sin(l1)*cos(l2)*135.0,cos(l1)*sin(l2)*145.0-sin(l1)*cos(l2)*185.0,-cos(l1)*sin(l2)*160.0+sin(l1)*cos(l2)*125.0)*(0.00034*fineVis)
-    +vec3f(cos(l3)*52.0,cos(l3)*46.0,cos(l3)*58.0)*(0.00046*medVis);
-  let modLeath=sin(l1)*sin(l2)*0.044*fineVis+sin(l3)*0.038*medVis;
+  // Leather fine pebble grain (~180/m)
+  let l1=(bp.x*180.0+bp.y*155.0-bp.z*170.0)*tau;
+  let l2=(bp.x*150.0-bp.y*185.0+bp.z*140.0)*tau;
+  let gLeath=vec3f(cos(l1)*sin(l2)*180.0+sin(l1)*cos(l2)*150.0,cos(l1)*sin(l2)*155.0-sin(l1)*cos(l2)*185.0,-cos(l1)*sin(l2)*170.0+sin(l1)*cos(l2)*140.0)*(0.00014*fineVis);
+  let modLeath=sin(l1)*sin(l2)*0.020*fineVis;
 
   var gradBp=select(gLin,gWool,isWool);
   gradBp=select(gradBp,gLeath,isLeather);
@@ -867,16 +857,21 @@ fn clothingContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let borderSeam=smoothstep(0.06,0.35,chEdge)*step(0.0001,bpFoot);
   let sideSeam=exp(-pow((bp.z+0.032)/0.0045,2.0))*smoothstep(0.84,0.92,bp.y)*(1.0-smoothstep(1.36,1.42,bp.y));
   let stitchTick=smoothstep(0.45,0.92,sin(bp.y*130.0*tau))*fineVis;
-  let seamDark=select(borderSeam*0.11+sideSeam*stitchTick*0.08,0.0,isBrass);
-  gradBp+=select(vec3f(0.0,cos(bp.y*130.0*tau)*sideSeam*0.025*fineVis,0.0),vec3f(0.0),isBrass);
+  let seamDark=select(borderSeam*0.10+sideSeam*stitchTick*0.06,0.0,isBrass);
+  gradBp+=select(vec3f(0.0,cos(bp.y*130.0*tau)*sideSeam*0.015*fineVis,0.0),vec3f(0.0),isBrass);
 
   let dhdx=dot(gradBp,dBpdx);
   let dhdy=dot(gradBp,dBpdy);
   let r1=cross(dPdy,nGeom);
   let r2=cross(nGeom,dPdx);
   let det=dot(dPdx,r1);
-  let invDet=1.0/select(max(abs(det),1e-8),-max(abs(det),1e-8),det<0.0);
-  let n=normalize(nGeom-(r1*dhdx+r2*dhdy)*select(0.0,invDet,abs(det)>1e-8));
+  let detScale=length(dPdx)*length(dPdy);
+  let detOk=abs(det)>1e-5 && abs(det)>1e-4*detScale;
+  let safeDet=select(1.0,det,detOk);
+  let rawPerturb=select(vec3f(0.0),(r1*dhdx+r2*dhdy)/safeDet,detOk);
+  let pLen=length(rawPerturb);
+  let perturb=select(rawPerturb,rawPerturb*(0.14/pLen),pLen>0.14);
+  let n=normalize(nGeom-perturb);
 
   let wet=clamp(v.wet,vec2f(0.0),vec2f(1.0));
   let foldAO=v.tone.w;

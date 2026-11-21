@@ -272,18 +272,19 @@ function coverageMask(fit, size) {
   }
   return mask;
 }
-function bakeTexture(fit, work, reuseDir = null) {
+const DELIGHT_VERSION = 2;
+function bakeTexture(fit, glbFile, work, reuseDir = null) {
   let prev = null;
   if (reuseDir && fs.existsSync(path.join(reuseDir, 'manifest.json')) && fs.existsSync(path.join(reuseDir, 'albedo.bc7.bin.gz')) && fs.existsSync(path.join(reuseDir, 'albedo.astc.bin.gz'))) {
     try {
       const m = JSON.parse(fs.readFileSync(path.join(reuseDir, 'manifest.json'), 'utf8'));
-      if (m?.source?.sha256 === fit.sha256 && m?.texture?.width === TEXTURE_SIZE && m?.files?.['albedo.bc7.bin'] && m?.files?.['albedo.astc.bin']) prev = m;
+      if (m?.source?.sha256 === fit.sha256 && m?.texture?.width === TEXTURE_SIZE && m?.texture?.delightVersion === DELIGHT_VERSION && m?.files?.['albedo.bc7.bin'] && m?.files?.['albedo.astc.bin']) prev = m;
     } catch { /* rebake full texture */ }
   }
   const image = path.join(work, fit.mime === 'image/png' ? 'albedo.png' : 'albedo.jpg'), mask = path.join(work, 'mask.u8');
   fs.writeFileSync(image, fit.picture);
   fs.writeFileSync(mask, coverageMask(fit, TEXTURE_SIZE));
-  const pyArgs = [fileURLToPath(new URL('./crew-continuum-texture.py', import.meta.url)), image, mask, work, `--size=${TEXTURE_SIZE}`, `--sample=${SAMPLE_SIZE}`, ...(prev ? ['--sample-only'] : [])];
+  const pyArgs = [fileURLToPath(new URL('./crew-continuum-texture.py', import.meta.url)), image, mask, work, `--size=${TEXTURE_SIZE}`, `--sample=${SAMPLE_SIZE}`, `--glb=${glbFile}`, ...(prev ? ['--sample-only'] : [])];
   execFileSync('python3', pyArgs, { stdio: ['ignore', 'inherit', 'inherit'] });
   const sample = fs.readFileSync(path.join(work, 'sample.rgb')), toLinear = Float32Array.from({ length: 256 }, (_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
   // Bilinear, in linear light, wrapping as the GPU's sampler does.
@@ -547,7 +548,7 @@ async function bake(entry) {
     const dir = path.join(OUT, entry.id);
     const palettes = samplePoses(fit.animator), body = splitPieces(fit), posed = palettes.map((palette) => posedPositions(palette, body));
     lap(`${palettes.length} poses`);
-    const texture = bakeTexture(fit, work, dir), surface = surfaceColours(fit, texture);
+    const texture = bakeTexture(fit, file, work, dir), surface = surfaceColours(fit, texture);
     lap('albedo');
     const weldedFit = weld(fit), far = farSource(fit, weldedFit, surface);
     lap('far source');
@@ -691,7 +692,7 @@ async function bake(entry) {
       clusters: { count: clusters.count, levels: clusters.levels, roots: clusters.roots, finestTriangles: clusters.finestTriangles, rootError: +clusters.rootError.toFixed(4), pieceCopies: body.copies },
       chain: { ...farBody.stats, farSourceTriangles: far.triangles, farSourceError: +sourceError.toFixed(4), posedDelta: +posedDelta.toFixed(4) },
       splat,
-      texture: { width: texture.levels.width, height: texture.levels.height, coverage: texture.levels.coverage, levels: texture.levels.levels },
+      texture: { width: texture.levels.width, height: texture.levels.height, coverage: texture.levels.coverage, delightVersion: DELIGHT_VERSION, levels: texture.levels.levels },
       body: { file: 'body.glb', bytes: standIn.bytes.length, sha256: createHash('sha256').update(standIn.bytes).digest('hex'), triangles: standIn.triangles, vertices: standIn.vertices, contactDrift: drift },
       poses: palettes.length, files, bakeSeconds: +((Date.now() - started) / 1000).toFixed(1),
     };

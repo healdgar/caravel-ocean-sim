@@ -1020,12 +1020,14 @@ const TERRAIN_LAND_MATERIAL_BLOCK = /* wgsl */ `
     if(turfFade>0.01){
       let mBroad=landFilteredNoise(world.xz*0.014+vec2f(11.3,-7.9),footprint*0.014);
       let mMid=landFilteredNoise(vec2f(world.x*0.031-world.z*0.024,world.x*0.024+world.z*0.031)+vec2f(crownN2,crownN1)*0.65,footprint*0.039);
+      let mTuft=landFilteredNoise(vec2f(world.x*0.24+world.z*0.17,-world.x*0.17+world.z*0.24)+vec2f(-19.3,14.7),footprint*0.30);
       let mottle=clamp(0.5+0.34*mBroad+0.24*mMid,0.0,1.0);
-      let warmPasture=mix(albedo*vec3f(1.14,1.07,0.82),vec3f(0.21,0.19,0.11),0.22);
-      let lushPasture=albedo*vec3f(0.92,1.04,0.92);
-      let turfCol=mix(lushPasture,warmPasture,smoothstep(0.22,0.82,mottle));
-      albedo=mix(albedo,turfCol,turfFade*0.36);
-      relief+=(mottle-0.5)*0.006*turfFade;
+      let pastureMask=clamp(groundCover.a,0.0,1.0);
+      let lushPasture=mix(albedo*vec3f(0.86,1.04,0.84),vec3f(0.062,0.126,0.038),pastureMask*0.34);
+      let olivePasture=mix(albedo*vec3f(1.02,1.03,0.84),vec3f(0.104,0.130,0.048),pastureMask*0.28);
+      let turfCol=mix(lushPasture,olivePasture,smoothstep(0.22,0.82,mottle))*(1.0+mTuft*0.18*pastureMask);
+      albedo=mix(albedo,turfCol,turfFade*mix(0.32,0.48,pastureMask));
+      relief+=((mottle-0.5)*0.006+mTuft*0.009*pastureMask)*turfFade;
     }
     // Item 4: Canopy-floor contact AO under dense forests beyond the real-time shadow-map range (260 m).
     let farCanopyAO=effCanopy*(1.0-landShadowCoverage(world));
@@ -1046,7 +1048,7 @@ const TERRAIN_LAND_MATERIAL_BLOCK = /* wgsl */ `
     if(waveWeight>0.01){
       let wv=grassWindWave(world.xz,F.camPos.w,F.windP[0]);
       let crest=smoothstep(-0.35,0.75,wv.y);
-      albedo*=mix(vec3f(1.0),mix(vec3f(0.88,0.91,0.86),vec3f(1.24,1.16,0.84),crest),waveWeight*0.72);
+      albedo*=mix(vec3f(1.0),mix(vec3f(0.90,0.94,0.88),vec3f(1.14,1.15,1.00),crest),waveWeight*0.72);
       relief+=wv.y*0.018*waveWeight;
       roughness=clamp(mix(roughness,0.58,max(0.0,wv.y)*waveWeight*0.35),0.07,0.98);
     }

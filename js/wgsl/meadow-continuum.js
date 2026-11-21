@@ -657,6 +657,104 @@ fn meadowSwardDetail(bentXZ: vec2f, pixel: f32, windDir: vec2f, gust: f32) -> ve
   let density = clamp(0.5 + sig * 0.28 + (gust - 0.5) * 0.05 * max(wFine, wMid), 0.0, 1.0);
   return vec4f(density, clamp(tilt, -0.75, 0.75), clamp(oat, 0.0, 1.0), clamp(shadow, 0.0, 1.0));
 }
+
+// Multi-scale aperiodic band-limited grass-tuft & blade-clump heightfield (0.08..1.04) for the 5-step GTA V
+// parallax volumetric grass shells on FAR & SPLAT. Mutually rotated hash-lattice octaves (tuft ~0.32 m,
+// secondary blade-clump ~0.54 m, clump ~0.95 m, pasture wave ~3.2 m) fade strictly before Nyquist with zero grid
+// alignment, zero sine stripes, and zero shimmer.
+fn meadowTuftHeight(p: vec2f, wTuftFine: f32, wTuftMid: f32, wClump: f32, wWave: f32) -> f32 {
+  var h = 0.52;
+  if (wTuftFine > 0.001) {
+    let p1a = vec2f(p.x * 0.8660 - p.y * 0.5000, p.x * 0.5000 + p.y * 0.8660) * 3.12 + vec2f(7.3, -13.1);
+    h += meadowOrganicNoise(p1a) * (0.38 * wTuftFine);
+  }
+  if (wTuftMid > 0.001) {
+    let p1b = vec2f(p.x * 0.3420 + p.y * 0.9397, -p.x * 0.9397 + p.y * 0.3420) * 1.85 + vec2f(-23.7, 11.4);
+    h += meadowOrganicNoise(p1b) * (0.32 * wTuftMid);
+  }
+  if (wClump > 0.001) {
+    let p2 = vec2f(p.x * 0.6428 - p.y * 0.7660, p.x * 0.7660 + p.y * 0.6428) * 1.05 + vec2f(31.4, -17.8);
+    h += meadowOrganicNoise(p2) * (0.28 * wClump);
+  }
+  if (wWave > 0.001) {
+    let p3 = vec2f(p.x * 0.9659 + p.y * 0.2588, -p.x * 0.2588 + p.y * 0.9659) * 0.3125 + vec2f(-47.1, -29.2);
+    h += meadowOrganicNoise(p3) * (0.22 * wWave);
+  }
+  return clamp(h, 0.08, 1.04);
+}
+
+struct MeadowParallaxHit {
+  hitH: f32,          // physical vertical intersection height inside the 0.36 m canopy (0.12..0.99)
+  cavityOcc: f32,     // volumetric occlusion accumulated along the ray through taller neighbouring tufts
+  gradXZ: vec2f,      // tuft surface height gradient in world XZ at hitXZ (for 3D micro-normal shading)
+  detailEnergy: f32,  // resolved band energy (1 near -> 0 horizon) for luminance-invariant far filtering
+};
+
+// True 5-step GPU view-ray parallax-occluded volumetric grass shells (uniform control flow, zero discard,
+// strictly TBDR-compliant). Steps downward through 5 physical height slices across the 0.36 m grass canopy with
+// downwind gust shear and exact linear root interpolation between slices so inter-tuft dark root cavities,
+// emerald mid-blades, and sunlit golden-oat tips match physical 3D widened blade clusters seamlessly.
+fn meadowParallaxSward(
+  unshiftedWorldXZ: vec2f,
+  viewDir: vec3f,
+  windDir: vec2f,
+  gust: f32,
+  bendSlope: f32,
+  footPixel: f32,
+) -> MeadowParallaxHit {
+  let wTuftFine = 1.0 - smoothstep(0.09, 0.26, footPixel);
+  let wTuftMid  = 1.0 - smoothstep(0.18, 0.52, footPixel);
+  let wClump    = 1.0 - smoothstep(0.36, 1.05, footPixel);
+  let wWave     = 1.0 - smoothstep(1.20, 3.80, footPixel);
+  let detailEnergy = clamp(wTuftFine * 0.42 + wTuftMid * 0.33 + wClump * 0.25, 0.0, 1.0);
+
+  let canopyH = 0.36;
+  let rayStepXZ = -viewDir.xz / max(abs(viewDir.y), 0.22);
+  let bendMag = (0.04 + 0.22 * gust + 0.14 * bendSlope) * canopyH;
+
+  let slices = array<f32, 5>(0.96, 0.78, 0.60, 0.42, 0.24);
+  var hitH = 0.16;
+  var hitXZ = unshiftedWorldXZ + rayStepXZ * canopyH;
+  var hitFound = false;
+  var prevH = 1.06;
+  var prevTh = 0.0;
+  var prevXZ = unshiftedWorldXZ - windDir * bendMag;
+  var occAccum = 0.0;
+
+  for (var i = 0u; i < 5u; i++) {
+    let h = slices[i];
+    let windBendOffset = -windDir * (bendMag * h * h);
+    let sampleXZ = unshiftedWorldXZ + windBendOffset + rayStepXZ * ((1.0 - h) * canopyH);
+    let th = meadowTuftHeight(sampleXZ, wTuftFine, wTuftMid, wClump, wWave);
+    if (!hitFound) {
+      occAccum += clamp(th - (h - 0.22), 0.0, 0.30);
+      if (th >= h) {
+        let dCurr = th - h;
+        let dPrev = max(prevH - prevTh, 0.0);
+        let frac = clamp(dPrev / max(dPrev + dCurr, 1e-4), 0.0, 1.0);
+        hitH = select(mix(prevH, h, frac), clamp(th, 0.92, 0.99), i == 0u);
+        hitXZ = select(mix(prevXZ, sampleXZ, frac), sampleXZ, i == 0u);
+        hitFound = true;
+      }
+    }
+    prevH = h;
+    prevTh = th;
+    prevXZ = sampleXZ;
+  }
+  if (!hitFound) {
+    hitH = clamp(prevTh * 0.85, 0.12, 0.25);
+    hitXZ = prevXZ;
+  }
+
+  let eps = max(0.08, footPixel * 0.55);
+  let hC = meadowTuftHeight(hitXZ, wTuftFine, wTuftMid, wClump, wWave);
+  let hX = meadowTuftHeight(hitXZ + vec2f(eps, 0.0), wTuftFine, wTuftMid, wClump, wWave);
+  let hZ = meadowTuftHeight(hitXZ + vec2f(0.0, eps), wTuftFine, wTuftMid, wClump, wWave);
+  let gradXZ = clamp(vec2f(hX - hC, hZ - hC) / eps * canopyH, vec2f(-0.95), vec2f(0.95));
+
+  let farH = hitH + (1.0 - detailEnergy) * 0.03;
+  return MeadowParallaxHit(clamp(farH, 0.12, 0.99), clamp(occAccum, 0.0, 1.0), gradXZ, detailEnergy);
+}
 `;
 
 const meadowContinuumMaterialWGSL = () => {
@@ -793,39 +891,45 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let unshiftedWorldXZ = v.world.xz;
   let fCov = meadowCoverAt(unshiftedWorldXZ);
   let marginFade = smoothstep(0.06, 0.55, fCov.r);
-  // Screen-space world footprint: cap grazing-angle foreshortening against isotropic pixel size so
-  // eye-level sightlines (~5 deg depression) preserve fine & mid tussock/panicle structure across CLUSTER -> FAR -> SPLAT
+  // Screen-space world footprint (derivatives computed in strictly uniform control flow):
+  // Preserve grazing-angle anisotropy so tufts looking up 30..180 m hillsides keep horizontal resolution near isoFoot
   // while still band-limiting cleanly before Nyquist with zero shimmer.
   let dxW = dpdx(unshiftedWorldXZ);
   let dyW = dpdy(unshiftedWorldXZ);
   let isoFoot = v.flow.z * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0);
-  let anisoFoot = min(max(length(dxW), length(dyW)), isoFoot * 2.0);
-  let footPixel = mix(isoFoot, anisoFoot, 0.35);
-  let sd = meadowSwardDetail(unshiftedWorldXZ, footPixel, windDir, gust);
+  let minorFoot = min(length(dxW), length(dyW));
+  let majorFoot = min(max(length(dxW), length(dyW)), isoFoot * 1.65);
+  let footPixel = mix(max(isoFoot, minorFoot), majorFoot, 0.22);
 
   let view = normalize(F.camPos.xyz - world);
   let viewGrazing = clamp(1.0 - abs(dot(view, normalize(v.normal))), 0.0, 1.0);
   let horizGraze = clamp(1.0 - abs(view.y), 0.0, 1.0);
   let grazeFactor = smoothstep(0.18, 0.88, max(viewGrazing, horizGraze));
 
-  // A body or splat is as much sward as its sward hides of the ground from here: Beer-Lambert optical depth through
-  // upright blades rises toward 1.0 at eye-level grazing sightlines so FAR/SPLAT never wash into bare dirt.
-  let farHidesBase = clamp(v.blade.w * 1.24 + 0.14 * marginFade, 0.0, 1.0);
-  let farHides = mix(farHidesBase, 1.0, grazeFactor * 0.82);
-  let swardWeight = select(clamp(0.55 + 0.45 * marginFade, 0.0, 1.0), marginFade * farHides, isContinuum);
-  // On collapsed far bodies & splats, horizontal sightlines across tall upright culms see the sunlit upper golden-oat
-  // canopy rather than the occluded roots below; bias effAlong upward smoothly with grazeFactor + tussock structure.
-  let effAlong = select(
-    along,
-    clamp(along + 0.24 * grazeFactor + (sd.x - 0.5) * 0.58 + sd.z * 0.30 - sd.w * (0.34 - 0.14 * grazeFactor), 0.10, 0.98),
-    isContinuum,
-  );
+  // On FAR & SPLAT, step a real 5-layer view-ray parallax volumetric grass shell through the 0.36 m canopy;
+  // on physical 3D CLUSTER blades, evaluate the lighter surface micro-detail field.
+  var sd = vec4f(0.5, 0.0, 0.0, 0.0);
+  var para = MeadowParallaxHit(along, 0.0, vec2f(0.0), 1.0);
+  if (isContinuum) {
+    para = meadowParallaxSward(unshiftedWorldXZ, view, windDir, gust, bendSlope, footPixel);
+  } else {
+    sd = meadowSwardDetail(unshiftedWorldXZ, footPixel, windDir, gust);
+  }
 
-  // Natural Iberian Meadow Albedo (ZERO 62% brown dirt washout!):
+  let hitH = para.hitH;
+  // A body or splat is as much sward as its parallax ray intercepts: tufts above the root floor are full grass,
+  // while deep inter-tuft cavities let shadowed humus peek through just like gaps between physical 3D blades.
+  let farHidesBase = clamp(v.blade.w * 1.18 + 0.16 * marginFade, 0.0, 1.0);
+  let farHides = mix(farHidesBase, 1.0, max(grazeFactor * 0.78, smoothstep(0.24, 0.44, hitH) * 0.92));
+  let swardWeight = select(clamp(0.55 + 0.45 * marginFade, 0.0, 1.0), marginFade * farHides, isContinuum);
+  // Drive effAlong physically from parallax hitH on FAR/SPLAT (zero artificial +0.24 beige bias!).
+  let effAlong = select(along, hitH, isContinuum);
+
+  // Natural Iberian Meadow Albedo (exact hue & luminance parity between 3D CLUSTER blades and FAR/SPLAT parallax shells):
   //   - World-space moisture & lushness patches blend smoothly between lush emerald pasture,
   //     Mediterranean olive-sage fescue, and sun-warmed straw.
-  //   - Root base (effAlong < 0.18) grounds gently with 20% warm soil/thatch tint + physical root AO (0.42 -> 1.0).
-  //   - Tall culm seed-heads (effAlong > 0.76) warm toward sunlit golden oat!
+  //   - Root cavities (effAlong < 0.24) ground with warm soil/thatch tint + deep physical root AO (0.36..0.55).
+  //   - Tall sunlit crests (effAlong > 0.76..0.78) warm toward crisp golden oat seed-heads ONLY at the very tips!
   let groundCol = meadowGroundColour(unshiftedWorldXZ);
   let mWarp = vec2f(sin(unshiftedWorldXZ.y * 0.042 + 1.7), cos(unshiftedWorldXZ.x * 0.038 - 0.9)) * 4.5;
   let mp = unshiftedWorldXZ + mWarp;
@@ -852,21 +956,32 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   );
   let tussockLum = clamp(v.colour.g / 0.142, 0.72, 1.28);
   var grassPigment = mix(v.colour * 1.06, patchGreen * tussockLum, 0.44);
-  // Warm tall culm seed-heads & distant tussock panicle crests toward sunlit golden oat
+  // Crisp golden oat seed-heads ONLY on the highest tuft tips (hitH > 0.78, matching CLUSTER smoothstep(0.76, 0.94, along)).
+  // Past tuft resolution on distant hills (detailEnergy -> 0), keep only the subtle ~11% area-average tip warmth.
+  let farTipAvg = (1.0 - para.detailEnergy) * (0.08 + 0.07 * smoothstep(0.38, 0.72, hitH));
   let oatHeadT = select(
     smoothstep(0.76, 0.94, along),
-    clamp(smoothstep(0.66, 0.92, effAlong) * (0.72 + 0.22 * grazeFactor) + sd.z * (0.42 + 0.18 * grazeFactor) + 0.14 * grazeFactor, 0.0, 0.94),
+    clamp(smoothstep(0.78, 0.95, hitH) + farTipAvg, 0.0, 0.92),
     isContinuum,
   );
   grassPigment = mix(grassPigment, goldenOatTip, oatHeadT * 0.82);
-  // Gentle 20% warm soil/thatch root grounding on effAlong < 0.18
+  // Warm soil/thatch root grounding inside deep root cavities
   let warmSoil = mix(groundCol, vec3f(0.072, 0.066, 0.034), 0.45);
-  grassPigment = mix(grassPigment, warmSoil, 0.20 * (1.0 - smoothstep(0.0, 0.18, effAlong)));
+  grassPigment = mix(
+    grassPigment,
+    warmSoil,
+    select(0.20 * (1.0 - smoothstep(0.0, 0.18, effAlong)), 0.28 * (1.0 - smoothstep(0.12, 0.34, hitH)), isContinuum),
+  );
 
   let organCol = mix(grassPigment, v.colour * 1.06, isFlower);
-  let ao = mix(0.42, 1.0, smoothstep(0.0, 0.55, effAlong)) * select(1.0, 1.0 - sd.w * 0.28, isContinuum);
-  let shadedBladeCol = organCol * mix(1.0, ao, swardWeight * 0.75);
-  var baseCol = mix(groundCol, shadedBladeCol, select(1.0, swardWeight, isContinuum));
+  let clusterAO = mix(0.42, 1.0, smoothstep(0.0, 0.55, along));
+  let paraAO = mix(0.36, 1.0, smoothstep(0.14, 0.80, hitH))
+             * (1.0 - para.cavityOcc * 0.22)
+             * mix(0.95, 1.0, para.detailEnergy);
+  let ao = select(clusterAO, clamp(paraAO, 0.34, 1.0), isContinuum);
+  let shadedBladeCol = organCol * mix(1.0, ao, swardWeight * 0.78);
+  let shadowedUnderGround = groundCol * mix(1.0, 0.52, marginFade);
+  var baseCol = mix(shadowedUnderGround, shadedBladeCol, select(1.0, swardWeight, isContinuum));
 
   // Per-pixel crater soot/ash scorching around inner rim + thrown-soil dusting across outer apron
   let cCellF = landCraterLookupCell(unshiftedWorldXZ, cfg.crater.xy);
@@ -879,28 +994,40 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
       let innerRimChar = smoothstep(0.18, 0.68, cFieldF.g) * (1.0 - inBowl * 0.65);
       let apronDust = clamp(cFieldF.a * 0.85 + cFieldF.g * 0.45, 0.0, 1.0) * (1.0 - innerRimChar * 0.5);
       let thrownEarth = mix(groundCol * vec3f(0.86, 0.78, 0.68), vec3f(0.20, 0.17, 0.12), cFieldF.b * 0.65);
-      let sootAsh = mix(vec3f(0.015, 0.013, 0.011), vec3f(0.048, 0.044, 0.040), clamp(along * 0.7, 0.0, 1.0));
-      baseCol = mix(baseCol, thrownEarth, apronDust * (0.45 + 0.45 * (1.0 - along)));
+      let sootAsh = mix(vec3f(0.015, 0.013, 0.011), vec3f(0.048, 0.044, 0.040), clamp(effAlong * 0.7, 0.0, 1.0));
+      baseCol = mix(baseCol, thrownEarth, apronDust * (0.45 + 0.45 * (1.0 - effAlong)));
       baseCol = mix(baseCol, sootAsh, innerRimChar * 0.82);
       baseCol = mix(baseCol, groundCol * 0.48, inBowl);
     }
   }
 
-  let hotSinge = clamp(v.harm.x, 0.0, 1.0) * smoothstep(0.35, 0.92, along);
+  let hotSinge = clamp(v.harm.x, 0.0, 1.0) * smoothstep(0.35, 0.92, effAlong);
   if (hotSinge > 0.001) {
-    let emberSoot = mix(vec3f(0.022, 0.016, 0.011), vec3f(0.11, 0.048, 0.014), smoothstep(0.70, 0.98, along));
+    let emberSoot = mix(vec3f(0.022, 0.016, 0.011), vec3f(0.11, 0.048, 0.014), smoothstep(0.70, 0.98, effAlong));
     baseCol = mix(baseCol, emberSoot, hotSinge * 0.88);
   }
 
-  let tf = sd.xy;
-  var n = normalize(v.normal + vec3f(acrossDir.x * tf.y * select(0.18, 0.28, isContinuum), 0.03, acrossDir.y * tf.y * select(0.18, 0.28, isContinuum)) * swardWeight);
+  let tf = select(sd.xy, vec2f(hitH, 0.0), isContinuum);
+  // Perturb normal from parallax tuft gradient + travelling 14 m wind rollers on FAR/SPLAT so wind waves and
+  // micro-tuft lighting roll continuously from near 3D blades -> mid widened blades -> far parallax shells -> horizon.
+  let clusterPerturb = vec3f(acrossDir.x * sd.y * 0.18, 0.03, acrossDir.y * sd.y * 0.18);
+  let paraPerturb = vec3f(
+    -para.gradXZ.x * 0.62 - windDir.x * (swell * 0.14),
+    0.04,
+    -para.gradXZ.y * 0.62 - windDir.y * (swell * 0.14),
+  );
+  var n = normalize(v.normal + select(clusterPerturb, paraPerturb, isContinuum) * swardWeight);
   if (!frontFacing) { n = normalize(vec3f(-n.x * 0.55, abs(n.y), -n.z * 0.55)); }
 
-  // Shimmering wind-ripple contrast across gust crests & upright lulls
+  // Shimmering wind-ripple contrast across gust crests & upright lulls (matched identically on CLUSTER & FAR/SPLAT)
   let crest = smoothstep(-0.38, 0.65, swell);
-  let tendrilHighlight = mix(1.0, mix(select(0.92, 0.84, isContinuum), select(1.09, 1.15, isContinuum), tf.x), swardWeight);
-  let windTrough = select(vec3f(0.90, 0.94, 0.88), mix(vec3f(0.93, 0.96, 0.91), vec3f(0.90, 0.94, 0.88), grazeFactor), isContinuum);
-  let windPeak = select(vec3f(1.14, 1.15, 1.02), mix(vec3f(1.10, 1.11, 1.02), vec3f(1.15, 1.16, 1.02), grazeFactor), isContinuum);
+  let tendrilHighlight = mix(
+    1.0,
+    select(mix(0.92, 1.09, sd.x), mix(0.92, 1.08, hitH), isContinuum),
+    swardWeight,
+  );
+  let windTrough = vec3f(0.90, 0.94, 0.88);
+  let windPeak = vec3f(1.14, 1.15, 1.02);
   let windTone = mix(
     vec3f(1.0),
     mix(windTrough, windPeak, crest),
@@ -921,14 +1048,13 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let nDotL = max(dot(n, F.sunDir.xyz), 0.0);
   let wrap = max(0.0, dot(n, F.sunDir.xyz) * 0.50 + 0.50) * (0.14 + 0.14 * effAlong) * swardWeight;
 
-  // Forward subsurface sunlight translucency (backscatter through bent golden-green upper blades & panicles)
+  // Forward subsurface sunlight translucency (identical physical energy on CLUSTER & FAR/SPLAT)
   let sunFwd = pow(max(dot(-view, F.sunDir.xyz), 0.0), 2.1);
   let backTransmission = max(0.0, -dot(n, F.sunDir.xyz)) * 0.50 + 0.50;
   let backscatter = (0.28 * backTransmission + 0.92 * sunFwd)
                   * smoothstep(0.24, 0.88, effAlong)
                   * (0.65 + 0.55 * gust)
                   * (0.70 + 0.30 * tf.x)
-                  * select(1.0, 1.0 + 0.25 * grazeFactor, isContinuum)
                   * swardWeight;
 
   let skyDir = normalize(vec3f(n.x * 0.65, max(n.y, 0.12), n.z * 0.65));

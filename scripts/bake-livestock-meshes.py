@@ -21,6 +21,7 @@ import glob
 import math
 import heapq
 import struct
+from collections import deque
 import numpy as np
 import bpy
 import bmesh
@@ -238,8 +239,8 @@ def extract_part_records(bm, part_code, coat_fn):
         v = loop.vert
         if uv_layer is not None:
             uv = loop[uv_layer].uv
-            u_gpu = max(0.0, min(1.0, float(uv.x) % 1.0 if float(uv.x) < 0.0 or float(uv.x) > 1.0 else float(uv.x)))
-            v_bl = max(0.0, min(1.0, float(uv.y) % 1.0 if float(uv.y) < 0.0 or float(uv.y) > 1.0 else float(uv.y)))
+            u_gpu = max(0.0, min(1.0, float(uv.x)))
+            v_bl = max(0.0, min(1.0, float(uv.y)))
             v_gpu = 1.0 - v_bl
             key = (v.index, int(round(u_gpu * 4095.0)), int(round(v_gpu * 4095.0)))
         else:
@@ -373,15 +374,12 @@ def find_tripo_glb(tripo_dir, species_name):
     return glbs[-1] if glbs else None
 
 
-def sample_4k_texture_to_point_attribute(me):
-    """Samples the embedded 4K glTF basecolor texture (converting sRGB -> linear) onto a POINT
-    FLOAT_COLOR attribute `BakeCoat` BEFORE welding UV seams.
+def sample_image_to_point_attribute(me, img):
+    """Samples an sRGB/linear Blender Image through `me.uv_layers.active` onto a POINT
+    FLOAT_COLOR attribute `BakeCoat` (linear RGB) so FAR and SPLAT match CLUSTER 1:1.
     """
-    imgs = [im for im in bpy.data.images if im.size[0] >= 256 and im.size[1] >= 256]
-    if not imgs or not me.uv_layers.active:
+    if img is None or not me.uv_layers.active:
         return False
-    # Prefer basecolor image if multiple exist
-    img = next((im for im in imgs if "basecolor" in im.name.lower() or "color" in im.name.lower()), imgs[0])
     w, h, ch = img.size[0], img.size[1], img.channels
     px = np.empty(w * h * ch, dtype=np.float32)
     img.pixels.foreach_get(px)
@@ -397,8 +395,8 @@ def sample_4k_texture_to_point_attribute(me):
     l_verts = np.empty(n_loops, dtype=np.int32)
     me.loops.foreach_get("vertex_index", l_verts)
 
-    gx = np.mod(uvs[:, 0], 1.0) * (w - 1)
-    gy = np.mod(uvs[:, 1], 1.0) * (h - 1)
+    gx = np.clip(uvs[:, 0], 0.0, 1.0) * (w - 1)
+    gy = np.clip(uvs[:, 1], 0.0, 1.0) * (h - 1)
     x0 = np.floor(gx).astype(np.int32)
     y0 = np.floor(gy).astype(np.int32)
     x1 = np.minimum(x0 + 1, w - 1)
@@ -419,32 +417,578 @@ def sample_4k_texture_to_point_attribute(me):
     return True
 
 
-def export_tripo_basecolor(species_name, tex_size=1024):
-    """Exports the embedded Tripo basecolor image resized to tex_size x tex_size JPEG for GPU texture_2d_array."""
-    imgs = [im for im in bpy.data.images if im.size[0] >= 256 and im.size[1] >= 256]
-    if not imgs:
-        return None
-    img = next((im for im in imgs if "basecolor" in im.name.lower() or "color" in im.name.lower()), imgs[0])
+def align_points_waterworld(pts_bl, height):
+    """Converts Blender (x, y, z) -> Waterworld (x, z, -y), aligns +Z forward via lower-body/hoof PCA,
+    scales to exact metric height, centers X/Z symmetrically, and grounds hooves at Y = 0.
+    Returns (aligned_float32_nx3, scale_factor).
+    """
+    pts = np.column_stack([pts_bl[:, 0], pts_bl[:, 2], -pts_bl[:, 1]]).astype(np.float64)
+    min_y, max_y = float(pts[:, 1].min()), float(pts[:, 1].max())
+    span_y = max(0.05, max_y - min_y)
+
+    low_mask = pts[:, 1] < (min_y + 0.55 * span_y)
+    low_pts = pts[low_mask] if np.any(low_mask) else pts
+    xz = low_pts[:, [0, 2]] - low_pts[:, [0, 2]].mean(axis=0)
+    _, evecs = np.linalg.eigh((xz.T @ xz) / max(1, len(xz)))
+    fw = evecs[:, 1]  # principal horizontal body axis (unit vector in XZ)
+
+    # Orient +Z toward taller head/poll end
+    proj = pts[:, 0] * fw[0] + pts[:, 2] * fw[1]
+    mid_proj = 0.5 * (float(proj.min()) + float(proj.max()))
+    if float(pts[proj < mid_proj, 1].max()) > float(pts[proj >= mid_proj, 1].max()):
+        fw = -fw
+
+    # Right-handed horizontal basis: Y=(0,1,0), Z=(fw[0], 0, fw[1]), X = Y x Z = (fw[1], 0, -fw[0])
+    rt = np.array([fw[1], -fw[0]], dtype=np.float64)
+    scale = height / span_y
+    wx = (pts[:, 0] * rt[0] + pts[:, 2] * rt[1]) * scale
+    wy = (pts[:, 1] - min_y) * scale
+    wz = (pts[:, 0] * fw[0] + pts[:, 2] * fw[1]) * scale
+
+    # Center X on mid-barrel + hooves, center Z on 4 hooves, ground hooves at Y = 0
+    hoof_m = wy < 0.06 * height
+    med_z = float(np.median(wz[hoof_m])) if np.any(hoof_m) else 0.5 * (float(wz.min()) + float(wz.max()))
+    fore_m = hoof_m & (wz >= med_z)
+    hind_m = hoof_m & (wz < med_z)
+    cz = 0.5 * (
+        (float(np.median(wz[fore_m])) if np.any(fore_m) else float(wz.max()))
+        + (float(np.median(wz[hind_m])) if np.any(hind_m) else float(wz.min()))
+    )
+    body_span_z = float(wz.max() - wz.min())
+    mid_barrel = (wy > 0.34 * height) & (wy < 0.68 * height) & (np.abs(wz - cz) < 0.25 * body_span_z)
+    if np.sum(mid_barrel) >= 8:
+        cx = 0.5 * (float(np.percentile(wx[mid_barrel], 2)) + float(np.percentile(wx[mid_barrel], 98)))
+    elif np.any(hoof_m):
+        cx = 0.5 * (float(np.percentile(wx[hoof_m], 5)) + float(np.percentile(wx[hoof_m], 95)))
+    else:
+        cx = 0.5 * (float(wx.min()) + float(wx.max()))
+
+    wx -= cx
+    wz -= cz
+    wy -= float(wy.min())
+    return np.column_stack([wx, wy, wz]).astype(np.float32), float(scale)
+
+
+def make_strict_closed_manifold(bm):
+    """Repairs decimation-induced non-manifold edges/vertices, disconnected shells, and boundary holes
+    so the target mesh is a watertight 2-manifold (boundary=0, non_manifold=0) before UV unwrapping.
+    """
+    for _pass in range(8):
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+
+        bad_faces = set()
+        for e in bm.edges:
+            if len(e.link_faces) > 2:
+                for f in e.link_faces:
+                    bad_faces.add(f)
+        for f in bm.faces:
+            if f.calc_area() < 1e-10:
+                bad_faces.add(f)
+        if bad_faces:
+            bmesh.ops.delete(bm, geom=list(bad_faces), context="FACES")
+
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        pinch_faces = set()
+        for v in bm.verts:
+            if len(v.link_faces) == 0:
+                continue
+            bdy_deg = sum(1 for e in v.link_edges if e.is_boundary)
+            if bdy_deg > 2:
+                for f in v.link_faces:
+                    pinch_faces.add(f)
+                continue
+            if not v.is_manifold:
+                lfaces = list(v.link_faces)
+                vis = {lfaces[0]}
+                q = deque([lfaces[0]])
+                while q:
+                    cf = q.popleft()
+                    for e in cf.edges:
+                        if v in e.verts:
+                            for nf in e.link_faces:
+                                if nf not in vis and nf in lfaces:
+                                    vis.add(nf)
+                                    q.append(nf)
+                if len(vis) < len(lfaces):
+                    for f in lfaces:
+                        pinch_faces.add(f)
+        if pinch_faces:
+            bmesh.ops.delete(bm, geom=list(pinch_faces), context="FACES")
+
+        loose_e = [e for e in bm.edges if len(e.link_faces) == 0]
+        if loose_e:
+            bmesh.ops.delete(bm, geom=loose_e, context="EDGES")
+        loose_v = [v for v in bm.verts if len(v.link_faces) == 0]
+        if loose_v:
+            bmesh.ops.delete(bm, geom=loose_v, context="VERTS")
+
+        bm.faces.ensure_lookup_table()
+        visited = set()
+        comps = []
+        for f in bm.faces:
+            if f.index in visited:
+                continue
+            comp = []
+            q = deque([f])
+            visited.add(f.index)
+            while q:
+                cur = q.popleft()
+                comp.append(cur)
+                for e in cur.edges:
+                    if len(e.link_faces) == 2:
+                        for nf in e.link_faces:
+                            if nf.index not in visited:
+                                visited.add(nf.index)
+                                q.append(nf)
+            comps.append(comp)
+        if len(comps) > 1:
+            comps.sort(key=len, reverse=True)
+            del_f = [f for c in comps[1:] for f in c]
+            bmesh.ops.delete(bm, geom=del_f, context="FACES")
+            loose_e = [e for e in bm.edges if len(e.link_faces) == 0]
+            if loose_e:
+                bmesh.ops.delete(bm, geom=loose_e, context="EDGES")
+            loose_v = [v for v in bm.verts if len(v.link_faces) == 0]
+            if loose_v:
+                bmesh.ops.delete(bm, geom=loose_v, context="VERTS")
+
+        bm.edges.ensure_lookup_table()
+        bdy = [e for e in bm.edges if e.is_boundary]
+        if bdy:
+            bmesh.ops.holes_fill(bm, edges=bdy, sides=256)
+            bmesh.ops.triangulate(bm, faces=bm.faces[:])
+
+        # Fallback: fan-triangulate any remaining simple boundary loops that holes_fill skipped
+        bm.edges.ensure_lookup_table()
+        rem_bdy = [e for e in bm.edges if e.is_boundary]
+        if rem_bdy:
+            bdy_set = set(rem_bdy)
+            while bdy_set:
+                start_e = next(iter(bdy_set))
+                loop_verts = [start_e.verts[0], start_e.verts[1]]
+                bdy_set.discard(start_e)
+                cur_v = start_e.verts[1]
+                while True:
+                    nxt = None
+                    for e in cur_v.link_edges:
+                        if e in bdy_set:
+                            nxt = e
+                            break
+                    if nxt is None:
+                        break
+                    bdy_set.discard(nxt)
+                    cur_v = nxt.other_vert(cur_v)
+                    if cur_v == loop_verts[0]:
+                        break
+                    loop_verts.append(cur_v)
+                if len(loop_verts) >= 3:
+                    center = sum((v.co for v in loop_verts), Vector((0.0, 0.0, 0.0))) / float(len(loop_verts))
+                    vc = bm.verts.new(center)
+                    for k in range(len(loop_verts)):
+                        va = loop_verts[k]
+                        vb = loop_verts[(k + 1) % len(loop_verts)]
+                        if va != vb and va != vc and vb != vc:
+                            try:
+                                bm.faces.new([va, vb, vc])
+                            except ValueError:
+                                pass
+
+        bm.edges.ensure_lookup_table()
+        bm.verts.ensure_lookup_table()
+        n_bdy = sum(1 for e in bm.edges if e.is_boundary)
+        n_nm = sum(1 for e in bm.edges if not e.is_manifold)
+        n_nmv = sum(1 for v in bm.verts if not v.is_manifold)
+        if n_bdy == 0 and n_nm == 0 and n_nmv == 0:
+            break
+
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+
+def compute_sagittal_midline_x(pts, height):
+    """Computes a smooth anatomical centerline x_mid(z) following body, neck, and slightly turned head."""
+    z_min, z_max = float(pts[:, 2].min()), float(pts[:, 2].max())
+    n_bins = 48
+    zs = np.linspace(z_min, z_max, n_bins)
+    dz = (z_max - z_min) / n_bins
+    xs = np.zeros(n_bins, dtype=np.float64)
+    valid = np.zeros(n_bins, dtype=bool)
+    for i, zc in enumerate(zs):
+        m = (np.abs(pts[:, 2] - zc) <= dz * 1.2) & (pts[:, 1] < 0.84 * height)
+        if np.sum(m) < 10:
+            m = np.abs(pts[:, 2] - zc) <= dz * 2.0
+        if np.sum(m) >= 4:
+            sub_x = pts[m, 0]
+            xs[i] = 0.5 * (float(np.percentile(sub_x, 15)) + float(np.percentile(sub_x, 85)))
+            valid[i] = True
+    if np.any(valid):
+        idx_v = np.where(valid)[0]
+        xs = np.interp(np.arange(n_bins), idx_v, xs[idx_v])
+        for _ in range(4):
+            xs_pad = np.pad(xs, 1, mode="edge")
+            xs = 0.25 * xs_pad[:-2] + 0.5 * xs_pad[1:-1] + 0.25 * xs_pad[2:]
+    return zs, xs
+
+
+def dijkstra_seam_path(bm, start_vert, goal_set, cost_fn):
+    dist = {start_vert.index: 0.0}
+    prev_edge = {}
+    pq = [(0.0, start_vert.index)]
+    visited = set()
+    while pq:
+        d, u_idx = heapq.heappop(pq)
+        if u_idx in visited:
+            continue
+        visited.add(u_idx)
+        if u_idx in goal_set:
+            edges = []
+            cur = u_idx
+            while cur in prev_edge:
+                e, parent_idx = prev_edge[cur]
+                edges.append(e)
+                cur = parent_idx
+            return edges
+        u = bm.verts[u_idx]
+        for e in u.link_edges:
+            v = e.other_vert(u)
+            v_idx = v.index
+            if v_idx in visited:
+                continue
+            nd = d + cost_fn(u, v, e)
+            if nd < dist.get(v_idx, 1e30):
+                dist[v_idx] = nd
+                prev_edge[v_idx] = (e, u_idx)
+                heapq.heappush(pq, (nd, v_idx))
+    return []
+
+
+def mark_anatomical_pelt_seams(obj, height, species_name):
+    """Marks clean anatomical UV seams yielding 2-3 large continuous pelt islands:
+      - Left pelt & Right pelt split cleanly along the smooth sagittal midline x_mid(z)
+      - Long hanging tail (cattle, horse) detached at the tail dock with 1 hidden inner slit
+      - Hidden medial inner-leg relief slits from each hoof sole to the sagittal midline
+      - Hidden underside horn slits (cattle) so curved horns unroll flat without squishing
+    Zero random Voronoi seams across face, eyes, forehead, horns, ears, neck, or flanks!
+    """
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+
+    for e in bm.edges:
+        e.seam = False
+
+    pts = np.array([[v.co.x, v.co.y, v.co.z] for v in bm.verts], dtype=np.float64)
+    zs, xs_mid = compute_sagittal_midline_x(pts, height)
+    min_z, max_z = float(pts[:, 2].min()), float(pts[:, 2].max())
+
+    def x_mid_at(z):
+        return float(np.interp(z, zs, xs_mid))
+
+    hoof_y = 0.06 * height
+    hind_hooves = [p[2] for p in pts if p[1] < hoof_y and p[2] < 0.0]
+    back_z = float(np.median(hind_hooves)) if hind_hooves else min_z + 0.25 * (max_z - min_z)
+    tail_z = back_z - 0.14 * height
+
+    region = {}
+    has_long_tail = species_name in ("cattle", "horse")
+    for f in bm.faces:
+        c = f.calc_center_median()
+        if has_long_tail and c.z < tail_z and c.y < 0.72 * height:
+            region[f.index] = 2
+        else:
+            region[f.index] = 1 if (c.x - x_mid_at(c.z)) >= 0.0 else 0
+
+    for _ in range(4):
+        new_reg = dict(region)
+        for f in bm.faces:
+            nbrs = [lf for e in f.edges for lf in e.link_faces if lf != f]
+            if len(nbrs) >= 2:
+                counts = {}
+                for nf in nbrs:
+                    r = region[nf.index]
+                    counts[r] = counts.get(r, 0) + 1
+                best_r, best_c = max(counts.items(), key=lambda kv: kv[1])
+                if best_c == len(nbrs) and best_r != region[f.index]:
+                    new_reg[f.index] = best_r
+        region = new_reg
+
+    for _ in range(6):
+        visited = set()
+        comps_by_reg = {0: [], 1: [], 2: []}
+        for f in bm.faces:
+            if f.index in visited:
+                continue
+            r = region[f.index]
+            comp = []
+            q = deque([f])
+            visited.add(f.index)
+            while q:
+                cur = q.popleft()
+                comp.append(cur)
+                for e in cur.edges:
+                    for nf in e.link_faces:
+                        if nf.index not in visited and region[nf.index] == r:
+                            visited.add(nf.index)
+                            q.append(nf)
+            comps_by_reg[r].append(comp)
+
+        changed = 0
+        for r, comps in comps_by_reg.items():
+            if len(comps) <= 1:
+                continue
+            comps.sort(key=len, reverse=True)
+            for small in comps[1:]:
+                nbr_counts = {}
+                small_set = set(f.index for f in small)
+                for f in small:
+                    for e in f.edges:
+                        for nf in e.link_faces:
+                            if nf.index not in small_set:
+                                nr = region[nf.index]
+                                nbr_counts[nr] = nbr_counts.get(nr, 0) + 1
+                target_r = max(nbr_counts.items(), key=lambda kv: kv[1])[0] if nbr_counts else (1 - r if r < 2 else 0)
+                for f in small:
+                    region[f.index] = target_r
+                    changed += 1
+        if changed == 0:
+            break
+
+    seam_verts = set()
+    tail_seam_verts = set()
+    boundary_seam_edges = 0
+    for e in bm.edges:
+        if len(e.link_faces) == 2:
+            r0, r1 = region[e.link_faces[0].index], region[e.link_faces[1].index]
+            if r0 != r1:
+                e.seam = True
+                boundary_seam_edges += 1
+                seam_verts.add(e.verts[0].index)
+                seam_verts.add(e.verts[1].index)
+                if 2 in (r0, r1):
+                    tail_seam_verts.add(e.verts[0].index)
+                    tail_seam_verts.add(e.verts[1].index)
+
+    tail_slit_edges = 0
+    if has_long_tail and tail_seam_verts:
+        tail_verts = [v for v in bm.verts if any(region[f.index] == 2 for f in v.link_faces)]
+        if tail_verts:
+            v_tail_tip = min(tail_verts, key=lambda v: v.co.y)
+            def tail_cost(u, v, e):
+                if not all(any(region[f.index] == 2 for f in x.link_faces) for x in (u, v)):
+                    return 1e6
+                p = 0.5 * (u.co + v.co)
+                elen = (u.co - v.co).length
+                dx = abs(p.x - x_mid_at(p.z))
+                n = (u.normal + v.normal).normalized() if (u.normal + v.normal).length > 1e-6 else Vector((0, 0, 1))
+                return elen * (1.0 + 8.0 * dx / height + 3.0 * max(0.0, -n.z))
+            for e in dijkstra_seam_path(bm, v_tail_tip, tail_seam_verts, tail_cost):
+                e.seam = True
+                tail_slit_edges += 1
+
+    hoof_verts = [v for v in bm.verts if v.co.y < 0.08 * height]
+    med_z = float(np.median([v.co.z for v in hoof_verts])) if hoof_verts else 0.0
+    leg_seam_edges = 0
+    for is_front in (True, False):
+        for is_right in (True, False):
+            reg_id = 1 if is_right else 0
+            cands = [
+                v for v in bm.verts
+                if v.co.y < 0.25 * height
+                and ((v.co.z >= med_z) == is_front)
+                and any(region[f.index] == reg_id for f in v.link_faces)
+            ]
+            if not cands:
+                continue
+            v_hoof = min(cands, key=lambda v: v.co.y + 0.05 * abs(v.co.x - x_mid_at(v.co.z)))
+            def leg_cost(u, v, e, r_id=reg_id):
+                p = 0.5 * (u.co + v.co)
+                dx_mid = abs(p.x - x_mid_at(p.z))
+                elen = (u.co - v.co).length
+                pen = 1.0 + 18.0 * dx_mid / max(0.1, height)
+                if p.y > 0.58 * height:
+                    pen += 40.0 * (p.y - 0.58 * height) / height
+                if not any(region[f.index] == r_id for f in v.link_faces):
+                    pen += 100.0
+                return elen * pen
+            for e in dijkstra_seam_path(bm, v_hoof, seam_verts, leg_cost):
+                e.seam = True
+                leg_seam_edges += 1
+
+    horn_seam_edges = 0
+    if species_name == "cattle":
+        for is_right in (True, False):
+            reg_id = 1 if is_right else 0
+            s_sign = 1.0 if is_right else -1.0
+            cands = [
+                v for v in bm.verts
+                if v.co.y > 0.72 * height and v.co.z > 0.25 * max_z
+                and (v.co.x - x_mid_at(v.co.z)) * s_sign > 0.08 * height
+            ]
+            if not cands:
+                continue
+            v_tip = max(cands, key=lambda v: abs(v.co.x - x_mid_at(v.co.z)) + 0.8 * v.co.y)
+            def horn_cost(u, v, e, r_id=reg_id):
+                n = (u.normal + v.normal).normalized() if (u.normal + v.normal).length > 1e-6 else Vector((0, 1, 0))
+                elen = (u.co - v.co).length
+                pen = 1.0 + 4.0 * max(0.0, n.y) + 5.0 * max(0.0, n.z)
+                if not any(region[f.index] == r_id for f in v.link_faces):
+                    pen += 100.0
+                return elen * pen
+            for e in dijkstra_seam_path(bm, v_tip, seam_verts, horn_cost):
+                e.seam = True
+                horn_seam_edges += 1
+
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    print(f"[pelt-uv] {species_name}: seams region_bdy={boundary_seam_edges}, legs={leg_seam_edges}, tail={tail_slit_edges}, horns={horn_seam_edges}")
+
+
+def flood_fill_unbaked_pixels(rgba_f32):
+    """Inpaints any missed/pure-black ray pixels inside islands and dilates valid baked pelt colors
+    into all untouched background texels so GPU mipmaps down to 1x1 NEVER bleed black into coats.
+    """
+    h, w, _ = rgba_f32.shape
+    valid = (rgba_f32[:, :, 3] > 0.5) & (np.max(rgba_f32[:, :, :3], axis=2) >= 0.004)
+    if np.all(valid) or not np.any(valid):
+        return rgba_f32[:, :, :3]
+    out = rgba_f32[:, :, :3].copy()
+    cur_valid = valid.copy()
+    for _ in range(64):
+        if np.all(cur_valid):
+            break
+        acc = np.zeros_like(out)
+        cnt = np.zeros((h, w), dtype=np.float32)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy == 0 and dx == 0:
+                    continue
+                ys = slice(max(0, dy), h + min(0, dy))
+                xs = slice(max(0, dx), w + min(0, dx))
+                yd = slice(max(0, -dy), h + min(0, -dy))
+                xd = slice(max(0, -dx), w + min(0, -dx))
+                m = cur_valid[ys, xs]
+                acc[yd, xd] += out[ys, xs] * m[:, :, None]
+                cnt[yd, xd] += m.astype(np.float32)
+        fill = (~cur_valid) & (cnt > 0.0)
+        if not np.any(fill):
+            break
+        out[fill] = acc[fill] / cnt[fill, None]
+        cur_valid[fill] = True
+    if not np.all(cur_valid):
+        out[~cur_valid] = out[valid].mean(axis=0)
+    return out
+
+
+def bake_clean_pelt_texture(src_obj, tgt_obj, src_img, species_name, tex_size=1024):
+    """Bakes lighting-free Cycles EMIT color from high-res Tripo source_obj onto clean pelt-unwrapped
+    target_obj (1024x1024 sRGB), flood-fills margins/background, saves JPEG, and returns bake_img.
+    """
+    mat_src = bpy.data.materials.new(name=f"{species_name}_emit_src")
+    mat_src.use_nodes = True
+    nt = mat_src.node_tree
+    nt.nodes.clear()
+    n_out = nt.nodes.new("ShaderNodeOutputMaterial")
+    n_emit = nt.nodes.new("ShaderNodeEmission")
+    n_tex = nt.nodes.new("ShaderNodeTexImage")
+    n_tex.image = src_img
+    n_tex.interpolation = "Linear"
+    nt.links.new(n_tex.outputs["Color"], n_emit.inputs["Color"])
+    nt.links.new(n_emit.outputs["Emission"], n_out.inputs["Surface"])
+    src_obj.data.materials.clear()
+    src_obj.data.materials.append(mat_src)
+
+    bake_img = bpy.data.images.new(name=f"{species_name}_pelt_baked", width=tex_size, height=tex_size, alpha=True, float_buffer=False)
+    bake_img.colorspace_settings.name = "sRGB"
+    bake_img.pixels.foreach_set(np.zeros(tex_size * tex_size * 4, dtype=np.float32))
+    mat_tgt = bpy.data.materials.new(name=f"{species_name}_bake_tgt")
+    mat_tgt.use_nodes = True
+    nt_t = mat_tgt.node_tree
+    nt_t.nodes.clear()
+    nt_t.nodes.new("ShaderNodeOutputMaterial")
+    nt_tex = nt_t.nodes.new("ShaderNodeTexImage")
+    nt_tex.image = bake_img
+    nt_t.nodes.active = nt_tex
+    tgt_obj.data.materials.clear()
+    tgt_obj.data.materials.append(mat_tgt)
+
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 4
+    scene.cycles.use_denoising = False
+    scene.cycles.bake_type = "EMIT"
+    scene.view_settings.view_transform = "Standard"
+    scene.view_settings.look = "None"
+    scene.view_settings.exposure = 0.0
+    scene.view_settings.gamma = 1.0
+    scene.render.bake.use_selected_to_active = True
+    scene.render.bake.use_clear = True
+    scene.render.bake.cage_extrusion = 0.035
+    scene.render.bake.max_ray_distance = 0.08
+    scene.render.bake.margin = 16
+    scene.render.bake.margin_type = "EXTEND"
+
+    bpy.ops.object.select_all(action="DESELECT")
+    src_obj.select_set(True)
+    tgt_obj.select_set(True)
+    bpy.context.view_layer.objects.active = tgt_obj
+    bpy.ops.object.bake(type="EMIT")
+
+    px = np.empty(tex_size * tex_size * 4, dtype=np.float32)
+    bake_img.pixels.foreach_get(px)
+    rgba = px.reshape(tex_size, tex_size, 4)
+
+    # Diagnostic check for any missed ray loops prior to flood-fill repair
+    bm_chk = bmesh.new()
+    bm_chk.from_mesh(tgt_obj.data)
+    uv_lay = bm_chk.loops.layers.uv.active
+    missed_alpha = 0
+    repaired_black = 0
+    total_loops = 0
+    for f in bm_chk.faces:
+        for l in f.loops:
+            total_loops += 1
+            uv = l[uv_lay].uv
+            ix = max(0, min(tex_size - 1, int(round(uv.x * (tex_size - 1)))))
+            iy = max(0, min(tex_size - 1, int(round(uv.y * (tex_size - 1)))))
+            if rgba[iy, ix, 3] < 0.5:
+                missed_alpha += 1
+            elif np.max(rgba[iy, ix, :3]) < 0.004:
+                repaired_black += 1
+    bm_chk.free()
+
+    rgb_filled = flood_fill_unbaked_pixels(rgba)
+    rgba[:, :, :3] = rgb_filled
+    rgba[:, :, 3] = 1.0
+    bake_img.pixels.foreach_set(rgba.ravel())
+    bake_img.update()
+
     os.makedirs(OUT_TEX_DIR, exist_ok=True)
     out_path = os.path.join(OUT_TEX_DIR, f"livestock-{species_name}.jpg")
-    dup = img.copy()
-    try:
-        dup.scale(tex_size, tex_size)
-        scene = bpy.context.scene
-        scene.render.image_settings.file_format = "JPEG"
-        scene.render.image_settings.color_mode = "RGB"
-        scene.render.image_settings.quality = 92
-        dup.save_render(out_path, scene=scene)
-        print(f"[tripo] Saved {tex_size}x{tex_size} basecolor texture: {out_path} ({os.path.getsize(out_path)/1024:.1f} KB)")
-    finally:
-        bpy.data.images.remove(dup)
-    return out_path
+    scene.render.image_settings.file_format = "JPEG"
+    scene.render.image_settings.color_mode = "RGB"
+    scene.render.image_settings.quality = 92
+    bake_img.save_render(out_path, scene=scene)
+    print(
+        f"[cycles-bake] {species_name}: saved {tex_size}x{tex_size} pelt JPEG {out_path} "
+        f"({os.path.getsize(out_path)/1024:.1f} KB), missed_alpha={missed_alpha}/{total_loops}, "
+        f"inpainted_dark={repaired_black}/{total_loops}"
+    )
+    return bake_img
 
 
 def import_tripo_quadruped(glb_path, spec_meta):
-    """Imports a Tripo H3.1 4K GLB, strips twin sheep if needed, exports 1024x1024 basecolor JPEG,
-    samples 4K basecolor to POINT colors (for far-body/splat fallback), welds UV-seam duplicates while
-    preserving loop UVs, decimates with UV-seam delimiting to target_faces, and aligns/grounds.
+    """Imports a Tripo H3.1 4K GLB, aligns source_obj to Waterworld coordinates, builds a watertight
+    decimated target_obj (12k-14k tris), re-unwraps cleanly onto 2-3 continuous anatomical pelt UV
+    islands, Cycles-EMIT bakes 4K -> 1K clean pelt JPEG, and resamples linear BakeCoat vertex colors
+    from the baked pelt texture so FAR & SPLAT match CLUSTER 1:1.
     Returns (bm, vert_linear_rgb_list).
     """
     clear_scene()
@@ -458,45 +1002,126 @@ def import_tripo_quadruped(glb_path, spec_meta):
     bpy.context.view_layer.objects.active = meshes[0]
     if len(meshes) > 1:
         bpy.ops.object.join()
-    obj = bpy.context.view_layer.objects.active
+    src_obj = bpy.context.view_layer.objects.active
+    src_obj.name = f"{spec_meta['name']}_source"
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-
-    # Export 1024x1024 high-res Tripo basecolor JPEG before any mesh edits
-    export_tripo_basecolor(spec_meta["name"], tex_size=1024)
 
     # 1. Single Merino sheep extraction: strip twin sheep at X > 0.0 immediately after transform_apply!
     if spec_meta["name"] == "sheep":
         bm_strip = bmesh.new()
-        bm_strip.from_mesh(obj.data)
+        bm_strip.from_mesh(src_obj.data)
         to_del = [v for v in bm_strip.verts if v.co.x > 0.0]
         if to_del:
             print(f"[tripo] Stripping twin sheep component ({len(to_del)}/{len(bm_strip.verts)} verts with x > 0)")
             bmesh.ops.delete(bm_strip, geom=to_del, context="VERTS")
-            bm_strip.to_mesh(obj.data)
-            obj.data.update()
+            bm_strip.to_mesh(src_obj.data)
+            src_obj.data.update()
         bm_strip.free()
 
-    # 2. Sample 4096x4096 basecolor onto per-vertex POINT FLOAT_COLOR for far-body & splat colour parity,
-    #    while KEEPING obj.data.uv_layers intact for crisp GPU texture mapping!
-    has_tex = sample_4k_texture_to_point_attribute(obj.data)
+    # 2. Transform source_obj directly into Waterworld coordinates (+Z forward, +Y up, symmetric X, hooves Y=0)
+    #    BEFORE duplicating to target_obj so Cycles selected-to-active raycasts align identically in real meters.
+    n_sv = len(src_obj.data.vertices)
+    co_flat = np.empty(n_sv * 3, dtype=np.float32)
+    src_obj.data.vertices.foreach_get("co", co_flat)
+    ww_pts, scale = align_points_waterworld(co_flat.reshape(-1, 3), spec_meta["height"])
+    src_obj.data.vertices.foreach_set("co", ww_pts.ravel())
+    src_obj.data.update()
 
-    # 3. Weld coincident UV-seam vertices (Blender WELD preserves per-loop UV coordinates!),
-    #    then decimate with UV delimiting so UV seams and texture islands stay 100% undistorted!
-    weld = obj.modifiers.new(name="WeldUVSeams", type="WELD")
-    weld.merge_threshold = 0.00015
+    imgs = [im for im in bpy.data.images if im.size[0] >= 256 and im.size[1] >= 256]
+    src_img = next((im for im in imgs if "basecolor" in im.name.lower() or "color" in im.name.lower()), imgs[0]) if imgs else None
+
+    # 3. Build welded, decimated, watertight manifold target_obj (dropping Tripo's 80 Voronoi UV islands!)
+    tgt_mesh = src_obj.data.copy()
+    tgt_mesh.name = f"{spec_meta['name']}_target_mesh"
+    tgt_obj = bpy.data.objects.new(f"{spec_meta['name']}_target", tgt_mesh)
+    bpy.context.collection.objects.link(tgt_obj)
+    bpy.ops.object.select_all(action="DESELECT")
+    tgt_obj.select_set(True)
+    bpy.context.view_layer.objects.active = tgt_obj
+
+    while len(tgt_obj.data.uv_layers) > 0:
+        tgt_obj.data.uv_layers.remove(tgt_obj.data.uv_layers[0])
+
+    weld = tgt_obj.modifiers.new(name="WeldUVSeams", type="WELD")
+    weld.merge_threshold = 0.00015 * scale
     bpy.ops.object.modifier_apply(modifier=weld.name)
 
     target_faces = spec_meta.get("targetFaces", 12000)
-    if len(obj.data.polygons) > target_faces:
-        dec = obj.modifiers.new(name="TripoDec", type="DECIMATE")
+    if len(tgt_obj.data.polygons) > target_faces:
+        dec = tgt_obj.modifiers.new(name="TripoDec", type="DECIMATE")
         dec.decimate_type = "COLLAPSE"
-        dec.ratio = float(target_faces) / float(len(obj.data.polygons))
+        dec.ratio = float(target_faces) / float(len(tgt_obj.data.polygons))
         dec.use_collapse_triangulate = True
-        dec.delimit = {"UV"}
         bpy.ops.object.modifier_apply(modifier=dec.name)
 
-    # Read mesh + baked vertex linear RGB colors into BMesh
-    me = obj.data
+    bm_clean = bmesh.new()
+    bm_clean.from_mesh(tgt_obj.data)
+    make_strict_closed_manifold(bm_clean)
+    bm_clean.edges.ensure_lookup_table()
+    bm_clean.verts.ensure_lookup_table()
+    b_edges = sum(1 for e in bm_clean.edges if e.is_boundary)
+    nm_edges = sum(1 for e in bm_clean.edges if not e.is_manifold)
+    bm_clean.to_mesh(tgt_obj.data)
+    bm_clean.free()
+    tgt_obj.data.update()
+
+    # 4. Re-unwrap target_obj cleanly onto 2-3 continuous anatomical pelt UV islands via SLIM MINIMUM_STRETCH
+    tgt_obj.data.uv_layers.new(name="CleanPeltUV")
+    mark_anatomical_pelt_seams(tgt_obj, spec_meta["height"], spec_meta["name"])
+
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.unwrap(method="MINIMUM_STRETCH", margin=0.025, iterations=14)
+    bpy.ops.uv.select_all(action="SELECT")
+    bpy.ops.uv.average_islands_scale()
+    bpy.ops.uv.pack_islands(margin=0.025, rotate=True)
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    # Verify UV island count, area utilization & orientation
+    bm_uv = bmesh.new()
+    bm_uv.from_mesh(tgt_obj.data)
+    uv_lay = bm_uv.loops.layers.uv.active
+    uv_area = 0.0
+    neg_tris = 0
+    for f in bm_uv.faces:
+        u0, u1, u2 = [l[uv_lay].uv for l in f.loops]
+        a2 = (u1.x - u0.x) * (u2.y - u0.y) - (u2.x - u0.x) * (u1.y - u0.y)
+        uv_area += 0.5 * abs(a2)
+        if a2 < 0.0:
+            neg_tris += 1
+    bm_uv.faces.ensure_lookup_table()
+    vis = set()
+    islands = []
+    for f in bm_uv.faces:
+        if f.index in vis:
+            continue
+        comp = []
+        q = deque([f])
+        vis.add(f.index)
+        while q:
+            c = q.popleft()
+            comp.append(c)
+            for e in c.edges:
+                if e.seam:
+                    continue
+                for nf in e.link_faces:
+                    if nf.index not in vis:
+                        vis.add(nf.index)
+                        q.append(nf)
+        islands.append(len(comp))
+    bm_uv.free()
+    islands.sort(reverse=True)
+    print(
+        f"[tripo] {spec_meta['name']}: {len(tgt_obj.data.vertices)} verts, {len(tgt_obj.data.polygons)} tris, "
+        f"boundary={b_edges}, non_manifold={nm_edges}, uv_islands={len(islands)} {islands[:6]}, "
+        f"uv_area={uv_area:.3f}, neg_uv_tris={neg_tris}"
+    )
+
+    # 5. Cycles EMIT selected-to-active bake (4K Tripo -> 1024x1024 clean pelt JPEG) & resample BakeCoat vertex RGB
+    bake_img = bake_clean_pelt_texture(src_obj, tgt_obj, src_img, spec_meta["name"], tex_size=1024) if src_img else None
+    has_tex = sample_image_to_point_attribute(tgt_obj.data, bake_img) if bake_img else False
+
+    me = tgt_obj.data
     n_v = len(me.vertices)
     vert_rgb = None
     attr = me.color_attributes.get("BakeCoat") if has_tex else None
@@ -508,71 +1133,14 @@ def import_tripo_quadruped(glb_path, spec_meta):
     bm = bmesh.new()
     bm.from_mesh(me)
     bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
     bm.verts.ensure_lookup_table()
     bm.edges.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
-
-    # Verify crack-free seam welding
-    boundary_edges = sum(1 for e in bm.edges if e.is_boundary)
-    print(f"[tripo] {spec_meta['name']}: {len(bm.verts)} verts, {len(bm.faces)} tris, boundary_edges={boundary_edges}")
-
-    # 4. Convert Blender (x, y, z) -> Waterworld (x, z, -y) and align horizontal yaw via lower-body/hoof PCA!
-    pts = np.array([[v.co.x, v.co.z, -v.co.y] for v in bm.verts], dtype=np.float64)
-    min_y, max_y = float(pts[:, 1].min()), float(pts[:, 1].max())
-    span_y = max(0.05, max_y - min_y)
-
-    low_mask = pts[:, 1] < (min_y + 0.55 * span_y)
-    low_pts = pts[low_mask] if np.any(low_mask) else pts
-    xz = low_pts[:, [0, 2]] - low_pts[:, [0, 2]].mean(axis=0)
-    _, evecs = np.linalg.eigh((xz.T @ xz) / max(1, len(xz)))
-    fw = evecs[:, 1]  # principal horizontal body axis (unit vector in XZ)
-
-    # Orient +Z toward taller head/poll end
-    proj = pts[:, 0] * fw[0] + pts[:, 2] * fw[1]
-    mid_proj = 0.5 * (float(proj.min()) + float(proj.max()))
-    pos_top = float(pts[proj >= mid_proj, 1].max())
-    neg_top = float(pts[proj < mid_proj, 1].max())
-    if neg_top > pos_top:
-        fw = -fw
-
-    # Right-handed horizontal basis: Y=(0,1,0), Z=(fw[0], 0, fw[1]), X = Y x Z = (fw[1], 0, -fw[0])
-    rt = np.array([fw[1], -fw[0]], dtype=np.float64)
-    scale = spec_meta["height"] / span_y
-    wx = (pts[:, 0] * rt[0] + pts[:, 2] * rt[1]) * scale
-    wy = (pts[:, 1] - min_y) * scale
-    wz = (pts[:, 0] * fw[0] + pts[:, 2] * fw[1]) * scale
-
-    # Center X on mid-barrel + hooves, center Z on 4 hooves, ground hooves at Y = 0
-    H = spec_meta["height"]
-    hoof_m = wy < 0.06 * H
-    med_z = float(np.median(wz[hoof_m])) if np.any(hoof_m) else 0.5 * (float(wz.min()) + float(wz.max()))
-    fore_m = hoof_m & (wz >= med_z)
-    hind_m = hoof_m & (wz < med_z)
-    cz = 0.5 * (
-        (float(np.median(wz[fore_m])) if np.any(fore_m) else float(wz.max()))
-        + (float(np.median(wz[hind_m])) if np.any(hind_m) else float(wz.min()))
-    )
-    body_span_z = float(wz.max() - wz.min())
-    mid_barrel = (wy > 0.34 * H) & (wy < 0.68 * H) & (np.abs(wz - cz) < 0.25 * body_span_z)
-    if np.sum(mid_barrel) >= 8:
-        cx = 0.5 * (float(np.percentile(wx[mid_barrel], 2)) + float(np.percentile(wx[mid_barrel], 98)))
-    elif np.any(hoof_m):
-        cx = 0.5 * (float(np.percentile(wx[hoof_m], 5)) + float(np.percentile(wx[hoof_m], 95)))
-    else:
-        cx = 0.5 * (float(wx.min()) + float(wx.max()))
-
-    wx -= cx
-    wz -= cz
-    wy -= float(wy.min())
-
-    for i, v in enumerate(bm.verts):
-        v.co = Vector((float(wx[i]), float(wy[i]), float(wz[i])))
-
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
-    bm.verts.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
     bm.normal_update()
-    bpy.data.objects.remove(obj, do_unlink=True)
+
+    bpy.data.objects.remove(tgt_obj, do_unlink=True)
+    bpy.data.objects.remove(src_obj, do_unlink=True)
     return bm, vert_rgb
 
 
@@ -693,7 +1261,7 @@ def build_cattle(tripo_dir):
 
 
 def build_swine(tripo_dir):
-    meta = {"name": "swine", "neckPivot": (0.0, 0.42, 0.28), "legY": 0.28, "frontZ": 0.25, "backZ": -0.30, "height": 0.66, "targetFaces": 10000}
+    meta = {"name": "swine", "neckPivot": (0.0, 0.42, 0.28), "legY": 0.28, "frontZ": 0.25, "backZ": -0.30, "height": 0.66, "targetFaces": 12000}
     glb = find_tripo_glb(tripo_dir, "swine")
     vert_rgb = None
     if glb:

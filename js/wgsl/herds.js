@@ -991,18 +991,32 @@ fn livestockCoatAlbedo(species: u32, coatCode: f32, texColor: vec3f, seed: f32, 
       return col;
     }
     if (species == 1u) {
-      let hornKeep = smoothstep(1.14, 1.26, localXZ.y) * smoothstep(0.18, 0.32, lum);
-      let hideMask = smoothstep(0.03, 0.09, lum) * (1.0 - hornKeep);
+      let maxC = max(col.r, max(col.g, col.b));
+      let minC = min(col.r, min(col.g, col.b));
+      let sat = (maxC - minC) / max(maxC, 0.001);
+      // Preserve pale horns, muzzle rim, dark eyes/nostrils/inner ears, and dark hooves untouched.
+      let headRegion = smoothstep(0.40, 0.62, localXZ.x);
+      let hornKeep = smoothstep(1.04, 1.20, localXZ.y) * smoothstep(0.30, 0.55, localXZ.x) * smoothstep(0.09, 0.22, lum);
+      let paleHeadKeep = headRegion * (1.0 - smoothstep(0.20, 0.40, sat)) * smoothstep(0.12, 0.26, lum);
+      let hoofKeep = 1.0 - smoothstep(0.08, 0.18, localXZ.y);
+      let hideMask = smoothstep(0.035, 0.105, lum) * (1.0 - max(max(hornKeep, paleHeadKeep), hoofKeep));
       if (h1 < 0.22) {
-        col = mix(col, vec3f(lum * 0.38, lum * 0.34, lum * 0.32), hideMask * 0.88);
+        col = mix(col, vec3f(lum * 0.42, lum * 0.37, lum * 0.34), hideMask * 0.85);
       } else if (h1 < 0.52) {
         col = mix(col, col * vec3f(1.06, 0.96, 0.88), hideMask * 0.65);
       } else if (h1 < 0.78) {
-        col = mix(col, vec3f(col.r * 1.28, col.g * 1.55 + 0.02, col.b * 1.65 + 0.015), hideMask * 0.75);
+        col = mix(col, vec3f(col.r * 1.24, col.g * 1.48 + 0.015, col.b * 1.56 + 0.012), hideMask * 0.72);
       }
       if (h2 < 0.22) {
-        let coatPatch = smoothstep(0.05, 0.22, gnoise(localXZ * 2.4 + vec2f(seed * 19.0, seed * 7.0)));
-        col = mix(col, vec3f(0.56, 0.52, 0.44) * (0.65 + 0.70 * lum), hideMask * coatPatch * 0.85);
+        // Soft organic belted/spotted piebald markings strictly on torso/flank (localXZ.x = rest.z < 0.55, below poll).
+        let torsoMask = (1.0 - smoothstep(0.32, 0.55, localXZ.x))
+          * smoothstep(0.24, 0.46, localXZ.y)
+          * (1.0 - smoothstep(1.12, 1.28, localXZ.y));
+        let patchN = gnoise(localXZ * 2.1 + vec2f(seed * 19.0, seed * 7.0))
+          + 0.35 * gnoise(localXZ * 5.2 + vec2f(seed * 3.0, seed * 11.0));
+        let coatPatch = smoothstep(0.04, 0.36, patchN);
+        let furShade = 0.58 + 0.72 * sqrt(clamp(lum, 0.01, 1.0));
+        col = mix(col, vec3f(0.56, 0.52, 0.45) * furShade, hideMask * torsoMask * coatPatch * 0.78);
       }
       return col;
     }
@@ -1015,18 +1029,29 @@ fn livestockCoatAlbedo(species: u32, coatCode: f32, texColor: vec3f, seed: f32, 
       }
       return col;
     }
-    // Horse (species == 3u): preserve dark eyes/nostrils/hooves/mane while varying bay, chestnut, seal-brown, and dapple-grey coats.
-    let coatMask = smoothstep(0.024, 0.065, lum);
+    // Horse (species == 3u): preserve dark eyes/nostrils/hooves/mane while varying bay, chestnut, seal-brown, and Lusitano dapple-grey coats.
+    let hoofKeepH = 1.0 - smoothstep(0.09, 0.19, localXZ.y);
+    let coatMask = smoothstep(0.025, 0.085, lum) * (1.0 - hoofKeepH);
     if (h1 < 0.16) {
-      let dapple = 0.84 + 0.16 * gnoise(localXZ * 8.5 + vec2f(seed * 13.0));
-      let grey = vec3f(0.44, 0.42, 0.39) * dapple * clamp(0.45 + lum * 4.2, 0.35, 1.15);
-      col = mix(col, grey, smoothstep(0.012, 0.045, lum) * 0.90);
+      let maxC = max(col.r, max(col.g, col.b));
+      let minC = min(col.r, min(col.g, col.b));
+      let chroma = maxC - minC;
+      let coatTone = sqrt(clamp(lum, 0.002, 1.0));
+      let bodyDapple = smoothstep(0.28, 0.65, localXZ.y) * (1.0 - smoothstep(0.62, 0.92, localXZ.x));
+      let dapple = 1.0 + (0.11 * gnoise(localXZ * 7.5 + vec2f(seed * 13.0, seed * 5.0))) * bodyDapple;
+      // Smooth continuous blend: warm bay coat -> dappled Lusitano silver-grey; dark mane/tail -> charcoal-grey; eyes/nostrils/hooves stay dark.
+      let warmHide = smoothstep(0.018, 0.12, chroma) * smoothstep(0.022, 0.095, lum) * (1.0 - hoofKeepH);
+      let greyCoat = vec3f(0.45, 0.44, 0.41) * dapple * clamp(0.42 + 0.98 * coatTone, 0.32, 1.12);
+      let charcoalMane = vec3f(0.11, 0.108, 0.104) * clamp(0.45 + 1.35 * coatTone, 0.30, 1.05);
+      let maneMask = smoothstep(0.012, 0.045, lum) * (1.0 - warmHide) * (1.0 - hoofKeepH) * smoothstep(0.18, 0.34, localXZ.y);
+      col = mix(col, charcoalMane, maneMask * 0.55);
+      col = mix(col, greyCoat, warmHide * 0.88);
     } else if (h1 < 0.48) {
-      col = mix(col, col * vec3f(1.38, 1.22, 0.95) + vec3f(0.028, 0.010, 0.002), coatMask * 0.78);
+      col = mix(col, col * vec3f(1.34, 1.20, 0.94) + vec3f(0.024, 0.008, 0.002), coatMask * 0.76);
     } else if (h1 < 0.74) {
-      col = mix(col, col * vec3f(0.52, 0.56, 0.62), coatMask * 0.82);
+      col = mix(col, col * vec3f(0.54, 0.57, 0.62), coatMask * 0.80);
     } else {
-      col = mix(col, col * vec3f(1.08, 1.02, 0.96), coatMask * 0.50);
+      col = mix(col, col * vec3f(1.06, 1.02, 0.96), coatMask * 0.48);
     }
     return col;
   }

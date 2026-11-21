@@ -344,23 +344,25 @@ fn crewShadeLit(v:CrewVertex,front:bool,baseIn:vec3f)->vec3f {
   let clothGate=(1.0-clamp(v.skin,0.0,1.0))*${(clothSheen / CREW_CLOTH_SHEEN).toFixed(4)};
   let bpFoot=max(length(dBpdx),length(dBpdy));
   let fineFade=(1.0-smoothstep(0.0009,0.0036,bpFoot))*step(1e-6,bpFoot)*clothGate;
-  let twillFade=(1.0-smoothstep(0.0035,0.016,bpFoot))*step(1e-6,bpFoot)*clothGate;
-  let uWeave=(bp.x+bp.z)*210.0*6.2831853;
-  let vWeave=bp.y*210.0*6.2831853;
-  let tWeave=(bp.x*44.0-bp.y*36.0+bp.z*40.0)*6.2831853;
-  let gradFine=vec3f(cos(uWeave)*210.0,cos(vWeave)*210.0,cos(uWeave)*210.0)*(0.00018*fineFade);
-  let gradTwill=vec3f(cos(tWeave)*44.0,-cos(tWeave)*36.0,cos(tWeave)*40.0)*(0.00055*twillFade);
+  let uWeave=(bp.x+bp.z)*260.0*6.2831853;
+  let vWeave=bp.y*260.0*6.2831853;
+  let gradFine=vec3f(cos(uWeave)*260.0,cos(vWeave)*260.0,cos(uWeave)*260.0)*(0.00012*fineFade);
   let skinMicroFade=(1.0-smoothstep(0.0008,0.0038,bpFoot))*step(1e-6,bpFoot)*clamp(v.skin,0.0,1.0);
   let pA=(bp.x*320.0+bp.y*290.0+bp.z*310.0)*6.2831853;
   let pB=(bp.x*530.0-bp.y*470.0+bp.z*490.0)*6.2831853;
-  let gradSkin=vec3f(cos(pA)*320.0+cos(pB)*265.0,cos(pA)*290.0-cos(pB)*235.0,cos(pA)*310.0+cos(pB)*245.0)*(0.000042*skinMicroFade);
-  let gradBp=gradFine+gradTwill+gradSkin;
+  let gradSkin=vec3f(cos(pA)*320.0+cos(pB)*265.0,cos(pA)*290.0-cos(pB)*235.0,cos(pA)*310.0+cos(pB)*245.0)*(0.000032*skinMicroFade);
+  let gradBp=gradFine+gradSkin;
   let dhdx=dot(gradBp,dBpdx);let dhdy=dot(gradBp,dBpdy);
   let r1=cross(dPdy,nGeom);let r2=cross(nGeom,dPdx);
   let det=dot(dPdx,r1);
-  let invDet=1.0/select(max(abs(det),1e-8),-max(abs(det),1e-8),det<0.0);
-  let n=normalize(nGeom-(r1*dhdx+r2*dhdy)*select(0.0,invDet,abs(det)>1e-8));
-  let clothThreadMod=1.0+(sin(uWeave)*sin(vWeave)*0.032*fineFade+sin(tWeave)*0.022*twillFade);
+  let detScale=length(dPdx)*length(dPdy);
+  let detOk=abs(det)>1e-5 && abs(det)>1e-4*detScale;
+  let safeDet=select(1.0,det,detOk);
+  let rawPerturb=select(vec3f(0.0),(r1*dhdx+r2*dhdy)/safeDet,detOk);
+  let pLen=length(rawPerturb);
+  let perturb=select(rawPerturb,rawPerturb*(0.14/pLen),pLen>0.14);
+  let n=normalize(nGeom-perturb);
+  let clothThreadMod=1.0+sin(uWeave)*sin(vWeave)*0.020*fineFade;
   let sun=F.sunDir.xyz;
   let shadowSample=vesselShadow(v.world,n);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
@@ -411,18 +413,19 @@ fn crewShadeLit(v:CrewVertex,front:bool,baseIn:vec3f)->vec3f {
   let skinAmt=saturate(v.skin);
   // Pre-integrated warm hemoglobin subsurface scatter wrap on skin so facial shadow terminators stay warm and lifelike
   // without blowing up into orange plastic highlights or crimson blotches; cloth (skinAmt == 0) keeps exact vessel lighting.
-  let rough=clamp(mix(mix(.92,.80,skinAmt),mix(.55,.44,skinAmt),wet.y)+roughBias,0.08,0.99);
+  let rough=clamp(mix(mix(.92,.84,skinAmt),mix(.55,.44,skinAmt),wet.y)+roughBias,0.08,0.99);
   let wrapRGB=vec3f(.14,.10,.08)*skinAmt;
   let ndlRaw=dot(n,sun);
   let diffRGB=max(vec3f(0.0),(vec3f(ndlRaw)+wrapRGB)/(vec3f(1.0)+wrapRGB))/(vec3f(1.0)+wrapRGB);
   let skinAmb=mix(ambient,ambient*vec3f(1.03,1.00,0.96),skinAmt*0.40);
-  let f0=mix(vec3f(.04),vec3f(.028),skinAmt);
+  let f0=mix(vec3f(.04),vec3f(.020),skinAmt);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;
+  let envSkinAtten=mix(1.0,0.12,skinAmt*(1.0-wet.y));
   let grazing=1.0-clamp(dot(n,view),0.0,1.0);
   let clothSheen=grazing*grazing*grazing*grazing*(1.0-skinAmt)*(1.0-wet.x*0.7)*${clothSheen.toFixed(4)};
   let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)+albedo*(direct*(diffRGB/PI+vec3f(clothSheen))+skinAmb*(1.0+clothSheen*0.5))+direct*spec*max(ndlRaw,0.0)
-    +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
+    +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0)*envSkinAtten;
   return col;
 }
 // Match timber, canvas and land: the same directional sky and marine haze must veil every surface along this view

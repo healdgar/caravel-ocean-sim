@@ -3,14 +3,14 @@
  "version": 3,
  "generator": "scripts/prepare-hair-continuum.mjs",
  "atlas": {
-  "words": 5673386,
+  "words": 5652757,
   "headerWords": 32,
-  "bytes": 22693544,
-  "sha256": "9703291fb1ee3321df675ed1141ceb8a1aeb99547874c5dbcc6edf256823cb6f",
+  "bytes": 22611028,
+  "sha256": "b5bc01ab607f8eb5741730c34b1834d943344ed25fc2c01d8713ca21ed1cd50c",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 10890437,
-   "sha256": "f69fb611389212e8d218eb678d4b0307eb1b58828e57a33c127f9f632017c3de"
+   "bytes": 10787467,
+   "sha256": "3f88acfe3f600e3d5f0298633e4fb8ede19b32b7fc58c8e8e6db042736f2552f"
   }
  },
  "types": [
@@ -22,11 +22,11 @@
    "vertices": 32796,
    "triangles": 36848,
    "clusters": {
-    "count": 742,
+    "count": 756,
     "levels": 10,
     "roots": 1,
     "finestTriangles": 36848,
-    "rootError": 0.013
+    "rootError": 0.0146
    },
    "chain": {
     "cell": 0,
@@ -45,25 +45,25 @@
     "simplifyError": 0,
     "steps": 217,
     "coreTriangles": 6,
-    "depth": 7,
+    "depth": 6,
     "errorRange": [
      0,
-     0.1061
+     0.0919
     ],
-    "inflateMax": 0.022,
+    "inflateMax": 0.0215,
     "rootTriangles": 35,
     "farFirst": 203,
     "farFirstTriangles": 34,
-    "handoffError": 0.0742
+    "handoffError": 0.0539
    },
    "splat": {
     "centre": [
      -0.0029,
-     1.6825,
-     -0.0266
+     1.6823,
+     -0.0313
     ],
-    "rx": 0.0943,
-    "ry": 0.0984
+    "rx": 0.0936,
+    "ry": 0.0985
    }
   },
   {
@@ -74,11 +74,11 @@
    "vertices": 42366,
    "triangles": 49838,
    "clusters": {
-    "count": 980,
-    "levels": 11,
+    "count": 949,
+    "levels": 10,
     "roots": 1,
     "finestTriangles": 49838,
-    "rootError": 0.0144
+    "rootError": 0.017
    },
    "chain": {
     "cell": 0,
@@ -100,22 +100,22 @@
     "depth": 7,
     "errorRange": [
      0,
-     0.1203
+     0.0991
     ],
-    "inflateMax": 0.0215,
-    "rootTriangles": 24,
-    "farFirst": 208,
-    "farFirstTriangles": 24,
-    "handoffError": 0.0745
+    "inflateMax": 0.0214,
+    "rootTriangles": 48,
+    "farFirst": 196,
+    "farFirstTriangles": 48,
+    "handoffError": 0.0319
    },
    "splat": {
     "centre": [
-     -0.0029,
-     1.6812,
-     -0.033
+     -0.004,
+     1.68,
+     -0.0327
     ],
-    "rx": 0.093,
-    "ry": 0.0973
+    "rx": 0.0918,
+    "ry": 0.0961
    }
   },
   {
@@ -123,14 +123,14 @@
    "id": "mariner-queue",
    "sex": "male",
    "slot": "scalp",
-   "vertices": 37184,
-   "triangles": 42952,
+   "vertices": 36832,
+   "triangles": 42536,
    "clusters": {
-    "count": 857,
+    "count": 855,
     "levels": 10,
     "roots": 1,
-    "finestTriangles": 42952,
-    "rootError": 0.0139
+    "finestTriangles": 42536,
+    "rootError": 0.0186
    },
    "chain": {
     "cell": 0,
@@ -149,25 +149,25 @@
     "simplifyError": 0,
     "steps": 217,
     "coreTriangles": 6,
-    "depth": 8,
+    "depth": 6,
     "errorRange": [
      0,
-     0.0791
+     0.1052
     ],
-    "inflateMax": 0.03,
+    "inflateMax": 0.0296,
     "rootTriangles": 41,
     "farFirst": 200,
     "farFirstTriangles": 40,
-    "handoffError": 0.0791
+    "handoffError": 0.0682
    },
    "splat": {
     "centre": [
-     -0.0025,
-     1.6324,
-     -0.0414
+     -0.0028,
+     1.6305,
+     -0.0411
     ],
-    "rx": 0.0954,
-    "ry": 0.1501
+    "rx": 0.0841,
+    "ry": 0.1482
    }
   },
   {
@@ -178,11 +178,11 @@
    "vertices": 46728,
    "triangles": 55784,
    "clusters": {
-    "count": 1059,
-    "levels": 10,
+    "count": 1041,
+    "levels": 11,
     "roots": 1,
     "finestTriangles": 55784,
-    "rootError": 0.0149
+    "rootError": 0.0202
    },
    "chain": {
     "cell": 0,
@@ -207,10 +207,10 @@
      0.1395
     ],
     "inflateMax": 0.0247,
-    "rootTriangles": 54,
-    "farFirst": 193,
-    "farFirstTriangles": 54,
-    "handoffError": 0.0426
+    "rootTriangles": 26,
+    "farFirst": 207,
+    "farFirstTriangles": 26,
+    "handoffError": 0.0495
    },
    "splat": {
     "centre": [
@@ -230,11 +230,11 @@
    "vertices": 30076,
    "triangles": 33788,
    "clusters": {
-    "count": 685,
+    "count": 689,
     "levels": 10,
     "roots": 1,
     "finestTriangles": 33788,
-    "rootError": 0.011
+    "rootError": 0.0152
    },
    "chain": {
     "cell": 0,
@@ -282,11 +282,63 @@
    "vertices": 48678,
    "triangles": 58124,
    "clusters": {
-    "count": 1132,
+    "count": 1095,
     "levels": 11,
     "roots": 1,
     "finestTriangles": 58124,
-    "rootError": 0.0153
+    "rootError": 0.0211
+   },
+   "chain": {
+    "cell": 0,
+    "cells": [
+     0,
+     0,
+     0
+    ],
+    "wellComposedCells": 0,
+    "wrapTriangles": 440,
+    "baseTriangles": 440,
+    "baseVertices": 222,
+    "baseError": 0,
+    "outward": 0,
+    "inward": 0,
+    "simplifyError": 0,
+    "steps": 217,
+    "coreTriangles": 6,
+    "depth": 7,
+    "errorRange": [
+     0,
+     0.1272
+    ],
+    "inflateMax": 0.0286,
+    "rootTriangles": 28,
+    "farFirst": 206,
+    "farFirstTriangles": 28,
+    "handoffError": 0.0796
+   },
+   "splat": {
+    "centre": [
+     -0.0035,
+     1.5559,
+     -0.0335
+    ],
+    "rx": 0.1017,
+    "ry": 0.1432
+   }
+  },
+  {
+   "index": 6,
+   "id": "nape-chignon",
+   "sex": "female",
+   "slot": "scalp",
+   "vertices": 36383,
+   "triangles": 41974,
+   "clusters": {
+    "count": 841,
+    "levels": 10,
+    "roots": 1,
+    "finestTriangles": 41974,
+    "rootError": 0.0191
    },
    "chain": {
     "cell": 0,
@@ -308,74 +360,22 @@
     "depth": 6,
     "errorRange": [
      0,
-     0.0872
+     0.0802
     ],
-    "inflateMax": 0.0291,
-    "rootTriangles": 28,
-    "farFirst": 206,
-    "farFirstTriangles": 28,
-    "handoffError": 0.0825
-   },
-   "splat": {
-    "centre": [
-     -0.0008,
-     1.5582,
-     -0.0309
-    ],
-    "rx": 0.1052,
-    "ry": 0.1454
-   }
-  },
-  {
-   "index": 6,
-   "id": "nape-chignon",
-   "sex": "female",
-   "slot": "scalp",
-   "vertices": 36858,
-   "triangles": 42524,
-   "clusters": {
-    "count": 849,
-    "levels": 10,
-    "roots": 1,
-    "finestTriangles": 42524,
-    "rootError": 0.0139
-   },
-   "chain": {
-    "cell": 0,
-    "cells": [
-     0,
-     0,
-     0
-    ],
-    "wellComposedCells": 0,
-    "wrapTriangles": 440,
-    "baseTriangles": 440,
-    "baseVertices": 222,
-    "baseError": 0,
-    "outward": 0,
-    "inward": 0,
-    "simplifyError": 0,
-    "steps": 217,
-    "coreTriangles": 6,
-    "depth": 7,
-    "errorRange": [
-     0,
-     0.113
-    ],
-    "inflateMax": 0.0247,
-    "rootTriangles": 41,
+    "inflateMax": 0.0236,
+    "rootTriangles": 40,
     "farFirst": 200,
     "farFirstTriangles": 40,
-    "handoffError": 0.0739
+    "handoffError": 0.0522
    },
    "splat": {
     "centre": [
-     -0.0026,
-     1.6011,
-     -0.0344
+     -0.0031,
+     1.6079,
+     -0.0361
     ],
-    "rx": 0.0993,
-    "ry": 0.1055
+    "rx": 0.0943,
+    "ry": 0.0932
    }
   },
   {
@@ -383,14 +383,14 @@
    "id": "crown-braids",
    "sex": "female",
    "slot": "scalp",
-   "vertices": 38345,
-   "triangles": 44410,
+   "vertices": 37845,
+   "triangles": 43810,
    "clusters": {
-    "count": 887,
+    "count": 880,
     "levels": 10,
     "roots": 1,
-    "finestTriangles": 44410,
-    "rootError": 0.0137
+    "finestTriangles": 43810,
+    "rootError": 0.018
    },
    "chain": {
     "cell": 0,
@@ -409,25 +409,25 @@
     "simplifyError": 0,
     "steps": 217,
     "coreTriangles": 6,
-    "depth": 7,
+    "depth": 6,
     "errorRange": [
      0,
-     0.0758
+     0.093
     ],
-    "inflateMax": 0.0215,
+    "inflateMax": 0.0214,
     "rootTriangles": 42,
     "farFirst": 199,
     "farFirstTriangles": 42,
-    "handoffError": 0.0717
+    "handoffError": 0.0534
    },
    "splat": {
     "centre": [
-     -0.0031,
-     1.6108,
-     -0.0193
+     -0.0021,
+     1.6111,
+     -0.0198
     ],
-    "rx": 0.0933,
-    "ry": 0.0933
+    "rx": 0.0913,
+    "ry": 0.0898
    }
   },
   {
@@ -438,11 +438,11 @@
    "vertices": 49228,
    "triangles": 58784,
    "clusters": {
-    "count": 1135,
-    "levels": 11,
+    "count": 1106,
+    "levels": 10,
     "roots": 1,
     "finestTriangles": 58784,
-    "rootError": 0.0162
+    "rootError": 0.0219
    },
    "chain": {
     "cell": 0,
@@ -461,25 +461,25 @@
     "simplifyError": 0,
     "steps": 217,
     "coreTriangles": 6,
-    "depth": 6,
+    "depth": 7,
     "errorRange": [
      0,
-     0.1131
+     0.0908
     ],
-    "inflateMax": 0.0289,
-    "rootTriangles": 28,
-    "farFirst": 206,
-    "farFirstTriangles": 28,
-    "handoffError": 0.079
+    "inflateMax": 0.0287,
+    "rootTriangles": 56,
+    "farFirst": 192,
+    "farFirstTriangles": 56,
+    "handoffError": 0.0641
    },
    "splat": {
     "centre": [
-     -0.0006,
-     1.5574,
-     -0.036
+     -0.0035,
+     1.5565,
+     -0.0405
     ],
-    "rx": 0.108,
-    "ry": 0.1447
+    "rx": 0.1052,
+    "ry": 0.1438
    }
   },
   {

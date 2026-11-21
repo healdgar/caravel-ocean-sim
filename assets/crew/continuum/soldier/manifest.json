@@ -15,11 +15,11 @@
     "words": 18948613,
     "headerWords": 32,
     "bytes": 75794452,
-    "sha256": "0b5158c41198f082244cf52862e0a688bc432cfa86f5ec8becf7ba34709a483f",
+    "sha256": "81a888f7060269100b08d612fe60efcdc678dedc5078096bb24a64e916f6d313",
     "gzip": {
       "file": "atlas.bin.gz",
-      "bytes": 34607764,
-      "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
+      "bytes": 34732171,
+      "sha256": "56996e8a6b1b875ab06689d1f6e534ab0a7703c81379e6ea2e8addb9634f32ac"
     }
   },
   "pieces": [
@@ -51,21 +51,21 @@
   ],
   "regionMedians": [
     [
-      0.08344,
-      0.02212,
-      0.00848
+      0.21964,
+      0.08164,
+      0.0347
     ],
     null,
     null,
     [
-      0.23864,
-      0.11185,
-      0.058
+      0.47388,
+      0.21906,
+      0.11076
     ],
     [
-      0.7781,
-      0.39938,
-      0.23485
+      0.49395,
+      0.23881,
+      0.13004
     ]
   ],
   "rig": {
@@ -724,9 +724,9 @@
         "name": "paint",
         "share": 0,
         "mean": [
-          0.09623,
-          0.03239,
-          0.01633
+          0.2565,
+          0.11269,
+          0.05764
         ]
       },
       {
@@ -743,18 +743,18 @@
         "name": "skin",
         "share": 1,
         "mean": [
-          0.30622,
-          0.17273,
-          0.10251
+          0.4442,
+          0.20006,
+          0.10454
         ]
       },
       {
         "name": "hair",
         "share": 0,
         "mean": [
-          0.68797,
-          0.34345,
-          0.19799
+          0.49457,
+          0.23953,
+          0.13027
         ]
       }
     ]
@@ -763,6 +763,7 @@
     "width": 4096,
     "height": 4096,
     "coverage": 0.6722,
+    "delightVersion": 2,
     "levels": [
       {
         "width": 4096,
@@ -847,7 +848,7 @@
   "body": {
     "file": "body.glb",
     "bytes": 974160,
-    "sha256": "4a0d5981b2e148606e19640019989a27471c2133c825a2757fd697ee2d2d39af",
+    "sha256": "1c91eeeea8f546e1119ecd1750b93bb77fbeca2c3e456079d245adaa655fec7b",
     "triangles": 20000,
     "vertices": 9994,
     "contactDrift": {
@@ -860,31 +861,31 @@
   "files": {
     "atlas.bin": {
       "bytes": 75794452,
-      "sha256": "0b5158c41198f082244cf52862e0a688bc432cfa86f5ec8becf7ba34709a483f",
+      "sha256": "81a888f7060269100b08d612fe60efcdc678dedc5078096bb24a64e916f6d313",
       "gzip": {
         "file": "atlas.bin.gz",
-        "bytes": 34607764,
-        "sha256": "432a56d128ce5956c87de4c2f63523cfef32a4e6ebae49f0c8d0e8870a661514"
+        "bytes": 34732171,
+        "sha256": "56996e8a6b1b875ab06689d1f6e534ab0a7703c81379e6ea2e8addb9634f32ac"
       }
     },
     "albedo.bc7.bin": {
       "bytes": 22369648,
-      "sha256": "f49371ee9250c1dd45d5dc73bac57f8113d5469396088645b3f9e47b0d36566d",
+      "sha256": "b0c4cfdb1e7df94cf76b4e859e12dc4bea4ba5e7403d0bb5d34d47fec539a4d1",
       "gzip": {
         "file": "albedo.bc7.bin.gz",
-        "bytes": 12834875,
-        "sha256": "4b14a4d0e0398175cb37ac25a9666e9caf6753108e98b0310d71548d92d55be4"
+        "bytes": 13195106,
+        "sha256": "4fb349c8f57107e6551c698815bf11bdf34d6e8685816a22a298b0335a6628db"
       }
     },
     "albedo.astc.bin": {
       "bytes": 22369648,
-      "sha256": "3b8668e35da4184be1b7f33abdf1e5e6b93e00833721697203b4b531cf75d00e",
+      "sha256": "e7d676268d531145db9f7d6eca4d8c3b42b15e924201e0fa458df688a8d41f48",
       "gzip": {
         "file": "albedo.astc.bin.gz",
-        "bytes": 13598860,
-        "sha256": "e4c70011d14ca7f26b3e167a3f3032172af9020073f54d9385ba504a110f7ab6"
+        "bytes": 13967586,
+        "sha256": "6c5cffac324f90c80b1c2be7c62f4ef4405d3a401a1bbf024bd30c54b7f0ade8"
       }
     }
   },
-  "bakeSeconds": 56.8
+  "bakeSeconds": 56
 }

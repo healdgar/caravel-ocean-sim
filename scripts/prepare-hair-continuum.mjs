@@ -404,98 +404,98 @@ function buildScalpGroom(ref, style, seed) {
     const { point, normal, sparseWisp } = follicles[i];
     const [rx, ry, rz] = point;
     const sideSign = rx >= partX ? 1 : -1;
-    const phase = rand();
-    const tone = Math.min(1, Math.max(0, 0.5 + (rand() - 0.5) * 0.68));
+    // Spatial clump-coherent phase so adjacent locks flow together as cohesive shingled hair clumps (zero tangled stray straw!)
+    const azBucket = Math.floor((Math.atan2(rx, rz - ref.midZ) + Math.PI) * 3.5);
+    const clumpPhase = ((azBucket * 0.6180339887) % 1 + 1) % 1;
+    const phase = (clumpPhase * 0.72 + rand() * 0.28) % 1;
+    const tone = Math.min(1, Math.max(0, 0.5 + (rand() - 0.5) * 0.52));
     const lockSeed = rand();
-    // 3-tier volumetric hair architecture:
-    //   layer 0 (45%): broad shingled under-coat hugging the skull (seals all scalp gaps)
-    //   layer 1 (35%): fluffy lofted mid-body locks with fuller arch & wave volume
-    //   layer 2 (20%): fine outer wind-reactive flyaway fibers
-    const tier = sparseWisp ? 2 : (i % 5 === 0 ? 2 : (i % 5 <= 2 ? 0 : 1));
-    const isFlyaway = tier === 2;
-    const isUnderCoat = tier === 0;
+    // 2-tier cohesive shingled clump architecture (ZERO detached thin spider-web flyaways!):
+    //   tier 0 (55%): broad shingled under-coat clumps hugging the skull tightly (seals all scalp gaps)
+    //   tier 1 (45%): full sculpted outer locks layered cleanly over the under-coat with cohesive wave flow
+    const isUnderCoat = sparseWisp ? false : (i % 9 <= 4);
 
-    let segs = 6, len = 0.10, baseW = 0.0095, flexMax = 0.55, curlAmp = 0.0045, curlFreq = 7.0;
+    let segs = 6, len = 0.10, baseW = 0.0115, flexMax = 0.45, curlAmp = 0.0032, curlFreq = 6.5;
     if (style === 'cropped-curls') {
       segs = 5;
-      len = (0.042 + rand() * 0.024) * (isUnderCoat ? 0.92 : 1.08);
-      baseW = isFlyaway ? 0.0032 : (isUnderCoat ? 0.0112 : 0.0086) + rand() * 0.0024;
-      flexMax = isFlyaway ? 0.42 : 0.22;
-      curlAmp = isUnderCoat ? 0.0040 : 0.0068;
-      curlFreq = 10.5;
+      len = (0.044 + rand() * 0.020) * (isUnderCoat ? 0.94 : 1.06);
+      baseW = (isUnderCoat ? 0.0128 : 0.0102) + rand() * 0.0024;
+      flexMax = 0.18;
+      curlAmp = isUnderCoat ? 0.0028 : 0.0044;
+      curlFreq = 9.5;
     } else if (style === 'tonsure-fringe') {
       segs = 5;
-      len = sparseWisp ? 0.028 + rand() * 0.012 : 0.048 + rand() * 0.024;
-      baseW = sparseWisp ? 0.0018 : (isUnderCoat ? 0.0102 : 0.0078) + rand() * 0.0022;
-      flexMax = 0.34;
-      curlAmp = 0.0042;
-      curlFreq = 7.0;
+      len = sparseWisp ? 0.026 + rand() * 0.010 : 0.048 + rand() * 0.022;
+      baseW = sparseWisp ? 0.0048 : (isUnderCoat ? 0.0118 : 0.0094) + rand() * 0.0022;
+      flexMax = 0.24;
+      curlAmp = 0.0030;
+      curlFreq = 6.5;
     } else if (style === 'parted-locks') {
       segs = 7;
       const frontFactor = Math.max(0, (rz - ref.midZ) / 0.10);
-      len = (0.11 + rand() * 0.06) * (1 - 0.22 * frontFactor);
-      baseW = isFlyaway ? 0.0032 : (isUnderCoat ? 0.0118 : 0.0090) + rand() * 0.0026;
-      flexMax = isFlyaway ? 0.80 : (isUnderCoat ? 0.44 : 0.62);
-      curlAmp = isUnderCoat ? 0.0045 : 0.0072;
-      curlFreq = 8.4;
+      len = (0.105 + rand() * 0.045) * (1 - 0.26 * frontFactor);
+      baseW = (isUnderCoat ? 0.0132 : 0.0104) + rand() * 0.0026;
+      flexMax = isUnderCoat ? 0.34 : 0.50;
+      curlAmp = isUnderCoat ? 0.0030 : 0.0048;
+      curlFreq = 7.4;
     } else if (style === 'mariner-queue') {
       segs = 6;
-      len = 0.148 + rand() * 0.035;
-      baseW = isFlyaway ? 0.0028 : (isUnderCoat ? 0.0115 : 0.0088) + rand() * 0.0022;
-      flexMax = isFlyaway ? 0.58 : 0.18;
-      curlAmp = 0.0024;
-      curlFreq = 5.2;
+      len = 0.148 + rand() * 0.032;
+      baseW = (isUnderCoat ? 0.0128 : 0.0102) + rand() * 0.0024;
+      flexMax = 0.16;
+      curlAmp = 0.0018;
+      curlFreq = 4.8;
     } else if (style === 'indigenous-long') {
       segs = 8;
       const frontTrim = rz > ref.midZ + 0.038 && Math.abs(rx) < 0.045;
-      len = frontTrim ? 0.056 + rand() * 0.018 : 0.22 + rand() * 0.075;
-      baseW = isFlyaway ? 0.0032 : (isUnderCoat ? 0.0120 : 0.0092) + rand() * 0.0024;
-      flexMax = frontTrim ? 0.44 : (isUnderCoat ? 0.70 : 0.90);
-      curlAmp = 0.0026;
-      curlFreq = 4.4;
+      len = frontTrim ? 0.052 + rand() * 0.016 : 0.21 + rand() * 0.065;
+      baseW = (isUnderCoat ? 0.0134 : 0.0106) + rand() * 0.0024;
+      flexMax = frontTrim ? 0.34 : (isUnderCoat ? 0.58 : 0.76);
+      curlAmp = 0.0020;
+      curlFreq = 4.2;
     } else if (style === 'parted-waves') {
       segs = 8;
-      const frontTendril = rz > ref.midZ + 0.025 && Math.abs(rx) > 0.022;
-      len = frontTendril ? 0.15 + rand() * 0.05 : 0.24 + rand() * 0.09;
-      baseW = isFlyaway ? 0.0032 : (isUnderCoat ? 0.0124 : 0.0094) + rand() * 0.0026;
-      flexMax = isUnderCoat ? 0.72 : 0.92;
-      curlAmp = isUnderCoat ? 0.0055 : 0.0092;
-      curlFreq = 9.5;
+      const frontSide = rz > ref.midZ + 0.022 && Math.abs(rx) > 0.020;
+      len = frontSide ? 0.17 + rand() * 0.04 : 0.23 + rand() * 0.07;
+      baseW = (isUnderCoat ? 0.0138 : 0.0108) + rand() * 0.0026;
+      flexMax = isUnderCoat ? 0.58 : 0.76;
+      curlAmp = isUnderCoat ? 0.0036 : 0.0058;
+      curlFreq = 8.0;
     } else if (style === 'nape-chignon' || style === 'crown-braids') {
       segs = 6;
-      len = 0.140 + rand() * 0.035;
-      baseW = isFlyaway ? 0.0026 : (isUnderCoat ? 0.0116 : 0.0088) + rand() * 0.0024;
-      flexMax = isFlyaway ? 0.60 : 0.22;
-      curlAmp = 0.0030;
-      curlFreq = 6.2;
+      len = 0.142 + rand() * 0.030;
+      baseW = (isUnderCoat ? 0.0130 : 0.0104) + rand() * 0.0024;
+      flexMax = 0.18;
+      curlAmp = 0.0020;
+      curlFreq = 5.4;
     } else if (style === 'indigenous-long-f') {
       segs = 8;
       const templeLock = rz > ref.midZ + 0.022 && Math.abs(rx) > 0.020;
-      len = templeLock ? 0.19 + rand() * 0.05 : 0.28 + rand() * 0.09;
-      baseW = isFlyaway ? 0.0032 : (isUnderCoat ? 0.0124 : 0.0094) + rand() * 0.0026;
-      flexMax = isUnderCoat ? 0.75 : 0.95;
-      curlAmp = 0.0032;
-      curlFreq = 4.8;
+      len = templeLock ? 0.19 + rand() * 0.045 : 0.27 + rand() * 0.075;
+      baseW = (isUnderCoat ? 0.0138 : 0.0108) + rand() * 0.0026;
+      flexMax = isUnderCoat ? 0.62 : 0.80;
+      curlAmp = 0.0024;
+      curlFreq = 4.6;
     }
 
-    // Slimmer, naturally tapered lock ribbons tucked tightly into the scalp root so strands never look like floating tabs.
-    baseW *= 0.76;
-    const rootLift = isUnderCoat ? -0.0008 : (tier === 1 ? 0.0014 : 0.0024);
+    // Full shingled lock ribbons anchored snugly inside the scalp root so hair forms a cohesive, sculpted crown!
+    const rootLift = isUnderCoat ? -0.0010 : 0.0010;
     const root = add3(point, normal, rootLift);
-    const archRatio = isUnderCoat ? 0.28 : (tier === 1 ? 0.44 : 0.36);
-    const pts = [root], widths = [baseW * 0.88], arches = [baseW * archRatio];
-    let cur = add3(point, normal, rootLift + (isUnderCoat ? 0.0016 : 0.0032));
-    // Smooth part-line emergence: near partX, strands crest slightly UP & BACK before parting sideways so the crown part has zero bald gap!
+    const archRatio = isUnderCoat ? 0.26 : 0.38;
+    const pts = [root], widths = [baseW * 0.94], arches = [baseW * archRatio];
+    let cur = add3(point, normal, rootLift + (isUnderCoat ? 0.0014 : 0.0026));
+    // Smooth part-line emergence & backward framing sweep past temples/ears so NO strands dangle in front of cheeks!
     const distFromPart = Math.abs(rx - partX);
     const partSpread = Math.min(1, distFromPart / 0.028);
-    let sweepSide = [sideSign * (0.14 + 0.50 * partSpread), (isUnderCoat ? 0.12 : 0.26) * (1 - partSpread) - 0.04, -0.46];
+    const frontFacePush = rz > ref.midZ + 0.008 ? 0.24 : 0.0;
+    let sweepSide = [sideSign * (0.16 + 0.52 * partSpread), (isUnderCoat ? 0.10 : 0.22) * (1 - partSpread) - 0.04, -0.54 - frontFacePush];
     if (style === 'cropped-curls') {
       const swirlAngle = Math.atan2(rx, rz - (ref.midZ - 0.035)) + 0.65;
-      sweepSide = [Math.sin(swirlAngle) * 0.58, 0.12 - 0.24 * partSpread, Math.min(-0.12, Math.cos(swirlAngle) * 0.55 - 0.18)];
+      sweepSide = [Math.sin(swirlAngle) * 0.54, 0.10 - 0.22 * partSpread, Math.min(-0.18, Math.cos(swirlAngle) * 0.50 - 0.24)];
     } else if (style === 'indigenous-long' && rz > ref.midZ + 0.038 && Math.abs(rx) < 0.045) {
-      sweepSide = [sideSign * (0.25 + 0.50 * partSpread), -0.42, -0.06];
+      sweepSide = [sideSign * (0.28 + 0.50 * partSpread), -0.38, -0.18];
     }
-    let dir = norm3(add3(normal, sweepSide, isUnderCoat ? 1.15 : (tier === 1 ? 0.92 : 0.80)));
+    let dir = norm3(add3(normal, sweepSide, isUnderCoat ? 1.25 : 1.05));
 
     // Non-uniform station spacing: short 6mm–12mm root-crest steps over the curved skull, lengthening along the free hang!
     let prevU = 0;
@@ -504,37 +504,39 @@ function buildScalpGroom(ref, style, seed) {
       const u = 0.35 * lin + 0.65 * (lin * lin);
       const ds = len * (u - prevU);
       prevU = u;
-      if (style === 'mariner-queue' && !isFlyaway) {
+      if (style === 'mariner-queue') {
         const toTie = sub3(gatherPt, cur);
         const dist = Math.hypot(...toTie);
-        if (dist > 0.012) dir = norm3(add3(dir, norm3(toTie), 0.76 * u + 0.28));
-        else { cur = add3(gatherPt, [(rand() - 0.5) * 0.008, -u * 0.012, -0.006]); }
-      } else if ((style === 'nape-chignon' || style === 'crown-braids') && !isFlyaway) {
-        const target = style === 'nape-chignon' ? bunPt : [sideSign * 0.056 * (1 - u * 0.65), ref.crownY - 0.075 - u * 0.055, ref.occZ - 0.014];
+        if (dist > 0.012) dir = norm3(add3(dir, norm3(toTie), 0.86 * u + 0.34));
+        else { cur = add3(gatherPt, [(rand() - 0.5) * 0.006, -u * 0.010, -0.005]); }
+      } else if (style === 'nape-chignon' || style === 'crown-braids') {
+        const target = style === 'nape-chignon' ? bunPt : [sideSign * 0.054 * (1 - u * 0.65), ref.crownY - 0.075 - u * 0.055, ref.occZ - 0.012];
         const toTarget = sub3(target, cur);
-        if (Math.hypot(...toTarget) > 0.012) dir = norm3(add3(dir, norm3(toTarget), 0.72 * u + 0.26));
+        if (Math.hypot(...toTarget) > 0.012) dir = norm3(add3(dir, norm3(toTarget), 0.84 * u + 0.32));
       } else {
-        // Natural gravity drape: lofted root crown near u=0, then soft vertical hang along head & shoulders.
-        const grav = style === 'cropped-curls' ? 0.58 : 1.48;
-        const horizDamp = Math.max(0.30, 1 - u * 0.66);
+        // Cohesive gravity drape sweeping gently back past cheekbones & ears onto shoulders
+        const grav = style === 'cropped-curls' ? 0.56 : 1.44;
+        const horizDamp = Math.max(0.32, 1 - u * 0.64);
+        const backSweep = rz > ref.midZ + 0.008 ? 0.28 * (1 - u * 0.65) : 0.06;
         dir = norm3([
-          dir[0] * horizDamp + sideSign * (tier === 1 ? 0.09 : 0.06) * (1 - u),
-          dir[1] - grav * (0.24 + 1.12 * u),
-          dir[2] * horizDamp - (rz > ref.midZ + 0.02 ? 0.14 * (1 - u) : 0.03),
+          dir[0] * horizDamp + sideSign * (isUnderCoat ? 0.05 : 0.08) * (1 - u),
+          dir[1] - grav * (0.24 + 1.08 * u),
+          dir[2] * horizDamp - backSweep,
         ]);
       }
-      const waveA = Math.sin(u * curlFreq + phase * 6.283) * curlAmp * Math.min(1, u * 2.2);
-      const waveB = Math.cos(u * curlFreq * 0.85 + phase * 6.283) * curlAmp * 0.65 * Math.min(1, u * 2.2);
+      const waveA = Math.sin(u * curlFreq + phase * 6.283) * curlAmp * Math.min(1, u * 2.0);
+      const waveB = Math.cos(u * curlFreq * 0.85 + phase * 6.283) * curlAmp * 0.55 * Math.min(1, u * 2.0);
       const sideVec = norm3(cross3(dir, [0, 1, 0.1]));
       const outVec = norm3(cross3(sideVec, dir));
       let next = add3(cur, dir, ds);
       next = add3(add3(next, sideVec, waveA), outVec, waveB);
-      const hugClearance = isUnderCoat ? (0.0024 + u * 0.0014) : (tier === 1 ? (0.0058 + u * 0.0042) : (0.0076 + u * 0.0050));
+      const hugClearance = isUnderCoat ? (0.0020 + u * 0.0012) : (0.0044 + u * 0.0028);
       next = ref.repel(next, hugClearance);
       dir = norm3(sub3(next, cur));
       cur = next;
       pts.push(cur);
-      const taper = Math.max(0.18, 1 - (u ** 1.55) * 0.82);
+      // Full cohesive ribbon body with clean tapered tip (never needle-thin 1px spider threads!)
+      const taper = Math.max(0.32, 1 - (u ** 1.85) * 0.68);
       widths.push(baseW * taper);
       arches.push(baseW * taper * archRatio);
     }
@@ -606,69 +608,69 @@ function buildScalpGroom(ref, style, seed) {
     }
   }
 
-  // Secondary structural feature strands: wind-whipped queue tail, coiled chignon bun, or woven Renaissance crown plaits!
+  // Secondary structural feature strands: cohesive queue tail, coiled chignon bun, or woven Renaissance crown plaits!
   if (style === 'mariner-queue') {
-    for (let q = 0; q < 96; q++) {
-      const a = (q / 96) * Math.PI * 2 + rand() * 0.2, r = Math.sqrt(rand()) * 0.012;
+    for (let q = 0; q < 80; q++) {
+      const a = (q / 80) * Math.PI * 2 + rand() * 0.18, r = Math.sqrt(rand()) * 0.011;
       const start = [gatherPt[0] + Math.cos(a) * r, gatherPt[1] + Math.sin(a) * r * 0.7, gatherPt[2] - 0.004];
-      const segs = 7, tailLen = 0.155 + rand() * 0.055;
-      const pts = [start], widths = [0.0028], arches = [0.0011];
-      let cur = [...start], dir = norm3([(rand() - 0.5) * 0.12, -0.86, -0.48]);
+      const segs = 7, tailLen = 0.150 + rand() * 0.045;
+      const pts = [start], widths = [0.0052], arches = [0.0018];
+      let cur = [...start], dir = norm3([(rand() - 0.5) * 0.10, -0.88, -0.46]);
       const phase = rand();
       for (let k = 1; k <= segs; k++) {
         const u = k / segs;
         const twist = u * 4.5 + a;
-        const flare = u > 0.35 ? (u - 0.35) * 0.018 : 0;
+        const flare = u > 0.35 ? (u - 0.35) * 0.014 : 0;
         let next = add3(cur, dir, tailLen / segs);
-        next[0] += Math.cos(twist) * (0.002 + flare * 0.35);
-        next[2] += Math.sin(twist) * 0.002 - flare * 0.25;
+        next[0] += Math.cos(twist) * (0.002 + flare * 0.30);
+        next[2] += Math.sin(twist) * 0.002 - flare * 0.22;
         next = ref.repel(next, 0.003);
         dir = norm3([dir[0] * 0.9, dir[1] - 0.12, dir[2] * 0.88]);
         cur = next;
         pts.push(cur);
-        const w = (0.0030 + flare * 0.12) * Math.max(0.15, 1 - (u ** 1.4) * 0.82);
-        widths.push(w); arches.push(w * 0.4);
+        const w = (0.0052 + flare * 0.10) * Math.max(0.28, 1 - (u ** 1.6) * 0.72);
+        widths.push(w); arches.push(w * 0.38);
       }
-      appendStrand(mesh, pts, widths, arches, skinFn, 0.96, phase, 0.35 + rand() * 0.45, rand());
+      appendStrand(mesh, pts, widths, arches, skinFn, 0.88, phase, 0.35 + rand() * 0.45, rand());
     }
   } else if (style === 'nape-chignon') {
-    for (let b = 0; b < 135; b++) {
-      const t0 = (b / 135) * Math.PI * 2, ringR = 0.016 + (b % 3) * 0.009 + rand() * 0.005;
-      const segs = 6, arcSpan = 1.9 + rand() * 0.6;
+    for (let b = 0; b < 110; b++) {
+      const t0 = (b / 110) * Math.PI * 2, ringR = 0.015 + (b % 3) * 0.009 + rand() * 0.004;
+      const segs = 6, arcSpan = 1.9 + rand() * 0.5;
       const pts = [], widths = [], arches = [];
       for (let k = 0; k <= segs; k++) {
         const u = k / segs, ang = t0 + u * arcSpan;
-        const braidWave = Math.sin(u * 9.4 + b) * 0.0035;
+        const braidWave = Math.sin(u * 9.4 + b) * 0.0030;
         const p = ref.repel([
           bunPt[0] + Math.cos(ang) * (ringR + braidWave),
           bunPt[1] + Math.sin(ang) * (ringR * 0.86 + braidWave),
-          bunPt[2] - 0.010 - Math.sin(u * Math.PI) * (0.016 + (2 - (b % 3)) * 0.005),
+          bunPt[2] - 0.010 - Math.sin(u * Math.PI) * (0.015 + (2 - (b % 3)) * 0.005),
         ], 0.0025);
         pts.push(p);
-        const w = 0.0038 * Math.sin(Math.max(0.18, u * Math.PI * 0.92));
-        widths.push(Math.max(0.0012, w)); arches.push(Math.max(0.0006, w * 0.42));
+        const w = 0.0064 * Math.sin(Math.max(0.25, u * Math.PI * 0.92));
+        widths.push(Math.max(0.0024, w)); arches.push(Math.max(0.0010, w * 0.40));
       }
-      appendStrand(mesh, pts, widths, arches, skinFn, 0.16, rand(), 0.35 + rand() * 0.5, rand());
+      appendStrand(mesh, pts, widths, arches, skinFn, 0.14, rand(), 0.35 + rand() * 0.45, rand());
     }
   } else if (style === 'crown-braids') {
     for (const side of [-1, 1]) {
-      for (let b = 0; b < 78; b++) {
-        const lobe = b % 3, offset = (rand() - 0.5) * 0.006;
+      for (let b = 0; b < 68; b++) {
+        const lobe = b % 3, offset = (rand() - 0.5) * 0.005;
         const segs = 8, pts = [], widths = [], arches = [];
         for (let k = 0; k <= segs; k++) {
           const u = k / segs;
           // Sweep from upper temple around the side of the crown to an interlaced occipital coronet.
           const theta = (0.28 + u * 2.45) * side;
-          const baseY = ref.crownY - 0.032 - u * 0.072 + Math.cos(u * 18.8 + lobe * 2.09) * 0.0055;
-          const radX = 0.076 + Math.sin(u * 18.8 + lobe * 2.09) * 0.0045 + offset;
-          const radZ = 0.096 + Math.sin(u * 18.8 + lobe * 2.09) * 0.0045;
+          const baseY = ref.crownY - 0.032 - u * 0.072 + Math.cos(u * 18.8 + lobe * 2.09) * 0.0050;
+          const radX = 0.075 + Math.sin(u * 18.8 + lobe * 2.09) * 0.0040 + offset;
+          const radZ = 0.095 + Math.sin(u * 18.8 + lobe * 2.09) * 0.0040;
           const raw = [Math.sin(theta) * radX, baseY, ref.midZ + Math.cos(theta) * radZ * 0.92];
-          const pushed = ref.repel(raw, 0.0055);
+          const pushed = ref.repel(raw, 0.0050);
           pts.push(pushed);
-          const w = 0.0036 * Math.max(0.22, 1 - Math.abs(u - 0.5) * 0.55);
-          widths.push(w); arches.push(w * 0.42);
+          const w = 0.0062 * Math.max(0.32, 1 - Math.abs(u - 0.5) * 0.50);
+          widths.push(w); arches.push(w * 0.40);
         }
-        appendStrand(mesh, pts, widths, arches, skinFn, 0.20, rand(), 0.35 + rand() * 0.5, rand());
+        appendStrand(mesh, pts, widths, arches, skinFn, 0.18, rand(), 0.35 + rand() * 0.45, rand());
       }
     }
   }
