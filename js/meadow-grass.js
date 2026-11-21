@@ -707,7 +707,8 @@ export async function createMeadowGrass({
   const most = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / (MEADOW_CONTINUUM_POSE * 16));
   const perType = Math.floor(Math.min(wanted, most) / atlas.types.length);
   const { capacity, room } = continuumRoom(atlas.types, atlas.types.map(() => perType));
-  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: isSecondary ? 'meadow secondary' : 'meadow', written: true, profile: 'meadow' });
+  const meadowProfile = isMobile ? { ...continuumProfile('meadow'), errorScale: 0.44, taperMetres: 260 } : 'meadow';
+  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: isSecondary ? 'meadow secondary' : 'meadow', written: true, profile: meadowProfile });
   scene.setCount(capacity);
   scene.setWorldOffset(worldOffset?.x ?? 0, worldOffset?.z ?? 0);
   const stood = mkBuf('meadow stood', MEADOW_CONTINUUM_STOOD_BYTES, B.STORAGE | B.INDIRECT);

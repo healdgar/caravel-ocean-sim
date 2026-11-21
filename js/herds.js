@@ -745,7 +745,7 @@ export async function createLivestockHerds({
   const [pipelines, atlas, livestockTex] = await Promise.all([
     requestHerdsPipelines({ device, shader, format, samples }),
     requestAnimalContinuumAtlas(device),
-    requestLivestockTextures(device),
+    requestLivestockTextures(device, { isMobile }),
   ]);
   const cloudGroup = clouds.bindVolume(pipelines.view.pipeline, 'shadow');
   const herdTypes = ANIMAL_CONTINUUM_TYPES.map((_, t) => t).filter((t) => t < HERD_SPECIES);

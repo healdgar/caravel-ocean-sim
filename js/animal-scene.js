@@ -19,21 +19,12 @@ function linearToSrgbByte(x) {
 }
 
 // Loads all 4 clean pelt-baked Tripo H3.1 livestock basecolor textures (sheep, cattle, swine, horse) into one
-// mipmapped rgba8unorm-srgb texture_2d_array (1024x1024x4) using canonical top-down ImageData bytes, CPU linear-space
-// 2x2 mip downsampling, and queue.writeTexture (zero reused-OffscreenCanvas / IOSurface orientation hazards).
-export function requestLivestockTextures(device) {
-  return requestOnce(device, 'livestock albedo texture array', async () => {
-    const bitmaps = await Promise.all(LIVESTOCK_TEXTURE_ASSETS.map(async (url) => {
-      try {
-        const res = await fetch(url);
-        if (!res.ok) return null;
-        return await createImageBitmap(await res.blob());
-      } catch {
-        return null;
-      }
-    }));
-    const valid = bitmaps.find(Boolean);
-    const size = valid ? Math.min(1024, Math.max(256, valid.width)) : 4;
+// mipmapped rgba8unorm-srgb texture_2d_array using sequential low-RAM decoding, one reused HTMLCanvasElement,
+// compact Uint8Array linear-light 2x2 mip downsampling, and 256-byte-aligned queue.writeTexture (iOS/WebKit-safe).
+export function requestLivestockTextures(device, { isMobile = false } = {}) {
+  const mobile = isMobile || (typeof navigator !== 'undefined' && (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)));
+  return requestOnce(device, `livestock albedo texture array ${mobile ? 512 : 1024}`, async () => {
+    const size = mobile ? 512 : 1024;
     const mipLevelCount = Math.floor(Math.log2(size)) + 1;
     const layers = LIVESTOCK_TEXTURE_ASSETS.length;
     const texture = device.createTexture({
@@ -43,70 +34,80 @@ export function requestLivestockTextures(device) {
       format: 'rgba8unorm-srgb',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
-    const uploadSolidLayer = (layer) => {
-      for (let mip = 0, w = size, h = size; mip < mipLevelCount; mip++, w = Math.max(1, w >> 1), h = Math.max(1, h >> 1)) {
-        const bytes = new Uint8Array(w * h * 4).fill(255);
-        device.queue.writeTexture({ texture, mipLevel: mip, origin: [0, 0, layer] }, bytes, { bytesPerRow: w * 4, rowsPerImage: h }, [w, h, 1]);
+    const writeAlignedMip = (layer, mip, w, h, rgba) => {
+      const rowBytes = w * 4;
+      const bpr = (rowBytes + 255) & ~255;
+      if (bpr === rowBytes) {
+        device.queue.writeTexture({ texture, mipLevel: mip, origin: [0, 0, layer] }, rgba, { bytesPerRow: bpr, rowsPerImage: h }, [w, h, 1]);
+      } else {
+        const padded = new Uint8Array(bpr * h);
+        for (let y = 0; y < h; y++) padded.set(rgba.subarray(y * rowBytes, (y + 1) * rowBytes), y * bpr);
+        device.queue.writeTexture({ texture, mipLevel: mip, origin: [0, 0, layer] }, padded, { bytesPerRow: bpr, rowsPerImage: h }, [w, h, 1]);
       }
     };
-    if (valid) {
+    const uploadSolidLayer = (layer) => {
+      for (let mip = 0, w = size, h = size; mip < mipLevelCount; mip++, w = Math.max(1, w >> 1), h = Math.max(1, h >> 1)) {
+        writeAlignedMip(layer, mip, w, h, new Uint8Array(w * h * 4).fill(255));
+      }
+    };
+    const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(size, size) : null);
+    if (canvas) {
+      canvas.width = size;
+      canvas.height = size;
+    }
+    const ctx = canvas ? canvas.getContext('2d', { willReadFrequently: true }) : null;
+    try {
       for (let layer = 0; layer < layers; layer++) {
-        const bmp = bitmaps[layer];
-        if (!bmp) {
+        let bmp = null;
+        try {
+          const res = await fetch(LIVESTOCK_TEXTURE_ASSETS[layer]);
+          if (res.ok) bmp = await createImageBitmap(await res.blob());
+        } catch {
+          bmp = null;
+        }
+        if (!bmp || !ctx) {
+          bmp?.close?.();
           uploadSolidLayer(layer);
           continue;
         }
-        const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(size, size) : document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.clearRect(0, 0, size, size);
         ctx.drawImage(bmp, 0, 0, size, size);
-        const topDown = ctx.getImageData(0, 0, size, size).data;
         bmp.close?.();
+        const topDown = ctx.getImageData(0, 0, size, size).data;
+        let cur = new Uint8Array(topDown.buffer, topDown.byteOffset, topDown.byteLength);
+        writeAlignedMip(layer, 0, size, size, cur);
 
-        const mip0 = new Uint8Array(topDown.buffer, topDown.byteOffset, topDown.byteLength);
-        device.queue.writeTexture({ texture, mipLevel: 0, origin: [0, 0, layer] }, mip0, { bytesPerRow: size * 4, rowsPerImage: size }, [size, size, 1]);
-
-        // Decode mip 0 to linear float RGB once, then box-average 2x2 in linear light down the full pyramid.
         let w = size, h = size;
-        let lin = new Float32Array(w * h * 3);
-        for (let i = 0, p = 0; i < w * h; i++, p += 4) {
-          lin[i * 3] = SRGB_TO_LINEAR_LUT[mip0[p]];
-          lin[i * 3 + 1] = SRGB_TO_LINEAR_LUT[mip0[p + 1]];
-          lin[i * 3 + 2] = SRGB_TO_LINEAR_LUT[mip0[p + 2]];
-        }
         for (let mip = 1; mip < mipLevelCount; mip++) {
           const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1);
-          const nextLin = new Float32Array(nw * nh * 3);
-          const mipBytes = new Uint8Array(nw * nh * 4);
+          const next = new Uint8Array(nw * nh * 4);
           for (let y = 0; y < nh; y++) {
             const sy0 = Math.min(h - 1, y * 2), sy1 = Math.min(h - 1, sy0 + 1);
             for (let x = 0; x < nw; x++) {
               const sx0 = Math.min(w - 1, x * 2), sx1 = Math.min(w - 1, sx0 + 1);
-              const i00 = (sy0 * w + sx0) * 3, i10 = (sy0 * w + sx1) * 3;
-              const i01 = (sy1 * w + sx0) * 3, i11 = (sy1 * w + sx1) * 3;
-              const r = 0.25 * (lin[i00] + lin[i10] + lin[i01] + lin[i11]);
-              const g = 0.25 * (lin[i00 + 1] + lin[i10 + 1] + lin[i01 + 1] + lin[i11 + 1]);
-              const b = 0.25 * (lin[i00 + 2] + lin[i10 + 2] + lin[i01 + 2] + lin[i11 + 2]);
-              const dst = (y * nw + x) * 3;
-              nextLin[dst] = r;
-              nextLin[dst + 1] = g;
-              nextLin[dst + 2] = b;
+              const i00 = (sy0 * w + sx0) * 4, i10 = (sy0 * w + sx1) * 4;
+              const i01 = (sy1 * w + sx0) * 4, i11 = (sy1 * w + sx1) * 4;
+              const r = 0.25 * (SRGB_TO_LINEAR_LUT[cur[i00]] + SRGB_TO_LINEAR_LUT[cur[i10]] + SRGB_TO_LINEAR_LUT[cur[i01]] + SRGB_TO_LINEAR_LUT[cur[i11]]);
+              const g = 0.25 * (SRGB_TO_LINEAR_LUT[cur[i00 + 1]] + SRGB_TO_LINEAR_LUT[cur[i10 + 1]] + SRGB_TO_LINEAR_LUT[cur[i01 + 1]] + SRGB_TO_LINEAR_LUT[cur[i11 + 1]]);
+              const b = 0.25 * (SRGB_TO_LINEAR_LUT[cur[i00 + 2]] + SRGB_TO_LINEAR_LUT[cur[i10 + 2]] + SRGB_TO_LINEAR_LUT[cur[i01 + 2]] + SRGB_TO_LINEAR_LUT[cur[i11 + 2]]);
               const p = (y * nw + x) * 4;
-              mipBytes[p] = linearToSrgbByte(r);
-              mipBytes[p + 1] = linearToSrgbByte(g);
-              mipBytes[p + 2] = linearToSrgbByte(b);
-              mipBytes[p + 3] = 255;
+              next[p] = linearToSrgbByte(r);
+              next[p + 1] = linearToSrgbByte(g);
+              next[p + 2] = linearToSrgbByte(b);
+              next[p + 3] = 255;
             }
           }
-          device.queue.writeTexture({ texture, mipLevel: mip, origin: [0, 0, layer] }, mipBytes, { bytesPerRow: nw * 4, rowsPerImage: nh }, [nw, nh, 1]);
-          lin = nextLin;
+          writeAlignedMip(layer, mip, nw, nh, next);
+          cur = next;
           w = nw;
           h = nh;
         }
       }
-    } else {
-      for (let layer = 0; layer < layers; layer++) uploadSolidLayer(layer);
+    } finally {
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
     }
     const view = texture.createView({ dimension: '2d-array' });
     const sampler = device.createSampler({
@@ -116,7 +117,7 @@ export function requestLivestockTextures(device) {
       mipmapFilter: 'linear',
       addressModeU: 'clamp-to-edge',
       addressModeV: 'clamp-to-edge',
-      maxAnisotropy: 8,
+      maxAnisotropy: mobile ? 4 : 8,
     });
     return { texture, view, sampler };
   });

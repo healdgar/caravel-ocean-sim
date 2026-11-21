@@ -687,20 +687,18 @@ struct MeadowParallaxHit {
   hitH: f32,          // physical vertical intersection height inside the 0.36 m canopy (0.12..0.99)
   cavityOcc: f32,     // volumetric occlusion accumulated along the ray through taller neighbouring tufts
   gradXZ: vec2f,      // tuft surface height gradient in world XZ at hitXZ (for 3D micro-normal shading)
-  detailEnergy: f32,  // resolved band energy (1 near -> 0 horizon) for luminance-invariant far filtering
+  detailEnergy: f32   // resolved band energy (1 near -> 0 horizon) for luminance-invariant far filtering
 };
 
-// True 5-step GPU view-ray parallax-occluded volumetric grass shells (uniform control flow, zero discard,
-// strictly TBDR-compliant). Steps downward through 5 physical height slices across the 0.36 m grass canopy with
-// downwind gust shear and exact linear root interpolation between slices so inter-tuft dark root cavities,
-// emerald mid-blades, and sunlit golden-oat tips match physical 3D widened blade clusters seamlessly.
+// Fast 4-step GPU view-ray parallax-occluded volumetric grass shells (uniform control flow, zero discard,
+// zero dynamic array indexing for strict iOS/Safari WebKit WGSL compatibility, and low ALU for mobile TBDR).
 fn meadowParallaxSward(
   unshiftedWorldXZ: vec2f,
   viewDir: vec3f,
   windDir: vec2f,
   gust: f32,
   bendSlope: f32,
-  footPixel: f32,
+  footPixel: f32
 ) -> MeadowParallaxHit {
   let wTuftFine = 1.0 - smoothstep(0.09, 0.26, footPixel);
   let wTuftMid  = 1.0 - smoothstep(0.18, 0.52, footPixel);
@@ -712,7 +710,6 @@ fn meadowParallaxSward(
   let rayStepXZ = -viewDir.xz / max(abs(viewDir.y), 0.22);
   let bendMag = (0.04 + 0.22 * gust + 0.14 * bendSlope) * canopyH;
 
-  let slices = array<f32, 5>(0.96, 0.78, 0.60, 0.42, 0.24);
   var hitH = 0.16;
   var hitXZ = unshiftedWorldXZ + rayStepXZ * canopyH;
   var hitFound = false;
@@ -721,18 +718,18 @@ fn meadowParallaxSward(
   var prevXZ = unshiftedWorldXZ - windDir * bendMag;
   var occAccum = 0.0;
 
-  for (var i = 0u; i < 5u; i++) {
-    let h = slices[i];
+  for (var i = 0u; i < 4u; i++) {
+    let h = 0.94 - f32(i) * 0.22;
     let windBendOffset = -windDir * (bendMag * h * h);
     let sampleXZ = unshiftedWorldXZ + windBendOffset + rayStepXZ * ((1.0 - h) * canopyH);
     let th = meadowTuftHeight(sampleXZ, wTuftFine, wTuftMid, wClump, wWave);
     if (!hitFound) {
-      occAccum += clamp(th - (h - 0.22), 0.0, 0.30);
+      occAccum += clamp(th - (h - 0.24), 0.0, 0.32);
       if (th >= h) {
         let dCurr = th - h;
         let dPrev = max(prevH - prevTh, 0.0);
         let frac = clamp(dPrev / max(dPrev + dCurr, 1e-4), 0.0, 1.0);
-        hitH = select(mix(prevH, h, frac), clamp(th, 0.92, 0.99), i == 0u);
+        hitH = select(mix(prevH, h, frac), clamp(th, 0.90, 0.99), i == 0u);
         hitXZ = select(mix(prevXZ, sampleXZ, frac), sampleXZ, i == 0u);
         hitFound = true;
       }
@@ -746,11 +743,14 @@ fn meadowParallaxSward(
     hitXZ = prevXZ;
   }
 
-  let eps = max(0.08, footPixel * 0.55);
-  let hC = meadowTuftHeight(hitXZ, wTuftFine, wTuftMid, wClump, wWave);
-  let hX = meadowTuftHeight(hitXZ + vec2f(eps, 0.0), wTuftFine, wTuftMid, wClump, wWave);
-  let hZ = meadowTuftHeight(hitXZ + vec2f(0.0, eps), wTuftFine, wTuftMid, wClump, wWave);
-  let gradXZ = clamp(vec2f(hX - hC, hZ - hC) / eps * canopyH, vec2f(-0.95), vec2f(0.95));
+  var gradXZ = vec2f(0.0);
+  if (detailEnergy > 0.02) {
+    let eps = max(0.09, footPixel * 0.55);
+    let hC = meadowTuftHeight(hitXZ, wTuftFine, wTuftMid, wClump, 0.0);
+    let hX = meadowTuftHeight(hitXZ + vec2f(eps, 0.0), wTuftFine, wTuftMid, wClump, 0.0);
+    let hZ = meadowTuftHeight(hitXZ + vec2f(0.0, eps), wTuftFine, wTuftMid, wClump, 0.0);
+    gradXZ = clamp(vec2f(hX - hC, hZ - hC) / eps * canopyH, vec2f(-0.95), vec2f(0.95));
+  }
 
   let farH = hitH + (1.0 - detailEnergy) * 0.03;
   return MeadowParallaxHit(clamp(farH, 0.12, 0.99), clamp(occAccum, 0.0, 1.0), gradXZ, detailEnergy);
@@ -945,14 +945,14 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let patchGreen = mix(
     mix(sunWarmedStraw, oliveSageFescue, smoothstep(0.10, 0.48, moisture)),
     emeraldPasture,
-    smoothstep(0.45, 0.88, moisture),
+    smoothstep(0.45, 0.88, moisture)
   );
 
   // Preserve distinct wildflower corolla pigments (chamomile ivory, rose mallow, scarlet field poppy)
   let isFlower = select(
     clamp(max(v.colour.b - v.colour.g * 0.58, v.colour.r - v.colour.g * 1.32) * 10.0, 0.0, 1.0),
     0.0,
-    isContinuum,
+    isContinuum
   );
   let tussockLum = clamp(v.colour.g / 0.142, 0.72, 1.28);
   var grassPigment = mix(v.colour * 1.06, patchGreen * tussockLum, 0.44);
@@ -962,7 +962,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let oatHeadT = select(
     smoothstep(0.76, 0.94, along),
     clamp(smoothstep(0.78, 0.95, hitH) + farTipAvg, 0.0, 0.92),
-    isContinuum,
+    isContinuum
   );
   grassPigment = mix(grassPigment, goldenOatTip, oatHeadT * 0.82);
   // Warm soil/thatch root grounding inside deep root cavities
@@ -970,7 +970,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   grassPigment = mix(
     grassPigment,
     warmSoil,
-    select(0.20 * (1.0 - smoothstep(0.0, 0.18, effAlong)), 0.28 * (1.0 - smoothstep(0.12, 0.34, hitH)), isContinuum),
+    select(0.20 * (1.0 - smoothstep(0.0, 0.18, effAlong)), 0.28 * (1.0 - smoothstep(0.12, 0.34, hitH)), isContinuum)
   );
 
   let organCol = mix(grassPigment, v.colour * 1.06, isFlower);
@@ -1014,7 +1014,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let paraPerturb = vec3f(
     -para.gradXZ.x * 0.62 - windDir.x * (swell * 0.14),
     0.04,
-    -para.gradXZ.y * 0.62 - windDir.y * (swell * 0.14),
+    -para.gradXZ.y * 0.62 - windDir.y * (swell * 0.14)
   );
   var n = normalize(v.normal + select(clusterPerturb, paraPerturb, isContinuum) * swardWeight);
   if (!frontFacing) { n = normalize(vec3f(-n.x * 0.55, abs(n.y), -n.z * 0.55)); }
@@ -1024,14 +1024,14 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let tendrilHighlight = mix(
     1.0,
     select(mix(0.92, 1.09, sd.x), mix(0.92, 1.08, hitH), isContinuum),
-    swardWeight,
+    swardWeight
   );
   let windTrough = vec3f(0.90, 0.94, 0.88);
   let windPeak = vec3f(1.14, 1.15, 1.02);
   let windTone = mix(
     vec3f(1.0),
     mix(windTrough, windPeak, crest),
-    swardWeight * (0.30 + 0.70 * effAlong),
+    swardWeight * (0.30 + 0.70 * effAlong)
   );
   let albedo = clamp(baseCol * tendrilHighlight * windTone, vec3f(0.0), vec3f(0.36));
 
