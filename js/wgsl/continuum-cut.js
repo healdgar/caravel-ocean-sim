@@ -497,7 +497,12 @@ fn continuumTry(slot:u32,i:u32)->u32 {
             let faceN=continuumQuat(record.turn,normalize(vec3f(-0.5*(dh.y-dh.x+dh.w-dh.z)/patchSpan,1.0,-0.5*(dh.z-dh.x+dh.w-dh.y)/patchSpan)));
             let cosT=abs(dot(normalize(-relative),faceN));
             let sinT=sqrt(max(1.0-cosT*cosT,0.0));
-            let angleErr=sqrt(0.0025*cosT*cosT+0.0400*sinT*sinT)*(1.0+0.35*smoothstep(0.25,0.05,cosT));
+            // Pure face-vs-edge perspective visibility:
+            //   - Grazing / walking (sinT -> 1): 100% of vertical blade face height is visible (1.0), preserving
+            //     full crisp 3D blades in front of the player with zero artificial near-field coarsening.
+            //   - Top-down / "as the crow flies" (cosT -> 1, sinT -> 0): only the ~1.5 cm blade edge (~0.06x height)
+            //     faces the eye, so 2D takes over immediately once blade edges fall <= allowedPx.
+            let angleErr=sqrt(0.0036*cosT*cosT+sinT*sinT);
             let reliefScale=clamp(stretch.y*record.place.w/max(scale,1e-3),0.01,1.0);
             perspectiveFactor=max(angleErr*reliefScale,0.015);
           }

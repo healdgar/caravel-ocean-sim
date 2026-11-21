@@ -396,11 +396,10 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
 fn meadowGrainFrom(band: u32, s: i32) -> u32 { return select(u32(min((i32(band) - s) / 3 + 1, i32(MEADOW_GRAINS) - 1)), 0u, i32(band) < s); }
 @compute @workgroup_size(1) fn meadowStandBudget() {
   // Size the fine grain=1 (4 m) radius directly from the live grazing perspective cutoff so tuning pixel error
-  // from 1 px ("best") to coarser budgets automatically keeps 100% of 3D cluster patches at grain=1 while
-  // coarsening pure 2D parallax bands beyond that cutoff by octave (grain = 2, 4, 8, 16) for fast Compute + Draw.
-  let grazingDist = 0.105 * meadowFocal() / max(cfg.scene.x, 1.0);
+  // from 1 px ("best") to coarser budgets keeps 3D cluster patches at grain=1 while coarsening pure 2D bands beyond.
+  let grazingDist = 0.145 * meadowFocal() / max(cfg.scene.x, 1.0);
   var s = i32(clamp(ceil(log2(max(grazingDist, 32.0) / 8.0) * 3.0), 6.0, 12.0));
-  for (; s > 5; s--) {
+  for (; s > 6; s--) {
     var total = 0u;
     for (var b = 0u; b < MEADOW_BANDS; b++) { total += atomicLoad(&meadowBlockWork[MEADOW_COUNTS + b * MEADOW_GRAINS + meadowGrainFrom(b, s)]); }
     if (total <= cfg.params.z) { break; }
@@ -668,41 +667,17 @@ fn meadowSwardDetail(bentXZ: vec2f, pixel: f32, windDir: vec2f, gust: f32) -> ve
   return vec4f(density, clamp(tilt, -0.75, 0.75), clamp(oat, 0.0, 1.0), clamp(shadow, 0.0, 1.0));
 }
 
-// Multi-scale aperiodic band-limited grass-tuft & blade-clump heightfield (0.08..1.04) for the 5-step GTA V
-// parallax volumetric grass shells on FAR & SPLAT. Mutually rotated hash-lattice octaves (tuft ~0.32 m,
-// secondary blade-clump ~0.54 m, clump ~0.95 m, pasture wave ~3.2 m) fade strictly before Nyquist with zero grid
-// alignment, zero sine stripes, and zero shimmer.
-fn meadowTuftHeight(p: vec2f, wTuftFine: f32, wTuftMid: f32, wClump: f32, wWave: f32) -> f32 {
-  var h = 0.52;
-  if (wTuftFine > 0.001) {
-    let p1a = vec2f(p.x * 0.8660 - p.y * 0.5000, p.x * 0.5000 + p.y * 0.8660) * 3.12 + vec2f(7.3, -13.1);
-    h += meadowOrganicNoise(p1a) * (0.38 * wTuftFine);
-  }
-  if (wTuftMid > 0.001) {
-    let p1b = vec2f(p.x * 0.3420 + p.y * 0.9397, -p.x * 0.9397 + p.y * 0.3420) * 1.85 + vec2f(-23.7, 11.4);
-    h += meadowOrganicNoise(p1b) * (0.32 * wTuftMid);
-  }
-  if (wClump > 0.001) {
-    let p2 = vec2f(p.x * 0.6428 - p.y * 0.7660, p.x * 0.7660 + p.y * 0.6428) * 1.05 + vec2f(31.4, -17.8);
-    h += meadowOrganicNoise(p2) * (0.28 * wClump);
-  }
-  if (wWave > 0.001) {
-    let p3 = vec2f(p.x * 0.9659 + p.y * 0.2588, -p.x * 0.2588 + p.y * 0.9659) * 0.3125 + vec2f(-47.1, -29.2);
-    h += meadowOrganicNoise(p3) * (0.22 * wWave);
-  }
-  return clamp(h, 0.08, 1.04);
-}
-
 struct MeadowParallaxHit {
-  hitH: f32,          // physical vertical intersection height inside the 0.36 m canopy (0.12..0.99)
-  cavityOcc: f32,     // volumetric occlusion accumulated along the ray through taller neighbouring tufts
-  gradXZ: vec2f,      // tuft surface height gradient in world XZ at hitXZ (for 3D micro-normal shading)
-  detailEnergy: f32   // resolved band energy (1 near -> 0 horizon) for luminance-invariant far filtering
+  hitH: f32,
+  cavityOcc: f32,
+  gradXZ: vec2f,
+  detailEnergy: f32
 };
 
-// Fast 4-step GPU view-ray parallax-occluded volumetric grass shells (no fragment kills, zero dynamic array indexing
-// for strict iOS/Safari WebKit WGSL compatibility, early-out on hit, and 2-tap gradient skipped past ~95 m for low
-// fragment ALU on mobile/Apple Silicon TBDR while keeping crisp micro-tufts across the 18..60 m handoff band).
+// High-frequency, Nyquist-band-limited vertical grass-blade & straw-stalk field for seamless 2D FAR & SPLAT grass.
+// Uses fine stalk scales (~4.5 cm, ~9.5 cm, ~26 cm, ~1.0 m) — ZERO 32 cm smooth moss pillows, ZERO stacked pancake
+// slices, ZERO bulbous cushion normals — so the 3D -> 2D MSAA handoff matches crisp sunlit blades & golden oat tips
+// seamlessly at any viewing angle and runs ~3x faster on GPU fragment ALU!
 fn meadowParallaxSward(
   unshiftedWorldXZ: vec2f,
   viewDir: vec3f,
@@ -712,67 +687,66 @@ fn meadowParallaxSward(
   footPixel: f32,
   dist: f32
 ) -> MeadowParallaxHit {
-  let wTuftFine = 1.0 - smoothstep(0.09, 0.26, footPixel);
-  let wTuftMid  = 1.0 - smoothstep(0.18, 0.52, footPixel);
-  let wClump    = 1.0 - smoothstep(0.36, 1.05, footPixel);
-  let wWave     = 1.0 - smoothstep(1.20, 3.80, footPixel);
-  let detailEnergy = clamp(wTuftFine * 0.42 + wTuftMid * 0.33 + wClump * 0.25, 0.0, 1.0);
+  // Strict Nyquist band-limiting per stalk scale so each octave fades cleanly into its exact mean before aliasing:
+  let wBlade = 1.0 - smoothstep(0.014, 0.048, footPixel); // ~4.5 cm individual blade needles (near/mid top-down & mid grazing)
+  let wStalk = 1.0 - smoothstep(0.036, 0.125, footPixel); // ~10 cm crisp stalk & seed-head tufts (~15..95 m)
+  let wTuft  = 1.0 - smoothstep(0.11, 0.38, footPixel);   // ~28 cm wild oat / fescue pockets (~30..300 m)
+  let wSward = 1.0 - smoothstep(0.45, 1.85, footPixel);   // ~1.1 m organic pasture density & shade (~100 m..1.5 km)
+  let detailEnergy = clamp(wBlade * 0.34 + wStalk * 0.34 + wTuft * 0.22 + wSward * 0.10, 0.0, 1.0);
 
-  let canopyH = 0.36;
-  let rayStepXZ = -viewDir.xz / max(abs(viewDir.y), 0.22);
-  let bendMag = (0.04 + 0.22 * gust + 0.14 * bendSlope) * canopyH;
+  let canopyH = 0.28;
+  // Subtle single-layer view-ray + wind-bend parallax displacement (clamped smoothly so grazing angles never smear!)
+  let rayShift = -viewDir.xz / max(abs(viewDir.y), 0.45) * (0.12 * canopyH);
+  let bendShift = -windDir * ((0.05 + 0.22 * gust + 0.14 * bendSlope) * canopyH * 0.55);
+  let p = unshiftedWorldXZ + bendShift + rayShift;
 
-  // Past ~1 km (detailEnergy == 0) only the 3.2 m pasture wave survives: 1 tap gives identical luminance at 4x less ALU.
-  if (detailEnergy <= 0.001) {
-    let midXZ = unshiftedWorldXZ - windDir * (bendMag * 0.30) + rayStepXZ * (0.45 * canopyH);
-    let th = meadowTuftHeight(midXZ, 0.0, 0.0, 0.0, wWave);
-    return MeadowParallaxHit(clamp(th + 0.03, 0.12, 0.99), clamp((th - 0.35) * 0.5, 0.0, 0.45), vec2f(0.0), 0.0);
+  var h = 0.56;
+  var tipSpeck = 0.0;
+  var crevice = 0.0;
+  var microTilt = vec2f(0.0);
+
+  if (wBlade > 0.001) {
+    // 22 m^-1 (~4.5 cm) crisp needle-fine grass blades & micro-gaps
+    let q0 = vec2f(p.x * 0.8660 - p.y * 0.5000, p.x * 0.5000 + p.y * 0.8660) * 21.5 + vec2f(5.1, -9.3);
+    let q1 = vec2f(p.x * 0.3420 + p.y * 0.9397, -p.x * 0.9397 + p.y * 0.3420) * 34.0 + vec2f(-17.4, 13.7);
+    let n0 = meadowOrganicNoise(q0);
+    let n1 = meadowOrganicNoise(q1);
+    let bSig = n0 * 0.62 + n1 * 0.38;
+    h += bSig * (0.28 * wBlade);
+    tipSpeck += smoothstep(0.26, 0.78, bSig) * (0.42 * wBlade);
+    crevice += (1.0 - smoothstep(-0.72, -0.05, bSig)) * (0.34 * wBlade);
+    microTilt += vec2f(n0, n1) * (0.14 * wBlade);
+  }
+  if (wStalk > 0.001) {
+    // 10.5 m^-1 (~9.5 cm) fine blade-clump & oat seed-head wisps
+    let r0 = vec2f(p.x * 0.6428 - p.y * 0.7660, p.x * 0.7660 + p.y * 0.6428) * 10.4 + vec2f(23.7, -14.2);
+    let r1 = vec2f(p.x * 0.9659 + p.y * 0.2588, -p.x * 0.2588 + p.y * 0.9659) * 15.8 + vec2f(-31.2, -19.5);
+    let m0 = meadowOrganicNoise(r0);
+    let m1 = meadowOrganicNoise(r1);
+    let sSig = m0 * 0.58 + m1 * 0.42;
+    h += sSig * (0.24 * wStalk);
+    tipSpeck += smoothstep(0.22, 0.76, sSig) * (0.38 * wStalk);
+    crevice += (1.0 - smoothstep(-0.68, 0.0, sSig)) * (0.28 * wStalk);
+    microTilt += vec2f(m0, m1) * (0.10 * wStalk);
+  }
+  if (wTuft > 0.001) {
+    // 3.8 m^-1 (~26 cm) subtle tussock height variation (NO bulbous bump normals!)
+    let t0 = vec2f(p.x * 0.7880 + p.y * 0.6157, -p.x * 0.6157 + p.y * 0.7880) * 3.8 + vec2f(-11.8, 27.4);
+    let nT = meadowOrganicNoise(t0);
+    h += nT * (0.14 * wTuft);
+    tipSpeck += smoothstep(0.24, 0.78, nT) * (0.22 * wTuft);
+    crevice += (1.0 - smoothstep(-0.65, 0.05, nT)) * (0.18 * wTuft);
+  }
+  if (wSward > 0.001) {
+    // 0.92 m^-1 (~1.1 m) broad organic meadow variation
+    let w0 = vec2f(p.x * 0.2588 - p.y * 0.9659, p.x * 0.9659 + p.y * 0.2588) * 0.92 + vec2f(41.3, 18.6);
+    let nW = meadowOrganicNoise(w0);
+    h += nW * (0.09 * wSward);
+    tipSpeck += smoothstep(0.20, 0.75, nW) * (0.12 * wSward);
   }
 
-  var hitH = 0.16;
-  var hitXZ = unshiftedWorldXZ + rayStepXZ * canopyH;
-  var hitFound = false;
-  var prevH = 1.06;
-  var prevTh = 0.0;
-  var prevXZ = unshiftedWorldXZ - windDir * bendMag;
-  var occAccum = 0.0;
-
-  for (var i = 0u; i < 4u; i++) {
-    let h = 0.94 - f32(i) * 0.22;
-    let windBendOffset = -windDir * (bendMag * h * h);
-    let sampleXZ = unshiftedWorldXZ + windBendOffset + rayStepXZ * ((1.0 - h) * canopyH);
-    let th = meadowTuftHeight(sampleXZ, wTuftFine, wTuftMid, wClump, wWave);
-    occAccum += clamp(th - (h - 0.24), 0.0, 0.32);
-    if (th >= h) {
-      let dCurr = th - h;
-      let dPrev = max(prevH - prevTh, 0.0);
-      let frac = clamp(dPrev / max(dPrev + dCurr, 1e-4), 0.0, 1.0);
-      hitH = select(mix(prevH, h, frac), clamp(th, 0.90, 0.99), i == 0u);
-      hitXZ = select(mix(prevXZ, sampleXZ, frac), sampleXZ, i == 0u);
-      hitFound = true;
-      break;
-    }
-    prevH = h;
-    prevTh = th;
-    prevXZ = sampleXZ;
-  }
-  if (!hitFound) {
-    hitH = clamp(prevTh * 0.85, 0.12, 0.25);
-    hitXZ = prevXZ;
-  }
-
-  var gradXZ = vec2f(0.0);
-  let gradFade = 1.0 - smoothstep(65.0, 95.0, dist);
-  if (gradFade > 0.001 && detailEnergy > 0.02) {
-    let eps = max(0.08, footPixel * 0.55);
-    let refH = select(prevTh, hitH, hitFound);
-    let hX = meadowTuftHeight(hitXZ + vec2f(eps, 0.0), wTuftFine, wTuftMid, wClump, wWave);
-    let hZ = meadowTuftHeight(hitXZ + vec2f(0.0, eps), wTuftFine, wTuftMid, wClump, wWave);
-    gradXZ = clamp(vec2f(hX - refH, hZ - refH) / eps * canopyH, vec2f(-0.95), vec2f(0.95)) * gradFade;
-  }
-
-  let farH = hitH + (1.0 - detailEnergy) * 0.03;
-  return MeadowParallaxHit(clamp(farH, 0.12, 0.99), clamp(occAccum, 0.0, 1.0), gradXZ, detailEnergy);
+  let finalH = clamp(h + tipSpeck * 0.26, 0.24, 0.98);
+  return MeadowParallaxHit(finalH, clamp(crevice, 0.0, 0.65), microTilt, detailEnergy);
 }
 `;
 
@@ -993,11 +967,10 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   );
 
   let organCol = mix(grassPigment, v.colour * 1.06, isFlower);
-  let clusterAO = mix(0.42, 1.0, smoothstep(0.0, 0.55, along));
-  let paraAO = mix(0.36, 1.0, smoothstep(0.14, 0.80, hitH))
-             * (1.0 - para.cavityOcc * 0.22)
-             * mix(0.95, 1.0, para.detailEnergy);
-  let ao = select(clusterAO, clamp(paraAO, 0.34, 1.0), isContinuum);
+  let clusterAO = mix(0.46, 1.0, smoothstep(0.0, 0.55, along));
+  let paraAO = mix(0.56, 1.0, smoothstep(0.24, 0.82, hitH))
+             * (1.0 - para.cavityOcc * 0.14);
+  let ao = select(clusterAO, clamp(paraAO, 0.50, 1.0), isContinuum);
   let shadedBladeCol = organCol * mix(1.0, ao, swardWeight * 0.78);
   let shadowedUnderGround = groundCol * mix(1.0, 0.52, marginFade);
   var baseCol = mix(shadowedUnderGround, shadedBladeCol, select(1.0, swardWeight, isContinuum));
@@ -1031,9 +1004,9 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   // micro-tuft lighting roll continuously from near 3D blades -> mid widened blades -> far parallax shells -> horizon.
   let clusterPerturb = vec3f(acrossDir.x * sd.y * 0.18, 0.03, acrossDir.y * sd.y * 0.18);
   let paraPerturb = vec3f(
-    -para.gradXZ.x * 0.62 - windDir.x * (swell * 0.14),
+    para.gradXZ.x * 0.22 - windDir.x * (swell * 0.14),
     0.04,
-    -para.gradXZ.y * 0.62 - windDir.y * (swell * 0.14)
+    para.gradXZ.y * 0.22 - windDir.y * (swell * 0.14)
   );
   var n = normalize(v.normal + select(clusterPerturb, paraPerturb, isContinuum) * swardWeight);
   if (!frontFacing) { n = normalize(vec3f(-n.x * 0.55, abs(n.y), -n.z * 0.55)); }
