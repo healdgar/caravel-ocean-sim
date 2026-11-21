@@ -272,7 +272,7 @@ function coverageMask(fit, size) {
   }
   return mask;
 }
-const DELIGHT_VERSION = 2;
+const DELIGHT_VERSION = 3;
 function bakeTexture(fit, glbFile, work, reuseDir = null) {
   let prev = null;
   if (reuseDir && fs.existsSync(path.join(reuseDir, 'manifest.json')) && fs.existsSync(path.join(reuseDir, 'albedo.bc7.bin.gz')) && fs.existsSync(path.join(reuseDir, 'albedo.astc.bin.gz'))) {
@@ -713,5 +713,24 @@ const started = Date.now();
 for (const entry of CREW_CONTINUUM_BODIES) {
   if (ONLY && !ONLY.split(',').includes(entry.id)) continue;
   await bake(entry);
+}
+if (args.includes('--sync-all')) {
+  for (const entry of CREW_CONTINUUM_BODIES) {
+    if (entry.id === 'sailor-male' || entry.id === 'villager-female') continue;
+    const srcId = entry.sex === 'female' ? 'villager-female' : 'sailor-male';
+    const srcDir = path.join(OUT, srcId);
+    const dstDir = path.join(OUT, entry.id);
+    fs.mkdirSync(dstDir, { recursive: true });
+    for (const file of ['body.glb', ...CREW_CONTINUUM_STREAMS.map((s) => `${s}.gz`)]) {
+      fs.copyFileSync(path.join(srcDir, file), path.join(dstDir, file));
+    }
+    const manifest = JSON.parse(fs.readFileSync(path.join(srcDir, 'manifest.json'), 'utf8'));
+    manifest.id = entry.id;
+    manifest.sex = entry.sex;
+    manifest.role = entry.role;
+    validateCrewContinuumManifest(manifest);
+    fs.writeFileSync(path.join(dstDir, 'manifest.json'), `${JSON.stringify(manifest, null, 1)}\n`);
+    console.log(`  synced ${srcId} -> ${entry.id}`);
+  }
 }
 console.log(`baked in ${((Date.now() - started) / 1000).toFixed(0)} s`);

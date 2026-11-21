@@ -383,7 +383,13 @@ def main():
         linear = linear_from_srgb(np.asarray(resized, dtype=np.float32) / 255).astype(np.float32)
     covered = np.fromfile(args.mask, dtype=np.uint8).reshape(args.size, args.size) > 0
     if args.glb is not None:
-        linear = delight_and_equalize_face(linear, covered, args.glb)
+        raw_glb = args.glb.read_bytes()
+        jlen = struct.unpack_from('<I', raw_glb, 12)[0]
+        g_hdr = json.loads(raw_glb[20:20 + jlen])
+        if g_hdr.get('extras', {}).get('cleanPelt'):
+            print(f'cleanPelt GLB ({args.glb.name}): skipping legacy Tripo delight/mirror pass')
+        else:
+            linear = delight_and_equalize_face(linear, covered, args.glb)
     filled = fill_outside(linear, covered)
     if args.preview_out is not None:
         args.preview_out.parent.mkdir(parents=True, exist_ok=True)

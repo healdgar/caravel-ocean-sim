@@ -237,62 +237,48 @@ fn crewScalpMode(actor:CrewActor,identity:u32,slot:u32)->f32 {
   var h=(identity*131u+1u)*0x9e3779b1u+0x85ebca6bu;
   h=(h^(h>>15u))*0x2c1b3c6du;
   h=h^(h>>13u);
-  let roll=h&31u;
+  let roll=h&63u;
   if(roll==0u){return 0.0;}
-  if(roll<=3u){return 2.0;}
+  if(roll==1u){return 2.0;}
   return 1.0;
 }
 fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scalpMode:f32)->vec4f {
-  // Clean undressed anatomical base bodies:
-  //   region 3 = skin (tinted seamlessly by each person's actor.skin.rgb — zero baked clothes, zero garment stains!)
-  //   region 4 = legacy high-forehead brow tag -> treated as skin so no floating brow stripe ever appears on the forehead
-  //   region 0 = eye opening (sclera & iris kept verbatim; surrounding eyelids/sockets tinted as skin; true brow ridge tinted as hair)
+  // Clean 50k anatomical base bodies with real 3D spherical eyeballs:
+  //   region 0 = real 3D spherical eyeballs (crisp painted iris/pupil/sclera kept verbatim, glossy wet cornea in shade!)
+  //   region 3 = clean continuous pelt skin (luminance-preserving transfer onto actor.skin.rgb, zero discoloration!)
+  //   region 4 = legacy brow tag -> treated cleanly as skin
   //   region 1/2 = fallback dyed cloth only if a legacy body is ever loaded
+  if(region==0u){
+    return vec4f(picture,0.0);
+  }
   let female=actor.skin.w>0.5&&actor.skin.w<1.5;
   let skin=crewWear[3u];
-  let skinLuma=max(dot(skin.xyz,vec3f(0.299,0.587,0.114)),1e-3);
+  let skinLuma=max(dot(skin.xyz,vec3f(0.299,0.587,0.114)),0.05);
   let picLuma=dot(picture,vec3f(0.299,0.587,0.114));
 
-  // Preserve full 4K/8K painted skin detail (cheeks, lips, eyelid creases, nostrils, pores) while transferring cleanly
-  // to each person's actor.skin.rgb with a tight shade range so baked highlights or shadows never blow out or bruise.
-  let lumaRatio=clamp(picLuma/skinLuma,0.60,1.24);
-  let softLuma=mix(1.0,lumaRatio,0.82);
-  let rawShade=clamp(picture/max(skin.xyz,vec3f(1e-3)),vec3f(0.60),vec3f(1.24));
-  let safeShade=vec3f(rawShade.r,rawShade.g,min(rawShade.b,lumaRatio*1.04));
-  var skinTone=actor.skin.rgb*mix(vec3f(softLuma),safeShade,0.58);
+  // Luminance-preserving warm skin transfer: avoids raw per-channel RGB division AND avoids additive fair-skin
+  // chroma bias on darker complexions (relChroma = 0 on plain skin, proportional to actorLuma on lips/cheeks)!
+  let lumaSh=clamp(picLuma/skinLuma,0.58,1.26);
+  let actorLuma=max(dot(actor.skin.rgb,vec3f(0.299,0.587,0.114)),0.015);
+  let relChroma=(picture/skinLuma)-(skin.xyz/skinLuma);
+  var skinTone=max(actor.skin.rgb*mix(1.0,lumaSh,0.78)+relChroma*actorLuma*0.42,vec3f(0.006));
 
-  // Gentle lip warmth reinforcement (4K/8K painted texture already carries natural lip color).
+  // Gentle lip warmth reinforcement across all skin tones.
   let lipY=select(1.584,1.506,female);
   let lipZ=select(0.082,0.095,female);
   let lipD=length(vec2f(bodyPos.x/0.024,(bodyPos.y-lipY)/0.0085));
   let lipMask=step(lipZ,bodyPos.z)*(1.0-smoothstep(0.65,1.15,lipD));
-  skinTone=mix(skinTone,skinTone*vec3f(1.06,0.88,0.86),lipMask*0.16);
+  skinTone=mix(skinTone,skinTone*vec3f(1.06,0.88,0.86),lipMask*0.14);
 
-  var baseOut=vec4f(picture,0.0);
-  if(region==0u||region==3u||region==4u){
-    // Treat region 0, 3, and 4 uniformly as skin so stray Tripo eye-region spills onto eyelids/brows/forehead/nose
-    // NEVER bypass actor.skin.rgb! Keep natural warm-off-white sclera (<=0.62) and dark iris/pupil strictly inside
-    // the tight anatomical eye opening ellipse (radius < 0.72), with zero chalky eyelids or brow blotches.
-    let eyeX=select(0.0315,0.0345,female);
-    let eyeY=select(1.6585,1.5825,female);
-    let eyeZ=select(0.064,0.072,female);
-    let eyeRx=select(0.0155,0.0145,female);
-    let eyeRy=select(0.0062,0.0060,female);
-    let eyeRel=vec2f((abs(bodyPos.x)-eyeX)/eyeRx,(bodyPos.y-eyeY)/eyeRy);
-    let eyeR2=dot(eyeRel,eyeRel);
-    let inEyeOpen=smoothstep(eyeZ,eyeZ+0.008,bodyPos.z)*(1.0-smoothstep(0.28,0.5184,eyeR2));
-    let lowWarmth=1.0-smoothstep(0.08,0.20,picture.r-picture.b);
-    let darkIrisLash=(1.0-smoothstep(skinLuma*0.22,skinLuma*0.46,picLuma))*lowWarmth;
-    let softSclera=select(0.0,smoothstep(skinLuma*0.92,skinLuma*1.28,picLuma)*lowWarmth,region==0u);
-    let eyeOpen=inEyeOpen*max(darkIrisLash,softSclera);
-    let eyeCol=min(picture,vec3f(0.62,0.60,0.57));
-    baseOut=vec4f(mix(skinTone,eyeCol,eyeOpen),1.0-eyeOpen);
-  }else if(region==1u||region==2u){
+  var baseOut=vec4f(skinTone,1.0);
+  if(region==1u||region==2u){
     let median=crewWear[min(region,4u)];
     if(median.w>=0.5){
       let worn=select(actor.trousers.rgb,actor.shirt.rgb,region==1u);
       let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
       baseOut=vec4f(worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2),0.0);
+    }else{
+      baseOut=vec4f(picture,0.0);
     }
   }
   // Softly harmonize the painted 4K/8K eyebrows toward each person's actor.hair.rgb without stamping opaque stripes over skin.
@@ -399,7 +385,27 @@ fn crewContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   var c:CrewVertex;
   c.position=v.position;c.world=v.world;c.normal=v.normal;c.color=surface.rgb;c.wet=v.wet;c.skin=clamp(surface.w,0.0,1.0);
   c.bodyPos=v.bodyPos;c.damage=v.hurt.xyz;c.paint=v.look.w;c.actor=v.look.z;
-  return vec4f(continuumAir(crewShadeLit(c,front,surface.rgb),v.world),1.0);
+  let skinLit=crewShadeLit(c,front,surface.rgb);
+  // Real 3D spherical eyeballs (region == 0): crisp glossy wet cornea specular catchlight, zero cloth weave bump!
+  let isEye=v.look.x==CONTINUUM_CLUSTER_ENTRY&&v.look.y==0u;
+  let eyeN=normalize(select(-v.normal,v.normal,front));
+  let eyeView=normalize(F.camPos.xyz-v.world);
+  let eyeSun=F.sunDir.xyz;
+  let eyeShadow=vesselShadow(v.world,eyeN);
+  let eyeDirect=sunIlluminance()*sunVis[0]*step(0.0,eyeSun.y)*solarShadowVisibility(eyeShadow);
+  let eyeSky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
+  let eyeSea=textureSampleLevel(envCube,sampC,normalize(vec3f(eyeN.x,-0.65,eyeN.z)),${ENV_MIPS - 1}.0).rgb;
+  let eyeAmb=vesselAmbient(eyeN,eyeSky,eyeSea);
+  let eyeNdl=max(dot(eyeN,eyeSun),0.0);
+  let eyeRough=0.07;
+  let eyeF0=vec3f(0.028);
+  let eyeSpec=vesselSpecular(eyeN,eyeView,eyeSun,eyeRough,eyeF0)*eyeNdl;
+  let eyeRefl=textureSampleLevel(envCube,sampC,reflect(-eyeView,eyeN),0.8).rgb*vesselEnvironment(eyeN,eyeView,eyeRough,eyeF0)*0.42*F.windP[1].w;
+  let eyeLit=surface.rgb*(eyeDirect*(eyeNdl/3.14159265)+eyeAmb)+eyeDirect*eyeSpec+eyeRefl
+    +lunarSurface(eyeN,eyeView,surface.rgb,eyeRough,eyeF0,sunVis[1]*lunarShadowVisibility(eyeShadow))
+    +lightningSurface(eyeN,eyeView,surface.rgb,eyeRough)+gunFlashSurface(v.world,eyeN,eyeView,surface.rgb,eyeRough)
+    +worldFireSurface(v.world,eyeN,eyeView,surface.rgb,eyeRough);
+  return vec4f(continuumAir(select(skinLit,eyeLit,isEye),v.world),1.0);
 }
 `;
 }
@@ -493,13 +499,12 @@ fn crewHairHash(v:u32)->u32 {
     else if(hairCode==2u||hairCode==4u||hairCode==5u){scalpType=1u;}
     else if(hairCode==3u){scalpType=2u;}
     else{
-      // Note: reconcileColonialGroomAndComp zeroes hairCode when hat!=0 (though hats are not drawn on continuum bodies),
-      // so roll full period hair for most hairCode==0 men, leaving ~12% tonsure fringe and ~6% shaved dome.
-      let roll=h&31u;
+      // Roll full period hair for ~97% of hairCode==0 men, leaving ~1.5% tonsure fringe and ~1.5% shaved dome.
+      let roll=h&63u;
       if(roll==0u){scalpGone=true;}
-      else if(roll<=3u){scalpType=4u;}
-      else if(roll<=13u){scalpType=0u;}
-      else if(roll<=23u){scalpType=1u;}
+      else if(roll==1u){scalpType=4u;}
+      else if(roll<=22u){scalpType=0u;}
+      else if(roll<=44u){scalpType=1u;}
       else{scalpType=2u;}
     }
   }

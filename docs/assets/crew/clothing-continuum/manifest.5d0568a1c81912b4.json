@@ -1,0 +1,648 @@
+{
+  "format": "waterworld.clothing-continuum",
+  "version": 3,
+  "generator": "scripts/prepare-clothing-continuum.mjs",
+  "atlas": {
+    "words": 3160665,
+    "headerWords": 32,
+    "bytes": 12642660,
+    "sha256": "6494addbd6305ee03209e70d3999190a5d7ea17cff738e6fee5ecca153536586",
+    "gzip": {
+      "file": "atlas.bin.gz",
+      "bytes": 5724089,
+      "sha256": "1d036bb9721a095845bf01f5b1aec1b3d2d207b198890b522be694ec5a57484c"
+    }
+  },
+  "types": [
+    {
+      "index": 0,
+      "id": "male-linen-shirt",
+      "sex": "male",
+      "slot": "upper",
+      "triangles": 21440,
+      "clusters": {
+        "count": 341,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 21440,
+        "rootError": 0.1646
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          33,
+          24,
+          20
+        ],
+        "wellComposedCells": 2,
+        "wrapTriangles": 2488,
+        "baseTriangles": 168,
+        "baseVertices": 84,
+        "baseError": 0.0885,
+        "outward": 0.0885,
+        "inward": 0.088,
+        "simplifyError": 0.04,
+        "steps": 79,
+        "coreTriangles": 4,
+        "depth": 4,
+        "errorRange": [
+          0.0885,
+          0.374
+        ],
+        "inflateMax": 0.092,
+        "rootTriangles": 82,
+        "farFirst": 43,
+        "farFirstTriangles": 82,
+        "handoffError": 0.1808
+      }
+    },
+    {
+      "index": 1,
+      "id": "male-doublet",
+      "sex": "male",
+      "slot": "upper",
+      "triangles": 22140,
+      "clusters": {
+        "count": 349,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 22140,
+        "rootError": 0.1945
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          41,
+          29,
+          22
+        ],
+        "wellComposedCells": 20,
+        "wrapTriangles": 3792,
+        "baseTriangles": 1704,
+        "baseVertices": 852,
+        "baseError": 0.0906,
+        "outward": 0.0906,
+        "inward": 0.0781,
+        "simplifyError": 0.0131,
+        "steps": 846,
+        "coreTriangles": 6,
+        "depth": 9,
+        "errorRange": [
+          0.0906,
+          0.6338
+        ],
+        "inflateMax": 0.1239,
+        "rootTriangles": 85,
+        "farFirst": 810,
+        "farFirstTriangles": 84,
+        "handoffError": 0.1965
+      }
+    },
+    {
+      "index": 2,
+      "id": "male-soldier-jerkin",
+      "sex": "male",
+      "slot": "upper",
+      "triangles": 22040,
+      "clusters": {
+        "count": 349,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 22040,
+        "rootError": 0.187
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          40,
+          28,
+          22
+        ],
+        "wellComposedCells": 18,
+        "wrapTriangles": 3748,
+        "baseTriangles": 1930,
+        "baseVertices": 965,
+        "baseError": 0.0816,
+        "outward": 0.0816,
+        "inward": 0.077,
+        "simplifyError": 0.0084,
+        "steps": 960,
+        "coreTriangles": 6,
+        "depth": 8,
+        "errorRange": [
+          0.0816,
+          0.609
+        ],
+        "inflateMax": 0.1199,
+        "rootTriangles": 84,
+        "farFirst": 923,
+        "farFirstTriangles": 84,
+        "handoffError": 0.1891
+      }
+    },
+    {
+      "index": 3,
+      "id": "female-chemise-blouse",
+      "sex": "female",
+      "slot": "upper",
+      "triangles": 21440,
+      "clusters": {
+        "count": 338,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 21440,
+        "rootError": 0.1565
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          32,
+          22,
+          20
+        ],
+        "wellComposedCells": 6,
+        "wrapTriangles": 2028,
+        "baseTriangles": 948,
+        "baseVertices": 474,
+        "baseError": 0.0972,
+        "outward": 0.0972,
+        "inward": 0.073,
+        "simplifyError": 0.0131,
+        "steps": 469,
+        "coreTriangles": 6,
+        "depth": 7,
+        "errorRange": [
+          0.0972,
+          0.4337
+        ],
+        "inflateMax": 0.088,
+        "rootTriangles": 82,
+        "farFirst": 433,
+        "farFirstTriangles": 82,
+        "handoffError": 0.1888
+      }
+    },
+    {
+      "index": 4,
+      "id": "female-laced-bodice",
+      "sex": "female",
+      "slot": "upper",
+      "triangles": 21440,
+      "clusters": {
+        "count": 338,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 21440,
+        "rootError": 0.1436
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          31,
+          22,
+          20
+        ],
+        "wellComposedCells": 9,
+        "wrapTriangles": 2012,
+        "baseTriangles": 966,
+        "baseVertices": 483,
+        "baseError": 0.0978,
+        "outward": 0.0978,
+        "inward": 0.0734,
+        "simplifyError": 0.0131,
+        "steps": 478,
+        "coreTriangles": 6,
+        "depth": 7,
+        "errorRange": [
+          0.0978,
+          0.4352
+        ],
+        "inflateMax": 0.084,
+        "rootTriangles": 82,
+        "farFirst": 442,
+        "farFirstTriangles": 82,
+        "handoffError": 0.2121
+      }
+    },
+    {
+      "index": 5,
+      "id": "indigenous-tunic-m",
+      "sex": "male",
+      "slot": "upper",
+      "triangles": 21440,
+      "clusters": {
+        "count": 338,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 21440,
+        "rootError": 0.1554
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          26,
+          29,
+          21
+        ],
+        "wellComposedCells": 4,
+        "wrapTriangles": 3084,
+        "baseTriangles": 1510,
+        "baseVertices": 755,
+        "baseError": 0.083,
+        "outward": 0.083,
+        "inward": 0.0575,
+        "simplifyError": 0.0105,
+        "steps": 750,
+        "coreTriangles": 6,
+        "depth": 7,
+        "errorRange": [
+          0.083,
+          0.3858
+        ],
+        "inflateMax": 0.076,
+        "rootTriangles": 81,
+        "farFirst": 715,
+        "farFirstTriangles": 80,
+        "handoffError": 0.1914
+      }
+    },
+    {
+      "index": 6,
+      "id": "indigenous-huipil-f",
+      "sex": "female",
+      "slot": "upper",
+      "triangles": 21440,
+      "clusters": {
+        "count": 338,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 21440,
+        "rootError": 0.1442
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          25,
+          27,
+          21
+        ],
+        "wellComposedCells": 10,
+        "wrapTriangles": 2624,
+        "baseTriangles": 1358,
+        "baseVertices": 679,
+        "baseError": 0.0947,
+        "outward": 0.0947,
+        "inward": 0.057,
+        "simplifyError": 0.0105,
+        "steps": 674,
+        "coreTriangles": 4,
+        "depth": 8,
+        "errorRange": [
+          0.0947,
+          0.5201
+        ],
+        "inflateMax": 0.068,
+        "rootTriangles": 83,
+        "farFirst": 638,
+        "farFirstTriangles": 82,
+        "handoffError": 0.2251
+      }
+    },
+    {
+      "index": 7,
+      "id": "male-mariner-slops",
+      "sex": "male",
+      "slot": "lower",
+      "triangles": 17468,
+      "clusters": {
+        "count": 279,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 17468,
+        "rootError": 0.1867
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          23,
+          38,
+          20
+        ],
+        "wellComposedCells": 6,
+        "wrapTriangles": 2808,
+        "baseTriangles": 1058,
+        "baseVertices": 533,
+        "baseError": 0.1153,
+        "outward": 0.0984,
+        "inward": 0.1153,
+        "simplifyError": 0.0164,
+        "steps": 529,
+        "coreTriangles": 4,
+        "depth": 7,
+        "errorRange": [
+          0.1153,
+          0.681
+        ],
+        "inflateMax": 0.1079,
+        "rootTriangles": 67,
+        "farFirst": 496,
+        "farFirstTriangles": 66,
+        "handoffError": 0.2182
+      }
+    },
+    {
+      "index": 8,
+      "id": "male-trunk-hose",
+      "sex": "male",
+      "slot": "lower",
+      "triangles": 22044,
+      "clusters": {
+        "count": 349,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 22044,
+        "rootError": 0.227
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          24,
+          38,
+          21
+        ],
+        "wellComposedCells": 4,
+        "wrapTriangles": 3152,
+        "baseTriangles": 1510,
+        "baseVertices": 757,
+        "baseError": 0.1222,
+        "outward": 0.0861,
+        "inward": 0.1222,
+        "simplifyError": 0.0105,
+        "steps": 752,
+        "coreTriangles": 6,
+        "depth": 7,
+        "errorRange": [
+          0.1222,
+          0.4731
+        ],
+        "inflateMax": 0.1079,
+        "rootTriangles": 83,
+        "farFirst": 714,
+        "farFirstTriangles": 82,
+        "handoffError": 0.2353
+      }
+    },
+    {
+      "index": 9,
+      "id": "female-pleated-skirt",
+      "sex": "female",
+      "slot": "lower",
+      "triangles": 20636,
+      "clusters": {
+        "count": 328,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 20636,
+        "rootError": 0.1589
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          33,
+          38,
+          31
+        ],
+        "wellComposedCells": 42,
+        "wrapTriangles": 7216,
+        "baseTriangles": 3902,
+        "baseVertices": 1953,
+        "baseError": 0.076,
+        "outward": 0.076,
+        "inward": 0.0421,
+        "simplifyError": 0.0105,
+        "steps": 1948,
+        "coreTriangles": 6,
+        "depth": 8,
+        "errorRange": [
+          0.076,
+          0.5836
+        ],
+        "inflateMax": 0.1079,
+        "rootTriangles": 72,
+        "farFirst": 1915,
+        "farFirstTriangles": 72,
+        "handoffError": 0.2171
+      }
+    },
+    {
+      "index": 10,
+      "id": "female-apron-skirt",
+      "sex": "female",
+      "slot": "lower",
+      "triangles": 20576,
+      "clusters": {
+        "count": 327,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 20576,
+        "rootError": 0.1652
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          33,
+          38,
+          31
+        ],
+        "wellComposedCells": 34,
+        "wrapTriangles": 7220,
+        "baseTriangles": 3866,
+        "baseVertices": 1935,
+        "baseError": 0.0753,
+        "outward": 0.0753,
+        "inward": 0.0448,
+        "simplifyError": 0.0105,
+        "steps": 1929,
+        "coreTriangles": 6,
+        "depth": 9,
+        "errorRange": [
+          0.0753,
+          0.6584
+        ],
+        "inflateMax": 0.1079,
+        "rootTriangles": 73,
+        "farFirst": 1897,
+        "farFirstTriangles": 72,
+        "handoffError": 0.2681
+      }
+    },
+    {
+      "index": 11,
+      "id": "indigenous-breechcloth-m",
+      "sex": "male",
+      "slot": "lower",
+      "triangles": 10784,
+      "clusters": {
+        "count": 173,
+        "levels": 7,
+        "roots": 1,
+        "finestTriangles": 10784,
+        "rootError": 0.1243
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          25,
+          37,
+          24
+        ],
+        "wellComposedCells": 12,
+        "wrapTriangles": 3700,
+        "baseTriangles": 1678,
+        "baseVertices": 841,
+        "baseError": 0.0719,
+        "outward": 0.0719,
+        "inward": 0.0429,
+        "simplifyError": 0.0105,
+        "steps": 836,
+        "coreTriangles": 4,
+        "depth": 8,
+        "errorRange": [
+          0.0719,
+          0.6245
+        ],
+        "inflateMax": 0.1039,
+        "rootTriangles": 75,
+        "farFirst": 802,
+        "farFirstTriangles": 74,
+        "handoffError": 0.2033
+      }
+    },
+    {
+      "index": 12,
+      "id": "indigenous-wrap-skirt-f",
+      "sex": "female",
+      "slot": "lower",
+      "triangles": 14304,
+      "clusters": {
+        "count": 224,
+        "levels": 7,
+        "roots": 1,
+        "finestTriangles": 14304,
+        "rootError": 0.0975
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          29,
+          38,
+          27
+        ],
+        "wellComposedCells": 33,
+        "wrapTriangles": 5632,
+        "baseTriangles": 3192,
+        "baseVertices": 1598,
+        "baseError": 0.0806,
+        "outward": 0.0806,
+        "inward": 0.0496,
+        "simplifyError": 0.0067,
+        "steps": 1593,
+        "coreTriangles": 6,
+        "depth": 8,
+        "errorRange": [
+          0.0806,
+          0.4402
+        ],
+        "inflateMax": 0.1079,
+        "rootTriangles": 105,
+        "farFirst": 1544,
+        "farFirstTriangles": 104,
+        "handoffError": 0.2074
+      }
+    },
+    {
+      "index": 13,
+      "id": "shoulder-cloak",
+      "sex": "male",
+      "slot": "over",
+      "triangles": 8168,
+      "clusters": {
+        "count": 127,
+        "levels": 6,
+        "roots": 1,
+        "finestTriangles": 8168,
+        "rootError": 0.0763
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          33,
+          33,
+          27
+        ],
+        "wellComposedCells": 33,
+        "wrapTriangles": 5144,
+        "baseTriangles": 2590,
+        "baseVertices": 1297,
+        "baseError": 0.0813,
+        "outward": 0.0813,
+        "inward": 0.0365,
+        "simplifyError": 0.0105,
+        "steps": 1292,
+        "coreTriangles": 6,
+        "depth": 8,
+        "errorRange": [
+          0.0813,
+          0.6811
+        ],
+        "inflateMax": 0.0922,
+        "rootTriangles": 125,
+        "farFirst": 1233,
+        "farFirstTriangles": 124,
+        "handoffError": 0.2124
+      }
+    },
+    {
+      "index": 14,
+      "id": "female-riding-breeches",
+      "sex": "female",
+      "slot": "lower",
+      "triangles": 22044,
+      "clusters": {
+        "count": 349,
+        "levels": 8,
+        "roots": 1,
+        "finestTriangles": 22044,
+        "rootError": 0.1945
+      },
+      "chain": {
+        "cell": 0.04,
+        "cells": [
+          21,
+          38,
+          20
+        ],
+        "wellComposedCells": 3,
+        "wrapTriangles": 2464,
+        "baseTriangles": 1028,
+        "baseVertices": 516,
+        "baseError": 0.1086,
+        "outward": 0.1086,
+        "inward": 0.1036,
+        "simplifyError": 0.0084,
+        "steps": 511,
+        "coreTriangles": 6,
+        "depth": 7,
+        "errorRange": [
+          0.1086,
+          0.4245
+        ],
+        "inflateMax": 0.1079,
+        "rootTriangles": 85,
+        "farFirst": 472,
+        "farFirstTriangles": 84,
+        "handoffError": 0.1965
+      }
+    }
+  ]
+}

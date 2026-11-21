@@ -13,7 +13,7 @@ import { continuumPixelError } from './continuum-core.js';
 import { continuumProfile } from './continuum-profiles.js';
 import { CONTINUUM_HEADER, CONTINUUM_TYPE_WORDS, continuumRoom } from './continuum-format.js';
 import { CONTINUUM_ROW } from './wgsl/continuum-cut.js';
-import { createContinuumScene, requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, continuumAtlasPages } from './continuum-scene.js';
+import { createContinuumScene, requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, continuumAtlasPages } from './continuum-scene.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { terrainSurfaceSample } from './terrain-model.js';
@@ -30,9 +30,9 @@ import {
 const MEADOW_COVER_DESKTOP = 2048; // 4.0 m/texel across 8192 m region with bilinear SDF filtering
 const MEADOW_COVER_MOBILE = 1024;
 // The most records the stand pass may write a frame (the patches in view and in the shadow map's box), held further
-// to what the device lets one buffer bind: Lisbon's dock stands about 1.07M. A view that asks more than the scene holds
-// is stood coarser far off (meadowStandBudget), never short near.
-const MEADOW_CONTINUUM_CAPACITY = 1 << 21, MEADOW_CONTINUUM_MOBILE_CAPACITY = 1 << 18, MEADOW_CONTINUUM_SECONDARY_CAPACITY = 1 << 17;
+// to what the device lets one buffer bind. Because meadowStandBudget coarsens blocks beyond 64 m (grain 2..16),
+// even an 8 km hillside fits in ~3k-8k records, so 1<<18 desktop / 1<<16 mobile gives >30x headroom with ~8x less VRAM.
+const MEADOW_CONTINUUM_CAPACITY = 1 << 18, MEADOW_CONTINUUM_MOBILE_CAPACITY = 1 << 16, MEADOW_CONTINUUM_SECONDARY_CAPACITY = 1 << 16;
 // The ground meadows stop at.
 const MEADOW_WATERLINE = 0.75;
 
@@ -620,7 +620,7 @@ export function requestMeadowStand(device, shader) {
     const entries = {
       reset: [buffer(9, 'storage'), buffer(10, 'storage')],
       blocks: [...uniforms, buffer(6, 'read-only-storage'), buffer(10, 'storage'), buffer(12, 'uniform')],
-      budget: [buffer(1, 'uniform'), buffer(10, 'storage')],
+      budget: [buffer(0, 'uniform'), buffer(1, 'uniform'), buffer(10, 'storage')],
       patches: [...uniforms, texture(3, 'unfilterable-float'), texture(4, 'float'), buffer(5, 'read-only-storage'), buffer(7, 'storage'), buffer(8, 'storage'), buffer(9, 'storage'),
         buffer(11, 'read-only-storage'), buffer(12, 'uniform'), buffer(13, 'uniform'), texture(14, 'sint'), texture(15, 'float', '2d-array'),
         { binding: 16, visibility: C, sampler: { type: 'filtering' } }, texture(17, 'unfilterable-float', '2d-array')],
@@ -642,7 +642,7 @@ export function requestMeadowStand(device, shader) {
   });
 }
 // What each stand pass binds.
-const MEADOW_STAND_BINDINGS = Object.freeze({ reset: [9, 10], blocks: [0, 1, 2, 6, 10, 12], budget: [1, 10], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17], finish: [1, 7, 9] });
+const MEADOW_STAND_BINDINGS = Object.freeze({ reset: [9, 10], blocks: [0, 1, 2, 6, 10, 12], budget: [0, 1, 10], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17], finish: [1, 7, 9] });
 // What the material's view, and its capture under water, bind in group 0.
 const MEADOW_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24]);
 
@@ -678,15 +678,15 @@ export async function createMeadowGrass({
   const land0 = new Map(resources);
   const frame = land0.get(0)?.buffer, shadowUniform = land0.get(19)?.buffer;
   if (!frame || !shadowUniform) throw Error('The meadow is cut and lit by the land\'s frame and shadow map, and there are none');
-  // The atlas, the one cut's programs, the meadow's view, its stand pass and its capture under water, asked for at once,
-  // the programs binding as many pages as the atlas takes.
+  // The atlas, the one cut's programs, the meadow's view and its stand pass, asked for at once, the programs binding as
+  // many pages as the atlas takes. Meadow grass only grows above MEADOW_WATERLINE (0.75 m), so it never draws into the
+  // underwater submerged-geometry capture pass.
   const pages = continuumAtlasPages(device, pack.words.length);
-  const [atlas, programs, view, stand, submerged] = await Promise.all([
+  const [atlas, programs, view, stand] = await Promise.all([
     requestContinuumAtlas(device, `meadow ${pack.manifest.pack}`, async () => pack),
     requestContinuumPrograms({ device, shader, shadowFormat, pages }),
     requestContinuumView({ device, shader, material: MEADOW_CONTINUUM_SPEC, format, samples, pages }),
     requestMeadowStand(device, shader),
-    requestContinuumCapture(waterOptics, MEADOW_CONTINUUM_SPEC, pages),
   ]);
   if (atlas.types.length !== pack.manifest.types.length) throw Error(`The meadow continuum atlas holds ${atlas.types.length} types, its manifest ${pack.manifest.types.length}: rebake it`);
   // The pack's mixes in their roles: a strand for a margin sows it behind the beaches.
@@ -707,7 +707,7 @@ export async function createMeadowGrass({
   const most = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / (MEADOW_CONTINUUM_POSE * 16));
   const perType = Math.floor(Math.min(wanted, most) / atlas.types.length);
   const { capacity, room } = continuumRoom(atlas.types, atlas.types.map(() => perType));
-  const meadowProfile = isMobile ? { ...continuumProfile('meadow'), errorScale: 0.44, taperMetres: 260 } : 'meadow';
+  const meadowProfile = isMobile ? { ...continuumProfile('meadow'), errorScale: 1.35, taperMetres: 0, taperPower: 1.0, shadowMaxDistance: 20 } : 'meadow';
   const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: isSecondary ? 'meadow secondary' : 'meadow', written: true, profile: meadowProfile });
   scene.setCount(capacity);
   scene.setWorldOffset(worldOffset?.x ?? 0, worldOffset?.z ?? 0);
@@ -801,10 +801,10 @@ export async function createMeadowGrass({
     return resized;
   };
 
-  // The stand pass's bind groups, one a pass, and the view's and capture's groups: rebuilt when the region's blocks,
+  // The stand pass's bind groups, one a pass, and the view's group: rebuilt when the region's blocks,
   // the land's resources or the craters change.
   let activeResources = resources;
-  let standGroups = null, viewGroup = null, under = null;
+  let standGroups = null, viewGroup = null;
   const cloudGroup = clouds.bindVolume(view.pipeline, 'shadow');
   function buildGroups() {
     if (!elevationView) return;
@@ -827,7 +827,6 @@ export async function createMeadowGrass({
     ]);
     const entries = MEADOW_VIEW_BINDINGS.map((binding) => ({ binding, resource: own.get(binding) ?? land.get(binding) }));
     viewGroup = device.createBindGroup({ label: 'meadow view', layout: view.pipeline.getBindGroupLayout(0), entries });
-    under = continuumCaptureDraw(submerged, entries, { bind: (pipeline) => clouds.bindVolume(pipeline, 'shadow') });
   }
 
   let curRegion = region;
@@ -1003,7 +1002,7 @@ export async function createMeadowGrass({
       coverSize,
       coast,
       isSecondary: Boolean(isSecondary),
-      submerged: submerged !== null,
+      submerged: false,
       capacity,
       room,
       get coveredTexels() { return coverTexels; },
@@ -1057,10 +1056,8 @@ export async function createMeadowGrass({
     drawShadow(pass) {
       if (active && !destroyed) scene.drawShadow(pass);
     },
-    // The same coarse cut, shaded as the camera's, in the water's capture.
-    drawSubmerged(pass, above = false) {
-      if (active && !destroyed) under?.draw(pass, [scene], above);
-    },
+    // Meadow grass only grows above MEADOW_WATERLINE (0.75 m); no-op so submerged capture never redraws dry-land grass.
+    drawSubmerged(_pass, _above = false) {},
     // The indirect draws the view submits, for the continuum census (js/continuum-census.js).
     continuumDraws() {
       return active && !destroyed ? scene.continuumDraws() : [];

@@ -379,116 +379,209 @@ function scalpSkinFor(ref) {
   };
 }
 
+// Builds a snug, dark-rooted sculpted 3D scalp under-cap raycasted directly onto the fitted cranium (+2 mm)
+// strictly inside the hairline/ear/nape boundary so ZERO bald scalp patches EVER show through crown partings!
+function appendScalpUnderCap(mesh, ref, partX = 0) {
+  const center = [0, ref.crownY - 0.088, ref.midZ - 0.004];
+  const nLat = 20, nLon = 36;
+  const grid = Array.from({ length: nLat + 1 }, () => new Array(nLon).fill(-1));
+
+  const insideCap = (hx, hy, hz) => {
+    const ax = Math.abs(hx);
+    // Retract 4 mm inside the hairline so the dark root cap stays neatly hidden under front hairline wisps
+    if (hz > ref.midZ + 0.008) {
+      const widowDip = 0.005 * Math.exp(-((hx / 0.018) ** 2));
+      const templeRecede = 0.005 * Math.exp(-(((ax - 0.044) / 0.018) ** 2));
+      const hairlineY = (ref.crownY - 0.046) - widowDip + templeRecede;
+      const sideburnZone = ax > 0.054 && hz < ref.midZ + 0.040;
+      if (!sideburnZone && hy < hairlineY) return false;
+      if (sideburnZone && hy < ref.earY + 0.004) return false;
+    }
+    // Keep ears completely clear
+    const earDy = (hy - ref.earY) / 0.038, earDz = (hz - ref.earZ) / 0.030;
+    if (ax > 0.052 && earDy * earDy + earDz * earDz < 1.0) return false;
+    // Nape boundary
+    const napeLimit = ref.crownY - 0.168 + 0.022 * Math.max(0, (hz - (ref.occZ + 0.02)) * 4);
+    if (hy < napeLimit) return false;
+    return true;
+  };
+
+  for (let il = 0; il <= nLat; il++) {
+    // Polar angle from crown apex (0.04) down to lower occiput/nape (2.25 rad)
+    const theta = 0.04 + (il / nLat) * 2.18;
+    const st = Math.sin(theta), ct = Math.cos(theta);
+    for (let io = 0; io < nLon; io++) {
+      const phi = (io / nLon) * Math.PI * 2;
+      const dir = norm3([Math.sin(phi) * st * 0.90, ct, Math.cos(phi) * st * 1.06]);
+      const hit = ref.raycast(center, dir, 0.04, 0.18);
+      if (!hit) continue;
+      const [hx, hy, hz] = hit.point;
+      if (!insideCap(hx, hy, hz)) continue;
+      // Snug +2.0 mm over cranium (tucked cleanly underneath all 3D locks!)
+      const p = add3(hit.point, hit.normal, 0.0020);
+      // Tangent flows naturally outward from crown part downward toward sides/nape
+      const sgn = hx >= partX ? 1 : -1;
+      const flow = norm3([sgn * 0.42 * st, -0.68 - 0.25 * st, -0.45]);
+      const T = norm3(sub3(flow, hit.normal, dot3(flow, hit.normal)));
+      const idx = mesh.position.length / 3;
+      mesh.position.push(p[0], p[1], p[2]);
+      mesh.normal.push(hit.normal[0], hit.normal[1], hit.normal[2]);
+      // Low along (0.06) + dark root tone (0.18) -> lush dark hair-root depth under locks!
+      const along8 = 16;
+      const cross8 = 128;
+      mesh.high.push((along8 | (cross8 << 8)) >>> 0);
+      mesh.word.push(packTangentToneSeed(T, 0.18, ((io * 7 + il * 13) % 29) / 29));
+      mesh.skin.push(packSkin([JOINT_HEAD, 0, 0, 0], [1, 0, 0, 0]));
+      mesh.wind.push(packWind(0, 0.1));
+      mesh.part.push(JOINT_HEAD);
+      grid[il][io] = idx;
+    }
+  }
+
+  for (let il = 0; il < nLat; il++) {
+    for (let io = 0; io < nLon; io++) {
+      const io2 = (io + 1) % nLon;
+      const a = grid[il][io], b = grid[il][io2], c = grid[il + 1][io2], d = grid[il + 1][io];
+      if (a >= 0 && b >= 0 && c >= 0 && d >= 0) {
+        mesh.index.push(a, d, c, a, c, b);
+        mesh.triPart.push(JOINT_HEAD, JOINT_HEAD);
+      } else if (a >= 0 && b >= 0 && c >= 0) {
+        mesh.index.push(a, c, b);
+        mesh.triPart.push(JOINT_HEAD);
+      } else if (a >= 0 && c >= 0 && d >= 0) {
+        mesh.index.push(a, d, c);
+        mesh.triPart.push(JOINT_HEAD);
+      }
+    }
+  }
+}
+
 function buildScalpGroom(ref, style, seed) {
   const rand = mulberry32(seed);
   const mesh = createEmptyGroomMesh();
   const skinFn = scalpSkinFor(ref);
   const tonsure = style === 'tonsure-fringe';
   const countMap = {
-    'cropped-curls': 1480,
-    'parted-locks': 1420,
-    'mariner-queue': 1340,
-    'indigenous-long': 1400,
+    'cropped-curls': 1580,
+    'parted-locks': 1520,
+    'mariner-queue': 1420,
+    'indigenous-long': 1500,
     'tonsure-fringe': 960,
-    'parted-waves': 1460,
-    'nape-chignon': 1320,
-    'crown-braids': 1320,
-    'indigenous-long-f': 1480,
+    'parted-waves': 1560,
+    'nape-chignon': 1420,
+    'crown-braids': 1420,
+    'indigenous-long-f': 1560,
   };
-  const follicles = sampleScalpFollicles(ref, countMap[style] ?? 1380, rand, { tonsure });
+  const follicles = sampleScalpFollicles(ref, countMap[style] ?? 1480, rand, { tonsure });
   const partX = style === 'parted-locks' ? -0.014 : 0.0;
   const gatherPt = [0, ref.crownY - 0.148, ref.occZ - 0.020];
   const bunPt = [0, ref.crownY - 0.116, ref.occZ - 0.030];
+
+  // Layer 0: Snug dark-rooted sculpted scalp under-cap (seals 100% of crown/parting gaps on all haired grooms!)
+  if (!tonsure) {
+    appendScalpUnderCap(mesh, ref, partX);
+  }
 
   for (let i = 0; i < follicles.length; i++) {
     const { point, normal, sparseWisp } = follicles[i];
     const [rx, ry, rz] = point;
     const sideSign = rx >= partX ? 1 : -1;
-    // Spatial clump-coherent phase so adjacent locks flow together as cohesive shingled hair clumps (zero tangled stray straw!)
-    const azBucket = Math.floor((Math.atan2(rx, rz - ref.midZ) + Math.PI) * 3.5);
+    // Spatial clump-coherent phase so adjacent locks flow together as cohesive shingled hair clumps
+    const azBucket = Math.floor((Math.atan2(rx, rz - ref.midZ) + Math.PI) * 3.8);
     const clumpPhase = ((azBucket * 0.6180339887) % 1 + 1) % 1;
-    const phase = (clumpPhase * 0.72 + rand() * 0.28) % 1;
-    const tone = Math.min(1, Math.max(0, 0.5 + (rand() - 0.5) * 0.52));
+    const phase = (clumpPhase * 0.70 + rand() * 0.30) % 1;
     const lockSeed = rand();
-    // 2-tier cohesive shingled clump architecture (ZERO detached thin spider-web flyaways!):
-    //   tier 0 (55%): broad shingled under-coat clumps hugging the skull tightly (seals all scalp gaps)
-    //   tier 1 (45%): full sculpted outer locks layered cleanly over the under-coat with cohesive wave flow
-    const isUnderCoat = sparseWisp ? false : (i % 9 <= 4);
+    // 3-Layer Sculpted Multi-Width Tapered Hair Architecture:
+    //   layer 0 (38%): broad dark-rooted volume clumps hugging the scalp cap (lush base silhouette)
+    //   layer 1 (40%): medium sculpted tapered locks with crisp V-ridge & natural curl/wave
+    //   layer 2 (22%): fine tapered outer framing locks & sun-lit top strands breaking up flat 2006 strips!
+    const mod10 = i % 10;
+    const layer = sparseWisp ? 2 : (mod10 < 4 ? 0 : (mod10 < 8 ? 1 : 2));
+    const isUnderCoat = layer === 0;
+    const isFineTop = layer === 2;
+    const tone = layer === 0
+      ? Math.min(1, Math.max(0, 0.36 + (rand() - 0.5) * 0.30))
+      : layer === 1
+        ? Math.min(1, Math.max(0, 0.54 + (rand() - 0.5) * 0.44))
+        : Math.min(1, Math.max(0, 0.72 + (rand() - 0.5) * 0.44));
 
-    let segs = 6, len = 0.10, baseW = 0.0115, flexMax = 0.45, curlAmp = 0.0032, curlFreq = 6.5;
+    const wScale = layer === 0 ? 1.04 : (layer === 1 ? 0.76 : 0.48);
+    const curlScale = layer === 0 ? 0.78 : (layer === 1 ? 1.15 : 1.48);
+
+    let segs = 6, len = 0.10, baseW = 0.0110, flexMax = 0.45, curlAmp = 0.0036, curlFreq = 7.0;
     if (style === 'cropped-curls') {
-      segs = 5;
-      len = (0.044 + rand() * 0.020) * (isUnderCoat ? 0.94 : 1.06);
-      baseW = (isUnderCoat ? 0.0128 : 0.0102) + rand() * 0.0024;
-      flexMax = 0.18;
-      curlAmp = isUnderCoat ? 0.0028 : 0.0044;
-      curlFreq = 9.5;
+      segs = 6;
+      len = (0.044 + rand() * 0.022) * (isUnderCoat ? 0.94 : (isFineTop ? 1.12 : 1.04));
+      baseW = (0.0112 + rand() * 0.0022) * wScale;
+      flexMax = isFineTop ? 0.24 : 0.18;
+      curlAmp = 0.0042 * curlScale;
+      curlFreq = 10.5;
     } else if (style === 'tonsure-fringe') {
       segs = 5;
       len = sparseWisp ? 0.026 + rand() * 0.010 : 0.048 + rand() * 0.022;
-      baseW = sparseWisp ? 0.0048 : (isUnderCoat ? 0.0118 : 0.0094) + rand() * 0.0022;
+      baseW = sparseWisp ? 0.0042 : (0.0108 + rand() * 0.0022) * wScale;
       flexMax = 0.24;
-      curlAmp = 0.0030;
-      curlFreq = 6.5;
+      curlAmp = 0.0034 * curlScale;
+      curlFreq = 7.0;
     } else if (style === 'parted-locks') {
-      segs = 7;
+      segs = 8;
       const frontFactor = Math.max(0, (rz - ref.midZ) / 0.10);
-      len = (0.105 + rand() * 0.045) * (1 - 0.26 * frontFactor);
-      baseW = (isUnderCoat ? 0.0132 : 0.0104) + rand() * 0.0026;
-      flexMax = isUnderCoat ? 0.34 : 0.50;
-      curlAmp = isUnderCoat ? 0.0030 : 0.0048;
-      curlFreq = 7.4;
+      len = (0.105 + rand() * 0.048) * (1 - 0.26 * frontFactor) * (isFineTop ? 1.06 : 1.0);
+      baseW = (0.0118 + rand() * 0.0024) * wScale;
+      flexMax = isUnderCoat ? 0.34 : (isFineTop ? 0.58 : 0.48);
+      curlAmp = 0.0044 * curlScale;
+      curlFreq = 8.2;
     } else if (style === 'mariner-queue') {
-      segs = 6;
+      segs = 7;
       len = 0.148 + rand() * 0.032;
-      baseW = (isUnderCoat ? 0.0128 : 0.0102) + rand() * 0.0024;
-      flexMax = 0.16;
-      curlAmp = 0.0018;
-      curlFreq = 4.8;
+      baseW = (0.0114 + rand() * 0.0022) * wScale;
+      flexMax = 0.18;
+      curlAmp = 0.0022 * curlScale;
+      curlFreq = 5.2;
     } else if (style === 'indigenous-long') {
       segs = 8;
       const frontTrim = rz > ref.midZ + 0.038 && Math.abs(rx) < 0.045;
-      len = frontTrim ? 0.052 + rand() * 0.016 : 0.21 + rand() * 0.065;
-      baseW = (isUnderCoat ? 0.0134 : 0.0106) + rand() * 0.0024;
-      flexMax = frontTrim ? 0.34 : (isUnderCoat ? 0.58 : 0.76);
-      curlAmp = 0.0020;
-      curlFreq = 4.2;
-    } else if (style === 'parted-waves') {
-      segs = 8;
-      const frontSide = rz > ref.midZ + 0.022 && Math.abs(rx) > 0.020;
-      len = frontSide ? 0.17 + rand() * 0.04 : 0.23 + rand() * 0.07;
-      baseW = (isUnderCoat ? 0.0138 : 0.0108) + rand() * 0.0026;
-      flexMax = isUnderCoat ? 0.58 : 0.76;
-      curlAmp = isUnderCoat ? 0.0036 : 0.0058;
-      curlFreq = 8.0;
-    } else if (style === 'nape-chignon' || style === 'crown-braids') {
-      segs = 6;
-      len = 0.142 + rand() * 0.030;
-      baseW = (isUnderCoat ? 0.0130 : 0.0104) + rand() * 0.0024;
-      flexMax = 0.18;
-      curlAmp = 0.0020;
-      curlFreq = 5.4;
-    } else if (style === 'indigenous-long-f') {
-      segs = 8;
-      const templeLock = rz > ref.midZ + 0.022 && Math.abs(rx) > 0.020;
-      len = templeLock ? 0.19 + rand() * 0.045 : 0.27 + rand() * 0.075;
-      baseW = (isUnderCoat ? 0.0138 : 0.0108) + rand() * 0.0026;
-      flexMax = isUnderCoat ? 0.62 : 0.80;
-      curlAmp = 0.0024;
+      len = frontTrim ? 0.052 + rand() * 0.016 : 0.21 + rand() * 0.068;
+      baseW = (0.0120 + rand() * 0.0024) * wScale;
+      flexMax = frontTrim ? 0.34 : (isUnderCoat ? 0.56 : 0.78);
+      curlAmp = 0.0024 * curlScale;
       curlFreq = 4.6;
+    } else if (style === 'parted-waves') {
+      segs = 9;
+      const frontSide = rz > ref.midZ + 0.022 && Math.abs(rx) > 0.020;
+      len = (frontSide ? 0.17 + rand() * 0.042 : 0.23 + rand() * 0.075) * (isFineTop ? 1.06 : 1.0);
+      baseW = (0.0122 + rand() * 0.0024) * wScale;
+      flexMax = isUnderCoat ? 0.56 : (isFineTop ? 0.84 : 0.74);
+      curlAmp = 0.0054 * curlScale;
+      curlFreq = 8.6;
+    } else if (style === 'nape-chignon' || style === 'crown-braids') {
+      segs = 7;
+      len = 0.142 + rand() * 0.030;
+      baseW = (0.0116 + rand() * 0.0022) * wScale;
+      flexMax = isFineTop ? 0.24 : 0.18;
+      curlAmp = 0.0024 * curlScale;
+      curlFreq = 5.8;
+    } else if (style === 'indigenous-long-f') {
+      segs = 9;
+      const templeLock = rz > ref.midZ + 0.022 && Math.abs(rx) > 0.020;
+      len = templeLock ? 0.19 + rand() * 0.048 : 0.27 + rand() * 0.078;
+      baseW = (0.0122 + rand() * 0.0024) * wScale;
+      flexMax = isUnderCoat ? 0.60 : 0.82;
+      curlAmp = 0.0028 * curlScale;
+      curlFreq = 5.0;
     }
 
-    // Full shingled lock ribbons anchored snugly inside the scalp root so hair forms a cohesive, sculpted crown!
-    const rootLift = isUnderCoat ? -0.0010 : 0.0010;
+    // Layered root lift: under-clumps hug the scalp cap tightly, mid & fine locks layer smoothly above with dimensional arch!
+    const rootLift = isUnderCoat ? 0.0008 : (isFineTop ? 0.0032 : 0.0020);
     const root = add3(point, normal, rootLift);
-    const archRatio = isUnderCoat ? 0.26 : 0.38;
-    const pts = [root], widths = [baseW * 0.94], arches = [baseW * archRatio];
-    let cur = add3(point, normal, rootLift + (isUnderCoat ? 0.0014 : 0.0026));
+    const archRatio = isUnderCoat ? 0.30 : (isFineTop ? 0.56 : 0.44);
+    const pts = [root], widths = [baseW * 0.92], arches = [baseW * archRatio];
+    let cur = add3(point, normal, rootLift + (isUnderCoat ? 0.0016 : (isFineTop ? 0.0036 : 0.0026)));
     // Smooth part-line emergence & backward framing sweep past temples/ears so NO strands dangle in front of cheeks!
     const distFromPart = Math.abs(rx - partX);
     const partSpread = Math.min(1, distFromPart / 0.028);
     const frontFacePush = rz > ref.midZ + 0.008 ? 0.24 : 0.0;
-    let sweepSide = [sideSign * (0.16 + 0.52 * partSpread), (isUnderCoat ? 0.10 : 0.22) * (1 - partSpread) - 0.04, -0.54 - frontFacePush];
+    let sweepSide = [sideSign * (0.16 + 0.52 * partSpread), (isUnderCoat ? 0.10 : (isFineTop ? 0.28 : 0.22)) * (1 - partSpread) - 0.04, -0.54 - frontFacePush];
     if (style === 'cropped-curls') {
       const swirlAngle = Math.atan2(rx, rz - (ref.midZ - 0.035)) + 0.65;
       sweepSide = [Math.sin(swirlAngle) * 0.54, 0.10 - 0.22 * partSpread, Math.min(-0.18, Math.cos(swirlAngle) * 0.50 - 0.24)];
@@ -497,7 +590,7 @@ function buildScalpGroom(ref, style, seed) {
     }
     let dir = norm3(add3(normal, sweepSide, isUnderCoat ? 1.25 : 1.05));
 
-    // Non-uniform station spacing: short 6mm–12mm root-crest steps over the curved skull, lengthening along the free hang!
+    // Non-uniform station spacing: short 6mm-12mm root-crest steps over the curved skull, lengthening along the free hang!
     let prevU = 0;
     for (let k = 1; k <= segs; k++) {
       const lin = k / segs;
@@ -530,13 +623,14 @@ function buildScalpGroom(ref, style, seed) {
       const outVec = norm3(cross3(sideVec, dir));
       let next = add3(cur, dir, ds);
       next = add3(add3(next, sideVec, waveA), outVec, waveB);
-      const hugClearance = isUnderCoat ? (0.0020 + u * 0.0012) : (0.0044 + u * 0.0028);
+      const hugClearance = isUnderCoat ? (0.0024 + u * 0.0014) : (isFineTop ? (0.0058 + u * 0.0036) : (0.0044 + u * 0.0026));
       next = ref.repel(next, hugClearance);
       dir = norm3(sub3(next, cur));
       cur = next;
       pts.push(cur);
-      // Full cohesive ribbon body with clean tapered tip (never needle-thin 1px spider threads!)
-      const taper = Math.max(0.32, 1 - (u ** 1.85) * 0.68);
+      // Natural sculpted lock taper: broad roots tapering gracefully to soft fine tips!
+      const minTaper = isUnderCoat ? 0.28 : (isFineTop ? 0.12 : 0.18);
+      const taper = Math.max(minTaper, 1 - (u ** 1.55) * (1 - minTaper));
       widths.push(baseW * taper);
       arches.push(baseW * taper * archRatio);
     }

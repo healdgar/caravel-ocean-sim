@@ -112,8 +112,8 @@ struct ContinuumView {
   scene:vec4f,              // the scene's pixel error, the world's offset x and z, unused
   lists:array<vec4u,${CONTINUUM_LISTS.length}>,     // each list's first entry and room
   aim:vec4f,                // where the player's guns would fall, in the scene's frame, and how far about it (0: none)
-  curve:vec4f,              // symmetric family profile: errorScale, invTaperMetres, splatScale, 0
-  limits:vec4f,             // symmetric family profile: minPixels, maxDistance, shadowMinError, shadowMaxDistance
+  curve:vec4f,              // symmetric family profile: errorScale, invTaperMetres, splatScale, taperPower
+  limits:vec4f              // symmetric family profile: minPixels, maxDistance, shadowMinError, shadowMaxDistance
 };
 struct ContinuumPoint { position:vec3f, normal:vec3f, high:u32, word:u32 };
 // A point as its kind poses it, in its type's own metres; wear (0 to ${CONTINUUM_SURFACE_RANGE}) how worn it is.
@@ -477,7 +477,31 @@ fn continuumTry(slot:u32,i:u32)->u32 {
         let aimed=aim.w>0.0&&length(relative+F.camPos.xyz-aim.xyz)<=reach+aim.w;
         let isImportant=aimed||continuumFlagged(record,${important >>> 0}u);
         if(maxDist<=0.0||nearDist<maxDist||isImportant){
-          let pixels=select(continuumProfilePixels(continuumView.scene.x,isImportant,away,continuumView.curve),0.0,continuumFlagged(record,CONTINUUM_EXACT));
+          // For surface-draped parallax layers (GROUNDED + WIND + STRETCHED, e.g. meadow sward), the visible
+          // difference between 3D relief and the 2D parallax volumetric shell depends on the eye's perspective angle
+          // to the draped triangle face normal N (cosT = |dot(V, N)|):
+          //   - Looking straight down (cosT -> 1, "as the crow flies"): vertical blades foreshorten to 0; only
+          //     micro-width (~0.05x height) differs, so 2D parallax takes over seamlessly as soon as blades < allowedPx.
+          //   - Grazing along the face or over a ridge crest (cosT -> 0, sinT -> 1): side-on blade profile and
+          //     parallax step error (~0.20*sinT, rising +35% below 15 deg where parallax clamps) stay visible farther
+          //     out and remain 3D strictly until their projected screen difference drops below allowedPx (1 px at best,
+          //     tunable to worst via the shared scene pixel threshold).
+          // Scaling vertical relief by (tall / scale) also ensures horizontal grain coarsening never re-inflates height.
+          let lowGrounded=continuumFlagged(record,CONTINUUM_GROUNDED)&&continuumKindOf(record)==${CONTINUUM_KIND.WIND}u&&continuumFlagged(record,CONTINUUM_STRETCHED);
+          var perspectiveFactor=1.0;
+          if(lowGrounded){
+            let stretch=continuumStretch(record);
+            let data=continuumKindData(record);
+            let dh=continuumPoses[data+1u]*stretch.y;
+            let patchSpan=max(continuumTypeF(model,${CONTINUUM_TYPE.span}u)*max(stretch.x,1e-3),1e-3);
+            let faceN=continuumQuat(record.turn,normalize(vec3f(-0.5*(dh.y-dh.x+dh.w-dh.z)/patchSpan,1.0,-0.5*(dh.z-dh.x+dh.w-dh.y)/patchSpan)));
+            let cosT=abs(dot(normalize(-relative),faceN));
+            let sinT=sqrt(max(1.0-cosT*cosT,0.0));
+            let angleErr=sqrt(0.0025*cosT*cosT+0.0400*sinT*sinT)*(1.0+0.35*smoothstep(0.25,0.05,cosT));
+            let reliefScale=clamp(stretch.y*record.place.w/max(scale,1e-3),0.01,1.0);
+            perspectiveFactor=max(angleErr*reliefScale,0.015);
+          }
+          let pixels=select(continuumProfilePixels(continuumView.scene.x,isImportant,away,continuumView.curve)/perspectiveFactor,0.0,continuumFlagged(record,CONTINUUM_EXACT));
           let steps=continuumType(model,${CONTINUUM_TYPE.stepCount}u);
           // The far body is drawn from the first step no heavier than the clusters' coarsest cut; finer is theirs.
           let farFirst=continuumType(model,${CONTINUUM_TYPE.farFirst}u);
@@ -512,7 +536,6 @@ fn continuumTry(slot:u32,i:u32)->u32 {
           }
           // Afloat, the earth's curve does not bend it: the sea's own surface is drawn flat about the eye.
           let sea=continuumFlagged(record,CONTINUUM_SEA);
-          let lowGrounded=continuumFlagged(record,CONTINUUM_GROUNDED)&&continuumKindOf(record)==${CONTINUUM_KIND.WIND}u&&continuumFlagged(record,CONTINUUM_STRETCHED);
           let hiZWorld=select(world,world+vec3f(0.0,0.9,0.0),lowGrounded);
           let hiZReach=select(reach,reach+0.6,lowGrounded);
           let viewVisible=!continuumOutside(select(earthCurve(relative,F.camPos.y),relative,sea),reach)
@@ -588,7 +611,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       let w=vec4f(m[0].w,m[1].w,m[2].w,m[3].w);
       let x=vec4f(m[0].x,m[1].x,m[2].x,m[3].x);
       let y=vec4f(m[0].y,m[1].y,m[2].y,m[3].y);
-      let raw=array<vec4f,5>(w+x,w-x,w+y,w-y,w);
+      var raw=array<vec4f,5>(w+x,w-x,w+y,w-y,w);
       for(var p=0u;p<5u;p++){continuumFrustum[p]=raw[p]/max(length(raw[p].xyz),1e-8);}
     }
   }

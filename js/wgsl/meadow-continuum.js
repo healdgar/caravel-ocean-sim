@@ -64,7 +64,7 @@ const MEADOW_PATCH: f32 = ${MEADOW_PATCH_METRES.toFixed(4)};
 const MEADOW_BLOCK: i32 = ${MEADOW_BLOCK_PATCHES};
 struct MeadowNearDomain {
   domain: vec4f,
-  grid: vec4f,
+  grid: vec4f
 };
 struct MeadowCfg {
   domain: vec4f, // the cover map's region: centre x, z, span; the waterline
@@ -73,27 +73,27 @@ struct MeadowCfg {
   blocks: vec4i, // the region's first block x, z; blocks across x, z
   scene: vec4f,  // the scene's pixel error (js/continuum-core.js), the gust's wave number, 0, 0
   more: vec4u,   // 0, blocks in the region, 1 when primary section (landLight valid), 0
-  mixes: array<vec4f, 3>, // each mix's (lowland, upland, margin) colour (linear) and cover from above: its variants' mean
+  mixes: array<vec4f, 3> // each mix's (lowland, upland, margin) colour (linear) and cover from above: its variants' mean
 };
 struct ShotWake {
   posRad: vec4f,    // x, y, z (unshifted coast world m), signedRadius (< 0 = hot shot)
-  velTrail: vec4f,  // vx, vy, vz (m/s), trailLen (m)
+  velTrail: vec4f   // vx, vy, vz (m/s), trailLen (m)
 };
 struct BlastRing {
   posAge: vec4f,    // x, y, z (unshifted coast world m), ageSec
-  params: vec4f,    // strength, speed (26 m/s), maxAge (2.2 s), hot
+  params: vec4f     // strength, speed (26 m/s), maxAge (2.2 s), hot
 };
 // 1040-byte ballistic air-wake & impact shockwave uniform buffer (16 + 16*32 + 16*32 = 1040 bytes).
 struct MeadowWakeFrame {
   counts: vec4u,    // shotCount (<= 16), ringCount (<= 16), 0, 0
   shots: array<ShotWake, ${MEADOW_MAX_SHOT_WAKES}>,
-  rings: array<BlastRing, ${MEADOW_MAX_BLAST_RINGS}>,
+  rings: array<BlastRing, ${MEADOW_MAX_BLAST_RINGS}>
 };
 struct MeadowBallisticDeform {
   pushXZ: vec2f,
   pressDown: f32,
   buryDepth: f32,
-  hotSinge: f32,
+  hotSinge: f32
 };
 
 fn meadowHash(x_in: u32) -> u32 {
@@ -338,7 +338,7 @@ fn meadowStandTypeF(model: u32, field: u32) -> f32 { return bitcast<f32>(meadowA
 fn meadowOutside(at: vec3f, reach: f32) -> bool {
   let m = F.viewProj; let p = vec4f(at, 1.0);
   let w = vec4f(m[0].w, m[1].w, m[2].w, m[3].w); let x = vec4f(m[0].x, m[1].x, m[2].x, m[3].x); let y = vec4f(m[0].y, m[1].y, m[2].y, m[3].y);
-  let planes = array<vec4f, 5>(w + x, w - x, w + y, w - y, w);
+  var planes = array<vec4f, 5>(w + x, w - x, w + y, w - y, w);
   for (var i = 0u; i < 5u; i++) { if (dot(planes[i], p) < -reach * length(planes[i].xyz)) { return true; } }
   return false;
 }
@@ -381,7 +381,7 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
   let seen = (cfg.scene.z <= 0.0 || nearDist < cfg.scene.z) && !meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach);
   let lit = (cfg.scene.w <= 0.0 || nearDist <= cfg.scene.w) && meadowInLight(centre, reach);
   if (!seen && !lit) { return; }
-  let band = u32(clamp(floor(log2(max(dist, 8.0) / 8.0) * 3.0), 0.0, f32(MEADOW_BANDS - 1u)));
+  let band = u32(clamp(floor(log2(max(nearDist, 8.0) / 8.0) * 3.0), 0.0, f32(MEADOW_BANDS - 1u)));
   let most = bitcast<u32>(data.w);
   var bits = array<vec2u, 5>(${MEADOW_GRAIN_BITS.map(([at, n]) => `vec2u(${at}u, ${(1 << n) - 1}u)`).join(', ')});
   for (var g = 0u; g < MEADOW_GRAINS; g++) { atomicAdd(&meadowBlockWork[MEADOW_COUNTS + band * MEADOW_GRAINS + g], (most >> bits[g].x) & bits[g].y); }
@@ -395,10 +395,12 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
 // upper bound of the records its blocks take at that grain, so no patch is ever stood past the scene's capacity.
 fn meadowGrainFrom(band: u32, s: i32) -> u32 { return select(u32(min((i32(band) - s) / 3 + 1, i32(MEADOW_GRAINS) - 1)), 0u, i32(band) < s); }
 @compute @workgroup_size(1) fn meadowStandBudget() {
-  // Keep near and mid bands (< ~256 m, band < 15) locked at grain=1 so walking or panning never flips nearby blocks
-  // between 4 m and 8 m grids (which would jump patch scale, drape corners, and cluster cuts).
-  var s = i32(MEADOW_BANDS);
-  for (; s > 15; s--) {
+  // Size the fine grain=1 (4 m) radius directly from the live grazing perspective cutoff so tuning pixel error
+  // from 1 px ("best") to coarser budgets automatically keeps 100% of 3D cluster patches at grain=1 while
+  // coarsening pure 2D parallax bands beyond that cutoff by octave (grain = 2, 4, 8, 16) for fast Compute + Draw.
+  let grazingDist = 0.105 * meadowFocal() / max(cfg.scene.x, 1.0);
+  var s = i32(clamp(ceil(log2(max(grazingDist, 32.0) / 8.0) * 3.0), 6.0, 12.0));
+  for (; s > 5; s--) {
     var total = 0u;
     for (var b = 0u; b < MEADOW_BANDS; b++) { total += atomicLoad(&meadowBlockWork[MEADOW_COUNTS + b * MEADOW_GRAINS + meadowGrainFrom(b, s)]); }
     if (total <= cfg.params.z) { break; }
@@ -440,8 +442,16 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   let model = select(select(0u, 1u, mixes.y > mixes.x), 2u, mixes.z > max(mixes.x, mixes.y)) * 4u + (pick & 3u);
   let quarter = (pick >> 2u) & 3u;
   // The turn's cosine and sine, and the quaternion that turns its type's +x toward -z by as much (continuumQuat).
-  let turnCS = array<vec2f, 4>(vec2f(1.0, 0.0), vec2f(0.0, 1.0), vec2f(-1.0, 0.0), vec2f(0.0, -1.0))[quarter];
-  let turn = array<vec4f, 4>(vec4f(0.0, 0.0, 0.0, 1.0), vec4f(0.0, 0.70710678, 0.0, 0.70710678), vec4f(0.0, 1.0, 0.0, 0.0), vec4f(0.0, 0.70710678, 0.0, -0.70710678))[quarter];
+  let turnCS = select(
+    select(vec2f(1.0, 0.0), vec2f(0.0, 1.0), quarter == 1u),
+    select(vec2f(-1.0, 0.0), vec2f(0.0, -1.0), quarter == 3u),
+    quarter >= 2u
+  );
+  let turn = select(
+    select(vec4f(0.0, 0.0, 0.0, 1.0), vec4f(0.0, 0.70710678, 0.0, 0.70710678), quarter == 1u),
+    select(vec4f(0.0, 1.0, 0.0, 0.0), vec4f(0.0, 0.70710678, 0.0, -0.70710678), quarter == 3u),
+    quarter >= 2u
+  );
   let shift = meadowShift();
   // It stands on the true ground under its middle, and the one cut raises it at its anchor (GROUNDED) to the ground
   // the land draws there: the view's cut in the view and its shadow, the captures' under water. Its anchor is where its
@@ -690,15 +700,17 @@ struct MeadowParallaxHit {
   detailEnergy: f32   // resolved band energy (1 near -> 0 horizon) for luminance-invariant far filtering
 };
 
-// Fast 4-step GPU view-ray parallax-occluded volumetric grass shells (uniform control flow, zero discard,
-// zero dynamic array indexing for strict iOS/Safari WebKit WGSL compatibility, and low ALU for mobile TBDR).
+// Fast 4-step GPU view-ray parallax-occluded volumetric grass shells (no fragment kills, zero dynamic array indexing
+// for strict iOS/Safari WebKit WGSL compatibility, early-out on hit, and 2-tap gradient skipped past ~95 m for low
+// fragment ALU on mobile/Apple Silicon TBDR while keeping crisp micro-tufts across the 18..60 m handoff band).
 fn meadowParallaxSward(
   unshiftedWorldXZ: vec2f,
   viewDir: vec3f,
   windDir: vec2f,
   gust: f32,
   bendSlope: f32,
-  footPixel: f32
+  footPixel: f32,
+  dist: f32
 ) -> MeadowParallaxHit {
   let wTuftFine = 1.0 - smoothstep(0.09, 0.26, footPixel);
   let wTuftMid  = 1.0 - smoothstep(0.18, 0.52, footPixel);
@@ -709,6 +721,13 @@ fn meadowParallaxSward(
   let canopyH = 0.36;
   let rayStepXZ = -viewDir.xz / max(abs(viewDir.y), 0.22);
   let bendMag = (0.04 + 0.22 * gust + 0.14 * bendSlope) * canopyH;
+
+  // Past ~1 km (detailEnergy == 0) only the 3.2 m pasture wave survives: 1 tap gives identical luminance at 4x less ALU.
+  if (detailEnergy <= 0.001) {
+    let midXZ = unshiftedWorldXZ - windDir * (bendMag * 0.30) + rayStepXZ * (0.45 * canopyH);
+    let th = meadowTuftHeight(midXZ, 0.0, 0.0, 0.0, wWave);
+    return MeadowParallaxHit(clamp(th + 0.03, 0.12, 0.99), clamp((th - 0.35) * 0.5, 0.0, 0.45), vec2f(0.0), 0.0);
+  }
 
   var hitH = 0.16;
   var hitXZ = unshiftedWorldXZ + rayStepXZ * canopyH;
@@ -723,16 +742,15 @@ fn meadowParallaxSward(
     let windBendOffset = -windDir * (bendMag * h * h);
     let sampleXZ = unshiftedWorldXZ + windBendOffset + rayStepXZ * ((1.0 - h) * canopyH);
     let th = meadowTuftHeight(sampleXZ, wTuftFine, wTuftMid, wClump, wWave);
-    if (!hitFound) {
-      occAccum += clamp(th - (h - 0.24), 0.0, 0.32);
-      if (th >= h) {
-        let dCurr = th - h;
-        let dPrev = max(prevH - prevTh, 0.0);
-        let frac = clamp(dPrev / max(dPrev + dCurr, 1e-4), 0.0, 1.0);
-        hitH = select(mix(prevH, h, frac), clamp(th, 0.90, 0.99), i == 0u);
-        hitXZ = select(mix(prevXZ, sampleXZ, frac), sampleXZ, i == 0u);
-        hitFound = true;
-      }
+    occAccum += clamp(th - (h - 0.24), 0.0, 0.32);
+    if (th >= h) {
+      let dCurr = th - h;
+      let dPrev = max(prevH - prevTh, 0.0);
+      let frac = clamp(dPrev / max(dPrev + dCurr, 1e-4), 0.0, 1.0);
+      hitH = select(mix(prevH, h, frac), clamp(th, 0.90, 0.99), i == 0u);
+      hitXZ = select(mix(prevXZ, sampleXZ, frac), sampleXZ, i == 0u);
+      hitFound = true;
+      break;
     }
     prevH = h;
     prevTh = th;
@@ -744,12 +762,13 @@ fn meadowParallaxSward(
   }
 
   var gradXZ = vec2f(0.0);
-  if (detailEnergy > 0.02) {
-    let eps = max(0.09, footPixel * 0.55);
-    let hC = meadowTuftHeight(hitXZ, wTuftFine, wTuftMid, wClump, 0.0);
-    let hX = meadowTuftHeight(hitXZ + vec2f(eps, 0.0), wTuftFine, wTuftMid, wClump, 0.0);
-    let hZ = meadowTuftHeight(hitXZ + vec2f(0.0, eps), wTuftFine, wTuftMid, wClump, 0.0);
-    gradXZ = clamp(vec2f(hX - hC, hZ - hC) / eps * canopyH, vec2f(-0.95), vec2f(0.95));
+  let gradFade = 1.0 - smoothstep(65.0, 95.0, dist);
+  if (gradFade > 0.001 && detailEnergy > 0.02) {
+    let eps = max(0.08, footPixel * 0.55);
+    let refH = select(prevTh, hitH, hitFound);
+    let hX = meadowTuftHeight(hitXZ + vec2f(eps, 0.0), wTuftFine, wTuftMid, wClump, wWave);
+    let hZ = meadowTuftHeight(hitXZ + vec2f(0.0, eps), wTuftFine, wTuftMid, wClump, wWave);
+    gradXZ = clamp(vec2f(hX - refH, hZ - refH) / eps * canopyH, vec2f(-0.95), vec2f(0.95)) * gradFade;
   }
 
   let farH = hitH + (1.0 - detailEnergy) * 0.03;
@@ -911,7 +930,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   var sd = vec4f(0.5, 0.0, 0.0, 0.0);
   var para = MeadowParallaxHit(along, 0.0, vec2f(0.0), 1.0);
   if (isContinuum) {
-    para = meadowParallaxSward(unshiftedWorldXZ, view, windDir, gust, bendSlope, footPixel);
+    para = meadowParallaxSward(unshiftedWorldXZ, view, windDir, gust, bendSlope, footPixel, v.flow.z);
   } else {
     sd = meadowSwardDetail(unshiftedWorldXZ, footPixel, windDir, gust);
   }
@@ -1090,11 +1109,11 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
 `;
 };
 
-// The meadow's material (js/wgsl/continuum-cut.js). Its blades are open shells, seen from both sides; it is seen under
-// water too, through the water's own capture.
+// The meadow's material (js/wgsl/continuum-cut.js). Its blades are open shells, seen from both sides; grass only grows
+// above MEADOW_WATERLINE (0.75 m), so it skips the underwater capture pass.
 export const MEADOW_CONTINUUM_SPEC = Object.freeze({
   name: 'meadowContinuum', prelude: meadowContinuumPreludeWGSL, core: false, data: MEADOW_CONTINUUM_DATA,
   varyings: [['colour', 'vec3f'], ['blade', 'vec4f'], ['flow', 'vec4f'], ['harm', 'vec4f']],
   wgsl: meadowContinuumMaterialWGSL, salt: 5,
-  cullMode: 'none', air: true, capture: true, coverage: true,
+  cullMode: 'none', air: true, capture: false, coverage: true,
 });

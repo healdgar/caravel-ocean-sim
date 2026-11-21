@@ -3,14 +3,14 @@
   "version": 3,
   "generator": "scripts/prepare-clothing-continuum.mjs",
   "atlas": {
-    "words": 3090059,
+    "words": 3160665,
     "headerWords": 32,
-    "bytes": 12360236,
-    "sha256": "faf6772e22a08b73083b0d945c1606609cdaa35fa89fc34f5b5440ee42b33963",
+    "bytes": 12642660,
+    "sha256": "6494addbd6305ee03209e70d3999190a5d7ea17cff738e6fee5ecca153536586",
     "gzip": {
       "file": "atlas.bin.gz",
-      "bytes": 5547402,
-      "sha256": "67403d28ed1c6d449fa09087dcd7b99dafd130a9522ddbfa1111ec5da34026fa"
+      "bytes": 5724089,
+      "sha256": "1d036bb9721a095845bf01f5b1aec1b3d2d207b198890b522be694ec5a57484c"
     }
   },
   "types": [
@@ -21,11 +21,11 @@
       "slot": "upper",
       "triangles": 21440,
       "clusters": {
-        "count": 338,
+        "count": 341,
         "levels": 8,
         "roots": 1,
         "finestTriangles": 21440,
-        "rootError": 0.1795
+        "rootError": 0.1646
       },
       "chain": {
         "cell": 0.04,
@@ -34,26 +34,26 @@
           24,
           20
         ],
-        "wellComposedCells": 3,
-        "wrapTriangles": 2428,
-        "baseTriangles": 1130,
-        "baseVertices": 565,
-        "baseError": 0.086,
-        "outward": 0.086,
-        "inward": 0.08,
-        "simplifyError": 0.0067,
-        "steps": 560,
-        "coreTriangles": 6,
-        "depth": 7,
+        "wellComposedCells": 2,
+        "wrapTriangles": 2488,
+        "baseTriangles": 168,
+        "baseVertices": 84,
+        "baseError": 0.0885,
+        "outward": 0.0885,
+        "inward": 0.088,
+        "simplifyError": 0.04,
+        "steps": 79,
+        "coreTriangles": 4,
+        "depth": 4,
         "errorRange": [
-          0.086,
-          0.3638
+          0.0885,
+          0.374
         ],
         "inflateMax": 0.092,
         "rootTriangles": 82,
-        "farFirst": 524,
+        "farFirst": 43,
         "farFirstTriangles": 82,
-        "handoffError": 0.1827
+        "handoffError": 0.1808
       }
     },
     {
@@ -67,35 +67,35 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 22140,
-        "rootError": 0.1812
+        "rootError": 0.1945
       },
       "chain": {
         "cell": 0.04,
         "cells": [
           41,
           29,
-          21
+          22
         ],
-        "wellComposedCells": 14,
-        "wrapTriangles": 3604,
-        "baseTriangles": 1712,
-        "baseVertices": 856,
-        "baseError": 0.0863,
-        "outward": 0.0863,
-        "inward": 0.079,
-        "simplifyError": 0.0084,
-        "steps": 851,
+        "wellComposedCells": 20,
+        "wrapTriangles": 3792,
+        "baseTriangles": 1704,
+        "baseVertices": 852,
+        "baseError": 0.0906,
+        "outward": 0.0906,
+        "inward": 0.0781,
+        "simplifyError": 0.0131,
+        "steps": 846,
         "coreTriangles": 6,
-        "depth": 8,
+        "depth": 9,
         "errorRange": [
-          0.0863,
-          0.5678
+          0.0906,
+          0.6338
         ],
-        "inflateMax": 0.1203,
-        "rootTriangles": 84,
-        "farFirst": 814,
+        "inflateMax": 0.1239,
+        "rootTriangles": 85,
+        "farFirst": 810,
         "farFirstTriangles": 84,
-        "handoffError": 0.2005
+        "handoffError": 0.1965
       }
     },
     {
@@ -109,35 +109,35 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 22040,
-        "rootError": 0.1886
+        "rootError": 0.187
       },
       "chain": {
         "cell": 0.04,
         "cells": [
           40,
-          29,
-          21
+          28,
+          22
         ],
-        "wellComposedCells": 9,
-        "wrapTriangles": 3604,
-        "baseTriangles": 1824,
-        "baseVertices": 912,
-        "baseError": 0.0894,
-        "outward": 0.0894,
-        "inward": 0.0794,
-        "simplifyError": 0.0067,
-        "steps": 906,
-        "coreTriangles": 4,
+        "wellComposedCells": 18,
+        "wrapTriangles": 3748,
+        "baseTriangles": 1930,
+        "baseVertices": 965,
+        "baseError": 0.0816,
+        "outward": 0.0816,
+        "inward": 0.077,
+        "simplifyError": 0.0084,
+        "steps": 960,
+        "coreTriangles": 6,
         "depth": 8,
         "errorRange": [
-          0.0894,
-          0.6092
+          0.0816,
+          0.609
         ],
         "inflateMax": 0.1199,
-        "rootTriangles": 85,
-        "farFirst": 870,
+        "rootTriangles": 84,
+        "farFirst": 923,
         "farFirstTriangles": 84,
-        "handoffError": 0.2228
+        "handoffError": 0.1891
       }
     },
     {
@@ -151,35 +151,35 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 21440,
-        "rootError": 0.1392
+        "rootError": 0.1565
       },
       "chain": {
         "cell": 0.04,
         "cells": [
           32,
-          23,
+          22,
           20
         ],
-        "wellComposedCells": 9,
-        "wrapTriangles": 2052,
-        "baseTriangles": 164,
-        "baseVertices": 82,
-        "baseError": 0.0848,
-        "outward": 0.0848,
-        "inward": 0.0695,
-        "simplifyError": 0.04,
-        "steps": 77,
+        "wellComposedCells": 6,
+        "wrapTriangles": 2028,
+        "baseTriangles": 948,
+        "baseVertices": 474,
+        "baseError": 0.0972,
+        "outward": 0.0972,
+        "inward": 0.073,
+        "simplifyError": 0.0131,
+        "steps": 469,
         "coreTriangles": 6,
-        "depth": 5,
+        "depth": 7,
         "errorRange": [
-          0.0848,
-          0.4778
+          0.0972,
+          0.4337
         ],
-        "inflateMax": 0.084,
+        "inflateMax": 0.088,
         "rootTriangles": 82,
-        "farFirst": 41,
+        "farFirst": 433,
         "farFirstTriangles": 82,
-        "handoffError": 0.1501
+        "handoffError": 0.1888
       }
     },
     {
@@ -193,7 +193,7 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 21440,
-        "rootError": 0.1396
+        "rootError": 0.1436
       },
       "chain": {
         "cell": 0.04,
@@ -202,26 +202,26 @@
           22,
           20
         ],
-        "wellComposedCells": 2,
-        "wrapTriangles": 1996,
-        "baseTriangles": 974,
-        "baseVertices": 487,
-        "baseError": 0.0961,
-        "outward": 0.0961,
-        "inward": 0.0732,
+        "wellComposedCells": 9,
+        "wrapTriangles": 2012,
+        "baseTriangles": 966,
+        "baseVertices": 483,
+        "baseError": 0.0978,
+        "outward": 0.0978,
+        "inward": 0.0734,
         "simplifyError": 0.0131,
-        "steps": 482,
+        "steps": 478,
         "coreTriangles": 6,
-        "depth": 6,
+        "depth": 7,
         "errorRange": [
-          0.0961,
-          0.4336
+          0.0978,
+          0.4352
         ],
         "inflateMax": 0.084,
         "rootTriangles": 82,
-        "farFirst": 446,
+        "farFirst": 442,
         "farFirstTriangles": 82,
-        "handoffError": 0.19
+        "handoffError": 0.2121
       }
     },
     {
@@ -235,7 +235,7 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 21440,
-        "rootError": 0.1611
+        "rootError": 0.1554
       },
       "chain": {
         "cell": 0.04,
@@ -244,26 +244,26 @@
           29,
           21
         ],
-        "wellComposedCells": 9,
-        "wrapTriangles": 3116,
-        "baseTriangles": 1292,
-        "baseVertices": 646,
-        "baseError": 0.0816,
-        "outward": 0.0816,
-        "inward": 0.0603,
-        "simplifyError": 0.0131,
-        "steps": 641,
-        "coreTriangles": 4,
+        "wellComposedCells": 4,
+        "wrapTriangles": 3084,
+        "baseTriangles": 1510,
+        "baseVertices": 755,
+        "baseError": 0.083,
+        "outward": 0.083,
+        "inward": 0.0575,
+        "simplifyError": 0.0105,
+        "steps": 750,
+        "coreTriangles": 6,
         "depth": 7,
         "errorRange": [
-          0.0816,
-          0.5083
+          0.083,
+          0.3858
         ],
         "inflateMax": 0.076,
-        "rootTriangles": 82,
-        "farFirst": 605,
-        "farFirstTriangles": 82,
-        "handoffError": 0.1894
+        "rootTriangles": 81,
+        "farFirst": 715,
+        "farFirstTriangles": 80,
+        "handoffError": 0.1914
       }
     },
     {
@@ -273,39 +273,39 @@
       "slot": "upper",
       "triangles": 21440,
       "clusters": {
-        "count": 339,
+        "count": 338,
         "levels": 8,
         "roots": 1,
         "finestTriangles": 21440,
-        "rootError": 0.1501
+        "rootError": 0.1442
       },
       "chain": {
         "cell": 0.04,
         "cells": [
-          26,
-          28,
+          25,
+          27,
           21
         ],
-        "wellComposedCells": 5,
-        "wrapTriangles": 2772,
-        "baseTriangles": 1206,
-        "baseVertices": 603,
-        "baseError": 0.0827,
-        "outward": 0.0827,
-        "inward": 0.0521,
-        "simplifyError": 0.0131,
-        "steps": 598,
+        "wellComposedCells": 10,
+        "wrapTriangles": 2624,
+        "baseTriangles": 1358,
+        "baseVertices": 679,
+        "baseError": 0.0947,
+        "outward": 0.0947,
+        "inward": 0.057,
+        "simplifyError": 0.0105,
+        "steps": 674,
         "coreTriangles": 4,
-        "depth": 7,
+        "depth": 8,
         "errorRange": [
-          0.0827,
-          0.4488
+          0.0947,
+          0.5201
         ],
-        "inflateMax": 0.072,
-        "rootTriangles": 82,
-        "farFirst": 562,
+        "inflateMax": 0.068,
+        "rootTriangles": 83,
+        "farFirst": 638,
         "farFirstTriangles": 82,
-        "handoffError": 0.19
+        "handoffError": 0.2251
       }
     },
     {
@@ -319,7 +319,7 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 17468,
-        "rootError": 0.1698
+        "rootError": 0.1867
       },
       "chain": {
         "cell": 0.04,
@@ -328,26 +328,26 @@
           38,
           20
         ],
-        "wellComposedCells": 4,
-        "wrapTriangles": 2844,
-        "baseTriangles": 1464,
-        "baseVertices": 736,
-        "baseError": 0.1049,
-        "outward": 0.1049,
-        "inward": 0.104,
-        "simplifyError": 0.0105,
-        "steps": 732,
+        "wellComposedCells": 6,
+        "wrapTriangles": 2808,
+        "baseTriangles": 1058,
+        "baseVertices": 533,
+        "baseError": 0.1153,
+        "outward": 0.0984,
+        "inward": 0.1153,
+        "simplifyError": 0.0164,
+        "steps": 529,
         "coreTriangles": 4,
         "depth": 7,
         "errorRange": [
-          0.1049,
-          0.6755
+          0.1153,
+          0.681
         ],
         "inflateMax": 0.1079,
-        "rootTriangles": 64,
-        "farFirst": 700,
-        "farFirstTriangles": 64,
-        "handoffError": 0.2461
+        "rootTriangles": 67,
+        "farFirst": 496,
+        "farFirstTriangles": 66,
+        "handoffError": 0.2182
       }
     },
     {
@@ -361,7 +361,7 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 22044,
-        "rootError": 0.2121
+        "rootError": 0.227
       },
       "chain": {
         "cell": 0.04,
@@ -370,26 +370,26 @@
           38,
           21
         ],
-        "wellComposedCells": 2,
-        "wrapTriangles": 3360,
-        "baseTriangles": 1730,
-        "baseVertices": 867,
-        "baseError": 0.0946,
-        "outward": 0.0946,
-        "inward": 0.0914,
+        "wellComposedCells": 4,
+        "wrapTriangles": 3152,
+        "baseTriangles": 1510,
+        "baseVertices": 757,
+        "baseError": 0.1222,
+        "outward": 0.0861,
+        "inward": 0.1222,
         "simplifyError": 0.0105,
-        "steps": 862,
+        "steps": 752,
         "coreTriangles": 6,
-        "depth": 8,
+        "depth": 7,
         "errorRange": [
-          0.0946,
-          0.424
+          0.1222,
+          0.4731
         ],
         "inflateMax": 0.1079,
         "rootTriangles": 83,
-        "farFirst": 824,
+        "farFirst": 714,
         "farFirstTriangles": 82,
-        "handoffError": 0.2081
+        "handoffError": 0.2353
       }
     },
     {
@@ -403,35 +403,35 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 20636,
-        "rootError": 0.1467
+        "rootError": 0.1589
       },
       "chain": {
-        "cell": 0.06,
+        "cell": 0.04,
         "cells": [
-          26,
-          29,
-          25
+          33,
+          38,
+          31
         ],
-        "wellComposedCells": 12,
-        "wrapTriangles": 3340,
-        "baseTriangles": 1276,
-        "baseVertices": 639,
-        "baseError": 0.1203,
-        "outward": 0.1203,
-        "inward": 0.0599,
-        "simplifyError": 0.0246,
-        "steps": 632,
+        "wellComposedCells": 42,
+        "wrapTriangles": 7216,
+        "baseTriangles": 3902,
+        "baseVertices": 1953,
+        "baseError": 0.076,
+        "outward": 0.076,
+        "inward": 0.0421,
+        "simplifyError": 0.0105,
+        "steps": 1948,
         "coreTriangles": 6,
-        "depth": 7,
+        "depth": 8,
         "errorRange": [
-          0.1203,
-          0.5907
+          0.076,
+          0.5836
         ],
         "inflateMax": 0.1079,
-        "rootTriangles": 77,
-        "farFirst": 600,
-        "farFirstTriangles": 76,
-        "handoffError": 0.2815
+        "rootTriangles": 72,
+        "farFirst": 1915,
+        "farFirstTriangles": 72,
+        "handoffError": 0.2171
       }
     },
     {
@@ -445,35 +445,35 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 20576,
-        "rootError": 0.1364
+        "rootError": 0.1652
       },
       "chain": {
-        "cell": 0.06,
+        "cell": 0.04,
         "cells": [
-          26,
-          29,
-          25
+          33,
+          38,
+          31
         ],
-        "wellComposedCells": 10,
-        "wrapTriangles": 3368,
-        "baseTriangles": 1550,
-        "baseVertices": 775,
-        "baseError": 0.1203,
-        "outward": 0.1203,
-        "inward": 0.0599,
-        "simplifyError": 0.0197,
-        "steps": 769,
+        "wellComposedCells": 34,
+        "wrapTriangles": 7220,
+        "baseTriangles": 3866,
+        "baseVertices": 1935,
+        "baseError": 0.0753,
+        "outward": 0.0753,
+        "inward": 0.0448,
+        "simplifyError": 0.0105,
+        "steps": 1929,
         "coreTriangles": 6,
-        "depth": 7,
+        "depth": 9,
         "errorRange": [
-          0.1203,
-          0.6035
+          0.0753,
+          0.6584
         ],
         "inflateMax": 0.1079,
-        "rootTriangles": 76,
-        "farFirst": 737,
-        "farFirstTriangles": 76,
-        "handoffError": 0.3346
+        "rootTriangles": 73,
+        "farFirst": 1897,
+        "farFirstTriangles": 72,
+        "handoffError": 0.2681
       }
     },
     {
@@ -487,7 +487,7 @@
         "levels": 7,
         "roots": 1,
         "finestTriangles": 10784,
-        "rootError": 0.1426
+        "rootError": 0.1243
       },
       "chain": {
         "cell": 0.04,
@@ -497,25 +497,25 @@
           24
         ],
         "wellComposedCells": 12,
-        "wrapTriangles": 3732,
-        "baseTriangles": 1946,
-        "baseVertices": 975,
-        "baseError": 0.0755,
-        "outward": 0.0755,
-        "inward": 0.0476,
-        "simplifyError": 0.0067,
-        "steps": 970,
+        "wrapTriangles": 3700,
+        "baseTriangles": 1678,
+        "baseVertices": 841,
+        "baseError": 0.0719,
+        "outward": 0.0719,
+        "inward": 0.0429,
+        "simplifyError": 0.0105,
+        "steps": 836,
         "coreTriangles": 4,
-        "depth": 7,
+        "depth": 8,
         "errorRange": [
-          0.0755,
-          0.7055
+          0.0719,
+          0.6245
         ],
         "inflateMax": 0.1039,
-        "rootTriangles": 77,
-        "farFirst": 935,
-        "farFirstTriangles": 76,
-        "handoffError": 0.1919
+        "rootTriangles": 75,
+        "farFirst": 802,
+        "farFirstTriangles": 74,
+        "handoffError": 0.2033
       }
     },
     {
@@ -529,7 +529,7 @@
         "levels": 7,
         "roots": 1,
         "finestTriangles": 14304,
-        "rootError": 0.105
+        "rootError": 0.0975
       },
       "chain": {
         "cell": 0.04,
@@ -538,26 +538,26 @@
           38,
           27
         ],
-        "wellComposedCells": 42,
-        "wrapTriangles": 5668,
-        "baseTriangles": 2938,
-        "baseVertices": 1471,
-        "baseError": 0.0829,
-        "outward": 0.0829,
-        "inward": 0.0504,
-        "simplifyError": 0.0105,
-        "steps": 1466,
-        "coreTriangles": 4,
+        "wellComposedCells": 33,
+        "wrapTriangles": 5632,
+        "baseTriangles": 3192,
+        "baseVertices": 1598,
+        "baseError": 0.0806,
+        "outward": 0.0806,
+        "inward": 0.0496,
+        "simplifyError": 0.0067,
+        "steps": 1593,
+        "coreTriangles": 6,
         "depth": 8,
         "errorRange": [
-          0.0829,
-          0.4768
+          0.0806,
+          0.4402
         ],
         "inflateMax": 0.1079,
-        "rootTriangles": 107,
-        "farFirst": 1416,
-        "farFirstTriangles": 106,
-        "handoffError": 0.2429
+        "rootTriangles": 105,
+        "farFirst": 1544,
+        "farFirstTriangles": 104,
+        "handoffError": 0.2074
       }
     },
     {
@@ -571,35 +571,35 @@
         "levels": 6,
         "roots": 1,
         "finestTriangles": 8168,
-        "rootError": 0.0878
+        "rootError": 0.0763
       },
       "chain": {
         "cell": 0.04,
         "cells": [
-          35,
-          32,
-          26
+          33,
+          33,
+          27
         ],
-        "wellComposedCells": 41,
-        "wrapTriangles": 5180,
-        "baseTriangles": 2418,
-        "baseVertices": 1211,
-        "baseError": 0.0887,
-        "outward": 0.0887,
-        "inward": 0.0377,
-        "simplifyError": 0.0131,
-        "steps": 1206,
+        "wellComposedCells": 33,
+        "wrapTriangles": 5144,
+        "baseTriangles": 2590,
+        "baseVertices": 1297,
+        "baseError": 0.0813,
+        "outward": 0.0813,
+        "inward": 0.0365,
+        "simplifyError": 0.0105,
+        "steps": 1292,
         "coreTriangles": 6,
-        "depth": 9,
+        "depth": 8,
         "errorRange": [
-          0.0887,
-          0.4885
+          0.0813,
+          0.6811
         ],
-        "inflateMax": 0.1,
-        "rootTriangles": 126,
-        "farFirst": 1146,
-        "farFirstTriangles": 126,
-        "handoffError": 0.2395
+        "inflateMax": 0.0922,
+        "rootTriangles": 125,
+        "farFirst": 1233,
+        "farFirstTriangles": 124,
+        "handoffError": 0.2124
       }
     },
     {
@@ -613,35 +613,35 @@
         "levels": 8,
         "roots": 1,
         "finestTriangles": 22044,
-        "rootError": 0.1971
+        "rootError": 0.1945
       },
       "chain": {
         "cell": 0.04,
         "cells": [
           21,
           38,
-          19
+          20
         ],
-        "wellComposedCells": 1,
-        "wrapTriangles": 2448,
-        "baseTriangles": 156,
-        "baseVertices": 80,
-        "baseError": 0.1067,
-        "outward": 0.09,
-        "inward": 0.1067,
-        "simplifyError": 0.04,
-        "steps": 75,
+        "wellComposedCells": 3,
+        "wrapTriangles": 2464,
+        "baseTriangles": 1028,
+        "baseVertices": 516,
+        "baseError": 0.1086,
+        "outward": 0.1086,
+        "inward": 0.1036,
+        "simplifyError": 0.0084,
+        "steps": 511,
         "coreTriangles": 6,
-        "depth": 4,
+        "depth": 7,
         "errorRange": [
-          0.1067,
-          0.4995
+          0.1086,
+          0.4245
         ],
         "inflateMax": 0.1079,
-        "rootTriangles": 84,
-        "farFirst": 36,
+        "rootTriangles": 85,
+        "farFirst": 472,
         "farFirstTriangles": 84,
-        "handoffError": 0.1947
+        "handoffError": 0.1965
       }
     }
   ]

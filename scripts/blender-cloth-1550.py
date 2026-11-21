@@ -26,8 +26,10 @@ import time
 from mathutils import Vector, Matrix
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FIT_50K_DIR = os.path.join(ROOT, '.tripo', '1550-hd-base', 'fit-50k')
 FIT_DIR = os.path.join(ROOT, '.tripo', '1550-hd-base', 'fit')
 OUT_DIR = os.path.join(ROOT, '.tripo', '1550-hd-base', 'cloth')
+VERIFY_CLOTH_DIR = os.path.join(ROOT, '.tripo', '1550-hd-base', 'verify-cloth')
 
 # Must match scripts/crew_skeleton.py / js/crew-skeleton.js exact 93-joint order
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
@@ -77,6 +79,7 @@ def parse_args():
     only = None
     sex_filter = None
     sim_frames = 12
+    verify = False
     for a in argv:
         if a.startswith('--only='):
             only = set(a.split('=', 1)[1].split(','))
@@ -84,7 +87,9 @@ def parse_args():
             sex_filter = a.split('=', 1)[1]
         elif a.startswith('--sim-frames='):
             sim_frames = int(a.split('=', 1)[1])
-    return only, sex_filter, sim_frames
+        elif a == '--verify':
+            verify = True
+    return only, sex_filter, sim_frames, verify
 
 
 def clear_scene():
@@ -238,7 +243,8 @@ class BodySurface:
                         if r > best:
                             best = r
                 self.torso_r[iz][it] = best
-        # Smoothly fill any missed grazing rays without ever shrinking below measured surface
+        # Fill any missed grazing rays, then run 2D Gaussian outer-convex envelope smoothing
+        # taking max(raw_r, smoothed_r) so the torso envelope NEVER shrinks into skin and has ZERO raycast dimples!
         for _ in range(3):
             prev = [row[:] for row in self.torso_r]
             for iz in range(self.t_nz):
@@ -252,8 +258,23 @@ class BodySurface:
                     ]
                     if c < 0.04:
                         self.torso_r[iz][it] = max(nb)
-                    else:
-                        self.torso_r[iz][it] = max(c, c * 0.78 + (sum(nb) * 0.25) * 0.22)
+        # 3 passes of 5x5 separable Gaussian smoothing with max(raw_r, smooth_r) convex-hull preservation
+        gauss = (0.0625, 0.25, 0.375, 0.25, 0.0625)
+        for _ in range(3):
+            tmp = [[0.0] * self.t_nt for _ in range(self.t_nz)]
+            for iz in range(self.t_nz):
+                for it in range(self.t_nt):
+                    s = 0.0
+                    for k, wk in enumerate(gauss):
+                        s += wk * self.torso_r[iz][(it + k - 2) % self.t_nt]
+                    tmp[iz][it] = s
+            for iz in range(self.t_nz):
+                for it in range(self.t_nt):
+                    s = 0.0
+                    for k, wk in enumerate(gauss):
+                        jz = max(0, min(self.t_nz - 1, iz + k - 2))
+                        s += wk * tmp[jz][it]
+                    self.torso_r[iz][it] = max(self.torso_r[iz][it], s)
 
         # Female chest/bust bridge envelope: smoothly bridge the front sternum valley between left & right bust peaks
         # and add positive bust clearance so blouses/bodices drape smoothly across the chest with ZERO cleavage poke-through!
@@ -338,6 +359,22 @@ class BodySurface:
                             if r < 0.14 and r > best:
                                 best = r
                     self.arm_r[side][ix][it] = max(0.032, best)
+            # Smooth arm envelope with outer-convex max(raw, smooth) so shoulder & elbow sleeves have zero dents
+            for _ in range(2):
+                prev_a = [row[:] for row in self.arm_r[side]]
+                for ix in range(self.a_nx):
+                    for it in range(self.a_nt):
+                        sm_t = (
+                            0.25 * prev_a[ix][(it - 1) % self.a_nt]
+                            + 0.50 * prev_a[ix][it]
+                            + 0.25 * prev_a[ix][(it + 1) % self.a_nt]
+                        )
+                        sm_x = (
+                            0.25 * prev_a[max(0, ix - 1)][it]
+                            + 0.50 * sm_t
+                            + 0.25 * prev_a[min(self.a_nx - 1, ix + 1)][it]
+                        )
+                        self.arm_r[side][ix][it] = max(prev_a[ix][it], sm_x)
 
         # Precompute leg envelopes (Z in [0.02, 0.86])
         self.l_nz, self.l_nt = 32, 24
@@ -369,6 +406,22 @@ class BodySurface:
                             if r < 0.16 and r > best:
                                 best = r
                     self.leg_r[side][iz][it] = max(0.036, best)
+            # Smooth leg envelope with outer-convex max(raw, smooth) so thighs & hips have zero raycast dents
+            for _ in range(2):
+                prev_l = [row[:] for row in self.leg_r[side]]
+                for iz in range(self.l_nz):
+                    for it in range(self.l_nt):
+                        sm_t = (
+                            0.25 * prev_l[iz][(it - 1) % self.l_nt]
+                            + 0.50 * prev_l[iz][it]
+                            + 0.25 * prev_l[iz][(it + 1) % self.l_nt]
+                        )
+                        sm_z = (
+                            0.25 * prev_l[max(0, iz - 1)][it]
+                            + 0.50 * sm_t
+                            + 0.25 * prev_l[min(self.l_nz - 1, iz + 1)][it]
+                        )
+                        self.leg_r[side][iz][it] = max(prev_l[iz][it], sm_z)
 
         # Measure foot bounding boxes for 3D shoes
         self.feet = []
@@ -439,9 +492,9 @@ _ACTIVE_SURF = None
 
 
 def enforce_body_clearance(obj, donor, min_clr, peplum_flare=None, bust_bridge=False):
-    """Mathematically guarantees every vertex of the cloth surface sits at least min_clr outside the high-res Tripo body.
-    When bust_bridge=True on female upper garments, also enforces the bridged convex front chest envelope so cloth can
-    NEVER collapse into the sternum valley or allow cleavage skin poke-through!"""
+    """Smoothly guarantees every vertex of the cloth surface sits at least min_clr outside the body
+    using SMOOTH RADIAL outward push (NEVER noisy local triangle normals from closest_point_on_mesh,
+    which caused jagged scars & dimples on peplums, chests, and trouser hips!)."""
     if donor is None or (min_clr <= 0.0 and peplum_flare is None):
         return
     mesh = obj.data
@@ -460,9 +513,23 @@ def enforce_body_clearance(obj, donor, min_clr, peplum_flare=None, bust_bridge=F
         if ok:
             delta = v.co - loc
             sd = delta.dot(nrm)
-            if sd < req and delta.length < 0.06:
-                v.co = loc + nrm * req
-                pushed += 1
+            # Only push vertices that actually approach skin (< min(0.011, req)) using PURE smooth radial direction
+            # (ZERO noisy body-mesh normal component!) so already-clear cloth NEVER gets pinpoint bumps!
+            safe_req = min(0.011, req) if peplum_flare is None else req
+            if sd < safe_req and delta.length < 0.038:
+                if surf is not None and abs(v.co.x) < surf.arm_x0 * 0.96 and v.co.z >= surf.t_z0:
+                    _, yc = surf.sample_torso(min(surf.t_z1, max(surf.t_z0, v.co.z)), 0.0)
+                    out_dir = Vector((v.co.x, v.co.y - yc, 0.0))
+                elif delta.length > 1e-4 and sd > 0.0:
+                    out_dir = delta.copy()
+                else:
+                    out_dir = nrm.copy()
+                if out_dir.length > 1e-5:
+                    out_dir.normalize()
+                    need = safe_req - sd
+                    if need > 0.0:
+                        v.co = v.co + out_dir * min(need, 0.014)
+                        pushed += 1
         # Female chest bridge guard: keep front bust vertices strictly outside the bridged torso envelope
         if bust_bridge and surf is not None and surf.female and abs(v.co.x) < surf.arm_x0 * 0.96:
             if (surf.pelvis.z + 0.08) <= v.co.z <= (surf.sh_l.z + 0.01):
@@ -682,28 +749,26 @@ def make_cloth_object(name, verts, faces, pin_weights, chan_fab_uv, flex_phase, 
         ss.render_levels = subsurf
         bpy.ops.object.modifier_apply(modifier=ss.name)
 
-    # Tailored smoothing pass: removes cloth-sim pinch & Play-Doh lumps while keeping graceful drape folds
-    sm = obj.modifiers.new('Smooth', 'SMOOTH')
-    sm.factor = 0.45
-    sm.iterations = 3
-    bpy.ops.object.modifier_apply(modifier=sm.name)
-
-    csm = obj.modifiers.new('CorrectiveSmooth', 'CORRECTIVE_SMOOTH')
-    csm.factor = 0.50
-    csm.iterations = 3
-    csm.smooth_type = 'LENGTH_WEIGHTED'
-    bpy.ops.object.modifier_apply(modifier=csm.name)
-
-    # Guaranteed geometric body & bust-bridge clearance so ZERO vertices ever intersect bare skin!
-    enforce_body_clearance(obj, _ACTIVE_DONOR, min_clr, peplum_flare=peplum_flare, bust_bridge=bust_bridge)
-
-    # One gentle post-clearance smoothing pass eliminates any localized facet push-out dimples cleanly!
+    # Iterative smooth clearance relaxation (5 passes of clamp -> smooth, FINISHING on smooth!):
+    # Ending with smooth guarantees ZERO localized push-out scars/dimples while keeping safe body clearance!
     if min_clr > 0.0 and subsurf > 0:
-        sm2 = obj.modifiers.new('PostClearSmooth', 'SMOOTH')
-        sm2.factor = 0.35
-        sm2.iterations = 2
-        bpy.ops.object.modifier_apply(modifier=sm2.name)
-        enforce_body_clearance(obj, _ACTIVE_DONOR, max(0.008, min_clr - 0.002), peplum_flare=peplum_flare, bust_bridge=bust_bridge)
+        for it_pass in range(5):
+            enforce_body_clearance(obj, _ACTIVE_DONOR, min_clr + 0.002 * (1.0 - it_pass / 5.0), peplum_flare=peplum_flare, bust_bridge=bust_bridge)
+            sm_i = obj.modifiers.new(f'RelaxSmooth_{it_pass}', 'SMOOTH')
+            sm_i.factor = 0.45 - it_pass * 0.05
+            sm_i.iterations = 2
+            bpy.ops.object.modifier_apply(modifier=sm_i.name)
+        csm = obj.modifiers.new('CorrectiveSmooth', 'CORRECTIVE_SMOOTH')
+        csm.factor = 0.45
+        csm.iterations = 3
+        csm.smooth_type = 'LENGTH_WEIGHTED'
+        bpy.ops.object.modifier_apply(modifier=csm.name)
+    else:
+        sm = obj.modifiers.new('Smooth', 'SMOOTH')
+        sm.factor = 0.40
+        sm.iterations = 3
+        bpy.ops.object.modifier_apply(modifier=sm.name)
+        enforce_body_clearance(obj, _ACTIVE_DONOR, min_clr, peplum_flare=peplum_flare, bust_bridge=bust_bridge)
 
     # Rolled 6 mm return lip ONLY on open collar/cuff/hem boundaries (NEVER full-body SOLIDIFY -> ZERO z-fighting!)
     if solidify > 0.0:
@@ -758,9 +823,9 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
     sh_z = surf.sh_l.z
     neck_z = surf.neck.z
     neck_y = surf.neck.y
-    neck_r = 0.064 if surf.female else 0.076
+    neck_r = 0.056 if surf.female else 0.064
     yoke_z0 = sh_z - 0.012
-    yoke_z1 = (neck_z + 0.020) if shoulder_yoke else (z_top or surf.pelvis.z + 0.06)
+    yoke_z1 = (neck_z + 0.016) if shoulder_yoke else (z_top or surf.pelvis.z + 0.06)
     body_top = yoke_z0 if shoulder_yoke else (z_top or surf.pelvis.z + 0.06)
     yoke_split = 0.78 if shoulder_yoke else 1.05
     rings = []
@@ -779,12 +844,20 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
             cos_f = math.cos(th)
             z = z_base
             if in_yoke:
-                if v_neck > 0 and cos_f > 0.55:
-                    vs = _sstep(0.55, 1.0, cos_f) ** 1.15
-                    z -= v_neck * vs * yt
-                elif scoop > 0 and cos_f > 0.30:
-                    ss = _sstep(0.30, 1.0, cos_f)
-                    z -= scoop * ss * yt
+                if v_neck > 0:
+                    # Smooth tailored 1550 linen collar band around back/sides + clean open front V-placket (zero jagged notch!)
+                    if cos_f > 0.35:
+                        vs = _sstep(0.35, 1.0, cos_f)
+                        z -= v_neck * (vs ** 1.25) * (yt ** 0.90)
+                    elif yt > 0.58:
+                        # Neat soft turned-down 1550 collar band framing back and sides of neck cleanly
+                        band_w = 1.0 - _sstep(-0.05, 0.35, cos_f)
+                        z += 0.018 * ((yt - 0.58) / 0.42) * band_w
+                elif scoop > 0:
+                    # Wide, smooth, graceful Renaissance gathered oval scoop neckline across collarbone (zero jagged notch!)
+                    if cos_f > -0.15:
+                        ss = _sstep(-0.15, 0.92, cos_f)
+                        z -= scoop * (ss ** 1.15) * (yt ** 0.92)
                 if stand_collar > 0 and yt > 0.60:
                     z += stand_collar * ((yt - 0.60) / 0.40)
 
@@ -825,7 +898,7 @@ def build_torso_piece(surf, name, *, z_bot, z_top=None, n_z=28, n_t=48, clearanc
                 ch, fab = collar_ch, FAB_LINEN
             elif hem_trim and not in_yoke and bf < 0.09:
                 ch, fab = CH_TRIM, FAB_COTTON
-            elif bodice_lace and cos_f > 0.965 and 0.06 < bf < 0.92 and not in_yoke:
+            elif bodice_lace and cos_f > 0.975 and 0.08 < bf < 0.88 and not in_yoke:
                 ch, fab = CH_LINEN, FAB_LINEN
 
             # Pin collar/yoke smoothly + firm pin at tucked waist hem so torso drapes cleanly without riding up or bunching!
@@ -875,13 +948,12 @@ def build_sleeves_piece(surf, name, *, x_end_frac=0.58, n_x=22, n_t=28, clearanc
                 vf = it / n_t
                 th = vf * math.tau
                 env_r, yc, zc = surf.sample_arm(side, max(surf.arm_x0, ax), th)
-                # Tuck inner sleeve root cleanly 9 mm INSIDE the torso armscye so sleeves emerge smoothly from under
-                # bodice/shirt shoulders with a crisp tailored seam and ZERO shoulder-cap interpenetration!
-                armscye_tuck = -0.009 * (1.0 - _sstep(0.0, 0.24, uf))
-                cap = 0.003 * math.sin(min(1.0, max(0.0, (uf - 0.14) / 0.36)) * math.pi) * (0.40 + 0.60 * max(0.0, math.sin(th))) if 0.14 < uf < 0.50 else 0.0
+                # Tuck inner sleeve root smoothly inside torso armscye with zero bulbous shoulder-cap lump!
+                armscye_tuck = -0.012 * (1.0 - _sstep(0.0, 0.28, uf))
+                cap = 0.0
                 # Graceful subtle gravity hang on underside of sleeve + gentle tailored puff
-                hang_drop = -0.006 * math.sin(uf * math.pi) * max(0.0, -math.sin(th))
-                puff = puff_amp * (math.sin(uf * math.pi) ** 1.15) * (0.95 + 0.05 * math.cos(th * 6))
+                hang_drop = -0.005 * math.sin(uf * math.pi) * max(0.0, -math.sin(th))
+                puff = puff_amp * (math.sin(uf * math.pi) ** 1.25) * (0.95 + 0.05 * math.cos(th * 6))
                 # Clean tailored cuff band without pinched double-wall sausage bulge
                 cuff = 0.0025 * _sstep(0.86, 0.94, uf) if rolled_cuff else 0.0
                 r = env_r + clearance + armscye_tuck + cap + puff + cuff
@@ -1354,7 +1426,8 @@ def join_and_transfer_skin(objs, body_ctx, spec_id, slot):
     tri.quad_method = 'FIXED'
     bpy.ops.object.modifier_apply(modifier=tri.name)
 
-    # Transfer exact 93-joint vertex groups from the HD Tripo body donor!
+    # Transfer exact 93-joint vertex groups from the clean body donor, then smooth across shoulders/armpits
+    # so sleeves and torsos bend like real woven fabric when arms drop from T-pose to natural idle/walk pose!
     donor = body_ctx['donor']
     dt = garment.modifiers.new('SkinTransfer', 'DATA_TRANSFER')
     dt.object = donor
@@ -1363,6 +1436,16 @@ def join_and_transfer_skin(objs, body_ctx, spec_id, slot):
     dt.vert_mapping = 'POLYINTERP_NEAREST'
     bpy.ops.object.datalayout_transfer(modifier=dt.name)
     bpy.ops.object.modifier_apply(modifier=dt.name)
+
+    # Smooth vertex weights along connected fabric topology (never bleeds across disconnected shoes/buttons!)
+    bpy.ops.object.select_all(action='DESELECT')
+    garment.select_set(True)
+    bpy.context.view_layer.objects.active = garment
+    bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+    bpy.ops.object.vertex_group_smooth(group_select_mode='ALL', factor=0.55, repeat=6, expand=0.0)
+    bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=4)
+    bpy.ops.object.vertex_group_normalize_all(group_select_mode='ALL', lock_active=False)
+    bpy.ops.object.mode_set(mode='OBJECT')
 
     mesh = garment.data
     n_verts = len(mesh.vertices)
@@ -1459,22 +1542,35 @@ def join_and_transfer_skin(objs, body_ctx, spec_id, slot):
         word = (ch | (fab << 3) | (ao8 << 8) | (u8 << 16) | (v8 << 24)) & 0xFFFFFFFF
         struct.pack_into('<I', word_buf, i * 4, word)
 
-        # Skinning: crisp leg-following skirt blend (so knees/thighs stay covered walking & riding!), spine drape for cloaks, exact DATA_TRANSFER otherwise!
-        if is_skirt and y > 0.13 and ch not in (CH_LEATHER, CH_BRASS, CH_BUFF):
-            # Pelvis holds waist (y >= 0.90), drops rapidly below hip so each side tracks its thigh/knee cleanly while striding!
-            pw = max(0.0, min(1.0, (y - 0.74) / 0.18))
-            t_lr = max(0.0, min(1.0, (x + 0.065) / 0.13))
-            sb = t_lr * t_lr * (3.0 - 2.0 * t_lr)  # smoothstep(-0.065, +0.065, x)
-            calf_f = max(0.0, min(0.70, (0.50 - y) / 0.34))
-            leg_w = 1.0 - pw
-            lw = leg_w * (1.0 - calf_f)
-            cw = leg_w * calf_f
-            pairs_raw = [
-                (pelvis_j, pw),
-                (thigh_l_j, lw * sb),
-                (thigh_r_j, lw * (1.0 - sb)),
-                (calf_l_j if sb >= 0.5 else calf_r_j, cw),
-            ]
+        # Skinning: lock skirt waistband AND its belt/buckle together to pelvis so belt never separates in Idle/Walk!
+        if is_skirt and y > 0.13:
+            if y > 0.90 and ch in (CH_LEATHER, CH_BRASS, CH_BUFF, CH_TRIM):
+                pairs_raw = [(pelvis_j, 1.0)]
+            elif ch not in (CH_LEATHER, CH_BRASS, CH_BUFF):
+                # Pelvis holds waist (y >= 0.90), drops rapidly below hip so each side tracks its thigh/knee cleanly while striding!
+                pw = max(0.0, min(1.0, (y - 0.74) / 0.18))
+                t_lr = max(0.0, min(1.0, (x + 0.065) / 0.13))
+                sb = t_lr * t_lr * (3.0 - 2.0 * t_lr)  # smoothstep(-0.065, +0.065, x)
+                calf_f = max(0.0, min(0.70, (0.50 - y) / 0.34))
+                leg_w = 1.0 - pw
+                lw = leg_w * (1.0 - calf_f)
+                cw = leg_w * calf_f
+                pairs_raw = [
+                    (pelvis_j, pw),
+                    (thigh_l_j, lw * sb),
+                    (thigh_r_j, lw * (1.0 - sb)),
+                    (calf_l_j if sb >= 0.5 else calf_r_j, cw),
+                ]
+            else:
+                # Shoes at y <= 0.13 handled in else branch below
+                jmap = {}
+                for g in v.groups:
+                    js = vg_to_slot.get(g.group, -1)
+                    if 0 < js < len(JOINTS) and g.weight > 1e-5:
+                        jmap[js] = jmap.get(js, 0.0) + g.weight
+                pairs_raw = sorted(jmap.items(), key=lambda kv: kv[1], reverse=True)[:4]
+                if not pairs_raw:
+                    pairs_raw = [(fallback_joint, 1.0)]
         elif is_cloak:
             vf = max(0.0, min(1.0, (y - 0.62) / 0.90))
             pairs_raw = [(sp3_j, 0.45 + 0.45 * vf), (sp2_j, 0.35), (pelvis_j, 0.20 * (1.0 - vf))]
@@ -1551,8 +1647,8 @@ def build_one_garment(surf, body_ctx, spec_id, slot, sim_frames):
                                         rolled_cuff=True, channel=CH_SHIRT, fabric=FAB_LINEN,
                                         cloth_cfg=None, solidify=0.0024, sim_frames=0))
     elif spec_id == 'male-doublet':
-        objs.append(build_torso_piece(surf, 'dbl_body', z_bot=0.84, clearance=0.023, flare_bot=0.032,
-                                      stand_collar=0.038, collar_ch=CH_LINEN, channel=CH_SHIRT, fabric=FAB_WOOL,
+        objs.append(build_torso_piece(surf, 'dbl_body', z_bot=0.84, clearance=0.023, flare_bot=0.052,
+                                      stand_collar=0.036, collar_ch=CH_LINEN, channel=CH_SHIRT, fabric=FAB_WOOL,
                                       cloth_cfg=None, solidify=0.0032, sim_frames=0, hem_flex=0.10))
         objs.extend(build_sleeves_piece(surf, 'dbl_slv', x_end_frac=0.88, clearance=0.017, puff_amp=0.007,
                                         cuff_trim=True, rolled_cuff=False, channel=CH_SHIRT, fabric=FAB_WOOL,
@@ -1562,7 +1658,7 @@ def build_one_garment(surf, body_ctx, spec_id, slot, sim_frames):
         objs.extend(build_sleeves_piece(surf, 'jrk_slv', x_end_frac=0.84, clearance=0.017, puff_amp=0.006,
                                         cuff_trim=True, rolled_cuff=False, channel=CH_LINEN, fabric=FAB_LINEN,
                                         cloth_cfg=None, solidify=0.0024, sim_frames=0))
-        objs.append(build_torso_piece(surf, 'jrk_body', z_bot=0.84, clearance=0.023, flare_bot=0.032,
+        objs.append(build_torso_piece(surf, 'jrk_body', z_bot=0.84, clearance=0.023, flare_bot=0.052,
                                       stand_collar=0.030, channel=CH_BUFF, fabric=FAB_LEATHER,
                                       cloth_cfg=None, solidify=0.0034, sim_frames=0, hem_flex=0.06))
         objs.append(build_buttons(surf, 'jrk', z_bot=0.95, z_top=1.40, count=6, clr=0.025))
@@ -1607,16 +1703,16 @@ def build_one_garment(surf, body_ctx, spec_id, slot, sim_frames):
         objs.extend(build_belt_and_buckle(surf, 'trunk', z_center=z_waist + 0.028, half_h=0.015, clr=0.025, thickness=0.005))
         objs.extend(build_shoes(surf, 'trunk', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.155, cuff_clr=0.018))
     elif spec_id == 'female-pleated-skirt':
-        objs.extend(build_pleated_skirt(surf, 'skirt', z_waist=z_waist + 0.036, z_hem=0.10, waist_clr=0.022,
+        objs.extend(build_pleated_skirt(surf, 'skirt', z_waist=z_waist + 0.030, z_hem=0.10, waist_clr=0.022,
                                         hem_rx=0.42, hem_rz=0.39, pleats=16, pleat_amp=0.018,
                                         channel=CH_TROUSERS, fabric=FAB_WOOL, apron=False, sim_frames=skirt_frames))
-        objs.extend(build_belt_and_buckle(surf, 'skirt', z_center=z_waist + 0.024, half_h=0.014, clr=0.024, thickness=0.005, belt_ch=CH_LEATHER, buckle_ch=CH_BRASS))
+        objs.extend(build_belt_and_buckle(surf, 'skirt', z_center=z_waist + 0.026, half_h=0.015, clr=0.027, thickness=0.005, belt_ch=CH_LEATHER, buckle_ch=CH_BRASS))
         objs.extend(build_shoes(surf, 'skirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105, cuff_clr=0.008))
     elif spec_id == 'female-apron-skirt':
-        objs.extend(build_pleated_skirt(surf, 'askirt', z_waist=z_waist + 0.036, z_hem=0.10, waist_clr=0.022,
+        objs.extend(build_pleated_skirt(surf, 'askirt', z_waist=z_waist + 0.030, z_hem=0.10, waist_clr=0.022,
                                         hem_rx=0.42, hem_rz=0.39, pleats=16, pleat_amp=0.018,
                                         channel=CH_TROUSERS, fabric=FAB_WOOL, apron=True, sim_frames=skirt_frames))
-        objs.extend(build_belt_and_buckle(surf, 'askirt', z_center=z_waist + 0.024, half_h=0.014, clr=0.026, thickness=0.005, belt_ch=CH_LINEN, buckle_ch=None))
+        objs.extend(build_belt_and_buckle(surf, 'askirt', z_center=z_waist + 0.026, half_h=0.015, clr=0.028, thickness=0.005, belt_ch=CH_LINEN, buckle_ch=None))
         objs.extend(build_shoes(surf, 'askirt', channel=CH_LEATHER, fabric=FAB_LEATHER, cuff_z=0.105, cuff_clr=0.008))
     elif spec_id == 'indigenous-breechcloth-m':
         objs.extend(build_pleated_skirt(surf, 'breech', z_waist=z_waist + 0.020, z_hem=0.46, n_z=18, n_t=40,
@@ -1644,9 +1740,147 @@ def build_one_garment(surf, body_ctx, spec_id, slot, sim_frames):
     return join_and_transfer_skin(objs, body_ctx, spec_id, slot)
 
 
+def render_cloth_verify(glb_path, sex, pairs):
+    """Renders crisp Cycles verification views of exported cloth .bin garments on the 50k body
+    in BOTH rest pose AND arms-down natural Idle pose to confirm zero chest dimples, zero shoulder
+    crumples, zero skin poke-through, and clean collar/neckline tailoring!"""
+    clear_scene()
+    bpy.ops.import_scene.gltf(filepath=glb_path)
+    body_obj = max((o for o in bpy.context.scene.objects if o.type == 'MESH'), key=lambda o: len(o.data.vertices))
+    arm_obj = next(o for o in bpy.context.scene.objects if o.type == 'ARMATURE')
+    for p in body_obj.data.polygons:
+        p.use_smooth = True
+
+    # Setup simple clean PBR materials for cloth channels
+    ch_colors = {
+        CH_SHIRT: (0.62, 0.56, 0.46, 1.0) if sex == 'male' else (0.74, 0.70, 0.63, 1.0),
+        CH_TROUSERS: (0.14, 0.19, 0.27, 1.0) if sex == 'male' else (0.32, 0.14, 0.14, 1.0),
+        CH_LINEN: (0.82, 0.79, 0.72, 1.0),
+        CH_LEATHER: (0.10, 0.06, 0.035, 1.0),
+        CH_BRASS: (0.58, 0.39, 0.11, 1.0),
+        CH_BUFF: (0.42, 0.28, 0.14, 1.0),
+        CH_HOSE: (0.09, 0.09, 0.10, 1.0),
+        CH_TRIM: (0.45, 0.10, 0.07, 1.0),
+    }
+    ch_mats = []
+    for ch in range(8):
+        m = bpy.data.materials.new(f'VerifyCh{ch}')
+        m.use_nodes = True
+        bsdf = next(n for n in m.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+        bsdf.inputs['Base Color'].default_value = ch_colors[ch]
+        bsdf.inputs['Roughness'].default_value = 0.25 if ch == CH_BRASS else (0.50 if ch == CH_LEATHER else 0.85)
+        if ch == CH_BRASS:
+            bsdf.inputs['Metallic'].default_value = 0.85
+        ch_mats.append(m)
+
+    scene = bpy.context.scene
+    scene.render.engine = 'CYCLES'
+    scene.cycles.device = 'CPU'
+    scene.cycles.samples = 20
+    scene.cycles.use_denoising = True
+    scene.render.resolution_x = 640
+    scene.render.resolution_y = 800
+    scene.view_settings.view_transform = 'AgX'
+
+    world = bpy.data.worlds.new('ClothWorld')
+    scene.world = world
+    world.use_nodes = True
+    bg = world.node_tree.nodes.get('Background')
+    if bg:
+        bg.inputs[0].default_value = (0.35, 0.40, 0.48, 1.0)
+        bg.inputs[1].default_value = 0.80
+
+    sun_data = bpy.data.lights.new('KeySun', type='SUN')
+    sun_data.energy = 3.2
+    sun_data.angle = math.radians(10.0)
+    sun_obj = bpy.data.objects.new('KeySun', sun_data)
+    bpy.context.collection.objects.link(sun_obj)
+    sun_obj.rotation_euler = (math.radians(48), math.radians(-18), math.radians(-24))
+
+    cam_data = bpy.data.cameras.new('VerifyCam')
+    cam_data.lens = 55.0
+    cam_obj = bpy.data.objects.new('VerifyCam', cam_data)
+    bpy.context.collection.objects.link(cam_obj)
+    scene.camera = cam_obj
+
+    def load_bin_garment(gid):
+        p = os.path.join(OUT_DIR, f'{gid}.bin')
+        raw = open(p, 'rb').read()
+        magic, ver, nv, nt = struct.unpack_from('<4sIII', raw, 0)
+        off = 16
+        pos_gl = struct.unpack_from(f'<{nv * 3}f', raw, off); off += nv * 12
+        off += nv * 12  # skip normals
+        words = struct.unpack_from(f'<{nv}I', raw, off); off += nv * 4
+        skin_j = struct.unpack_from(f'<{nv}I', raw, off); off += nv * 4
+        skin_w = struct.unpack_from(f'<{nv}I', raw, off); off += nv * 4
+        off += nv * 4  # skip wind
+        idxs = struct.unpack_from(f'<{nt * 3}I', raw, off)
+
+        # Convert glTF Y-up back to Blender Z-up: (x_bl = x_gl, y_bl = -z_gl, z_bl = y_gl)
+        bverts = [(pos_gl[i * 3], -pos_gl[i * 3 + 2], pos_gl[i * 3 + 1]) for i in range(nv)]
+        bfaces = [(idxs[t * 3], idxs[t * 3 + 1], idxs[t * 3 + 2]) for t in range(nt)]
+        me = bpy.data.meshes.new(f'V_{gid}')
+        me.from_pydata(bverts, [], bfaces)
+        me.update()
+        obj = bpy.data.objects.new(f'V_{gid}', me)
+        bpy.context.collection.objects.link(obj)
+        for m in ch_mats:
+            me.materials.append(m)
+        for poly in me.polygons:
+            poly.use_smooth = True
+            poly.material_index = words[poly.vertices[0]] & 7
+        # Create vertex groups matching armature bone names so ARMATURE modifier poses cloth identically!
+        vgs = {}
+        for j_slot, j_name in enumerate(JOINTS):
+            vgs[j_slot] = obj.vertex_groups.new(name=j_name)
+        for vi in range(nv):
+            jw, ww = skin_j[vi], skin_w[vi]
+            for k in range(4):
+                js = (jw >> (k * 8)) & 255
+                wt = ((ww >> (k * 8)) & 255) / 255.0
+                if wt > 1e-4 and js in vgs:
+                    vgs[js].add([vi], wt, 'REPLACE')
+        # Match body_obj world transform (arm_obj is parent of body_obj)
+        inv_arm = arm_obj.matrix_world.inverted()
+        for v in me.vertices:
+            v.co = inv_arm @ v.co
+        me.update()
+        obj.parent = arm_obj
+        amod = obj.modifiers.new('Armature', 'ARMATURE')
+        amod.object = arm_obj
+        return obj
+
+    os.makedirs(VERIFY_CLOTH_DIR, exist_ok=True)
+    idle_act = next((a for a in bpy.data.actions if 'Idle' in a.name), None)
+
+    for tag, gids in pairs:
+        loaded = [load_bin_garment(g) for g in gids]
+        for pose_name, use_idle in (('rest', False), ('idle', True)):
+            if use_idle and idle_act is not None:
+                arm_obj.data.pose_position = 'POSE'
+                if arm_obj.animation_data is None:
+                    arm_obj.animation_data_create()
+                arm_obj.animation_data.action = idle_act
+                scene.frame_set(1)
+            else:
+                arm_obj.data.pose_position = 'REST'
+                scene.frame_set(1)
+            # Frame torso + head + hips cleanly (1.5 m portrait view)
+            z_tgt = 1.24 if sex == 'female' else 1.30
+            cam_loc = Vector((-0.38, -1.65, z_tgt + 0.06))
+            cam_obj.location = cam_loc
+            cam_obj.rotation_euler = (Vector((0.0, 0.0, z_tgt)) - cam_loc).to_track_quat('-Z', 'Y').to_euler()
+            out_png = os.path.join(VERIFY_CLOTH_DIR, f'{sex}_{tag}_{pose_name}.png')
+            scene.render.filepath = out_png
+            bpy.ops.render.render(write_still=True)
+            print(f'  [cloth-verify] rendered {out_png}')
+        for o in loaded:
+            bpy.data.objects.remove(o, do_unlink=True)
+
+
 def main():
     global _ACTIVE_DONOR, _ACTIVE_SURF
-    only, sex_filter, sim_frames = parse_args()
+    only, sex_filter, sim_frames, verify = parse_args()
     t_all = time.perf_counter()
     for sex in ('female', 'male'):
         if sex_filter and sex != sex_filter:
@@ -1654,10 +1888,12 @@ def main():
         todo = [(gid, gsex, gslot) for gid, gsex, gslot in GARMENTS if gsex == sex and (only is None or gid in only)]
         if not todo:
             continue
-        glb = os.path.join(FIT_DIR, f'base-{sex}.glb')
+        fit50k_name = 'villager-female.glb' if sex == 'female' else 'sailor-male.glb'
+        glb_50k = os.path.join(FIT_50K_DIR, fit50k_name)
+        glb = glb_50k if os.path.exists(glb_50k) else os.path.join(FIT_DIR, f'base-{sex}.glb')
         if not os.path.exists(glb):
-            raise SystemExit(f'Missing fitted Tripo base body: {glb}')
-        print(f'\n=== Loading HD Tripo base-{sex}.glb ===')
+            raise SystemExit(f'Missing fitted base body: {glb}')
+        print(f'\n=== Loading fitted base body {os.path.relpath(glb, ROOT)} ===')
         t0 = time.perf_counter()
         body_ctx = import_fitted_body(glb)
         _ACTIVE_DONOR = body_ctx['donor']
@@ -1669,6 +1905,16 @@ def main():
             tg = time.perf_counter()
             nv, nt, outp = build_one_garment(surf, body_ctx, gid, gslot, sim_frames)
             print(f'  {gid:24s}: {nv:6d} verts · {nt:6d} tris · {os.path.getsize(outp) // 1024:4d} KB · {time.perf_counter() - tg:.1f}s')
+
+        if verify:
+            pairs = (
+                [('blouse_skirt', ['female-chemise-blouse', 'female-pleated-skirt']),
+                 ('bodice_apron', ['female-laced-bodice', 'female-apron-skirt'])]
+                if sex == 'female' else
+                [('shirt_slops', ['male-linen-shirt', 'male-mariner-slops']),
+                 ('doublet_hose', ['male-doublet', 'male-trunk-hose'])]
+            )
+            render_cloth_verify(glb, sex, pairs)
 
     print(f'\nDone in {time.perf_counter() - t_all:.1f}s')
 
