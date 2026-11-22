@@ -674,6 +674,7 @@ export async function createMeadowGrass({
   worldOffset = null,
 }) {
   if (!(pack?.words?.length > 0) || !pack.manifest) return null;
+  const packManifest = pack.manifest;
   const B = GPUBufferUsage;
   const land0 = new Map(resources);
   const frame = land0.get(0)?.buffer, shadowUniform = land0.get(19)?.buffer;
@@ -682,15 +683,17 @@ export async function createMeadowGrass({
   // many pages as the atlas takes. Meadow grass only grows above MEADOW_WATERLINE (0.75 m), so it never draws into the
   // underwater submerged-geometry capture pass.
   const pages = continuumAtlasPages(device, pack.words);
+  const packRef = pack;
+  pack = null; // Release parameter slot so returned closures never retain the full raw CPU meadow words buffer.
   const [atlas, programs, view, stand] = await Promise.all([
-    requestContinuumAtlas(device, `meadow ${pack.manifest.pack}`, async () => pack),
+    requestContinuumAtlas(device, `meadow ${packManifest.pack}`, async () => packRef),
     requestContinuumPrograms({ device, shader, shadowFormat, pages }),
     requestContinuumView({ device, shader, material: MEADOW_CONTINUUM_SPEC, format, samples, pages }),
     requestMeadowStand(device, shader),
   ]);
-  if (atlas.types.length !== pack.manifest.types.length) throw Error(`The meadow continuum atlas holds ${atlas.types.length} types, its manifest ${pack.manifest.types.length}: rebake it`);
+  if (atlas.types.length !== packManifest.types.length) throw Error(`The meadow continuum atlas holds ${atlas.types.length} types, its manifest ${packManifest.types.length}: rebake it`);
   // The pack's mixes in their roles: a strand for a margin sows it behind the beaches.
-  const coast = (pack.manifest.mixes ?? [])[MEADOW_MIX_ROLES.indexOf('margin')] === 'strand';
+  const coast = (packManifest.mixes ?? [])[MEADOW_MIX_ROLES.indexOf('margin')] === 'strand';
   const mkBuf = (label, size, usage, data = null) => {
     const buf = device.createBuffer({ label, size: Math.max(16, size), usage });
     if (data?.byteLength) device.queue.writeBuffer(buf, 0, data);
@@ -722,8 +725,8 @@ export async function createMeadowGrass({
   cfgF.set([continuumPixelError(), MEADOW_GUST_WAVE, 0, 0], 16);
   cfgU[22] = isSecondary ? 0 : 1; // cfg.more.z: 1 when primary section (landLight valid), 0 for secondary sections
   // Each mix's colour and cover from above, the mean of its variants (meadowMixMean): a colour word holds three
-  // square roots of a linear colour.
-  const words = pack.words, floats = new Float32Array(words.buffer, words.byteOffset, words.length), M = MEADOW_CONTINUUM_MATERIAL;
+  // square roots of a linear colour. Read from atlas.words (compact metadata prefix), never pinning full raw pack words.
+  const words = atlas.words, floats = new Float32Array(words.buffer, words.byteOffset, words.length), M = MEADOW_CONTINUUM_MATERIAL;
   const mixCounts = [0, 0, 0];
   for (let t = 0; t < atlas.types.length; t++) {
     const at = words[CONTINUUM_HEADER.typesAt] + t * CONTINUUM_TYPE_WORDS, mix = words[at + M.mix], top = words[at + M.top];

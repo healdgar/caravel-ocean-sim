@@ -49,6 +49,16 @@ export const TROPICAL_MEADOW_GRASS_ASSETS = Object.freeze({
   'manifest.json': 'assets/ground-cover/tropical/meadows-gpu/manifest.json',
   'atlas.bin.gz': 'assets/ground-cover/tropical/meadows-gpu/atlas.bin.gz',
 });
+// Compact mobile meadow continuum packs (scripts/prepare-mobile-continuum.mjs): same 12 physical 3D grass mixes and
+// continuous canopy bodies, pruned to ~12 MB raw for mobile and 128 MiB WebGPU devices.
+export const PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS = Object.freeze({
+  'manifest.json': 'assets/mobile-continuum/portugal-meadow/manifest.json',
+  'atlas.bin.gz': 'assets/mobile-continuum/portugal-meadow/atlas.bin.gz',
+});
+export const TROPICAL_MEADOW_GRASS_MOBILE_ASSETS = Object.freeze({
+  'manifest.json': 'assets/mobile-continuum/tropical-meadow/manifest.json',
+  'atlas.bin.gz': 'assets/mobile-continuum/tropical-meadow/atlas.bin.gz',
+});
 // What each of a pack's three mixes is sown where (js/meadow-grass.js, buildMeadowCoverMap): the first on open
 // lowland, the second on slopes, heights and scrub, the third on field margins or, for a pack that has one, the strand.
 export const MEADOW_MIX_ROLES = Object.freeze(['lowland', 'upland', 'margin']);

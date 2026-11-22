@@ -243,7 +243,9 @@ const DBG = Number(qs.get('dbg')) || 0;
 // Depth-first visibility avoids costly hidden-water shading; keep an A/B fallback.
 const OCEAN_DEPTH = qs.get('oceanDepth') !== '0';
 const INITIAL_NEURAL_MODE = normalizeNeuralLightMode(qs.get('neuralMode'));
-const isWebKit = typeof navigator !== 'undefined' && /AppleWebKit/i.test(navigator.userAgent || '') && !/Chrome|Chromium|Edg|OPR|CriOS|FxiOS/i.test(navigator.userAgent || '');
+const isMobile = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+const isIOS = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+const isWebKit = isIOS || (typeof navigator !== 'undefined' && /AppleWebKit/i.test(navigator.userAgent || '') && !/Chrome|Chromium|Edg|OPR/i.test(navigator.userAgent || ''));
 const D2R = Math.PI / 180;
 const GU = globalThis.GPUBufferUsage;
 const TU = globalThis.GPUTextureUsage;
@@ -496,7 +498,8 @@ async function main() {
   const msView = msLUT.createView();
   const skyView = skyLUT.createView();
   const MSAA = 4;
-  const AUTO_START_PIXELS = 2.5e6;
+  const AUTO_START_PIXELS = isMobile ? 0.9e6 : 2.5e6;
+  const SHADOW_RES = isMobile ? 1024 : 2048;
   const SEA_LATITUDE_UNKNOWN = 30;
   const POLYGONS_YIELD_AT = 0.45;
   const HDR = 'rgba16float';
@@ -554,9 +557,12 @@ async function main() {
     oakTex: oakTexPromise,
     oakSampler,
   };
-  // 2048 square is 16 MiB. At 4096 it was 64 MiB for shadows that differ only in how sharp a walker's is.
-  const landShadows = createLandShadows(device);
+  // 2048 square is 16 MiB on desktop; 1024 square on mobile keeps shadow VRAM 4x leaner inside iOS Jetsam limits.
+  const landShadows = createLandShadows(device, SHADOW_RES);
+  let releaseMobileScenery = null;
+  const mobileSceneryGate = isMobile ? new Promise((resolve) => { releaseMobileScenery = resolve; }) : null;
   const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, oceanBridge, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows,
+    sceneryGate: mobileSceneryGate,
     boardKept: BOARD_KEPT ? { clock: boardKeepClock(), dateMs: continuedCareer?.voyage?.dateMs ?? DEFAULT_DEPARTURE.dateMs } : null }) : Promise.resolve(null);
   const prewarmPromises = [
     ...(!isWebKit ? [
@@ -584,7 +590,7 @@ async function main() {
   // seconds: tests/startup-wave-gpu.test.mjs holds the line.
   // On Safari / Apple WebKit, GPUProcess compiles Metal pipelines far more serially than Chrome/Dawn, so non-frame-0
   // subsystems are deferred until after frame 0 renders and brought online in small staggered waves.
-  const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
+  const sceneShadows=createSceneShadows(device,fleetCount,SHADOW_RES),wakePool=createFleetWakePool(device,fleetCount);
   const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.STORAGE|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
   const seaShadowsPromise=createSeaShadows({device,computePipe,sceneShadows,count:fleetCount});
   const dolphinsPromise=isWebKit?null:Promise.all([surfaceWavesPromise,waterOpticsPromise]).then(([surfaceWaves,waterOptics])=>createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shadows:landShadows,shader,format:HDR,samples:MSAA}));
@@ -802,7 +808,7 @@ async function main() {
     const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,mesh,pristineMesh:asset.vertices,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap,partAssembly:asset.partAssembly??null,fracture:asset.fracture??null,detail:asset.detail??null});
     if(pose)render.poseAssets=pose.assets;
     const wetnessPromise=createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length+Object.keys(asset.model.supplementalCrewStations??{}).length,posed:pose});
-    const shadowsPromise=wetnessPromise.then(wetness=>createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,wetness,targets:sceneShadows.layer(index)}));
+    const shadowsPromise=wetnessPromise.then(wetness=>createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,resolution:sceneShadows.resolution,wetness,targets:sceneShadows.layer(index)}));
     const [wetness,shadows,interaction,rowingWater]=await Promise.all([
       wetnessPromise,
       shadowsPromise,
@@ -854,7 +860,7 @@ async function main() {
       .then(r=>{fortSoldiers=r;}).catch(error=>{console.error('Fort garrison initialization:',error);}),
     createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics,most:2})
       .then(r=>{mateSoldiers=r;}).catch(error=>{console.error('The first mate\'s figure:',error);}),
-    createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)})
+    createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics,isMobile})
       .then(r=>{townsfolk=r;window.oceanTownsfolk=r;}).catch(error=>{console.error('Townsfolk initialization:',error);}),
     createBoardArmies({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics})
       .then(r=>{boardArmies=r;window.oceanArmies=r;}).catch(error=>{console.error('Board armies initialization:',error);}),
@@ -1301,7 +1307,7 @@ async function main() {
 
   function resize() {
     if(bloomMeasuring||neuralMeasuring)return;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 2 : 3);
     const nw = Math.max(1, Math.round(canvas.clientWidth * dpr)), nh = Math.max(1, Math.round(canvas.clientHeight * dpr));
     if (nw !== nativeWidth || nh !== nativeHeight) { nativeWidth=nw; nativeHeight=nh; resolution.reset(); }
     const limit = device.limits.maxTextureDimension2D;
@@ -1910,13 +1916,24 @@ async function main() {
     };
     (async()=>{
       await delayWave(120);
-      // Wave 1: sun shafts, Hi-Z, shore folk (+ gunnery immediately for combat scenarios)
+      // On mobile, release the serialized scenery pipeline (forest -> meadow -> herds -> trade vessels) right after
+      // Frame 0 is live on screen, and wait for forest+meadow before spawning extra post-frame waves so Jetsam peak
+      // stays well below iOS limits.
+      if(releaseMobileScenery){
+        const release=releaseMobileScenery;releaseMobileScenery=null;release();
+      }
+      // Wave 1: sun shafts, Hi-Z (+ shore folk immediately on desktop; on mobile wait for scenery wave first)
       await runWave([
         ensureVolumetricShaftsDeferred,
         ensureContinuumHiZDeferred,
-        ensureShoreFolkDeferred,
+        ...(!isMobile?[ensureShoreFolkDeferred]:[]),
         ...(BROADSIDE_SCENARIO||CASTLES_SCENARIO?[ensureGunneryDeferred,ensureHullFloodDeferred]:[]),
       ]);
+      if(isMobile){
+        await Promise.resolve(terrain?.sceneryReady).catch(()=>{});
+        await delayWave(250);
+        await runWave([ensureShoreFolkDeferred]);
+      }
       await delayWave(150);
       // Wave 2: ship water interaction, deck wash & bow spray
       await runWave([ensureInteractionsDeferred]);

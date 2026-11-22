@@ -20,7 +20,8 @@ import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
 import {createLivestockHerds} from './herds.js';
 import {createMeadowGrass,createSectionMeadowGrass} from './meadow-grass.js';
-import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
+import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS,TROPICAL_MEADOW_GRASS_MOBILE_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
+import {continuumAtlasMetaWords} from './continuum-format.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_TYPED_FLOATS,CITY_TYPES_WATERSIDE,compileCityBuildingType} from './old-world-buildings.js';
@@ -1017,7 +1018,7 @@ const GROUND_STANDING_M = 0.75;
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,oceanBridge=null,
   region:explicitRegion=null,placement=null,options={},
-  canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto',portDamage=null,landShadows=null,boardKept=null}){
+  canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto',portDamage=null,landShadows=null,boardKept=null,sceneryGate=null}){
   if(!['auto','off'].includes(canopyMode))throw Error('Unknown canopy scenery mode');
   const activeLandShadows=landShadows??createLandShadows(device,64);
   const ownsLandShadows=!landShadows;
@@ -1109,7 +1110,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     requestCityContinuumAtlas(device),requestBoulderContinuumAtlas(device),
     requestLandCraterPipelines({computePipe}),requestLandContinuumPipelines({device,shader}),
     useProcedural?requestInlandWaterPipeline({device,shader,format,samples}):null,
-    useProcedural?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
+    useProcedural&&!isMobile?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
   // An Old World city is the board Castle and Commons' model founded for its port ahead of time: the board is fetched
   // while the rest loads, and handed over before the land is made. A city whose board is missing has no town.
   const bakedBoardPath=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?bakedBoardAsset(regionParam,resolvedYear):null;
@@ -1121,8 +1122,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionParam,resolvedYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs))
     :(runtimeKeepKey&&boardKept?keptBoard(runtimeKeepKey,resolvedYear,{clock:boardKept.clock}).then(kept=>kept?.board?{port:runtimeKeepKey,year:resolvedYear,board:kept.board,lived:{day:kept.day,days:0,keptAt:kept.keptAt??null}}:null).catch(()=>null):null);
   if(bakedBoardPath||runtimeKeepKey)requestBoardStampPipelines({device,shader}).catch(()=>{});
+  const useCompactScenery=isMobile||(device.limits?.maxStorageBufferBindingSize??Infinity)<256*1024*1024;
   let forestFailure=null;
-  const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
+  const startForestLoad=()=>canopyMode==='off'?Promise.resolve(null):loadForestScenery({
     assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
     skipRoots:useProcedural,
     deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
@@ -1131,13 +1133,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // (js/forest-groves.js). A coast that cannot load its grove keeps its planted trees alone, and says why.
   let groveFailure=null;
   const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
-  const grovePromise=canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
+  const startGroveLoad=()=>canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
   let meadowFailure=null;
   // Every coast grows the grass of its climate, as its forest does: the tropical sward where the place's climate is
   // subtropical (Saba's among them), the Portuguese elsewhere. There is no cold-temperate or boreal sward or forest
   // yet, so Québec, New England and the north take the Portuguese.
   const tropicalSward=forestMixParam?useSubtropicalForest:activeClimate.forestPackKind==='subtropical';
-  const meadowPromise=loadMeadowGrass({assets:tropicalSward?TROPICAL_MEADOW_GRASS_ASSETS:PORTUGAL_MEADOW_GRASS_ASSETS}).catch(error=>{meadowFailure=error.message;return null;});
+  const meadowAssets=useCompactScenery
+    ?(tropicalSward?TROPICAL_MEADOW_GRASS_MOBILE_ASSETS:PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS)
+    :(tropicalSward?TROPICAL_MEADOW_GRASS_ASSETS:PORTUGAL_MEADOW_GRASS_ASSETS);
+  const startMeadowLoad=()=>loadMeadowGrass({assets:meadowAssets}).catch(error=>{meadowFailure=error.message;return null;});
+  // On desktop, prefetch forest/groves/meadow in parallel with city/land for minimal latency.
+  // On mobile, serialize heavy continuum atlas decompressions (city -> forest -> meadow) to prevent Jetsam OOM spikes.
+  const forestPromise=isMobile?null:startForestLoad();
+  const grovePromise=isMobile?null:startGroveLoad();
+  const meadowPromise=isMobile?null:startMeadowLoad();
   const autoCurated1550=isKnownSpanishMain&&search.get('discover')!=='1'&&search.get('era')!=='2026'&&search.get('realDEM')!=='off';
   const useRealDEM=useProcedural&&search.get('realDEM')!=='off'&&!autoCurated1550;
   const proceduralGridOpts=isMobile
@@ -1258,8 +1268,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     return terrainNearSample(nearTile,x,z)??terrainSample(heights,x,z);
   };
-  // A coast's mesh is kept for what its points say of the ground (sand), not drawn: the land draws through the continuum.
-  let mesh=proceduralPack?proceduralPack.mesh:null;
+  // A coast's mesh is not drawn (the land draws through the continuum); extract only the compact 1-float/grid-point
+  // sand-kind array and immediately drop the 55+ MB CPU vertex/index buffers so mobile stays well below Jetsam limits.
+  const landKind=(vertices,n)=>{const kind=new Float32Array(n*n);if(vertices)for(let k=0;k<n*n;k++)kind[k]=vertices[k*8+7];return kind;};
+  let centerLandKind=proceduralPack?.mesh?.vertices?landKind(proceduralPack.mesh.vertices,activeRegion.size):null;
+  if(proceduralPack)proceduralPack.mesh=null;
+  if(preloaded1550?.upgradedPack)preloaded1550.upgradedPack.mesh=null;
   let groundPatches=createGroundCoverPatches(activeRegion,baseGroundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
   const nearBitmapPromise=nearTile?createImageBitmap(new Blob([nearTile.albedo],{type:'image/png'})):null;
   nearBitmapPromise?.catch(()=>{});
@@ -1598,8 +1612,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         {binding:2,resource:landSampler},
         {binding:3,resource:nearAlbedo.createView()},
       ];
-      // Keep crisp 64x64 texels per view for windows/gables/tiles; dense cities (>96 types) use 4x4 (16-view) grid so VRAM stays lean.
-      const cellSize=isMobile&&placedTypes.length>80?32:64;
+      // Keep crisp 64x64 texels per view for windows/gables/tiles; mobile uses 32x32 and dense cities (>96 types) use 4x4 grid so VRAM stays lean.
+      const cellSize=isMobile?32:64;
       const gridSize=placedTypes.length>96?4:6;
       const baked=await bakeContinuumCardAtlas({
         device,shader,renderer:cardRenderer,atlas,material:cityView.material,
@@ -1624,13 +1638,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
   const forestHeld=pack=>({roots:pack?.manifest?.rootCount??0,groveRoots:pack?.groveRoots??0,sections:pack?.sectionsResident??0,released:pack?.sectionsReleased??0});
   const forestStats={loaded:false,mode:canopyMode,error:forestFailure,groves:{loaded:false,error:groveFailure},coverage:null};
+  const mobilePause=ms=>isMobile?new Promise(r=>setTimeout(r,ms)):Promise.resolve();
   const forestReadyPromise=(async()=>{
-    forestPack=await forestPromise;
+    if(sceneryGate)await sceneryGate;
     if(terrainDisposed)return null;
-    grovePack=forestPack&&proceduralPack?await grovePromise:null;
+    forestPack=await (forestPromise??startForestLoad());
+    if(terrainDisposed)return null;
+    grovePack=forestPack&&proceduralPack?await (grovePromise??startGroveLoad()):null;
     if(terrainDisposed)return null;
     const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}):forestPack;
-    const made=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource:TERRAIN_FINISH_ONLY,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees)}).catch(error=>{forestFailure=error.message;console.error('forest continuum',error);return null;}):null;
+    const made=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource:TERRAIN_FINISH_ONLY,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),isMobile}).catch(error=>{forestFailure=error.message;console.error('forest continuum',error);return null;}):null;
     if(terrainDisposed){made?.destroy?.();return null;}
     forest=made;
     if(forest?.stats)Object.assign(forestStats,forest.stats);
@@ -1677,8 +1694,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     ?{x0:activeRegion.x-activeRegion.span/2,z0:activeRegion.z-activeRegion.span/2,g:activeRegion.span/1024}
     :{x0:ISLAND.x-ISLAND.span/2,z0:ISLAND.z-ISLAND.span/2,g:nearTile?nearTile.manifest.domain.spacing:2};
   let landGrid=landGridFor();
-  // Sand, from what the coast's mesh says of each lattice point.
-  const landKind=(vertices,n)=>{const kind=new Float32Array(n*n);if(vertices)for(let k=0;k<n*n;k++)kind[k]=vertices[k*8+7];return kind;};
   // Saba's surveyed bay: a lattice at the survey's own spacing over the island's patches that hold it, the island's
   // own surface round the survey. Kind 1 inside it, and how far the survey trusts each point.
   function landSabaWindow(cell){
@@ -1702,11 +1717,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       return {sx:0,sz:0,n:ISLAND.size,cell,heights,kind:null,authority:3,window:nearTile?landSabaWindow(cell):null,near:nearTile?[...nearTile.bounds]:null,land,captureLand};
     }
     const n=activeRegion.size;
-    return {sx:0,sz:0,n,cell:1024/(n-1),heights,kind:landKind(mesh?.vertices,n),authority:3,window:null,near:null,land,captureLand};
+    return {sx:0,sz:0,n,cell:1024/(n-1),heights,kind:centerLandKind,authority:3,window:null,near:null,land,captureLand};
   };
   const landSectionSpec=rec=>{
     const n=Math.round(Math.sqrt(rec.heights.length));
-    return {sx:rec.secX,sz:rec.secZ,n,cell:1024/(n-1),heights:rec.heights,kind:landKind(rec.meshVertsCpu,n),authority:rec.isMock?1:2,window:null,near:null,land:()=>rec.landGroup,captureLand:()=>rec.submergedGroup??null};
+    return {sx:rec.secX,sz:rec.secZ,n,cell:1024/(n-1),heights:rec.heights,kind:rec.landKind??landKind(rec.meshVertsCpu,n),authority:rec.isMock?1:2,window:null,near:null,land:()=>rec.landGroup,captureLand:()=>rec.submergedGroup??null};
   };
   // A piece new, changed or gone (null): it and the neighbours whose shared edges follow it are baked again. Until
   // then it draws its old ground with its new textures, since the old ones go; one gone goes at once.
@@ -1745,7 +1760,24 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   // Build fractured boulders, inland water, herds, and trade vessels in parallel.
   let boulderCardAtlas=null;
-  const [boulderRes, inlandWaterRes, herdsRes, tradeVesselsRes] = await Promise.all([
+  let herds=null;
+  const startHerds=()=>proceduralPack?createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}).then(h=>{
+    if(terrainDisposed){h?.destroy?.();return null;}
+    herds=h;
+    return herds;
+  }).catch(error=>{console.error('livestock herds',error);return null;}):Promise.resolve(null);
+  let pendingTradeSharedCrew=options?.sharedCrew??null;
+  const startTradeVessels=()=>proceduralPack?createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,clouds,shadowFormat:activeLandShadows.format,sharedCrew:pendingTradeSharedCrew,submerged:submerged??null,isMobile}).then(tv=>{
+    if(terrainDisposed){tv?.destroy?.();return null;}
+    tradeVessels=tv;
+    if(tradeVessels&&pendingTradeSharedCrew)tradeVessels.setSharedCrew?.(pendingTradeSharedCrew);
+    if(tradeVessels&&proceduralPack?.port?.country?.board){
+      tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
+    }
+    return tradeVessels;
+  }).catch(error=>{console.error('trade vessels',error);return null;}):Promise.resolve(null);
+  let tradeVessels=null;
+  const [boulderRes, inlandWaterRes] = await Promise.all([
     Promise.all([requestBoulderContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}),boulderViewPromise])
       .then(([atlas,programs,view])=>{
         const made=createBoulderContinuum({
@@ -1762,7 +1794,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           const baked=await bakeContinuumCardAtlas({
             device,shader,renderer:cardRenderer,atlas,material:view.material,
             typeIds,bakeGroup0Entries:[{binding:0,resource:landSampler},{binding:1,resource:albedo.createView()}],
-            cellSize:64,gridSize:6,tintMode:0,salt:view.material.salt??5,
+            cellSize:isMobile?32:64,gridSize:6,tintMode:0,salt:view.material.salt??5,
             batchSize:6,isCancelled:()=>terrainDisposed,label:'boulder cards',
           });
           if(!baked)return;
@@ -1774,21 +1806,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         return made;
       }).catch(error=>{console.error('boulder continuum',error);return null;}),
     proceduralPack?createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):Promise.resolve(null),
-    proceduralPack?createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):Promise.resolve(null),
-    proceduralPack?createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,clouds,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):Promise.resolve(null),
+    isMobile?Promise.resolve(null):startHerds(),
+    isMobile?Promise.resolve(null):startTradeVessels(),
   ]);
   boulderContinuum=boulderRes;
   let inlandWater=inlandWaterRes;
-  let herds=herdsRes;
-  let tradeVessels=tradeVesselsRes;
-  if(tradeVessels&&proceduralPack?.port?.country?.board){
-    tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
-  }
   // Stream the 186 MiB meadow grass atlas asynchronously so Frame 0 never stalls waiting for grass tufts.
   let meadowGrass=null,loadedMeadowPack=null;
   const meadowGrassStats={loaded:false,error:meadowFailure};
   const attachSectionMeadow=(rec)=>{
-    if(!rec||rec.meadowGrass||rec._meadowPending||!loadedMeadowPack||terrainDisposed)return;
+    if(isMobile||!rec||rec.meadowGrass||rec._meadowPending||!loadedMeadowPack||terrainDisposed)return;
     // Attach real procedural meadow grass to all adjacent coastal land sections (covering 24.5 km × 24.5 km continuously).
     if(Math.max(Math.abs(rec.secX|0),Math.abs(rec.secZ|0))>1)return;
     rec._meadowPending=true;
@@ -1803,11 +1830,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }).catch(()=>{rec._meadowPending=false;});
   };
   const meadowReadyPromise=(async()=>{
-    const meadowPack=await meadowPromise;
+    if(isMobile){await forestReadyPromise;await mobilePause(250);}
+    if(terrainDisposed)return null;
+    const meadowPack=await (meadowPromise??startMeadowLoad());
     if(!meadowPack||terrainDisposed)return null;
-    loadedMeadowPack=meadowPack;
     try{
       const made=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset});
+      // Release the full raw CPU meadow words once uploaded to the GPU; secondary sections reuse the cached GPU atlas
+      // and only read type-header metadata from the compact prefix.
+      loadedMeadowPack={manifest:meadowPack.manifest,words:continuumAtlasMetaWords(meadowPack.words)};
       if(terrainDisposed){made?.destroy?.();return null;}
       meadowGrass=made;
       if(craters)meadowGrass.bindCraters?.(craters);
@@ -1816,7 +1847,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       return meadowGrass;
     }catch(error){meadowFailure=error.message;meadowGrassStats.error=meadowFailure;return null;}
   })();
-  const sceneryReady=Promise.all([forestReadyPromise,meadowReadyPromise]).then(()=>true);
+  const sceneryReady=Promise.all([forestReadyPromise,meadowReadyPromise]).then(async()=>{
+    if(isMobile&&!terrainDisposed){
+      await mobilePause(250);
+      if(!terrainDisposed&&!herds)await startHerds();
+      await mobilePause(250);
+      if(!terrainDisposed&&!tradeVessels)await startTradeVessels();
+    }
+    return true;
+  });
   let tick=0;
 
   function regenerateTextureMips(tex,texSize){
@@ -1953,8 +1992,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       beaches:secPack.beaches,
       port:secPack.port,
       vegetation:secPack.vegetation,
-      // Kept for what its points say of the ground (sand); the section's land draws through the continuum.
-      meshVertsCpu:sMesh.vertices,
+      // Kept only as compact 1-float/grid-point sand-kind array; the section's land draws through the continuum.
+      landKind:landKind(sMesh.vertices,Math.round(Math.sqrt(secPack.heights.length))),
       portFractures:null,
       uniform:sUniform,
       albedo:sAlbedo,
@@ -1990,7 +2029,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       {taperUnconnectedOuter:true,refreshTextures:false}
     );
     adjRec._cachedForestPlanted=null;
-    adjRec.meshVertsCpu=adjRec.mesh.vertices;
+    if(adjRec.mesh?.vertices){adjRec.landKind=landKind(adjRec.mesh.vertices,Math.round(Math.sqrt(adjRec.heights.length)));adjRec.mesh=null;}
     landPiece(adjRec.key,landSectionSpec(adjRec));
     craters?.invalidate(sReg);
     adjRec.biome=synthesizeCoastalBiome(sReg,adjRec.heights,adjRec.beaches,adjRec.port,null);
@@ -2197,7 +2236,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         bordersModified=true;
         proceduralPack._cachedForestPlanted=null;
         device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
-        mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
+        const rebuiltMesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
+        centerLandKind=rebuiltMesh?.vertices?landKind(rebuiltMesh.vertices,activeRegion.size):centerLandKind;
         landCentre(proceduralPack.port?.riverCut);
         craters?.invalidate(activeRegion);
       }
@@ -2314,7 +2354,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     regionalDem:proceduralPack.regionalDem??null,
     biome:new Uint8Array(biome),
     albedo:proceduralPack.albedo?new Uint8Array(proceduralPack.albedo):null,
-    mesh:proceduralPack.mesh,
+    landKind:centerLandKind?new Float32Array(centerLandKind):null,
     vegetation:proceduralPack.vegetation,
     beaches:proceduralPack.beaches,
     views:proceduralPack.views,
@@ -2325,7 +2365,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let refreshBoardFabricFn=null;
 
   function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
-    if(terrainDisposed||!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
+    if(terrainDisposed||!proceduralPack||!upgradedPack?.heights||!(upgradedPack?.mesh||upgradedPack?.landKind))return false;
     fabricEpoch++;
     proceduralPack._cachedForestPlanted=null;
     upgradedPack._cachedForestPlanted=null;
@@ -2371,7 +2411,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         boardStamp=stamp;stamp.stamp(albedo,activeRegion.albedoSize);regenerateAlbedoMips();
       }).catch(()=>{});
     }
-    mesh=upgradedPack.mesh;
+    if(upgradedPack.mesh?.vertices){
+      centerLandKind=landKind(upgradedPack.mesh.vertices,activeRegion.size);
+      upgradedPack.mesh=null;
+    }else if(upgradedPack.landKind){
+      centerLandKind=upgradedPack.landKind;
+    }
     // A coast laid out wider or narrower puts every piece of land on another grid.
     if(landGrid.g!==activeRegion.span/1024){landGrid=landGridFor();landContinuum?.regrid(landGrid);for(const key of landSpecs.keys())landDirty.add(key);}
     landCentre(proceduralPack.port?.riverCut);
@@ -2951,7 +2996,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }));
       meadowGrass.setBallisticWakes(shots,rings);
     },
-    setSharedCrew(crewAssets){tradeVessels?.setSharedCrew?.(crewAssets);},
+    setSharedCrew(crewAssets){pendingTradeSharedCrew=crewAssets;tradeVessels?.setSharedCrew?.(crewAssets);},
     // Where the player's guns would fall now ({x,y,z,radius} in the scene's frame, or null): the city's buildings
     // there are cut finer. Four floats a frame at most, written only when they change.
     setGunneryAim(fall){cityAim=fall??null;cityContinuum?.setAim(cityAim);},

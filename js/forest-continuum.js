@@ -48,6 +48,16 @@ export const PORTUGAL_FOREST_CONTINUUM_ASSETS = Object.freeze({
   'manifest.json': 'assets/forest-scenery/portugal/continuum/manifest.json',
   'atlas.bin.gz': 'assets/forest-scenery/portugal/continuum/atlas.bin.gz',
 });
+// Compact mobile continuum packs (scripts/prepare-mobile-continuum.mjs): same physical 3D tree clusters, wind bones,
+// and far-body morphs with sub-centimetre finest levels pruned so mobile & 128 MiB GPUs stay inside one page and VRAM budget.
+export const FOREST_CONTINUUM_MOBILE_ASSETS = Object.freeze({
+  'manifest.json': 'assets/mobile-continuum/saba-forest/manifest.json',
+  'atlas.bin.gz': 'assets/mobile-continuum/saba-forest/atlas.bin.gz',
+});
+export const PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS = Object.freeze({
+  'manifest.json': 'assets/mobile-continuum/portugal-forest/manifest.json',
+  'atlas.bin.gz': 'assets/mobile-continuum/portugal-forest/atlas.bin.gz',
+});
 
 // A surface's layer among its prototype's materials, or FOREST_CONTINUUM_UNTEXTURED for one the pack colours alone (its
 // source layer -1): its vertex colour is then its albedo.
@@ -106,8 +116,10 @@ export function loadForestContinuum({ assets, fetchAsset = fetch }) {
   return loadContinuumAtlas({ assets, validate: validateForestContinuumManifest, label: 'forest', fetchAsset });
 }
 // The atlas of the pack a manifest describes, and its prototypes' fingerprint: a pack's continuum is its own.
-export function forestContinuumAssetsFor(manifest) {
+export function forestContinuumAssetsFor(manifest, { mobile = false } = {}) {
   const species = new Set(manifest.prototypes.map((p) => p.species));
   if (species.has('royal_palm') || species.has('ceiba') || species.has('mangrove')) return SUBTROPICAL_FOREST_CONTINUUM_ASSETS;
-  return manifest.prototypes.some((p) => Boolean(p.cohort)) ? PORTUGAL_FOREST_CONTINUUM_ASSETS : FOREST_CONTINUUM_ASSETS;
+  const isPortugal = manifest.prototypes.some((p) => Boolean(p.cohort));
+  if (mobile) return isPortugal ? PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS : FOREST_CONTINUUM_MOBILE_ASSETS;
+  return isPortugal ? PORTUGAL_FOREST_CONTINUUM_ASSETS : FOREST_CONTINUUM_ASSETS;
 }

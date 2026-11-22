@@ -363,6 +363,7 @@ export function checkContinuumAtlas(words, label = 'continuum') {
 }
 // A family's baked atlas, fetched, unpacked, checked against its manifest's receipt and checked as an atlas. `assets`
 // names its 'manifest.json' and 'atlas.bin.gz'; `validate` checks its manifest. Resolves to { manifest, words }.
+// Streams decompressed bytes directly into a single exact-sized Uint8Array so large atlases never double-buffer on CPU.
 export async function loadContinuumAtlas({ assets, validate, label, fetchAsset = fetch, verifySha256 = false }) {
   const get = async (path) => {
     const response = await fetchAsset(path);
@@ -371,19 +372,47 @@ export async function loadContinuumAtlas({ assets, validate, label, fetchAsset =
   };
   // Fetch manifest and compressed atlas concurrently to save a full round-trip on every continuum family.
   const [manifestRes, atlasRes] = await Promise.all([get(assets['manifest.json']), get(assets['atlas.bin.gz'])]);
-  const [manifestJson, bytesBuf] = await Promise.all([
-    manifestRes.json(),
-    new Response(atlasRes.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(),
-  ]);
-  const manifest = validate(manifestJson);
-  const bytes = new Uint8Array(bytesBuf);
-  if (bytes.byteLength !== manifest.atlas.bytes) throw Error(`The ${label} continuum atlas has the wrong size`);
+  const manifest = validate(await manifestRes.json());
+  const expectedBytes = manifest.atlas.bytes;
+  let bytes;
+  const stream = atlasRes.body?.pipeThrough ? atlasRes.body.pipeThrough(new DecompressionStream('gzip')) : null;
+  if (stream?.getReader) {
+    bytes = new Uint8Array(expectedBytes);
+    const reader = stream.getReader();
+    let offset = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (offset + value.byteLength > expectedBytes) {
+          await reader.cancel();
+          throw Error(`The ${label} continuum atlas has the wrong size`);
+        }
+        bytes.set(value, offset);
+        offset += value.byteLength;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    if (offset !== expectedBytes) throw Error(`The ${label} continuum atlas has the wrong size`);
+  } else {
+    const bytesBuf = await new Response(atlasRes.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+    bytes = new Uint8Array(bytesBuf);
+    if (bytes.byteLength !== expectedBytes) throw Error(`The ${label} continuum atlas has the wrong size`);
+  }
   const wantVerify = verifySha256 || (typeof location !== 'undefined' && new URLSearchParams(location.search).get('verifyAssets') === '1');
   if (wantVerify) {
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
     if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== manifest.atlas.sha256) throw Error(`The ${label} continuum atlas failed verification`);
   }
   return { manifest, words: checkContinuumAtlas(new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4), label) };
+}
+// Compact CPU metadata prefix of an atlas (header + type table + cluster table, typically <2% of atlas size),
+// sufficient for card-bake cluster cuts, type material reads, and GPU page counts after raw vertices are uploaded.
+export function continuumAtlasMetaWords(words) {
+  const cut = words[CONTINUUM_HEADER.verticesAt];
+  if (!(cut > 0) || words.length <= cut) return words;
+  return words.slice(0, cut);
 }
 // What each type of an atlas can enter in the lists at most: all its clusters, and its far body at the heaviest step
 // it is drawn at, in chunks.
@@ -399,7 +428,7 @@ export function continuumAtlasTypes(words) {
 // absent on disk), so continuumAtlasPages and uploadContinuumAtlas agree without changing on-disk packs.
 export function continuumAtlasTotalWords(words) {
   const H = CONTINUUM_HEADER;
-  return words.length + (words[H.cones] ? 0 : words[H.clusterCount]);
+  return (words[H.words] || words.length) + (words[H.cones] ? 0 : words[H.clusterCount]);
 }
 // Builds one pack4x8snorm-compatible u32 normal cone [nx, ny, nz, sinHalfAngle] per cluster directly from the atlas's
 // quantized vertices and triangle indices. Full-sphere clusters encode (0, 1, 0, 1.0) -> 0x7f007f00 to disable culling.

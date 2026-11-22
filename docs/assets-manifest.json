@@ -684,6 +684,16 @@
     "bytes": 337723061,
     "sha256": "895b0d80074131c7ac3759ae65fd5e267eee864f1bc135c4e9d567aa0ce764ca"
   },
+  "assets/mobile-continuum/saba-forest/atlas.bin.gz": {
+    "url": "assets/mobile-continuum/saba-forest/atlas.bin.21311f446ca6f168.gz",
+    "bytes": 3581729,
+    "sha256": "21311f446ca6f1683811a7e406381ce8222c292de9d11e335ba648f988badbd8"
+  },
+  "assets/mobile-continuum/portugal-forest/atlas.bin.gz": {
+    "url": "assets/mobile-continuum/portugal-forest/atlas.bin.35b8384c68958f3e.gz",
+    "bytes": 11366228,
+    "sha256": "35b8384c68958f3e951fed3392ecf18a8dfca67d45994c7e4a74f20e707496c3"
+  },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
     "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.03aaf54ab8042358.gz",
     "bytes": 194984318,
@@ -693,6 +703,16 @@
     "url": "assets/ground-cover/tropical/meadows-gpu/atlas.bin.a9010146ecdf6063.gz",
     "bytes": 147441086,
     "sha256": "a9010146ecdf606301632f209fbecec0cc739509ef40eb019fea8e6c5514d394"
+  },
+  "assets/mobile-continuum/portugal-meadow/atlas.bin.gz": {
+    "url": "assets/mobile-continuum/portugal-meadow/atlas.bin.1384cda45e7ee82b.gz",
+    "bytes": 6526843,
+    "sha256": "1384cda45e7ee82b433144e6f7458a1351e93b76686f1bf4fc529fbd1c56ae04"
+  },
+  "assets/mobile-continuum/tropical-meadow/atlas.bin.gz": {
+    "url": "assets/mobile-continuum/tropical-meadow/atlas.bin.df2435a4ab2392d8.gz",
+    "bytes": 5581612,
+    "sha256": "df2435a4ab2392d81f829d4fe40ef28619be6188280107575cbcbe1555c93718"
   },
   "assets/world/hyg-stars.bin": {
     "url": "assets/world/hyg-stars.e648341c03cb753b.bin",
@@ -1088,6 +1108,16 @@
     "url": "assets/forest-scenery/portugal/continuum/manifest.71564486f344ac22.json",
     "bytes": 109236,
     "sha256": "71564486f344ac222b81321543d9c2f22e513cb2408698c2c635b738b39863f5"
+  },
+  "assets/mobile-continuum/saba-forest/manifest.json": {
+    "url": "assets/mobile-continuum/saba-forest/manifest.9a1b529407787ba0.json",
+    "bytes": 60618,
+    "sha256": "9a1b529407787ba05dbc7120f6e7eb3c0e4f9c1c7eb0e4a875b3a54d76c1b2b0"
+  },
+  "assets/mobile-continuum/portugal-forest/manifest.json": {
+    "url": "assets/mobile-continuum/portugal-forest/manifest.e1f82efad47c67ff.json",
+    "bytes": 144329,
+    "sha256": "e1f82efad47c67ff488a5c659117d58b6a4dc87ab712cb43bebe827d7ee09abd"
   },
   "assets/forest-scenery/saba/manifest.json": {
     "url": "assets/forest-scenery/saba/manifest.c0605e02c0bf4a37.json",
@@ -2025,9 +2055,9 @@
     "sha256": "40250fb88f9c43af3049ff419bbf636ab5f088afc3126de2d675b93fdd4f7313"
   },
   "assets/continuum/bake-worker.js": {
-    "url": "assets/continuum/bake-worker.87c332bf551a2fd5.js",
+    "url": "assets/continuum/bake-worker.031c62f3eb6c4365.js",
     "bytes": 176074,
-    "sha256": "87c332bf551a2fd511e805ca54c1910068f756a0c36adfea9609c093c8b643f7"
+    "sha256": "031c62f3eb6c4365df8f16276991f1e5dbd77f32a9cfc687f9f535d9fdbcd873"
   },
   "assets/ports/1550/land-materials-pbr.png": {
     "url": "assets/ports/1550/land-materials-pbr.1d2651bbbcdd39c4.png",
@@ -2043,6 +2073,16 @@
     "url": "assets/ground-cover/tropical/meadows-gpu/manifest.d028dff1467195f5.json",
     "bytes": 20686,
     "sha256": "d028dff1467195f510fd09251808d8a406f1d7748b8265e4d2fbdd84a180c044"
+  },
+  "assets/mobile-continuum/portugal-meadow/manifest.json": {
+    "url": "assets/mobile-continuum/portugal-meadow/manifest.f2cadabb1335fe6e.json",
+    "bytes": 25742,
+    "sha256": "f2cadabb1335fe6e9283eb9e34b2252da94bc50e409cb749fde3d971240b09b2"
+  },
+  "assets/mobile-continuum/tropical-meadow/manifest.json": {
+    "url": "assets/mobile-continuum/tropical-meadow/manifest.dbe1f95ec438ebd1.json",
+    "bytes": 25729,
+    "sha256": "dbe1f95ec438ebd1a30f0dcbf28ce5b0675d0e1d8fb7a6b80f148d940da3892d"
   },
   "assets/ships/continuum/trade-cog-underway/manifest.json": {
     "url": "assets/ships/continuum/trade-cog-underway/manifest.d48de66d0f072323.json",

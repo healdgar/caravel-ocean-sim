@@ -7,7 +7,7 @@
 // intersection and color-bleed stains permanently.
 import {
   CONTINUUM_ATLAS_VERSION, CONTINUUM_HEADER_WORDS, CONTINUUM_NEVER,
-  continuumAtlasTypes, loadContinuumAtlas,
+  continuumAtlasMetaWords, continuumAtlasTypes, loadContinuumAtlas,
 } from './continuum-format.js';
 import { uploadContinuumAtlas } from './continuum-scene.js';
 
@@ -91,12 +91,10 @@ export function loadClothingContinuum(device, { fetchAsset = fetch } = {}) {
       validate: validateClothingContinuumManifest,
       label: 'clothing continuum',
       fetchAsset,
-    }).then(({ manifest, words }) => ({
-      manifest,
-      words,
-      types: continuumAtlasTypes(words),
-      atlas: uploadContinuumAtlas(device, words, 'clothing continuum'),
-    })).catch((err) => {
+    }).then(({ manifest, words }) => {
+      const atlas = uploadContinuumAtlas(device, words, 'clothing continuum');
+      return { manifest, words: continuumAtlasMetaWords(words), types: atlas.types, atlas };
+    }).catch((err) => {
       if (clothingContinuumCache.get(device) === pending) clothingContinuumCache.delete(device);
       throw err;
     });

@@ -507,7 +507,7 @@ export function forestPackRoots(pack){
 // cuts each at the scene's one pixel error and draws it with the forest's material, and casts its shadow. Nothing here
 // selects, lists or draws a tree of its own.
 export async function createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat,terrainSource,pack,groundSample,
-  savedStrikes=null,strikeOrigin={x:0,z:0},onStrikesChanged=null}){
+  savedStrikes=null,strikeOrigin={x:0,z:0},onStrikesChanged=null,isMobile=false}){
   if(samples<2)throw Error('Forest leaf coverage requires MSAA');
   const m=pack.manifest,allocated=[],B=GPUBufferUsage,P=m.prototypes.length;
   const make=(data,usage,label)=>{if(data.byteLength>device.limits.maxBufferSize)throw Error(label+' exceeds GPU maxBufferSize');const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST,label});allocated.push(b);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
@@ -525,8 +525,10 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
     // The pack's atlas, its programs, its view and its stand pass, asked for at once while the roots are laid, the
-    // programs binding as many pages as the atlas takes.
-    const assets=forestContinuumAssetsFor(m);
+    // programs binding as many pages as the atlas takes. Mobile and 128 MiB storage-binding GPUs load the compact
+    // mobile continuum pack (26.5 MB vs 807 MB) so the atlas fits one page and stays safely inside mobile VRAM.
+    const compactContinuum=isMobile||(device.limits?.maxStorageBufferBindingSize??Infinity)<256*1024*1024;
+    const assets=forestContinuumAssetsFor(m,{mobile:compactContinuum});
     const atlasReady=requestContinuumAtlas(device,`forest ${assets['manifest.json']}`,()=>loadForestContinuum({assets})),pages=atlasReady.then(a=>a.pages.length);
     const ready=Promise.all([
       atlasReady,
@@ -777,7 +779,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       const cardAtlas=await bakeContinuumCardAtlas({
         device,shader,renderer:cardRenderer,atlas,material:view.material,
         typeIds:Array.from({length:P},(_,i)=>i),
-        bakeGroup0Entries:surfaceOwn,cellSize:128,batchSize:1,tintMode:CONTINUUM_CARD_TINT_FOREST,salt:3,
+        bakeGroup0Entries:surfaceOwn,cellSize:isMobile?64:128,batchSize:1,tintMode:CONTINUUM_CARD_TINT_FOREST,salt:3,
         isCancelled:()=>destroyed,label:'forest cards',
       });
       if(!cardAtlas)return;
@@ -786,7 +788,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       scene?.setCards(cardAtlas,cardRenderer,cardBindings);
     }).catch(error=>console.error('Forest octahedral card bake failed:',error));
     const continuumStats=atlas.manifest.totals;
-    stats.continuum={types:continuumStats.types,clusters:continuumStats.clusters,vertices:continuumStats.vertices,atlasBytes:atlas.words.byteLength,firstLayers};
+    stats.continuum={types:continuumStats.types,clusters:continuumStats.clusters,vertices:continuumStats.vertices,atlasBytes:atlas.atlasBytes??atlas.words.byteLength,firstLayers};
     // A ball finds its trees through these: one grid an array, built off the frame one after another, nearest
     // first, each serving as soon as it is ready; an array let go takes its grid with it.
     // A pack's trees are struck as the wood measured for their species (js/forest-trunk-shapes.js). Full-grown trees are

@@ -108,7 +108,7 @@ fn forestStandTurn(yaw:f32,v:vec3f)->vec3f{let c=cos(yaw);let s=sin(yaw);return 
 fn forestStandOutside(relative:vec3f,reach:f32)->bool{
  let m=F.viewProj;let p=vec4f(relative,1.0);
  let w=vec4f(m[0].w,m[1].w,m[2].w,m[3].w);let x=vec4f(m[0].x,m[1].x,m[2].x,m[3].x);let y=vec4f(m[0].y,m[1].y,m[2].y,m[3].y);
- let planes=array<vec4f,5>(w+x,w-x,w+y,w-y,w);
+ var planes=array<vec4f,5>(w+x,w-x,w+y,w-y,w);
  for(var i=0u;i<5u;i++){if(dot(planes[i],p)< -reach*length(planes[i].xyz)){return true;}}
  return false;
 }
@@ -129,7 +129,8 @@ fn forestStandOwn(tree:u32,touched:bool,near:f32,lane:u32)->vec2f{
  if(slot<0&&touched){
   for(var k=0u;k<12u;k++){
    let at=(start+k*stride)&${FOREST_WIND_OWN - 1}u;
-   if(atomicCompareExchangeWeak(&forestWindOwners[at],0u,tree+1u).exchanged){
+   // Avoid atomicCompareExchangeWeak: Apple WebKit MSL codegen fails with "field may not be qualified with an address space".
+   if(atomicLoad(&forestWindOwners[at])==0u&&atomicMax(&forestWindOwners[at],tree+1u)==0u){
     slot=i32(at);
     let source=${FOREST_WIND_STATE_BONES}u+lane*FOREST_WIND_BONES*2u;let into=${FOREST_WIND_STATE_BONES}u+(forestWind.counts.z*${FOREST_WIND_LANES}u+at)*FOREST_WIND_BONES*2u;
     for(var b=0u;b<FOREST_WIND_BONES*2u;b++){forestWindState[into+b]=forestWindState[source+b];}

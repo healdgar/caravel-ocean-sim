@@ -13,7 +13,7 @@ import { continuumGroundView } from './continuum-ground.js';
 import { continuumHiZView, continuumHiZUniform, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from './continuum-hiz.js';
 import {
   CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS,
-  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, buildContinuumClusterCones,
+  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones,
 } from './continuum-format.js';
 import {
   CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_BATCH, CONTINUUM_STATE_ENTRIES,
@@ -174,11 +174,27 @@ export function continuumCaptureDraw(capture, main, shadows) {
 }
 
 // A family's baked atlas, fetched once a device by `load` (resolving to { manifest, words }) and uploaded.
+// Releases the full CPU vertex/index/stream word array immediately after GPU upload, retaining only the compact
+// header + types + clusters prefix (<2%) needed by card baking and metadata readers.
 export function requestContinuumAtlas(device, label, load) {
   return requestOnce(device, `${label} continuum atlas`, async () => {
     const { manifest, words } = await load();
-    return { manifest, words, ...uploadContinuumAtlas(device, words, label) };
+    const uploaded = uploadContinuumAtlas(device, words, label);
+    const metaWords = continuumAtlasMetaWords(words);
+    return { manifest, words: metaWords, atlasBytes: words.byteLength, ...uploaded };
   });
+}
+const CONTINUUM_UPLOAD_CHUNK_WORDS = 4 * 1024 * 1024; // 16 MiB chunks prevent large IPC staging spikes in WebKit
+function writeBufferChunked(device, buffer, dstByteOffset, src, startWord, endWord) {
+  for (let at = startWord; at < endWord; at += CONTINUUM_UPLOAD_CHUNK_WORDS) {
+    const next = Math.min(endWord, at + CONTINUUM_UPLOAD_CHUNK_WORDS);
+    device.queue.writeBuffer(buffer, dstByteOffset + (at - startWord) * 4, src.subarray(at, next));
+  }
+}
+// Isolated factory so the returned destroy() closure never captures uploadContinuumAtlas's `words` or `cones` buffers
+// in a shared JS engine function context (which would otherwise pin 100-800 MB of raw CPU atlas words forever).
+function makeAtlasDestroy(pages) {
+  return function destroy() { for (const page of pages) page.destroy(); };
 }
 // An atlas on the GPU, in as many pages as the device needs to bind it (continuumAtlasPages), with what each of its
 // types can enter in the lists (continuumAtlasTypes): { pages, buffer (the first page, which holds its header and
@@ -190,13 +206,14 @@ export function uploadContinuumAtlas(device, words, label) {
   const conesAt = cones ? words.length : words[CONTINUUM_HEADER.cones];
   const totalWords = cones ? words.length + cones.length : words.length;
   const count = continuumAtlasPages(device, totalWords), { pageWords } = continuumAtlasPaging(device, count);
-  const pages = Array.from({ length: count }, (_, p) => {
+  const pages = [];
+  for (let p = 0; p < count; p++) {
     const pageStart = p * pageWords;
     const pageEnd = Math.min(totalWords, (p + 1) * pageWords);
     const buffer = device.createBuffer({ label: `${label} continuum atlas${count > 1 ? ` page ${p}` : ''}`, size: (pageEnd - pageStart) * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     const wEnd = Math.min(words.length, pageEnd);
     if (pageStart < wEnd) {
-      device.queue.writeBuffer(buffer, 0, words.subarray(pageStart, wEnd));
+      writeBufferChunked(device, buffer, 0, words, pageStart, wEnd);
     }
     if (p === 0 && cones) {
       device.queue.writeBuffer(buffer, CONTINUUM_HEADER.cones * 4, new Uint32Array([conesAt]));
@@ -204,12 +221,12 @@ export function uploadContinuumAtlas(device, words, label) {
     if (cones) {
       const cStart = Math.max(pageStart, words.length);
       if (cStart < pageEnd) {
-        device.queue.writeBuffer(buffer, (cStart - pageStart) * 4, cones.subarray(cStart - words.length, pageEnd - words.length));
+        writeBufferChunked(device, buffer, (cStart - pageStart) * 4, cones, cStart - words.length, pageEnd - words.length);
       }
     }
-    return buffer;
-  });
-  return { pages, buffer: pages[0], types: continuumAtlasTypes(words), destroy() { for (const page of pages) page.destroy(); } };
+    pages.push(buffer);
+  }
+  return { pages, buffer: pages[0], types: continuumAtlasTypes(words), destroy: makeAtlasDestroy(pages) };
 }
 
 // Where a scene of `capacity` instances keeps its lists in its one list buffer: CONTINUUM_STATE_ENTRIES entries an

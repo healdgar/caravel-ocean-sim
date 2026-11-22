@@ -7,7 +7,7 @@
 // continuum profile and shaded with anisotropic dual-lobe fiber highlights.
 import {
   CONTINUUM_ATLAS_VERSION, CONTINUUM_HEADER_WORDS, CONTINUUM_NEVER,
-  continuumAtlasTypes, loadContinuumAtlas,
+  continuumAtlasMetaWords, continuumAtlasTypes, loadContinuumAtlas,
 } from './continuum-format.js';
 import { uploadContinuumAtlas } from './continuum-scene.js';
 
@@ -103,12 +103,10 @@ export function loadHairContinuum(device, { fetchAsset = fetch } = {}) {
       validate: validateHairContinuumManifest,
       label: 'hair continuum',
       fetchAsset,
-    }).then(({ manifest, words }) => ({
-      manifest,
-      words,
-      types: continuumAtlasTypes(words),
-      atlas: uploadContinuumAtlas(device, words, 'hair continuum'),
-    })).catch((err) => {
+    }).then(({ manifest, words }) => {
+      const atlas = uploadContinuumAtlas(device, words, 'hair continuum');
+      return { manifest, words: continuumAtlasMetaWords(words), types: atlas.types, atlas };
+    }).catch((err) => {
       if (hairContinuumCache.get(device) === pending) hairContinuumCache.delete(device);
       throw err;
     });

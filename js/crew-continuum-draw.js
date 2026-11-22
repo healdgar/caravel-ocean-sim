@@ -9,7 +9,7 @@
 // draw them. The CPU writes only each person's orders and the batch's few words.
 import { loadCrewGLB } from './gltf.js';
 import { requestOnce } from './gpu-program-cache.js';
-import { continuumAtlasTypes, continuumRoom, loadContinuumAtlas } from './continuum-format.js';
+import { continuumAtlasMetaWords, continuumAtlasTypes, continuumRoom, loadContinuumAtlas } from './continuum-format.js';
 import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, uploadContinuumAtlas, createContinuumScene } from './continuum-scene.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { transcodeBC7Texture } from './bc7-transcode.js';
@@ -103,17 +103,22 @@ async function openCrewContinuumBody(device, id, fetchAsset) {
   };
   const { width, height, levels } = manifest.texture;
   const label = `crew continuum ${id} picture`;
+  const isMobileCrew = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  const dropTopMip = isMobileCrew && !codec.transcode && levels.length > 1 && width >= 2048 && height >= 2048;
+  const texLevels = dropTopMip ? levels.slice(1) : levels;
+  const texW = texLevels[0].width, texH = texLevels[0].height;
   const texture = codec.transcode
     ? await transcodeBC7Texture(device, { bytes: picture, width, height, levels, format: codec.format, label })
-    : device.createTexture({ label, size: [width, height], mipLevelCount: levels.length, format: codec.format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    : device.createTexture({ label, size: [texW, texH], mipLevelCount: texLevels.length, format: codec.format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
   if (!codec.transcode) {
-    levels.forEach((level, mipLevel) => {
+    texLevels.forEach((level, mipLevel) => {
       const across = Math.ceil(level.width / 4), down = Math.ceil(level.height / 4);
       device.queue.writeTexture({ texture, mipLevel }, picture, { offset: level.offset, bytesPerRow: across * 16, rowsPerImage: down }, [across * 4, down * 4]);
     });
   }
+  const uploadedAtlas = uploadContinuumAtlas(device, words, `crew ${id}`);
   return {
-    id, manifest, standIn, words, types: continuumAtlasTypes(words), atlas: uploadContinuumAtlas(device, words, `crew ${id}`),
+    id, manifest, standIn, words: continuumAtlasMetaWords(words), types: uploadedAtlas.types, atlas: uploadedAtlas,
     rig: uniform(`crew continuum ${id} rig`, crewContinuumRig(manifest)), wear: uniform(`crew continuum ${id} wear`, crewContinuumWear(manifest)),
     texture, albedo: texture.createView(),
     sampler: device.createSampler({ label: `crew continuum ${id} picture`, magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', maxAnisotropy: 8 }),

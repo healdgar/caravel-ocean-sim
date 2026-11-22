@@ -36,7 +36,7 @@ import { poseCrewFingers } from './crew-physics.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { withNeuralPbrTradeVessels } from './wgsl/neural-pbr.js';
 import { SHIP_CONTINUUM_BODIES, SHIP_CONTINUUM_MATERIAL, SHIP_CONTINUUM_TURN_WGSL, loadShipContinuum, shipContinuumTurn } from './ship-continuum.js';
-import { CONTINUUM_KIND, CONTINUUM_DAMAGED, CONTINUUM_IMPORTANT_FLAG, CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, continuumRoom } from './continuum-format.js';
+import { CONTINUUM_KIND, CONTINUUM_DAMAGED, CONTINUUM_IMPORTANT_FLAG, CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, continuumAtlasMetaWords, continuumRoom } from './continuum-format.js';
 import { CONTINUUM_RECORD_WGSL } from './wgsl/continuum-cut.js';
 import { SHIP_RIDER_HEADER, SHIP_DRAPED_SAILS, SHIP_DRAPED_OARS, SHIP_DRAPED_BLOCK, SHIP_DRAPED_CANVAS, SHIP_DRAPED_OARED, SHIP_DRAPED_HELM } from './wgsl/ship-kinds.js';
 import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, uploadContinuumAtlas, createContinuumScene } from './continuum-scene.js';
@@ -1741,28 +1741,39 @@ function buildArchetypeData(index) {
     ? Math.max(1.95, Math.min(2.25, maxYDesign * designScale[1] + 1.05))
     : Math.max(0.5, maxYDesign * designScale[1]);
 
-  const partAssembly = createPartAssemblyCatalog({
-    domain: 'ship',
-    modelId: spec.modelId,
-    vertices: preFracture.vertices,
-    vertexStride: 9,
-    indices: preFracture.indices,
-    groups: preFracture.groups,
-  });
-
-  const rawCollider = createShipCollider({
-    model,
-    vertices: preFracture.vertices,
-    indices: preFracture.indices,
-    groups: preFracture.groups,
-    fracture: preFracture.fracture,
-  });
-  const collider = {
-    ...rawCollider,
-    frame: {
-      ...rawCollider.frame,
-      verticalScale: designScale[1],
-    },
+  let cachedPartAssembly = null;
+  let cachedCollider = null;
+  const getPartAssembly = () => {
+    if (!cachedPartAssembly) {
+      cachedPartAssembly = createPartAssemblyCatalog({
+        domain: 'ship',
+        modelId: spec.modelId,
+        vertices: preFracture.vertices,
+        vertexStride: 9,
+        indices: preFracture.indices,
+        groups: preFracture.groups,
+      });
+    }
+    return cachedPartAssembly;
+  };
+  const getCollider = () => {
+    if (!cachedCollider) {
+      const rawCollider = createShipCollider({
+        model,
+        vertices: preFracture.vertices,
+        indices: preFracture.indices,
+        groups: preFracture.groups,
+        fracture: preFracture.fracture,
+      });
+      cachedCollider = {
+        ...rawCollider,
+        frame: {
+          ...rawCollider.frame,
+          verticalScale: designScale[1],
+        },
+      };
+    }
+    return cachedCollider;
   };
 
   const baseHydro = spec.modelId === 'lusoria'
@@ -1791,9 +1802,9 @@ function buildArchetypeData(index) {
     vertices: preFracture.vertices,
     indices: preFracture.indices,
     groups: preFracture.groups,
-    partAssembly,
+    get partAssembly() { return getPartAssembly(); },
     fracture: preFracture.fracture,
-    collider,
+    get collider() { return getCollider(); },
     vertexCount: Math.floor(preFracture.vertices.length / 9),
     indexCount: preFracture.indices.length,
     triangleCount: Math.floor(preFracture.indices.length / 3),
@@ -4152,10 +4163,24 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
   return ai;
 }
 
+function archetypeMetricsLite(index) {
+  const spec = ARCHETYPE_SPECS[index];
+  const model = getShipModel(spec.modelId);
+  const designScale = archetypeDesignScale(spec, model);
+  const yRatio0 = designScale[1] / (model.designFrame.verticalScale || 1);
+  const baseHydro = spec.modelId === 'lusoria'
+    ? rowingDesign('lusoria')
+    : boatHydrodynamics(spec.length, spec.beam, 14, 0, spec.modelId);
+  const draft = spec.modelId === 'lusoria'
+    ? 0.305
+    : Math.max(0.85, (baseHydro.draft - baseHydro.sinkage) * yRatio0);
+  return { designScale, draft };
+}
+
 function buildArchetypeScaleWGSL() {
   const rows = [];
   for (let i = 0; i < TRADE_VESSEL_ARCHETYPES; i++) {
-    const a = getTradeVesselArchetype(i);
+    const a = archetypeMetricsLite(i);
     rows.push(`vec4f(${a.designScale[0].toFixed(6)}, ${a.designScale[1].toFixed(6)}, ${a.designScale[2].toFixed(6)}, ${a.draft.toFixed(4)})`);
   }
   return `const ARCHETYPE_SCALES = array<vec4f, ${TRADE_VESSEL_ARCHETYPES}>(\n  ${rows.join(',\n  ')}\n);`;
@@ -4174,12 +4199,46 @@ function buildBargeOarPivotsWGSL() {
 const BARGE_ROW_SWEEP_RAD = 0.30;
 const BARGE_ROW_DIP_RAD = 0.12;
 
+// Pre-measured deterministic sail brail yard/peak/tack coordinates for the 7 static trade vessel archetypes.
+// Keeping these as static constants avoids synchronously building all 7 full ship assemblies (~480–850 MB CPU RAM
+// and ~8.5 s on WebKit) at top-level module evaluation time before WebGPU even initializes.
+const STATIC_SAIL_BRAIL_SPECS = Object.freeze({
+  0: {
+    1: { isLateen: false, yardY: 6.2130, yardZ: -3.2969, footY: 1.3590 },
+    2: { isLateen: false, yardY: 8.3419, yardZ: -0.2121, footY: 1.3590 },
+    3: { isLateen: true, peak: [0.3531, 7.4904, 5.5740], tack: [0.4514, 2.6364, 1.6437] },
+  },
+  1: {
+    0: { isLateen: false, yardY: 5.6761, yardZ: -0.4648, footY: 2.7490 },
+  },
+  2: {
+    1: { isLateen: false, yardY: 5.8670, yardZ: -3.8024, footY: 1.6554 },
+    2: { isLateen: false, yardY: 7.0954, yardZ: -0.2814, footY: 2.0941 },
+    3: { isLateen: true, peak: [0.3708, 6.5689, 5.6834], tack: [0.4196, 2.5328, 3.7320] },
+    4: { isLateen: false, yardY: 9.2012, yardZ: -0.2134, footY: 7.6219 },
+    5: { isLateen: false, yardY: 1.7870, yardZ: -7.3000, footY: 0.7341 },
+  },
+  3: {
+    0: { isLateen: false, yardY: 5.1884, yardZ: -1.5283, footY: 1.5031 },
+  },
+  4: {
+    0: { isLateen: false, yardY: 0.4177, yardZ: 0.1856, footY: 0.2871 },
+  },
+  5: {
+    4: { isLateen: true, peak: [0.3230, 10.8145, 2.0128], tack: [0.5213, 1.9670, -5.9197] },
+    8: { isLateen: true, peak: [0.3346, 7.9561, 4.7082], tack: [0.4682, 1.7969, -0.6352] },
+    12: { isLateen: true, peak: [0.3441, 5.8123, 6.2337], tack: [0.4223, 2.3073, 3.1059] },
+  },
+  6: {
+    8: { isLateen: true, peak: [0.3334, 6.0781, 3.0697], tack: [0.4639, 1.5398, -2.1525] },
+  },
+});
+
 function buildSailBrailWGSL() {
   const rowsA = [];
   const rowsB = [];
   for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-    const arch = getTradeVesselArchetype(a);
-    const specs = arch.sailBrailSpecs || {};
+    const specs = STATIC_SAIL_BRAIL_SPECS[a] || {};
     for (let s = 0; s < 16; s++) {
       const rec = specs[s];
       if (!rec) {
@@ -5600,6 +5659,7 @@ export async function createTradeVessels({
   waterOptics = null,
   submerged = null,
   fetchAsset = fetch,
+  isMobile = false,
 } = {}) {
   if (!device || !shader || !resources) return null;
 
@@ -5728,8 +5788,10 @@ export async function createTradeVessels({
   // damaged vessel's flying shards reach beyond.
   const atlasWords = shipData.words;
   const atlas = uploadContinuumAtlas(device, atlasWords, 'trade vessel');
-  const atlasFloats = new Float32Array(atlasWords.buffer, atlasWords.byteOffset, atlasWords.length);
-  const typeRadius = atlas.types.map((_, t) => atlasFloats[atlasWords[CONTINUUM_HEADER.typesAt] + t * CONTINUUM_TYPE_WORDS + CONTINUUM_TYPE.sphere + 3]);
+  const atlasMetaWords = continuumAtlasMetaWords(atlasWords);
+  const atlasFloats = new Float32Array(atlasMetaWords.buffer, atlasMetaWords.byteOffset, atlasMetaWords.length);
+  const typeRadius = atlas.types.map((_, t) => atlasFloats[atlasMetaWords[CONTINUUM_HEADER.typesAt] + t * CONTINUUM_TYPE_WORDS + CONTINUUM_TYPE.sphere + 3]);
+  shipData.words = atlasMetaWords;
 
   // The scene's pose buffer (js/wgsl/ship-kinds.js): each archetype's DRAPED block, then a RIDER header for each slot
   // (where her posed assembly begins and its stride; her design scale), then each slot's posed assembly, each run
@@ -5774,10 +5836,10 @@ export async function createTradeVessels({
       if (destroyed) return;
       const cardBindings = createContinuumCardSceneBindings({ device, renderer: cardRenderer, resources, clouds });
       const cardAtlas = await bakeContinuumCardAtlas({
-        device, shader, renderer: cardRenderer, atlas, words: atlasWords, material: view.material,
+        device, shader, renderer: cardRenderer, atlas, words: atlasMetaWords, material: view.material,
         typeIds: Array.from({ length: TRADE_VESSEL_ARCHETYPES }, (_, i) => i),
         bakeGroup0Entries: [{ binding: 0, resource: oakView }, { binding: 1, resource: oakSampler }],
-        cellSize: 128, batchSize: 1, tintMode: CONTINUUM_CARD_TINT_VESSEL, salt: 5,
+        cellSize: isMobile ? 64 : 128, batchSize: 1, tintMode: CONTINUUM_CARD_TINT_VESSEL, salt: 5,
         isCancelled: () => destroyed, label: 'trade vessel cards',
       });
       if (!cardAtlas) return;
