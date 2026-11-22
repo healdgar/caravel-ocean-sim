@@ -1104,22 +1104,32 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
       relief=detailA*0.0024*archLodFade;
       roughness=clamp(pbr.roughness-0.16+detailB*0.025,0.44,0.72);
       ambientVisibility=(0.44+0.34*max(n.y,0.0))*aoVis*pbr.ao;
-      // Intertidal marine algae & barnacle biofouling on submerged/splash-zone dock pilings (excluding carved canoes, kind.y > 0.85)
-      let pilingTide=(1.0-smoothstep(0.15,1.45,world.y))*(1.0-smoothstep(0.82,0.89,in.kind.y))*clamp(0.55+0.45*detailA,0.0,1.0);
-      albedo=mix(albedo,vec3f(0.055,0.082,0.042),pilingTide*0.62);
-      roughness=mix(roughness,0.86,pilingTide*0.5);
+      // Intertidal marine algae, capillary wet darkening, and glossy splash sheen on dock pilings & water stairs (excluding canoes, kind.y > 0.85)
+      let seaSplashH=clamp(select(0.75,F.cascL[1].z,F.cascL[1].w>1.0)+F.windP[0].z*0.04,0.35,2.2);
+      let timberSplashTop=mix(0.68,1.55,clamp((seaSplashH-0.35)/1.85,0.0,1.0))+detailA*0.16;
+      let notCanoe=1.0-smoothstep(0.82,0.89,in.kind.y);
+      let pilingTide=(1.0-smoothstep(0.12,min(1.35,timberSplashTop*0.92),world.y))*notCanoe*clamp(0.55+0.45*detailA,0.0,1.0);
+      let pilingWet=(1.0-smoothstep(0.05,timberSplashTop,world.y))*notCanoe;
+      albedo=mix(albedo,vec3f(0.055,0.082,0.042),pilingTide*0.58);
+      albedo*=mix(1.0,0.52,pilingWet);
+      roughness=mix(mix(roughness,0.84,pilingTide*0.42),0.24,pilingWet*0.82);
+      surfaceWet=max(surfaceWet,pilingWet*0.82);
     }else if(in.kind.x<11.5){
       // Kind 11: MaterialCraft-cooked coursed Pedra Lioz & coral-limestone ashlar masonry
       let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
       let damp=smoothstep(0.2,3.8,world.y);
       let liozWarmth=vec3f(1.00,0.99,0.96);
       let stoneBase=pbr.albedo*mix(vec3f(0.76,0.75,0.72),liozWarmth,damp)*(0.96+detailA*0.06+detailB*0.03);
-      let tidalMoss=(1.0-smoothstep(0.18,1.55,world.y))*vertWall*clamp(0.55+0.45*detailA,0.0,1.0);
-      let fouledStone=mix(stoneBase,vec3f(0.085,0.135,0.056),tidalMoss*0.62);
-      albedo=fouledStone*shadeAlbedo;
+      let seaSplashH=clamp(select(0.75,F.cascL[1].z,F.cascL[1].w>1.0)+F.windP[0].z*0.04,0.35,2.2);
+      let quaySplashTop=mix(0.65,1.65,clamp((seaSplashH-0.35)/1.85,0.0,1.0))+detailA*0.18;
+      let tidalMoss=(1.0-smoothstep(0.12,min(1.42,quaySplashTop*0.88),world.y))*vertWall*clamp(0.55+0.45*detailA,0.0,1.0);
+      let quayWet=(1.0-smoothstep(0.04,quaySplashTop,world.y))*(0.55+0.45*vertWall);
+      let fouledStone=mix(stoneBase,vec3f(0.075,0.120,0.048),tidalMoss*0.56);
+      albedo=fouledStone*shadeAlbedo*mix(1.0,0.48,quayWet);
       archNormalOffset=pbr.normalOffset*0.65;
       relief=detailA*0.004*archLodFade;
-      roughness=clamp(pbr.roughness+(1.0-damp)*0.05+tidalMoss*0.12,0.62,0.92);
+      roughness=clamp(mix(pbr.roughness+(1.0-damp)*0.05+tidalMoss*0.10,0.22,quayWet*0.85),0.18,0.92);
+      surfaceWet=max(surfaceWet,quayWet*0.86);
       ambientVisibility=(0.46+0.34*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<12.5){
       // Kind 12: MaterialCraft-cooked Iberian limewashed stucco & weathered limestone plaster

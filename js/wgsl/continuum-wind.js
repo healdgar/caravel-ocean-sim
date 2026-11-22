@@ -106,19 +106,25 @@ fn continuumWindSkin(skeleton:u32,word:u32,p:ContinuumWindCarried)->ContinuumWin
 // How far the bones of a skeleton can carry any point of a sphere (the type's metres): a bone turns a point about its
 // pivot, so it moves by as far as the pivot has, and by its turn times how far it lies from the pivot.
 fn continuumWindReach(skeleton:u32,s:vec4f)->f32 { let h=continuumPoses[skeleton];return h.x+h.y*(length(s.xyz)+s.w+h.z); }
-// A leaf flutters about its foot as the wind sheds eddies off it: it pitches and rolls the more the further along it a
-// point lies, faster and further as the wind freshens, alive even in a light air.
+// A leaf twists and flutters about its petiole as light air sheds eddies off it: brisk torsional roll + tip pitch
+// flutter that catches sunlit sparkles even in a gentle breeze while the heavy wooden branch behind it stays calm.
 fn continuumWindFlutter(record:ContinuumRecord,word:u32,p:ContinuumWindCarried)->ContinuumWindCarried {
   let along=f32((word>>24u)&127u)/127.0;
-  let speed=F.windP[0].z;
-  let ramp=clamp((speed-3.0)/17.0,0.0,1.0);let swing=smoothstep(0.08,1.4,speed)*mix(0.22,1.0,ramp);
+  let speed=max(F.windP[0].z,0.0);
+  let ramp=clamp((speed-2.5)/15.5,0.0,1.0);
+  let swing=smoothstep(0.15,2.2,speed)*mix(0.30,1.0,ramp);
   let phase=f32((word>>18u)&63u)/63.0*6.2831853+f32(record.tag.z&1023u)*0.0061;
-  let at=F.camPos.w*(9.5+6.5*fract(phase*0.3183))*mix(0.32,1.0,ramp)+phase;
-  let pitch=sin(at)+0.38*sin(at*2.17+1.1);let roll=cos(at*1.31+0.7);
+  let rate=(6.8+5.6*fract(phase*0.3183))*mix(0.48,1.28,ramp);
+  let at=F.camPos.w*rate+phase;
+  let pitch=sin(at)+0.36*sin(at*2.13+1.1);
+  let twist=cos(at*1.37+0.7)+0.44*sin(at*2.59+1.9);
   let reach=swing*${CONTINUUM_WIND_FLUTTER}/max(record.place.w,0.85);
-  let side=normalize(cross(p.normal,select(vec3f(0.0,1.0,0.0),vec3f(1.0,0.0,0.0),abs(p.normal.y)>0.9)));let mid=cross(side,p.normal);
-  return ContinuumWindCarried(p.position+p.normal*(reach*along*0.85*pitch)+side*(reach*0.28*along*roll),
-    normalize(p.normal+mid*(pitch*swing*0.2*along)+side*(roll*swing*0.26*(0.35+0.65*along))));
+  let side=normalize(cross(p.normal,select(vec3f(0.0,1.0,0.0),vec3f(1.0,0.0,0.0),abs(p.normal.y)>0.9)));
+  let mid=cross(side,p.normal);
+  let twistAng=twist*swing*(0.24+0.46*along);
+  let ct=cos(twistAng);let st=sin(twistAng);
+  let twistedN=normalize(p.normal*ct+side*st+mid*(pitch*swing*0.16*along));
+  return ContinuumWindCarried(p.position+p.normal*(reach*along*0.62*pitch)+side*(reach*(0.20+0.52*along)*twist),twistedN);
 }
 // A point of a tree: its leaf fluttered, then carried by its bones, by its lane's skeleton and its own in their shares;
 // its wood pinned at the foot, where the trunk stands in the ground.
@@ -141,13 +147,12 @@ fn continuumWindBones(record:ContinuumRecord,data:u32,word:u32,p:ContinuumPosed)
 }
 // The eddies the gusts roll along: a blade curls across the wind by this, -1 to 1.
 fn continuumWindCurl(at:vec2f,downwind:vec2f,speed:f32)->f32 {
-  let t=F.camPos.w;let u=dot(at,downwind)-t*max(speed,5.2)*1.15;let v=dot(at,vec2f(-downwind.y,downwind.x));
-  return sin(v*1.38+u*0.42)*cos(u*1.12-v*0.54+t*0.9);
+  let t=F.camPos.w;let u=dot(at,downwind)-t*max(speed,0.8)*1.05;let v=dot(at,vec2f(-downwind.y,downwind.x));
+  return sin(v*1.38+u*0.42)*cos(u*1.12-v*0.54+t*1.35);
 }
 // A point of a draped sward: stood as tall as its plants stand where the cover thins, its supple tops pressed down a
-// little as the gust packet passes, leaned downwind as the gust front crossing it bends it and its tip flutters,
-// curled across the wind by the eddies, pushed by shot, dropped as it leans so its blade keeps its length, and lifted
-// onto the ground under it. Its material lights the bend (js/wgsl/meadow-continuum.js); the normal is left at rest.
+// little as the gust packet passes, quivering briskly blade-by-blade in light air and leaning into sweeping travelling
+// gust waves as the wind freshens, dropped along an arc so blades never stretch, and lifted onto the ground under it.
 fn continuumWindSward(record:ContinuumRecord,data:u32,vertex:u32,word:u32,p:ContinuumPosed)->ContinuumPosed {
   var out=p;
   let gust=continuumPoses[data];let push=continuumPoses[data+2u];
@@ -157,27 +162,37 @@ fn continuumWindSward(record:ContinuumRecord,data:u32,vertex:u32,word:u32,p:Cont
   var along=0.0;
   if(vertex!=CONTINUUM_NO_VERTEX){along=f32(continuumPointAt(continuumTypeOf(record),vertex).high&255u)/255.0;}
   let flexAlong=select(clamp(along*1.26,0.0,1.12),1.0,along==0.0);
-  let press=1.0-0.14*gust.z*smoothstep(0.15,0.80,flexAlong);
+  let rawSpeed=max(F.windP[0].z,0.0);
+  let gustCalm=smoothstep(0.6,9.5,rawSpeed);
+  let press=1.0-0.14*gust.z*gustCalm*smoothstep(0.15,0.80,flexAlong);
   let height=max(p.position.y,0.0)*stand*press;
   out.position.y=p.position.y*stand*press;
   let weight=f32(word&65535u)/65535.0*stand;
   if(weight>0.0){
     let plant=f32(word>>16u)/65535.0*6.2831853;
-    let speed=max(F.windP[0].z,5.2);
+    let t=F.camPos.w;
     let downwind=select(vec2f(0.82,0.57),normalize(F.windP[0].xy),dot(F.windP[0].xy,F.windP[0].xy)>0.0004);
+    let sideDir=vec2f(-downwind.y,downwind.x);
     let at=continuumPlace(record,p.position).xz;
     let front=gust.x-push.w*dot(at,downwind);
-    let tip=0.045*gust.z/(0.08+0.62*gust.z*clamp(speed/9.2,0.58,1.42))*sin(dot(at,downwind)*2.35-F.camPos.w*5.8+plant);
-    let bend=gust.y*(0.65+0.35*sin(F.camPos.w*1.1+front)+tip);
-    let curl=continuumWindCurl(at,downwind,speed)*(0.12+0.22*gust.z);
-    let lean=normalize(downwind+vec2f(-downwind.y,downwind.x)*curl);
-    let toward=continuumQuat(vec4f(-record.turn.xyz,record.turn.w),vec3f(lean.x,0.0,lean.y));
+    let stretch=continuumStretch(record);
+    let qScale=1.0/max(stretch.x,1.0);
+    // Light slender blades quiver briskly around their equilibrium lean (3..6 Hz per-plant tremor + cross-wind shiver),
+    // visible even in a gentle breeze while macro gust rollers build smoothly only as real wind pressure grows.
+    let qRate=5.8+3.6*fract(plant*0.3183099)+clamp(rawSpeed,0.0,16.0)*0.24;
+    let qEnv=smoothstep(0.15,2.4,rawSpeed)*mix(0.48,1.0,clamp(rawSpeed/9.5,0.0,1.0))*select(1.0,0.0,stretch.x>1.5);
+    let qAlong=sin(t*qRate+plant+dot(at,downwind)*2.9)+0.42*sin(t*(qRate*1.73)+plant*2.3);
+    let qCross=cos(t*(qRate*1.19)+plant*1.7+dot(at,sideDir)*3.4);
+    let qReach=0.042*qScale*qEnv*(0.55+0.45*gust.z)*smoothstep(0.12,0.85,flexAlong);
+    let bend=gust.y*(0.62+0.38*sin(t*1.1+front))+qReach*qAlong;
+    let curl=continuumWindCurl(at,downwind,rawSpeed)*(0.10+0.22*gust.z*gustCalm);
+    let leanVec=normalize(downwind+sideDir*curl)*bend+sideDir*(qReach*0.72*qCross);
+    let toward=continuumQuat(vec4f(-record.turn.xyz,record.turn.w),vec3f(leanVec.x,0.0,leanVec.y));
     let flex=select(smoothstep(0.04,0.75,along),1.0,along==0.0);
-    let moved=toward*(weight*bend)+push.xyz*weight*flex;
+    let moved=toward*weight+push.xyz*weight*flex;
     out.position+=vec3f(moved.x,0.0,moved.z);
     // The blade bends along an arc: as far as it leans, its point comes down (its lean and height scaled by the
     // patch's stretch, which the kind's points are posed before).
-    let stretch=continuumStretch(record);
     let leaning=clamp(length(moved.xz*stretch.xz)/max(height*stretch.y,0.055),0.0,0.78);
     out.position.y-=height*(1.0-sqrt(max(0.25,1.0-leaning*leaning)))*smoothstep(0.08,0.65,flexAlong);
   }

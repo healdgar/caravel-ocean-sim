@@ -386,7 +386,7 @@ fn forestWindCapsuleAt(c:ForestWindCapsule,at:vec3f,now:f32)->vec3f{
 fn forestWindStep(skeleton:u32,model:u32,toward:vec3f,speed:f32,gust:f32,phase:f32,own:bool,tree:ForestRoot){
  let now=forestWindState[0].x;let dt=clamp(forestWindState[1].x,0.0,0.05);let begin=forestWindState[1].y<1.5;let half=dt*0.5;
  let blown=speed*gust;let pressure=0.6125*blown*blown;
- let ramp=clamp((blown-3.0)/17.0,0.0,1.0);let alive=smoothstep(0.08,1.4,blown);
+ let ramp=clamp((blown-3.0)/17.0,0.0,1.0);
  var turned:array<vec4f,${CONTINUUM_WIND_BONES}>;var moved:array<vec3f,${CONTINUUM_WIND_BONES}>;
  let c=cos(tree.yawColour.x);let s=sin(tree.yawColour.x);let scale=max(tree.rootScale.w,0.25);
  let out=skeleton*FOREST_WIND_SKELETON;
@@ -400,11 +400,11 @@ fn forestWindStep(skeleton:u32,model:u32,toward:vec3f,speed:f32,gust:f32,phase:f
   let at=${FOREST_WIND_STATE_BONES}u+(skeleton*FOREST_WIND_BONES+b)*2u;
   var angle=forestWindState[at].xyz;var rate=forestWindState[at+1u].xyz;
   if(!forestWindFinite(angle)||!forestWindFinite(rate*0.01)){angle=vec3f(0.0);rate=vec3f(0.0);}
-  let stiffness=max(spring.x,1.0);let omega=clamp(spring.y,0.8,18.0);let damping=clamp(spring.z,0.1,0.85);let most=max(spring.w,0.02);
-  // Eddies vary the flow from bone to bone by where it lies, so neighbouring branches sway together without tearing.
+  let stiffness=max(spring.x,1.0);let omega=clamp(spring.y,0.8,18.0);let damping=clamp(spring.z+0.18*(1.0-ramp),0.16,0.92);let most=max(spring.w,0.02);
+  // Slow macro-eddies vary the flow smoothly from branch to branch without exciting artificial high-frequency wood vibration.
   let p=phase+dot(pivot.xyz,vec3f(0.32,0.21,0.29));
-  let eddy=1.0+0.26*sin(now*(0.85+0.18*omega)+p)+0.14*cos(now*(1.65+0.25*omega)-p*1.3);
-  let side=vec3f(-toward.z,0.12*sin(now*1.4+p),toward.x)*(0.2*sin(now*(1.25+0.22*omega)+p*1.7));
+  let eddy=1.0+0.24*sin(now*(0.42+0.04*omega)+p)+0.12*cos(now*(0.88+0.06*omega)-p*1.3);
+  let side=vec3f(-toward.z,0.08*sin(now*0.65+p),toward.x)*(0.16*sin(now*(0.58+0.05*omega)+p*1.7));
   var force=normalize(toward*eddy+side+vec3f(0.0,-0.06*blown/14.0,0.0))*(pressure*aero.w);
   if(own){
    // Where the wind presses it, in the scene's frame; what pushes there turned into the tree's.
@@ -437,10 +437,13 @@ fn forestWindStep(skeleton:u32,model:u32,toward:vec3f,speed:f32,gust:f32,phase:f
   if(!forestWindFinite(angle)||!forestWindFinite(rate*0.01)){angle=vec3f(0.0);rate=vec3f(0.0);}
   forestWindState[at]=vec4f(angle,0.0);forestWindState[at+1u]=vec4f(rate,0.0);
   var flutter=vec3f(0.0);
-  if(group>=1u){
-   let along=axis.w;let f=now*omega*(2.6+1.8*along)*mix(0.3,1.0,ramp)+p*2.3;
+  // Solid limbs (group 1) bend strictly through their damped spring inertia — zero high-frequency branch quiver in light air.
+  // Only slender outer twigs (group 2) pick up a modest elastic flex once a fresh breeze (> 5.5 m/s) builds.
+  let twigWind=smoothstep(5.5,16.0,blown);
+  if(group==2u&&twigWind>0.001){
+   let along=axis.w;let f=now*omega*(0.95+0.55*along)*mix(0.45,1.0,twigWind)+p*2.3;
    let a=normalize(cross(axis.xyz,select(vec3f(0.0,1.0,0.0),vec3f(1.0,0.0,0.0),abs(axis.y)>0.9)));let a2=cross(axis.xyz,a);
-   flutter=(a*sin(f)+a2*(0.65*cos(f*1.37+0.8)))*(alive*mix(0.24,1.0,ramp)*(0.005+0.024*along*along)*select(0.55,1.0,group==2u));
+   flutter=(a*sin(f)+a2*(0.55*cos(f*1.31+0.8)))*(twigWind*twigWind*(0.002+0.011*along*along));
   }
   var q=forestWindTurn(angle+flutter);var pivoted=pivot.xyz;
   if(parent>=0){let up=u32(parent);pivoted=forestWindRotate(turned[up],pivot.xyz)+moved[up];q=normalize(forestWindCompose(turned[up],q));}
@@ -678,7 +681,7 @@ fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
     raw=1.0-smoothstep(0.0,.7,abs(select(s.local.y,stood.y,s.local.y>held.x||stood.y>held.x)-held.x));
    }
   }
-  (*v).surface=vec4f(f32((s.high>>5u)&255u)/255.,word.a,raw,0.0);
+  (*v).surface=vec4f(f32((s.high>>5u)&255u)/255.,word.a,raw,s.local.y);
   (*v).layer=select(FOREST_UNTEXTURED,first+layer,textured)|(leaf<<16u);
   return;
  }
@@ -756,16 +759,19 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
   }
   let canopy=clamp(v.surface.y,0.,1.);
   if(!leaf){
-   // Bark: coherent furrowed maps, subtle crevice occlusion up close, raw wood where shot has opened it.
+   // Bark: coherent furrowed maps, subtle crevice occlusion up close, raw wood where shot has opened it,
+   // and grounded moss/soil weathering around the trunk's root collar.
    let pale=v.colour*vec3f(2.7,2.2,1.5)+vec3f(.07,.055,.03);
    colour=forestOwnColour(surface.pigment)*mix(v.colour,pale,clamp(v.surface.z,0.,1.));
+   let rootCollar=(1.0-smoothstep(-0.08,0.95,v.surface.w))*(1.0-clamp(v.surface.z,0.0,1.0));
+   colour=mix(colour,colour*vec3f(0.56,0.65,0.46),rootCollar*0.44);
    let detailVec=vec3f(surface.detail.xy*0.92,max(surface.detail.z,0.38));
    n=forestMappedNormal(n,detailVec,dx,dy,ux,uy)*select(-1.,1.,front);
    let rawRough=surface.detail.a/max(surface.pigment.a,FOREST_THINNEST_COVERAGE);
-   roughness=clamp(rawRough,0.72,0.98);
+   roughness=clamp(mix(rawRough,0.95,rootCollar*0.4),0.72,0.98);
    wet=clamp(material.coordinates.w*(1.0-roughness)*0.45,0.0,0.12);
    // The light the specimen's own canopy lets through (not a sun shadow: the land's and the clouds' stay).
-   let woodAO=min(canopy,select(1.0,mix(0.30,1.0,exposure),canopy>0.995&&exposure<0.995));
+   let woodAO=min(canopy,select(1.0,mix(0.30,1.0,exposure),canopy>0.995&&exposure<0.995))*(1.0-rootCollar*0.34);
    diffuse=max(dot(n,F.sunDir.xyz),0.)*(.35+.65*woodAO);ambient=(.36+max(n.y,0.)*.25)*woodAO;
   }else{
    let pigment=surface.pigment;

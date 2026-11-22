@@ -58,3 +58,18 @@ test('boulder continuum binds and evaluates Shared Neural PBR for close-up rock 
   assert.match(wgslSrc, /evalNeuralPbr\(/, 'boulder shade evaluates Neural PBR');
   assert.match(wgslSrc, /applyNeuralPbrNormal\(/, 'boulder shade applies Neural PBR normal relief');
 });
+
+test('tree vs grass wind physics: calm wood branches, twisting leaves, quivering grass without 5.2 m/s floor', () => {
+  const forestSrc = fs.readFileSync(new URL('../js/wgsl/forest-continuum.js', import.meta.url), 'utf8');
+  const windSrc = fs.readFileSync(new URL('../js/wgsl/continuum-wind.js', import.meta.url), 'utf8');
+  const meadowSrc = fs.readFileSync(new URL('../js/wgsl/meadow-continuum.js', import.meta.url), 'utf8');
+  const groundSrc = fs.readFileSync(new URL('../js/wgsl/ground-detail.js', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(forestSrc, /if\(group>=1u\)/, 'primary wooden limbs must not receive synthetic high-frequency flutter');
+  assert.match(forestSrc, /twigWind=smoothstep\(5\.5,16\.0,blown\)/, 'only outer twigs flex above moderate breeze');
+  assert.match(windSrc, /let twistAng=/, 'leaves twist torsionally around their petiole in light air');
+  assert.match(windSrc, /let qCross=/, 'grass blades quiver cross-wind and downwind at high frequency');
+  assert.doesNotMatch(windSrc, /max\(F\.windP\[0\]\.z\s*,\s*5\.2\)/, 'continuum-wind must not clamp grass wind to 5.2 m/s');
+  assert.doesNotMatch(meadowSrc, /max\((?:F\.windP\[0\]\.z|windParam\.z|speed)\s*,\s*5\.2\)/, 'meadow-continuum must not clamp grass wind to 5.2 m/s');
+  assert.doesNotMatch(groundSrc, /max\(windParam\.z\s*,\s*4\.8\)/, 'grassWindWave must not clamp grass wind to 4.8 m/s');
+});

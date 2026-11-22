@@ -164,8 +164,9 @@ fn meadowWindDirection() -> vec2f {
 fn meadowWindField(worldXZ: vec2f, time: f32, windParam: vec4f) -> vec2f {
   let windDir = meadowWindDirection();
   let acrossDir = vec2f(-windDir.y, windDir.x);
-  let speed = max(windParam.z, 5.2);
-  let advect = time * speed * 1.15;
+  let rawSpeed = max(windParam.z, 0.0);
+  let speed = max(rawSpeed, 0.8);
+  let advect = time * speed * 1.05;
   let u = dot(worldXZ, windDir);
   let v = dot(worldXZ, acrossDir);
   let frontWarp = sin(v * 0.085 + time * 0.24) * 2.35 + cos(v * 0.19 - time * 0.31) * 1.15;
@@ -173,16 +174,17 @@ fn meadowWindField(worldXZ: vec2f, time: f32, windParam: vec4f) -> vec2f {
   let ripple45 = sin((u - advect * 1.06) * 1.3963 + cos(v * 0.48 - time * 0.52) * 1.40);
   let fineWave = sin((u - advect * 1.14) * 2.35 + sin(v * 0.92 + time * 0.72) * 1.05);
   let gustPacket = 0.56 + 0.44 * sin((u - advect * 0.82) * 0.165 + sin(v * 0.072) * 1.8) * cos(v * 0.095 + time * 0.21);
-  let swell = (roller14 * 0.60 + ripple45 * 0.28 + fineWave * 0.12) * gustPacket;
-  let gust01 = smoothstep(-0.50, 0.76, swell);
+  let windGain = smoothstep(0.35, 9.5, rawSpeed);
+  let swell = (roller14 * 0.60 + ripple45 * 0.28 + fineWave * 0.12) * gustPacket * windGain;
+  let gust01 = smoothstep(-0.50, 0.76, swell) * windGain;
   return vec2f(gust01, swell);
 }
 fn meadowWindCurl(worldXZ: vec2f, time: f32, windDir: vec2f, speed: f32) -> f32 {
   let acrossDir = vec2f(-windDir.y, windDir.x);
-  let advect = time * max(speed, 5.2) * 1.15;
+  let advect = time * max(speed, 0.8) * 1.05;
   let u = dot(worldXZ, windDir) - advect;
   let v = dot(worldXZ, acrossDir);
-  return sin(v * 1.38 + u * 0.42) * cos(u * 1.12 - v * 0.54 + time * 0.9);
+  return sin(v * 1.38 + u * 0.42) * cos(u * 1.12 - v * 0.54 + time * 1.35);
 }
 fn meadowWorldBillow(p: vec2f) -> vec3f {
   let warp = vec2f(sin(p.y * 0.13 + 1.3), cos(p.x * 0.11 - 0.8)) * 2.4;
@@ -505,16 +507,18 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   // front crosses it (the kind's phase, less its wave number times how far downwind a point stands), as strongly as
   // the gust packet over it and the wind's speed bend it.
   let downwind = meadowWindDirection();
-  let speed = max(F.windP[0].z, 5.2);
+  let rawSpeed = max(F.windP[0].z, 0.0);
+  let speed = max(rawSpeed, 0.8);
   let t = F.camPos.w;
   let u = dot(middle, downwind);
   let v = dot(middle, vec2f(-downwind.y, downwind.x));
-  let advect = t * speed * 1.15;
+  let advect = t * speed * 1.05;
   let warp = sin(v * 0.085 + t * 0.24) * 2.35 + cos(v * 0.19 - t * 0.31) * 1.15;
   let packet = 0.56 + 0.44 * sin((u - advect * 0.82) * 0.165 + sin(v * 0.072) * 1.8) * cos(v * 0.095 + t * 0.21);
   let wave = cfg.scene.y;
   let phase = 3.14159265 - 1.1 * t + wave * advect - warp;
-  let strength = meadowStandTypeF(model, ${M.sway}u) * tall * (0.08 + 0.62 * packet * clamp(speed / 9.2, 0.58, 1.42)) * 0.75;
+  let windLean = smoothstep(0.5, 11.5, rawSpeed) * clamp(rawSpeed / 10.5, 0.0, 1.55);
+  let strength = meadowStandTypeF(model, ${M.sway}u) * tall * (0.015 * smoothstep(0.2, 2.5, rawSpeed) + 0.64 * packet * windLean) * 0.75;
   // In view, or in the sun's box: its type's sphere where its stretch and drape put it, grown by its sway, its push
   // and how far the drawn ground may lie from the true.
   let sphere = vec4f(meadowStandTypeF(model, ${T.sphere}u), meadowStandTypeF(model, ${T.sphere + 1}u), meadowStandTypeF(model, ${T.sphere + 2}u), meadowStandTypeF(model, ${T.sphere + 3}u));
@@ -794,7 +798,7 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   let wind = meadowWindField(at, F.camPos.w, F.windP[0]);
   let windDir = meadowWindDirection();
   let acrossDir = vec2f(-windDir.y, windDir.x);
-  let windSpeed = max(F.windP[0].z, 5.2);
+  let windSpeed = max(F.windP[0].z, 0.0);
   let curl = meadowWindCurl(at, F.camPos.w, windDir, windSpeed);
   let billow = meadowWorldBillow(at);
   let mean = meadowMixMean(cover.g, at);
@@ -840,14 +844,16 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
     colour = mix(side, mean.rgb, abs(toward.y));
     hides = meadowHides(mean.a, dot(toward, slope));
   }
-  // The wind's bend, as the shading reads it: rolling multi-octave gusts bending flexible upper blades by up to ~40
-  // degrees, curled across the wind, and the normal leaning on the ground's slope and tilting with the bend.
+  // The wind's bend, as the shading reads it: crisp high-frequency blade quiver in light air, building into
+  // rolling multi-octave gusts as real wind speed increases.
   let flexAlong = clamp(along * 1.26, 0.0, 1.12);
-  let speedNorm = clamp(windSpeed / 9.2, 0.58, 1.42);
+  let speedNorm = smoothstep(0.5, 11.5, windSpeed) * clamp(windSpeed / 10.5, 0.0, 1.55);
+  let quiverEnv = smoothstep(0.15, 2.4, windSpeed) * mix(0.55, 1.0, clamp(windSpeed / 9.5, 0.0, 1.0));
   let stiffFactor = 9.5 / (clamp(stiff, 3.0, 22.0) + 4.5);
-  let tipFlutter = sin(dot(at, windDir) * 2.35 - F.camPos.w * 5.8 + f32(seed & 31u) * 0.35) * 0.045 * wind.x;
-  let bendSin = clamp((0.08 + 0.62 * wind.x * speedNorm + tipFlutter) * stiffFactor, 0.0, 0.66);
-  let bendDir = normalize(windDir + acrossDir * (curl * (0.12 + 0.22 * wind.x)));
+  let qRate = 5.8 + 3.6 * fract(f32(seed & 255u) / 256.0) + clamp(windSpeed, 0.0, 16.0) * 0.24;
+  let tipFlutter = (sin(dot(at, windDir) * 2.9 + F.camPos.w * qRate + f32(seed & 31u) * 0.35) * 0.085 + cos(F.camPos.w * (qRate * 1.37) + f32((seed >> 5u) & 31u) * 0.41) * 0.045) * quiverEnv;
+  let bendSin = clamp((0.015 * quiverEnv + 0.64 * wind.x * speedNorm + tipFlutter) * stiffFactor, 0.0, 0.68);
+  let bendDir = normalize(windDir + acrossDir * (curl * (0.10 + 0.22 * wind.x)));
   var bendSlope = clamp(1.65 * bendSin * pow(max(flexAlong, 0.02), 0.65), 0.0, 0.96) * (1.0 - ballistics.buryDepth);
   var normal: vec3f;
   if (splat) {

@@ -325,9 +325,10 @@ fn boulderContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   albedo=mix(albedo,soil*0.72,rootMask*0.50);
   roughness=mix(roughness,0.93,rootMask*0.50);
 
-  // 4. Wet dark glossy tidal skirt (world.y < 1.8 m, undulating naturally with noise).
-  let tideTop=1.80+(rock.mossNoise-0.5)*0.30;
-  let wet=1.0-smoothstep(0.22,tideTop,world.y);
+  // 4. Wet dark glossy tidal skirt coupled to actual coastal swell & wind-sea splash height.
+  let seaSplashH=clamp(select(0.75,F.cascL[1].z,F.cascL[1].w>1.0)+F.windP[0].z*0.05,0.35,3.2);
+  let tideTop=mix(0.68,2.35,clamp((seaSplashH-0.35)/2.2,0.0,1.0))+(rock.mossNoise-0.5)*0.28;
+  let wet=1.0-smoothstep(0.16,tideTop,world.y);
   albedo*=mix(1.0,0.44,wet);
   roughness=mix(roughness,0.16,wet);
 

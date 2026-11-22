@@ -187,7 +187,9 @@ fn grassWindWave(worldXZ:vec2f,time:f32,windParam:vec4f)->vec2f{
   let rawDir=windParam.xy;
   let windDir=select(vec2f(0.82,0.57),normalize(rawDir),dot(rawDir,rawDir)>0.0004);
   let acrossDir=vec2f(-windDir.y,windDir.x);
-  let speed=max(windParam.z,4.8);
+  let rawSpeed=max(windParam.z,0.0);
+  let speed=max(rawSpeed,0.8);
+  let windGain=smoothstep(0.4,9.5,rawSpeed);
   let u=dot(worldXZ,windDir);
   let v=dot(worldXZ,acrossDir);
   let curve=sin(v*0.075+time*0.22)*2.15+cos(v*0.19-time*0.34)*1.05;
@@ -195,7 +197,7 @@ fn grassWindWave(worldXZ:vec2f,time:f32,windParam:vec4f)->vec2f{
   let p2=u*0.78-time*speed*1.04+cos(v*0.33-time*0.47)*1.30;
   let p3=u*1.72-time*speed*1.68+sin(v*0.88+time*0.62)*0.95;
   let catsPaw=0.58+0.42*sin(u*0.095-time*speed*0.24+sin(v*0.06)*1.8)*cos(v*0.085+time*0.19);
-  let swell=(sin(p1)*0.56+sin(p2)*0.29+sin(p3)*0.15)*catsPaw;
+  let swell=(sin(p1)*0.56+sin(p2)*0.29+sin(p3)*0.15)*catsPaw*windGain;
   return vec2f(clamp(0.46+0.62*swell,0.0,1.0),swell);
 }
 // Grass, soil, sand and rock from the same few fetches. Colour is scaled about its own value by a signal that is
