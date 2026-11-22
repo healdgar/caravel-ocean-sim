@@ -7,10 +7,12 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { SHADOW_FRAME, LAND_CLOTH_SHADOW } from './shadows.js';
+import { createNeuralPbrWGSL } from './neural-pbr.js';
 import { BOULDER_CONTINUUM_MATERIAL } from '../boulder-continuum.js';
 
 // Group 0: the land's resources a boulder is shaded by (js/boulder-continuum.js BOULDER_CONTINUUM_BINDINGS of
-// js/terrain.js nearResources). Group 1 is unused; the scene's data is group 2.
+// js/terrain.js nearResources, including the shared Neural PBR bank at bindings 22 & 23). Group 1 is unused;
+// the scene's data is group 2.
 const boulderContinuumPreludeWGSL = () => FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + /* wgsl */`
 struct BoulderLand { domain:vec4f };
 @group(0) @binding(0) var<uniform> F:Frame;
@@ -26,7 +28,7 @@ struct BoulderLand { domain:vec4f };
 @group(0) @binding(19) var<uniform> landSH:ShadowFrame;
 @group(0) @binding(20) var landSolidShadow:texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare:sampler_comparison;
-` + LAND_CLOTH_SHADOW + SKY_RENDER_FUNCS;
+` + LAND_CLOTH_SHADOW + SKY_RENDER_FUNCS + createNeuralPbrWGSL({ group: 0, latentBinding: 22, weightBinding: 23 });
 
 // Shared procedural lithology, triplanar rock strata, fracture fissure micro-crack AO, and mineral speckle used by
 // both live cluster shading and octahedral G-buffer card baking so near clusters and distant cards match seamlessly.
@@ -99,23 +101,31 @@ fn boulderRockTriplanar(p:vec3f,n:vec3f,freq:f32)->f32 {
   return gx*w.x+gy*w.y+gz*w.z;
 }
 
-// Pure aperiodic multi-octave granular rock relief (zero sine contour rings, zero iso-contour worms).
-fn boulderRockRelief(p:vec3f,strataAxis:vec3f,strataFreq:f32,strataAmp:f32,warp:vec3f)->f32 {
+// Pure aperiodic multi-octave granular rock relief with footprint-filtered crisp micro-grain.
+fn boulderRockRelief(p:vec3f,strataAxis:vec3f,strataFreq:f32,strataAmp:f32,warp:vec3f,fineWeight:f32,microWeight:f32)->f32 {
   let stretched=p+strataAxis*(dot(p,strataAxis)*strataFreq*0.65);
-  let coarse=boulderRockNoise3(stretched*2.6+warp*0.35)-0.5;
-  let mid=boulderRockNoise3(p*7.4+vec3f(11.3,5.7,19.1))-0.5;
-  let fine=boulderRockNoise3(p*19.5-vec3f(4.2,13.8,7.6))-0.5;
-  return coarse*(0.38+strataAmp*0.65)+mid*0.32+fine*0.18;
+  let coarse=boulderRockNoise3(stretched*3.1+warp*0.42)-0.5;
+  let mid=boulderRockNoise3(p*9.2+vec3f(11.3,5.7,19.1))-0.5;
+  var h=coarse*(0.36+strataAmp*0.62)+mid*0.30;
+  if(fineWeight>0.01){
+    let fine=boulderRockNoise3(p*25.0-vec3f(4.2,13.8,7.6))-0.5;
+    h+=fine*(0.18*fineWeight);
+  }
+  if(microWeight>0.01){
+    let micro=boulderRockNoise3(p*56.0+vec3f(7.9,2.3,15.4))-0.5;
+    h+=micro*(0.09*microWeight);
+  }
+  return h;
 }
 
-fn boulderRockSurface(p:vec3f,baseN:vec3f,stone:vec4f,facetLight:f32,localY:f32,detailFade:f32)->BoulderRockSample {
+fn boulderRockSurface(p:vec3f,baseN:vec3f,stone:vec4f,facetLight:f32,localY:f32,detailFade:f32,worldFoot:f32)->BoulderRockSample {
   let idx=clamp(u32(floor(stone.w*6.0)),0u,5u);
 
   // Lithology-specific geological strata orientation, frequency, mineral speckle, and roughness.
   var strataAxis=vec3f(0.18,0.96,0.20);
   var strataFreq=2.6;
-  var strataAmp=0.14;
-  var speckleAmp=0.22;
+  var strataAmp=0.18;
+  var speckleAmp=0.30;
   var baseRough=0.78;
   var strataTint=vec3f(0.92,0.91,0.89);
 
@@ -123,90 +133,96 @@ fn boulderRockSurface(p:vec3f,baseN:vec3f,stone:vec4f,facetLight:f32,localY:f32,
     // Stratified Limestone: crisp horizontal sedimentary beds & pale chalky seams.
     strataAxis=vec3f(0.08,0.995,-0.05);
     strataFreq=3.8;
-    strataAmp=0.34;
-    speckleAmp=0.09;
+    strataAmp=0.36;
+    speckleAmp=0.14;
     baseRough=0.80;
     strataTint=vec3f(1.08,1.05,0.98);
   }else if(idx==2u){
     // Jagged Red/Ochre Sandstone: bold dipping cross-bedded iron-oxide strata.
     strataAxis=normalize(vec3f(-0.46,0.85,0.22));
     strataFreq=3.3;
-    strataAmp=0.38;
-    speckleAmp=0.14;
+    strataAmp=0.40;
+    speckleAmp=0.22;
     baseRough=0.85;
     strataTint=vec3f(1.18,0.88,0.72);
   }else if(idx==3u){
     // Columnar Dark Coastal Basalt: dense volcanic rock with subtle vertical cooling striae.
     strataAxis=normalize(vec3f(0.92,0.14,0.36));
     strataFreq=2.4;
-    strataAmp=0.11;
-    speckleAmp=0.08;
+    strataAmp=0.14;
+    speckleAmp=0.14;
     baseRough=0.68;
     strataTint=vec3f(0.84,0.88,0.94);
   }else if(idx==4u){
     // Weathered Grey Slate / Schist: tight dipping foliation laminations + silvery mica.
     strataAxis=normalize(vec3f(0.68,0.70,-0.22));
     strataFreq=5.4;
-    strataAmp=0.32;
-    speckleAmp=0.16;
+    strataAmp=0.34;
+    speckleAmp=0.22;
     baseRough=0.70;
     strataTint=vec3f(0.90,0.94,1.02);
   }else if(idx==5u){
     // Fractured Dolmen / Moorland Gritstone: coarse bedding + heavy weathered joints.
     strataAxis=vec3f(0.06,0.996,0.05);
     strataFreq=2.9;
-    strataAmp=0.24;
-    speckleAmp=0.20;
+    strataAmp=0.28;
+    speckleAmp=0.28;
     baseRough=0.84;
     strataTint=vec3f(1.04,0.98,0.88);
   }
+
+  let fineWeight=1.0-smoothstep(0.025,0.12,worldFoot);
+  let microWeight=1.0-smoothstep(0.008,0.045,worldFoot);
 
   let macroFbm=boulderRockFbm(p*0.85);
   let warp=vec3f(macroFbm-0.5,boulderRockNoise3(p*0.9+vec3f(17.3,4.1,9.7))-0.5,boulderRockNoise3(p*0.9+vec3f(3.7,19.1,2.9))-0.5)*0.55;
 
   // Aperiodic anisotropic sedimentary/granite layering (stretched 3D noise along strata axis — zero sine contour rings).
   let stretchedP=p+strataAxis*(dot(p,strataAxis)*strataFreq*0.65);
-  let bandNoise=boulderRockFbm(stretchedP*1.85+warp*0.30);
-  let triGrain=boulderRockTriplanar(p,baseN,5.5);
-  let strataVal=bandNoise*0.70+triGrain*0.30;
+  let bandNoise=boulderRockFbm(stretchedP*1.95+warp*0.32);
+  let triGrain=boulderRockTriplanar(p,baseN,6.2);
+  let strataVal=bandNoise*0.68+triGrain*0.32;
 
-  // Subtle dark rock-pocket pitting & weathering crevices (aperiodic noise valleys, zero contour-loop worms).
-  let pitA=boulderRockNoise3(p*5.2+vec3f(3.7,14.1,8.9));
-  let pitB=boulderRockNoise3(p*14.0-vec3f(9.2,4.6,12.3));
-  let crack=clamp((1.0-smoothstep(0.10,0.34,pitA*0.62+pitB*0.38))*0.85,0.0,1.0);
+  // Crisp jagged hairline fracture fissures (narrow ridged valleys — zero blurry leopard-spot blotches).
+  let crackFieldA=abs(boulderRockNoise3(p*2.6+warp*0.85+vec3f(3.7,14.1,8.9))*2.0-1.0);
+  let crackFieldB=abs(boulderRockNoise3(p*7.4-warp*0.45-vec3f(9.2,4.6,12.3))*2.0-1.0);
+  let seamA=1.0-smoothstep(0.015,0.105+worldFoot*0.35,crackFieldA);
+  let seamB=(1.0-smoothstep(0.012,0.085+worldFoot*0.45,crackFieldB))*fineWeight;
+  let crack=clamp(max(seamA*0.82,seamB*0.65),0.0,1.0);
 
-  // Coarse granite / sandstone mineral grain & quartz/biotite speckle.
-  let grainMid=boulderRockTriplanar(p,baseN,12.5);
-  let fineA=boulderRockNoise3(p*21.0+vec3f(2.1,5.7,8.3));
-  let fineB=boulderRockNoise3(p*44.0+vec3f(9.4,1.3,4.6));
-  let quartzFleck=smoothstep(0.72,0.94,fineA)*0.26+smoothstep(0.76,0.96,fineB)*0.20;
-  let micaFleck=smoothstep(0.28,0.06,fineA)*0.30;
-  let speckleMod=(0.82+0.34*grainMid)*(1.0+(quartzFleck-micaFleck)*speckleAmp*detailFade);
+  // Multi-scale mineral grain & quartz/feldspar/biotite crystal speckle (footprint-filtered for crisp close-ups).
+  let grainMid=boulderRockTriplanar(p,baseN,14.0);
+  let fineA=boulderRockNoise3(p*26.0+vec3f(2.1,5.7,8.3));
+  let fineB=boulderRockNoise3(p*58.0+vec3f(9.4,1.3,4.6));
+  let quartzFleck=smoothstep(0.68,0.92,fineA)*0.30*fineWeight+smoothstep(0.72,0.95,fineB)*0.24*microWeight;
+  let micaFleck=smoothstep(0.30,0.06,fineA)*0.32*fineWeight+smoothstep(0.26,0.05,fineB)*0.20*microWeight;
+  let speckleMod=mix(1.0,0.78+0.42*grainMid,0.45+0.55*fineWeight)*(1.0+(quartzFleck-micaFleck)*speckleAmp);
 
-  // Micro-bump normal from granular rock relief.
+  // Crisp close-up micro-bump normal from multi-octave granular rock relief + hairline fissures.
   var n=baseN;
   if(detailFade>0.01){
-    let eps=0.028;
-    let h0=boulderRockRelief(p,strataAxis,strataFreq,strataAmp,warp);
-    let hx=boulderRockRelief(p+vec3f(eps,0.0,0.0),strataAxis,strataFreq,strataAmp,warp);
-    let hy=boulderRockRelief(p+vec3f(0.0,eps,0.0),strataAxis,strataFreq,strataAmp,warp);
-    let hz=boulderRockRelief(p+vec3f(0.0,0.0,eps),strataAxis,strataFreq,strataAmp,warp);
+    let eps=clamp(max(0.008,worldFoot*0.65),0.008,0.045);
+    let h0=boulderRockRelief(p,strataAxis,strataFreq,strataAmp,warp,fineWeight,microWeight);
+    let hx=boulderRockRelief(p+vec3f(eps,0.0,0.0),strataAxis,strataFreq,strataAmp,warp,fineWeight,microWeight);
+    let hy=boulderRockRelief(p+vec3f(0.0,eps,0.0),strataAxis,strataFreq,strataAmp,warp,fineWeight,microWeight);
+    let hz=boulderRockRelief(p+vec3f(0.0,0.0,eps),strataAxis,strataFreq,strataAmp,warp,fineWeight,microWeight);
     let grad=vec3f(hx-h0,hy-h0,hz-h0)/eps;
     let tangentGrad=grad-baseN*dot(grad,baseN);
-    n=normalize(baseN-tangentGrad*(0.055*detailFade));
+    let bumpStrength=(0.085+0.065*fineWeight)*detailFade;
+    n=normalize(baseN-clamp(tangentGrad*bumpStrength,vec3f(-0.40),vec3f(0.40)));
   }
 
-  let facetShade=0.58+facetLight*0.42;
+  let facetShade=0.60+facetLight*0.40;
   let heightLift=0.80+0.22*clamp((localY+0.24)/1.04,0.0,1.0);
   var col=stone.rgb*facetShade*heightLift;
-  col*=mix(vec3f(1.0-strataAmp*0.55),strataTint*(1.0+strataAmp*0.22),strataVal);
+  col*=mix(vec3f(1.0-strataAmp*0.58),strataTint*(1.0+strataAmp*0.24),strataVal);
   col*=mix(0.76,1.18,macroFbm);
   col*=speckleMod;
-  // Weathering pocket & crevice darkening.
-  let crackCol=select(vec3f(0.42,0.41,0.39),vec3f(0.56,0.54,0.49),idx==1u);
-  col=mix(col,col*crackCol,crack*0.52);
+  // Crisp darkened weathering fissure crevices.
+  let crackCol=select(vec3f(0.36,0.35,0.34),vec3f(0.50,0.48,0.44),idx==1u);
+  col=mix(col,col*crackCol,crack*0.68);
 
-  let roughness=clamp(baseRough+crack*0.14-quartzFleck*0.12*detailFade+(triGrain-0.5)*0.08,0.48,0.94);
+  let roughness=clamp(baseRough+crack*0.14-quartzFleck*0.16+(triGrain-0.5)*0.10,0.44,0.94);
 
   var out:BoulderRockSample;
   out.albedo=col;
@@ -258,19 +274,36 @@ fn boulderContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   }
 
   let camDist=distance(world,eye);
-  let detailFade=smoothstep(58.0,10.0,camDist);
-  let rock=boulderRockSurface(world,base,v.stone,v.lit.x,v.lit.y,detailFade);
-  let n=rock.normal;
+  let worldFoot=max(length(across),length(down));
+  let detailFade=smoothstep(64.0,8.0,camDist);
+  let edgeCurv=clamp(length(fwidth(unitN))*0.42,0.0,1.0)*smoothstep(24.0,3.0,camDist);
+  let rock=boulderRockSurface(world,base,v.stone,v.lit.x,v.lit.y,detailFade,worldFoot);
+  var n=rock.normal;
+
+  // Shared Neural PBR fractured stone detail (dual-band 64x64 meso + 5.618x rotated micro albedo,
+  // tangent-space normal map, cavity AO, and roughness — matching coastal cliffs, masonry, and props).
+  let npbrScale=1.45;
+  let npbrHoriz=abs(base.y)>0.65;
+  let npbrAlongX=abs(base.z)>=abs(base.x);
+  let npbrUV=select(select(vec2f(world.z,world.y),vec2f(world.x,world.y),npbrAlongX),world.xz,npbrHoriz)*npbrScale;
+  let npbrDuDx=select(select(vec2f(across.z,across.y),vec2f(across.x,across.y),npbrAlongX),across.xz,npbrHoriz)*npbrScale;
+  let npbrDuDy=select(select(vec2f(down.z,down.y),vec2f(down.x,down.y),npbrAlongX),down.xz,npbrHoriz)*npbrScale;
+  let npbrHint=select(select(vec3f(0.0,0.0,1.0),vec3f(1.0,0.0,0.0),npbrAlongX),vec3f(1.0,0.0,0.0),npbrHoriz);
+  let npbrBasis=neuralPbrTangentBasis(n,npbrHint);
+  let npbr=evalNeuralPbr(10u,npbrUV,npbrDuDx,npbrDuDy,camDist,1.0);
+  n=applyNeuralPbrNormal(n,npbrBasis,npbr.normalTS*1.05);
 
   let uv=clamp((world.xz-LAND.domain.xy)/LAND.domain.z+0.5,vec2f(0.0),vec2f(1.0));
   let soil=pow(max(textureSampleLevel(landAlbedo,landSampler,uv,1.0).rgb,vec3f(0.005)),vec3f(2.2));
   let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0.0).r;
   let sunlight=textureSampleLevel(landLight,sampC,uv,0.0);
 
-  // 1. Grounded soil-skirt blending at the boulder's embedded root.
+  // 1. Grounded soil-skirt blending & Neural PBR close-up rock micro-albedo + chipped arris wear.
   let rootMask=1.0-smoothstep(-0.22,0.16,v.lit.y);
-  var albedo=mix(rock.albedo,soil,0.16);
-  var roughness=rock.roughness;
+  var albedo=mix(rock.albedo,soil,0.14);
+  albedo=clamp(albedo*npbr.albedoMul,vec3f(0.008),vec3f(0.95));
+  albedo=clamp(albedo*(1.0+edgeCurv*0.26),vec3f(0.008),vec3f(0.95));
+  var roughness=clamp(rock.roughness+npbr.roughDelta,0.18,0.96);
 
   // 2. Warm hillside moss & pale golden-sage lichen on sky-facing shelves above the salt-spray zone.
   let aboveSpray=smoothstep(2.0,5.8,world.y);
@@ -298,7 +331,7 @@ fn boulderContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   albedo*=mix(1.0,0.44,wet);
   roughness=mix(roughness,0.16,wet);
 
-  // 5. Physically based sun, sky, ground bounce, wet sheen, shadow, lunar, and atmospheric lighting.
+  // 5. Physically based sun, sky, ground bounce, GGX specular, wet sheen, shadow, lunar, and atmospheric lighting.
   let shadowed=boulderContinuumLandShadow(world,n);
   let direct=sunIlluminance()*sunlight.r*solarShadowVisibility(shadowed);
   let valleyAO=clamp(1.0+sunlight.b*0.44,0.70,1.14);
@@ -307,23 +340,22 @@ fn boulderContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let hemiMix=clamp(n.y*0.5+0.5,0.0,1.0);
   let ambient=skyIrr*mix(vec3f(0.46,0.42,0.36),vec3f(1.0),hemiMix);
   let sun=normalize(select(vec3f(0.0,1.0,0.0),F.sunDir.xyz,length(F.sunDir.xyz)>0.001));
-  let diffuse=max(dot(n,sun),0.0);
-  let visibility=(0.36+0.34*max(n.y,0.0))*valleyAO;
+  let horizonVis=smoothstep(-0.08,0.16,dot(base,sun));
+  let diffuse=max(dot(n,sun),0.0)*horizonVis;
+  let cavityAO=clamp((1.0-rock.crack*0.32)*npbr.cavityAO,0.35,1.15);
+  let visibility=(0.36+0.34*max(n.y,0.0))*valleyAO*cavityAO;
   let groundBounce=direct*max(sun.y,0.0)*(1.0-max(n.y,0.0))*0.062*soil*visibility;
   let toEye=normalize(eye-world);
 
   var color=albedo*(direct*diffuse/PI+ambient*visibility)+albedo*groundBounce;
 
-  // Specular highlight: subtle mineral glint on dry rock, crisp glossy Fresnel reflection on wet tidal stone.
-  let halfRaw=toEye+sun;
-  let halfway=select(vec3f(0.0,1.0,0.0),normalize(halfRaw),length(halfRaw)>1e-5);
-  let ndoth=max(dot(n,halfway),0.0);
-  let ndotv=max(dot(n,toEye),0.0);
-  let fresnel=mix(0.035,0.065,wet)+(1.0-mix(0.035,0.065,wet))*pow(1.0-ndotv,5.0);
-  let specPow=mix(26.0,96.0,wet*(1.0-roughness));
-  let specStrength=mix(0.022,0.26,wet)*(1.0-rock.crack*0.45);
-  color+=(direct/PI)*pow(ndoth,specPow)*specStrength*(0.5+0.5*fresnel);
+  // Physically based GGX specular: crisp micro-facet glint on dry mineral stone, glossy Fresnel sheen on wet tidal rock.
+  let f0=vec3f(mix(0.036,0.062,wet));
+  let specBrdf=neuralPbrAnisoSpecular(n,npbrBasis,toEye,sun,roughness,npbr.aniso,f0);
+  color+=direct*specBrdf*diffuse*mix(0.75,1.15,wet)*cavityAO;
   if(wet>0.01){
+    let ndotv=max(dot(n,toEye),0.0);
+    let fresnel=mix(0.035,0.065,wet)+(1.0-mix(0.035,0.065,wet))*pow(1.0-ndotv,5.0);
     let refl=reflect(-toEye,n);
     let envRefl=textureSampleLevel(envCube,sampC,vec3f(refl.x,max(refl.y,0.02),refl.z),mix(4.5,1.2,wet)).rgb;
     color+=envRefl*fresnel*wet*0.55*(0.55+0.45*visibility);
@@ -352,7 +384,7 @@ fn boulderContinuumCardBakeVarying(s:ContinuumSurface,v:ptr<function,ContinuumCa
 }
 fn boulderContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSample {
   let baseN=normalize(v.normal+vec3f(0.0,1e-6,0.0));
-  let rock=boulderRockSurface(v.local*1.5,baseN,v.stone,v.lit.x,v.lit.y,0.85);
+  let rock=boulderRockSurface(v.local*1.5,baseN,v.stone,v.lit.x,v.lit.y,0.85,0.04);
   let meanSoil=pow(max(textureSampleLevel(boulderCardLandAlbedo,boulderCardLandSamp,vec2f(0.5,0.5),6.0).rgb,vec3f(0.01)),vec3f(2.2));
   let rootMask=1.0-smoothstep(-0.22,0.16,v.lit.y);
   let topMoss=smoothstep(0.54,0.88,max(rock.normal.y,0.0))*smoothstep(0.36,0.76,rock.mossNoise)*0.22;

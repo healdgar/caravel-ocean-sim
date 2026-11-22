@@ -49,3 +49,12 @@ test('inland-water WGSL avoids world-coordinate lever-arm phase moire with rotat
   assert.match(src, /fn riverBarWave\(p:\s*vec2f,\s*chCoord:\s*vec2f/, 'riverBarWave takes intrinsic curvilinear channel coordinates');
   assert.match(src, /let\s+overSea\s*=\s*smoothstep\(/, 'estuary wings feather laterally whenever overlapping submerged sea bed');
 });
+
+test('boulder continuum binds and evaluates Shared Neural PBR for close-up rock texture', () => {
+  const jsSrc = fs.readFileSync(new URL('../js/boulder-continuum.js', import.meta.url), 'utf8');
+  const wgslSrc = fs.readFileSync(new URL('../js/wgsl/boulder-continuum.js', import.meta.url), 'utf8');
+  assert.match(jsSrc, /BOULDER_CONTINUUM_BINDINGS\s*=\s*Object\.freeze\(\[[^\]]*22\s*,\s*23/, 'BOULDER_CONTINUUM_BINDINGS must include Neural PBR bindings 22 and 23');
+  assert.match(wgslSrc, /createNeuralPbrWGSL\(\{\s*group:\s*0,\s*latentBinding:\s*22,\s*weightBinding:\s*23\s*\}\)/, 'boulder prelude includes Neural PBR bindings 22/23');
+  assert.match(wgslSrc, /evalNeuralPbr\(/, 'boulder shade evaluates Neural PBR');
+  assert.match(wgslSrc, /applyNeuralPbrNormal\(/, 'boulder shade applies Neural PBR normal relief');
+});

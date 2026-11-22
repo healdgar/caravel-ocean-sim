@@ -1312,7 +1312,7 @@ export const BOULDER_CONTINUUM_MATERIAL = Object.freeze({ archetype: CONTINUUM_T
 export const BOULDER_CONTINUUM_TYPES = Object.freeze(Array.from({ length: ROCK_ARCHETYPES }, (_, archetype) => `boulder-${archetype}`));
 // The land's resources (js/terrain.js nearResources) the boulders' material binds in its group 0
 // (js/wgsl/boulder-continuum.js).
-export const BOULDER_CONTINUUM_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 19, 20, 21, 24]);
+export const BOULDER_CONTINUUM_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 19, 20, 21, 22, 23, 24]);
 // The baked atlas and its manifest. Spelled out, not composed, because the build publishes (and versions) only the
 // asset paths it finds quoted in the source. Both are kept in git: boulders are drawn from nothing else.
 export const BOULDER_CONTINUUM_ASSETS = Object.freeze({
