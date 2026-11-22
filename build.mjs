@@ -11,6 +11,7 @@ import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { FOREST_ASSETS, SUBTROPICAL_FOREST_ASSETS, PORTUGAL_FOREST_ASSETS } from './js/forest-scenery.js';
 import { FOREST_CONTINUUM_ASSETS, SUBTROPICAL_FOREST_CONTINUUM_ASSETS, PORTUGAL_FOREST_CONTINUUM_ASSETS, FOREST_CONTINUUM_MOBILE_ASSETS, PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS } from './js/forest-continuum.js';
 import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
@@ -62,7 +63,7 @@ order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js'
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 wgslModules.push('js/wgsl/human-morph.js','js/wgsl/part-assembly.js','js/wgsl/rig-surfaces.js','js/wgsl/vessel-recoil.js','js/wgsl/hull-flood.js','js/wgsl/townsfolk.js');
 // Shaders read these constants as they are built, so they come first, after the fort plan the streets import.
-order.unshift('js/fort-plan.js','js/fort-records.js','js/harbour-geography.js','js/harbour-defences.js','js/town-streets.js','js/indigenous-dress.js');
+order.unshift('js/version.js','js/fort-plan.js','js/fort-records.js','js/harbour-geography.js','js/harbour-defences.js','js/town-streets.js','js/indigenous-dress.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/town-clips.js','js/town-shots.js','js/townsfolk.js','js/board-armies.js','js/prop-continuum.js','js/wgsl/prop-continuum.js','js/gunnery-tools.js','js/props.js','js/free-cannon.js','js/castle-duel.js');
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/port-props.js','js/tripo-pier-assets.js');
 wgslModules.push('js/wgsl/ship-fracture.js');
@@ -262,6 +263,24 @@ const stripModuleSyntax = (src,inlineAssets=true) => {
 
 const license = fs.readFileSync(path.join(root, 'LICENSE'), 'utf8');
 const notices = fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8');
+const pkgVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version || '1.0.0';
+const gitRun = (gitArgs) => {
+  try { return execFileSync('git', gitArgs, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+  catch { return ''; }
+};
+const gitCount = Number(gitRun(['rev-list', '--count', 'HEAD'])) || 0;
+const gitCommit = gitRun(['rev-parse', '--short', 'HEAD']) || 'dev';
+const gitBranch = gitRun(['rev-parse', '--abbrev-ref', 'HEAD']) || '';
+const gitDirty = Boolean(gitRun(['status', '--porcelain', '--untracked-files=no', '--', 'js/', 'index.html', 'build.mjs', 'scripts/']));
+const buildInfo = {
+  version: `${pkgVersion.split('.').slice(0, 2).join('.')}.${gitCount}`,
+  build: gitCount,
+  commit: gitCommit,
+  branch: gitBranch,
+  dirty: gitDirty,
+  builtAt: new Date().toISOString(),
+};
+const buildBootstrap = `<script>window.__WATERWORLD_BUILD__=${JSON.stringify(buildInfo)};</script>`;
 const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8').replace('</head>', () => '<!--\n' + license + '\n' + notices + '\n-->\n</head>');
 const SCRIPT_TAG = '<script type="module" src="js/main.js"></script>';
 const write = (name, html) => {
@@ -278,7 +297,7 @@ for (const f of order) for (const [, target] of fs.readFileSync(path.join(root, 
 // ---- readable bundle --------------------------------------------------------------------
 let code = '';
 for (const f of order) code += `// ---- ${f} ----\n${stripModuleSyntax(fs.readFileSync(path.join(root, f), 'utf8'))}\n`;
-write('ocean.html', page.replace(SCRIPT_TAG, () => `<script type="module">\n${code}\n</script>`));
+write('ocean.html', page.replace(SCRIPT_TAG, () => `${buildBootstrap}\n<script type="module">\n${code}\n</script>`));
 
 // ---- minified bundle --------------------------------------------------------------------
 // WGSL has no string literals, so comments and whitespace can be removed safely. Spaces are
@@ -513,7 +532,7 @@ const minifyPage = js => page
   .replace(/<style>([\s\S]*?)<\/style>/, (_, css) => `<style>${esbuild ? esbuild.transformSync(css, { loader: 'css', minify: true, legalComments: 'none' }).code.trim() : css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').replace(/ ?([{}:;,>]) ?/g, '$1').trim()}</style>`)
   .replace(/<[a-z][^>]*>/gi, tag => tag.replace(/\s+/g, ' '))
   .replace(/>\s+</g, '><')
-  .replace(SCRIPT_TAG, () => `<script type="module">${js}</script>`);
+  .replace(SCRIPT_TAG, () => `${buildBootstrap}<script type="module">${js}</script>`);
 write('ocean.min.html', minifyPage(minJs));
 
 // Pages serves cached assets; the two ocean downloads remain self-contained. The published page opens on deck, so
@@ -527,10 +546,12 @@ for(const [file,record]of pagesAssets){
   fs.writeFileSync(destination,runtimeAssetBytes.get(file));
 }
 fs.writeFileSync(path.join(root,'docs','assets-manifest.json'),JSON.stringify(Object.fromEntries(pagesAssets),null,2)+'\n');
+fs.writeFileSync(path.join(root,'docs','build-info.json'),JSON.stringify(buildInfo,null,2)+'\n');
 // Only sailing essentials preload. Marine encounters load their whale asset
 // on demand, keeping optional downloads off the first-frame critical path.
 const startupPreloads=['assets/caravel-oak-albedo.webp']
   .map(file=>`<link rel="preload" as="fetch" href="${pagesAssets.get(file).url}" crossorigin="anonymous">`).join('');
 write('docs/index.html', minifyPage(pagesJs).replace('</head>','<meta name="robots" content="noindex, nofollow, noarchive">'+startupPreloads+'</head>')
   .replace('<script type="module">', pagesBootstrap + '<script type="module">'));
+console.log(`stamped build #${buildInfo.build} (v${buildInfo.version} ${buildInfo.commit}${buildInfo.dirty ? '*' : ''})`);
 fs.writeFileSync(path.join(root, 'docs', '.nojekyll'), '');

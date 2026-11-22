@@ -4,6 +4,7 @@
 // kilometres of shore for curated ports or any global (lat, lon) landfall. Every town, work and waterfront on that
 // ground is its board's (js/old-world.js), drawn as the city atlas's types (buildCityTypeGeometry builds each one).
 
+import { waterworldApiBase } from './version.js';
 import { layTownStreets, paveCityStreets, streetEdgeAt } from './town-streets.js';
 import { layPortProps, pierBentStations, pierBrowStations, pierCraneStation } from './port-props.js';
 import { emitTripoHarborCrane, emitTripoDockCleat } from './tripo-pier-assets.js';
@@ -7109,7 +7110,7 @@ export function apply1550TerritoryCachePayload(basePack, payloadBytes, orthophot
 }
 
 export async function runLandfallDiscoveryPipeline(basePack, {
-  apiBase = '/waterworld/api',
+  apiBase = waterworldApiBase(),
   onFirstExplorer = null,
   onProgress = null,
   onUpgradeReady = null,

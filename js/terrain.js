@@ -1845,7 +1845,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(meadowGrass?.stats)Object.assign(meadowGrassStats,meadowGrass.stats);
       for(const sec of loadedSections.values())attachSectionMeadow(sec);
       return meadowGrass;
-    }catch(error){meadowFailure=error.message;meadowGrassStats.error=meadowFailure;return null;}
+    }catch(error){meadowFailure=error.message;meadowGrassStats.error=meadowFailure;console.error('meadow continuum',error);return null;}
   })();
   const sceneryReady=Promise.all([forestReadyPromise,meadowReadyPromise]).then(async()=>{
     if(isMobile&&!terrainDisposed){

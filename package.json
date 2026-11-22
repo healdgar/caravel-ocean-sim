@@ -8,7 +8,9 @@
   "scripts": {
     "start": "node server.mjs",
     "build": "node build.mjs",
-    "deploy": "node scripts/deploy-cloudflare.mjs",
+    "deploy": "node scripts/deploy-cloudflare.mjs --target=test",
+    "deploy:test": "node scripts/deploy-cloudflare.mjs --target=test",
+    "deploy:prod": "node scripts/deploy-cloudflare.mjs --target=prod",
     "meshy": "node scripts/meshy.mjs",
     "tripo:livestock": "node scripts/tripo-livestock.mjs",
     "audio": "node scripts/audio.mjs",

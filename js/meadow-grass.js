@@ -683,14 +683,15 @@ export async function createMeadowGrass({
   // many pages as the atlas takes. Meadow grass only grows above MEADOW_WATERLINE (0.75 m), so it never draws into the
   // underwater submerged-geometry capture pass.
   const pages = continuumAtlasPages(device, pack.words);
-  const packRef = pack;
+  let packRef = pack;
   pack = null; // Release parameter slot so returned closures never retain the full raw CPU meadow words buffer.
   const [atlas, programs, view, stand] = await Promise.all([
-    requestContinuumAtlas(device, `meadow ${packManifest.pack}`, async () => packRef),
+    requestContinuumAtlas(device, `meadow ${packManifest.pack}`, async () => { const p = packRef; packRef = null; return p; }),
     requestContinuumPrograms({ device, shader, shadowFormat, pages }),
     requestContinuumView({ device, shader, material: MEADOW_CONTINUUM_SPEC, format, samples, pages }),
     requestMeadowStand(device, shader),
   ]);
+  packRef = null;
   if (atlas.types.length !== packManifest.types.length) throw Error(`The meadow continuum atlas holds ${atlas.types.length} types, its manifest ${packManifest.types.length}: rebake it`);
   // The pack's mixes in their roles: a strand for a margin sows it behind the beaches.
   const coast = (packManifest.mixes ?? [])[MEADOW_MIX_ROLES.indexOf('margin')] === 'strand';
@@ -988,19 +989,19 @@ export async function createMeadowGrass({
   if (craters) bindCraters(craters);
   else buildGroups();
 
-  const manifestTypes = pack.manifest.types ?? [];
+  const manifestTypes = packManifest.types ?? [];
   return {
     stats: {
       loaded: true,
       backend: 'continuum',
-      style: pack.manifest.format,
-      pack: pack.manifest.pack,
-      mixes: pack.manifest.mixes,
+      style: packManifest.format,
+      pack: packManifest.pack,
+      mixes: packManifest.mixes,
       variants: manifestTypes.length,
       clusters: manifestTypes.reduce((n, v) => n + v.clusters, 0),
       sourceTriangles: manifestTypes.reduce((n, v) => n + v.sourceTriangles, 0),
-      farError: pack.manifest.farError,
-      atlasBytes: words.byteLength,
+      farError: packManifest.farError,
+      atlasBytes: atlas.atlasBytes ?? words.byteLength,
       patchMetres: MEADOW_PATCH_METRES,
       coverSize,
       coast,

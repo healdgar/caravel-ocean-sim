@@ -7,6 +7,7 @@ shots/
 # local tooling
 .claude/
 .cloudflare/
+.cloudflare-test/
 .wrangler/
 # Meshy credentials references, task records and generated source assets stay local.
 .meshy/

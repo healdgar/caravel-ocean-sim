@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-// Stages docs/ into .cloudflare/public/waterworld/ (splitting >20 MiB and .gz
+// Stages docs/ into .cloudflare(-test)/public/<mount>/ (splitting >20 MiB and .gz
 // streams into raw binary parts so Cloudflare Static Assets never rejects >25 MiB
 // files or alters Content-Encoding on SHA-256 receipt-verified .gz streams) and
-// deploys the sixcailloux-waterworld Worker to https://sixcailloux.com/waterworld/.
+// deploys either:
+//   --target=test (default): sixcailloux-waterworld-test -> https://www.sixcailloux.com/waterworld-test/
+//   --target=prod:           sixcailloux-waterworld      -> https://www.sixcailloux.com/waterworld/
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -11,7 +13,33 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const args = new Set(process.argv.slice(2));
+const rawArgs = process.argv.slice(2);
+const args = new Set(rawArgs);
+
+const targetArg = rawArgs.find((a) => a.startsWith('--target='))?.slice('--target='.length)
+  || (args.has('--prod') || args.has('--production') ? 'prod' : args.has('--test') ? 'test' : 'test');
+
+const TARGETS = {
+  test: {
+    id: 'test',
+    workerName: 'sixcailloux-waterworld-test',
+    mountName: 'waterworld-test',
+    basePath: '/waterworld-test',
+    cfDirName: '.cloudflare-test',
+  },
+  prod: {
+    id: 'prod',
+    workerName: 'sixcailloux-waterworld',
+    mountName: 'waterworld',
+    basePath: '/waterworld',
+    cfDirName: '.cloudflare',
+  },
+};
+
+const target = TARGETS[targetArg === 'production' ? 'prod' : targetArg];
+if (!target) {
+  throw new Error(`Unknown --target=${targetArg}. Expected --target=test or --target=prod.`);
+}
 
 if (!args.has('--skip-build')) {
   execFileSync(process.execPath, [path.join(root, 'build.mjs')], { stdio: 'inherit', cwd: root });
@@ -20,9 +48,11 @@ if (!args.has('--skip-build')) {
 const docsDir = path.join(root, 'docs');
 const manifestPath = path.join(docsDir, 'assets-manifest.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const buildInfoPath = path.join(docsDir, 'build-info.json');
+const buildInfo = fs.existsSync(buildInfoPath) ? JSON.parse(fs.readFileSync(buildInfoPath, 'utf8')) : null;
 
-const cfDir = path.join(root, '.cloudflare');
-const outRoot = path.join(cfDir, 'public', 'waterworld');
+const cfDir = path.join(root, target.cfDirName);
+const outRoot = path.join(cfDir, 'public', target.mountName);
 fs.rmSync(cfDir, { recursive: true, force: true });
 fs.mkdirSync(outRoot, { recursive: true });
 
@@ -30,7 +60,14 @@ const indexHtmlPath = path.join(docsDir, 'index.html');
 const indexHtmlSha256 = createHash('sha256').update(fs.readFileSync(indexHtmlPath)).digest('hex');
 fs.copyFileSync(indexHtmlPath, path.join(outRoot, 'index.html'));
 fs.copyFileSync(manifestPath, path.join(outRoot, 'assets-manifest.json'));
+if (buildInfo) {
+  fs.writeFileSync(
+    path.join(outRoot, 'build-info.json'),
+    JSON.stringify({ ...buildInfo, target: target.id, deployedAt: new Date().toISOString() }, null, 2) + '\n',
+  );
+}
 
+const BASE = target.basePath;
 const MAX_PART_BYTES = 20 * 1024 * 1024;
 const streamManifest = {};
 let partFileCount = 0;
@@ -43,7 +80,7 @@ for (const [source, record] of Object.entries(manifest)) {
   if (bytes.length !== record.bytes || sha256 !== record.sha256) {
     throw new Error(`Asset receipt mismatch before Cloudflare staging: ${source}`);
   }
-  const webPath = '/waterworld/' + record.url;
+  const webPath = `${BASE}/${record.url}`;
   if (record.url.endsWith('.gz') || bytes.length > MAX_PART_BYTES) {
     const parts = [];
     for (let offset = 0, partIndex = 0; offset < bytes.length; offset += MAX_PART_BYTES, partIndex++) {
@@ -52,7 +89,7 @@ for (const [source, record] of Object.entries(manifest)) {
       const destPart = path.join(outRoot, relPart);
       fs.mkdirSync(path.dirname(destPart), { recursive: true });
       fs.writeFileSync(destPart, slice);
-      parts.push('/waterworld/' + relPart);
+      parts.push(`${BASE}/${relPart}`);
       partFileCount++;
     }
     streamManifest[webPath] = {
@@ -77,10 +114,10 @@ for (const name of ['ocean.html', 'ocean.min.html']) {
     const relPart = `download/${name}.part${partIndex}.bin`;
     fs.mkdirSync(path.join(outRoot, 'download'), { recursive: true });
     fs.writeFileSync(path.join(outRoot, relPart), bytes.subarray(offset, Math.min(bytes.length, offset + MAX_PART_BYTES)));
-    parts.push('/waterworld/' + relPart);
+    parts.push(`${BASE}/${relPart}`);
     partFileCount++;
   }
-  streamManifest[`/waterworld/download/${name}`] = {
+  streamManifest[`${BASE}/download/${name}`] = {
     bytes: bytes.length,
     sha256: createHash('sha256').update(bytes).digest('hex'),
     contentType: 'text/html; charset=utf-8',
@@ -90,8 +127,9 @@ for (const name of ['ocean.html', 'ocean.min.html']) {
   };
 }
 
-const workerCode = `// Generated by scripts/deploy-cloudflare.mjs
+const workerCode = `// Generated by scripts/deploy-cloudflare.mjs (target=${target.id}, base=${BASE})
 import { handleDmApi } from './dm-stats-api.mjs';
+const BASE = ${JSON.stringify(BASE)};
 const STREAM_MANIFEST = ${JSON.stringify(streamManifest)};
 
 const ROBOTS_HEADER = 'noindex, nofollow, noarchive';
@@ -112,15 +150,23 @@ export default {
         },
       });
     }
-    if (url.pathname === '/waterworld') {
-      return Response.redirect(url.origin + '/waterworld/' + url.search, 308);
+    if (url.pathname === BASE) {
+      return Response.redirect(url.origin + BASE + '/' + url.search, 308);
     }
 
     // The dungeon master's figures (mcp/dm-stats-api.mjs): counts and the game's numbers under a Caiioo account, never what is said.
-    if (url.pathname.startsWith('/waterworld/api/dm/')) return handleDmApi(request, env, ctx);
+    if (url.pathname.startsWith(BASE + '/api/dm/')) {
+      if (BASE !== '/waterworld') {
+        const dmUrl = new URL(url.toString());
+        dmUrl.pathname = '/waterworld' + url.pathname.slice(BASE.length);
+        return handleDmApi(new Request(dmUrl, request), env, ctx);
+      }
+      return handleDmApi(request, env, ctx);
+    }
 
     // Shared 1550 Historical Landfall Discovery & Cache API (backed by Cloudflare R2)
-    if (url.pathname.startsWith('/waterworld/api/') && env.LANDFALL_CACHE) {
+    if (url.pathname.startsWith(BASE + '/api/') && env.LANDFALL_CACHE) {
+      const apiPath = url.pathname.slice(BASE.length);
       const corsJson = {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
@@ -129,7 +175,7 @@ export default {
       };
       const rawCell = (url.searchParams.get('cell') || '').replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 64);
 
-      if (url.pathname === '/waterworld/api/landfall-discovery' && request.method === 'GET') {
+      if (apiPath === '/api/landfall-discovery' && request.method === 'GET') {
         if (!rawCell) return new Response(JSON.stringify({ error: 'Missing cell' }), { status: 400, headers: corsJson });
         const metaKey = 'cells/' + rawCell + '/meta.json';
         const orthoKey = 'orthophotos/' + rawCell + '.jpg';
@@ -164,7 +210,7 @@ export default {
         }), { status: 200, headers: corsJson });
       }
 
-      if (url.pathname === '/waterworld/api/landfall-pack' && request.method === 'GET') {
+      if (apiPath === '/api/landfall-pack' && request.method === 'GET') {
         if (!rawCell) return new Response('Missing cell', { status: 400 });
         const packObj = await env.LANDFALL_CACHE.get('cells/' + rawCell + '/pack.bin');
         if (!packObj) return new Response('Not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
@@ -179,7 +225,7 @@ export default {
         });
       }
 
-      if (url.pathname === '/waterworld/api/landfall-pack' && request.method === 'PUT') {
+      if (apiPath === '/api/landfall-pack' && request.method === 'PUT') {
         if (!rawCell) return new Response(JSON.stringify({ error: 'Missing cell' }), { status: 400, headers: corsJson });
         const buf = await request.arrayBuffer();
         if (buf.byteLength < 16 || buf.byteLength > 2 * 1024 * 1024) {
@@ -225,7 +271,7 @@ export default {
         return new Response(JSON.stringify({ ok: true, meta }), { status: 200, headers: corsJson });
       }
 
-      if (url.pathname === '/waterworld/api/landfall-orthophoto' && request.method === 'GET') {
+      if (apiPath === '/api/landfall-orthophoto' && request.method === 'GET') {
         if (!rawCell) return new Response('Missing cell', { status: 400 });
         const orthoObj = await env.LANDFALL_CACHE.get('orthophotos/' + rawCell + '.jpg');
         if (!orthoObj) return new Response('Not found', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
@@ -240,7 +286,7 @@ export default {
         });
       }
 
-      if (url.pathname === '/waterworld/api/popular-landfalls' && request.method === 'GET') {
+      if (apiPath === '/api/popular-landfalls' && request.method === 'GET') {
         const popObj = await env.LANDFALL_CACHE.get('index/popular.json');
         const list = popObj ? await popObj.json() : [];
         return new Response(JSON.stringify({ count: list.length, destinations: list }), { status: 200, headers: corsJson });
@@ -286,19 +332,19 @@ export default {
     }
 
     let assetUrl = new URL(url.toString());
-    if (assetUrl.pathname === '/waterworld/index.html') {
-      assetUrl.pathname = '/waterworld/';
+    if (assetUrl.pathname === BASE + '/index.html') {
+      assetUrl.pathname = BASE + '/';
     }
     const res = await env.ASSETS.fetch(new Request(assetUrl, request));
     const headers = new Headers(res.headers);
     headers.set('X-Robots-Tag', ROBOTS_HEADER);
-    if (url.pathname.startsWith('/waterworld/assets/')) {
+    if (url.pathname.startsWith(BASE + '/assets/')) {
       headers.set('Access-Control-Allow-Origin', '*');
       headers.set('Cache-Control', IMMUTABLE_CACHE);
-    } else if (url.pathname === '/waterworld/' || url.pathname === '/waterworld/index.html') {
+    } else if (url.pathname === BASE + '/' || url.pathname === BASE + '/index.html' || url.pathname === BASE + '/build-info.json') {
       headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
       headers.set('CDN-Cache-Control', 'no-store');
-      headers.set('ETag', INDEX_HTML_ETAG);
+      if (url.pathname !== BASE + '/build-info.json') headers.set('ETag', INDEX_HTML_ETAG);
     }
     return new Response(res.body, { status: res.status, headers });
   },
@@ -310,15 +356,17 @@ fs.writeFileSync(path.join(cfDir, 'worker.mjs'), workerCode);
 for (const name of ['dm-stats-api.mjs', 'dm-telemetry.mjs']) fs.copyFileSync(path.join(root, 'mcp', name), path.join(cfDir, name));
 
 const wranglerConfig = {
-  name: 'sixcailloux-waterworld',
+  name: target.workerName,
   account_id: 'a3a03834d087613a6568830ecd18e90d',
   main: 'worker.mjs',
   compatibility_date: '2026-10-22',
   workers_dev: false,
   preview_urls: false,
   routes: [
-    { pattern: 'sixcailloux.com/waterworld*', zone_name: 'sixcailloux.com' },
-    { pattern: 'www.sixcailloux.com/waterworld*', zone_name: 'sixcailloux.com' },
+    { pattern: `sixcailloux.com${BASE}`, zone_name: 'sixcailloux.com' },
+    { pattern: `sixcailloux.com${BASE}/*`, zone_name: 'sixcailloux.com' },
+    { pattern: `www.sixcailloux.com${BASE}`, zone_name: 'sixcailloux.com' },
+    { pattern: `www.sixcailloux.com${BASE}/*`, zone_name: 'sixcailloux.com' },
   ],
   assets: {
     directory: './public',
@@ -336,7 +384,10 @@ const wranglerConfig = {
 const configPath = path.join(cfDir, 'wrangler.jsonc');
 fs.writeFileSync(configPath, JSON.stringify(wranglerConfig, null, 2) + '\n');
 
-console.log(`Staged Cloudflare bundle: ${directFileCount} direct assets, ${Object.keys(streamManifest).length} streamed assets (${partFileCount} <=20MiB parts)`);
+console.log(`Staged Cloudflare [${target.id}] (${target.workerName} -> https://www.sixcailloux.com${BASE}/): ${directFileCount} direct assets, ${Object.keys(streamManifest).length} streamed assets (${partFileCount} <=20MiB parts)`);
+if (buildInfo) {
+  console.log(`Build stamp: #${buildInfo.build} v${buildInfo.version} (${buildInfo.commit}${buildInfo.dirty ? '*' : ''})`);
+}
 
 if (!args.has('--stage-only')) {
   const localWrangler = '/Users/alexwall/dev/sixcailloux/services/support/node_modules/.bin/wrangler';

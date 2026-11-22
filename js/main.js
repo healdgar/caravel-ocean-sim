@@ -1,3 +1,4 @@
+import {getWaterworldBuild,formatBuildLabel} from './version.js';
 import {forestSurfaceFeatures} from './forest-surfaces.js';
 import {requestWebGPUAdapter,requestWebGPUDevice,describeMissingWebGPUAdapter} from './webgpu-adapter.js';
 import {withSceneHullProfile} from './wgsl/hull.js';
@@ -4671,9 +4672,18 @@ async function main() {
     onCoastlineSwap:()=>{envFull=true;},
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});
   {
+    const buildInfo=getWaterworldBuild();
+    window.oceanBuild=buildInfo;
+    const chanUpper=buildInfo.channel.toUpperCase();
+    const chanStyle=buildInfo.channel==='prod'
+      ?'background:rgba(52,211,153,0.18);color:#6ee7b7;border:1px solid rgba(52,211,153,0.45);'
+      :buildInfo.channel==='test'
+        ?'background:rgba(251,191,36,0.20);color:#fcd34d;border:1px solid rgba(251,191,36,0.50);'
+        :'background:rgba(148,163,184,0.18);color:#cbd5e1;border:1px solid rgba(148,163,184,0.40);';
+    const builtStr=buildInfo.builtAt?buildInfo.builtAt.replace('T',' ').slice(0,16)+' UTC':'unbundled dev';
     const perfDebugBox=document.createElement('div');
     perfDebugBox.style.cssText='margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.14);';
-    perfDebugBox.innerHTML='<strong style="display:block;font-size:12px;margin-bottom:6px;opacity:0.85;">Debug &amp; Side Modes</strong><div class="encounter-buttons" style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" id="perf-castle-duel-btn">🏰 Castle Duel</button><button type="button" id="perf-coastline-btn">Switch Coastline (1550 / 2026)</button></div>';
+    perfDebugBox.innerHTML=`<div id="debug-build-banner" style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px;padding:6px 8px;border-radius:7px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);font:11px/1.35 ui-monospace,monospace;"><div><div style="color:#f3eee3;font-weight:600;">${formatBuildLabel(buildInfo)}</div><div style="color:#a8b8c4;font-size:10px;">${builtStr}</div></div><span style="padding:2px 6px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.06em;${chanStyle}">${chanUpper}</span></div><strong style="display:block;font-size:12px;margin-bottom:6px;opacity:0.85;">Debug &amp; Side Modes</strong><div class="encounter-buttons" style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" id="perf-castle-duel-btn">🏰 Castle Duel</button><button type="button" id="perf-coastline-btn">Switch Coastline (1550 / 2026)</button></div>`;
     const perfDuelBtn=perfDebugBox.querySelector('#perf-castle-duel-btn');
     const perfCoastBtn=perfDebugBox.querySelector('#perf-coastline-btn');
     perfDuelBtn.title=`La Punta against the Morro across the mouth of ${CASTLE_DUEL_PLACE.name} in ${CASTLE_DUEL_PLACE.year}, laid by eye. Raised at open sea; the ship and the voyage wait until it ends.`;
