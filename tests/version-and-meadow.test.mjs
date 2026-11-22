@@ -40,3 +40,12 @@ test('createMeadowGrass never dereferences pack after clearing pack = null', () 
   const afterClear = src.slice(clearAt + 'pack = null;'.length, end);
   assert.doesNotMatch(afterClear, /\bpack\./, 'pack.* must not be referenced after pack = null');
 });
+
+test('inland-water WGSL avoids world-coordinate lever-arm phase moire with rotating flow/shore vectors', () => {
+  const src = fs.readFileSync(new URL('../js/wgsl/inland-water.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /dot\(\s*p\s*,\s*kAxis\s*\)/, 'riverBarWave must not dot worldXZ with rotating kAxis');
+  assert.doesNotMatch(src, /dot\(\s*p\s*,\s*kSide\s*\)/, 'riverBarWave must not dot worldXZ with rotating kSide');
+  assert.doesNotMatch(src, /dot\(\s*pos[AB]\s*,\s*(?:across|dir)\s*\)/, 'fluvial UV/undulation must use intrinsic channel coords, not dot(worldXZ, rotatingFlow)');
+  assert.match(src, /fn riverBarWave\(p:\s*vec2f,\s*chCoord:\s*vec2f/, 'riverBarWave takes intrinsic curvilinear channel coordinates');
+  assert.match(src, /let\s+overSea\s*=\s*smoothstep\(/, 'estuary wings feather laterally whenever overlapping submerged sea bed');
+});

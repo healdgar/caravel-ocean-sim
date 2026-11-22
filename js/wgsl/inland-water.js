@@ -83,18 +83,20 @@ fn lambdaSmith(w: vec3f, cov: vec3f) -> f32 {
 }
 
 // Standing/slow-propagating wave-current steepening on the river-mouth bar where outflow opposes coastal swells.
-fn riverBarWave(p: vec2f, flowDir: vec2f, shoreDir: vec2f, speed: f32, t: f32) -> vec3f {
+// Phase is evaluated in intrinsic curvilinear channel coordinates (alongS, acrossS) so |worldXZ| (~6 km from origin)
+// never multiplies spatially rotating shoreDir/flowDir gradients into sub-metre moiré zebra stripes.
+fn riverBarWave(p: vec2f, chCoord: vec2f, flowDir: vec2f, shoreDir: vec2f, speed: f32, t: f32) -> vec3f {
   let kAxis = normalize(shoreDir - flowDir * 0.85 + vec2f(1e-4, 0.0));
   let kSide = vec2f(kAxis.x * 0.82 - kAxis.y * 0.57, kAxis.x * 0.57 + kAxis.y * 0.82);
-  let k1 = 0.82;
-  let k2 = 1.65;
-  let ph1 = dot(p, kAxis) * k1 - t * (1.45 - min(speed, 1.8) * 0.32) + gnoise(p * 0.065) * 1.4;
-  let ph2 = dot(p, kSide) * k2 - t * 2.10 + gnoise(p * 0.12 + vec2f(4.3, 9.1)) * 1.1;
-  let env = 0.58 + 0.42 * gnoise(p * 0.035 - flowDir * t * 0.12);
-  let a1 = 0.072 * env;
-  let a2 = 0.036 * env;
-  let h = a1 * (sin(ph1) + 0.22 * cos(2.0 * ph1)) + a2 * sin(ph2);
-  let s1 = a1 * k1 * (cos(ph1) - 0.44 * sin(2.0 * ph1));
+  let k1 = 0.55;
+  let k2 = 0.92;
+  let ph1 = -chCoord.x * k1 - t * (1.35 - min(speed, 1.8) * 0.28) + gnoise(p * 0.045) * 2.2;
+  let ph2 = (-chCoord.x * 0.82 + chCoord.y * 0.57) * k2 - t * 1.90 + gnoise(p * 0.09 + vec2f(4.3, 9.1)) * 2.1;
+  let env = 0.52 + 0.48 * gnoise(p * 0.032 - flowDir * t * 0.12);
+  let a1 = 0.068 * env;
+  let a2 = 0.032 * env;
+  let h = a1 * (sin(ph1) + 0.20 * cos(2.0 * ph1)) + a2 * sin(ph2);
+  let s1 = a1 * k1 * (cos(ph1) - 0.40 * sin(2.0 * ph1));
   let s2 = a2 * k2 * cos(ph2);
   let sl = kAxis * s1 + kSide * s2;
   return vec3f(h, sl.x, sl.y);
@@ -206,8 +208,10 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   // Sea-mouth swell coupling: sample exact 6 ocean FFT cascades & coastal shoaling so surface matches coastalOcean.
   var oceanDisp = vec3f(0.0);
   var barY = 0.0;
+  var cwsBedV = 1.0;
   if (estuaryT > 0.001) {
     let cws = coastalWaveState(xzBase);
+    cwsBedV = cws.bed;
     let distApprox = distance(vec3f(xzBase.x, 0.0, xzBase.y), F.camPos.xyz);
     for (var c = 0u; c < ${CASCADES}u; c++) {
       let texel = F.cascL[c >> 2u][c & 3u] / TEX_N;
@@ -223,7 +227,10 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     oceanDisp += cws.dispOffset;
     let barEnv = 4.0 * estuaryT * (1.0 - estuaryT) * (1.0 - smoothstep(0.72, 0.89, oceanConv)) * bankMask;
     let opposing = clamp(-dot(flowDir, cws.shoreDir) * 0.65 + 0.45, 0.0, 1.15);
-    barY = riverBarWave(xzBase, flowDir, cws.shoreDir, speed, t).x * barEnv * opposing;
+    let swellHsV = select(1.2, F.cascL[1].z, F.cascL[1].w > 1.0);
+    let seaEnergyV = clamp(cws.swellScale * (swellHsV + F.windP[0].z * 0.05) / 1.45, 0.0, 1.0);
+    let chCoordV = vec2f(flowCoord.z, hydro.y * flowCoord.w);
+    barY = riverBarWave(xzBase, chCoordV, flowDir, cws.shoreDir, speed, t).x * barEnv * opposing * (0.30 + 0.70 * seaEnergyV);
   }
 
   let seaBlendV = smoothstep(0.32, 0.56, estuaryT);
@@ -236,14 +243,15 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let cfdBankMask = mix(1.0 - 0.72 * smoothstep(0.78, 1.0, bankAbs), 1.0, seaBlendV);
   let splashY = (swV.x * 1.15 + sweV2.x * 1.35) * cfdBankMask;
   let rawRelY = posKind.y + fluvialY + barY;
-  let plumeRelY = max(rawRelY, 0.0) + mix(0.090, 0.055, smoothstep(0.42, 0.98, estuaryT));
+  let plumeRelY = max(rawRelY, 0.0) + mix(0.095, 0.065, smoothstep(0.42, 0.98, estuaryT));
   let relToOceanY = mix(
     rawRelY + select(0.0, 0.018 * smoothstep(0.08, 0.30, estuaryT) * bankMask, estuaryT > 0.08),
     plumeRelY,
     seaBlendV
   );
-  // Prevent the ocean surface (at y = oceanDisp.y) from Z-fighting up through low tidal river-mouth reaches.
-  let tidalOceanFloor = oceanDisp.y + 0.045;
+  // Prevent finer ocean clipmap wave crests from poking through the coarser estuary mesh over submerged sea bed.
+  let seaClearance = mix(0.055, 0.13, smoothstep(0.06, 0.45, estuaryT)) * smoothstep(-0.04, -0.45, cwsBedV);
+  let tidalOceanFloor = oceanDisp.y + max(splashY, 0.0) + seaClearance;
   let baseSurfaceY = oceanDisp.y * vertW + splashY + relToOceanY;
   let finalSurfaceY = select(baseSurfaceY, max(baseSurfaceY, tidalOceanFloor), estuaryT > 0.02 && posKind.y < 0.35);
   let shifted = vec3f(
@@ -300,10 +308,15 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let posA = in.rawXZ - advVel * (phA - 0.5) * advPeriod;
   let posB = in.rawXZ - advVel * (phB - 0.5) * advPeriod;
 
-  // Flow-aligned anisotropic foam sampling so river whitewater stretches into natural lacy current filaments
-  // instead of flat isotropic spots across the water surface.
-  let flowUvA = vec2f(dot(posA, across) * 0.52, dot(posA, dir) * 0.13);
-  let flowUvB = vec2f(dot(posB, across) * 0.52 + 0.37, dot(posB, dir) * 0.13 + 0.71);
+  // Flow-aligned anisotropic foam sampling in intrinsic curvilinear channel coordinates (acrossS, alongS)
+  // so world coordinates (~6 km from origin) never amplify gentle river-bend rotation into moiré stripes.
+  let acrossS = in.hydroVars.y * in.coordThal.y;
+  let alongS = in.coordThal.x;
+  let chanFlowSpd = length(liveFlow) * 0.72;
+  let chanPosA = vec2f(acrossS, alongS - chanFlowSpd * (phA - 0.5) * advPeriod);
+  let chanPosB = vec2f(acrossS, alongS - chanFlowSpd * (phB - 0.5) * advPeriod);
+  let flowUvA = select(vec2f(chanPosA.x * 0.52, chanPosA.y * 0.13), posA * 0.28, isPond);
+  let flowUvB = select(vec2f(chanPosB.x * 0.52 + 0.37, chanPosB.y * 0.13 + 0.71), posB * 0.28 + vec2f(0.37, 0.71), isPond);
   let foamA = textureSample(foamTex, sampR, flowUvA);
   let foamB = textureSample(foamTex, sampR, flowUvB);
   let foamFineA = textureSample(foamTex, sampR, flowUvA * vec2f(2.1, 1.6) + vec2f(0.19, 0.43));
@@ -366,10 +379,10 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
       fluvialSl += dv.xy;
       fluvialCov += vec3f(max(mv.x - dv.x * dv.x, 0.0), max(mv.y - dv.y * dv.y, 0.0), mv.z - dv.x * dv.y);
     }
-    // Gentle macro river undulations (broad 3..8 m flowing current swells, never high-frequency stipple)
+    // Gentle macro river undulations (broad 3..8 m flowing current swells, never high-frequency stipple or bend moiré)
     if (detail1 > 0.0) {
-      let g1A = noiseGrad(vec2f(dot(posA, across) * 0.55, dot(posA, dir) * 0.30), 0.24);
-      let g1B = noiseGrad(vec2f(dot(posB, across) * 0.55 + 7.1, dot(posB, dir) * 0.30 + 3.9), 0.24);
+      let g1A = noiseGrad(select(vec2f(chanPosA.x * 0.55, chanPosA.y * 0.30), posA * 0.38, isPond), 0.24);
+      let g1B = noiseGrad(select(vec2f(chanPosB.x * 0.55 + 7.1, chanPosB.y * 0.30 + 3.9), posB * 0.38 + vec2f(7.1, 3.9), isPond), 0.24);
       let g1 = mix(g1A, g1B, wB);
       fluvialSl += (across * g1.x * 0.55 + dir * g1.y * 0.30) * (0.048 * detail1);
     }
@@ -446,11 +459,13 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     let barEnv = 4.0 * estuaryT * (1.0 - estuaryT) * (1.0 - smoothstep(0.72, 0.89, oceanConv)) * bankMask;
     if (barEnv > 0.002) {
       let opposing = clamp(-dot(dir, cws.shoreDir) * 0.65 + 0.45, 0.0, 1.15);
-      let bw = riverBarWave(xz, dir, cws.shoreDir, speed, t);
-      let barScale = barEnv * opposing * (0.45 + 0.45 * min(speed, 2.0));
+      let swellHsBar = select(1.2, F.cascL[1].z, F.cascL[1].w > 1.0);
+      let seaEnergy = clamp(cws.swellScale * (swellHsBar + F.windP[0].z * 0.05) / 1.45, 0.0, 1.0);
+      let bw = riverBarWave(xz, vec2f(alongS, acrossS), dir, cws.shoreDir, speed, t);
+      let barScale = barEnv * opposing * (0.30 + 0.70 * seaEnergy) * (0.42 + 0.42 * min(speed, 2.0));
       barSl = bw.yz * barScale;
-      let crestLine = smoothstep(0.015, 0.075, bw.x);
-      barFoam = clamp(barEnv * opposing * crestLine * (0.48 + 0.52 * speed * 0.5), 0.0, 0.82);
+      let crestLine = smoothstep(0.052, 0.105, bw.x + (pat - 0.5) * 0.032);
+      barFoam = clamp(barEnv * opposing * seaEnergy * crestLine * (0.30 + 0.42 * min(speed, 2.0) * 0.5), 0.0, 0.65);
     }
     shoreBreak = coastalBreakerFoam(xz, cwsSwashH, oceanSl + barSl, cws);
   }
@@ -621,12 +636,13 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     col = mix(col, swashCol, oceanBlend);
   }
   col = surfaceAir(col, in.world);
-  let seaWing = smoothstep(0.38, 0.52, estuaryT);
-  let lateralFade = mix(1.0, pow(clamp(1.0 - bankAbs, 0.0, 1.0), 1.65), seaWing);
-  let axialFade = 1.0 - smoothstep(0.38, 0.95, estuaryT);
-  let rippleHold = clamp(length(fluvialSl) * 2.0 + length(barSl) * 2.8 + barFoam * 0.85, 0.0, 0.40)
+  let overSea = smoothstep(-0.08, -0.55, cwsBed) * smoothstep(0.02, 0.18, estuaryT);
+  let seaWing = max(smoothstep(0.32, 0.52, estuaryT), overSea);
+  let lateralFade = mix(1.0, pow(clamp(1.0 - smoothstep(0.48, 0.98, bankAbs), 0.0, 1.0), 1.35), seaWing);
+  let axialFade = 1.0 - smoothstep(0.35, 0.95, estuaryT);
+  let rippleHold = clamp(length(fluvialSl) * 1.4 + length(barSl) * 1.8 + barFoam * 0.65, 0.0, 0.30)
     * (1.0 - smoothstep(0.68, 0.95, estuaryT)) * lateralFade;
-  let outAlpha = select(1.0, clamp(axialFade * lateralFade + rippleHold, 0.0, 1.0), estuaryT > 0.38);
+  let outAlpha = select(1.0, clamp(axialFade * lateralFade + rippleHold, 0.0, 1.0), estuaryT > 0.02);
   return vec4f(col, outAlpha);
 }
 `;
