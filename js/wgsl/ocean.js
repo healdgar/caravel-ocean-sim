@@ -198,7 +198,7 @@ fn foamPattern(xz: vec2f, t: f32) -> f32 {
   let jx = max(1.0 + jxx, 0.15);
   let jz = max(1.0 + jzz, 0.15);
   let wp = in.rel.xz + F.camPos.xz;
-  let dx = I.domain.w;
+  let dx = max(I.domain.w, 0.25);
   var wakeSlope = vec2f(0.0);
   var sweCoastFoam = 0.0;
   if (dist < 360.0) {

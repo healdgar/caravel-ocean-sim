@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {MAX_FOLLOWERS,readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,fleetModelCode,fleetViewBounds,validateFleetDevice} from '../js/fleet.js';
+import {MAX_FOLLOWERS,readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,fleetModelCode,fleetViewBounds,validateFleetDevice,createFleetWakePool} from '../js/fleet.js';
 import {copyVessel} from '../js/vessels.js';
 import {getShipModel} from '../js/ship-models.js';
 import {createFollower,steerFollower} from '../js/follower.js';
@@ -124,4 +124,34 @@ test('production fleet shaders cover nine hulls and sample a single pooled wake 
   }
   assert.throws(()=>withPooledFleetWakes(SCENE_FOAM_UPDATE,10),/Invalid/);
   assert.throws(()=>withPooledFleetWakes('not a wake shader',3),/Unrecognized/);
+});
+
+test('deferred wake startup cannot produce 0/0 NaN ocean slopes or unseeded wake pool domains',()=>{
+  const pooledOcean=withPooledFleetWakes(withFleetHullCount(createOpticalOcean(COASTAL_WATER,true,true,true),1),1);
+  assert.ok(pooledOcean.includes('max(fleetInteractions[0].domain.w, 0.25)'));
+  assert.ok(pooledOcean.includes('domain.domain.z>1e-3'));
+
+  const writes=[];
+  const prevTex=globalThis.GPUTextureUsage,prevBuf=globalThis.GPUBufferUsage;
+  globalThis.GPUTextureUsage={TEXTURE_BINDING:1,STORAGE_BINDING:2,COPY_SRC:4,COPY_DST:8};
+  globalThis.GPUBufferUsage={UNIFORM:1,COPY_DST:2};
+  try{
+    const fakeDevice={
+      limits:{maxTextureArrayLayers:16,maxTextureDimension2D:4096,maxUniformBufferBindingSize:65536},
+      createTexture:()=>({createView:()=>({}),destroy(){}}),
+      createBuffer:()=>({destroy(){}}),
+      queue:{writeBuffer:(buf,off,data)=>writes.push(new Float32Array(data))},
+    };
+    const pool=createFleetWakePool(fakeDevice,2);
+    assert.equal(writes.length,1);
+    for(let i=0;i<2;i++){
+      assert.ok(writes[0][i*16+2]>0,'domain.z seeded non-zero');
+      assert.ok(writes[0][i*16+3]>0,'domain.w seeded non-zero');
+      assert.equal(writes[0][i*16+9],0,'motion.y seeded inactive');
+    }
+    pool.destroy();
+  }finally{
+    if(prevTex===undefined)delete globalThis.GPUTextureUsage;else globalThis.GPUTextureUsage=prevTex;
+    if(prevBuf===undefined)delete globalThis.GPUBufferUsage;else globalThis.GPUBufferUsage=prevBuf;
+  }
 });

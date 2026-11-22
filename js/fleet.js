@@ -71,6 +71,10 @@ export function createFleetWakePool(device,count){
   const views=textures.map(texture=>texture.createView({dimension:'2d-array'}));
   const uniform=device.createBuffer({label:'fleet wake domains',size:64*count,usage:B.UNIFORM|B.COPY_DST});
   const values=new Float32Array(16*count);let current=0;
+  // Seed inactive non-zero domain extent/texel defaults so Frame-0 ocean/probe shaders
+  // never see dx=0 before deferred WebKit/iOS hull interaction initialization finishes.
+  for(let i=0;i<count;i++){values[i*16+2]=1;values[i*16+3]=0.25;}
+  device.queue.writeBuffer(uniform,0,values);
   return {textures,views,uniform,count,get current(){return current;},get next(){return 1-current;},
     layer(index){
       if(!Number.isInteger(index)||index<0||index>=count)throw new RangeError('Invalid fleet wake layer');

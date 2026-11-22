@@ -14,10 +14,12 @@ fn ${name}(p:vec2f)->vec4f{
   var total=vec4f(0);
   for(var slot=0u;slot<${count}u;slot++){
     let domain=fleetInteractions[slot];
-    let uv=(p-domain.domain.xy)/domain.domain.z+.5;
-    let edge=max(abs(uv.x-.5),abs(uv.y-.5));
-    if(domain.motion.y>.5&&edge<.495){
-      total+=textureSampleLevel(fleetWakeTex,wakeSamp,uv,i32(slot),0.0)*(1.0-smoothstep(.45,.495,edge))*domain.motion.y;
+    if(domain.motion.y>.5&&domain.domain.z>1e-3){
+      let uv=(p-domain.domain.xy)/domain.domain.z+.5;
+      let edge=max(abs(uv.x-.5),abs(uv.y-.5));
+      if(edge<.495){
+        total+=textureSampleLevel(fleetWakeTex,wakeSamp,uv,i32(slot),0.0)*(1.0-smoothstep(.45,.495,edge))*domain.motion.y;
+      }
     }
   }
   return total;
