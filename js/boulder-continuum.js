@@ -332,74 +332,151 @@ export function measurePolyhedron(poly) {
   };
 }
 
+// Builds a sharp, angular, geologically fractured outer cleavage polyhedron for each of the 6 lithology archetypes.
+// Every polyhedron is strictly convex and watertight (V - E + F == 2), deeply anchored to a flat-bedded base at
+// y = -0.24 so sloped hillsides never expose floating undersides, and defined by 8-11 bold asymmetric cleavage planes
+// meeting at crisp geological angles (never rounded ellipsoids or uniform bevel rings).
 function buildOuterBoulderPolyhedron(archetype) {
-  const rand = boulderSeededRandom(29173 + archetype * 13007);
-  const star = [0, 0.28, 0];
-  let poly = createInitialBox(-1.45, 1.45, -0.22, 1.15, -1.45, 1.45);
+  const star = [0, 0.24, 0];
+  let poly = createInitialBox(-1.65, 1.65, -0.35, 1.35, -1.65, 1.65);
 
-  const cutAroundStar = (dir, dist) => {
+  const cut = (dir, dist) => {
     const n = norm3(dir);
     const d = dot3(n, star) + dist;
     const clipped = clipConvexPolyhedron(poly, n, d, false, -1);
     if (clipped) poly = clipped;
   };
+  const cutAz = (azDeg, elDeg, dist) => {
+    const az = azDeg * (Math.PI / 180), el = elDeg * (Math.PI / 180);
+    cut([Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)], dist);
+  };
 
-  // Grounded basal root plane at y = -0.20 keeps every boulder firmly embedded on slopes.
-  cutAroundStar([0, -1, 0], 0.48);
+  // Flat-bedded basal root plane keeps every boulder solidly rooted into slopes without egg-like undercuts.
+  cut([0, -1, 0], 0.50);
 
-  const topTilt = archetype === 0
-    ? [0.22, 0.96, 0.12]
-    : archetype === 2
-      ? [0.46, 0.84, -0.26]
-      : archetype === 5
-        ? [0.07, 0.99, -0.05]
-        : [0.16 + rand() * 0.24, 0.92, 0.14 - rand() * 0.28];
-  const topDist = archetype === 0 ? 0.44 : archetype === 2 ? 0.50 : archetype === 4 ? 0.46 : 0.48 + rand() * 0.08;
-  cutAroundStar(topTilt, topDist);
+  let stretchX = 1.0, stretchZ = 1.0;
 
-  const sideCount = archetype === 5 ? 7 : 9 + (archetype % 3);
-  const phase = rand() * Math.PI * 2;
-  for (let i = 0; i < sideCount; i++) {
-    const az = phase + (i / sideCount) * Math.PI * 2 + (rand() - 0.5) * (archetype === 5 ? 0.14 : 0.34);
-    const el = archetype === 3 && i % 2 === 0 ? 0.48 : archetype === 5 ? 0.08 : (rand() - 0.16) * 0.62;
-    const dist = (archetype === 1 || archetype === 2 ? 0.60 : 0.66) + rand() * 0.18;
-    cutAroundStar([Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)], dist);
+  if (archetype === 0) {
+    // 0: Angular Coastal Granite Block — asymmetric fractured tor with 5 steep bold cleavage faces,
+    // a crisp pitched ridge crest, and a stepped corner shoulder.
+    cutAz(12, 4, 0.72);
+    cutAz(78, 8, 0.64);
+    cutAz(146, -4, 0.69);
+    cutAz(220, 6, 0.74);
+    cutAz(294, -5, 0.63);
+    // Intersecting pitched ridge planes forming a crisp diagonal granite crest.
+    cut([0.36, 0.91, 0.21], 0.45);
+    cut([-0.48, 0.85, -0.22], 0.48);
+    // Asymmetric stepped shoulder & spall corner fracture.
+    cutAz(48, 46, 0.54);
+    cutAz(252, 52, 0.56);
+    stretchX = 1.20;
+    stretchZ = 0.84;
+  } else if (archetype === 1) {
+    // 1: Stratified Limestone Slab / Ledge — horizontal sedimentary bedding shelf, terraced upper step,
+    // and crisp near-vertical conjugate joint walls.
+    cutAz(5, 3, 0.76);
+    cutAz(92, -4, 0.64);
+    cutAz(176, 4, 0.74);
+    cutAz(264, -3, 0.62);
+    // Conjugate corner joint fractures breaking rectangular boxiness.
+    cutAz(44, 6, 0.74);
+    cutAz(218, 5, 0.71);
+    // Horizontal sedimentary bedding cap + one bold terraced ledge step on one flank.
+    cut([0.07, 0.996, -0.05], 0.46);
+    cut([-0.44, 0.86, 0.26], 0.49);
+    cutAz(136, 44, 0.60);
+    stretchX = 1.28;
+    stretchZ = 0.80;
+  } else if (archetype === 2) {
+    // 2: Jagged Red/Ochre Sandstone Crag — dramatic tilted strata hogback ridge meeting a sheer counter-scarp.
+    cutAz(18, -6, 0.72);
+    cutAz(108, 7, 0.62);
+    cutAz(194, -5, 0.68);
+    cutAz(276, 5, 0.60);
+    cutAz(332, 10, 0.69);
+    // Dramatic tilted dipping strata slab intersecting a steep diagonal counter-scarp cleavage cliff.
+    cut([-0.50, 0.83, 0.24], 0.42);
+    cut([0.82, 0.49, -0.29], 0.50);
+    // High prow chisel fracture & secondary tail cleavage.
+    cutAz(64, 42, 0.55);
+    cutAz(238, 48, 0.58);
+    stretchX = 1.24;
+    stretchZ = 0.74;
+  } else if (archetype === 3) {
+    // 3: Columnar Dark Coastal Basalt — crisp 6-sided irregular hexagonal prismatic column with stark flat cap
+    // and a single sharp conchoidal edge spall.
+    cutAz(8, 2, 0.68);
+    cutAz(66, -2, 0.63);
+    cutAz(129, 3, 0.66);
+    cutAz(188, -2, 0.64);
+    cutAz(246, 2, 0.69);
+    cutAz(308, -3, 0.62);
+    // Stark fractured hexagonal top cap + one sharp upper conchoidal spall facet.
+    cut([0.13, 0.986, -0.09], 0.52);
+    cut([-0.56, 0.78, 0.28], 0.54);
+    cutAz(35, 50, 0.59);
+    stretchX = 1.04;
+    stretchZ = 0.94;
+  } else if (archetype === 4) {
+    // 4: Weathered Grey Slate / Schist Outcrop — steep dipping foliation planes converging to a razor-edged crest.
+    cutAz(8, -4, 0.76);
+    cutAz(172, 6, 0.74);
+    cutAz(92, 4, 0.64);
+    cutAz(274, -5, 0.62);
+    // Steep opposing foliation cleavage planes creating a dramatic angled knife-edge ridge.
+    cut([0.66, 0.70, -0.27], 0.42);
+    cut([-0.78, 0.58, 0.23], 0.44);
+    // Sharp oblique cross-joint fractures at the ends of the outcrop blade.
+    cutAz(46, 36, 0.60);
+    cutAz(224, 44, 0.58);
+    stretchX = 1.30;
+    stretchZ = 0.68;
+  } else {
+    // 5: Fractured Dolmen / Tabular Moorland Stone — broad angular tabular slab with sheer fractured walls
+    // and an asymmetric stepped fracture notch along one side.
+    cutAz(14, 3, 0.74);
+    cutAz(84, -3, 0.68);
+    cutAz(158, 5, 0.71);
+    cutAz(234, -4, 0.69);
+    cutAz(306, 4, 0.66);
+    // Broad weathered tabular top face + two asymmetric upper fracture-notch bevels.
+    cut([0.05, 0.997, 0.04], 0.48);
+    cut([0.52, 0.78, 0.35], 0.54);
+    cut([0.30, 0.74, -0.60], 0.55);
+    cutAz(195, 52, 0.59);
+    stretchX = 1.22;
+    stretchZ = 0.92;
   }
 
-  // Upper brow bevel planes create natural geological facets and corners.
-  const bevelCount = archetype === 5 ? 5 : 6;
-  for (let i = 0; i < bevelCount; i++) {
-    const az = phase + 0.37 + (i / bevelCount) * Math.PI * 2;
-    const el = 0.56 + rand() * 0.22;
-    const dist = 0.52 + rand() * 0.12;
-    cutAroundStar([Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)], dist);
-  }
-  // Basal undercut / heel planes so boulders tuck cleanly into soil without overhanging skirts.
-  for (let i = 0; i < 5; i++) {
-    const az = phase + 0.61 + (i / 5) * Math.PI * 2;
-    cutAroundStar([Math.cos(az) * 0.86, -0.51, Math.sin(az) * 0.86], 0.68 + rand() * 0.08);
-  }
-
-  // Normalize horizontal extent to ~0.92 and vertical span to [-0.20, 0.80] while preserving planarity.
-  const stretchX = archetype === 0 ? 1.12 : archetype === 4 ? 1.06 : 0.90 + rand() * 0.22;
-  const stretchZ = archetype === 0 ? 0.86 : archetype === 4 ? 0.94 : 0.86 + rand() * 0.22;
-  let minY = Infinity, maxY = -Infinity, maxXZ = 0;
+  // Normalize horizontal footprint around (0, 0) to radius 0.94 and vertical span to [-0.24, 0.80] while keeping planarity.
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const p of poly.vertices) {
     p[0] *= stretchX;
     p[2] *= stretchZ;
+    if (p[0] < minX) minX = p[0];
+    if (p[0] > maxX) maxX = p[0];
     if (p[1] < minY) minY = p[1];
     if (p[1] > maxY) maxY = p[1];
+    if (p[2] < minZ) minZ = p[2];
+    if (p[2] > maxZ) maxZ = p[2];
+  }
+  const midX = (minX + maxX) * 0.5, midZ = (minZ + maxZ) * 0.5;
+  let maxXZ = 0;
+  for (const p of poly.vertices) {
+    p[0] -= midX;
+    p[2] -= midZ;
     const r = Math.hypot(p[0], p[2]);
     if (r > maxXZ) maxXZ = r;
   }
-  const xzScale = 0.92 / Math.max(1e-3, maxXZ);
-  const yScale = 1.0 / Math.max(1e-3, maxY - minY);
+  const xzScale = 0.94 / Math.max(1e-3, maxXZ);
+  const yScale = 1.04 / Math.max(1e-3, maxY - minY);
   for (const p of poly.vertices) {
     p[0] *= xzScale;
     p[2] *= xzScale;
-    p[1] = -0.20 + (p[1] - minY) * yScale;
+    p[1] = -0.24 + (p[1] - minY) * yScale;
   }
-  // Recompute exact unit face normals after affine stretch/normalization.
+  // Recompute exact outward unit face normals after affine stretch/normalization.
   for (const f of poly.faces) {
     const a = poly.vertices[f.v[0]], b = poly.vertices[f.v[1]], c = poly.vertices[f.v[2]];
     f.n = norm3(cross3(sub3(b, a), sub3(c, a)));
@@ -502,40 +579,130 @@ function decomposeBoulderCleavage(outerPoly, archetype) {
   return rawCells;
 }
 
-// The outer polyhedron as it is drawn: eight floats a corner (position, normal, how lit its facet is, its archetype's
-// tag), every face a fan, its normals creased where facets meet at more than some fifteen degrees.
-function buildNearPolyhedronVertices(outerPoly, archetype) {
-  const out = [];
-  const archTag = (archetype + 0.5) / ROCK_ARCHETYPES;
-  // Crease-aware vertex normals on exterior faces so geological facets stay crisp while gentle bends smooth.
-  const vIncident = Array.from({ length: outerPoly.vertices.length }, () => []);
-  outerPoly.faces.forEach((f, fi) => {
-    for (const v of f.v) vIncident[v].push(fi);
+// Deterministic 3D hash-lattice noise for organic multi-scale geological crag sculpting.
+function cragHash3(ix, iy, iz, seed) {
+  let h = (Math.imul(ix, 374761393) ^ Math.imul(iy, 668265263) ^ Math.imul(iz, 2147483647) ^ Math.imul(seed, 1274126177)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function cragNoise3(x, y, z, seed) {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  const fx = x - ix, fy = y - iy, fz = z - iz;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy), uz = fz * fz * (3 - 2 * fz);
+  const n000 = cragHash3(ix, iy, iz, seed), n100 = cragHash3(ix + 1, iy, iz, seed);
+  const n010 = cragHash3(ix, iy + 1, iz, seed), n110 = cragHash3(ix + 1, iy + 1, iz, seed);
+  const n001 = cragHash3(ix, iy, iz + 1, seed), n101 = cragHash3(ix + 1, iy, iz + 1, seed);
+  const n011 = cragHash3(ix, iy + 1, iz + 1, seed), n111 = cragHash3(ix + 1, iy + 1, iz + 1, seed);
+  const nx00 = n000 + (n100 - n000) * ux, nx10 = n010 + (n110 - n010) * ux;
+  const nx01 = n001 + (n101 - n001) * ux, nx11 = n011 + (n111 - n011) * ux;
+  const nxy0 = nx00 + (nx10 - nx00) * uy, nxy1 = nx01 + (nx11 - nx01) * uy;
+  return nxy0 + (nxy1 - nxy0) * uz;
+}
+
+// Subdivides the cleavage polyhedron twice into a watertight ~380-tri craggy geological outcrop mesh with sharp
+// angular ridges, stepped sedimentary ledges, and chipped rock relief (never a smooth sphere, never a 10-face pyramid).
+function buildCraggyRockSurface(outerPoly, archetype) {
+  let verts = outerPoly.vertices.map((p) => [p[0], p[1], p[2]]);
+  let tris = [];
+  for (const face of outerPoly.faces) {
+    const ring = face.v;
+    for (let k = 1; k + 1 < ring.length; k++) tris.push([ring[0], ring[k], ring[k + 1]]);
+  }
+
+  for (let pass = 0; pass < 2; pass++) {
+    const midCache = new Map();
+    const nextTris = [];
+    const midpoint = (a, b) => {
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      const key = lo * 65536 + hi;
+      let idx = midCache.get(key);
+      if (idx === undefined) {
+        const pa = verts[a], pb = verts[b];
+        idx = verts.length;
+        verts.push([(pa[0] + pb[0]) * 0.5, (pa[1] + pb[1]) * 0.5, (pa[2] + pb[2]) * 0.5]);
+        midCache.set(key, idx);
+      }
+      return idx;
+    };
+    for (const [a, b, c] of tris) {
+      const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a);
+      nextTris.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+    }
+    tris = nextTris;
+  }
+
+  // Sculpt organic angular rock crags, sharp ridge lines, and lithology-specific strata shelves in local space.
+  const seed = 7919 + archetype * 4099;
+  const strataAxis = archetype === 2
+    ? norm3([-0.44, 0.86, 0.22])
+    : archetype === 4
+      ? norm3([0.66, 0.72, -0.20])
+      : archetype === 3
+        ? norm3([0.92, 0.14, 0.36])
+        : [0.08, 0.99, -0.06];
+  const strataAmp = archetype === 1 ? 0.085 : archetype === 2 ? 0.075 : archetype === 4 ? 0.065 : 0.042;
+  const cragAmp = archetype === 3 ? 0.09 : 0.14;
+  const center = [0, 0.18, 0];
+
+  const sculpted = verts.map((p) => {
+    const dx = p[0] - center[0], dy = p[1] - center[1], dz = p[2] - center[2];
+    const r = Math.hypot(dx, dy, dz) || 1;
+    const dir = [dx / r, dy / r, dz / r];
+    // Keep the grounded basal root plane firmly tucked below y = -0.18 so rocks never float on slopes.
+    const aboveBase = Math.max(0, Math.min(1, (p[1] + 0.18) / 0.26));
+    const n1 = cragNoise3(p[0] * 2.1 + 3.1, p[1] * 2.1 - 1.7, p[2] * 2.1 + 5.3, seed);
+    const n2 = cragNoise3(p[0] * 4.6 - 7.3, p[1] * 4.6 + 2.9, p[2] * 4.6 - 4.1, seed + 17);
+    const n3 = cragNoise3(p[0] * 8.8 + 11.2, p[1] * 8.8 - 6.4, p[2] * 8.8 + 9.7, seed + 53);
+    // Sharp angular ridge (|2n-1|) creates crisp geological rock facets & chipped hollows instead of smooth bumps.
+    const ridge1 = 1 - Math.abs(n1 * 2 - 1);
+    const ridge2 = 1 - Math.abs(n2 * 2 - 1);
+    const sCoord = (p[0] * strataAxis[0] + p[1] * strataAxis[1] + p[2] * strataAxis[2]) * 4.4;
+    const stepLedge = (Math.sin(sCoord * Math.PI * 2) + 0.45 * Math.sin(sCoord * Math.PI * 4 + 0.9)) * strataAmp;
+    const radialDisp = ((ridge1 - 0.52) * cragAmp + (ridge2 - 0.48) * cragAmp * 0.52 + (n3 - 0.5) * 0.048 + stepLedge) * aboveBase;
+    return [
+      p[0] + dir[0] * radialDisp,
+      Math.max(-0.24, p[1] + dir[1] * radialDisp * 0.72),
+      p[2] + dir[2] * radialDisp,
+    ];
   });
 
-  for (let fi = 0; fi < outerPoly.faces.length; fi++) {
-    const face = outerPoly.faces[fi];
-    const fn = face.n;
-    const ring = face.v;
-    for (let k = 1; k + 1 < ring.length; k++) {
-      for (const v of [ring[0], ring[k], ring[k + 1]]) {
-        let sx = 0, sy = 0, sz = 0;
-        for (const nfi of vIncident[v]) {
-          const nf = outerPoly.faces[nfi].n;
-          if (dot3(nf, fn) >= 0.965) {
-            sx += nf[0]; sy += nf[1]; sz += nf[2];
-          }
+  // Compute exact geometric face normals and outward-oriented triangle records.
+  const triNormals = tris.map(([a, b, c]) => {
+    const pa = sculpted[a], pb = sculpted[b], pc = sculpted[c];
+    return norm3(cross3(sub3(pb, pa), sub3(pc, pa)));
+  });
+
+  const vIncident = Array.from({ length: sculpted.length }, () => []);
+  tris.forEach(([a, b, c], ti) => {
+    vIncident[a].push(ti); vIncident[b].push(ti); vIncident[c].push(ti);
+  });
+
+  const out = [];
+  const outerTriangles = [];
+  const archTag = (archetype + 0.5) / ROCK_ARCHETYPES;
+  for (let ti = 0; ti < tris.length; ti++) {
+    const [a, b, c] = tris[ti];
+    const fn = triNormals[ti];
+    outerTriangles.push({ a: sculpted[a], b: sculpted[b], c: sculpted[c], n: fn });
+    for (const v of [a, b, c]) {
+      let sx = 0, sy = 0, sz = 0;
+      for (const nti of vIncident[v]) {
+        const nf = triNormals[nti];
+        // Preserve sharp geological rock creases (> ~28 deg dihedral, dot < 0.88) while gently smoothing intra-facet micro-faces.
+        if (dot3(nf, fn) >= 0.88) {
+          sx += nf[0]; sy += nf[1]; sz += nf[2];
         }
-        const vn = (sx || sy || sz) ? norm3([sx, sy, sz]) : fn;
-        const p = outerPoly.vertices[v];
-        const heightTerm = Math.max(0, Math.min(1, (p[1] + 0.20) / 1.0));
-        const upLight = 0.65 + 0.35 * Math.max(0, fn[1]);
-        const shade = 0.42 + 0.56 * (heightTerm * 0.6 + upLight * 0.4);
-        out.push(p[0], p[1], p[2], vn[0], vn[1], vn[2], shade, archTag);
       }
+      const vn = (sx || sy || sz) ? norm3([sx, sy, sz]) : fn;
+      const p = sculpted[v];
+      const heightTerm = Math.max(0, Math.min(1, (p[1] + 0.24) / 1.04));
+      const upLight = 0.58 + 0.42 * Math.max(0, fn[1]);
+      // Deepen underside crevices and convex ridges for crisp rock grounding.
+      const shade = 0.34 + 0.64 * (heightTerm * 0.56 + upLight * 0.44);
+      out.push(p[0], p[1], p[2], vn[0], vn[1], vn[2], shade, archTag);
     }
   }
-  return new Float32Array(out);
+  return { nearVertices: new Float32Array(out), outerTriangles };
 }
 
 const templateCache = new Array(ROCK_ARCHETYPES).fill(null);
@@ -547,21 +714,7 @@ export function getBoulderCleavageTemplate(archetype = 0) {
   const outerPoly = buildOuterBoulderPolyhedron(arch);
   const outerStats = measurePolyhedron(outerPoly);
   const cells = decomposeBoulderCleavage(outerPoly, arch);
-  const nearVertices = buildNearPolyhedronVertices(outerPoly, arch);
-
-  // Pre-build ray-castable local outer triangles for exact intact boulder collision sweeps.
-  const outerTriangles = [];
-  for (const face of outerPoly.faces) {
-    const ring = face.v;
-    for (let i = 1; i + 1 < ring.length; i++) {
-      outerTriangles.push({
-        a: outerPoly.vertices[ring[0]],
-        b: outerPoly.vertices[ring[i]],
-        c: outerPoly.vertices[ring[i + 1]],
-        n: face.n,
-      });
-    }
-  }
+  const { nearVertices, outerTriangles } = buildCraggyRockSurface(outerPoly, arch);
 
   let shardVolumeSum = 0;
   for (const c of cells) shardVolumeSum += c.stats.volume;
@@ -668,7 +821,7 @@ export function prepareBoulderFracture(boulder, {
       for (let i = 0; i < ring.length; i++) {
         const wp = worldVerts[ring[i]];
         const lp = poly.vertices[ring[i]];
-        const heightTerm = Math.max(0, Math.min(1, (lp[1] + 0.20) / 1.0));
+        const heightTerm = Math.max(0, Math.min(1, (lp[1] + 0.24) / 1.04));
         const shade = face.raw
           ? 0.56 + 0.22 * heightTerm
           : 0.44 + 0.52 * (0.55 * heightTerm + 0.45 * Math.max(0, face.n[1] * 0.5 + 0.5));
@@ -1319,6 +1472,8 @@ export function createBoulderContinuum({ device, atlas, programs, view, frame, s
       scene.setWorldOffset(shiftX, shiftZ);
     },
     setAim(fall) { scene.setAim(fall); },
+    get hasCards() { return scene.hasCards; },
+    setCards(cardAtlas, cardRenderer, cardBindings) { scene.setCards(cardAtlas, cardRenderer, cardBindings); },
     // A shot's sweep and strike, in the world's frame; the rocks lie in the scene's.
     sweepBoulderSegment(from, to, radius = 0.08, options = null) {
       const hit = field.sweepBoulderSegment(toLocal(from), toLocal(to), radius, options);

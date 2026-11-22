@@ -243,6 +243,7 @@ const DBG = Number(qs.get('dbg')) || 0;
 // Depth-first visibility avoids costly hidden-water shading; keep an A/B fallback.
 const OCEAN_DEPTH = qs.get('oceanDepth') !== '0';
 const INITIAL_NEURAL_MODE = normalizeNeuralLightMode(qs.get('neuralMode'));
+const isWebKit = typeof navigator !== 'undefined' && /AppleWebKit/i.test(navigator.userAgent || '') && !/Chrome|Chromium|Edg|OPR|CriOS|FxiOS/i.test(navigator.userAgent || '');
 const D2R = Math.PI / 180;
 const GU = globalThis.GPUBufferUsage;
 const TU = globalThis.GPUTextureUsage;
@@ -558,19 +559,21 @@ async function main() {
   const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, oceanBridge, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows,
     boardKept: BOARD_KEPT ? { clock: boardKeepClock(), dateMs: continuedCareer?.voyage?.dateMs ?? DEFAULT_DEPARTURE.dateMs } : null }) : Promise.resolve(null);
   const prewarmPromises = [
-    computePipe(SCENE_DECK_UPDATE, 'deck wash'),
-    shader(DECK_RENDER, 'deck water'),
-    computePipe(WATER_CONTACTS, 'hull contact'),
-    computePipe(WAKE_UPDATE, 'local wake'),
-    computePipe(SPRAY_UPDATE, 'spray update'),
-    computePipe(SHEET_UPDATE, 'impact sheets'),
-    shader(WATER_EFFECTS, 'water effects'),
+    ...(!isWebKit ? [
+      computePipe(SCENE_DECK_UPDATE, 'deck wash'),
+      shader(DECK_RENDER, 'deck water'),
+      computePipe(WATER_CONTACTS, 'hull contact'),
+      computePipe(WAKE_UPDATE, 'local wake'),
+      computePipe(SPRAY_UPDATE, 'spray update'),
+      computePipe(SHEET_UPDATE, 'impact sheets'),
+      shader(WATER_EFFECTS, 'water effects'),
+      computePipe(SPINDRIFT_UPDATE, 'crest spray update'),
+      shader(SPINDRIFT_RENDER, 'crest spray'),
+    ] : []),
     computePipe(WET_CLEAR, 'wetting grid clear'),
     computePipe(WET_DEPOSIT, 'spray deposition'),
     computePipe(WET_SEA, 'wetting sea heights'),
     computePipe(withPosedWetnessProbes(), 'surface moisture'),
-    computePipe(SPINDRIFT_UPDATE, 'crest spray update'),
-    shader(SPINDRIFT_RENDER, 'crest spray'),
     ...(sceneModelCodes.some(c => c <= 1) ? [computePipe(VESSEL_POSE_UPDATE, 'shared vessel deformation')] : []),
     ...(sceneModelCodes.some(c => c >= 2) ? [computePipe(VESSEL_SURFACE_POSE_UPDATE, 'shared vessel deformation')] : []),
   ];
@@ -579,13 +582,15 @@ async function main() {
   // The ships, their crews, the port's people and the weather ask for their programs here as well, before anything
   // is awaited. A subsystem that waits its turn to ask adds its whole compile to the load, and on Direct3D that is
   // seconds: tests/startup-wave-gpu.test.mjs holds the line.
+  // On Safari / Apple WebKit, GPUProcess compiles Metal pipelines far more serially than Chrome/Dawn, so non-frame-0
+  // subsystems are deferred until after frame 0 renders and brought online in small staggered waves.
   const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
   const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.STORAGE|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
   const seaShadowsPromise=createSeaShadows({device,computePipe,sceneShadows,count:fleetCount});
-  const dolphinsPromise=Promise.all([surfaceWavesPromise,waterOpticsPromise]).then(([surfaceWaves,waterOptics])=>createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shadows:landShadows,shader,format:HDR,samples:MSAA}));
-  const gunEffectsPromise=surfaceWavesPromise.then(surfaceWaves=>createGunneryEffects({surfaceWaves,hulls:fleetHullUBO,hullCount:fleetCount,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA}));
-  const gunSeaPromise=surfaceWavesPromise.then(surfaceWaves=>createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe}));
-  const gunportSafetyPromise=surfaceWavesPromise.then(surfaceWaves=>createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0}));
+  const dolphinsPromise=isWebKit?null:Promise.all([surfaceWavesPromise,waterOpticsPromise]).then(([surfaceWaves,waterOptics])=>createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shadows:landShadows,shader,format:HDR,samples:MSAA}));
+  const gunEffectsPromise=isWebKit?null:surfaceWavesPromise.then(surfaceWaves=>createGunneryEffects({surfaceWaves,hulls:fleetHullUBO,hullCount:fleetCount,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA}));
+  const gunSeaPromise=isWebKit?null:surfaceWavesPromise.then(surfaceWaves=>createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe}));
+  const gunportSafetyPromise=isWebKit?null:surfaceWavesPromise.then(surfaceWaves=>createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0}));
   const probePipePromise=computePipe(SCENE_HEIGHT_PROBE,'height probe');
   const neuralPbr=sharedNeuralPbrBank(device,{strength:qs.has('neuralPbr')&&Number.isFinite(Number(qs.get('neuralPbr')))?Math.max(0,Math.min(1.5,Number(qs.get('neuralPbr')))):P.neuralPbr});
   window.oceanNeuralPbr=neuralPbr;
@@ -593,21 +598,24 @@ async function main() {
   const vesselProgramsPromise=requestVesselContinuumPrograms({device,shader,format:HDR,samples:MSAA,waterOptics:waterOpticsPromise});
   vesselProgramsPromise.catch(()=>{});
   const startupPrograms=[
-    seaShadowsPromise,dolphinsPromise,gunEffectsPromise,gunSeaPromise,gunportSafetyPromise,probePipePromise,
+    seaShadowsPromise,probePipePromise,
     requestCrewPipelines({device,shader,format:HDR,samples:MSAA,waterOptics:waterOpticsPromise}),
     vesselProgramsPromise,
-    requestWaterEffectPipelines({device,shader}),
-    requestDeckWaterPipelines({device,shader}),
-    requestCrestSprayPipeline({device,shader}),
-    requestWeatherPipelines({device,shader,format:HDR,samples:MSAA}),
-    requestTownsfolkPipelines({device,shader}),
-    requestUnderwaterPipeline({device,shader,format:HDR,samples:MSAA,cameraProbe:true,surfaceWaves:true,shadows:true,skipAir:true}),
     requestNeuralLightPipelines({device,shader,swapFormat,samples:MSAA,mode:INITIAL_NEURAL_MODE}),
-    requestHullFloodPipelines({device,shader,format:HDR,samples:MSAA}),
-    computePipe(HULL_CONTACT_QUERY,'underside incident sea contact'),
     computePipe(PART_ASSEMBLY_POSE_UPDATE,'shared part assembly deformation'),
     computePipe(SHIP_FRACTURE_POSE_UPDATE,'ship fracture'),
-    ...(fleetSpecs.some(spec=>getShipParts(spec.modelId).equipment.anchor!==null)?[requestAnchorSplashPipeline({device,shader,format:HDR,samples:MSAA})]:[]),
+    ...(!isWebKit?[
+      dolphinsPromise,gunEffectsPromise,gunSeaPromise,gunportSafetyPromise,
+      requestWaterEffectPipelines({device,shader}),
+      requestDeckWaterPipelines({device,shader}),
+      requestCrestSprayPipeline({device,shader}),
+      requestWeatherPipelines({device,shader,format:HDR,samples:MSAA}),
+      requestTownsfolkPipelines({device,shader}),
+      requestUnderwaterPipeline({device,shader,format:HDR,samples:MSAA,cameraProbe:true,surfaceWaves:true,shadows:true,skipAir:true}),
+      requestHullFloodPipelines({device,shader,format:HDR,samples:MSAA}),
+      computePipe(HULL_CONTACT_QUERY,'underside incident sea contact'),
+      ...(fleetSpecs.some(spec=>getShipParts(spec.modelId).equipment.anchor!==null)?[requestAnchorSplashPipeline({device,shader,format:HDR,samples:MSAA})]:[]),
+    ]:[]),
   ];
   for(const p of startupPrograms)p.catch(()=>{});
 
@@ -633,8 +641,19 @@ async function main() {
       })):null,
     ]);
   };
-  const openOceanPromise=oceanPipelines(false),coastalOceanPromise=oceanPipelines(true);
-  coastalOceanPromise.catch(()=>{});
+  const startsCoastal = Boolean(LAND_STAGE);
+  let openOceanPromise=(isWebKit&&startsCoastal)?null:oceanPipelines(false);
+  let coastalOceanPromise=(isWebKit&&!startsCoastal)?null:oceanPipelines(true);
+  openOceanPromise?.catch(()=>{});
+  coastalOceanPromise?.catch(()=>{});
+  const createMediumDownPipe = () => shader(createUnderwaterPost(BLOOM_DOWN, 'bloom'), 'medium bloom source').then(mediumDownMod => device.createRenderPipelineAsync({
+    label: 'medium bloom source', layout: 'auto',
+    vertex: { module: mediumDownMod, entryPoint: 'vs' }, fragment: { module: mediumDownMod, entryPoint: 'fs', targets: [{ format: HDR }] },
+  }));
+  const createMediumCompPipe = () => shader(createUnderwaterPost(COMPOSITE, 'composite'), 'medium composite source').then(mediumCompMod => device.createRenderPipelineAsync({
+    label: 'medium composite source', layout: 'auto',
+    vertex: { module: mediumCompMod, entryPoint: 'vs' }, fragment: { module: mediumCompMod, entryPoint: 'fs', targets: [{ format: swapFormat }] },
+  }));
   const renderPipesPromise = Promise.all([
     shader(SKY_BG, 'sky').then(skyMod => device.createRenderPipelineAsync({
       label: 'sky', layout: 'auto',
@@ -662,14 +681,8 @@ async function main() {
       vertex: { module: compMod, entryPoint: 'vs' },
       fragment: { module: compMod, entryPoint: 'fs', targets: [{ format: swapFormat }] },
     })),
-    shader(createUnderwaterPost(BLOOM_DOWN, 'bloom'), 'medium bloom source').then(mediumDownMod => device.createRenderPipelineAsync({
-      label: 'medium bloom source', layout: 'auto',
-      vertex: { module: mediumDownMod, entryPoint: 'vs' }, fragment: { module: mediumDownMod, entryPoint: 'fs', targets: [{ format: HDR }] },
-    })),
-    shader(createUnderwaterPost(COMPOSITE, 'composite'), 'medium composite source').then(mediumCompMod => device.createRenderPipelineAsync({
-      label: 'medium composite source', layout: 'auto',
-      vertex: { module: mediumCompMod, entryPoint: 'vs' }, fragment: { module: mediumCompMod, entryPoint: 'fs', targets: [{ format: swapFormat }] },
-    })),
+    isWebKit ? Promise.resolve(null) : createMediumDownPipe(),
+    isWebKit ? Promise.resolve(null) : createMediumCompPipe(),
   ]);
   renderPipesPromise.catch(() => {});
 
@@ -744,7 +757,9 @@ async function main() {
   // --------------------------------------------------------------------------------------
   // Render pipelines
   // --------------------------------------------------------------------------------------
-  const [[oceanPipe,oceanDepthPipe],[skyPipe,downPipe,upPipe,compPipe,mediumDownPipe,mediumCompPipe]]=await Promise.all([openOceanPromise,renderPipesPromise]);
+  const initialOceanPromise=(isWebKit&&startsCoastal)?coastalOceanPromise:openOceanPromise;
+  const [[oceanPipe,oceanDepthPipe],[skyPipe,downPipe,upPipe,compPipe,initMediumDownPipe,initMediumCompPipe]]=await Promise.all([initialOceanPromise,renderPipesPromise]);
+  let mediumDownPipe=initMediumDownPipe,mediumCompPipe=initMediumCompPipe;
 
   window.oceanStartup?.stage('ship-crew','Building the ships and loading their crew…');
   const [waterFilterPipe, surfaceWaves, shallowWater, waterOptics] = await Promise.all([
@@ -781,9 +796,9 @@ async function main() {
     const hullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull'),hullData=new Float32Array(HULL_UNIFORM_BYTES/4);
     const holesUBO=mkBuf(HULL_DAMAGE_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull damage');
     const recoilMap=createGunRecoilMap(asset);
-    const interactionPromise=createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
+    const interactionPromise=isWebKit?null:createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
     const rowingWaterPromise=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
-    interactionPromise.catch(()=>{});rowingWaterPromise?.catch(()=>{});
+    interactionPromise?.catch(()=>{});rowingWaterPromise?.catch(()=>{});
     const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,mesh,pristineMesh:asset.vertices,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap,partAssembly:asset.partAssembly??null,fracture:asset.fracture??null,detail:asset.detail??null});
     if(pose)render.poseAssets=pose.assets;
     const wetnessPromise=createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length+Object.keys(asset.model.supplementalCrewStations??{}).length,posed:pose});
@@ -798,14 +813,14 @@ async function main() {
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}
     // People are drawn through the continuum alone, so a body not baked leaves the company unseen, and says so.
     catch(error){if(index===0)crewError=error?.missing?'Crew bodies not baked':'Crew unavailable';console.error(spec.id+' crew initialization:',error);}
-    interaction.setShadows(shadows);
+    interaction?.setShadows(shadows);
     // She is drawn, shadowed and seen from under the water through her own scene of the one continuum
     // (js/vessel-continuum.js), which reads her posed vertices and her own copy of the assembly. Its buffers are named
     // for her model and row ('<model> vessel <id> continuum draws'), so a frame's indirect draws say which ship they are.
     const continuum=createVesselContinuum({device,programs:render.programs,body:render.body,asset,pose,frame:frameUBO,shadows,
       identity:index+1,samples:MSAA,label:`${asset.model.id} vessel ${spec.id}`});
     shadows.castWith((pass,cloth)=>continuum.cast(pass,cloth));
-    vessels.push({...spec,boat:null,asset,render,hullUBO,holesUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
+    vessels.push({...spec,boat:null,asset,render,hullUBO,holesUBO,hullData,mesh,vertexBuffer,pose,wetness,wetnessConnected:false,shadows,crew,interaction,
       rowingWater,continuum,ownGroups:new Map(),recoilMap});
   }
   // Holed, scarred or broken: her record is flagged DAMAGED, so the cut draws her clusters alone and her material masks
@@ -822,7 +837,11 @@ async function main() {
   }
   // The same entries for her continuum's water capture (js/water-optics.js), omitting Neural PBR (bindings 16-17).
   const vesselCaptureEntries=v=>vesselGroupEntries(v).map((resource,binding)=>({binding,resource})).filter(e=>e.binding!==16&&e.binding!==17);
-  const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
+  const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,shadows=playerVessel.shadows;
+  let interaction=playerVessel.interaction;
+  const wakeSampler=interaction?interaction.sampler:device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear'});
+  const deckPlaceholderTex=isWebKit?device.createTexture({label:'deck water placeholder',size:[1,1],format:'rgba32float',usage:TU.TEXTURE_BINDING}):null;
+  const deckPlaceholderView=deckPlaceholderTex?deckPlaceholderTex.createView():null;
   let fortSoldiers=null,mateSoldiers=null,townsfolk=null,boardArmies=null;
   window.oceanTownsfolk=null;
   window.oceanArmies=null;
@@ -830,7 +849,7 @@ async function main() {
   window.oceanProps=props;
   // Launch shore garrison, shore party (mate + captain), townsfolk, and standing armies concurrently in the background so they don't
   // stall Frame 0 serially while their 34 MiB soldier/villager atlases stream in.
-  const shoreFolkReadyPromise=sharedCrew?Promise.all([
+  const launchShoreFolk=()=>sharedCrew?Promise.all([
     createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics})
       .then(r=>{fortSoldiers=r;}).catch(error=>{console.error('Fort garrison initialization:',error);}),
     createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics,most:2})
@@ -840,28 +859,44 @@ async function main() {
     createBoardArmies({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,waterOptics})
       .then(r=>{boardArmies=r;window.oceanArmies=r;}).catch(error=>{console.error('Board armies initialization:',error);}),
   ]):Promise.resolve();
-  const spindriftPromise=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
-  const weatherRendererPromise=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
-  const hullContactProbePromise=createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
+  let resolveShoreFolkReady=null,shoreFolkDeferredPromise=null;
+  const shoreFolkReadyPromise=isWebKit?new Promise(resolve=>{resolveShoreFolkReady=resolve;}):launchShoreFolk();
+  const ensureShoreFolkDeferred=()=>{
+    if(!isWebKit)return shoreFolkReadyPromise;
+    if(!shoreFolkDeferredPromise){
+      shoreFolkDeferredPromise=launchShoreFolk().finally(()=>resolveShoreFolkReady?.());
+    }
+    return shoreFolkDeferredPromise;
+  };
+  const spindriftPromise=isWebKit?null:createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
+  const weatherRendererPromise=isWebKit?null:createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
+  const hullContactProbePromise=isWebKit?null:createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
   // Her anchor's iron and rode are her own (js/vessel-detail.js); this is the splash it throws up when let go.
   const noAnchorSplash=Object.freeze({update(){},draw(){}});
-  const anchorsPromise=Promise.all(vessels.map(async v=>{v.anchorSplash=getShipParts(v.modelId).equipment.anchor===null?noAnchorSplash:await createAnchorSplashRenderer({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
-  for(const p of [spindriftPromise,weatherRendererPromise,hullContactProbePromise,anchorsPromise,shoreFolkReadyPromise])p.catch(()=>{});
-  const spindrift=await spindriftPromise;
-  for(const v of vessels)v.wetness.connect(v.interaction,spindrift,fullArr(dispTex),samplerSim);
+  for(const v of vessels)v.anchorSplash=noAnchorSplash;
+  const anchorsPromise=isWebKit?null:Promise.all(vessels.map(async v=>{v.anchorSplash=getShipParts(v.modelId).equipment.anchor===null?noAnchorSplash:await createAnchorSplashRenderer({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});}));
+  for(const p of [spindriftPromise,weatherRendererPromise,hullContactProbePromise,anchorsPromise,shoreFolkReadyPromise])p?.catch(()=>{});
+  let spindrift=isWebKit?null:await spindriftPromise;
+  const tryConnectWetness=v=>{
+    if(!v.wetnessConnected&&v.interaction&&spindrift){
+      v.wetness.connect(v.interaction,spindrift,fullArr(dispTex),samplerSim);
+      v.wetnessConnected=true;
+    }
+  };
+  if(!isWebKit)for(const v of vessels)tryConnectWetness(v);
   const wakeIndices=[0,1,2,3],wakeIndex=()=>wakePool.current+2*surfaceWaves.current;
   const bgFoamUpd=[0,1].map(i=>wakeIndices.map(w=>bg(foamUpdPipe,[{buffer:foamUBO},lvl(foamW[1-i],0),lvl(foamW[i],0),
-    fullArr(dispTex),fullArr(derivTex),samplerSim,samplerSim,{buffer:wakePool.uniform},wakePool.views[w&1],interaction.sampler,
+    fullArr(dispTex),fullArr(derivTex),samplerSim,samplerSim,{buffer:wakePool.uniform},wakePool.views[w&1],wakeSampler,
     null,null,{buffer:surfaceWaves.uniform},surfaceWaves.views[w>>1]],'foamupd'+i)));
   const clouds = await cloudsPromise;
   clouds.setSkyPipeline(skyPipe);
   const bgEnvClouds = clouds.bindVolume(envPipe);
   const bgSunClouds = clouds.bindVolume(sunVisPipe,true);
-  const volumetricShaftsPromise = createVolumetricShafts({ device, frameUBO, transView, skyView, sampler: sampClamp, clouds, landShadows, shader, computePipe, format: HDR, samples: MSAA });
-  volumetricShaftsPromise.catch(() => {});
+  const volumetricShaftsPromise = isWebKit ? null : createVolumetricShafts({ device, frameUBO, transView, skyView, sampler: sampClamp, clouds, landShadows, shader, computePipe, format: HDR, samples: MSAA });
+  volumetricShaftsPromise?.catch(() => {});
   const oceanResources=(i,w)=>[{buffer:frameUBO},transView,skyView,sampClamp,
     fullArr(dispTex),fullArr(derivTex),fullArr(momTex),foamTex.createView(),envCubeView,sampRepeat,
-    fullArr(foamW[i]),{buffer:sunVisBuf},{buffer:fleetHullUBO},{buffer:wakePool.uniform},wakePool.views[w&1],interaction.sampler,
+    fullArr(foamW[i]),{buffer:sunVisBuf},{buffer:fleetHullUBO},{buffer:wakePool.uniform},wakePool.views[w&1],wakeSampler,
     null,null,{buffer:surfaceWaves.uniform},surfaceWaves.views[w>>1],{buffer:clouds.uniform},{buffer:clouds.shadowGrid}];
   // Automatic layouts tie bind groups to one pipeline, so each variant of the ocean keeps its own.
   const oceanVariant=([pipe,depthPipe])=>({pipe,depthPipe,shadows:sceneShadows.bindSea(pipe,seaShadows.view),optics:null,
@@ -869,30 +904,220 @@ async function main() {
       entries:oceanResources(i,w).map((resource,binding)=>({binding,resource})).filter(e=>e.resource!==null&&(!OCEAN_DEPTH||e.binding!==12))}))),
     depthGroups:OCEAN_DEPTH?wakeIndices.map(w=>device.createBindGroup({label:'ocean visibility',layout:depthPipe.getBindGroupLayout(0),
       entries:oceanResources(0,w).map((resource,binding)=>({binding,resource})).filter(e=>e.resource!==null&&[0,4,9,12,13,14,15,18,19].includes(e.binding))})):[]});
-  const openOcean=oceanVariant([oceanPipe,oceanDepthPipe]);
-  let coastalOcean=null;
+  let openOcean=(isWebKit&&startsCoastal)?null:oceanVariant([oceanPipe,oceanDepthPipe]);
+  let coastalOcean=(isWebKit&&startsCoastal)?oceanVariant([oceanPipe,oceanDepthPipe]):null;
+  const ensureOpenOcean=()=>{
+    if(!openOceanPromise){
+      openOceanPromise=oceanPipelines(false).then(pipes=>{
+        if(!gpuDeviceLost)openOcean??=oceanVariant(pipes);
+        return pipes;
+      });
+      openOceanPromise.catch(()=>{});
+    }
+    return openOceanPromise;
+  };
+  const ensureCoastalOcean=()=>{
+    if(!coastalOceanPromise){
+      coastalOceanPromise=oceanPipelines(true).then(pipes=>{
+        if(!gpuDeviceLost)coastalOcean??=oceanVariant(pipes);
+        return pipes;
+      });
+      coastalOceanPromise.catch(()=>{});
+    }
+    return coastalOceanPromise;
+  };
   const bgSky=bg(skyPipe,[{buffer:frameUBO},transView,skyView,sampClamp,{buffer:sunVisBuf},celestial.view],'sky');
   window.oceanStartup?.stage('weather-wildlife','Preparing weather, scenery and wildlife…');
   const weather=createWeatherState();
-  let [terrain,weatherRenderer,,dolphins,gunEffects,gunSea,gunportSafety,hullContactProbe,probePipe,volumetricShafts]=await Promise.all([
-    terrainPromise,
-    weatherRendererPromise,
-    anchorsPromise,
-    dolphinsPromise,
-    gunEffectsPromise,
-    gunSeaPromise,
-    gunportSafetyPromise,
-    hullContactProbePromise,
-    probePipePromise,
-    volumetricShaftsPromise,
-  ]);
+  const createDeferredDolphins=loadFn=>{
+    let real=null,loading=null,enabled=true,onSurfaceEvent=null,pendingTrigger=null;
+    const load=()=>{
+      if(real)return Promise.resolve(real);
+      if(!loading){
+        loading=Promise.resolve().then(loadFn).then(r=>{
+          if(gpuDeviceLost||!r)return null;
+          real=r;
+          if(onSurfaceEvent)real.state.onSurfaceEvent=onSurfaceEvent;
+          real.state.enabled=enabled;
+          if(pendingTrigger){
+            const {boat:b,opts}=pendingTrigger;
+            pendingTrigger=null;
+            real.state.trigger(b,opts);
+          }
+          return real;
+        }).catch(err=>{
+          loading=null;
+          console.error('Deferred dolphins init failed:',err);
+          return null;
+        });
+      }
+      return loading;
+    };
+    const state={
+      get active(){return real?real.state.active:false;},
+      get count(){return real?real.state.count:0;},
+      get age(){return real?real.state.age:0;},
+      get event(){return real?real.state.event:null;},
+      get animals(){return real?real.state.animals:[];},
+      get enabled(){return real?real.state.enabled:enabled;},
+      set enabled(v){enabled=Boolean(v);if(real)real.state.enabled=enabled;},
+      get onSurfaceEvent(){return real?real.state.onSurfaceEvent:onSurfaceEvent;},
+      set onSurfaceEvent(fn){onSurfaceEvent=fn;if(real)real.state.onSurfaceEvent=fn;},
+      trigger(b,opts){
+        if(real)return real.state.trigger(b,opts);
+        pendingTrigger={boat:b,opts};
+        load();
+        return false;
+      },
+      clear(){pendingTrigger=null;real?.state.clear();},
+      shift(dx,dz){real?.state.shift?.(dx,dz);},
+    };
+    return {
+      state,load,
+      update(dt,b,settings,terr,vs){real?.update(dt,b,settings,terr,vs);},
+      encode(pass){real?.encode(pass);},
+      draw(pass){real?.draw(pass);},
+      drawSubmerged(pass,above=false){real?.drawSubmerged(pass,above);},
+      drawShadow(pass){real?.drawShadow(pass);},
+      continuumDraws(){return real?.continuumDraws()??[];},
+    };
+  };
+  let terrain,weatherRenderer=null,dolphins=null,gunEffects=null,gunSea=null,gunportSafety=null,hullContactProbe=null,probePipe,volumetricShafts=null;
+  if(isWebKit){
+    [terrain,probePipe]=await Promise.all([terrainPromise,probePipePromise]);
+    dolphins=createDeferredDolphins(()=>createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shadows:landShadows,shader,format:HDR,samples:MSAA}));
+  }else{
+    [terrain,weatherRenderer,,dolphins,gunEffects,gunSea,gunportSafety,hullContactProbe,probePipe,volumetricShafts]=await Promise.all([
+      terrainPromise,
+      weatherRendererPromise,
+      anchorsPromise,
+      dolphinsPromise,
+      gunEffectsPromise,
+      gunSeaPromise,
+      gunportSafetyPromise,
+      hullContactProbePromise,
+      probePipePromise,
+      volumetricShaftsPromise,
+    ]);
+  }
+  if(terrain?.nearResources&&clouds)props.attachCardLighting(terrain.nearResources,clouds);
+  let deferredInteractionsP=null,deferredSpindriftP=null,deferredWeatherP=null,deferredHullContactP=null,deferredAnchorsP=null,deferredShaftsP=null,deferredGunEffectsP=null,deferredGunSeaP=null,deferredGunportSafetyP=null;
+  const ensureInteractionsDeferred=()=>{
+    if(!isWebKit||vessels.every(v=>v.interaction))return Promise.resolve();
+    if(!deferredInteractionsP){
+      deferredInteractionsP=Promise.all(vessels.map((v,index)=>v.interaction?Promise.resolve(v.interaction):createWaterInteraction({
+        device,frameUBO,hullUBO:v.hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index),
+      }).then(made=>{
+        if(gpuDeviceLost)return null;
+        v.interaction=made;
+        if(v===playerVessel)interaction=made;
+        made.setShadows(v.shadows);
+        if(v.hullResources){v.hullResources[12]=made.deck.view;v.ownGroups=new Map();}
+        tryConnectWetness(v);
+        return made;
+      }))).catch(err=>{deferredInteractionsP=null;console.error('Deferred water interaction init failed:',err);});
+    }
+    return deferredInteractionsP;
+  };
+  const ensureSpindriftDeferred=()=>{
+    if(spindrift)return Promise.resolve(spindrift);
+    if(!deferredSpindriftP){
+      deferredSpindriftP=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows}).then(made=>{
+        if(gpuDeviceLost)return null;
+        spindrift=made;
+        for(const v of vessels)tryConnectWetness(v);
+        return made;
+      }).catch(err=>{deferredSpindriftP=null;console.error('Deferred spindrift init failed:',err);});
+    }
+    return deferredSpindriftP;
+  };
+  const ensureWeatherDeferred=()=>{
+    if(weatherRenderer)return Promise.resolve(weatherRenderer);
+    if(!deferredWeatherP){
+      deferredWeatherP=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA}).then(made=>{
+        if(gpuDeviceLost)return null;
+        weatherRenderer=made;
+        return made;
+      }).catch(err=>{deferredWeatherP=null;console.error('Deferred weather renderer init failed:',err);});
+    }
+    return deferredWeatherP;
+  };
+  const ensureHullContactDeferred=()=>{
+    if(hullContactProbe)return Promise.resolve(hullContactProbe);
+    if(!deferredHullContactP){
+      deferredHullContactP=createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id}).then(made=>{
+        if(gpuDeviceLost)return null;
+        hullContactProbe=made;
+        return made;
+      }).catch(err=>{deferredHullContactP=null;console.error('Deferred hull contact probe init failed:',err);});
+    }
+    return deferredHullContactP;
+  };
+  const ensureAnchorsDeferred=()=>{
+    if(!isWebKit)return Promise.resolve();
+    if(!deferredAnchorsP){
+      deferredAnchorsP=Promise.all(vessels.map(async v=>{
+        if(getShipParts(v.modelId).equipment.anchor===null||v.anchorSplash!==noAnchorSplash)return;
+        const made=await createAnchorSplashRenderer({device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,sunVisBuf,shadows:sceneShadows,shader,format:HDR,samples:MSAA});
+        if(!gpuDeviceLost)v.anchorSplash=made;
+      })).catch(err=>{deferredAnchorsP=null;console.error('Deferred anchor splash init failed:',err);});
+    }
+    return deferredAnchorsP;
+  };
+  const ensureVolumetricShaftsDeferred=()=>{
+    if(volumetricShafts)return Promise.resolve(volumetricShafts);
+    if(!deferredShaftsP){
+      deferredShaftsP=createVolumetricShafts({device,frameUBO,transView,skyView,sampler:sampClamp,clouds,landShadows,shader,computePipe,format:HDR,samples:MSAA}).then(made=>{
+        if(gpuDeviceLost)return null;
+        volumetricShafts=made;
+        return made;
+      }).catch(err=>{deferredShaftsP=null;console.error('Deferred sun shafts init failed:',err);});
+    }
+    return deferredShaftsP;
+  };
+  const ensureGunSeaDeferred=()=>{
+    if(gunSea)return Promise.resolve(gunSea);
+    if(!deferredGunSeaP){
+      deferredGunSeaP=createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe}).then(made=>{
+        if(gpuDeviceLost)return null;
+        gunSea=made;
+        return made;
+      }).catch(err=>{deferredGunSeaP=null;console.error('Deferred gunnery sea probe init failed:',err);});
+    }
+    return deferredGunSeaP;
+  };
+  const ensureGunportSafetyDeferred=()=>{
+    if(gunportSafety)return Promise.resolve(gunportSafety);
+    if(!deferredGunportSafetyP){
+      deferredGunportSafetyP=createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0}).then(made=>{
+        if(gpuDeviceLost)return null;
+        gunportSafety=made;
+        return made;
+      }).catch(err=>{deferredGunportSafetyP=null;console.error('Deferred gunport safety init failed:',err);});
+    }
+    return deferredGunportSafetyP;
+  };
+  const ensureGunneryEffectsDeferred=()=>{
+    if(gunEffects)return Promise.resolve(gunEffects);
+    if(!deferredGunEffectsP){
+      deferredGunEffectsP=createGunneryEffects({surfaceWaves,hulls:fleetHullUBO,hullCount:fleetCount,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA}).then(made=>{
+        if(gpuDeviceLost)return null;
+        made.shot=props.shot;
+        gunEffects=made;
+        return made;
+      }).catch(err=>{deferredGunEffectsP=null;console.error('Deferred gunnery effects init failed:',err);});
+    }
+    return deferredGunEffectsP;
+  };
+  const ensureGunneryDeferred=()=>Promise.allSettled([ensureGunSeaDeferred(),ensureGunportSafetyDeferred(),ensureGunneryEffectsDeferred()]);
   // Every ball in the air is placed in the prop continuum, and drawn there.
-  gunEffects.shot=props.shot;
+  if(gunEffects)gunEffects.shot=props.shot;
   if(terrain&&sharedCrew)terrain.setSharedCrew?.(sharedCrew);
   // Deck hands aboard the land's vessels are drawn through the people continuum, with the scene's frame and lights.
   const peopleOfTheLand=land=>{if(sharedCrew)land?.tradeVessels?.setPeople?.({frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shared:sharedCrew});};
   peopleOfTheLand(terrain);
-  if(terrain)coastalOcean=oceanVariant(await coastalOceanPromise);
+  if(terrain)coastalOcean??=oceanVariant(await ensureCoastalOcean());
+  else if(!openOcean)openOcean=oceanVariant(await ensureOpenOcean());
   let coastalGroup=terrain?terrain.waterGroup(coastalOcean.pipe):null;
   let coastalDepthGroup=OCEAN_DEPTH&&terrain?terrain.waterGroup(coastalOcean.depthPipe):null;
   async function spawnTerrainLate({region,placement,lat,lon,name,year}={}){
@@ -922,7 +1147,7 @@ async function main() {
       boardKept:BOARD_KEPT?{clock:boardKeepClock(),dateMs:gameDateMs()}:null,
     });
     if(!nextTerrain)return null;
-    coastalOcean??=oceanVariant(await coastalOceanPromise);
+    coastalOcean??=oceanVariant(await ensureCoastalOcean());
     terrain=nextTerrain;
     peopleOfTheLand(terrain);
     // A founded port made landfall at wakes its model, if none is awake yet.
@@ -940,6 +1165,7 @@ async function main() {
     terrain=null;
     coastalGroup=null;
     coastalDepthGroup=null;
+    if(!openOcean)ensureOpenOcean();
     if(typeof anchorEnvironment==='object'&&anchorEnvironment)anchorEnvironment.terrain=null;
     envFull=true;
   }
@@ -958,7 +1184,7 @@ async function main() {
     const read=mkBuf(64,GU.MAP_READ|GU.COPY_DST,vessel.id+' probe read');
     const uniform=mkBuf(32,GU.UNIFORM|GU.COPY_DST,vessel.id+' probe');
     const groups=wakeIndices.map(w=>bg(probePipe,[{buffer:frameUBO},fullArr(dispTex),samplerSim,{buffer:output},{buffer:uniform},
-      {buffer:wakePool.uniform},wakePool.views[w&1],interaction.sampler,fullArr(derivTex),
+      {buffer:wakePool.uniform},wakePool.views[w&1],wakeSampler,fullArr(derivTex),
       null,null,{buffer:surfaceWaves.uniform},surfaceWaves.views[w>>1]],vessel.id+' probe'));
     vessel.probe={output,read,uniform,groups,values:new Float32Array(8),pending:false,requested:false,state:createVesselProbeState()};
   }
@@ -1014,7 +1240,7 @@ async function main() {
     {binding:0,resource:submergedColor.createView()},{binding:1,resource:linSamp},{binding:2,resource:{buffer:opticsUBO}},
     {binding:3,resource:{buffer:vessels[0].probe.output}},{binding:4,resource:aboveWaterColor.createView()}]});
   const opticsUBO=mkBuf(16,GU.UNIFORM|GU.COPY_DST,'water extinction'),opticsData=new Float32Array(4);
-  const underwaterMedium=await createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler:sampClamp,sunVis:sunVisBuf,
+  let underwaterMedium=isWebKit?null:await createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler:sampClamp,sunVis:sunVisBuf,
     derivView:fullArr(derivTex),seaSampler:samplerSim,cameraProbe:vessels[0].probe.output,surfaceWaves,sceneShadows,format:HDR,samples:MSAA,skipAir:true});
   const neuralPass=await createNeuralLightPass({device,shader,frameUBO,linSamp,swapFormat,samples:MSAA,initialMode:INITIAL_NEURAL_MODE});
   window.oceanNeuralLight=neuralPass;
@@ -1033,9 +1259,45 @@ async function main() {
     colorAttachments: [{ view: null, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }],
     timestampWrites: undefined,
   };
-  let bloomLevels = 0, bloomPasses = [], bgComp = null, bgCompUnderwater = null, bgCompNoBloom = null, bgCompUnderwaterNoBloom = null, bloomZeroCleared = false;
+  let bloomLevels = 0, bloomPasses = [], bloomMip0View = null, bgComp = null, bgCompUnderwater = null, bgCompNoBloom = null, bgCompUnderwaterNoBloom = null, bloomZeroCleared = false;
   let bloomMeasuring=false,bloomMeasureRequested=false,bloomCameraMediumBand=false,bloomFrameReady=false;
   let neuralMeasuring=false,neuralMeasureRequested=false;
+
+  function attachUnderwaterTargets() {
+    if (!underwaterMedium || !mediumDownPipe || !mediumCompPipe || W < 1 || H < 1 || !hdrView || !depthMS || !submergedColor || !bloomMip0View) return;
+    const mediumView = underwaterMedium.resize({ width: W, height: H, hdrView, depthView: depthMS.createView(), submergedView: submergedColor.createView() });
+    if (bloomPasses.length > 0) {
+      bloomPasses[0].underwaterPipeline = mediumDownPipe;
+      bloomPasses[0].underwaterBindGroup = bg(mediumDownPipe, [mediumView, linSamp, { buffer: bloomUBOs[0] }, hdrView, { buffer: frameUBO }, { buffer: vessels[0].probe.output }]);
+    }
+    bgCompUnderwater = bg(mediumCompPipe, [mediumView, bloomMip0View, linSamp, { buffer: compUBO }, hdrView, { buffer: frameUBO }, { buffer: vessels[0].probe.output }]);
+    bgCompUnderwaterNoBloom = bg(mediumCompPipe, [mediumView, blackBloomView, linSamp, { buffer: compUBO }, hdrView, { buffer: frameUBO }, { buffer: vessels[0].probe.output }]);
+    neuralPass.resize({ width: W, height: H, hdrView, mediumView, bloomView: bloomMip0View, compUBO, cameraProbe: vessels[0].probe.output, depthView: mainPass.depthStencilAttachment.view });
+  }
+  let deferredUnderwaterP = null;
+  const ensureUnderwaterDeferred = () => {
+    if (underwaterMedium && mediumDownPipe && mediumCompPipe) return Promise.resolve();
+    if (!deferredUnderwaterP) {
+      deferredUnderwaterP = Promise.all([
+        underwaterMedium ? Promise.resolve(underwaterMedium) : createUnderwater({
+          device, shader, frameUBO, opticsUBO, transView, skyView, sampler: sampClamp, sunVis: sunVisBuf,
+          derivView: fullArr(derivTex), seaSampler: samplerSim, cameraProbe: vessels[0].probe.output, surfaceWaves, sceneShadows, format: HDR, samples: MSAA, skipAir: true,
+        }),
+        mediumDownPipe ? Promise.resolve(mediumDownPipe) : createMediumDownPipe(),
+        mediumCompPipe ? Promise.resolve(mediumCompPipe) : createMediumCompPipe(),
+      ]).then(([uw, mDown, mComp]) => {
+        if (gpuDeviceLost) return;
+        underwaterMedium = uw;
+        mediumDownPipe = mDown;
+        mediumCompPipe = mComp;
+        attachUnderwaterTargets();
+      }).catch(err => {
+        deferredUnderwaterP = null;
+        console.error('Deferred underwater init failed:', err);
+      });
+    }
+    return deferredUnderwaterP;
+  };
 
   function resize() {
     if(bloomMeasuring||neuralMeasuring)return;
@@ -1058,7 +1320,7 @@ async function main() {
     submergedPass.depthStencilAttachment.view=submergedDepth.createView();
     aboveWaterPass.colorAttachments[0].view=aboveWaterColor.createView();
     aboveWaterPass.depthStencilAttachment.view=submergedDepth.createView();
-    openOcean.optics=null;if(coastalOcean)coastalOcean.optics=null;
+    if(openOcean)openOcean.optics=null;if(coastalOcean)coastalOcean.optics=null;
     colorMS = device.createTexture({ size: [W, H], format: HDR, sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
     depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
@@ -1073,7 +1335,7 @@ async function main() {
       [lvl(waterCopy,m-1,'2d'),lvl(waterCopy,m,'2d')], 'water reflection mip'));
     for(const v of vessels){
       const resources=[{buffer:frameUBO},transView,skyView,sampClamp,
-        envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction.deck.view,
+        envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction?.deck?.view??deckPlaceholderView,
         {buffer:v.wetness.state},{buffer:v.wetness.lookup}];
       v.hullResources=resources;v.ownGroups=new Map();
     }
@@ -1083,9 +1345,10 @@ async function main() {
     mainPass.colorAttachments[0].view = colorMS.createView();
     mainPass.depthStencilAttachment.view = depthMS.createView();
     hdrView = hdrTex.createView();
-    const mediumView=underwaterMedium.resize({width:W,height:H,hdrView,depthView:depthMS.createView(),submergedView:submergedColor.createView()});
+    const mediumView=underwaterMedium?underwaterMedium.resize({width:W,height:H,hdrView,depthView:depthMS.createView(),submergedView:submergedColor.createView()}):null;
     const bv = [];
     for (let m = 0; m < bloomLevels; m++) bv.push(bloomTex.createView({ baseMipLevel: m, mipLevelCount: 1 }));
+    bloomMip0View = bv[0] ?? null;
     bloomPasses = [];
     const tmp = new Float32Array(4);
     for (let m = 0; m < bloomLevels; m++) {
@@ -1095,10 +1358,10 @@ async function main() {
       device.queue.writeBuffer(bloomUBOs[m], 0, tmp);
       bloomPasses.push({
         pipeline: downPipe,
-        underwaterPipeline:m===0?mediumDownPipe:null,
+        underwaterPipeline:m===0&&mediumDownPipe&&mediumView?mediumDownPipe:null,
         timingName: `Bloom down ${m}`,
         bindGroup: bg(downPipe, [m === 0 ? hdrView : bv[m - 1], linSamp, { buffer: bloomUBOs[m] }]),
-        underwaterBindGroup:m===0?bg(mediumDownPipe,[mediumView,linSamp,{buffer:bloomUBOs[m]},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]):null,
+        underwaterBindGroup:m===0&&mediumDownPipe&&mediumView?bg(mediumDownPipe,[mediumView,linSamp,{buffer:bloomUBOs[m]},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]):null,
         descriptor: { colorAttachments: [{ view: bv[m], clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] },
       });
     }
@@ -1115,9 +1378,9 @@ async function main() {
       });
     }
     bgComp = bg(compPipe, [hdrView, bv[0], linSamp, { buffer: compUBO }]);
-    bgCompUnderwater=bg(mediumCompPipe,[mediumView,bv[0],linSamp,{buffer:compUBO},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]);
+    bgCompUnderwater=mediumCompPipe&&mediumView?bg(mediumCompPipe,[mediumView,bv[0],linSamp,{buffer:compUBO},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]):null;
     bgCompNoBloom = bg(compPipe, [hdrView, blackBloomView, linSamp, { buffer: compUBO }]);
-    bgCompUnderwaterNoBloom=bg(mediumCompPipe,[mediumView,blackBloomView,linSamp,{buffer:compUBO},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]);
+    bgCompUnderwaterNoBloom=mediumCompPipe&&mediumView?bg(mediumCompPipe,[mediumView,blackBloomView,linSamp,{buffer:compUBO},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]):null;
     neuralPass.resize({width:W,height:H,hdrView,mediumView,bloomView:bv[0],compUBO,cameraProbe:vessels[0].probe.output,depthView:mainPass.depthStencilAttachment.view});
   }
 
@@ -1131,13 +1394,22 @@ async function main() {
   const continuumCensus=qs.get('census')==='0'?null:createContinuumCensus(device);
   let censusSeen=null;
   window.oceanContinuumCensus=continuumCensus;
-  let continuumHiZ=null;
+  let continuumHiZ=null,deferredHiZP=null;
   const hizDesired=qs.get('hiz')!=='0';
-  createContinuumHiZ({device,shader,samples:MSAA}).then(h=>{
-    h.setEnabled(hizDesired);
-    continuumHiZ=h;
-    window.oceanHiZ=h;
-  }).catch(err=>console.error('Continuum Hi-Z init failed:',err));
+  const ensureContinuumHiZDeferred=()=>{
+    if(continuumHiZ)return Promise.resolve(continuumHiZ);
+    if(!deferredHiZP){
+      deferredHiZP=createContinuumHiZ({device,shader,samples:MSAA}).then(h=>{
+        if(gpuDeviceLost)return null;
+        h.setEnabled(hizDesired);
+        continuumHiZ=h;
+        window.oceanHiZ=h;
+        return h;
+      }).catch(err=>{deferredHiZP=null;console.error('Continuum Hi-Z init failed:',err);});
+    }
+    return deferredHiZP;
+  };
+  if(!isWebKit)ensureContinuumHiZDeferred();
   let profileSummary='Waiting for frame timing…';
   const performancePanel=document.createElement('section');performancePanel.id='performance-panel';
   performancePanel.hidden=qs.get('profile')!=='1'||matchMedia('(max-width:900px), (pointer:coarse)').matches;
@@ -1409,6 +1681,7 @@ async function main() {
     deferSeaCollision:ownerBoat===boat,
     waterHeight:()=>ownerBoat.target?.heave??0,
     muzzleBlock:ownerBoat===boat?(gun,pose)=>{
+      if(!gunportSafety){ensureGunportSafetyDeferred();return null;}
       const r=gunportSafety.block(gun,pose,ownerBoat.gunnery.time,ownerBoat.revision);
       return r==='Checking sea at gunports'&&(BROADSIDE_SCENARIO||ownerBoat.gunnery.queue.length>0)?null:r;
     }:()=>null,
@@ -1448,19 +1721,20 @@ async function main() {
       }
       // An arrow makes no smoke, plume or splinters.
       if(isArrowAmmo(event.ammo)){if(event.type==='impact'){gunControls?.update?.();helm?.update?.(performance.now(),true);}return;}
+      if(!gunEffects)ensureGunneryEffectsDeferred();
       const shotKey=prefix+event.shotId;
-      if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
+      if(event.type==='shot')gunEffects?.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
       else if(event.type==='impact'&&event.kind==='water'){
-        gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
-        if(event.timberCrumble)gunEffects.emitImpact({...event,id:shotKey+'-debris',position:event.surfacePosition,massKg:event.mass,kind:'ship'});
+        gunEffects?.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
+        if(event.timberCrumble)gunEffects?.emitImpact({...event,id:shotKey+'-debris',position:event.surfacePosition,massKg:event.mass,kind:'ship'});
         emitCannonWaterWaves(shotKey,event,Math.max(0,ownerBoat.gunnery.time-event.time));
       }else if(event.type==='impact'){
         const rep=event.damageReport;
         const boostMass=rep?.magazineExploded?Math.max(120,event.mass*14):rep?.silenced?Math.max(45,event.mass*4):event.mass;
-        gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:boostMass,kind:event.kind});
+        gunEffects?.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:boostMass,kind:event.kind});
         if(rep?.magazineExploded){
           for(let k=1;k<=3;k++){
-            gunEffects.emitImpact({...event,id:`${shotKey}-mag-${k}`,position:[event.surfacePosition[0]+(k-2)*3.5,event.surfacePosition[1]+k*1.8,event.surfacePosition[2]+((k%2)?2.8:-2.8)],massKg:95,kind:'building'});
+            gunEffects?.emitImpact({...event,id:`${shotKey}-mag-${k}`,position:[event.surfacePosition[0]+(k-2)*3.5,event.surfacePosition[1]+k*1.8,event.surfacePosition[2]+((k%2)?2.8:-2.8)],massKg:95,kind:'building'});
           }
         }
         gunControls?.update?.();helm?.update?.(performance.now(),true);
@@ -1499,10 +1773,11 @@ async function main() {
     const origSetElevation=shipGuns.setElevation.bind(shipGuns);
     const origSetTraverse=shipGuns.setTraverse.bind(shipGuns);
     const origTrainOnTarget=shipGuns.trainOnTarget.bind(shipGuns);
-    shipGuns.prepare=side=>{const ok=origPrepare(side);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'prepare',side});return ok;};
-    shipGuns.fire=(side,opts)=>{const ok=origFire(side,opts);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:opts?.allowPartial?'fire-loaded':'fire',side});return ok;};
-    shipGuns.fireLoaded=side=>{const ok=origFireLoaded(side);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'fire-loaded',side});return ok;};
-    shipGuns.setFireAtWill=(enabled,side)=>{const ok=origSetFireAtWill(enabled,side);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'fire-at-will',enabled,side});return ok;};
+    const wakeGunnery=()=>{if(isWebKit&&(!gunEffects||!gunSea||!gunportSafety))ensureGunneryDeferred();};
+    shipGuns.prepare=side=>{wakeGunnery();const ok=origPrepare(side);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'prepare',side});return ok;};
+    shipGuns.fire=(side,opts)=>{wakeGunnery();const ok=origFire(side,opts);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:opts?.allowPartial?'fire-loaded':'fire',side});return ok;};
+    shipGuns.fireLoaded=side=>{wakeGunnery();const ok=origFireLoaded(side);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'fire-loaded',side});return ok;};
+    shipGuns.setFireAtWill=(enabled,side)=>{if(enabled)wakeGunnery();const ok=origSetFireAtWill(enabled,side);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'fire-at-will',enabled,side});return ok;};
     shipGuns.cease=()=>{origCease();if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'cease'});};
     shipGuns.standDown=()=>{origStandDown();if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'stand-down'});};
     shipGuns.setAmmo=type=>{const next=origSetAmmo(type);if(shouldSquadronObeyGunnery())commandFriendlyFleet(vessels,{type:'ammo',ammo:next});return next;};
@@ -1514,14 +1789,15 @@ async function main() {
   for(const v of vessels.slice(1))v.gunnery=createShipGunnery(v.boat,makeGunneryOptions(v.boat,v.id+'-'));
   const showShoreShot=(prefix,event)=>{
     sceneAudio.gunneryEvent(event);
+    if(!gunEffects)ensureGunneryEffectsDeferred();
     const shotKey=prefix+event.shotId;
-    if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
+    if(event.type==='shot')gunEffects?.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
     else if(event.type==='impact'&&event.kind==='water'){
-      gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
-      if(event.timberCrumble)gunEffects.emitImpact({...event,id:shotKey+'-debris',position:event.surfacePosition,massKg:event.mass,kind:'ship'});
+      gunEffects?.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
+      if(event.timberCrumble)gunEffects?.emitImpact({...event,id:shotKey+'-debris',position:event.surfacePosition,massKg:event.mass,kind:'ship'});
       emitCannonWaterWaves(shotKey,event,0);
     }else if(event.type==='impact'){
-      gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
+      gunEffects?.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
     }
   };
   let activePortRef=terrain?.port??null;
@@ -1603,12 +1879,68 @@ async function main() {
   // For the review and perf scripts, which aim at and fire on buildings.
   Object.defineProperties(window.oceanFleet,{terrain:{get:()=>terrain},orbit:{get:()=>shipOrbit},freeCam:{value:cam},portDamage:{value:portDamage},camera:{value:cam}});
 
-  const hullFlood=await createHullFlood({device,frameUBO,envCubeView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
-  for(const v of vessels)v.flood=hullFlood.vessel(v.holesUBO,v.hullUBO);
+  let hullFlood=isWebKit?null:await createHullFlood({device,frameUBO,envCubeView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
+  if(hullFlood)for(const v of vessels)v.flood=hullFlood.vessel(v.holesUBO,v.hullUBO);
+  let deferredHullFloodP=null;
+  const ensureHullFloodDeferred=()=>{
+    if(hullFlood)return Promise.resolve(hullFlood);
+    if(!deferredHullFloodP){
+      deferredHullFloodP=createHullFlood({device,frameUBO,envCubeView,sampler:sampClamp,shader,format:HDR,samples:MSAA}).then(made=>{
+        if(gpuDeviceLost)return null;
+        hullFlood=made;
+        for(const v of vessels)v.flood??=hullFlood.vessel(v.holesUBO,v.hullUBO);
+        return made;
+      }).catch(err=>{deferredHullFloodP=null;console.error('Deferred hull flood init failed:',err);});
+    }
+    return deferredHullFloodP;
+  };
+  let webkitDeferredScheduled=false;
+  const scheduleWebKitDeferredWaves=()=>{
+    if(!isWebKit||webkitDeferredScheduled||gpuDeviceLost)return;
+    webkitDeferredScheduled=true;
+    const delayWave=ms=>new Promise(resolve=>{
+      setTimeout(()=>{
+        if(typeof requestIdleCallback==='function')requestIdleCallback(()=>resolve(),{timeout:120});
+        else resolve();
+      },ms);
+    });
+    const runWave=async tasks=>{
+      if(gpuDeviceLost)return;
+      await Promise.allSettled(tasks.map(fn=>Promise.resolve().then(fn)));
+    };
+    (async()=>{
+      await delayWave(120);
+      // Wave 1: sun shafts, Hi-Z, shore folk (+ gunnery immediately for combat scenarios)
+      await runWave([
+        ensureVolumetricShaftsDeferred,
+        ensureContinuumHiZDeferred,
+        ensureShoreFolkDeferred,
+        ...(BROADSIDE_SCENARIO||CASTLES_SCENARIO?[ensureGunneryDeferred,ensureHullFloodDeferred]:[]),
+      ]);
+      await delayWave(150);
+      // Wave 2: ship water interaction, deck wash & bow spray
+      await runWave([ensureInteractionsDeferred]);
+      await delayWave(150);
+      // Wave 3: crest spray, weather & underside hull contact audio
+      await runWave([ensureSpindriftDeferred,ensureWeatherDeferred,ensureHullContactDeferred]);
+      await delayWave(150);
+      // Wave 4: gunnery probes & hull flooding
+      await runWave([ensureGunSeaDeferred,ensureGunportSafetyDeferred,ensureHullFloodDeferred]);
+      await delayWave(150);
+      // Wave 5: gunnery VFX (smoke, flash, plumes, arcs, fire lights)
+      await runWave([ensureGunneryEffectsDeferred]);
+      await delayWave(150);
+      // Wave 6: underwater medium/post & anchor splash
+      await runWave([ensureUnderwaterDeferred,ensureAnchorsDeferred]);
+      await delayWave(150);
+      // Wave 7: dolphins wildlife & inactive ocean mode
+      await runWave([()=>dolphins.load(),()=>(startsCoastal?ensureOpenOcean():ensureCoastalOcean())]);
+    })();
+  };
   let seaEventSerial=0;
   function seaEntry(position,{massKg=6,radiusMetres=.45,closingSpeed=4}={}){
     const id='sea-entry-'+(++seaEventSerial);
-    gunEffects.emitImpact({id,position:[position[0],0,position[2]],velocity:[0,-closingSpeed,0],massKg,kind:'water'});
+    gunEffects?.emitImpact({id,position:[position[0],0,position[2]],velocity:[0,-closingSpeed,0],massKg,kind:'water'});
     surfaceWaves.emit({source:'roundshot',id,kind:'entry',x:position[0],z:position[2],radiusMetres,closingSpeed,velocity:[0,-closingSpeed,0],massKg,age:0});
   }
   // What the rail and the sea do to a ship's people, told to whoever commands her.
@@ -4396,7 +4728,7 @@ async function main() {
   let fpsN = 0, fpsT = 0;
   let frameWorkMs=0;const frameStages=createFrameStages();window.oceanFrameStages=frameStages.snapshot;
   let shooting = false;
-  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();polygons.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
+  document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();polygons.reset();hullContactProbe?.reset();sceneAudio.visibility(document.hidden);});
 
   function encodeSim(cp) {
     cp.setPipeline(rowsPipe);
@@ -4418,13 +4750,13 @@ async function main() {
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
     fortSoldiers?.encodePose(cp);mateSoldiers?.encodePose(cp);boardArmies?.encodePose(cp);
     boardLife?.tick(gameDateMs());caravanClock(gameDateMs());
-    for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
+    for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction?.encode(cp,wakePool.next);
     wakePool.commit();
-    hullContactProbe.encode(cp);
-    spindrift.encode(cp);
+    hullContactProbe?.encode(cp);
+    spindrift?.encode(cp);
     dolphins.encode(cp);marineLife.encode(cp);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter){
-      v.wetness.encode(cp,v.boat.showProw);
+      if(v.wetnessConnected)v.wetness.encode(cp,v.boat.showProw);
       if(v.bakingWreck){v.bakingWreck=false;v.bakedWreck=true;}
     }
     // foam clipmaps
@@ -5444,8 +5776,9 @@ async function main() {
       };
       const drawOceanDepth=rp=>{
         if(nodeCount&&OCEAN_DEPTH){
-          rp.setVertexBuffer(0,instBuf);rp.setIndexBuffer(idxBuf,'uint16');
           const ocean=terrain?coastalOcean:openOcean;
+          if(!ocean)return;
+          rp.setVertexBuffer(0,instBuf);rp.setIndexBuffer(idxBuf,'uint16');
           rp.setPipeline(ocean.depthPipe);rp.setBindGroup(0,ocean.depthGroups[wakeIndex()]);
           if(coastalDepthGroup){rp.setBindGroup(1,opticsEmptyGroup);rp.setBindGroup(2,coastalDepthGroup);}
           rp.drawIndexed(GRID*GRID*6,nodeCount);
@@ -5453,8 +5786,9 @@ async function main() {
       };
       const drawOceanShade=rp=>{
         if(nodeCount){
-          rp.setVertexBuffer(0,instBuf);rp.setIndexBuffer(idxBuf,'uint16');
           const ocean=terrain?coastalOcean:openOcean;
+          if(!ocean)return;
+          rp.setVertexBuffer(0,instBuf);rp.setIndexBuffer(idxBuf,'uint16');
           rp.setPipeline(ocean.pipe);rp.setBindGroup(0,ocean.groups[foamCur][wakeIndex()]);
           rp.setBindGroup(1,ocean.shadows);rp.setBindGroup(2,coastalGroup??opticsEmptyGroup);
           rp.setBindGroup(3,ocean.optics??=oceanOpticsGroup(ocean));
@@ -5478,7 +5812,7 @@ async function main() {
         terrain?.drawFoliage?.(rp);
         terrain?.drawWater?.(rp,camSnap,frameF);
         rp.setPipeline(skyPipe);rp.setBindGroup(0,bgSky);clouds.drawSky(rp);rp.draw(3);
-        dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);shallowWater.drawSpray(rp);weatherRenderer.draw(rp);
+        dolphins.draw(rp);marineLife.draw(rp);gunEffects?.drawInPass(rp);spindrift?.draw(rp);shallowWater.drawSpray(rp);weatherRenderer?.draw(rp);
       });
       await runSceneSubpass('Scene: Ships',rp=>{
         for(const v of hullsSnap)v.continuum.draw(rp,(pipeline,far)=>vesselOwnGroups(v,pipeline,far));
@@ -5681,7 +6015,8 @@ async function main() {
     weather.step(dt,P,cam);
     frameStages.mark('Sailing and voyage');
     writeFrame(simTime);
-    weatherRenderer.update(weather,P,dt);
+    if(weatherRenderer)weatherRenderer.update(weather,P,dt);
+    else if(isWebKit&&(weather.intensity>0||weather.flash>0.005||P.rain>0||P.thunder>0))ensureWeatherDeferred();
     sceneAudio.update(dt,P,boat,frameF,weather,activeFires,{
       terrain,
       vessels:followerEnabled?vessels:[vessels[0]],
@@ -5736,7 +6071,8 @@ async function main() {
       data[51]=0;
       device.queue.writeBuffer(v.hullUBO,0,data);
       v.continuum.place(ship,{important:!index||v===aimedVessel,damaged:hullBelongsDamaged(v),reach:vesselDetailReach(v.detailState,ship)});
-      v.flood?.update(ship);
+      if(v.flood)v.flood.update(ship);
+      else if(isWebKit&&(dmg?.holes?.length||dmg?.craters?.length||dmg?.floodingTonnes>0))ensureHullFloodDeferred();
       updateHullHoleEffects(v,ship,dt);
       ship.crewEvents??=crewSeaEvents(v);
       fleetHullData.set(data.subarray(0,24),index*24);
@@ -5760,13 +6096,16 @@ async function main() {
           code:getShipColorsInfo(ship.damage?.surrendered?'surrender':ship.colors??DEFAULT_SHIP_COLORS).code,surrendered:!!ship.damage?.surrendered,
           wind:[Math.cos(P.windDir*D2R),Math.sin(P.windDir*D2R),settlingBake?0:P.windSpeed],anchor:v.anchor,mooring:index?null:mooringLinesState(dockingBoarding)}));
       }
-      if(ship.showProw&&!settlingBake)v.anchorSplash.update(v.anchor,ship);
+      if(ship.showProw&&!settlingBake){
+        if(isWebKit&&v.anchor?.active&&v.anchorSplash===noAnchorSplash&&getShipParts(v.modelId).equipment.anchor!==null)ensureAnchorsDeferred();
+        v.anchorSplash.update(v.anchor,ship);
+      }
       if(settlingBake){
         const savedEffects=ship.effects;ship.effects=false;
-        v.interaction.update(ship,0,simTime,frameIndex,0,0,true,0);
+        v.interaction?.update(ship,0,simTime,frameIndex,0,0,true,0);
         ship.effects=savedEffects;
       }else if(shipDt>0&&!v.dormantEncounter){
-        v.interaction.update(ship,shipDt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
+        v.interaction?.update(ship,shipDt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
       }
     }
     frameStages.mark('Ship state');
@@ -5783,7 +6122,9 @@ async function main() {
     const windVec=frameWind;
     if(!castleDuel.active){
       portGunnery?.update(dt,windVec,gameDateMs());
-      freeCannon.update(dt,{firing:cameraMode==='free'&&!ashore.on&&(keys.KeyF===true||Boolean(freeCamMobile?.state.firing)),eye:[cam.x,cam.y,cam.z],
+      const freeFiring=cameraMode==='free'&&!ashore.on&&(keys.KeyF===true||Boolean(freeCamMobile?.state.firing));
+      if(isWebKit&&freeFiring&&!gunEffects)ensureGunneryDeferred();
+      freeCannon.update(dt,{firing:freeFiring,eye:[cam.x,cam.y,cam.z],
         forward:[Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw)],wind:windVec});
       fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery,gameDateMs());
     }else{
@@ -5836,20 +6177,22 @@ async function main() {
       if(portGunnery){const portProj=portGunnery.projectiles;for(let i=0;i<portProj.length;i++)allProjectiles.push(portProj[i]);}
       for(const p of freeCannon.state.projectiles)allProjectiles.push(p);
     }
-    gunEffects.setProjectiles(allProjectiles);
+    if(isWebKit&&allProjectiles.length>0&&(!gunEffects||!gunSea))ensureGunneryDeferred();
+    gunEffects?.setProjectiles(allProjectiles);
     terrain?.setBallisticProjectiles?.(allProjectiles,simTime);
     if(!castleDuel.active&&boat.showProw&&boat.effects!==false){
       const aimFallback=(helm.inBattle||!captainPanel.hidden)?(shipGuns.selectedSide??BROADSIDE_SIDE??'port'):null;
+      if(isWebKit&&aimFallback&&!gunEffects)ensureGunneryDeferred();
       const aimArcs=shipGuns.computeAimTrajectories?.({wind:windVec,fallbackSide:aimFallback})??[];
-      gunEffects.setAimArcs?.(aimArcs);
+      gunEffects?.setAimArcs?.(aimArcs);
       // What stands where the broadside would fall is cut finer (one continuum, rule 3 item 5).
       terrain?.setGunneryAim?.(shipGuns.aimSummary?.fall??null);
       if(!captainPanel.hidden&&(frameIndex&3)===0)gunControls.update();
     }else{
-      gunEffects.setAimArcs?.(NO_AIM_ARCS);
+      gunEffects?.setAimArcs?.(NO_AIM_ARCS);
       terrain?.setGunneryAim?.(null);
     }
-    hullContactProbe.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
+    hullContactProbe?.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
     // Every fire burning, and the hull each is aboard (-1 ashore) so the GPU can carry it with her.
     activeFires.length=activeFireHulls.length=0;
     for(let i=0;i<activeVesselCount;i++){const fires=vessels[i].boat.damage?.worldFires;if(fires)for(const f of fires){activeFires.push(f);activeFireHulls.push(i);}}
@@ -5862,10 +6205,11 @@ async function main() {
     if(tradeFires?.length)for(let i=0;i<tradeFires.length;i++){activeFires.push(tradeFires[i]);activeFireHulls.push(-1);}
     // The frame block went up whole in writeFrame, its fire lights dark. The GPU chooses them from the fire records
     // kept here (gunEffects.encodeLights), so nothing more is sent for them. The wind only says how long smoke lasts.
-    gunEffects.update(dt,{wind:windVec,time:simTime,fires:activeFires,fireHulls:activeFireHulls});
-    wakePool.update(vessels);
+    gunEffects?.update(dt,{wind:windVec,time:simTime,fires:activeFires,fireHulls:activeFireHulls});
+    if(vessels.every(v=>v.interaction))wakePool.update(vessels);
     device.queue.writeBuffer(fleetHullUBO,0,fleetHullData);sceneShadows.update(vessels);
-    spindrift.update(frameF, P.spindrift, dt, needSpectrum);
+    if(spindrift)spindrift.update(frameF, P.spindrift, dt, needSpectrum);
+    else if(isWebKit&&P.spindrift>0&&frameF[58]>8)ensureSpindriftDeferred();
     if (needSpectrum) writeSimStatic();
     simF[48] = P.choppy;
     simF[52] = simTime; simF[53] = dt;
@@ -5886,7 +6230,7 @@ async function main() {
     terrain?.prepare(terrainCamera,frameF);
     const enc = device.createCommandEncoder();
     if(celestial.update())envFull=true;celestial.encode(enc);
-    gunEffects.encodeLights(enc,{frame:frameUBO,hull:vesselHullUBO});gunEffects.encode(enc);
+    if(gunEffects){gunEffects.encodeLights(enc,{frame:frameUBO,hull:vesselHullUBO});gunEffects.encode(enc);}
     profiler.beginFrame(frameIndex);
     const prevFoamCur = foamCur, prevSkySun = skySun, prevSkyHaze = skyHaze, prevSkyHeight = skyHeight;
     const ranSpectrum = needSpectrum;
@@ -5980,10 +6324,10 @@ async function main() {
     cp.end();
 
     for(const v of vessels)v.rowingWater?.encode(enc);
-    gunSea.encode(enc,shipGuns.state.projectiles,simTime);
-    gunportSafety.encode(enc,boat,shipGuns.state.time);
+    gunSea?.encode(enc,shipGuns.state.projectiles,simTime);
+    gunportSafety?.encode(enc,boat,shipGuns.state.time);
     const drawProw=vessels.some(v=>v.boat.showProw);
-    const gunVolumes=gunEffects.volumesActive;
+    const gunVolumes=Boolean(gunEffects?.volumesActive);
     mainPass.colorAttachments[0].resolveTarget=hdrView;
     for(const [i,v] of vessels.entries())if((!v.bakedWreck||skyChanged)&&!v.dormantEncounter)v.shadows.encode(enc,profiler,vesselHasVisibleCrew(v)?v.crew?.drawShadow:null,i?v.id+' ':'');
     seaShadows.encode(enc,i=>{const v=vessels[i];return (!v.bakedWreck||skyChanged)&&!v.dormantEncounter&&v.shadows.data[19]>0;});
@@ -6035,8 +6379,11 @@ async function main() {
     neuralPbr.setStrength(P.neuralPbr);
     mainPass.timestampWrites=profiler.writes('Scene');
     mainPass.colorAttachments[0].storeOp = 'discard';
-    const shaftsActive = !cameraMediumBand && P.clouds > 0.001 && frameF[33] > 0.025 && frameF[115] < 0.5;
-    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||cameraMediumBand||shaftsActive||(useNeuralLight&&neuralPass.wantsDepth) ? 'store' : 'discard';
+    const underwaterReady = Boolean(underwaterMedium && mediumCompPipe && bgCompUnderwater && bgCompUnderwaterNoBloom);
+    if (isWebKit && cameraMediumBand && !underwaterReady) ensureUnderwaterDeferred();
+    const activeMediumBand = cameraMediumBand && underwaterReady;
+    const shaftsActive = Boolean(volumetricShafts) && !activeMediumBand && P.clouds > 0.001 && frameF[33] > 0.025 && frameF[115] < 0.5;
+    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||activeMediumBand||shaftsActive||(useNeuralLight&&neuralPass.wantsDepth) ? 'store' : 'discard';
     // One pass for the whole scene keeps its multisampled attachments in tile memory. Whole hulls
     // come first: they neither discard nor blend, so what they hide is never shaded, sea included.
     if(drawProw){
@@ -6061,30 +6408,34 @@ async function main() {
     // seabed in landContinuum, then opaque land/herds/trade vessels, then opaque ocean shading, then sample-mask foliage.
     terrain?.drawOpaqueCity?.(rp,terrainCamera,frameF);
     if (nodeCount && OCEAN_DEPTH) {
-      rp.setVertexBuffer(0, instBuf);
-      rp.setIndexBuffer(idxBuf, 'uint16');
       const ocean=terrain?coastalOcean:openOcean;
-      rp.setPipeline(ocean.depthPipe);
-      rp.setBindGroup(0, ocean.depthGroups[wakeIndex()]);
-      if (coastalDepthGroup) {
-        rp.setBindGroup(1, opticsEmptyGroup);
-        rp.setBindGroup(2, coastalDepthGroup);
+      if (ocean) {
+        rp.setVertexBuffer(0, instBuf);
+        rp.setIndexBuffer(idxBuf, 'uint16');
+        rp.setPipeline(ocean.depthPipe);
+        rp.setBindGroup(0, ocean.depthGroups[wakeIndex()]);
+        if (coastalDepthGroup) {
+          rp.setBindGroup(1, opticsEmptyGroup);
+          rp.setBindGroup(2, coastalDepthGroup);
+        }
+        rp.drawIndexed(GRID * GRID * 6, nodeCount);
       }
-      rp.drawIndexed(GRID * GRID * 6, nodeCount);
     }
     terrain?.drawOpaqueLand?.(rp,terrainCamera,frameF);
     if (nodeCount) {
-      rp.setVertexBuffer(0, instBuf);
-      rp.setIndexBuffer(idxBuf, 'uint16');
       // Keep depth and colour in one render pass so tile attachments stay live.
       // The second draw shades only the surviving surface, with no discard.
       const ocean=terrain?coastalOcean:openOcean;
-      rp.setPipeline(ocean.pipe);
-      rp.setBindGroup(0, ocean.groups[foamCur][wakeIndex()]);
-      rp.setBindGroup(1, ocean.shadows);
-      rp.setBindGroup(2,coastalGroup??opticsEmptyGroup);
-      rp.setBindGroup(3,ocean.optics??=oceanOpticsGroup(ocean));
-      rp.drawIndexed(GRID * GRID * 6, nodeCount);
+      if (ocean) {
+        rp.setVertexBuffer(0, instBuf);
+        rp.setIndexBuffer(idxBuf, 'uint16');
+        rp.setPipeline(ocean.pipe);
+        rp.setBindGroup(0, ocean.groups[foamCur][wakeIndex()]);
+        rp.setBindGroup(1, ocean.shadows);
+        rp.setBindGroup(2,coastalGroup??opticsEmptyGroup);
+        rp.setBindGroup(3,ocean.optics??=oceanOpticsGroup(ocean));
+        rp.drawIndexed(GRID * GRID * 6, nodeCount);
+      }
     }
     terrain?.drawFoliage?.(rp);
     frameStages.mark('Scenery');
@@ -6101,8 +6452,8 @@ async function main() {
         if(!v.boat.damage?.sunk)v.flood?.draw(rp);
       }
     }
-    if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(rp);
-    dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);shallowWater.drawSpray(rp);weatherRenderer.draw(rp);
+    if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction?.draw(rp);
+    dolphins.draw(rp);marineLife.draw(rp);gunEffects?.drawInPass(rp);spindrift?.draw(rp);shallowWater.drawSpray(rp);weatherRenderer?.draw(rp);
     rp.end();
 
     continuumHiZ?.encode(enc,{
@@ -6112,7 +6463,7 @@ async function main() {
       timestampWrites:profiler.writes('Hi-Z pyramid'),
     });
 
-    if(gunVolumes){
+    if(gunVolumes&&gunEffects){
       gunEffects.resolveDepth(enc,mainPass.depthStencilAttachment.view,W,H);
       const effects=enc.beginRenderPass({colorAttachments:[{view:hdrView,loadOp:'load',storeOp:'store'}],timestampWrites:profiler.writes('Cannon smoke')});
       gunEffects.drawVolumes(effects);effects.end();
@@ -6124,7 +6475,7 @@ async function main() {
       timestampWrites:profiler.writes('Sun shafts'),
     });
 
-    underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);
+    underwaterMedium?.encode(enc,activeMediumBand,activeMediumBand?profiler.writes('Underwater medium'):undefined);
     let neuralEncoded=false;
     if(useNeuralLight){
       neuralPass.update({viewProj,camX:cam.x,camY:cam.y,camZ:cam.z,strength:P.neuralLight});
@@ -6132,10 +6483,10 @@ async function main() {
     }else if(neuralPass.active){
       neuralPass.update({viewProj,camX:cam.x,camY:cam.y,camZ:cam.z,strength:0});
     }
-    bloomCameraMediumBand=cameraMediumBand;
+    bloomCameraMediumBand=activeMediumBand;
     const bloomActive = P.bloom > 0.001 && bloomPasses.length > 0;
     if (bloomActive) {
-      encodeBloom(enc, bloomProfileWrites, cameraMediumBand);
+      encodeBloom(enc, bloomProfileWrites, activeMediumBand);
       bloomZeroCleared = false;
     } else if (!bloomZeroCleared && bloomPasses.length > 0) {
       const clearBloom = enc.beginRenderPass({
@@ -6166,17 +6517,17 @@ async function main() {
     compPass.colorAttachments[0].view = swapTex.createView();
     compPass.timestampWrites=profiler.writes('Composite');
     const pc = enc.beginRenderPass(compPass);
-    if(!(neuralEncoded&&neuralPass.drawComposite(pc,cameraMediumBand))){
-      pc.setPipeline(cameraMediumBand?mediumCompPipe:compPipe);
-      pc.setBindGroup(0, cameraMediumBand?(bloomActive?bgCompUnderwater:bgCompUnderwaterNoBloom):(bloomActive?bgComp:bgCompNoBloom));
+    if(!(neuralEncoded&&neuralPass.drawComposite(pc,activeMediumBand))){
+      pc.setPipeline(activeMediumBand?mediumCompPipe:compPipe);
+      pc.setBindGroup(0, activeMediumBand?(bloomActive?bgCompUnderwater:bgCompUnderwaterNoBloom):(bloomActive?bgComp:bgCompNoBloom));
       pc.draw(3);
     }
     pc.end();
 
     for(const {probe:p} of vessels)if(p.requested)enc.copyBufferToBuffer(p.output,0,p.read,0,64);
-    const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
-    const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
-    if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
+    const doAudio=Boolean(interaction)&&sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
+    const audioRevision=boat.revision,audioEpoch=hullContactProbe?.epoch??0,audioRequestedAt=performance.now(),audioSimTime=simTime;
+    if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe?.copy(enc,frameIndex);}
     if(continuumCensus?.idle){
       // People and their strand hair across every company, the garrison, the mate, the town and the decks of passing vessels.
       const allPeopleDraws=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(boardArmies?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
@@ -6213,29 +6564,30 @@ async function main() {
         if(!firstGpuError&&!oceanStartupDeviceLost){
           window.oceanSceneryReady=Promise.all([shoreFolkReadyPromise,terrain?.sceneryReady??Promise.resolve()]).then(()=>true);
           window.oceanStartup?.ready();wakeBoard();
+          if(isWebKit)requestAnimationFrame(()=>requestAnimationFrame(()=>scheduleWebKitDeferredWaves()));
         }
       },error=>window.oceanStartup?.fail(error));
     }
-    gunSea.read(contact=>{
+    gunSea?.read(contact=>{
       if(terrain&&contact?.position){
         const landY=terrain.height(contact.position[0],contact.position[2]);
         if(landY>(contact.surfacePosition?.[1]??0)+0.05)return;
       }
       shipGuns.impact(contact);
     });
-    gunportSafety.read();
+    gunportSafety?.read();
     if(doAudio){
       audioPending=true;
-      const bottomEvents=[],bottomReady=hullContactProbe.read(event=>bottomEvents.push(event));
+      const bottomEvents=[],bottomReady=hullContactProbe?hullContactProbe.read(event=>bottomEvents.push(event)):false;
       audioRead.mapAsync(GPUMapMode.READ).then(async()=>{
         try{
           // Resolve true underside returns before selecting a waterline accent.
           // Neither RAF nor the GPU waits for these two small asynchronous maps.
           await bottomReady;
-          if(audioRevision!==boat.revision||audioEpoch!==hullContactProbe.epoch||!sceneAudio.enabled||document.hidden||performance.now()-audioRequestedAt>350)return;
+          if(audioRevision!==boat.revision||(hullContactProbe&&audioEpoch!==hullContactProbe.epoch)||!sceneAudio.enabled||document.hidden||performance.now()-audioRequestedAt>350)return;
           const event=impactDetector.sample(new Float32Array(audioRead.getMappedRange()),audioRevision,{now:audioSimTime});
           sceneAudio.hullContact(impactDetector.contact);
-          for(const bottom of bottomEvents){const fresh=hullContactProbe.refreshEvent(bottom);if(fresh)sceneAudio.hullUnderside(fresh);}
+          for(const bottom of bottomEvents){const fresh=hullContactProbe?.refreshEvent(bottom);if(fresh)sceneAudio.hullUnderside(fresh);}
           sceneAudio.impact(event);
         }finally{if(audioRead.mapState==='mapped')audioRead.unmap();audioPending=false;}
       }).catch(()=>{audioPending=false;});

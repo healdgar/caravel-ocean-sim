@@ -112,11 +112,40 @@ fn propContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
 }
 `;
 
+// Octahedral G-buffer card bake hook (js/continuum-cards.js): bakes pure unlit prop pigment/plain albedo and local normal.
+const PROP_CONTINUUM_CARD_BAKE = Object.freeze({
+  prelude: () => /* wgsl */`
+@group(0) @binding(0) var propCardPigment:texture_2d_array<f32>;
+@group(0) @binding(1) var propCardSampler:sampler;
+`,
+  varyings: [['uv', 'vec2f'], ['surface', 'vec4u', true], ['plain', 'vec4f', true]],
+  wgsl: () => /* wgsl */`
+const PROP_CARD_PLAIN:u32=${PROP_CONTINUUM_PLAIN}u;
+fn propContinuumCardBakeVarying(s:ContinuumSurface,v:ptr<function,ContinuumCardBakeVarying>) {
+  (*v).uv=continuumUV(s.vertex);
+  (*v).surface=vec4u(continuumType(s.model,${PROP_CONTINUUM_MATERIAL.layer}u),0u,0u,0u);
+  (*v).plain=vec4f(continuumTypeF(s.model,${PROP_CONTINUUM_MATERIAL.albedo}u),continuumTypeF(s.model,${PROP_CONTINUUM_MATERIAL.albedo + 1}u),continuumTypeF(s.model,${PROP_CONTINUUM_MATERIAL.albedo + 2}u),continuumTypeF(s.model,${PROP_CONTINUUM_MATERIAL.roughness}u));
+}
+fn propContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSample {
+  let isPlain=v.surface.x==PROP_CARD_PLAIN;
+  let layer=select(v.surface.x,0u,isPlain);
+  let sampled=textureSample(propCardPigment,propCardSampler,v.uv,layer).rgb;
+  let rawAlbedo=select(sampled,v.plain.rgb,isPlain);
+  let luma=dot(rawAlbedo,vec3f(0.2126,0.7152,0.0722));
+  let cavityAO=select(clamp(0.72+0.28*smoothstep(0.08,0.52,luma),0.58,1.0),1.0,isPlain);
+  let albedo=clamp(rawAlbedo*cavityAO,vec3f(0.02),vec3f(0.95));
+  let n=normalize(v.normal+vec3f(0.0,1e-6,0.0))*select(-1.0,1.0,front);
+  return ContinuumCardSample(albedo,1.0,n,0.0);
+}
+`,
+});
+
 // The props' material (js/wgsl/continuum-cut.js).
 export const PROP_CONTINUUM_MATERIAL_SPEC = Object.freeze({
   name: 'propContinuum', prelude: propContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['uv', 'vec2f'], ['surface', 'vec4u', true], ['plain', 'vec4f', true], ['glow', 'f32', true]],
   wgsl: () => PROP_CONTINUUM_MATERIAL_WGSL, salt: 3,
   // Planks and cleats are open shells, lit from whichever side is seen.
-  cullMode: 'none', air: true, capture: true,
+  cullMode: 'none', air: true, capture: true, visibility: true,
+  cardBake: PROP_CONTINUUM_CARD_BAKE,
 });

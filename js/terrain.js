@@ -1086,8 +1086,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // of its own (js/wgsl/city-continuum.js).
   const cityMaterial=cityContinuumMaterial(citySource);
   const cityViewPromise=requestContinuumView({device,shader,material:cityMaterial,format,samples});
-  // Ground boulders removed (smooth boulders disabled until redesigned).
-  const boulderViewPromise=Promise.resolve(null);
+  // The ground cover's rocks, through the one continuum: fractured coastal & hillside boulders (js/wgsl/boulder-continuum.js).
+  const boulderViewPromise=requestContinuumView({device,shader,material:BOULDER_CONTINUUM_MATERIAL_SPEC,format,samples});
+  boulderViewPromise.catch(()=>{});
   const terrainPipesPromise=Promise.all([
     computePipe(TERRAIN_LIGHT,'island sunlight'),
     cityViewPromise,
@@ -1437,6 +1438,34 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     for(const block of groundResident.values()){boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
     groundResident.clear();groundWanted=[];groundResidencyAt=null;groundStats.resident=0;
   }
+  let boulderBlockCacheCity=null,boulderBlockCacheFn=null;
+  const getBoulderBlockTester=()=>{
+    const cityObj=proceduralPack?.port?.city??null;
+    if(cityObj===boulderBlockCacheCity)return boulderBlockCacheFn;
+    boulderBlockCacheCity=cityObj;
+    const bl=cityObj?.blocks;
+    if(!bl?.length){boulderBlockCacheFn=null;return null;}
+    const pad=12.0,cellM=32,grid=new Map(),keyOf=(i,j)=>(i+32768)*65536+(j+32768);
+    for(let b=0;b<bl.length;b+=CITY_BLOCK_FLOATS){
+      const bx=bl[b],bz=bl[b+2],yaw=bl[b+3],hw=bl[b+4]*0.5+pad,hd=bl[b+5]*0.5+pad,reach=Math.hypot(hw,hd);
+      const entry={bx,bz,c:Math.cos(yaw),s:Math.sin(yaw),hw,hd};
+      for(let j=Math.floor((bz-reach)/cellM);j<=Math.floor((bz+reach)/cellM);j++){
+        for(let i=Math.floor((bx-reach)/cellM);i<=Math.floor((bx+reach)/cellM);i++){
+          const k=keyOf(i,j);let list=grid.get(k);if(!list)grid.set(k,list=[]);list.push(entry);
+        }
+      }
+    }
+    boulderBlockCacheFn=(px,pz)=>{
+      const list=grid.get(keyOf(Math.floor(px/cellM),Math.floor(pz/cellM)));
+      if(!list)return false;
+      for(let m=0;m<list.length;m++){
+        const e=list[m],dx=px-e.bx,dz=pz-e.bz;
+        if(Math.abs(dx*e.c-dz*e.s)<=e.hw&&Math.abs(dx*e.s+dz*e.c)<=e.hd)return true;
+      }
+      return false;
+    };
+    return boulderBlockCacheFn;
+  };
   // Instances are worked out once per patch and uploaded as it comes into range; the GPU does the rest.
   function updateGroundResidency(camera){
     if(!boulderContinuum){groundStats.resident=0;return;}
@@ -1449,8 +1478,19 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
       groundWanted=groundPatches.filter(patch=>!groundResident.has(patch)&&distanceOf(patch)<GROUND_RESIDENT_M).sort((a,b)=>distanceOf(b)-distanceOf(a));
     }
+    const boulderCityBlock=getBoulderBlockTester();
+    const boulderTown=proceduralPack?.port?.country?.town;
+    const boulderTownR=boulderTown?.radius>0?boulderTown.radius+24:0;
+    const streetWin=proceduralPack?.port?.streets?.window;
+    const mayPlaceBoulder=(x,z)=>{
+      if(streetWin&&Math.abs(x-streetWin.x)<=streetWin.span*0.52&&Math.abs(z-streetWin.z)<=streetWin.span*0.52)return false;
+      if(streetEdgeAt(proceduralPack?.port?.streets,x,z)<Math.max(GROUND_COVER_STREET_GAP_M,12.0))return false;
+      if(boulderCityBlock?.(x,z))return false;
+      if(boulderTownR>0&&Math.hypot(x-boulderTown.x,z-boulderTown.z)<boulderTownR)return false;
+      return !inlandWaterSampler?.(x,z);
+    };
     for(let i=0;i<GROUND_PATCHES_PER_FRAME&&groundWanted.length&&groundFreeBlocks.length;i++){
-      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,baseGroundSample,(x,z)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M&&!inlandWaterSampler?.(x,z));
+      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,baseGroundSample,mayPlaceBoulder);
       const floats=new Float32Array(groundBlock*8),slotGroups=new Uint32Array(groundBlock).fill(0xffffffff);let slot=0;
       perVariant.forEach((data,variant)=>{for(let k=0;k<data.length;k+=8){floats.set(data.subarray(k,k+8),slot*8);slotGroups[slot++]=variant;}});
       boulderContinuum?.setInstances(block*groundBlock,floats,slotGroups);
@@ -1703,9 +1743,36 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   landCentre(proceduralPack?.port?.riverCut);
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
-  // Build inland water, herds, and trade vessels in parallel (ground boulders removed).
+  // Build fractured boulders, inland water, herds, and trade vessels in parallel.
+  let boulderCardAtlas=null;
   const [boulderRes, inlandWaterRes, herdsRes, tradeVesselsRes] = await Promise.all([
-    Promise.resolve(null),
+    Promise.all([requestBoulderContinuumAtlas(device),requestContinuumPrograms({device,shader,shadowFormat:activeLandShadows.format}),boulderViewPromise])
+      .then(([atlas,programs,view])=>{
+        const made=createBoulderContinuum({
+          device,atlas,programs,view,frame:frameUBO,shadowUniform:activeLandShadows.uniform,resources:nearResources,capacity:groundBlocks*groundBlock,samples,
+          getPort:()=>ensureBoulderFracturePort(),
+          groundAt:(x,z)=>baseGroundSample(x,z),
+          waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,
+        });
+        made.setWorldOffset(worldOffset.x,worldOffset.z);
+        // Bake relightable 1-triangle octahedral G-buffer cards asynchronously for all 6 boulder archetypes.
+        Promise.all([cloudsResolvedPromise,requestContinuumCardRenderer({device,shader,format,samples,pages:atlas.pages.length})]).then(async([resolvedClouds,cardRenderer])=>{
+          if(terrainDisposed||!resolvedClouds)return;
+          const typeIds=Array.from({length:atlas.types.length},(_,i)=>i);
+          const baked=await bakeContinuumCardAtlas({
+            device,shader,renderer:cardRenderer,atlas,material:view.material,
+            typeIds,bakeGroup0Entries:[{binding:0,resource:landSampler},{binding:1,resource:albedo.createView()}],
+            cellSize:64,gridSize:6,tintMode:0,salt:view.material.salt??5,
+            batchSize:6,isCancelled:()=>terrainDisposed,label:'boulder cards',
+          });
+          if(!baked)return;
+          if(terrainDisposed){baked.destroy();return;}
+          const cardBindings=createContinuumCardSceneBindings({device,renderer:cardRenderer,resources,clouds:resolvedClouds});
+          boulderCardAtlas=baked;
+          made.setCards(baked,cardRenderer,cardBindings);
+        }).catch(error=>console.error('Boulder octahedral card bake failed:',error));
+        return made;
+      }).catch(error=>{console.error('boulder continuum',error);return null;}),
     proceduralPack?createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):Promise.resolve(null),
     proceduralPack?createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):Promise.resolve(null),
     proceduralPack?createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,clouds,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):Promise.resolve(null),
@@ -2811,6 +2878,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       return out;
     },
     get boulderContinuum(){return boulderContinuum;},
+    get nearResources(){return nearResources;},
     sweepBoulderSegment(from,to,radius,options){return boulderContinuum?boulderContinuum.sweepBoulderSegment(from,to,radius,options):null;},
     strikeBoulder(event){
       const out=boulderContinuum?boulderContinuum.strikeBoulder(event):null;
@@ -2937,7 +3005,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       activeTownField?.texture.destroy();activeTownField?.window.destroy();
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
       biomeTexture?.destroy?.();
-      boulderContinuum?.destroy();
+      boulderContinuum?.destroy();boulderCardAtlas?.destroy();boulderCardAtlas=null;
       cityContinuumMade++;cityContinuum?.destroy();cityContinuum=null;cityCardAtlas?.destroy();cityCardAtlas=null;cityCardKey='';cityCardRenderer=null;cityCardBindings=null;
       inlandWater?.destroy?.();
       herds?.destroy?.();

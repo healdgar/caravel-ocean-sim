@@ -48,6 +48,7 @@ export const CONTINUUM_HEADER_WORDS = 32;
 export const CONTINUUM_HEADER = Object.freeze({
   magic: 0, version: 1, typeCount: 2, typesAt: 3, clustersAt: 4, clusterCount: 5, verticesAt: 6, vertexCount: 7, indicesAt: 8, indexCount: 9,
   chainsAt: 10, words: 11, hops: 12, chunkTriangles: 13, clusterTriangles: 14, streams: 15, skin: 16, uv: 17, rider: 18, wind: 19, surface: 20,
+  cones: 21,
 });
 export const CONTINUUM_TYPE_WORDS = 32;
 export const CONTINUUM_TYPE = Object.freeze({
@@ -393,6 +394,110 @@ export function continuumAtlasTypes(words) {
     const heaviest = pieces ? 0 : words[words[at + T.steps] + words[at + T.farFirst] * CONTINUUM_STEP_WORDS];
     return { clusters: words[at + T.clusterCount], farChunks: Math.ceil(heaviest / CONTINUUM_CHUNK_TRIANGLES) };
   });
+}
+// Total words an atlas occupies on the GPU once its per-cluster normal cone table is appended (1 u32/cluster when
+// absent on disk), so continuumAtlasPages and uploadContinuumAtlas agree without changing on-disk packs.
+export function continuumAtlasTotalWords(words) {
+  const H = CONTINUUM_HEADER;
+  return words.length + (words[H.cones] ? 0 : words[H.clusterCount]);
+}
+// Builds one pack4x8snorm-compatible u32 normal cone [nx, ny, nz, sinHalfAngle] per cluster directly from the atlas's
+// quantized vertices and triangle indices. Full-sphere clusters encode (0, 1, 0, 1.0) -> 0x7f007f00 to disable culling.
+// Watertight DAG propagation ensures a flat child (sinHalf < 0.45) never relaxes parentPx more than its parent relaxes ownPx.
+export function buildContinuumClusterCones(words) {
+  const H = CONTINUUM_HEADER, T = CONTINUUM_TYPE;
+  const clusterCount = words[H.clusterCount];
+  const cones = new Uint32Array(clusterCount);
+  if (!clusterCount) return cones;
+  const clustersAt = words[H.clustersAt], verticesAt = words[H.verticesAt], indicesAt = words[H.indicesAt];
+  const typesAt = words[H.typesAt], typeCount = words[H.typeCount];
+  const f32 = new Float32Array(words.buffer, words.byteOffset, words.length);
+  const tnx = new Float32Array(CONTINUUM_CLUSTER_TRIANGLES);
+  const tny = new Float32Array(CONTINUUM_CLUSTER_TRIANGLES);
+  const tnz = new Float32Array(CONTINUUM_CLUSTER_TRIANGLES);
+  const axArr = new Float32Array(clusterCount);
+  const ayArr = new Float32Array(clusterCount);
+  const azArr = new Float32Array(clusterCount);
+  const shArr = new Float32Array(clusterCount);
+  for (let c = 0; c < clusterCount; c++) {
+    const cb = clustersAt + c * CONTINUUM_CLUSTER_WORDS;
+    const first = indicesAt + words[cb + 14];
+    const tris = words[cb + 15] & 255;
+    let sx = 0, sy = 0, sz = 0, valid = 0;
+    for (let t = 0; t < tris; t++) {
+      const i0 = first + t * 3;
+      const v0 = verticesAt + words[i0] * CONTINUUM_VERTEX_WORDS;
+      const v1 = verticesAt + words[i0 + 1] * CONTINUUM_VERTEX_WORDS;
+      const v2 = verticesAt + words[i0 + 2] * CONTINUUM_VERTEX_WORDS;
+      const w0 = words[v0], x0 = w0 & 65535, y0 = w0 >>> 16, z0 = words[v0 + 1] & 65535;
+      const w1 = words[v1], x1 = w1 & 65535, y1 = w1 >>> 16, z1 = words[v1 + 1] & 65535;
+      const w2 = words[v2], x2 = w2 & 65535, y2 = w2 >>> 16, z2 = words[v2 + 1] & 65535;
+      const e1x = x1 - x0, e1y = y1 - y0, e1z = z1 - z0;
+      const e2x = x2 - x0, e2y = y2 - y0, e2z = z2 - z0;
+      const cx = e1y * e2z - e1z * e2y;
+      const cy = e1z * e2x - e1x * e2z;
+      const cz = e1x * e2y - e1y * e2x;
+      const len = Math.sqrt(cx * cx + cy * cy + cz * cz);
+      if (len > 1e-6) {
+        sx += cx; sy += cy; sz += cz;
+        const inv = 1 / len;
+        tnx[valid] = cx * inv; tny[valid] = cy * inv; tnz[valid] = cz * inv;
+        valid++;
+      }
+    }
+    const sumLen = Math.sqrt(sx * sx + sy * sy + sz * sz);
+    if (valid === 0 || sumLen < 1e-6) {
+      axArr[c] = 0; ayArr[c] = 1; azArr[c] = 0; shArr[c] = 1.0;
+    } else {
+      const invSum = 1 / sumLen;
+      const ax = sx * invSum, ay = sy * invSum, az = sz * invSum;
+      let minDot = 1.0;
+      for (let m = 0; m < valid; m++) {
+        const d = tnx[m] * ax + tny[m] * ay + tnz[m] * az;
+        if (d < minDot) minDot = d;
+      }
+      axArr[c] = ax; ayArr[c] = ay; azArr[c] = az;
+      shArr[c] = minDot <= 0 ? 1.0 : Math.min(1.0, Math.sqrt(Math.max(0, 1 - minDot * minDot)));
+    }
+  }
+  // Keep DAG cuts watertight for perspective weighting: clusters are stored coarsest parent first, so propagating
+  // parent sinHalf downward within the flat band (< 0.45) guarantees child.pPx >= parent.oPx with zero holes while
+  // preserving backface culling (sinHalf <= 0.45 < 0.96).
+  for (let ty = 0; ty < typeCount; ty++) {
+    const tb = typesAt + ty * CONTINUUM_TYPE_WORDS;
+    const first = words[tb + T.clusterFirst], cnt = words[tb + T.clusterCount];
+    let anyFlat = false;
+    for (let i = 0; i < cnt; i++) { if (shArr[first + i] < 0.45) { anyFlat = true; break; } }
+    if (!anyFlat) continue;
+    const byLod = new Map();
+    for (let i = 0; i < cnt; i++) {
+      const c = first + i, cb = clustersAt + c * CONTINUUM_CLUSTER_WORDS;
+      const key = `${words[cb]},${words[cb + 1]},${words[cb + 2]},${words[cb + 3]},${words[cb + 12]}`;
+      const prev = byLod.get(key);
+      if (prev === undefined || shArr[c] > prev) byLod.set(key, shArr[c]);
+    }
+    for (let i = 0; i < cnt; i++) {
+      const c = first + i, cb = clustersAt + c * CONTINUUM_CLUSTER_WORDS;
+      if (shArr[c] >= 0.45 || f32[cb + 13] > 1e20) continue;
+      const pkey = `${words[cb + 4]},${words[cb + 5]},${words[cb + 6]},${words[cb + 7]},${words[cb + 13]}`;
+      const psh = byLod.get(pkey);
+      if (psh !== undefined && psh > shArr[c]) {
+        shArr[c] = Math.min(psh, 0.45);
+        const ownKey = `${words[cb]},${words[cb + 1]},${words[cb + 2]},${words[cb + 3]},${words[cb + 12]}`;
+        if (shArr[c] > (byLod.get(ownKey) ?? 0)) byLod.set(ownKey, shArr[c]);
+      }
+    }
+  }
+  for (let c = 0; c < clusterCount; c++) {
+    const sh = shArr[c];
+    if (sh >= 0.99) { cones[c] = 0x7f007f00; continue; }
+    const bx = Math.max(-127, Math.min(127, Math.round(axArr[c] * 127))) & 0xff;
+    const by = Math.max(-127, Math.min(127, Math.round(ayArr[c] * 127))) & 0xff;
+    const bz = Math.max(-127, Math.min(127, Math.round(azArr[c] * 127))) & 0xff;
+    const bw = Math.min(127, Math.ceil(sh * 127)) & 0xff;
+    cones[c] = (bx | (by << 8) | (bz << 16) | (bw << 24)) >>> 0;
+  }
+  return cones;
 }
 // How full an entry of a list is taken to be at least, on the mean, when its lists are sized: a cut of real bodies
 // fills its clusters and chunks far better than this, so a scene within the budget never fills a list.

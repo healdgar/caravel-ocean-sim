@@ -1293,5 +1293,5 @@ fn herdContinuumShade(v: ContinuumVarying, front: bool) -> vec4f {
 export const HERD_CONTINUUM_MATERIAL_SPEC = Object.freeze({
   name: 'herdContinuum', prelude: herdContinuumPreludeWGSL, core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: [['coatInfo', 'vec4f'], ['localXZ', 'vec2f'], ['texColor', 'vec3f'], ['uv', 'vec2f'], ['flags', 'u32', true]],
-  wgsl: HERD_CONTINUUM_MATERIAL_WGSL, salt: 11, cullMode: 'back', air: false, capture: false,
+  wgsl: HERD_CONTINUUM_MATERIAL_WGSL, salt: 11, cullMode: 'back', air: false, capture: false, visibility: true,
 });

@@ -11,7 +11,10 @@ import { continuumPixelError, packContinuumProfile } from './continuum-core.js';
 import { continuumProfile } from './continuum-profiles.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { continuumHiZView, continuumHiZUniform, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from './continuum-hiz.js';
-import { CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, writeContinuumRecord, continuumAtlasTypes } from './continuum-format.js';
+import {
+  CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS,
+  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, buildContinuumClusterCones,
+} from './continuum-format.js';
 import {
   CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_BATCH, CONTINUUM_STATE_ENTRIES,
   CONTINUUM_GROUND_BINDING, CONTINUUM_SELECT_PAGES_AT, CONTINUUM_SHADOW_CLOTH_FORMAT, continuumDataBindings, continuumModuleWGSL, continuumBatchArgsWGSL,
@@ -35,11 +38,12 @@ export function continuumAtlasPaging(device, pages = 1) {
   }
   return made[pages - 1];
 }
-// How many pages an atlas of `words` words takes on `device`.
+// How many pages an atlas of `words` (Uint32Array or word count) takes on `device`.
 export function continuumAtlasPages(device, words) {
+  const total = typeof words === 'number' ? words : continuumAtlasTotalWords(words);
   const { pageWords } = continuumAtlasPaging(device);
-  const pages = Math.max(1, Math.ceil(words / pageWords));
-  if (pages > CONTINUUM_ATLAS_PAGES) throw Error(`A continuum atlas of ${words * 4} bytes is larger than the ${CONTINUUM_ATLAS_PAGES} pages of ${pageWords * 4} bytes this device binds`);
+  const pages = Math.max(1, Math.ceil(total / pageWords));
+  if (pages > CONTINUUM_ATLAS_PAGES) throw Error(`A continuum atlas of ${total * 4} bytes is larger than the ${CONTINUUM_ATLAS_PAGES} pages of ${pageWords * 4} bytes this device binds`);
   return pages;
 }
 
@@ -179,12 +183,30 @@ export function requestContinuumAtlas(device, label, load) {
 // An atlas on the GPU, in as many pages as the device needs to bind it (continuumAtlasPages), with what each of its
 // types can enter in the lists (continuumAtlasTypes): { pages, buffer (the first page, which holds its header and
 // types), types, destroy() }. Every scene of the one cut binds its atlas so, with programs of as many pages.
+// Appends per-cluster normal cones directly into the GPU upload pages without duplicating large CPU atlas buffers.
 export function uploadContinuumAtlas(device, words, label) {
-  const count = continuumAtlasPages(device, words.length), { pageWords } = continuumAtlasPaging(device, count);
+  const needCones = words[CONTINUUM_HEADER.cones] === 0 && words[CONTINUUM_HEADER.clusterCount] > 0;
+  const cones = needCones ? buildContinuumClusterCones(words) : null;
+  const conesAt = cones ? words.length : words[CONTINUUM_HEADER.cones];
+  const totalWords = cones ? words.length + cones.length : words.length;
+  const count = continuumAtlasPages(device, totalWords), { pageWords } = continuumAtlasPaging(device, count);
   const pages = Array.from({ length: count }, (_, p) => {
-    const part = words.subarray(p * pageWords, Math.min(words.length, (p + 1) * pageWords));
-    const buffer = device.createBuffer({ label: `${label} continuum atlas${count > 1 ? ` page ${p}` : ''}`, size: part.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buffer, 0, part);
+    const pageStart = p * pageWords;
+    const pageEnd = Math.min(totalWords, (p + 1) * pageWords);
+    const buffer = device.createBuffer({ label: `${label} continuum atlas${count > 1 ? ` page ${p}` : ''}`, size: (pageEnd - pageStart) * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const wEnd = Math.min(words.length, pageEnd);
+    if (pageStart < wEnd) {
+      device.queue.writeBuffer(buffer, 0, words.subarray(pageStart, wEnd));
+    }
+    if (p === 0 && cones) {
+      device.queue.writeBuffer(buffer, CONTINUUM_HEADER.cones * 4, new Uint32Array([conesAt]));
+    }
+    if (cones) {
+      const cStart = Math.max(pageStart, words.length);
+      if (cStart < pageEnd) {
+        device.queue.writeBuffer(buffer, (cStart - pageStart) * 4, cones.subarray(cStart - words.length, pageEnd - words.length));
+      }
+    }
     return buffer;
   });
   return { pages, buffer: pages[0], types: continuumAtlasTypes(words), destroy() { for (const page of pages) page.destroy(); } };
@@ -227,7 +249,8 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
   // The select's workgroups for what a family's own pass stood, made from its count on the GPU.
   const batches = written ? device.createBuffer({ label: `${label} continuum batches`, size: 16, usage: B.STORAGE | B.INDIRECT }) : null;
   const viewWords = new Uint32Array(CONTINUUM_VIEW_BYTES / 4), viewFloats = new Float32Array(viewWords.buffer);
-  viewWords.set([0, samples, 1, (view?.material?.salt ?? 0) >>> 0], 0);
+  const singleSided = view?.material?.cullMode === 'back' ? 0x80000000 : 0;
+  viewWords.set([0, samples, 1, (((view?.material?.salt ?? 0) & 0x7fffffff) | singleSided) >>> 0], 0);
   lists.forEach(([at, n], i) => viewWords.set([at, n, 0, 0], 8 + i * 4));
   const aimAt = 8 + CONTINUUM_LISTS.length * 4;
   const curveAt = aimAt + 4;

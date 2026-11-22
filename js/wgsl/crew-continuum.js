@@ -377,34 +377,119 @@ fn crewContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.02,1.48,y));
   (*v).wet=mix(lower,upper,smoothstep(.48,1.02,y));
 }
+fn crewFaceHash(v:u32)->f32 {
+  var h=v*0x9e3779b1u+0x85ebca6bu;
+  h=(h^(h>>15u))*0x2c1b3c6du;
+  return f32((h^(h>>13u))&65535u)*(1.0/65536.0);
+}
+fn crewBlinkPulse(t:f32)->f32 {
+  // Asymmetric ~160 ms human blink: 55 ms fast close, 25 ms closed hold, 80 ms smooth open.
+  if(t<0.0||t>0.160){return 0.0;}
+  if(t<0.055){let x=t/0.055;return x*x*(3.0-2.0*x);}
+  if(t<0.080){return 1.0;}
+  let x=1.0-(t-0.080)/0.080;
+  return x*x*(3.0-2.0*x);
+}
+fn crewEyeBlink(time:f32,seed:u32)->f32 {
+  let tSafe=max(time,0.0);
+  let h0=crewFaceHash(seed*73u+11u);
+  let h1=crewFaceHash(seed*157u+29u);
+  let period=3.2+2.6*h0;
+  let phase=tSafe+h1*period;
+  let cycle=u32(floor(phase/period));
+  let localT=phase-f32(cycle)*period;
+  let cHash=crewFaceHash(seed*211u+cycle*37u+5u);
+  let t1=localT-(0.15+0.45*cHash);
+  var b=crewBlinkPulse(t1);
+  // Occasional natural double-blink (~18% of cycles, 230 ms after first blink).
+  if(crewFaceHash(seed*313u+cycle*59u+19u)<0.18){
+    b=max(b,crewBlinkPulse(t1-0.230));
+  }
+  return b;
+}
+fn crewEyeGaze(time:f32,seed:u32)->vec2f {
+  let tSafe=max(time,0.0);
+  let period=2.6+2.2*crewFaceHash(seed*101u+7u);
+  let phase=tSafe+period*crewFaceHash(seed*179u+23u);
+  let cyc=u32(floor(phase/period));
+  let s=smoothstep(0.0,0.035,fract(phase/period));
+  let g0x=(crewFaceHash(seed*241u+cyc*43u+3u)-0.5)*2.0;
+  let g1x=(crewFaceHash(seed*241u+(cyc+1u)*43u+3u)-0.5)*2.0;
+  let g0y=(crewFaceHash(seed*277u+cyc*61u+9u)-0.5)*2.0;
+  let g1y=(crewFaceHash(seed*277u+(cyc+1u)*61u+9u)-0.5)*2.0;
+  // Composed conjugate micro-saccades weighted toward center gaze (clamped strictly inside eyeball UV patch).
+  let gx=mix(g0x*abs(g0x),g1x*abs(g1x),s)*0.0055;
+  let gy=mix(g0y*abs(g0y),g1y*abs(g1y),s)*0.0020;
+  return vec2f(gx,gy);
+}
 fn crewContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
+  let isEye=v.look.x==CONTINUUM_CLUSTER_ENTRY&&v.look.y==0u;
+  // Subtle conjugate eye micro-gaze offset (constant per actor across eyeball triangles, preserving mip derivatives).
+  let gazeUV=crewEyeGaze(F.camPos.w,v.coverage.z);
+  let eyeSampleUV=clamp(v.uv-gazeUV,vec2f(0.145,0.785),vec2f(0.355,0.995));
+  let sampleUV=select(v.uv,eyeSampleUV,isEye);
   // Read in uniform control flow; worn only by the full body.
-  let picture=textureSample(crewAlbedo,crewAlbedoSampler,v.uv).rgb;
+  let picture=textureSample(crewAlbedo,crewAlbedoSampler,sampleUV).rgb;
+  let actor=actors[v.look.z];
   var surface=v.tone;
-  if(v.look.x==CONTINUUM_CLUSTER_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actors[v.look.z],v.bodyPos,v.hurt.w);}
+  if(v.look.x==CONTINUUM_CLUSTER_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actor,v.bodyPos,v.hurt.w);}
   var c:CrewVertex;
   c.position=v.position;c.world=v.world;c.normal=v.normal;c.color=surface.rgb;c.wet=v.wet;c.skin=clamp(surface.w,0.0,1.0);
   c.bodyPos=v.bodyPos;c.damage=v.hurt.xyz;c.paint=v.look.w;c.actor=v.look.z;
-  let skinLit=crewShadeLit(c,front,surface.rgb);
-  // Real 3D spherical eyeballs (region == 0): crisp glossy wet cornea specular catchlight, zero cloth weave bump!
-  let isEye=v.look.x==CONTINUUM_CLUSTER_ENTRY&&v.look.y==0u;
+  let skinBase=crewShadeLit(c,front,surface.rgb);
   let eyeN=normalize(select(-v.normal,v.normal,front));
   let eyeView=normalize(F.camPos.xyz-v.world);
   let eyeSun=F.sunDir.xyz;
   let eyeShadow=vesselShadow(v.world,eyeN);
   let eyeDirect=sunIlluminance()*sunVis[0]*step(0.0,eyeSun.y)*solarShadowVisibility(eyeShadow);
+  // Subtle living subsurface skin warmth (BRDF-normalized by 1/PI so faces stay natural across all complexions).
+  let skinWeight=smoothstep(0.5,0.95,c.skin);
+  let ndlSkin=dot(eyeN,eyeSun);
+  let dTerm=(ndlSkin-0.08)/0.36;
+  let termBand=exp(-(dTerm*dTerm))*smoothstep(-0.28,0.18,ndlSkin);
+  let headMask=smoothstep(1.42,1.54,v.bodyPos.y);
+  let earNoseThin=headMask*(smoothstep(0.055,0.082,abs(v.bodyPos.x))+smoothstep(0.082,0.105,v.bodyPos.z));
+  let backDot=clamp(dot(-eyeSun,eyeView),0.0,1.0);
+  let rimV=max(1.0-clamp(dot(eyeN,eyeView),0.0,1.0),0.0);
+  let backRim=(backDot*backDot*backDot)*(rimV*rimV)*(0.25+0.75*clamp(earNoseThin,0.0,1.0));
+  let sssTint=vec3f(0.58,0.28,0.20)*max(surface.rgb,vec3f(0.012));
+  let skinLit=skinBase+(eyeDirect/3.14159265)*sssTint*(termBand*0.045+backRim*0.09)*skinWeight;
+  // Real 3D spherical eyeballs (region == 0): periodic blinking curtain, upper-lid socket shadow, wet meniscus & catchlight.
+  let eyeDu=(v.uv.x-0.25)/0.095;
+  let eyeDv=(0.89-v.uv.y)/0.095;
+  let blinkT=crewEyeBlink(F.camPos.w,v.coverage.z);
+  let lidArch=-0.08*eyeDu*eyeDu;
+  let lidEdge=mix(0.44,-0.36,blinkT)+lidArch;
+  let lidCov=smoothstep(lidEdge-0.035,lidEdge+0.030,eyeDv);
+  let staticUpperAO=smoothstep(0.10,0.34,eyeDv-lidArch*0.5);
+  let dLash=(eyeDv-(lidEdge-0.045))/0.055;
+  let blinkLashSh=exp(-(dLash*dLash))*smoothstep(0.02,0.25,blinkT);
+  let eyeLidAO=1.0-clamp(staticUpperAO*0.34+blinkLashSh*0.42,0.0,0.62);
+  let dCrease=(eyeDv-(lidEdge+0.015))/0.035;
+  let lidCrease=exp(-(dCrease*dCrease));
+  let lidSkin=max(actor.skin.rgb*(0.88-0.26*lidCrease),vec3f(0.008));
+  let eyeAlbedo=mix(surface.rgb*eyeLidAO,lidSkin,lidCov);
+  let eyeOpen=1.0-lidCov;
   let eyeSky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
   let eyeSea=textureSampleLevel(envCube,sampC,normalize(vec3f(eyeN.x,-0.65,eyeN.z)),${ENV_MIPS - 1}.0).rgb;
   let eyeAmb=vesselAmbient(eyeN,eyeSky,eyeSea);
   let eyeNdl=max(dot(eyeN,eyeSun),0.0);
-  let eyeRough=0.07;
-  let eyeF0=vec3f(0.028);
-  let eyeSpec=vesselSpecular(eyeN,eyeView,eyeSun,eyeRough,eyeF0)*eyeNdl;
-  let eyeRefl=textureSampleLevel(envCube,sampC,reflect(-eyeView,eyeN),0.8).rgb*vesselEnvironment(eyeN,eyeView,eyeRough,eyeF0)*0.42*F.windP[1].w;
-  let eyeLit=surface.rgb*(eyeDirect*(eyeNdl/3.14159265)+eyeAmb)+eyeDirect*eyeSpec+eyeRefl
-    +lunarSurface(eyeN,eyeView,surface.rgb,eyeRough,eyeF0,sunVis[1]*lunarShadowVisibility(eyeShadow))
-    +lightningSurface(eyeN,eyeView,surface.rgb,eyeRough)+gunFlashSurface(v.world,eyeN,eyeView,surface.rgb,eyeRough)
-    +worldFireSurface(v.world,eyeN,eyeView,surface.rgb,eyeRough);
+  let eyeHVec=eyeSun+eyeView;
+  let eyeH=select(eyeN,normalize(eyeHVec),dot(eyeHVec,eyeHVec)>1e-6);
+  let eyeNdh=max(dot(eyeN,eyeH),0.0);
+  let eyeRough=mix(0.055,0.84,lidCov);
+  let eyeF0=mix(vec3f(0.032),vec3f(0.020),lidCov);
+  let eyeSpec=vesselSpecular(eyeN,eyeView,eyeSun,eyeRough,eyeF0)*eyeNdl*mix(1.0,eyeLidAO,eyeOpen);
+  let catchlight=pow(max(eyeNdh,1e-4),180.0)*0.45*eyeNdl*eyeOpen*eyeLidAO;
+  let eyeRefl=textureSampleLevel(envCube,sampC,reflect(-eyeView,eyeN),0.45).rgb*vesselEnvironment(eyeN,eyeView,0.055,vec3f(0.032))*0.52*eyeOpen*eyeLidAO*F.windP[1].w;
+  // Subtle glistening wet tear-duct meniscus along the lower lid rim.
+  let dMen=(eyeDv+0.255)/0.055;
+  let meniscus=exp(-(dMen*dMen))*(1.0-smoothstep(0.45,0.72,abs(eyeDu)))*eyeOpen;
+  let tearSpec=(eyeDirect*pow(max(eyeNdh,1e-4),48.0)*0.16*eyeNdl+eyeSky*0.12)*meniscus;
+  let eyeLit=eyeAlbedo*(eyeDirect*(eyeNdl/3.14159265)+eyeAmb)+eyeDirect*(eyeSpec+vec3f(catchlight))+eyeRefl+tearSpec
+    +lunarSurface(eyeN,eyeView,eyeAlbedo,eyeRough,eyeF0,sunVis[1]*lunarShadowVisibility(eyeShadow))
+    +lightningSurface(eyeN,eyeView,eyeAlbedo,eyeRough)+gunFlashSurface(v.world,eyeN,eyeView,eyeAlbedo,eyeRough)
+    +worldFireSurface(v.world,eyeN,eyeView,eyeAlbedo,eyeRough);
   return vec4f(continuumAir(select(skinLit,eyeLit,isEye),v.world),1.0);
 }
 `;
@@ -420,7 +505,7 @@ export const CREW_CONTINUUM_MATERIAL = Object.freeze({
   varyings: Object.freeze([['uv', 'vec2f'], ['tone', 'vec4f'], ['bodyPos', 'vec3f'], ['wet', 'vec2f'], ['look', 'vec4u', true], ['hurt', 'vec4f', true]].map(Object.freeze)),
   wgsl: crewContinuumMaterialWGSL, salt: 17,
   // Sleeves, collars and hems are open shells, lit from whichever side is seen.
-  cullMode: 'none', air: true, capture: true,
+  cullMode: 'none', air: true, capture: true, visibility: true,
 });
 
 // --------------------------------------------------------------------------------------------- strand hair & beards
@@ -600,6 +685,25 @@ fn hairContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   let mBase=crewMoistureBase(actor.hair.w);
   (*v).wet=moisture[mBase+3u];
 }
+fn hairContinuumCoverage(v:ContinuumVarying,front:bool)->u32 {
+  if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){return 0xffffffffu;}
+  let along=clamp(v.strand.x,0.0,1.0);
+  // Keep scalp cap and entire crown/mid-length hair volume 100% solid (zero stipple dots through dark locks);
+  // soften only the very distal tapered strand tips (along > 0.85) into wispy ends via MSAA sample_mask.
+  if(along<0.85){return 0xffffffffu;}
+  let crossV=clamp(v.strand.y,-1.0,1.0);
+  let absCross=abs(crossV);
+  let seedPhase=v.strand.w;
+  let wobble=sin(along*14.0+seedPhase*6.2831853)*0.16;
+  let uFiber=crossV+wobble;
+  let strandWave=0.52+0.30*sin(uFiber*28.27+seedPhase*6.2831853)+0.18*sin(uFiber*56.55-seedPhase*11.3+along*5.0);
+  let tipJitter=0.85+0.11*strandWave;
+  let tipT=smoothstep(tipJitter,1.02,along);
+  let alpha=clamp(1.0-tipT*(0.62+0.38*smoothstep(0.30,0.90,absCross)),0.0,1.0);
+  if(alpha>=0.995){return 0xffffffffu;}
+  let hairSeed=v.coverage.z*0x9e3779b9u+u32(clamp(seedPhase,0.0,1.0)*255.0)*2654435761u+97u;
+  return continuumSamples(alpha,v.position.xy,v.coverage.w,hairSeed);
+}
 fn hairContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   var n=normalize(select(-v.normal,v.normal,front));
   var T=v.fiberT;
@@ -610,7 +714,7 @@ fn hairContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let lockTone=v.strand.z;
   let seedPhase=v.strand.w;
 
-  // Dense multi-frequency individual hair-fiber striations, fwidth band-limited to eliminate shimmer/banding with distance.
+  // Dense multi-frequency individual hair-fiber striations, fwidth band-limited in uniform control flow.
   let B=normalize(cross(n,T)+vec3f(1e-5,0.0,0.0));
   let wobble=sin(along*14.0+seedPhase*6.2831853)*0.22;
   let uFiber=crossV+wobble;
@@ -622,11 +726,11 @@ fn hairContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let micro2=sin(uFiber*62.83-seedPhase*12.566+along*4.0)*band2;
   let micro3=sin(uFiber*113.10+seedPhase*18.85-along*7.5)*band3;
   let edgeFluff=smoothstep(0.55,1.0,abs(crossV));
-  n=normalize(n+B*(crossV*0.32+micro*0.18+micro2*0.10+micro3*0.05));
+  n=normalize(n+B*(crossV*0.34+micro*0.20+micro2*0.11+micro3*0.055));
 
-  // Root-to-tip melanin variation, deep follicle root AO, sub-strand striations, and soft sun-kissed tips.
-  let rootAO=mix(0.36,1.0,smoothstep(0.0,0.28,along));
-  let fiberShade=0.84+0.12*micro+0.07*micro2+0.04*micro3-edgeFluff*0.10;
+  // Root-to-tip melanin variation, deep follicle/parting AO, sub-strand striations, and soft sun-kissed tips.
+  let rootAO=mix(0.32,1.0,smoothstep(0.0,0.30,along));
+  let fiberShade=0.84+0.12*micro+0.07*micro2+0.04*micro3-edgeFluff*0.08;
   let lockVar=mix(0.68,1.34,lockTone)*fiberShade;
   let tipWarm=mix(vec3f(1.0),vec3f(1.16,1.08,0.94),along*along*0.45);
   let wet=clamp(v.wet,vec2f(0.0),vec2f(1.0));
@@ -639,27 +743,48 @@ fn hairContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-0.65,n.z)),${ENV_MIPS - 1}.0).rgb;
   let ambient=vesselAmbient(n,sky,sea)*rootAO;
   let view=normalize(F.camPos.xyz-v.world);
-  let H=normalize(sun+view);
+  let hVec=sun+view;
+  let H=select(n,normalize(hVec),dot(hVec,hVec)>1e-6);
+  let ndl=dot(n,sun);
+  let ndv=max(dot(n,view),0.0);
+  let fresBase=max(1.0-ndv,0.0);
+  let fresRim=pow(max(fresBase,1e-4),3.5);
+  let fres2=fresBase*fresBase;
 
-  // Soft natural matte-satin Marschner / Kajiya-Kay hair fiber sheen (no glossy plastic crown band).
-  let T1=normalize(T-n*0.09);
-  let T2=normalize(T+n*0.15);
-  let sinTH1=sqrt(max(0.0,1.0-clamp(dot(T1,H),-1.0,1.0)*clamp(dot(T1,H),-1.0,1.0)));
-  let sinTH2=sqrt(max(0.0,1.0-clamp(dot(T2,H),-1.0,1.0)*clamp(dot(T2,H),-1.0,1.0)));
-  let atten=smoothstep(-0.25,0.45,dot(n,sun))*rootAO;
-  let specR=pow(sinTH1,mix(36.0,88.0,wet.y))*mix(0.007,0.030,wet.y)*atten;
-  let tintTRT=pow(max(albedo,vec3f(0.010)),vec3f(0.75))*1.15;
-  let specTRT=pow(sinTH2,18.0)*0.026*atten*(1.0-wet.x*0.35)*tintTRT;
+  // True Marschner Dual-Lobe Anisotropic Hair Optics:
+  //   R   (Primary cuticle reflection): root-shifted tangent, crisp white-tinted Fresnel sheen + per-strand shimmer breakup
+  //   TRT (Secondary internal reflection): tip-shifted tangent, broader exponent, richly tinted by melanin/albedo
+  //   TT  (Backlit rim transmission): physical forward-scattering glow through hair edges & tips
+  let shiftR=-0.08+0.045*(seedPhase-0.5)+0.025*micro;
+  let shiftTRT=0.13+0.04*(lockTone-0.5);
+  let T1=normalize(T+n*shiftR);
+  let T2=normalize(T+n*shiftTRT);
+  let tdH1=clamp(dot(T1,H),-1.0,1.0);
+  let tdH2=clamp(dot(T2,H),-1.0,1.0);
+  let sinTH1=sqrt(max(0.0,1.0-tdH1*tdH1));
+  let sinTH2=sqrt(max(0.0,1.0-tdH2*tdH2));
+  let atten=smoothstep(-0.22,0.42,ndl)*rootAO;
+  let rootSpecMask=smoothstep(0.08,0.28,along);
+  let shimmerR=0.58+0.42*smoothstep(-0.3,0.7,micro);
+  let fresR=mix(0.016,0.052,wet.y)*(0.80+0.35*fresRim);
+  let specR=mix(vec3f(1.0,0.97,0.92),max(albedo*2.2,vec3f(0.18)),0.28)*(pow(max(sinTH1,1e-4),mix(48.0,96.0,wet.y))*fresR*shimmerR*rootSpecMask*atten);
+  let tintTRT=pow(max(albedo,vec3f(0.015)),vec3f(0.75))*1.30;
+  let specTRT=pow(max(sinTH2,1e-4),20.0)*0.048*atten*rootSpecMask*(1.0-wet.x*0.30)*tintTRT;
 
-  // Soft wrapped fiber diffuse + subtle backlit scatter through strand tips.
-  let wrapDiff=max(0.0,(dot(n,sun)+0.32)/1.32)/3.14159265*rootAO;
-  let backScatter=pow(clamp(dot(-sun,view),0.0,1.0),4.0)*(0.12+0.26*along)*atten*albedo*1.1;
-  let skyGlint=textureSampleLevel(envCube,sampC,reflect(-view,n),6.2).rgb*0.005*rootAO;
-  let rough=mix(0.84,0.48,wet.y);
-  let f0=vec3f(0.022);
+  // Multi-scattering diffuse + backlit rim transmission (TT) + subtle anisotropic environment reflection.
+  let wrapDiff=max(0.0,(ndl+0.35)/1.35)/3.14159265*rootAO;
+  let ttFwd=pow(max(clamp(dot(-sun,view),0.0,1.0),1e-4),3.2)*(0.14+0.34*along)*(0.45+0.55*edgeFluff);
+  let transTT=ttFwd*rootAO*pow(max(albedo,vec3f(0.012)),vec3f(0.78))*vec3f(1.22,1.02,0.84)*0.24;
+  let vPerp=view-T*dot(view,T);
+  let nAniso=normalize(mix(n,select(n,normalize(vPerp),dot(vPerp,vPerp)>1e-4),0.45));
+  let envMip=mix(5.0,2.8,wet.y);
+  let envFres=mix(0.008,0.028,wet.y)+0.016*(fres2*fres2);
+  let envSheen=textureSampleLevel(envCube,sampC,reflect(-view,nAniso),envMip).rgb*envFres*rootAO*rootSpecMask*mix(vec3f(1.0),tintTRT*0.75,0.45);
+  let rough=mix(0.82,0.46,wet.y);
+  let f0=vec3f(0.025);
   let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))
     +lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)
-    +albedo*(direct*wrapDiff+ambient)+direct*(vec3f(specR)+specTRT+backScatter)+skyGlint*F.windP[1].w;
+    +albedo*(direct*wrapDiff+ambient)+(direct/3.14159265)*(specR*2.4+specTRT*2.2+transTT)+envSheen*F.windP[1].w;
   return vec4f(continuumAir(col,v.world),1.0);
 }
 `;
@@ -671,7 +796,7 @@ export const HAIR_CONTINUUM_MATERIAL = Object.freeze({
   core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: Object.freeze([['fiberT', 'vec3f'], ['strand', 'vec4f'], ['tone', 'vec3f'], ['wet', 'vec2f']].map(Object.freeze)),
   wgsl: hairContinuumMaterialWGSL, salt: 19,
-  cullMode: 'none', air: true, capture: true,
+  cullMode: 'none', air: true, capture: true, coverage: true,
 });
 
 // --------------------------------------------------------------------------------------------- kinematic 1550 clothing
@@ -915,5 +1040,5 @@ export const CLOTHING_CONTINUUM_MATERIAL = Object.freeze({
   core: false, data: Object.freeze({ group: 2, binding: 0 }),
   varyings: Object.freeze([['tone', 'vec4f'], ['cloth', 'vec4f'], ['wet', 'vec2f'], ['bodyPos', 'vec3f']].map(Object.freeze)),
   wgsl: clothingContinuumMaterialWGSL, salt: 23,
-  cullMode: 'none', air: true, capture: true,
+  cullMode: 'none', air: true, capture: true, visibility: true,
 });

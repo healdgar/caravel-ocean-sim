@@ -17,6 +17,8 @@ import { PROP_CONTINUUM_MATERIAL_SPEC } from './wgsl/prop-continuum.js';
 import { CONTINUUM_BROKEN, CONTINUUM_GONE, CONTINUUM_KIND, continuumRoom } from './continuum-format.js';
 import { CONTINUUM_GROUNDED } from './continuum-ground.js';
 import { requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, createContinuumScene } from './continuum-scene.js';
+import { requestContinuumCardRenderer, createContinuumCardSceneBindings, bakeContinuumCardAtlas } from './continuum-cards.js';
+import { CONTINUUM_CARD_TINT_NONE } from './wgsl/continuum-cards.js';
 
 const PROP_REACH_M = 3000;
 const PROP_CHECK_FRAMES = 30;
@@ -43,7 +45,7 @@ async function uploadPigments(device, models) {
   return texture;
 }
 
-export function createProps({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, waterOptics = null }) {
+export function createProps({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, waterOptics = null, resources = null, clouds = null }) {
   const B = GPUBufferUsage;
   const neuralPbr = sharedNeuralPbrBank(device);
   const buffer = (label, data, usage) => { const b = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: usage | B.COPY_DST }); device.queue.writeBuffer(b, 0, data); return b; };
@@ -56,6 +58,28 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
   let pigment = device.createTexture({ label: 'prop pigments (none yet)', size: [1, 1, 1], format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING });
   let ready = null, sceneGroup = null, kit = null, kitLoading = null, unavailable = false, activePort = null, scene = null, shot = null, frameCount = 0, destroyed = false;
   let shotPlaced = null, submerged = null, under = null;
+  let cardResources = resources, cardClouds = clouds, propCards = null, cardsBaking = false;
+
+  function maybeBakeCards() {
+    if (destroyed || propCards || cardsBaking || !ready || !kit || !cardResources || !cardClouds) return;
+    cardsBaking = true;
+    requestContinuumCardRenderer({ device, shader, format, samples, pages: ready.atlas.pages.length }).then(async (cardRenderer) => {
+      if (destroyed) return;
+      const cardBindings = createContinuumCardSceneBindings({ device, renderer: cardRenderer, resources: cardResources, clouds: cardClouds });
+      const cardAtlas = await bakeContinuumCardAtlas({
+        device, shader, renderer: cardRenderer, atlas: ready.atlas, words: ready.atlas.words,
+        material: PROP_CONTINUUM_MATERIAL_SPEC,
+        typeIds: PROP_MODELS.map((_, i) => i),
+        bakeGroup0Entries: [{ binding: 0, resource: pigment.createView({ dimension: '2d-array' }) }, { binding: 1, resource: sampler }],
+        cellSize: 64, batchSize: 2, tintMode: CONTINUUM_CARD_TINT_NONE, salt: PROP_CONTINUUM_MATERIAL_SPEC.salt,
+        isCancelled: () => destroyed, label: 'prop cards',
+      });
+      if (!cardAtlas) { cardsBaking = false; return; }
+      if (destroyed) { cardAtlas.destroy(); return; }
+      propCards = { atlas: cardAtlas, renderer: cardRenderer, bindings: cardBindings };
+      scene?.continuum.setCards(cardAtlas, cardRenderer, cardBindings);
+    }).catch((err) => { cardsBaking = false; console.warn('Prop octahedral card bake failed:', err); });
+  }
 
   function makeSceneGroup() {
     if (!ready) return;
@@ -85,6 +109,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     makeSceneGroup();
     shot = propScene(PROP_CONTINUUM_TYPES.map((_, t) => (t === PROP_CONTINUUM_SHOT ? GUNNERY_FX_LIMITS.projectiles : 0)), 'shot', null, null);
     if (shotPlaced) placeShot(...shotPlaced);
+    maybeBakeCards();
   }).catch((error) => { unavailable = true; console.warn(error.message); });
 
   // Nothing of a port's costs anything until a port is near, and a failed download only leaves the port as it was.
@@ -101,6 +126,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
       pigment = pigments;
       kit = { models };
       makeSceneGroup();
+      maybeBakeCards();
     })().catch((error) => { unavailable = true; console.warn(error.message); });
     return kitLoading;
   }
@@ -166,6 +192,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     device.queue.writeBuffer(records, 0, recordData);
     continuum.send(0, placed.length);
     continuum.setCount(placed.length);
+    if (propCards) continuum.setCards(propCards.atlas, propCards.renderer, propCards.bindings);
   }
 
   function sendProp(item) { placeProp(item); scene.continuum.send(item.at, 1); }
@@ -260,6 +287,18 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     continuumSources() {
       return [['props', scene?.continuum], ['shot', shot]].map(([name, family]) => ({ name, draws: family?.continuumDraws() ?? [] })).filter((source) => source.draws.length);
     },
-    destroy() { destroyed = true; dispose(); shot?.destroy(); shot = null; hull.destroy(); pigment.destroy(); },
+    // Optional late attachment of terrain finish resources + clouds so port props bake octahedral G-buffer cards.
+    attachCardLighting(nextResources, nextClouds) {
+      if (destroyed || !nextResources || !nextClouds) return;
+      cardResources = nextResources;
+      cardClouds = nextClouds;
+      if (propCards) {
+        propCards.bindings = createContinuumCardSceneBindings({ device, renderer: propCards.renderer, resources: cardResources, clouds: cardClouds });
+        scene?.continuum.setCards(propCards.atlas, propCards.renderer, propCards.bindings);
+      } else {
+        maybeBakeCards();
+      }
+    },
+    destroy() { destroyed = true; dispose(); propCards?.atlas.destroy(); propCards = null; shot?.destroy(); shot = null; hull.destroy(); pigment.destroy(); },
   };
 }

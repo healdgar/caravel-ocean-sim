@@ -681,7 +681,7 @@ export async function createMeadowGrass({
   // The atlas, the one cut's programs, the meadow's view and its stand pass, asked for at once, the programs binding as
   // many pages as the atlas takes. Meadow grass only grows above MEADOW_WATERLINE (0.75 m), so it never draws into the
   // underwater submerged-geometry capture pass.
-  const pages = continuumAtlasPages(device, pack.words.length);
+  const pages = continuumAtlasPages(device, pack.words);
   const [atlas, programs, view, stand] = await Promise.all([
     requestContinuumAtlas(device, `meadow ${pack.manifest.pack}`, async () => pack),
     requestContinuumPrograms({ device, shader, shadowFormat, pages }),

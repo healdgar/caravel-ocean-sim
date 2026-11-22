@@ -431,6 +431,13 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   if (max(cover.r, corners) < 0.02) { return; }
   let ground = meadowGroundY(middle, cfg.domain, elevation);
   if (ground < cfg.domain.w) { return; }
+  let shift = meadowShift();
+  // Conservative early frustum + light-box rejection before ballistics, 5x drawn-ground, 4x cover/billow & wind math.
+  let approxCentre = vec3f(middle.x, ground + 0.45, middle.y);
+  let approxRel = approxCentre + shift - F.camPos.xyz;
+  let approxReach = half * 1.65 + 4.5 + continuumGroundBound(cfg.scene.x, meadowFocal(), max(length(approxRel), 1.0));
+  let approxSeen = blockSeen && !meadowOutside(earthCurve(approxRel, F.camPos.y), approxReach);
+  if (!approxSeen && !meadowInLight(approxCentre, approxReach)) { return; }
   // Its variant: the mix (lowland, upland, margin) with the most of its middle, one of four, and turned a quarter
   // turn one way or another about its middle, each by a hash of where it lies, so no variant's grain runs the same
   // way down a row of patches. Every variant's square is alike at its edge, so turned it still meets its neighbours.
@@ -451,14 +458,18 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
     select(vec4f(0.0, 1.0, 0.0, 0.0), vec4f(0.0, 0.70710678, 0.0, -0.70710678), quarter == 3u),
     quarter >= 2u
   );
-  let shift = meadowShift();
   // It stands on the true ground under its middle, and the one cut raises it at its anchor (GROUNDED) to the ground
   // the land draws there: the view's cut in the view and its shadow, the captures' under water. Its anchor is where its
   // type's corner falls, turned about the middle.
   let anchor = middle - meadowTurned(vec2f(half), turnCS);
   let place = vec3f(anchor.x, ground, anchor.y);
   let lifted = continuumGroundLift(anchor + shift.xz);
-  let ballistics = meadowEvalBallistics(middle, ground, seed);
+  let stood = place.y + lifted;
+  let distHint = length(vec3f(middle.x, stood, middle.y) + shift - F.camPos.xyz);
+  var ballistics = MeadowBallisticDeform(vec2f(0.0), 0.0, 0.0, 0.0);
+  if (distHint <= 90.0) {
+    ballistics = meadowEvalBallistics(middle, ground, seed);
+  }
   // Draped over the ground the view draws under the corners of its type's square (the WIND kind's DRAPED form), from
   // where its anchor is raised to, and sunk by as much as that drape would float over the ground drawn at its middle.
   // A capture raises it by its own cut at the anchor, and the drape carries it over the view's ground between. A
@@ -470,7 +481,6 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   let c1 = anchor + meadowTurned(low + vec2f(span, 0.0), turnCS);
   let c2 = anchor + meadowTurned(low + vec2f(0.0, span), turnCS);
   let c3 = anchor + meadowTurned(low + vec2f(span), turnCS);
-  let stood = place.y + lifted;
   // Drape each corner squarely onto the drawn ground; on convex ridges add the small positive clearance needed so
   // the patch's middle clears the crest rather than pushing the four corners under the terrain (which Z-fights).
   let d0 = meadowDrawnGround(c0, shift) - stood;
@@ -479,7 +489,6 @@ fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
   let d3 = meadowDrawnGround(c3, shift) - stood;
   let midGround = meadowDrawnGround(middle, shift) - stood;
   let midGap = max(midGround - 0.25 * (d0 + d1 + d2 + d3), 0.0);
-  let distHint = length(vec3f(middle.x, stood, middle.y) + shift - F.camPos.xyz);
   let antiZFight = min(0.12, distHint * 0.00035) * smoothstep(35.0, 140.0, distHint);
   var drape = vec4f(d0, d1, d2, d3) + vec4f(midGap + antiZFight);
   // As tall as the meadow's lushness and billow grow it where each corner stands, pressed down by shot and blast and
@@ -777,7 +786,11 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   let slope = continuumQuat(s.record.turn, normalize(vec3f(-0.5 * (h.y - h.x + h.w - h.z) / span, 1.0, -0.5 * (h.z - h.x + h.w - h.y) / span)));
   let cover = meadowCoverAt(at);
   let groundY = meadowGroundY(at, cfg.domain, elevation);
-  let ballistics = meadowEvalBallistics(at, groundY, seed);
+  let dist = distance(s.world, eye);
+  var ballistics = MeadowBallisticDeform(vec2f(0.0), 0.0, 0.0, 0.0);
+  if (dist <= 90.0) {
+    ballistics = meadowEvalBallistics(at, groundY, seed);
+  }
   let wind = meadowWindField(at, F.camPos.w, F.windP[0]);
   let windDir = meadowWindDirection();
   let acrossDir = vec2f(-windDir.y, windDir.x);
@@ -850,7 +863,7 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   (*v).blade = vec4f(along, wind.x, wind.y, hides);
   // What the cover map keeps of it here, none on water, none where a crater has buried it.
   let keep = smoothstep(0.06, 0.55, cover.r) * step(cfg.domain.w, groundY) * (1.0 - ballistics.buryDepth);
-  (*v).flow = vec4f(s.world.xz, distance(s.world, eye), keep);
+  (*v).flow = vec4f(s.world.xz, dist, keep);
   (*v).harm = vec4f(ballistics.hotSinge, bendSlope, clump, 0.0);
 }
 
@@ -881,6 +894,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let bendSlope = clamp(v.harm.y, 0.0, 1.0);
   let isContinuum = v.coverage.x != CONTINUUM_CLUSTER_ENTRY;
 
+  let dist = v.flow.z;
   let unshiftedWorldXZ = v.world.xz;
   let fCov = meadowCoverAt(unshiftedWorldXZ);
   let marginFade = smoothstep(0.06, 0.55, fCov.r);
@@ -889,7 +903,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   // while still band-limiting cleanly before Nyquist with zero shimmer.
   let dxW = dpdx(unshiftedWorldXZ);
   let dyW = dpdy(unshiftedWorldXZ);
-  let isoFoot = v.flow.z * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0);
+  let isoFoot = dist * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0);
   let minorFoot = min(length(dxW), length(dyW));
   let majorFoot = min(max(length(dxW), length(dyW)), isoFoot * 1.65);
   let footPixel = mix(max(isoFoot, minorFoot), majorFoot, 0.22);
@@ -976,20 +990,22 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   var baseCol = mix(shadowedUnderGround, shadedBladeCol, select(1.0, swardWeight, isContinuum));
 
   // Per-pixel crater soot/ash scorching around inner rim + thrown-soil dusting across outer apron
-  let cCellF = landCraterLookupCell(unshiftedWorldXZ, cfg.crater.xy);
-  let cLayerF = landCraterLayerAt(cCellF, cfg.crater.w, landCraterLookup);
-  if (cLayerF >= 0) {
-    let cUVf = clamp(landCraterFieldUV(unshiftedWorldXZ, cfg.crater.xy, cCellF), vec2f(0.015), vec2f(0.985));
-    let cFieldF = textureSampleLevel(landCraterField, landSampler, cUVf, cLayerF, 0.0);
-    if (cFieldF.a > 0.005) {
-      let inBowl = max(smoothstep(-0.005, -0.030, cFieldF.r), smoothstep(0.62, 0.82, cFieldF.g));
-      let innerRimChar = smoothstep(0.18, 0.68, cFieldF.g) * (1.0 - inBowl * 0.65);
-      let apronDust = clamp(cFieldF.a * 0.85 + cFieldF.g * 0.45, 0.0, 1.0) * (1.0 - innerRimChar * 0.5);
-      let thrownEarth = mix(groundCol * vec3f(0.86, 0.78, 0.68), vec3f(0.20, 0.17, 0.12), cFieldF.b * 0.65);
-      let sootAsh = mix(vec3f(0.015, 0.013, 0.011), vec3f(0.048, 0.044, 0.040), clamp(effAlong * 0.7, 0.0, 1.0));
-      baseCol = mix(baseCol, thrownEarth, apronDust * (0.45 + 0.45 * (1.0 - effAlong)));
-      baseCol = mix(baseCol, sootAsh, innerRimChar * 0.82);
-      baseCol = mix(baseCol, groundCol * 0.48, inBowl);
+  if (cfg.crater.w > 0.5 && dist < 180.0) {
+    let cCellF = landCraterLookupCell(unshiftedWorldXZ, cfg.crater.xy);
+    let cLayerF = landCraterLayerAt(cCellF, cfg.crater.w, landCraterLookup);
+    if (cLayerF >= 0) {
+      let cUVf = clamp(landCraterFieldUV(unshiftedWorldXZ, cfg.crater.xy, cCellF), vec2f(0.015), vec2f(0.985));
+      let cFieldF = textureSampleLevel(landCraterField, landSampler, cUVf, cLayerF, 0.0);
+      if (cFieldF.a > 0.005) {
+        let inBowl = max(smoothstep(-0.005, -0.030, cFieldF.r), smoothstep(0.62, 0.82, cFieldF.g));
+        let innerRimChar = smoothstep(0.18, 0.68, cFieldF.g) * (1.0 - inBowl * 0.65);
+        let apronDust = clamp(cFieldF.a * 0.85 + cFieldF.g * 0.45, 0.0, 1.0) * (1.0 - innerRimChar * 0.5);
+        let thrownEarth = mix(groundCol * vec3f(0.86, 0.78, 0.68), vec3f(0.20, 0.17, 0.12), cFieldF.b * 0.65);
+        let sootAsh = mix(vec3f(0.015, 0.013, 0.011), vec3f(0.048, 0.044, 0.040), clamp(effAlong * 0.7, 0.0, 1.0));
+        baseCol = mix(baseCol, thrownEarth, apronDust * (0.45 + 0.45 * (1.0 - effAlong)));
+        baseCol = mix(baseCol, sootAsh, innerRimChar * 0.82);
+        baseCol = mix(baseCol, groundCol * 0.48, inBowl);
+      }
     }
   }
 
@@ -1033,8 +1049,11 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let bakedLight = textureSampleLevel(landLight, sampC, clamp(landUV, vec2f(0.0), vec2f(1.0)), 0.0).rg;
   let terrainSun = mix(1.0, bakedLight.r, inDomain);
   let sunlight = terrainSun * solarShadowVisibility(vec3f(cloudShadowAt(world * 0.001, F.sunDir.xyz))).x;
-  // The shadow map is drawn in the scene's frame, as the one cut casts into it.
-  let shadowVis = meadowShadowVis(v.world, n);
+  // The shadow map is drawn in the scene's frame, as the one cut casts into it; skip beyond meadow shadowMaxDistance (32 m).
+  var shadowVis = vec3f(1.0);
+  if (dist < 34.0) {
+    shadowVis = mix(meadowShadowVis(v.world, n), vec3f(1.0), smoothstep(28.0, 34.0, dist));
+  }
   let direct = sunIlluminance() * sunlight * solarShadowVisibility(shadowVis);
 
   let nDotL = max(dot(n, F.sunDir.xyz), 0.0);

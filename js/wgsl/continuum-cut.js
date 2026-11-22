@@ -108,7 +108,7 @@ ${reads}
 // loads: the kinds read constants that load later.
 export const continuumCommonWGSL = (paging) => CONTINUUM_RECORD_WGSL + continuumWordWGSL(paging) + /* wgsl */`
 struct ContinuumView {
-  counts:vec4u,             // instances, samples a pixel, 1 when shadows are cast, material salt
+  counts:vec4u,             // instances, samples a pixel, 1 when shadows are cast, material salt | (singleSided << 31)
   scene:vec4f,              // the scene's pixel error, the world's offset x and z, unused
   lists:array<vec4u,${CONTINUUM_LISTS.length}>,     // each list's first entry and room
   aim:vec4f,                // where the player's guns would fall, in the scene's frame, and how far about it (0: none)
@@ -395,7 +395,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       if(lod.w<0.0){return 0u;}
       let own=continuumPlace(record,lod.xyz)+shift;
       let ownPx=continuumPixels(ownError,cut.x,max(length(own)-lod.w*cut.z,CONTINUUM_NEAREST));
-      if(ownPx<=cut.y*continuumLevel(CONTINUUM_LEVELS-1u)){
+      if(ownPx*0.42<=cut.y*continuumLevel(CONTINUUM_LEVELS-1u)){
         let cull=continuumSphere(record,part,${atlasVec4('at+8u')});
         let cullWorld=continuumPlace(record,cull.xyz)+vec3f(0.0,continuumSlotLift[slot],0.0);
         let cullAt=cullWorld+continuumShift()-F.camPos.xyz;
@@ -406,9 +406,34 @@ fn continuumTry(slot:u32,i:u32)->u32 {
         let skipClusterHiZ=continuumFlagged(record,CONTINUUM_EXACT)||(continuumFlagged(record,CONTINUUM_GROUNDED)&&cullR<2.5);
         if(!continuumOutsideFast(select(earthCurve(cullAt,F.camPos.y),cullAt,sea),cullR)
           &&(skipClusterHiZ||!continuumHiZOccluded(cullWorld,cullR,sea))){
-          for(var j=0u;j<CONTINUUM_LEVELS;j++){
-            let allowedJ=cut.y*continuumLevel(j);
-            if(parentPx>allowedJ&&ownPx<=allowedJ){mask|=1u<<j;}
+          var coneVisible=true;
+          var edgeRelax=1.0;
+          let conesAt=continuumAtlas[${CONTINUUM_HEADER.cones}u];
+          if(conesAt!=0u&&continuumKindOf(record)==${CONTINUUM_KIND.RIGID}u&&!continuumFlagged(record,CONTINUUM_EXACT)){
+            let cone=unpack4x8snorm(continuumWord(conesAt+tries.z+i));
+            let sinHalf=cone.w;
+            if(sinHalf>=0.0&&sinHalf<0.96){
+              let axisW=continuumTurnNormal(record,cone.xyz);
+              let viewDist=max(length(cullAt),1e-3);
+              let toEye=-cullAt/viewDist;
+              if((continuumView.counts.w&0x80000000u)!=0u){
+                let sphereMargin=min(cullR/viewDist,1.0);
+                if(dot(toEye,axisW)< -(sinHalf+sphereMargin+0.04)){coneVisible=false;}
+              }
+              if(coneVisible&&sinHalf<0.45){
+                let cosT=abs(dot(toEye,axisW));
+                let flatness=1.0-smoothstep(0.15,0.45,sinHalf);
+                edgeRelax=mix(1.0,clamp(0.42+0.85*cosT,0.42,1.0),flatness*smoothstep(0.08,0.24,cosT));
+              }
+            }
+          }
+          if(coneVisible){
+            let pPx=parentPx*edgeRelax;
+            let oPx=ownPx*edgeRelax;
+            for(var j=0u;j<CONTINUUM_LEVELS;j++){
+              let allowedJ=cut.y*continuumLevel(j);
+              if(pPx>allowedJ&&oPx<=allowedJ){mask|=1u<<j;}
+            }
           }
         }
       }
@@ -1001,7 +1026,7 @@ struct ContinuumVisibilityVarying {
 // rejects a bare scalar u32 return type (MTLDataTypeUInt=33) when targets[0] is rgba16float (115), even with writeMask: 0.
 struct ContinuumVisibilityOut { @location(0) colour:vec4f, @builtin(sample_mask) mask:u32 };
 @fragment fn continuumVisibilityFS(v:ContinuumVisibilityVarying)->ContinuumVisibilityOut {
-  return ContinuumVisibilityOut(vec4f(0.0), continuumMask(v.coverage,v.position.xy,continuumView.counts.w));
+  return ContinuumVisibilityOut(vec4f(0.0), continuumMask(v.coverage,v.position.xy,continuumView.counts.w&0x7fffffffu));
 }
 `;
 
