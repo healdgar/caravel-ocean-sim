@@ -63,7 +63,7 @@ order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js'
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 wgslModules.push('js/wgsl/human-morph.js','js/wgsl/part-assembly.js','js/wgsl/rig-surfaces.js','js/wgsl/vessel-recoil.js','js/wgsl/hull-flood.js','js/wgsl/townsfolk.js');
 // Shaders read these constants as they are built, so they come first, after the fort plan the streets import.
-order.unshift('js/version.js','js/fort-plan.js','js/fort-records.js','js/harbour-geography.js','js/harbour-defences.js','js/town-streets.js','js/indigenous-dress.js');
+order.unshift('js/version.js','js/asset-cache.js','js/fort-plan.js','js/fort-records.js','js/harbour-geography.js','js/harbour-defences.js','js/town-streets.js','js/indigenous-dress.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/town-clips.js','js/town-shots.js','js/townsfolk.js','js/board-armies.js','js/prop-continuum.js','js/wgsl/prop-continuum.js','js/gunnery-tools.js','js/props.js','js/free-cannon.js','js/castle-duel.js');
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/port-props.js','js/tripo-pier-assets.js');
 wgslModules.push('js/wgsl/ship-fracture.js');
@@ -538,7 +538,8 @@ write('ocean.min.html', minifyPage(minJs));
 // Pages serves cached assets; the two ocean downloads remain self-contained. The published page opens on deck, so
 // it writes boat=1 into a bare address; whether the address was bare is kept first, for the game to ask a returning
 // captain about a saved voyage (js/main.js) instead of taking the visit for a scene of its own.
-const pagesBootstrap = '<script>const siteURL=new URL(location.href);window.oceanOpenedBare=!siteURL.search;if(!siteURL.searchParams.has("boat")){siteURL.searchParams.set("boat","1");history.replaceState(null,"",siteURL);}</script>';
+const assetIndex = Object.fromEntries([...pagesAssets.values()].map((r) => [r.sha256.slice(0, 16), r.bytes]));
+const pagesBootstrap = `<script>window.__WATERWORLD_ASSET_INDEX__=${JSON.stringify(assetIndex)};const siteURL=new URL(location.href);window.oceanOpenedBare=!siteURL.search;if(!siteURL.searchParams.has("boat")){siteURL.searchParams.set("boat","1");history.replaceState(null,"",siteURL);}</script>`;
 fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
 for(const [file,record]of pagesAssets){
   const destination=path.join(root,'docs',record.url);

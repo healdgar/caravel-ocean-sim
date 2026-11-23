@@ -1,4 +1,6 @@
 import {getWaterworldBuild,formatBuildLabel} from './version.js';
+import {installPersistentAssetCache,formatAssetCacheStatus} from './asset-cache.js';
+installPersistentAssetCache();
 import {forestSurfaceFeatures} from './forest-surfaces.js';
 import {requestWebGPUAdapter,requestWebGPUDevice,describeMissingWebGPUAdapter} from './webgpu-adapter.js';
 import {withSceneHullProfile} from './wgsl/hull.js';
@@ -4683,7 +4685,17 @@ async function main() {
     const builtStr=buildInfo.builtAt?buildInfo.builtAt.replace('T',' ').slice(0,16)+' UTC':'unbundled dev';
     const perfDebugBox=document.createElement('div');
     perfDebugBox.style.cssText='margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.14);';
-    perfDebugBox.innerHTML=`<div id="debug-build-banner" style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px;padding:6px 8px;border-radius:7px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);font:11px/1.35 ui-monospace,monospace;"><div><div style="color:#f3eee3;font-weight:600;">${formatBuildLabel(buildInfo)}</div><div style="color:#a8b8c4;font-size:10px;">${builtStr}</div></div><span style="padding:2px 6px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.06em;${chanStyle}">${chanUpper}</span></div><strong style="display:block;font-size:12px;margin-bottom:6px;opacity:0.85;">Debug &amp; Side Modes</strong><div class="encounter-buttons" style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" id="perf-castle-duel-btn">🏰 Castle Duel</button><button type="button" id="perf-coastline-btn">Switch Coastline (1550 / 2026)</button></div>`;
+    perfDebugBox.innerHTML=`<div id="debug-build-banner" style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px;padding:6px 8px;border-radius:7px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);font:11px/1.35 ui-monospace,monospace;"><div><div style="color:#f3eee3;font-weight:600;">${formatBuildLabel(buildInfo)}</div><div style="color:#a8b8c4;font-size:10px;">${builtStr}</div></div><span style="padding:2px 6px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.06em;${chanStyle}">${chanUpper}</span></div><div id="debug-cache-banner" style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.09);font:10px/1.35 ui-monospace,monospace;color:#b8c7d4;"><span id="debug-cache-text">${formatAssetCacheStatus(window.__WATERWORLD_ASSET_CACHE__?.stats)}</span><button type="button" id="debug-cache-clear" style="padding:2px 6px;font:10px ui-monospace,monospace;border-radius:4px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#e5edf4;cursor:pointer;">Clear</button></div><strong style="display:block;font-size:12px;margin-bottom:6px;opacity:0.85;">Debug &amp; Side Modes</strong><div class="encounter-buttons" style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" id="perf-castle-duel-btn">🏰 Castle Duel</button><button type="button" id="perf-coastline-btn">Switch Coastline (1550 / 2026)</button></div>`;
+    const cacheTextEl=perfDebugBox.querySelector('#debug-cache-text');
+    const cacheClearBtn=perfDebugBox.querySelector('#debug-cache-clear');
+    const syncCacheBanner=()=>{if(cacheTextEl)cacheTextEl.textContent=formatAssetCacheStatus(window.__WATERWORLD_ASSET_CACHE__?.stats);};
+    if(cacheClearBtn){
+      cacheClearBtn.onclick=async()=>{
+        cacheClearBtn.disabled=true;cacheClearBtn.textContent='Clearing…';
+        try{await window.__WATERWORLD_ASSET_CACHE__?.clear?.();}finally{cacheClearBtn.disabled=false;cacheClearBtn.textContent='Cleared';syncCacheBanner();}
+      };
+    }
+    setInterval(()=>{if(!performancePanel.hidden)syncCacheBanner();},1000);
     const perfDuelBtn=perfDebugBox.querySelector('#perf-castle-duel-btn');
     const perfCoastBtn=perfDebugBox.querySelector('#perf-coastline-btn');
     perfDuelBtn.title=`La Punta against the Morro across the mouth of ${CASTLE_DUEL_PLACE.name} in ${CASTLE_DUEL_PLACE.year}, laid by eye. Raised at open sea; the ship and the voyage wait until it ends.`;
