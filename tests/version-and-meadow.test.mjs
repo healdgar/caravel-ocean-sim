@@ -73,3 +73,31 @@ test('tree vs grass wind physics: calm wood branches, twisting leaves, quivering
   assert.doesNotMatch(meadowSrc, /max\((?:F\.windP\[0\]\.z|windParam\.z|speed)\s*,\s*5\.2\)/, 'meadow-continuum must not clamp grass wind to 5.2 m/s');
   assert.doesNotMatch(groundSrc, /max\(windParam\.z\s*,\s*4\.8\)/, 'grassWindWave must not clamp grass wind to 4.8 m/s');
 });
+
+test('forest/meadow continuum performance: 256-root GPU block culling, Hi-Z & crown-span thinning, <=8 storage buffers, calibrated profiles', async () => {
+  const { forestContinuumBlocksWGSL, forestContinuumStandWGSL } = await import('../js/wgsl/forest-continuum.js');
+  const { CONTINUUM_FAMILY_DEFAULTS } = await import('../js/continuum-profiles.js');
+
+  const blocksWgsl = forestContinuumBlocksWGSL();
+  const standWgsl = forestContinuumStandWGSL();
+
+  assert.match(blocksWgsl, /fn forestBuildBlocks\(/, 'blocks module defines forestBuildBlocks');
+  assert.match(blocksWgsl, /fn forestStandBlocks\(/, 'blocks module defines forestStandBlocks');
+  assert.match(blocksWgsl, /fn forestStandBlockArgs\(/, 'blocks module defines forestStandBlockArgs');
+  assert.match(blocksWgsl, /continuumHiZOccluded\(/, 'block cull tests Hi-Z occlusion');
+  assert.doesNotMatch(blocksWgsl, /\bforestWind\b/, 'blocks module must not reference unbound forestWind (WebKit Metal safety)');
+
+  assert.match(standWgsl, /forestBlockList/, 'forestStandRoots reads visible blocks from forestBlockList');
+  assert.match(standWgsl, /continuumHiZOccluded\(/, 'forestStandRoots tests conservative Hi-Z before ground-lift/record writes');
+  assert.match(standWgsl, /inShadowRange/, 'forestStandRoots gates shadow-box checks by shadowMaxDistance');
+
+  const countStorage = (src) => (src.match(/var<storage\b/g) || []).length;
+  assert.ok(countStorage(blocksWgsl) <= 8, `forestBlocks storage buffers (${countStorage(blocksWgsl)}) must stay <= 8`);
+  assert.ok(countStorage(standWgsl) <= 8, `forestStand storage buffers (${countStorage(standWgsl)}) must stay <= 8`);
+
+  const f = CONTINUUM_FAMILY_DEFAULTS.forest;
+  const m = CONTINUUM_FAMILY_DEFAULTS.meadow;
+  assert.ok(f.errorScale >= 1.0 && f.taperMetres > 0 && f.taperMetres <= 120, 'forest profile avoids sub-2cm 1.9M-tri veteran cliff');
+  assert.ok(f.splatScale >= 12.0 && f.shadowMaxDistance > 0 && f.shadowMaxDistance <= 180, 'forest profile hands off cleanly to 128px octahedral cards and bounds shadow range');
+  assert.ok(m.errorScale >= 3.0 && m.taperMetres > 0 && m.taperMetres <= 45, 'meadow profile skips 228k/452k-tri sub-3cm grass cliff and tapers smoothly into 2D parallax sward');
+});

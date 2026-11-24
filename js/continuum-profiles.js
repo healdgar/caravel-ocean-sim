@@ -40,10 +40,10 @@ export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
     errorScale: 0.50, taperMetres: 420, taperPower: 1.0, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.05, shadowMaxDistance: 400,
   }),
   forest: normalizeContinuumProfile({
-    errorScale: 0.44, taperMetres: 260, taperPower: 1.05, splatScale: 6.5, minPixels: 1.4, maxDistance: 0, shadowMinError: 0.55, shadowMaxDistance: 260,
+    errorScale: 1.35, taperMetres: 65, taperPower: 1.25, splatScale: 14.0, minPixels: 1.4, maxDistance: 0, shadowMinError: 1.45, shadowMaxDistance: 160,
   }),
   meadow: normalizeContinuumProfile({
-    errorScale: 2.50, taperMetres: 0, taperPower: 1.0, splatScale: 1.35, minPixels: 0.90, maxDistance: 0, shadowMinError: 0.95, shadowMaxDistance: 32,
+    errorScale: 3.4, taperMetres: 28, taperPower: 1.25, splatScale: 1.35, minPixels: 0.90, maxDistance: 0, shadowMinError: 0.95, shadowMaxDistance: 32,
   }),
   land: normalizeContinuumProfile({
     errorScale: 1.0, taperMetres: 0, taperPower: 1.0, splatScale: 1.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.0, shadowMaxDistance: 0,

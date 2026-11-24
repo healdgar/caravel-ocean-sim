@@ -5,6 +5,7 @@
 // and worn by its material (js/wgsl/forest-continuum.js), cut and cast by the one cut (js/continuum-scene.js). This
 // module holds the roots, strikes and fells them, and keeps the wood a ball meets (js/forest-trunks.js).
 import {continuumGroundView} from './continuum-ground.js';
+import {continuumHiZView,continuumHiZUniform,CONTINUUM_HIZ_TEXTURE_BINDING,CONTINUUM_HIZ_UNIFORM_BINDING} from './continuum-hiz.js';
 import {continuumProfile} from './continuum-profiles.js';
 import {createTaskYieldBudget} from './task-yield.js';
 import {CONTINUUM_RECORD_WORDS,continuumRoom} from './continuum-format.js';
@@ -14,7 +15,7 @@ import {createContinuumScene,requestContinuumAtlas,requestContinuumPrograms,requ
 import {CONTINUUM_CARD_TINT_FOREST} from './wgsl/continuum-cards.js';
 import {requestContinuumCardRenderer,createContinuumCardSceneBindings,bakeContinuumCardAtlas} from './continuum-cards.js';
 import {loadForestContinuum,forestContinuumAssetsFor} from './forest-continuum.js';
-import {FOREST_CONTINUUM_STAND_BYTES,FOREST_CONTINUUM_STOOD_BYTES,FOREST_WIND_BASIS,FOREST_WIND_BYTES,FOREST_WIND_CAPSULES,FOREST_WIND_CAPSULE_AT,FOREST_WIND_EVENT,FOREST_WIND_FORCES,FOREST_WIND_FORCE_AT,FOREST_WIND_LANES,FOREST_WIND_OWN,forestContinuumMaterial,forestContinuumStandWGSL,forestWindSkeletons,forestWindStateBytes,forestWindStepWGSL} from './wgsl/forest-continuum.js';
+import {FOREST_BLOCK_ROOTS,FOREST_BLOCK_ROW,FOREST_CONTINUUM_STAND_BYTES,FOREST_CONTINUUM_STOOD_BYTES,FOREST_WIND_BASIS,FOREST_WIND_BYTES,FOREST_WIND_CAPSULES,FOREST_WIND_CAPSULE_AT,FOREST_WIND_EVENT,FOREST_WIND_FORCES,FOREST_WIND_FORCE_AT,FOREST_WIND_LANES,FOREST_WIND_OWN,forestContinuumBlocksWGSL,forestContinuumMaterial,forestContinuumStandWGSL,forestWindSkeletons,forestWindStateBytes,forestWindStepWGSL} from './wgsl/forest-continuum.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,TREE_STRIKE_REACH_M,blastForestRoot,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,nearestForestRoot,reapplyForestStrikes,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 
@@ -512,7 +513,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
   const m=pack.manifest,allocated=[],B=GPUBufferUsage,P=m.prototypes.length;
   const make=(data,usage,label)=>{if(data.byteLength>device.limits.maxBufferSize)throw Error(label+' exceeds GPU maxBufferSize');const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST,label});allocated.push(b);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
   const abort=new AbortController();
-  let destroyed=false,surfaces=null,roots=null,scene=null,standGroup=null;
+  let destroyed=false,surfaces=null,roots=null,scene=null,standGroup=null,blockGroup=null,blocksBuf=null,blockListBuf=null,blockCapacity=0,blocksDirty=true;
   const query=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
   const shadowUniform=resources.find(([id])=>id===19)?.[1].buffer;
   if(!shadowUniform)throw Error('The forest is lit and cut by the land\'s shadow map, and there is none');
@@ -535,6 +536,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       requestContinuumPrograms({device,shader,shadowFormat,pages}),
       requestContinuumView({device,shader,material:forestContinuumMaterial(terrainSource),format,samples,pages}),
       shader(forestContinuumStandWGSL(),'forest stand'),
+      shader(forestContinuumBlocksWGSL(),'forest blocks'),
       shader(forestWindStepWGSL(),'forest wind'),
     ]);
     ready.catch(()=>{});
@@ -581,6 +583,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     // The roots stood each frame, and the cut's workgroups for them; and what the stand pass is told: the roots in
     // use, the records it may write, whether shadows are cast, where the trees' poses begin, the world's offset.
     const stood=device.createBuffer({label:'forest stood',size:FOREST_CONTINUUM_STOOD_BYTES,usage:B.STORAGE|B.INDIRECT});allocated.push(stood);
+    const blockWork=device.createBuffer({label:'forest block work',size:16,usage:B.STORAGE|B.INDIRECT});allocated.push(blockWork);
     const standBytes=new ArrayBuffer(FOREST_CONTINUUM_STAND_BYTES),standWords=new Uint32Array(standBytes),standFloats=new Float32Array(standBytes);
     const standUniform=make(new Uint8Array(standBytes),B.UNIFORM,'forest stand');
     let shiftX=0,shiftZ=0,standChanged=true;
@@ -619,32 +622,50 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       capsules.forEach((c,k)=>windFloats.set(capsuleWords(c),FOREST_WIND_CAPSULE_AT(k)));
       device.queue.writeBuffer(windUniform,0,windBytes);windChanged=false;
     };
-    let lastStandMinPx=0;
+    let lastStandMinPx=0,lastStandShadowMax=0;
     const writeStand=capacity=>{
-      const minPx=continuumProfile('forest').minPixels;
-      if(!standChanged&&minPx===lastStandMinPx)return;
-      lastStandMinPx=minPx;
+      const fp=continuumProfile('forest'),minPx=fp.minPixels,shadowMax=fp.shadowMaxDistance;
+      if(!standChanged&&minPx===lastStandMinPx&&shadowMax===lastStandShadowMax)return;
+      lastStandMinPx=minPx;lastStandShadowMax=shadowMax;
       standWords.set([activeRootCount,capacity,1,skeletonRoom],0);
       standFloats.set([shiftX,0,shiftZ,minPx],4);
+      standFloats.set([minPx,shadowMax,0,0],8);
       device.queue.writeBuffer(standUniform,0,standBytes);standChanged=false;
     };
-    let standLayout=null,windLayout=null,windRest=null,windGroup=null,atlas=null,programs=null,view=null,forestCards=null;
+    let standLayout=null,blockLayout=null,windLayout=null,windRest=null,windGroup=null,atlas=null,programs=null,view=null,forestCards=null;
+    const ensureBlockBuffers=()=>{
+      const needed=Math.max(1,Math.ceil(Math.max(1,rootCapacity)/FOREST_BLOCK_ROOTS));
+      if(blocksBuf&&blockListBuf&&blockCapacity>=needed)return;
+      retire([blocksBuf,blockListBuf]);
+      blockCapacity=needed;
+      blocksBuf=device.createBuffer({label:'forest blocks',size:needed*16,usage:B.STORAGE});
+      blockListBuf=device.createBuffer({label:'forest block list',size:(needed+1)*4,usage:B.STORAGE});
+      blocksDirty=true;
+    };
     // One scene as large as the roots held: every root may stand in view at once, and every skeleton before them. Made
     // anew when the roots grow.
     const makeScene=()=>{
+      ensureBlockBuffers();
       const capacity=Math.max(1,Math.min(rootCapacity,Math.floor(Math.min(device.limits.maxStorageBufferBindingSize,device.limits.maxBufferSize)/(CONTINUUM_RECORD_WORDS*4))));
-      if(scene?.capacity===capacity){standGroup=standBindGroup();windGroup=windBindGroup();return;}
+      if(scene?.capacity===capacity){standGroup=standBindGroup();blockGroup=blockBindGroup();windGroup=windBindGroup();return;}
       if(scene)retire([scene]);
       const {room}=continuumRoom(atlas.types,new Array(atlas.types.length).fill(capacity));
       scene=createContinuumScene({device,atlas,programs,capacity,room,view,poseRoom:skeletonRoom+capacity*CONTINUUM_WIND_POSE,frame:frameUBO,shadowUniform,samples,label:'forest',written:true,profile:'forest'});
       scene.setCount(capacity);scene.setWorldOffset(shiftX,shiftZ);
       if(forestCards)scene.setCards(forestCards.atlas,forestCards.renderer,forestCards.bindings);
-      standGroup=standBindGroup();windGroup=windBindGroup();standChanged=true;
+      standGroup=standBindGroup();blockGroup=blockBindGroup();windGroup=windBindGroup();standChanged=true;
     };
     const standBindGroup=()=>device.createBindGroup({label:'forest stand',layout:standLayout,entries:[
       ...[frameUBO,shadowUniform,roots,atlas.buffer,scene.records,scene.poses,stood,standUniform].map((buffer,binding)=>({binding,resource:{buffer}})),
       {binding:8,resource:continuumGroundView(device)},
-      ...[windUniform,windState,windOwners].map((buffer,k)=>({binding:9+k,resource:{buffer}}))]});
+      ...[windUniform,windState,windOwners].map((buffer,k)=>({binding:9+k,resource:{buffer}})),
+      {binding:CONTINUUM_HIZ_TEXTURE_BINDING,resource:continuumHiZView(device)},
+      {binding:CONTINUUM_HIZ_UNIFORM_BINDING,resource:{buffer:continuumHiZUniform(device)}},
+      {binding:14,resource:{buffer:blockListBuf}}]});
+    const blockBindGroup=()=>device.createBindGroup({label:'forest blocks',layout:blockLayout,entries:[
+      ...[frameUBO,shadowUniform,roots,atlas.buffer,blocksBuf,blockWork,blockListBuf,standUniform].map((buffer,binding)=>({binding,resource:{buffer}})),
+      {binding:CONTINUUM_HIZ_TEXTURE_BINDING,resource:continuumHiZView(device)},
+      {binding:CONTINUUM_HIZ_UNIFORM_BINDING,resource:{buffer:continuumHiZUniform(device)}}]});
     const windBindGroup=()=>device.createBindGroup({label:'forest wind',layout:windLayout,entries:
       [frameUBO,windUniform,roots,windRest,windState,scene.poses,windOwners].map((buffer,binding)=>({binding,resource:{buffer}}))});
     // The sections the pack holds, nearest the player first, each whole or not at all: those that fit the device's
@@ -705,7 +726,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       order=wanted;
       let standing=0;activeRootCount=0;
       for(const slab of slabs.values()){standing+=slab.standing;activeRootCount=Math.max(activeRootCount,slab.start+slab.count);}
-      standChanged=true;
+      standChanged=true;blocksDirty=true;
       if(atlas)makeScene();
       Object.assign(stats,{roots:standing,rootCapacity,sections:{resident,released,arrays:slabs.size}});
     };
@@ -737,16 +758,20 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     stats.materialLayers=surfaces.layers;stats.textureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
     // The GPU holds the surfaces now; the pack lets go of its maps.
     pack.releaseSurfaces?.();
-    let standModule,windModule;
-    [atlas,programs,view,standModule,windModule]=await ready;forestLoadAbort(abort.signal);
+    let standModule,blockModule,windModule;
+    [atlas,programs,view,standModule,blockModule,windModule]=await ready;forestLoadAbort(abort.signal);
     // A pack's atlas is its own: one type a prototype, in its order, named for it.
     const names=m.prototypes.map(p=>`${p.species}${p.cohort?`-${p.cohort}`:''}`),types=atlas.manifest.types;
     if(types.length!==P||types.some((type,id)=>type.name!==names[id]))throw Error(`The forest continuum atlas is not this pack's (${types.map(t=>t.name)} for ${names}): rebake it with scripts/prepare-forest-continuum.mjs`);
     const firstLayers=[];let layer=0;for(const p of m.prototypes){firstLayers.push(layer);layer+=p.nativeMaterials.length;}
     const C=GPUShaderStage.COMPUTE,entry=(binding,type)=>({binding,visibility:C,buffer:{type}});
     standLayout=device.createBindGroupLayout({label:'forest stand',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),
-      {binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},entry(9,'uniform'),entry(10,'storage'),entry(11,'storage')]});
+      {binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},entry(9,'uniform'),entry(10,'storage'),entry(11,'storage'),
+      {binding:CONTINUUM_HIZ_TEXTURE_BINDING,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d'}},entry(CONTINUUM_HIZ_UNIFORM_BINDING,'uniform'),entry(14,'read-only-storage')]});
     const standPipelineLayout=device.createPipelineLayout({label:'forest stand',bindGroupLayouts:[standLayout]});
+    blockLayout=device.createBindGroupLayout({label:'forest blocks',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),
+      {binding:CONTINUUM_HIZ_TEXTURE_BINDING,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d'}},entry(CONTINUUM_HIZ_UNIFORM_BINDING,'uniform')]});
+    const blockPipelineLayout=device.createPipelineLayout({label:'forest blocks',bindGroupLayouts:[blockLayout]});
     // Every type's skeleton at rest, as the bake measured it from its wood and leaves (scripts/prepare-forest-continuum.mjs).
     const restWords=new Float32Array(P*CONTINUUM_WIND_BONES*16);
     types.forEach((type,id)=>restWords.set(type.wind.bones,id*CONTINUUM_WIND_BONES*16));
@@ -754,8 +779,9 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     windLayout=device.createBindGroupLayout({label:'forest wind',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage')]});
     const windPipelineLayout=device.createPipelineLayout({label:'forest wind',bindGroupLayouts:[windLayout]});
     const compute=(layout,module,entryPoint)=>device.createComputePipelineAsync({label:`forest ${entryPoint}`,layout,compute:{module,entryPoint}});
-    const [standReset,standRoots,standFinish,windHead,windLanes,windOwn]=await Promise.all([
+    const [standReset,standRoots,standFinish,buildBlocks,blockReset,standBlocks,blockArgs,windHead,windLanes,windOwn]=await Promise.all([
       ...['forestStandReset','forestStandRoots','forestStandFinish'].map(entryPoint=>compute(standPipelineLayout,standModule,entryPoint)),
+      ...['forestBuildBlocks','forestStandBlockReset','forestStandBlocks','forestStandBlockArgs'].map(entryPoint=>compute(blockPipelineLayout,blockModule,entryPoint)),
       ...['forestWindHead','forestWindLanes','forestWindOwn'].map(entryPoint=>compute(windPipelineLayout,windModule,entryPoint))]);
     forestLoadAbort(abort.signal);
     stats.wind={skeletons,lanes:P*FOREST_WIND_LANES,own:FOREST_WIND_OWN,bones:types.map(type=>{let n=0;for(let b=0;b<CONTINUUM_WIND_BONES;b++)if((type.wind.bones[b*16+3]>>8)&1)n++;return n;})};
@@ -837,7 +863,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       return null;
     };
     const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes,strikeOrigin));};
-    const release=()=>{destroyed=true;abort.abort();forestCards?.atlas?.destroy?.();forestCards=null;for(const b of allocated)b.destroy();roots?.destroy();scene?.destroy();surfaces?.destroy();};
+    const release=()=>{destroyed=true;abort.abort();forestCards?.atlas?.destroy?.();forestCards=null;for(const b of allocated)b.destroy();blocksBuf?.destroy();blockListBuf?.destroy();roots?.destroy();scene?.destroy();surfaces?.destroy();};
     return {stats,trunksReady,
       get trunks(){return trunkGrid;},
       updatePack(nextPack){
@@ -908,9 +934,23 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
         if(destroyed)return;
         writeStand(scene.capacity);writeWind();
         pass.setBindGroup(0,windGroup);pass.setPipeline(windHead);pass.dispatchWorkgroups(1);
+        if(activeRootCount){
+          const numBlocks=Math.ceil(activeRootCount/FOREST_BLOCK_ROOTS);
+          pass.setBindGroup(0,blockGroup);
+          if(blocksDirty){
+            pass.setPipeline(buildBlocks);
+            pass.dispatchWorkgroups(Math.min(numBlocks,FOREST_BLOCK_ROW),Math.ceil(numBlocks/FOREST_BLOCK_ROW));
+            blocksDirty=false;
+          }
+          pass.setPipeline(blockReset);pass.dispatchWorkgroups(1);
+          const blockGroups=Math.ceil(numBlocks/64);
+          pass.setPipeline(standBlocks);
+          pass.dispatchWorkgroups(Math.min(blockGroups,FOREST_BLOCK_ROW),Math.ceil(blockGroups/FOREST_BLOCK_ROW));
+          pass.setPipeline(blockArgs);pass.dispatchWorkgroups(1);
+        }
         pass.setBindGroup(0,standGroup);
         pass.setPipeline(standReset);pass.dispatchWorkgroups(1);
-        if(activeRootCount){const groups=Math.ceil(activeRootCount/64);pass.setPipeline(standRoots);pass.dispatchWorkgroups(Math.min(groups,65535),Math.ceil(groups/65535));}
+        if(activeRootCount){pass.setPipeline(standRoots);pass.dispatchWorkgroupsIndirect(blockWork,0);}
         pass.setPipeline(standFinish);pass.dispatchWorkgroups(CONTINUUM_ROW/64);
         pass.setBindGroup(0,windGroup);
         pass.setPipeline(windLanes);pass.dispatchWorkgroups(Math.ceil(P*FOREST_WIND_LANES/64));
@@ -922,5 +962,5 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       // The indirect draws the view submits, for the continuum census (js/continuum-census.js).
       continuumDraws(){return destroyed?[]:scene.continuumDraws();},
       destroy:release};
-  }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();roots?.destroy();scene?.destroy();surfaces?.destroy();throw error;}
+  }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();blocksBuf?.destroy();blockListBuf?.destroy();roots?.destroy();scene?.destroy();surfaces?.destroy();throw error;}
 }

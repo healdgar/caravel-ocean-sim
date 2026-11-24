@@ -20,6 +20,7 @@ import { CONTINUUM_RECORD_WGSL, CONTINUUM_ROW } from './continuum-cut.js';
 import { CONTINUUM_WIND_FORM, CONTINUUM_WIND_POSE, CONTINUUM_WIND_BONES, CONTINUUM_WIND_SKELETON, CONTINUUM_WIND_FLUTTER } from './continuum-wind.js';
 import { CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_KIND, CONTINUUM_KIND_SHIFT, CONTINUUM_STRUCK } from '../continuum-format.js';
 import { continuumGroundWGSL } from '../continuum-ground.js';
+import { continuumHiZWGSL, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from '../continuum-hiz.js';
 import { FOREST_CONTINUUM_MATERIAL, FOREST_CONTINUUM_UNTEXTURED } from '../forest-continuum.js';
 import { FOREST_FALL_BEARINGS, FOREST_FALL_HEIGHT_STEPS, FOREST_FALL_REST_MIN_DEG, FOREST_FALL_SECONDS, FOREST_WOUND_BEARINGS } from '../forest-trunks.js';
 
@@ -27,10 +28,14 @@ import { FOREST_FALL_BEARINGS, FOREST_FALL_HEIGHT_STEPS, FOREST_FALL_REST_MIN_DE
 // optics are group 3.
 export const FOREST_CONTINUUM_DATA = Object.freeze({ group: 2, binding: 40 });
 // The stand pass's uniform: [roots in use, records it may write, 1 if shadows are cast, where the trees' poses begin
-// in the pose buffer (past the skeletons)], then the world's offset [x, 0, z, 0] (the roots stand in the scene's frame).
-export const FOREST_CONTINUUM_STAND_BYTES = 32;
+// in the pose buffer (past the skeletons)], then the world's offset [x, 0, z, minPx], then limits [minPx, shadowMaxDist, 0, 0].
+export const FOREST_CONTINUUM_STAND_BYTES = 48;
 // The stand pass's own buffer: the select's workgroups (x, y, z), then how many records it wrote.
 export const FOREST_CONTINUUM_STOOD_BYTES = 16;
+// Spatial block culling: consecutive 256-root blocks (99% grove roots are written tile-by-tile) are bounded once per
+// section load on the GPU and frustum/Hi-Z/shadow culled before forestStandRoots touches individual roots.
+export const FOREST_BLOCK_ROOTS = 256;
+export const FOREST_BLOCK_ROW = 4096;
 
 // ---------------------------------------------------------------------------------------------- the wind
 // A tree bends by its skeleton (js/wgsl/continuum-wind.js), each bone a damped spring the wind's pressure drives. Every
@@ -90,7 +95,7 @@ fn forestWindTouched(at:vec3f)->bool{
 export function forestContinuumStandWGSL() {
   const F = CONTINUUM_WIND_FORM, T = CONTINUUM_TYPE;
   return FRAME_WGSL + SHADOW_FRAME + CONTINUUM_RECORD_WGSL + continuumGroundWGSL(0, 8) + forestWindCommonWGSL() + /* wgsl */`
-struct ForestStand {counts:vec4u,shift:vec4f};
+struct ForestStand {counts:vec4u,shift:vec4f,limits:vec4f};
 @group(0)@binding(0)var<uniform>F:Frame;
 @group(0)@binding(1)var<uniform>SH:ShadowFrame;
 @group(0)@binding(2)var<storage,read>forestRoots:array<ForestRoot>;
@@ -102,6 +107,9 @@ struct ForestStand {counts:vec4u,shift:vec4f};
 @group(0)@binding(9)var<uniform>forestWind:ForestWind;
 @group(0)@binding(10)var<storage,read_write>forestWindState:array<vec4f>;
 @group(0)@binding(11)var<storage,read_write>forestWindOwners:array<atomic<u32>,${FOREST_WIND_OWN}>;
+@group(0)@binding(14)var<storage,read>forestBlockList:array<u32>;
+fn continuumShift()->vec3f{return forestStand.shift.xyz;}
+${continuumHiZWGSL(0, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING)}
 fn forestStandTypeF(model:u32,field:u32)->f32{return bitcast<f32>(forestAtlas[forestAtlas[${CONTINUUM_HEADER.typesAt}u]+model*${CONTINUUM_TYPE_WORDS}u+field]);}
 // A tree's yaw turns its type's +x toward (cos, 0, sin) of it.
 fn forestStandTurn(yaw:f32,v:vec3f)->vec3f{let c=cos(yaw);let s=sin(yaw);return vec3f(c*v.x-s*v.z,v.y,s*v.x+c*v.z);}
@@ -149,8 +157,12 @@ fn forestStandOwn(tree:u32,touched:bool,near:f32,lane:u32)->vec2f{
 @compute @workgroup_size(1)fn forestStandReset(){atomicStore(&forestStood[3],0u);}
 var<workgroup>forestStandCount:atomic<u32>;
 var<workgroup>forestStandBase:u32;
-@compute @workgroup_size(64)fn forestStandRoots(@builtin(global_invocation_id)id:vec3u,@builtin(num_workgroups)groups:vec3u,@builtin(local_invocation_index)localIdx:u32){
- let i=id.x+id.y*groups.x*64u;
+@compute @workgroup_size(64)fn forestStandRoots(@builtin(workgroup_id)group:vec3u,@builtin(local_invocation_index)localIdx:u32){
+ let groupLinear=group.x+group.y*${FOREST_BLOCK_ROW}u;
+ let visIdx=groupLinear>>2u;
+ let sub=groupLinear&3u;
+ var i=0xffffffffu;
+ if(visIdx<forestBlockList[0]){i=(forestBlockList[1u+visIdx]<<8u)|(sub<<6u)|localIdx;}
  var keep=false;
  var position=vec3f(0.0);var scale=0.0;var model=0u;var yaw=0.0;var felled=false;var wounded=false;
  var bones=vec3f(-1.0,-1.0,0.0);var reach=0.0;var seed=0u;var r:ForestRoot;
@@ -165,20 +177,27 @@ var<workgroup>forestStandBase:u32;
    let coarseCentre=r.rootScale.xyz+forestStandTurn(yaw,sphere.xyz)*scale;
    let coarseRadius=sphere.w*scale*1.35+6.0;
    let coarseRel=coarseCentre+shift-F.camPos.xyz;
-   let inShadow=forestStand.counts.z!=0u&&forestStandShadowed(coarseCentre,coarseRadius);
+   let coarseDist=length(coarseRel);
+   let shadowMaxDist=forestStand.limits.y;
+   let inShadowRange=shadowMaxDist<=0.0||max(coarseDist-coarseRadius,0.0)<=shadowMaxDist;
+   let inShadow=forestStand.counts.z!=0u&&inShadowRange&&forestStandShadowed(coarseCentre,coarseRadius);
    let inView=!forestStandOutside(earthCurve(coarseRel,F.camPos.y),coarseRadius);
    if(inView||inShadow){
-    let coarseDist=length(coarseRel);
     felled=r.identity.w<0.0;wounded=r.identity.w>0.0;
     // Its seed is where it stands, so its sample pattern and its thinning are its own however the trees are listed.
     seed=forestWindHash(bitcast<u32>(r.rootScale.x)^forestWindHash(bitcast<u32>(r.rootScale.z)));
-    // Exact deterministic sub-pixel horizon pre-thinning (same hash/seed as continuumProfileThin, conservative sphere >= splat).
-    // Drops ~84% of sub-minPixels distant roots BEFORE ground-lift fetches, record writes, and continuumSelect workgroups.
+    // Conservative Hi-Z occlusion rejection before ground-lift texture loads, record/pose writes, and continuumSelect.
+    // Never culls shadow casters, struck trees, or trees near the camera; adds +2 m slack above coarseRadius (+8 m total).
     var thinKept=true;
-    let minPx=forestStand.shift.w;
-    if(!inShadow&&!felled&&!wounded&&minPx>0.0&&coarseDist>300.0){
+    if(!inShadow&&!felled&&!wounded&&coarseDist>coarseRadius*1.4+8.0&&continuumHiZOccluded(coarseCentre,coarseRadius+2.0,false)){
+     thinKept=false;
+    }
+    // Exact deterministic sub-pixel horizon pre-thinning matching continuumSelect's crown splat span (splatRx/splatRy).
+    let minPx=forestStand.limits.x;
+    if(thinKept&&!inShadow&&!felled&&!wounded&&minPx>0.0&&coarseDist>180.0){
      let focal=F.screen.y/max(2.0*length(F.camUp.xyz),1e-4);
-     let maxSpan=2.0*sphere.w*scale*focal/coarseDist;
+     let crownR=max(forestStandTypeF(model,${T.splatRx}u),forestStandTypeF(model,${T.splatRy}u));
+     let maxSpan=2.0*crownR*scale*focal/coarseDist;
      if(maxSpan<minPx){
       if(maxSpan<0.16*minPx){thinKept=false;}
       else{
@@ -214,7 +233,7 @@ var<workgroup>forestStandBase:u32;
      let radius=(sphere.w+sway*1.25+${(CONTINUUM_WIND_FLUTTER * 2).toFixed(3)})*scale+reach;
      let centre=position+forestStandTurn(yaw,sphere.xyz)*scale;
      let relative=centre+shift-F.camPos.xyz;
-     keep=!forestStandOutside(earthCurve(relative,F.camPos.y),radius)||(forestStand.counts.z!=0u&&forestStandShadowed(centre,radius));
+     keep=!forestStandOutside(earthCurve(relative,F.camPos.y),radius)||(forestStand.counts.z!=0u&&inShadowRange&&forestStandShadowed(centre,radius));
     }
    }
   }
@@ -259,6 +278,118 @@ var<workgroup>forestStandBase:u32;
  if(id.x==0u){atomicStore(&forestStood[0],across);atomicStore(&forestStood[1],rows);atomicStore(&forestStood[2],1u);}
  let tail=n+id.x;
  if(tail<across*rows&&tail<forestStand.counts.y){forestRecords[tail].tag.x=CONTINUUM_GONE;}
+}
+`;
+}
+
+// Coarse 256-root GPU spatial block bounds + frustum/Hi-Z/shadow culling (5 storage buffers <= 8 limit).
+// Runs forestBuildBlocks once when coastal sections change, then culls ~95%+ of off-screen/occluded roots every frame
+// before forestStandRoots ever streams the root buffer.
+export function forestContinuumBlocksWGSL() {
+  const T = CONTINUUM_TYPE;
+  return FRAME_WGSL + SHADOW_FRAME + /* wgsl */`
+struct ForestRoot {rootScale:vec4f,yawColour:vec4f,identity:vec4f};
+struct ForestStand {counts:vec4u,shift:vec4f,limits:vec4f};
+@group(0)@binding(0)var<uniform>F:Frame;
+@group(0)@binding(1)var<uniform>SH:ShadowFrame;
+@group(0)@binding(2)var<storage,read>forestRoots:array<ForestRoot>;
+@group(0)@binding(3)var<storage,read>forestAtlas:array<u32>;
+@group(0)@binding(4)var<storage,read_write>forestBlocks:array<vec4f>;
+@group(0)@binding(5)var<storage,read_write>forestBlockWork:array<atomic<u32>,4>;
+@group(0)@binding(6)var<storage,read_write>forestBlockList:array<u32>;
+@group(0)@binding(7)var<uniform>forestStand:ForestStand;
+fn continuumShift()->vec3f{return forestStand.shift.xyz;}
+${continuumHiZWGSL(0, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING)}
+fn forestBlockTypeF(model:u32,field:u32)->f32{return bitcast<f32>(forestAtlas[forestAtlas[${CONTINUUM_HEADER.typesAt}u]+model*${CONTINUUM_TYPE_WORDS}u+field]);}
+fn forestBlockTurn(yaw:f32,v:vec3f)->vec3f{let c=cos(yaw);let s=sin(yaw);return vec3f(c*v.x-s*v.z,v.y,s*v.x+c*v.z);}
+fn forestBlockOutside(relative:vec3f,reach:f32)->bool{
+ let m=F.viewProj;let p=vec4f(relative,1.0);
+ let w=vec4f(m[0].w,m[1].w,m[2].w,m[3].w);let x=vec4f(m[0].x,m[1].x,m[2].x,m[3].x);let y=vec4f(m[0].y,m[1].y,m[2].y,m[3].y);
+ var planes=array<vec4f,5>(w+x,w-x,w+y,w-y,w);
+ for(var i=0u;i<5u;i++){if(dot(planes[i],p)< -reach*length(planes[i].xyz)){return true;}}
+ return false;
+}
+fn forestBlockShadowed(world:vec3f,reach:f32)->bool{
+ let light=SH.lightView*vec4f(world-SH.origin.xyz,1.0);
+ let r=reach*vec3f(length(vec3f(SH.lightView[0].x,SH.lightView[1].x,SH.lightView[2].x)),length(vec3f(SH.lightView[0].y,SH.lightView[1].y,SH.lightView[2].y)),length(vec3f(SH.lightView[0].z,SH.lightView[1].z,SH.lightView[2].z)));
+ return abs(light.x)<1.0+r.x&&abs(light.y)<1.0+r.y&&light.z> -r.z&&light.z<1.0+r.z;
+}
+var<workgroup>fbMin:array<vec3f,64>;
+var<workgroup>fbMax:array<vec3f,64>;
+var<workgroup>fbHas:array<u32,64>;
+@compute @workgroup_size(64)fn forestBuildBlocks(@builtin(workgroup_id)group:vec3u,@builtin(local_invocation_index)lane:u32){
+ let blockIdx=group.x+group.y*${FOREST_BLOCK_ROW}u;
+ let blockCount=(forestStand.counts.x+${FOREST_BLOCK_ROOTS - 1}u)>>8u;
+ if(blockIdx>=blockCount){return;}
+ var mn=vec3f(1e30);var mx=vec3f(-1e30);var has=0u;
+ let base=blockIdx<<8u;
+ for(var sub=0u;sub<4u;sub++){
+  let idx=base|(sub<<6u)|lane;
+  if(idx<forestStand.counts.x){
+   let r=forestRoots[idx];
+   let sc=r.rootScale.w;
+   if(sc>0.0){
+    let model=u32(r.identity.x);
+    let sp=vec4f(forestBlockTypeF(model,${T.sphere}u),forestBlockTypeF(model,${T.sphere + 1}u),forestBlockTypeF(model,${T.sphere + 2}u),forestBlockTypeF(model,${T.sphere + 3}u));
+    let c=r.rootScale.xyz+forestBlockTurn(r.yawColour.x,sp.xyz)*sc;
+    let rad=sp.w*sc*1.45+10.0;
+    mn=min(mn,c-vec3f(rad));mx=max(mx,c+vec3f(rad));has=1u;
+   }
+  }
+ }
+ fbMin[lane]=mn;fbMax[lane]=mx;fbHas[lane]=has;
+ workgroupBarrier();
+ if(lane==0u){
+  var bMin=vec3f(1e30);var bMax=vec3f(-1e30);var any=0u;
+  for(var k=0u;k<64u;k++){
+   if(fbHas[k]!=0u){bMin=min(bMin,fbMin[k]);bMax=max(bMax,fbMax[k]);any=1u;}
+  }
+  if(any!=0u){
+   let centre=0.5*(bMin+bMax);
+   let rad=length(0.5*(bMax-bMin));
+   forestBlocks[blockIdx]=vec4f(centre,rad);
+  }else{
+   forestBlocks[blockIdx]=vec4f(0.0,0.0,0.0,-1.0);
+  }
+ }
+}
+@compute @workgroup_size(1)fn forestStandBlockReset(){atomicStore(&forestBlockWork[3],0u);}
+var<workgroup>fbCount:atomic<u32>;
+var<workgroup>fbBase:u32;
+@compute @workgroup_size(64)fn forestStandBlocks(@builtin(workgroup_id)group:vec3u,@builtin(local_invocation_index)lane:u32){
+ let blockIdx=(group.x+group.y*${FOREST_BLOCK_ROW}u)*64u+lane;
+ let blockCount=(forestStand.counts.x+${FOREST_BLOCK_ROOTS - 1}u)>>8u;
+ var keep=false;
+ if(blockIdx<blockCount){
+  let b=forestBlocks[blockIdx];
+  if(b.w>=0.0){
+   let shift=forestStand.shift.xyz;
+   let rel=b.xyz+shift-F.camPos.xyz;
+   let dist=length(rel);
+   let shadowMaxDist=forestStand.limits.y;
+   let inShadowRange=shadowMaxDist<=0.0||max(dist-b.w,0.0)<=shadowMaxDist;
+   let inShadow=forestStand.counts.z!=0u&&inShadowRange&&forestBlockShadowed(b.xyz,b.w);
+   let inView=!forestBlockOutside(earthCurve(rel,F.camPos.y),b.w);
+   if(inView||inShadow){
+    keep=true;
+    if(!inShadow&&dist>b.w*1.4+10.0&&continuumHiZOccluded(b.xyz,b.w+2.0,false)){keep=false;}
+   }
+  }
+ }
+ var localOff=0u;
+ if(keep){localOff=atomicAdd(&fbCount,1u);}
+ workgroupBarrier();
+ if(lane==0u){let n=atomicLoad(&fbCount);if(n>0u){fbBase=atomicAdd(&forestBlockWork[3],n);}}
+ workgroupBarrier();
+ if(keep){forestBlockList[1u+fbBase+localOff]=blockIdx;}
+}
+@compute @workgroup_size(1)fn forestStandBlockArgs(){
+ let vis=atomicLoad(&forestBlockWork[3]);
+ forestBlockList[0]=vis;
+ let groups=vis*4u;
+ atomicStore(&forestBlockWork[0],min(groups,${FOREST_BLOCK_ROW}u));
+ atomicStore(&forestBlockWork[1],(groups+${FOREST_BLOCK_ROW - 1}u)/${FOREST_BLOCK_ROW}u);
+ atomicStore(&forestBlockWork[2],1u);
 }
 `;
 }
