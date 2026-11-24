@@ -15,6 +15,7 @@ import { CONTINUUM_HEADER, CONTINUUM_TYPE_WORDS, continuumRoom } from './continu
 import { CONTINUUM_ROW } from './wgsl/continuum-cut.js';
 import { createContinuumScene, requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, continuumAtlasPages } from './continuum-scene.js';
 import { continuumGroundView } from './continuum-ground.js';
+import { continuumHiZView, continuumHiZUniform } from './continuum-hiz.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { terrainSurfaceSample } from './terrain-model.js';
 import { CITY_BLOCK_FLOATS, CITY_GROUND } from './old-world-city.js';
@@ -619,7 +620,7 @@ export function requestMeadowStand(device, shader) {
     const uniforms = [buffer(0, 'uniform'), buffer(1, 'uniform'), buffer(2, 'uniform')];
     const entries = {
       reset: [buffer(9, 'storage'), buffer(10, 'storage')],
-      blocks: [...uniforms, buffer(6, 'read-only-storage'), buffer(10, 'storage'), buffer(12, 'uniform')],
+      blocks: [...uniforms, buffer(6, 'read-only-storage'), buffer(10, 'storage'), buffer(12, 'uniform'), texture(18, 'unfilterable-float'), buffer(19, 'uniform')],
       budget: [buffer(0, 'uniform'), buffer(1, 'uniform'), buffer(10, 'storage')],
       patches: [...uniforms, texture(3, 'unfilterable-float'), texture(4, 'float'), buffer(5, 'read-only-storage'), buffer(7, 'storage'), buffer(8, 'storage'), buffer(9, 'storage'),
         buffer(11, 'read-only-storage'), buffer(12, 'uniform'), buffer(13, 'uniform'), texture(14, 'sint'), texture(15, 'float', '2d-array'),
@@ -642,7 +643,7 @@ export function requestMeadowStand(device, shader) {
   });
 }
 // What each stand pass binds.
-const MEADOW_STAND_BINDINGS = Object.freeze({ reset: [9, 10], blocks: [0, 1, 2, 6, 10, 12], budget: [0, 1, 10], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17], finish: [1, 7, 9] });
+const MEADOW_STAND_BINDINGS = Object.freeze({ reset: [9, 10], blocks: [0, 1, 2, 6, 10, 12, 18, 19], budget: [0, 1, 10], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17], finish: [1, 7, 9] });
 // What the material's view, and its capture under water, bind in group 0.
 const MEADOW_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24]);
 
@@ -820,6 +821,7 @@ export async function createMeadowGrass({
         0: land.get(0), 1: { buffer: cfgBuf }, 2: { buffer: nearDomain }, 3: elevationView, 4: coverView, 5: { buffer: atlas.buffer },
         6: { buffer: blocksBuf }, 7: { buffer: scene.records }, 8: { buffer: scene.poses }, 9: { buffer: stood }, 10: { buffer: blockWork }, 11: { buffer: blockWork },
         12: land.get(19), 13: { buffer: wakeBuf }, 14: craterLookupView, 15: craterFieldView, 16: land.get(8), 17: continuumGroundView(device),
+        18: continuumHiZView(device), 19: { buffer: continuumHiZUniform(device) },
       };
       standGroups = Object.fromEntries(Object.entries(MEADOW_STAND_BINDINGS).map(([name, ids]) => [name, device.createBindGroup({
         label: `meadow stand ${name}`, layout: stand.layouts[name], entries: ids.map((binding) => ({ binding, resource: resource[binding] })),

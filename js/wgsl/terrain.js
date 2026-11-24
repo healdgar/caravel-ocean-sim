@@ -710,12 +710,14 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   let k=(effRough+1.0)*(effRough+1.0)*0.125;
   let G=(nDotV/(nDotV*(1.0-k)+k))*(nDotL/(nDotL*(1.0-k)+k));
   let specBRDF=(D*G*fresnelSun)/max(4.0*nDotV,1e-3);
-  var reflDir=reflect(-v,n);
-  reflDir.y=max(reflDir.y,-0.12);
-  let envMip=clamp(effRough*7.0,0.4,7.0);
-  let envSpec=textureSampleLevel(envCube,sampC,normalize(reflDir),envMip).rgb;
   let reflStrength=fresnel*smoothFilm*(1.0-effRough*0.78)*(0.26+0.74*effAmbVis);
-  let skyRefl=envSpec*reflStrength;
+  var skyRefl=vec3f(0.0);
+  if(reflStrength>0.001){
+    var reflDir=reflect(-v,n);
+    reflDir.y=max(reflDir.y,-0.12);
+    let envMip=clamp(effRough*7.0,0.4,7.0);
+    skyRefl=textureSampleLevel(envCube,sampC,normalize(reflDir),envMip).rgb*reflStrength;
+  }
   let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*(0.08+0.92*effWet),0.65,isMetal);
   col+=direct*min(specBRDF,1.5)*specMask*(0.25+0.75*archShadow)+skyRefl;
   let cloudMoon=lunarShadowVisibility(vec3f(cloudShadowAt(world*0.001,lunarDirection()))).x;

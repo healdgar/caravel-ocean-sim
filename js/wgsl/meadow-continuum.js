@@ -25,6 +25,7 @@ import { CONTINUUM_RECORD_WGSL, CONTINUUM_ROW } from './continuum-cut.js';
 import { CONTINUUM_WIND_FORM, CONTINUUM_WIND_DRAPED_POSE } from './continuum-wind.js';
 import { CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_KIND, CONTINUUM_KIND_SHIFT, CONTINUUM_STRETCHED } from '../continuum-format.js';
 import { CONTINUUM_GROUNDED, continuumGroundWGSL } from '../continuum-ground.js';
+import { continuumHiZWGSL } from '../continuum-hiz.js';
 import { MEADOW_PATCH_METRES, MEADOW_CONTINUUM_MATERIAL, MEADOW_CONTINUUM_STIFFNESS_UNIT } from '../meadow-continuum.js';
 
 export const MEADOW_MAX_SHOT_WAKES = 16;
@@ -336,6 +337,8 @@ const MEADOW_COUNTS: u32 = 4u;
 const MEADOW_GRAIN: u32 = ${4 + MEADOW_BANDS * MEADOW_GRAINS}u;
 fn meadowFocal() -> f32 { return F.screen.y / max(2.0 * length(F.camUp.xyz), 1e-4); }
 fn meadowShift() -> vec3f { return vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z); }
+fn continuumShift() -> vec3f { return meadowShift(); }
+${continuumHiZWGSL(0, 18, 19)}
 fn meadowStandTypeF(model: u32, field: u32) -> f32 { return bitcast<f32>(meadowAtlas[meadowAtlas[${CONTINUUM_HEADER.typesAt}u] + model * ${CONTINUUM_TYPE_WORDS}u + field]); }
 fn meadowOutside(at: vec3f, reach: f32) -> bool {
   let m = F.viewProj; let p = vec4f(at, 1.0);
@@ -380,7 +383,9 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
   let dist = length(centre + meadowShift() - F.camPos.xyz);
   let nearDist = max(dist - size, 0.0);
   let reach = size + continuumGroundBound(cfg.scene.x, meadowFocal(), dist + size);
-  let seen = (cfg.scene.z <= 0.0 || nearDist < cfg.scene.z) && !meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach);
+  let seen = (cfg.scene.z <= 0.0 || nearDist < cfg.scene.z)
+    && !meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach)
+    && (dist <= reach * 1.4 + 10.0 || !continuumHiZOccluded(centre, reach + 2.0, false));
   let lit = (cfg.scene.w <= 0.0 || nearDist <= cfg.scene.w) && meadowInLight(centre, reach);
   if (!seen && !lit) { return; }
   let band = u32(clamp(floor(log2(max(nearDist, 8.0) / 8.0) * 3.0), 0.0, f32(MEADOW_BANDS - 1u)));
@@ -635,8 +640,6 @@ fn meadowSwardDetail(bentXZ: vec2f, pixel: f32, windDir: vec2f, gust: f32) -> ve
 
   var sig = 0.0;
   var tilt = 0.0;
-  var oat = 0.0;
-  var shadow = 0.0;
 
   if (wFine > 0.001) {
     // Rotated aperiodic dual-scale blade-clump grain (2.4 m^-1 and 4.6 m^-1)
@@ -648,8 +651,6 @@ fn meadowSwardDetail(bentXZ: vec2f, pixel: f32, windDir: vec2f, gust: f32) -> ve
     let fSlope = meadowOrganicNoise(q0 + vec2f(0.35, 0.0)) - n0;
     sig += fSig * 0.82 * wFine;
     tilt += fSlope * 0.72 * wFine;
-    oat += smoothstep(0.18, 0.72, fSig) * 0.56 * wFine;
-    shadow += (1.0 - smoothstep(-0.68, 0.05, fSig)) * 0.46 * wFine;
   }
 
   if (wMid > 0.001) {
@@ -662,8 +663,6 @@ fn meadowSwardDetail(bentXZ: vec2f, pixel: f32, windDir: vec2f, gust: f32) -> ve
     let mSlope = meadowOrganicNoise(r1 + vec2f(0.35, 0.0)) - m1;
     sig += mSig * 0.65 * wMid;
     tilt += mSlope * 0.48 * wMid;
-    oat += smoothstep(0.16, 0.68, mSig) * 0.48 * wMid;
-    shadow += (1.0 - smoothstep(-0.64, 0.08, mSig)) * 0.38 * wMid;
   }
 
   if (wBroad > 0.001) {
@@ -672,12 +671,10 @@ fn meadowSwardDetail(bentXZ: vec2f, pixel: f32, windDir: vec2f, gust: f32) -> ve
     let s1 = vec2f(bentXZ.x * 0.259 - bentXZ.y * 0.966, bentXZ.x * 0.966 + bentXZ.y * 0.259) * 0.41 + vec2f(-53.2, -18.6);
     let bSig = meadowOrganicNoise(s0) * 0.60 + meadowOrganicNoise(s1) * 0.40;
     sig += bSig * 0.42 * wBroad;
-    oat += smoothstep(0.15, 0.65, bSig) * 0.30 * wBroad;
-    shadow += (1.0 - smoothstep(-0.60, 0.12, bSig)) * 0.24 * wBroad;
   }
 
   let density = clamp(0.5 + sig * 0.28 + (gust - 0.5) * 0.05 * max(wFine, wMid), 0.0, 1.0);
-  return vec4f(density, clamp(tilt, -0.75, 0.75), clamp(oat, 0.0, 1.0), clamp(shadow, 0.0, 1.0));
+  return vec4f(density, clamp(tilt, -0.75, 0.75), 0.0, 0.0);
 }
 
 struct MeadowParallaxHit {
@@ -789,10 +786,14 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   let span = max(continuumTypeF(s.model, ${T.span}u), 1e-3);
   let slope = continuumQuat(s.record.turn, normalize(vec3f(-0.5 * (h.y - h.x + h.w - h.z) / span, 1.0, -0.5 * (h.z - h.x + h.w - h.y) / span)));
   let cover = meadowCoverAt(at);
-  let groundY = meadowGroundY(at, cfg.domain, elevation);
   let dist = distance(s.world, eye);
+  let hasBallistics = dist <= 90.0 && (cfg.crater.w > 0.5 || wakes.counts.x > 0u || wakes.counts.y > 0u);
+  var groundY = s.world.y;
+  if (hasBallistics || s.world.y <= cfg.domain.w + 2.5) {
+    groundY = meadowGroundY(at, cfg.domain, elevation);
+  }
   var ballistics = MeadowBallisticDeform(vec2f(0.0), 0.0, 0.0, 0.0);
-  if (dist <= 90.0) {
+  if (hasBallistics) {
     ballistics = meadowEvalBallistics(at, groundY, seed);
   }
   let wind = meadowWindField(at, F.camPos.w, F.windP[0]);
@@ -801,13 +802,12 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   let windSpeed = max(F.windP[0].z, 0.0);
   let curl = meadowWindCurl(at, F.camPos.w, windDir, windSpeed);
   let billow = meadowWorldBillow(at);
-  let mean = meadowMixMean(cover.g, at);
   // The sward's organs carry their own along, stiffness and clump; a far body and splat are as the type's sward
   // shows from here, its stiffness a body's.
   var along = continuumTypeF(s.model, ${M.seenAlong}u);
   var stiff = 9.0;
   var clump = -1.0;
-  var colour = mean.rgb;
+  var colour = vec3f(0.0);
   var hides = 1.0;
   var rest = vec3f(0.0, 1.0, 0.0);
   if (cluster) {
@@ -817,6 +817,7 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
     colour = meadowColourOf(s.word);
     rest = s.normal;
   } else if (s.what == CONTINUUM_FAR_ENTRY) {
+    let mean = meadowMixMean(cover.g, at);
     // A far vertex's colour and cover are its optical moments' (its albedo and its share of ground hidden), the mean
     // of the sward seen about it, morphed down the chain with it. Far off a patch is one with the field it lies in: its
     // colour and cover are mostly the mean of the mixes growing where it stands (the world's own, which runs on
@@ -838,6 +839,7 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   } else {
     // The splat: seen from above, the mean of the mixes growing here, as the far body's coarse colour is; from the
     // side, the variant's side colour in proportion.
+    let mean = meadowMixMean(cover.g, at);
     let toward = normalize(s.world - eye);
     let top = meadowColourOf(continuumType(s.model, ${M.top}u));
     let side = meadowColourOf(continuumType(s.model, ${M.side}u)) * mean.rgb / max(top, vec3f(1e-4));
@@ -943,7 +945,10 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   //     Mediterranean olive-sage fescue, and sun-warmed straw.
   //   - Root cavities (effAlong < 0.24) ground with warm soil/thatch tint + deep physical root AO (0.36..0.55).
   //   - Tall sunlit crests (effAlong > 0.76..0.78) warm toward crisp golden oat seed-heads ONLY at the very tips!
-  let groundCol = meadowGroundColour(unshiftedWorldXZ);
+  var groundCol = vec3f(0.072, 0.066, 0.034);
+  if (isContinuum || along < 0.18 || (cfg.crater.w > 0.5 && dist < 180.0)) {
+    groundCol = meadowGroundColour(unshiftedWorldXZ);
+  }
   let mWarp = vec2f(sin(unshiftedWorldXZ.y * 0.042 + 1.7), cos(unshiftedWorldXZ.x * 0.038 - 0.9)) * 4.5;
   let mp = unshiftedWorldXZ + mWarp;
   let moistLow = 0.5 + 0.5 * sin(mp.x * 0.072 + mp.y * 0.056) * cos(mp.x * 0.046 - mp.y * 0.078 + 1.1);

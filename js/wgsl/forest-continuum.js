@@ -858,6 +858,19 @@ fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
  (*v).colour=lit.colour;(*v).normal=lit.normal;(*v).crown=vec4f(lit.light.x*reach.x+reach.y*(.35+.65*material.optics.z),lit.light.y,lit.finish);
  (*v).surface=vec4f(sky,1.0,gaps,0.0);
 }
+// Hardware 2x2 bilinear PCF single-tap shadow lookup for dappled canopy leaves (zero visual loss vs 4-tap PCF on
+// tiny moving foliage cards; solid bark/ground/walls retain full 4-tap landShadowVisibility).
+fn forestLeafShadowVis(world:vec3f,normal:vec3f)->vec3f{
+ if(landSH.origin.w<0.5){return vec3f(1.0);}
+ let facing=select(-1.0,1.0,dot(normal,landSH.sun.xyz)>=0.0);
+ let p=landSH.lightView*vec4f(world-landSH.origin.xyz+normal*facing*0.032+landSH.sun.xyz*0.025,1.0);
+ let uv=p.xy*vec2f(0.5,-0.5)+0.5;
+ let fade=landShadowCover(p);
+ if(fade<=0.0){return vec3f(1.0);}
+ let refZ=min(p.z-0.08/max(landSH.sun.w,1.0),0.99999);
+ let s1=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv,refZ);
+ return mix(vec3f(1.0),s1*landClothShadow(uv,refZ),fade);
+}
 fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
  let dx=dpdx(v.world);let dy=dpdy(v.world);let ux=dpdx(v.uv);let uy=dpdy(v.uv);
  // continuumFS computes coverage before shade: skip all normal/shadow/envCube shading on zero-sample air pixels.
@@ -921,7 +934,11 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
    wet=clamp((1.0-roughness)*0.42*(0.35+0.65*exposure),0.0,0.36);
   }
  }
- return landFinishShadowed(v.world,n,colour,diffuse,ambient,wet,roughness,landShadowVisibility(shadowAt,select(n,normalize(shadowAt-v.world+n*1e-6),v.coverage.x!=CONTINUUM_CLUSTER_ENTRY)));
+ let isLeaf=(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY)||((v.layer>>16u)!=0u);
+ let shdN=select(n,normalize(shadowAt-v.world+n*1e-6),v.coverage.x!=CONTINUUM_CLUSTER_ENTRY);
+ var shdVis:vec3f;
+ if(isLeaf){shdVis=forestLeafShadowVis(shadowAt,shdN);}else{shdVis=landShadowVisibility(shadowAt,shdN);}
+ return landFinishShadowed(v.world,n,colour,diffuse,ambient,wet,roughness,shdVis);
 }
 // A leaf card's cut: the samples its coverage takes, nearer leaves reading coverage half a level finer, which shows
 // their shapes, and far ones a little fuller, as a canopy's many small gaps close at a distance (FOREST_CROWN_CLOSING).

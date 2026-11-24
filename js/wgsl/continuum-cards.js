@@ -409,8 +409,8 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
     let w0=1.0-select(f.x,f.y,upper);
     let w1=select(f.y,f.x,upper);
     let w2=abs(f.x-f.y);
-    // Far horizon cards (<= 10 px, mipF >= 2.4) sample only the single dominant octahedral view (2 taps vs 6-12).
-    if(mipF>=2.4){
+    // Far horizon cards (<= 22 px, mipF >= 1.8, where parallax is already off) sample the single dominant octahedral view (2 taps vs 6).
+    if(mipF>=1.8){
       let bestCell=select(select(c2,c1,w1>=w2),c0,w0>=w1&&w0>=w2);
       let tb=continuumCardSampleCell(bestCell,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,false);
       albedo=tb.albedo;alpha=tb.alpha;nLocal=tb.normalLocal;zLocal=tb.zLocal;matFlag=tb.matFlag;

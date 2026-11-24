@@ -74,12 +74,16 @@ test('tree vs grass wind physics: calm wood branches, twisting leaves, quivering
   assert.doesNotMatch(groundSrc, /max\(windParam\.z\s*,\s*4\.8\)/, 'grassWindWave must not clamp grass wind to 4.8 m/s');
 });
 
-test('forest/meadow continuum performance: 256-root GPU block culling, Hi-Z & crown-span thinning, <=8 storage buffers, calibrated profiles', async () => {
+test('forest/meadow continuum performance without visual degradation: GPU block/Hi-Z culling, dead-work elimination, full-fidelity profiles', async () => {
   const { forestContinuumBlocksWGSL, forestContinuumStandWGSL } = await import('../js/wgsl/forest-continuum.js');
+  const { meadowContinuumStandWGSL } = await import('../js/wgsl/meadow-continuum.js');
   const { CONTINUUM_FAMILY_DEFAULTS } = await import('../js/continuum-profiles.js');
 
   const blocksWgsl = forestContinuumBlocksWGSL();
   const standWgsl = forestContinuumStandWGSL();
+  const meadowStandWgsl = meadowContinuumStandWGSL();
+  const terrainSrc = fs.readFileSync(new URL('../js/wgsl/terrain.js', import.meta.url), 'utf8');
+  const forestSrc = fs.readFileSync(new URL('../js/wgsl/forest-continuum.js', import.meta.url), 'utf8');
 
   assert.match(blocksWgsl, /fn forestBuildBlocks\(/, 'blocks module defines forestBuildBlocks');
   assert.match(blocksWgsl, /fn forestStandBlocks\(/, 'blocks module defines forestStandBlocks');
@@ -90,6 +94,9 @@ test('forest/meadow continuum performance: 256-root GPU block culling, Hi-Z & cr
   assert.match(standWgsl, /forestBlockList/, 'forestStandRoots reads visible blocks from forestBlockList');
   assert.match(standWgsl, /continuumHiZOccluded\(/, 'forestStandRoots tests conservative Hi-Z before ground-lift/record writes');
   assert.match(standWgsl, /inShadowRange/, 'forestStandRoots gates shadow-box checks by shadowMaxDistance');
+  assert.match(meadowStandWgsl, /continuumHiZOccluded\(/, 'meadowBlocksInView tests conservative Hi-Z occlusion');
+  assert.match(terrainSrc, /if\(reflStrength>0\.001\)/, 'landFinishShadowed skips dead envCube specular fetch when reflStrength <= 0.001');
+  assert.match(forestSrc, /fn forestLeafShadowVis\(/, 'forest leaves use 1-tap hardware-PCF shadow lookup');
 
   const countStorage = (src) => (src.match(/var<storage\b/g) || []).length;
   assert.ok(countStorage(blocksWgsl) <= 8, `forestBlocks storage buffers (${countStorage(blocksWgsl)}) must stay <= 8`);
@@ -97,7 +104,8 @@ test('forest/meadow continuum performance: 256-root GPU block culling, Hi-Z & cr
 
   const f = CONTINUUM_FAMILY_DEFAULTS.forest;
   const m = CONTINUUM_FAMILY_DEFAULTS.meadow;
-  assert.ok(f.errorScale >= 1.0 && f.taperMetres > 0 && f.taperMetres <= 120, 'forest profile avoids sub-2cm 1.9M-tri veteran cliff');
-  assert.ok(f.splatScale >= 12.0 && f.shadowMaxDistance > 0 && f.shadowMaxDistance <= 180, 'forest profile hands off cleanly to 128px octahedral cards and bounds shadow range');
-  assert.ok(m.errorScale >= 3.0 && m.taperMetres > 0 && m.taperMetres <= 45, 'meadow profile skips 228k/452k-tri sub-3cm grass cliff and tapers smoothly into 2D parallax sward');
+  assert.equal(f.errorScale, 0.44, 'forest preserves sharp 3D leaf fidelity without coarse mid-range banana leaves');
+  assert.equal(f.splatScale, 6.5, 'forest keeps cards at far pixel-perfect range, never premature floppy cards');
+  assert.equal(m.errorScale, 2.5, 'meadow preserves full flyover grass fidelity without chunky squares');
+  assert.equal(m.taperMetres, 0, 'meadow preserves full flyover visibility range');
 });

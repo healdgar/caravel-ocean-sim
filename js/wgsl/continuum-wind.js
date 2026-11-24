@@ -109,10 +109,14 @@ fn continuumWindReach(skeleton:u32,s:vec4f)->f32 { let h=continuumPoses[skeleton
 // A leaf twists and flutters about its petiole as light air sheds eddies off it: brisk torsional roll + tip pitch
 // flutter that catches sunlit sparkles even in a gentle breeze while the heavy wooden branch behind it stays calm.
 fn continuumWindFlutter(record:ContinuumRecord,word:u32,p:ContinuumWindCarried)->ContinuumWindCarried {
+  // Petiole flutter amplitude is 3.2 cm (< 0.4 px beyond 70 m); skip 4x trig + normal basis work on distant trees.
+  let camRel=record.place.xyz+continuumShift()-F.camPos.xyz;
+  let distFade=1.0-smoothstep(48.0,76.0,length(camRel));
+  if(distFade<=0.001){return p;}
   let along=f32((word>>24u)&127u)/127.0;
   let speed=max(F.windP[0].z,0.0);
   let ramp=clamp((speed-2.5)/15.5,0.0,1.0);
-  let swing=smoothstep(0.15,2.2,speed)*mix(0.30,1.0,ramp);
+  let swing=smoothstep(0.15,2.2,speed)*mix(0.30,1.0,ramp)*distFade;
   let phase=f32((word>>18u)&63u)/63.0*6.2831853+f32(record.tag.z&1023u)*0.0061;
   let rate=(6.8+5.6*fract(phase*0.3183))*mix(0.48,1.28,ramp);
   let at=F.camPos.w*rate+phase;
