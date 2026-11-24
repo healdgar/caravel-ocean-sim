@@ -816,6 +816,24 @@ fn forestContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>){
   (*v).layer=select(FOREST_UNTEXTURED,first+layer,textured)|(leaf<<16u);
   return;
  }
+ if(s.what==CONTINUUM_SURFEL_ENTRY){
+  // Pixel-perfect ~1.7 px Level-0 micro-surfel: mean leaf/bark albedo evaluated once in VS (zero FS texture fetch),
+  // carrying exact per-vertex exposure/canopy AO, root-collar height, wind-posed 3D normal, and leaf/bark material optics.
+  let layer=s.high&15u;let leaf=(s.high>>4u)&1u;
+  let word=unpack4x8unorm(s.word);
+  let textured=layer!=${FOREST_CONTINUUM_UNTEXTURED}u;
+  let material=forestNativeMaterials[select(0u,first+layer,textured)];
+  var colour=select(word.rgb*word.rgb,vec3f(1.0),textured);
+  if(textured){colour=forestNativeMean(material);}
+  colour*=tint;
+  let toEye=normalize(continuumEye()-s.world);
+  if(leaf!=0u&&textured&&dot(s.normal,toEye)<0.0){colour=forestLeafUnderside(colour,material,tint);}
+  (*v).colour=colour;
+  (*v).surface=vec4f(f32((s.high>>5u)&255u)/255.,word.a,f32(leaf),s.local.y);
+  (*v).crown=vec4f(material.optics.x,material.optics.z,material.coordinates.w,0.0);
+  (*v).layer=select(FOREST_UNTEXTURED,first+layer,textured)|(leaf<<16u);
+  return;
+ }
  // The far body and the splat: a crown of leaves, or the bare wood below it. Its triangle (or its type's splat) says
  // which, and in what leaf; what it looks like is its vertex's optical moments (rule 3.3), morphed down the chain with
  // its points: the colour of what is seen there, the sky that reaches it, how deep in it is seen and how much light
@@ -879,7 +897,7 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
  var n=normalize(v.normal);var colour=v.colour;var diffuse=0.0;var ambient=0.0;var wet=0.0;var roughness=.9;
  var shadowAt=v.world;
  let exposure=clamp(v.surface.x,0.,1.);
- if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){
+ if(v.coverage.x==CONTINUUM_FAR_ENTRY||v.coverage.x==CONTINUUM_SPLAT_ENTRY){
   // A crown, mottled as its leaves would be. Its shadow is looked up toward the sun past its outermost leaves.
   shadowAt=v.world+F.sunDir.xyz*FOREST_CROWN_SHADOW_LIFT;
   let mottle=mix(1.,forestCrownMottle(v.world),clamp(v.surface.y,0.,1.));
@@ -889,6 +907,28 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
   colour=clamp(v.colour,vec3f(0.),vec3f(4.));let light=clamp(v.crown.xy,vec2f(0.),vec2f(4.,1.));
   let finish=clamp(v.crown.zw,vec2f(0.,.05),vec2f(1.));
   diffuse=light.x*mottle;ambient=light.y*mix(1.,mottle,.6);wet=finish.x;roughness=finish.y;
+ }else if(v.coverage.x==CONTINUUM_SURFEL_ENTRY){
+  // Micro-surfel shading matches Level-0 cluster lighting identically (zero texture fetches, exact canopy/exposure AO).
+  let canopy=clamp(v.surface.y,0.,1.);
+  let leaf=(v.layer>>16u)!=0u;
+  let rawRough=v.crown.x;
+  n=n*select(-1.,1.,dot(n,toEye)>=0.);
+  if(!leaf){
+   let rootCollar=1.0-smoothstep(-0.08,0.95,v.surface.w);
+   colour=mix(colour,colour*vec3f(0.56,0.65,0.46),rootCollar*0.44);
+   roughness=clamp(mix(rawRough,0.95,rootCollar*0.4),0.72,0.98);
+   wet=clamp(v.crown.z*(1.0-roughness)*0.45,0.0,0.12);
+   let woodAO=min(canopy,select(1.0,mix(0.30,1.0,exposure),canopy>0.995&&exposure<0.995))*(1.0-rootCollar*0.34);
+   diffuse=max(dot(n,F.sunDir.xyz),0.)*(.35+.65*woodAO);ambient=(.36+max(n.y,0.)*.25)*woodAO;
+  }else{
+   let nDotL=dot(n,F.sunDir.xyz);
+   let backlit=max(-nDotL,0.)*v.crown.y;
+   colour=forestLeafBacklit(colour,backlit,exposure);
+   diffuse=(max(nDotL,0.)+backlit)*(.22+.78*exposure*exposure)*(.35+.65*canopy);
+   ambient=(.12+exposure*.56+abs(n.y)*.09)*canopy;
+   roughness=clamp(rawRough,0.30,0.92);
+   wet=clamp((1.0-roughness)*0.42*(0.35+0.65*exposure),0.0,0.36);
+  }
  }else{
   let layer=v.layer&0xffffu;let leaf=(v.layer>>16u)!=0u;let textured=layer!=FOREST_UNTEXTURED;
   let material=forestNativeMaterials[select(0u,layer,textured)];
@@ -935,20 +975,25 @@ fn forestContinuumShade(v:ContinuumVarying,front:bool)->vec4f{
   }
  }
  let isLeaf=(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY)||((v.layer>>16u)!=0u);
- let shdN=select(n,normalize(shadowAt-v.world+n*1e-6),v.coverage.x!=CONTINUUM_CLUSTER_ENTRY);
+ let isFar=v.coverage.x==CONTINUUM_FAR_ENTRY||v.coverage.x==CONTINUUM_SPLAT_ENTRY;
+ let shdN=select(n,normalize(shadowAt-v.world+n*1e-6),isFar);
  var shdVis:vec3f;
  if(isLeaf){shdVis=forestLeafShadowVis(shadowAt,shdN);}else{shdVis=landShadowVisibility(shadowAt,shdN);}
  return landFinishShadowed(v.world,n,colour,diffuse,ambient,wet,roughness,shdVis);
 }
 // A leaf card's cut: the samples its coverage takes, nearer leaves reading coverage half a level finer, which shows
 // their shapes, and far ones a little fuller, as a canopy's many small gaps close at a distance (FOREST_CROWN_CLOSING).
-// Bark covers every sample; the far body and its splat what their line of sight does not pass clean through, by a
-// pattern of their own, so trees standing one behind another fill each other's gaps.
+// Bark covers every sample; micro-surfels are circularly masked by continuumSurfelMask (skip corner ALU early here);
+// the far body and its splat keep what their line of sight does not pass clean through.
 fn forestContinuumCoverage(v:ContinuumVarying,front:bool)->u32{
  let ux=dpdx(v.uv);let uy=dpdy(v.uv);
  forestLastHasPigment=false;
  forestLastHasBot=false;
  let layer=v.layer&0xffffu;
+ if(v.coverage.x==CONTINUUM_SURFEL_ENTRY){
+  let m=select(0xffffffffu,0u,dot(v.surfel,v.surfel)>=1.0);
+  forestLastMask=m;return m;
+ }
  if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){
   let m=forestLeafSampleMask(1.-clamp(v.surface.z,0.,1.),continuumHash(v.coverage.z^0x2c1b3c6du),v.position.xy,v.coverage.w);
   forestLastMask=m;return m;

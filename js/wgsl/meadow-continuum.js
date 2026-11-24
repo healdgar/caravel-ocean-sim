@@ -681,13 +681,14 @@ struct MeadowParallaxHit {
   hitH: f32,
   cavityOcc: f32,
   gradXZ: vec2f,
-  detailEnergy: f32
+  detailEnergy: f32,
+  grazeIntercept: f32
 };
 
 // High-frequency, Nyquist-band-limited vertical grass-blade & straw-stalk field for seamless 2D FAR & SPLAT grass.
-// Uses fine stalk scales (~4.5 cm, ~9.5 cm, ~26 cm, ~1.0 m) — ZERO 32 cm smooth moss pillows, ZERO stacked pancake
-// slices, ZERO bulbous cushion normals — so the 3D -> 2D MSAA handoff matches crisp sunlit blades & golden oat tips
-// seamlessly at any viewing angle and runs ~3x faster on GPU fragment ALU!
+// Uses Beer-Lambert grazing canopy interception height h_bar(cosV) = 1 - (cosV/tau)*(1 - exp(-tau/cosV)) so standing
+// grazing views preserve golden oat seed-heads & vertical shadow contrast seamlessly across the 3D -> 2D handoff while
+// steep hillsides and top-down flyovers remain lush green with zero coarse pancake slices.
 fn meadowParallaxSward(
   unshiftedWorldXZ: vec2f,
   viewDir: vec3f,
@@ -695,7 +696,8 @@ fn meadowParallaxSward(
   gust: f32,
   bendSlope: f32,
   footPixel: f32,
-  dist: f32
+  dist: f32,
+  cosV: f32
 ) -> MeadowParallaxHit {
   // Strict Nyquist band-limiting per stalk scale so each octave fades cleanly into its exact mean before aliasing:
   let wBlade = 1.0 - smoothstep(0.014, 0.048, footPixel); // ~4.5 cm individual blade needles (near/mid top-down & mid grazing)
@@ -704,13 +706,17 @@ fn meadowParallaxSward(
   let wSward = 1.0 - smoothstep(0.45, 1.85, footPixel);   // ~1.1 m organic pasture density & shade (~100 m..1.5 km)
   let detailEnergy = clamp(wBlade * 0.34 + wStalk * 0.34 + wTuft * 0.22 + wSward * 0.10, 0.0, 1.0);
 
+  let cV = clamp(cosV, 0.04, 1.0);
+  let blIntercept = 1.0 - (cV / 2.2) * (1.0 - exp(-2.2 / cV));
+  let grazeIntercept = clamp((blIntercept - 0.596) / 0.377, 0.0, 1.0);
+
   let canopyH = 0.28;
   // Subtle single-layer view-ray + wind-bend parallax displacement (clamped smoothly so grazing angles never smear!)
   let rayShift = -viewDir.xz / max(abs(viewDir.y), 0.45) * (0.12 * canopyH);
   let bendShift = -windDir * ((0.05 + 0.22 * gust + 0.14 * bendSlope) * canopyH * 0.55);
   let p = unshiftedWorldXZ + bendShift + rayShift;
 
-  var h = 0.56;
+  var h = mix(0.55, 0.79, grazeIntercept);
   var tipSpeck = 0.0;
   var crevice = 0.0;
   var microTilt = vec2f(0.0);
@@ -755,8 +761,8 @@ fn meadowParallaxSward(
     tipSpeck += smoothstep(0.20, 0.75, nW) * (0.12 * wSward);
   }
 
-  let finalH = clamp(h + tipSpeck * 0.26, 0.24, 0.98);
-  return MeadowParallaxHit(finalH, clamp(crevice, 0.0, 0.65), microTilt, detailEnergy);
+  let finalH = clamp(h + tipSpeck * mix(0.26, 0.18, grazeIntercept), 0.24, 0.98);
+  return MeadowParallaxHit(finalH, clamp(crevice, 0.0, 0.65), microTilt, detailEnergy, grazeIntercept);
 }
 `;
 
@@ -917,16 +923,16 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let footPixel = mix(max(isoFoot, minorFoot), majorFoot, 0.22);
 
   let view = normalize(F.camPos.xyz - world);
-  let viewGrazing = clamp(1.0 - abs(dot(view, normalize(v.normal))), 0.0, 1.0);
+  let cosV = abs(dot(view, normalize(v.normal)));
+  let viewGrazing = clamp(1.0 - cosV, 0.0, 1.0);
   let horizGraze = clamp(1.0 - abs(view.y), 0.0, 1.0);
   let grazeFactor = smoothstep(0.18, 0.88, max(viewGrazing, horizGraze));
 
-  // On FAR & SPLAT, step a real 5-layer view-ray parallax volumetric grass shell through the 0.36 m canopy;
-  // on physical 3D CLUSTER blades, evaluate the lighter surface micro-detail field.
+  // On FAR & SPLAT, evaluate Beer-Lambert grazing-matched volumetric sward; on 3D CLUSTER blades, evaluate lighter detail.
   var sd = vec4f(0.5, 0.0, 0.0, 0.0);
-  var para = MeadowParallaxHit(along, 0.0, vec2f(0.0), 1.0);
+  var para = MeadowParallaxHit(along, 0.0, vec2f(0.0), 1.0, 0.0);
   if (isContinuum) {
-    para = meadowParallaxSward(unshiftedWorldXZ, view, windDir, gust, bendSlope, footPixel, v.flow.z);
+    para = meadowParallaxSward(unshiftedWorldXZ, view, windDir, gust, bendSlope, footPixel, v.flow.z, cosV);
   } else {
     sd = meadowSwardDetail(unshiftedWorldXZ, footPixel, windDir, gust);
   }
@@ -974,12 +980,13 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   );
   let tussockLum = clamp(v.colour.g / 0.142, 0.72, 1.28);
   var grassPigment = mix(v.colour * 1.06, patchGreen * tussockLum, 0.44);
-  // Crisp golden oat seed-heads ONLY on the highest tuft tips (hitH > 0.78, matching CLUSTER smoothstep(0.76, 0.94, along)).
-  // Past tuft resolution on distant hills (detailEnergy -> 0), keep only the subtle ~11% area-average tip warmth.
-  let farTipAvg = (1.0 - para.detailEnergy) * (0.08 + 0.07 * smoothstep(0.38, 0.72, hitH));
+  // Crisp golden oat seed-heads on tall tips (matching CLUSTER smoothstep(0.76, 0.94, along)) and Beer-Lambert
+  // grazing expectation past tuft resolution so standing grazing views stay warm wheat while steep hills/flyover stay green.
+  let farTipBase = 0.08 + 0.07 * smoothstep(0.38, 0.72, hitH);
+  let farTipAvg = (1.0 - para.detailEnergy) * mix(farTipBase, 0.48, para.grazeIntercept);
   let oatHeadT = select(
     smoothstep(0.76, 0.94, along),
-    clamp(smoothstep(0.78, 0.95, hitH) + farTipAvg, 0.0, 0.92),
+    clamp(smoothstep(0.76, 0.94, hitH) + farTipAvg, 0.0, 0.92),
     isContinuum
   );
   grassPigment = mix(grassPigment, goldenOatTip, oatHeadT * 0.82);
@@ -993,9 +1000,9 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
 
   let organCol = mix(grassPigment, v.colour * 1.06, isFlower);
   let clusterAO = mix(0.46, 1.0, smoothstep(0.0, 0.55, along));
-  let paraAO = mix(0.56, 1.0, smoothstep(0.24, 0.82, hitH))
-             * (1.0 - para.cavityOcc * 0.14);
-  let ao = select(clusterAO, clamp(paraAO, 0.50, 1.0), isContinuum);
+  let paraAO = mix(0.48, 1.0, smoothstep(0.24, 0.86, hitH))
+             * (1.0 - para.cavityOcc * mix(0.14, 0.28, para.grazeIntercept));
+  let ao = select(clusterAO, clamp(paraAO, 0.46, 1.0), isContinuum);
   let shadedBladeCol = organCol * mix(1.0, ao, swardWeight * 0.78);
   let shadowedUnderGround = groundCol * mix(1.0, 0.52, marginFade);
   var baseCol = mix(shadowedUnderGround, shadedBladeCol, select(1.0, swardWeight, isContinuum));
@@ -1060,10 +1067,10 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let bakedLight = textureSampleLevel(landLight, sampC, clamp(landUV, vec2f(0.0), vec2f(1.0)), 0.0).rg;
   let terrainSun = mix(1.0, bakedLight.r, inDomain);
   let sunlight = terrainSun * solarShadowVisibility(vec3f(cloudShadowAt(world * 0.001, F.sunDir.xyz))).x;
-  // The shadow map is drawn in the scene's frame, as the one cut casts into it; skip beyond meadow shadowMaxDistance (32 m).
+  // Receive cast shadows from trees, buildings, and hulls across the full shadow frustum (meadowShadowVis fades at edges).
   var shadowVis = vec3f(1.0);
-  if (dist < 34.0) {
-    shadowVis = mix(meadowShadowVis(v.world, n), vec3f(1.0), smoothstep(28.0, 34.0, dist));
+  if (dist < 220.0) {
+    shadowVis = meadowShadowVis(v.world, n);
   }
   let direct = sunIlluminance() * sunlight * solarShadowVisibility(shadowVis);
 

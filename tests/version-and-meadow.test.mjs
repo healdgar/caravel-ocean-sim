@@ -109,3 +109,86 @@ test('forest/meadow continuum performance without visual degradation: GPU block/
   assert.equal(m.errorScale, 2.5, 'meadow preserves full flyover grass fidelity without chunky squares');
   assert.equal(m.taperMetres, 0, 'meadow preserves full flyover visibility range');
 });
+
+test('universal One-Continuum prefix micro-surfels and Beer-Lambert grazing meadow continuity', async () => {
+  const {
+    CONTINUUM_HEADER, CONTINUUM_SURFEL_ENTRY, CONTINUUM_SURFEL_HEADER_WORDS, CONTINUUM_SURFEL_WORDS,
+    packContinuumBody, assembleContinuumAtlas, continuumFinestClusters, continuumPiecesFar, buildContinuumSurfels,
+  } = await import('../js/continuum-format.js');
+  const { continuumModuleWGSL } = await import('../js/wgsl/continuum-cut.js');
+  await import('../js/wgsl/continuum-wind.js');
+
+  assert.equal(CONTINUUM_HEADER.surfels, 22, 'atlas header reserves slot 22 for universal surfels');
+  assert.equal(CONTINUUM_SURFEL_ENTRY, 4, 'CONTINUUM_SURFEL_ENTRY uses distinct 4-bit list tag 4');
+
+  // Synthesize a 600-triangle 3D cube-grid test mesh and verify blue-noise prefix surfel packing.
+  const positions = [];
+  const normals = [];
+  const indices = [];
+  const parts = [];
+  const side = 10;
+  for (let iz = 0; iz <= side; iz++) {
+    for (let ix = 0; ix <= side; ix++) {
+      for (let face = 0; face < 3; face++) {
+        const u = ix / side, v = iz / side;
+        const p = face === 0 ? [u * 4, v * 4, 0] : face === 1 ? [u * 4, 0, v * 4] : [0, u * 4, v * 4];
+        const n = face === 0 ? [0, 0, 1] : face === 1 ? [0, 1, 0] : [1, 0, 0];
+        positions.push(...p); normals.push(...n); parts.push(face);
+      }
+    }
+  }
+  const strideX = 3, strideZ = (side + 1) * 3;
+  for (let iz = 0; iz < side; iz++) {
+    for (let ix = 0; ix < side; ix++) {
+      for (let face = 0; face < 3; face++) {
+        const a = iz * strideZ + ix * strideX + face;
+        const b = a + strideX, c = a + strideZ, d = c + strideX;
+        indices.push(a, b, d, a, d, c);
+      }
+    }
+  }
+  const welded = {
+    position: new Float32Array(positions),
+    normal: new Float32Array(normals),
+    index: new Uint32Array(indices),
+    part: new Uint32Array(parts),
+    count: positions.length / 3,
+  };
+  const clusters = continuumFinestClusters(welded);
+  const far = { ...continuumPiecesFar(), splat: { rx: 2.2, ry: 2.2, centre: [2, 2, 2] } };
+  const body = packContinuumBody({ triangles: indices.length / 3 }, { welded, clusters, far });
+  const atlas = assembleContinuumAtlas([body.words]);
+  const built = buildContinuumSurfels(atlas, { maxSurfels: 512, minLevel0Tris: 256 });
+  assert.ok(built.counts[0] >= 256 && built.counts[0] <= 512, `built ${built.counts[0]} surfels for generic 3D body`);
+  const f32 = new Float32Array(built.words.buffer);
+  const areaR = f32[2], handoffErr = f32[3];
+  assert.ok(areaR > 1.5 && areaR < 5.0, `physically plausible projected areaRadius=${areaR}`);
+  assert.ok(handoffErr >= 0.71 * areaR / Math.sqrt(built.counts[0]), 'handoffError enforces sub-2px surfel guarantee');
+  assert.equal(built.words.length, CONTINUUM_SURFEL_HEADER_WORDS + built.counts[0] * CONTINUUM_SURFEL_WORDS);
+  // First 32 surfels (tiny prefix) must span all 3 orthogonal faces (blue-noise Morton bit-reversal stratification).
+  const prefixParts = new Set();
+  for (let i = 0; i < 32; i++) {
+    const meta = built.words[CONTINUUM_SURFEL_HEADER_WORDS + i * CONTINUUM_SURFEL_WORDS + 1];
+    prefixParts.add(meta >>> 16);
+  }
+  assert.equal(prefixParts.size, 3, 'even a 32-surfel prefix spans all 3 spatial faces uniformly');
+
+  const selectWgsl = continuumModuleWGSL({ pass: 'select' });
+  const visWgsl = continuumModuleWGSL({ pass: 'visibility' });
+  const meadowSrc = fs.readFileSync(new URL('../js/wgsl/meadow-continuum.js', import.meta.url), 'utf8');
+  const forestSrc = fs.readFileSync(new URL('../js/wgsl/forest-continuum.js', import.meta.url), 'utf8');
+  const forestScenerySrc = fs.readFileSync(new URL('../js/forest-scenery.js', import.meta.url), 'utf8');
+  const hairSrc = fs.readFileSync(new URL('../js/hair-continuum.js', import.meta.url), 'utf8');
+
+  assert.match(selectWgsl, /continuumSurfelHeader\(/, 'continuumSelect queries universal surfel header');
+  assert.match(selectWgsl, /CONTINUUM_SURFEL_ENTRY/, 'continuumSelect emits CONTINUUM_SURFEL_ENTRY chunks into list 2');
+  assert.match(selectWgsl, /farError\*0\.44,lowGrounded/, 'lowGrounded meadow hands off before bloated Level 7 squares');
+  assert.match(visWgsl, /continuumSurfelFill\(/, 'continuumVisibility expands universal micro-surfels');
+  assert.match(visWgsl, /continuumSurfelMask\(/, 'continuumVisibility applies zero-discard circular MSAA disc mask');
+  assert.doesNotMatch(visWgsl, /\bdiscard\b/, 'continuumVisibility never uses discard (TBDR rule 2)');
+  assert.match(forestSrc, /CONTINUUM_SURFEL_ENTRY/, 'forest material shades micro-surfels without FS leaf texture fetches');
+  assert.match(forestScenerySrc, /surfels:\s*\{\s*foliage:\s*true/, 'forest enables foliage micro-surfel prefix stream');
+  assert.match(hairSrc, /surfels:\s*\{\s*maxSurfels:/, 'hair enables micro-surfel prefix stream');
+  assert.match(meadowSrc, /blIntercept\s*=\s*1\.0\s*-\s*\(cV\s*\/\s*2\.2\)/, 'meadowParallaxSward uses Beer-Lambert grazing canopy interception');
+  assert.match(meadowSrc, /if\s*\(dist\s*<\s*220\.0\)/, 'meadow receives tree/building shadows across full shadow frustum');
+});

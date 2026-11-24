@@ -104,7 +104,7 @@ export function loadHairContinuum(device, { fetchAsset = fetch } = {}) {
       label: 'hair continuum',
       fetchAsset,
     }).then(({ manifest, words }) => {
-      const atlas = uploadContinuumAtlas(device, words, 'hair continuum');
+      const atlas = uploadContinuumAtlas(device, words, 'hair continuum', { surfels: { maxSurfels: 4096 } });
       return { manifest, words: continuumAtlasMetaWords(words), types: atlas.types, atlas };
     }).catch((err) => {
       if (hairContinuumCache.get(device) === pending) hairContinuumCache.delete(device);

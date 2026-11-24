@@ -29,7 +29,8 @@ import {
   CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES, CONTINUUM_VIEW_LISTS,
   CONTINUUM_TYPE_PIECES, CONTINUUM_TYPE_DETAIL_SHIFT, CONTINUUM_KIND, CONTINUUM_KIND_SHIFT, CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_BROKEN, CONTINUUM_EXACT, CONTINUUM_SEA,
   CONTINUUM_IMPORTANT_FLAG, CONTINUUM_SHATTERED, CONTINUUM_DAMAGED, CONTINUUM_STRETCHED, CONTINUUM_STREAMS, CONTINUUM_SURFACE_RANGE,
-  CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY,
+  CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY, CONTINUUM_SURFEL_ENTRY,
+  CONTINUUM_SURFEL_HEADER_WORDS, CONTINUUM_SURFEL_WORDS, CONTINUUM_SURFEL_SCALE_MAX,
 } from '../continuum-format.js';
 import { continuumKindsWGSL } from './continuum-kinds.js';
 import { CONTINUUM_GROUNDED, continuumGroundWGSL } from '../continuum-ground.js';
@@ -127,6 +128,13 @@ const CONTINUUM_NO_VERTEX:u32=0xffffffffu;
 const CONTINUUM_CLUSTER_ENTRY:u32=${CONTINUUM_CLUSTER_ENTRY}u;
 const CONTINUUM_FAR_ENTRY:u32=${CONTINUUM_FAR_ENTRY}u;
 const CONTINUUM_SPLAT_ENTRY:u32=${CONTINUUM_SPLAT_ENTRY}u;
+const CONTINUUM_SURFEL_ENTRY:u32=${CONTINUUM_SURFEL_ENTRY}u;
+fn continuumSurfelHeader(model:u32)->vec4u {
+  let base=continuumAtlas[${CONTINUUM_HEADER.surfels}u];
+  if(base==0u){return vec4u(0u);}
+  let at=base+model*${CONTINUUM_SURFEL_HEADER_WORDS}u;
+  return vec4u(continuumWord(at),continuumWord(at+1u),continuumWord(at+2u),continuumWord(at+3u));
+}
 fn continuumTypeOf(record:ContinuumRecord)->u32 { return record.tag.x&65535u; }
 fn continuumKindOf(record:ContinuumRecord)->u32 { return (record.tag.x>>CONTINUUM_KIND_SHIFT)&15u; }
 fn continuumFlagged(record:ContinuumRecord,flags:u32)->bool { return (record.tag.x&flags)!=0u; }
@@ -577,30 +585,60 @@ fn continuumTry(slot:u32,i:u32)->u32 {
             if(!rangeKept){
               share=255u;splatShare=255u;splatScale=0.0;
             }else if(!alone){
-              let start=farError*scale*focal/max(pixels,1e-4);
-              share=u32(round(continuumHandoff(away,start)*255.0));
+              let surfelHdr=continuumSurfelHeader(model);
+              let hasSurfels=surfelHdr.y>0u&&!continuumFlagged(record,CONTINUUM_STRUCK);
+              let singleSided=(continuumView.counts.w&0x80000000u)!=0u;
+              let surfelAreaR=bitcast<f32>(surfelHdr.z)*scale*select(1.0,1.4142136,singleSided);
+              let effFarError=select(select(farError,farError*0.44,lowGrounded),bitcast<f32>(surfelHdr.w),hasSurfels);
+              var start=effFarError*scale*focal/max(pixels,1e-4);
+              if(hasSurfels){
+                // Enforce hard pixel-scale ceiling: never activate surfels closer than where maxSurfels stays <= 1.35 px radius.
+                let minSurfelDist=(surfelAreaR/sqrt(max(f32(surfelHdr.y),1.0)))*focal/1.35;
+                start=max(start,minSurfelDist);
+              }
+              let band=select(CONTINUUM_HANDOFF_BAND,0.65,lowGrounded&&!hasSurfels);
+              share=u32(round(clamp((away-start)/max(start*band,1e-6),0.0,1.0)*255.0));
               let stretch=continuumStretch(record);
               let span=2.0*max(continuumTypeF(model,${CONTINUUM_TYPE.splatRx}u)*0.5*(stretch.x+stretch.z),continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*stretch.y)*record.place.w*focal/away;
               let basePixels=continuumImportance(continuumView.scene.x,isImportant);
               splatShare=u32(round(continuumProfileSplatShare(span,basePixels,continuumView.curve)*255.0));
-              // When relightable octahedral G-buffer cards are attached to this scene (continuumView.scene.w > 0.5),
-              // hand off directly from textured 3D clusters into the card (list 3) across the MSAA band, bypassing
-              // coarse polygonal far-body facets. Struck instances stay on clusters so felled/damaged shapes hold.
+              // When relightable octahedral G-buffer cards are attached to this scene (continuumView.scene.w > 0.5):
+              //   - With universal prefix micro-surfels, crisp clusters hand off to ~1.1 px micro-surfels (list 2),
+              //     which then hand off seamlessly to the pixel-dense octahedral card (list 3) at far distance.
+              //   - Without surfels, clusters hand off directly into the card across the MSAA band.
               let hasCards=continuumView.scene.w>0.5&&!continuumFlagged(record,CONTINUUM_STRUCK);
-              if(hasCards){share=splatShare;splatShare=255u;}
+              if(hasCards){
+                if(hasSurfels){share=max(share,splatShare);}
+                else{share=splatShare;splatShare=255u;}
+              }
               if(share>0u){
                 splatScale=continuumProfileThin(span,select(away,0.0,isImportant),continuumView.limits,seed);
                 if(splatShare>0u&&splatScale>0.0){
                   wantCard=1u;
                 }
                 if(splatShare<255u){
-                  for(var j=0u;j<CONTINUUM_LEVELS;j++){
-                    let chosen=continuumMorphStep(steps,pixels*continuumLevel(j)*away/(focal*scale));
-                    var s=u32(chosen.x);var m=chosen.y;
-                    if(s<farFirst){s=farFirst;m=0.0;}
-                    if(j==0u){atomicAdd(&continuumCounted[2],continuumStepWord(model,s,0u));}
-                    let chunks=continuumChunks(model,s);let at=continuumReserve(2u,chunks);
-                    if(at!=CONTINUUM_FULL){step=s;morph=m;far.x=at;far.y=chunks;break;}
+                  if(hasSurfels){
+                    let nominalPx=max(CONTINUUM_BASE_PIXEL_ERROR*max(continuumView.curve.x,0.05),0.25);
+                    let targetPx=clamp(1.05*sqrt(max(pixels/nominalPx,0.5)),0.98,1.48);
+                    let baseRad=targetPx*away/max(focal,1e-4);
+                    let baseN=clamp((surfelAreaR*surfelAreaR)/max(baseRad*baseRad,1e-6),32.0,f32(surfelHdr.y));
+                    for(var j=0u;j<CONTINUUM_LEVELS;j++){
+                      let nJ=max(32.0,baseN/f32(1u<<j));
+                      let nCount=min(surfelHdr.y,u32(ceil(nJ)));
+                      if(j==0u){atomicAdd(&continuumCounted[2],nCount);}
+                      let chunks=(nCount+${CONTINUUM_CHUNK_TRIANGLES - 1}u)/${CONTINUUM_CHUNK_TRIANGLES}u;
+                      let at=continuumReserve(2u,chunks);
+                      if(at!=CONTINUUM_FULL){step=nCount;morph=nJ;far.x=at;far.y=chunks|0x80000000u;break;}
+                    }
+                  }else{
+                    for(var j=0u;j<CONTINUUM_LEVELS;j++){
+                      let chosen=continuumMorphStep(steps,pixels*continuumLevel(j)*away/(focal*scale));
+                      var s=u32(chosen.x);var m=chosen.y;
+                      if(s<farFirst){s=farFirst;m=0.0;}
+                      if(j==0u){atomicAdd(&continuumCounted[2],continuumStepWord(model,s,0u));}
+                      let chunks=continuumChunks(model,s);let at=continuumReserve(2u,chunks);
+                      if(at!=CONTINUUM_FULL){step=s;morph=m;far.x=at;far.y=chunks;break;}
+                    }
                   }
                 }
               }
@@ -738,10 +776,12 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       }
     }
   }
-  // Each far body's pieces, and its shadow's.
+  // Each far body's (or micro-surfel prefix's) pieces, and its shadow's.
   for(var k=0u;k<CONTINUUM_BATCH;k++){
     let far=continuumSlotFar[k];
-    if(far.x!=CONTINUUM_FULL){for(var c=lane;c<far.y;c+=${W}u){continuumLists[far.x+c]=vec2u(batch+k,c|(CONTINUUM_FAR_ENTRY<<28u));}}
+    let farCount=far.y&0x7fffffffu;
+    let farTag=select(CONTINUUM_FAR_ENTRY,CONTINUUM_SURFEL_ENTRY,(far.y&0x80000000u)!=0u);
+    if(far.x!=CONTINUUM_FULL){for(var c=lane;c<farCount;c+=${W}u){continuumLists[far.x+c]=vec2u(batch+k,c|(farTag<<28u));}}
     if(far.z!=CONTINUUM_FULL){for(var c=lane;c<far.w;c+=${W}u){continuumLists[far.z+c]=vec2u(batch+k,c|(CONTINUUM_FAR_ENTRY<<28u));}}
   }
   // The real triangles the scene's error asked of this workgroup, for the census: once a workgroup.
@@ -809,8 +849,19 @@ fn continuumMask(coverage:vec4u,pixel:vec2f,salt:u32)->u32 {
   let handoff=continuumSamples(f32(coverage.y&255u)/255.0,pixel,samples,seed);
   let splat=handoff&continuumSamples(f32((coverage.y>>8u)&255u)/255.0,pixel,samples,seed+7u);
   if(coverage.x==CONTINUUM_CLUSTER_ENTRY){return all&~handoff;}
-  if(coverage.x==CONTINUUM_FAR_ENTRY){return handoff&~splat;}
+  if(coverage.x==CONTINUUM_FAR_ENTRY||coverage.x==CONTINUUM_SURFEL_ENTRY){return handoff&~splat;}
   return splat;
+}
+fn continuumSurfelMask(coverage:vec4u,surfel:vec2f,pixel:vec2f,salt:u32)->u32 {
+  let base=continuumMask(coverage,pixel,salt);
+  if(coverage.x!=CONTINUUM_SURFEL_ENTRY||base==0u){return base;}
+  let r2=dot(surfel,surfel);
+  if(r2>=1.0){return 0u;}
+  if(r2<=0.64){return base;}
+  let discCov=1.0-smoothstep(0.64,1.0,r2);
+  let samples=clamp(coverage.w,1u,8u);
+  let seed=coverage.z*0x9e3779b9u+salt+0x3b8c5a1du;
+  return base&continuumSamples(discCov,pixel,samples,seed);
 }
 `;
 
@@ -852,8 +903,66 @@ fn continuumClipPulled(world:vec3f,pull:f32)->vec4f {
 fn continuumClip(world:vec3f)->vec4f { return F.viewProj*vec4f(earthCurve(world+continuumShift()-F.camPos.xyz,F.camPos.y),1.0); }
 // The eye, in the scene's frame.
 fn continuumEye()->vec3f { return F.camPos.xyz-continuumShift(); }
-// A corner of a cluster or far-body entry as a material reads it, or false where the entry draws nothing there.
+// One view-facing micro-surfel triangle expanded directly from a Level-0 atlas vertex (preserving every pose kind,
+// skin/wind/surface stream, and material attribute), smoothly shrinking tail surfels over the last 18% of the prefix.
+fn continuumSurfelFill(s:ptr<function,ContinuumSurface>,record:ContinuumRecord,chunk:u32,vertex:u32,countFloat:f32,lift:vec3f)->bool {
+  let model=(*s).model;
+  let hdr=continuumSurfelHeader(model);
+  let sIdx=chunk*${CONTINUUM_CHUNK_TRIANGLES}u+vertex/3u;
+  let nFloat=max(countFloat,1.0);
+  if(hdr.y==0u||sIdx>=hdr.y||f32(sIdx)>=nFloat){return false;}
+  let payloadBase=continuumAtlas[${CONTINUUM_HEADER.surfels}u]+continuumAtlas[${CONTINUUM_HEADER.typeCount}u]*${CONTINUUM_SURFEL_HEADER_WORDS}u;
+  let at=payloadBase+(hdr.x+sIdx)*${CONTINUUM_SURFEL_WORDS}u;
+  let vIdx=continuumWord(at);
+  let surfelMeta=continuumWord(at+1u);
+  let relRadius=f32(surfelMeta&65535u)*(${CONTINUUM_SURFEL_SCALE_MAX.toFixed(4)}/65535.0);
+  let part=surfelMeta>>16u;
+  let p=continuumPointAt(model,vIdx);
+  let posed=continuumPose(record,part,vIdx,continuumUnposed(p.position,p.normal));
+  if(posed.hidden){return false;}
+  let centre=continuumPlace(record,posed.position)+lift;
+  let nWorld=continuumTurnNormal(record,posed.normal);
+  let eye=continuumEye();
+  let toEyeVec=eye-centre;
+  let dist=max(length(toEyeVec),1e-3);
+  let toEye=toEyeVec/dist;
+  let singleSided=(continuumView.counts.w&0x80000000u)!=0u;
+  if(singleSided&&dot(nWorld,toEye)< -0.25){return false;}
+  let scale=continuumScale(record);
+  let areaR=bitcast<f32>(hdr.z)*scale*select(1.0,1.4142136,singleSided);
+  let tailT=clamp((nFloat-f32(sIdx))/max(nFloat*0.18,1.0),0.0,1.0);
+  let focal=F.screen.y/max(2.0*length(F.camUp.xyz),1e-4);
+  let minWorldR=0.72*dist/max(focal,1e-4);
+  let maxWorldR=max(continuumTypeF(model,${CONTINUUM_TYPE.sphere + 3}u)*scale*0.28,minWorldR);
+  let rad=clamp((areaR/sqrt(nFloat))*relRadius,minWorldR,maxWorldR)*sqrt(tailT);
+  let refUp=select(vec3f(0.0,1.0,0.0),vec3f(1.0,0.0,0.0),abs(toEye.y)>0.98);
+  var right=normalize(cross(refUp,toEye));
+  var up=cross(toEye,right);
+  var radX=rad;var radY=rad;
+  if(!singleSided){
+    // Area-preserving organic leaf/strand aspect (0.74 * 1.35 ~= 1.0) at a deterministic per-surfel angle so
+    // double-sided foliage/hair micro-surfels read as tiny natural leaves/strands rather than identical round dots.
+    let ang=f32(continuumHash(vIdx^(sIdx*2654435761u))&1023u)*(6.2831853/1024.0);
+    let ca=cos(ang);let sa=sin(ang);
+    let rRot=right*ca+up*sa;
+    let uRot=-right*sa+up*ca;
+    right=rRot;up=uRot;
+    radX=rad*0.74;radY=rad*1.35;
+  }
+  let cIdx=vertex%3u;
+  let triCorner=select(select(vec2f(1.7320508,-1.0),vec2f(-1.7320508,-1.0),cIdx==1u),vec2f(0.0,2.0),cIdx==0u);
+  (*s).local=posed.position;
+  (*s).world=centre+right*(triCorner.x*radX)+up*(triCorner.y*radY);
+  (*s).normal=nWorld;
+  (*s).high=p.high;(*s).word=p.word;(*s).vertex=vIdx;
+  (*s).wear=max(posed.wear,continuumSurfaceWear(vIdx));
+  (*s).corner=triCorner;
+  (*s).optics=CONTINUUM_NEAR_OPTICS;(*s).albedo=vec4f(0.0);
+  return true;
+}
+// A corner of a cluster, far-body, or micro-surfel entry as a material reads it, or false where the entry draws nothing there.
 fn continuumSurfaceOf(s:ptr<function,ContinuumSurface>,record:ContinuumRecord,what:u32,item:u32,vertex:u32,step:u32,morph:f32,lift:vec3f)->bool {
+  if(what==CONTINUUM_SURFEL_ENTRY){return continuumSurfelFill(s,record,item,vertex,morph,lift);}
   var corner:ContinuumCorner;
   if(what==CONTINUUM_CLUSTER_ENTRY){corner=continuumClusterCorner(record,item,vertex);}
   else{corner=continuumFarCorner(record,(*s).model,item,vertex,step,morph);}
@@ -909,9 +1018,10 @@ struct ContinuumVarying {
   @invariant @builtin(position) position:vec4f,
   @location(0) world:vec3f,
   @location(1) normal:vec3f,
-  @location(2) @interpolate(flat) coverage:vec4u,   // x the entry (1 clusters, 2 far body, 3 splat), y handoff | splat << 8, z the record's seed, w samples
+  @location(2) @interpolate(flat) coverage:vec4u,   // x the entry (1 clusters, 2 far body, 3 splat, 4 micro-surfel), y handoff | splat << 8, z the record's seed, w samples
   @location(3) optics:vec4f,                         // its optical moments (ContinuumSurface.optics)
-${continuumVaryingFields(material.varyings, 4)}
+  @location(4) surfel:vec2f,                         // micro-surfel local disc corner (0 for non-surfel entries)
+${continuumVaryingFields(material.varyings, 5)}
 };
 struct ContinuumCoverage { @location(0) colour:vec4f, @builtin(sample_mask) mask:u32 };
 // One corner of an entry. Coarse: an entry of the shadow map's lists, its far body at the step its shadow takes,
@@ -938,6 +1048,7 @@ fn continuumVertex(vertex:u32,listed:ContinuumEntry,coarse:bool)->ContinuumVaryi
   }else if(!continuumSurfaceOf(&s,record,what,item,vertex,state.y&65535u,bitcast<f32>(state.z),lift)){out.position=CONTINUUM_HIDDEN;return out;}
   out.world=s.world+vec3f(touched);
   out.normal=s.normal;out.optics=s.optics;
+  out.surfel=select(vec2f(0.0),s.corner,what==CONTINUUM_SURFEL_ENTRY);
   out.position=continuumClipPulled(out.world,pull);
   out.coverage=vec4u(what,state.x&65535u,record.tag.z,continuumView.counts.y);
   ${material.name}Varying(s,&out);
@@ -1001,7 +1112,8 @@ const continuumVisibilityWGSL = () => /* wgsl */`
 @group(0) @binding(0) var<uniform> F:Frame;
 struct ContinuumVisibilityVarying {
   @invariant @builtin(position) position:vec4f,
-  @location(0) @interpolate(flat) coverage:vec4u
+  @location(0) @interpolate(flat) coverage:vec4u,
+  @location(1) surfel:vec2f
 };
 @vertex fn continuumVisibilityVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVisibilityVarying {
   let touched=continuumBindings();
@@ -1020,13 +1132,14 @@ struct ContinuumVisibilityVarying {
   }else if(!continuumSurfaceOf(&s,record,what,item,vertex,state.y&65535u,bitcast<f32>(state.z),lift)){out.position=CONTINUUM_HIDDEN;return out;}
   out.position=continuumClipPulled(s.world+vec3f(touched),pull);
   out.coverage=vec4u(what,state.x&65535u,record.tag.z,continuumView.counts.y);
+  out.surfel=select(vec2f(0.0),s.corner,what==CONTINUUM_SURFEL_ENTRY);
   return out;
 }
 // Return a struct carrying @location(0) vec4f alongside @builtin(sample_mask) u32: Safari/WebKit WebGPU
 // rejects a bare scalar u32 return type (MTLDataTypeUInt=33) when targets[0] is rgba16float (115), even with writeMask: 0.
 struct ContinuumVisibilityOut { @location(0) colour:vec4f, @builtin(sample_mask) mask:u32 };
 @fragment fn continuumVisibilityFS(v:ContinuumVisibilityVarying)->ContinuumVisibilityOut {
-  return ContinuumVisibilityOut(vec4f(0.0), continuumMask(v.coverage,v.position.xy,continuumView.counts.w&0x7fffffffu));
+  return ContinuumVisibilityOut(vec4f(0.0), continuumSurfelMask(v.coverage,v.surfel,v.position.xy,continuumView.counts.w&0x7fffffffu));
 }
 `;
 
@@ -1138,8 +1251,8 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
     : 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { if(F.screen.x>=0.0&&captureMode.x<.5){return colour;} return surfaceAir(colour,world); }\n';
   const body = material.prelude(pass) + (material.core ? '' : CONTINUUM_CORE_WGSL) + continuumDataWGSL(material.data.group, material.data.binding, 'read', paging)
     + continuumCommonWGSL(paging) + continuumKindsWGSL() + continuumTouchWGSL(paging) + CONTINUUM_SPLAT + CONTINUUM_SURFACE + continuumVaryingWGSL(material) + air + material.wgsl();
-  // The samples a fragment keeps: its share of the handoff, and the material's mask and coverage where it has them.
-  const mask = `continuumMask(v.coverage,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''}${material.coverage ? `&${material.name}Coverage(v,front)` : ''}`;
+  // The samples a fragment keeps: its share of the handoff (and circular surfel disc), plus the material's mask and coverage.
+  const mask = `continuumSurfelMask(v.coverage,v.surfel,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''}${material.coverage ? `&${material.name}Coverage(v,front)` : ''}`;
   if (pass === 'view') {
     return body + /* wgsl */`
 @vertex fn continuumVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { return continuumVertex(vertex,listed,false); }

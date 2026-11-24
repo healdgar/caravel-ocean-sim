@@ -239,7 +239,7 @@ const BOULDER_CONTINUUM_MATERIAL_WGSL = BOULDER_ROCK_PROCEDURAL_WGSL + /* wgsl *
 fn boulderContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   let archTag=continuumTypeF(s.model,${BOULDER_CONTINUUM_MATERIAL.archetype}u);
   (*v).stone=vec4f(boulderContinuumPalette(archTag,bitcast<f32>(s.record.spare.x)),archTag);
-  (*v).lit=vec2f(select(s.optics.x,bitcast<f32>(s.word),s.what==CONTINUUM_CLUSTER_ENTRY),s.local.y);
+  (*v).lit=vec2f(select(s.optics.x,bitcast<f32>(s.word),s.what==CONTINUUM_CLUSTER_ENTRY||s.what==CONTINUUM_SURFEL_ENTRY),s.local.y);
 }
 
 fn boulderContinuumLandShadow(world:vec3f,normal:vec3f)->vec3f {
