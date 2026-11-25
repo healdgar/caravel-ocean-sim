@@ -1123,8 +1123,9 @@ fn forestContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCard
   },
 });
 
-// The forest's material (js/wgsl/continuum-cut.js), shaded with the land's module source (js/wgsl/terrain.js TERRAIN as
-// the terrain draws it), which holds the shared core, the frame and the land's finish (groups 0 and 1).
+// The forest's material (js/wgsl/continuum-cut.js), shaded with the land's finish-only module source (js/wgsl/terrain.js
+// TERRAIN_FINISH_ONLY, as js/terrain.js hands it over), which holds the shared core, the frame and the land's finish
+// (groups 0 and 1).
 export function forestContinuumMaterial(landSource) {
   return Object.freeze({
     name: 'forestContinuum', prelude: () => landSource, core: true, data: FOREST_CONTINUUM_DATA,

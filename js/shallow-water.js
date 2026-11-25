@@ -361,6 +361,8 @@ export async function createShallowWater({
   let lastGridCx = NaN, lastGridCz = NaN;
   let activeObsCount = 0, activeReachCount = 0, activeHullCount = 0;
   let needEnvDispatch = false;
+  // The hulls the environment field was last stamped with, and those in the uniform awaiting its next stamp.
+  let stampedHulls = 0, uploadedHulls = 0;
   let needsClear = true;
   let active = false;
   let frameCounter = 0;
@@ -491,13 +493,16 @@ export async function createShallowWater({
       return false;
     }
 
-    needEnvDispatch = worldDirty || gridShifted || activeHullCount > 0;
+    // Hulls move, so the field is stamped anew while any is in the window, and once more when the last has left:
+    // a hull left stamped in it would stand as a rock where she lay.
+    needEnvDispatch = worldDirty || gridShifted || activeHullCount > 0 || stampedHulls > 0;
     lastGridCx = cx;
     lastGridCz = cz;
     worldDirty = false;
 
-    const packedCounts = (activeObsCount & 1023) | ((activeReachCount & 1023) << 10) | ((activeHullCount & 1023) << 20);
-    const baseFlags = (nearCoast ? 2 : 0) | (activeReachCount > 0 ? 4 : 0);
+    // Both words cross to the GPU as f32s, which hold whole numbers exactly only under 2^24: 20 bits and 18.
+    const packedCounts = (activeObsCount & 1023) | ((activeReachCount & 1023) << 10);
+    const baseFlags = (nearCoast ? 2 : 0) | (activeReachCount > 0 ? 4 : 0) | ((activeHullCount & 1023) << 8);
     const k0 = SWE_CLAMP((2 * Math.PI) / Math.max(30, swellLen), 0.045, 0.14);
     const omega = SWE_CLAMP(Math.sqrt(9.81 * k0) * 1.45, 1.1, 2.2);
     const sdLen = Math.hypot(swellDir[0], swellDir[1]) || 1;
@@ -513,6 +518,7 @@ export async function createShallowWater({
     ]);
     if (needEnvDispatch) {
       device.queue.writeBuffer(envUniform, 0, uData);
+      uploadedHulls = activeHullCount;
     }
 
     // Upload per-substep SWE uniforms (emit spray only on the final substep)
@@ -546,6 +552,7 @@ export async function createShallowWater({
     pass.setBindGroup(0, envGroup);
     pass.dispatchWorkgroups(Math.ceil(size / 8), Math.ceil(size / 8), 1);
     needEnvDispatch = false;
+    stampedHulls = uploadedHulls;
   }
 
   function encodeSubstep(pass, substepIndex, srcIdx) {

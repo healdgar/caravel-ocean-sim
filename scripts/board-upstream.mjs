@@ -45,9 +45,17 @@
 //   `assets/board/SOURCE.json`), whose SHA-256 is pinned inside all pre-baked `assets/boards/*.world` saves.
 //   `BOARD_UPSTREAM_PENDING` holds subsequent generic simulation improvements written in Castle and Commons' own
 //   code and verified offline against both the untuned source and `assets/board/game.js` by
-//   `scripts/vendor-castle-and-commons.mjs --check` and `tests/board-model.test.mjs`. Until the next `--retune`
-//   and full board rebake promotes them into `BOARD_UPSTREAM`, guarded fallback shims in `assets/board/runtime.js`
-//   mirror them and yield automatically the moment each upstream hook exists in `assets/board/game.js`.
+//   `scripts/vendor-castle-and-commons.mjs --check` and `tests/board-model.test.mjs`. `assets/board/game.js` does
+//   NOT run them: until the next `--retune` and full board rebake promotes them into `BOARD_UPSTREAM`, the model runs
+//   the copies `assets/board/runtime.js` keeps (BOARD_STAGED), each the staged text itself, character for character,
+//   between `//<<pending:<id>` and `//>>pending:<id>`, and yielding the day the program has its own. There is one text:
+//       node scripts/board-upstream.mjs --check
+//   fails if a passage and its copy differ, if a passage holds text its copy does not (unless it says why in
+//   `unmirrored`), or if a copy has no passage (verifyPendingRuntimeMirror below).
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 export const BOARD_UPSTREAM = Object.freeze([
   // Fixes.
   {
@@ -261,13 +269,14 @@ dutch:{
 // Staged upstream simulation changes ready to copy back into Castle and Commons' index.html and to promote into
 // BOARD_UPSTREAM on the next `vendor-castle-and-commons.mjs --retune` + full board rebake. Every passage is pure
 // Castle and Commons code (zero host-specific globals, zero PRNG perturbation when not called), applies cleanly to
-// both the untuned upstream source and the tuned assets/board/game.js, and maps 1:1 to a guarded runtime fallback
-// shim in assets/board/runtime.js so zero simulation logic is duplicated once promoted.
+// both the untuned upstream source and the tuned assets/board/game.js, and is kept word for word in
+// assets/board/runtime.js until then (`unmirrored` says what of a passage is not, and why).
 export const BOARD_UPSTREAM_PENDING = Object.freeze([
   {
     id: 'find-person-armies',
     runtimeHook: 'findPerson',
     runtimeShim: 'buildArmySoldierInspect',
+    unmirrored: 'The whole passage: it is one line of findPerson, which is the program\'s. runtime.js only makes a card of its own for a soldier findPerson misses (buildArmySoldierInspect, with its own rule for his home); every other asking after a soldier (property, tenure, kin) still finds no one.',
     why: 'findPerson missed levied householders and hired sell-swords serving in W.armies (referenceTarget had a one-off fallback, while property, tenure, tree, and inspector lookups calling findPerson returned null). Search living hosts before returning null.',
     find: "const t=(W.travellers||[]).find(x=>x.p.id===id);if(t)return {p:t.p,s:W.settlements[t.to],t};return null;}",
     replace:
@@ -301,6 +310,7 @@ export const BOARD_UPSTREAM_PENDING = Object.freeze([
     id: 'opening-trade-backdate',
     runtimeHook: 'openingTradeBackdate',
     runtimeShim: 'openingTradeSpreadFrac',
+    unmirrored: 'tickTrade(opts) and its openingSpread: runtime.js never asks tickTrade for an opening spread; it sends its own opening traffic (tryDispatchRoute in ensureMaritimeWorldRoutes), which has no passage here.',
     why: 'Opening-day trade dispatches (Day 0 or forced opening pass) start all caravans, barges, and coasters stacked at departDay === now on their origin gates. Provide deterministic openingTradeBackdate(mode, i, now, force) and optional openingSpread handling in tickTrade without altering normal daily ticks.',
     find: 'function tickTrade(){\n  const S=W.settlements,',
     replace:
@@ -319,6 +329,7 @@ export const BOARD_UPSTREAM_PENDING = Object.freeze([
     id: 'opening-trade-spread-dispatch',
     runtimeHook: 'openingTradeBackdate',
     runtimeShim: 'openingTradeSpreadFrac',
+    unmirrored: 'The whole passage: it is tickTrade\'s own dispatch, which runtime.js does not call with an opening spread (see opening-trade-backdate).',
     why: 'Apply openingTradeBackdate when tickTrade({ openingSpread: true }) runs on opening day; ordinary simTick() calls pass no opts so departDay stays day() bit-for-bit.',
     find: "const c={origin:oi,dest:di,good:g,qty:bq,value:bq*price(d,g),poly:b.mode==='cart'?b.leg.poly:null,len:b.len,departDay:day(),arriveDay:day()+b.days,robbed:false,sea,unit:b.unit};",
     replace:
@@ -451,21 +462,18 @@ export const BOARD_UPSTREAM_PENDING = Object.freeze([
     id: 'settle-founding-month',
     runtimeHook: 'settleFoundingMonth',
     runtimeShim: 'ensureFoundingMonthSettled',
-    why: 'Direct-era worlds frozen or opened at Day 0 stand before the first monthly livestock (day % 30 === 18) and domain/standing-host (day % 30 === 20) ticks fire, leaving all herds at zero and W.armies empty. Provide settleFoundingMonth() to run those genuine monthly handlers cleanly through Day 21 on opening or thaw without altering prehistory or Day-21+ saves.',
+    why: 'A world opened or frozen at day 0 stands before its first monthly livestock tick (day % 30 === 18, which stocks every herd) and its first monthly domain tick (day % 30 === 20, which raises the standing hosts), so its herds are at zero and W.armies is empty. settleFoundingMonth() lives the founding month by the model\'s own days (simTick) until herds stand and a host is raised, or both ticks have had their day: at most twenty days, the clock never written, nothing lived twice by a world already past them.',
     find: "if(typeof freedomPrepare==='function')freedomPrepare();estateEcologyPrepare();initForeignWorld();\n}",
     replace:
       "if(typeof freedomPrepare==='function')freedomPrepare();estateEcologyPrepare();initForeignWorld();\n}\n" +
-      'async function settleFoundingMonth(){ // execute the founding month livestock (day 18) and standing-host (day 20) ticks cleanly through day 21\n' +
+      'async function settleFoundingMonth(){ // live the founding month a day at a time until its herds are stocked (tickLivestock, day 18) and its standing hosts raised (tickDomains, day 20)\n' +
       '  if(!W||!W.clock||!Array.isArray(W.settlements)||!W.settlements.length)return;\n' +
-      '  if(day()>=21)return;\n' +
-      '  const hasHerds=W.settlements.some(s=>Boolean(s?.hm));\n' +
-      '  const hasArmies=Array.isArray(W.armies)&&W.armies.some(a=>a&&!a.gone&&(a.strength>0||a.men?.length>0));\n' +
-      '  if(hasHerds&&hasArmies)return;\n' +
-      '  await STORAGE_OUTCOMES.wait();\n' +
-      "  if(typeof peoplePrepare==='function')peoplePrepare();\n" +
-      "  if(day()<18||!hasHerds){W.clock.day=18;if(typeof dailyLabourBegin==='function')dailyLabourBegin(W.clock.day);if(typeof tickLivestock==='function')tickLivestock();if(typeof dailyLabourEnd==='function')dailyLabourEnd();}\n" +
-      "  if(day()<20||!hasArmies){W.clock.day=20;if(typeof dailyLabourBegin==='function')dailyLabourBegin(W.clock.day);if(typeof tickDomains==='function')tickDomains();if(typeof tickMilitary==='function')tickMilitary();if(typeof dailyLabourEnd==='function')dailyLabourEnd();}\n" +
-      '  if(day()<21)W.clock.day=21;\n' +
+      '  const stocked=()=>W.settlements.some(s=>Boolean(s?.hm)),raised=()=>Array.isArray(W.armies)&&W.armies.some(a=>a&&!a.gone&&(a.strength>0||a.men?.length>0));\n' +
+      '  for(let n=0;n<20&&day()<20&&!(stocked()&&raised());n++){ // both ticks have had their day by day 20: never more than twenty days\n' +
+      '    await STORAGE_OUTCOMES.wait();\n' +
+      "    if(simTick()===false)throw Error('The model would not take a day');\n" +
+      '    if(n%8===7&&STORAGE_OUTCOMES.journal?.flush)await STORAGE_OUTCOMES.journal.flush();\n' +
+      '  }\n' +
       '  if(STORAGE_OUTCOMES.journal?.flush)await STORAGE_OUTCOMES.journal.flush();\n' +
       '  await STORAGE_OUTCOMES.wait();\n' +
       '}',
@@ -503,6 +511,52 @@ export function applyPendingUpstream(source) {
   return patched;
 }
 
+// The copies assets/board/runtime.js keeps of the staged passages: {id: text} for every `//<<pending:<id>` ...
+// `//>>pending:<id>` in it, the lines between the two marks as they stand.
+export function pendingRuntimeMirrors(runtime) {
+  const copies = {}, mark = /^[ \t]*\/\/<<pending:([\w-]+)[ \t]*\n([\s\S]*?)\n[ \t]*\/\/>>pending:\1[ \t]*$/gm;
+  for (const [, id, text] of runtime.matchAll(mark)) {
+    if (id in copies) throw new Error(`assets/board/runtime.js keeps two copies of staged passage "${id}"`);
+    copies[id] = text;
+  }
+  if (Object.keys(copies).length !== runtime.split('//<<pending:').length - 1 || Object.keys(copies).length !== runtime.split('//>>pending:').length - 1) {
+    throw new Error('assets/board/runtime.js has a //<<pending: or //>>pending: mark without its pair');
+  }
+  return copies;
+}
+
+// One text of every staged passage: the copy runtime.js runs is the passage, to the character. What a passage adds to
+// the program is its `replace` less its `find`; that must be its copy and nothing more, unless the passage says in
+// `unmirrored` what of it runtime.js does not keep. Throws on the first difference, naming it; answers what it checked.
+export function verifyPendingRuntimeMirror(runtime) {
+  const copies = pendingRuntimeMirrors(runtime), bare = (text) => text.replace(/\s+/g, ''), checked = [];
+  for (const id of Object.keys(copies)) {
+    if (!BOARD_UPSTREAM_PENDING.some((entry) => entry.id === id)) throw new Error(`assets/board/runtime.js keeps a copy of "${id}", which is no staged passage (promoted or removed: take the copy out)`);
+  }
+  for (const entry of BOARD_UPSTREAM_PENDING) {
+    const copy = copies[entry.id];
+    if (copy === undefined) {
+      if (!entry.unmirrored) throw new Error(`Staged passage "${entry.id}" has no copy in assets/board/runtime.js and does not say why (unmirrored)`);
+      checked.push({ id: entry.id, copied: 0, unmirrored: entry.unmirrored });
+      continue;
+    }
+    if (!copy.trim()) throw new Error(`The copy of staged passage "${entry.id}" in assets/board/runtime.js is empty`);
+    const at = entry.replace.indexOf(copy);
+    if (at < 0) {
+      // Say where the two part, so the one that moved is found without a diff tool.
+      const lines = copy.split('\n'), first = lines.findIndex((line) => !entry.replace.includes(line));
+      throw new Error(`Staged passage "${entry.id}" and its copy in assets/board/runtime.js have drifted apart` +
+        (first >= 0 ? `: line ${first + 1} of the copy is not in the passage: ${lines[first].trim().slice(0, 120)}` : ': every line of the copy is in the passage, but not together and in that order (one dropped, moved or respaced)'));
+    }
+    const rest = entry.replace.slice(0, at) + entry.replace.slice(at + copy.length);
+    if (bare(rest) !== bare(entry.find) && !entry.unmirrored) {
+      throw new Error(`Staged passage "${entry.id}" changes more of the program than assets/board/runtime.js keeps a copy of, and does not say why (unmirrored)`);
+    }
+    checked.push({ id: entry.id, copied: copy.length, ...(entry.unmirrored ? { unmirrored: entry.unmirrored } : {}) });
+  }
+  return checked;
+}
+
 // Reverse staged upstream passages in reverse order for exact round-trip verification.
 export function undoPendingUpstream(patched) {
   let source = patched;
@@ -512,4 +566,12 @@ export function undoPendingUpstream(patched) {
     source = source.split(replace).join(find);
   }
   return source;
+}
+
+// node scripts/board-upstream.mjs --check: reads the two files, writes nothing.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (!process.argv.includes('--check')) throw new Error('node scripts/board-upstream.mjs --check');
+  const checked = verifyPendingRuntimeMirror(readFileSync(new URL('../assets/board/runtime.js', import.meta.url), 'utf8'));
+  console.log(`OK ${BOARD_UPSTREAM.length} passages applied; ${checked.length} staged and NOT in assets/board/game.js, run from their copies in assets/board/runtime.js:`);
+  for (const { id, copied, unmirrored } of checked) console.log(`  ${id}: ${copied ? `${copied} characters, the same` : 'no copy'}${unmirrored ? `; not kept there: ${unmirrored}` : ''}`);
 }

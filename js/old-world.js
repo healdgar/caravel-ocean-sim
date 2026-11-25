@@ -11,7 +11,7 @@
 
 import { CITY_TREES } from './old-world-city.js';
 import { layBoardCountry } from './old-world-board.js';
-import { nativeTownHeld } from './native-towns.js';
+import { NATIVE_TOWNS, nativeTownHeld } from './native-towns.js';
 import { colonialTownHeld } from './colonial-towns.js';
 import { BOARD_RIVERS, boardRequest, boardSeat, resolveBakedBoardYear } from './board-model.js';
 import { FORT_RECORDS, fortPhaseFor, fortRecordsFor } from './fort-records.js';
@@ -266,14 +266,53 @@ const RUNTIME_BOARD_CROWN = Object.freeze({
 const RUNTIME_BOARD_WORK_KIND = Object.freeze({ tower: 'tower', 'artillery-tower': 'tower', battery: 'battery', enclosed: 'fort', bastioned: 'fort', citadel: 'fort' });
 const RUNTIME_BOARD_WORK_SIZE = Object.freeze({ tower: [12, 12], 'artillery-tower': [22, 22], battery: [44, 14], enclosed: [52, 52], bastioned: [76, 76], citadel: [120, 120] });
 
-function runtimeBoardNativeCulture(cultureId, latitude = 0) {
-  switch (cultureId) {
-    case 'abenaki-algonquian': return latitude >= 45.5 ? 'iroquoian' : 'massachusett';
-    case 'mid-atlantic-algonquian': return latitude >= 38.6 ? 'lenape' : 'powhatan';
-    case 'tupinamba-brazil-guiana': return 'tupi';
-    case 'pacific-indigenous-coast': return latitude >= 20 ? 'powhatan' : 'taino';
-    default: return 'taino';
+// The model's tongue for each people of this game's coasts (js/indigenous-sovereignty.js) that it has one for
+// (scripts/board-native.mjs): the tongue, or two and the latitude that parts them, the northern first.
+const BOARD_NATIVE_TONGUES = Object.freeze({
+  'abenaki-algonquian': ['iroquoian', 45.5, 'massachusett'],
+  'mid-atlantic-algonquian': ['lenape', 38.6, 'powhatan'],
+  'tupinamba-brazil-guiana': ['tupi'],
+  'taino-greater-antilles': ['taino'],
+});
+// PLACEHOLDERS, none of them history: what the model is asked where this game's records do not say. Each is a debt to
+// be paid in data (a tongue written in scripts/board-native.mjs, a crown in a port's record), kept in this one table
+// so that no wrong value is given silently; the first use of each is said once on the console.
+//   tongues  peoples the model has no tongue for yet, each founded in another's until its own is written
+//   tongue   a people the tables here do not know at all
+//   crown    a colonial port whose record names no crown of RUNTIME_BOARD_CROWN
+//   port     the key of a ground with neither a name nor coordinates
+export const BOARD_PLACEHOLDERS = Object.freeze({
+  tongues: Object.freeze({
+    'florida-gulf-chiefdoms': ['taino'],
+    'kalinago-lesser-antilles': ['taino'],
+    'maya-mesoamerica-coast': ['taino'],
+    'tierra-firme-carib-arawak': ['taino'],
+    // California and the coast north of it as Powhatan; Mexico to Chile as Taíno.
+    'pacific-indigenous-coast': ['powhatan', 20, 'taino'],
+  }),
+  tongue: 'taino',
+  crown: 'spain',
+  port: 'coast',
+});
+const boardPlaceholdersSaid = new Set();
+function boardPlaceholderUsed(what, where, value) {
+  const key = `${what}:${where}:${value}`;
+  if (!boardPlaceholdersSaid.has(key)) {
+    boardPlaceholdersSaid.add(key);
+    console.info(`Board placeholder (js/old-world.js BOARD_PLACEHOLDERS): ${what} of ${where} is not recorded; founded as ${value}`);
   }
+  return value;
+}
+
+// The tongue a native town of a region's coast is founded in: that of its port's own recorded town
+// (js/native-towns.js), else its people's in the model, else a placeholder.
+function runtimeBoardNativeCulture(region, cultureId) {
+  const recorded = NATIVE_TOWNS.find((town) => town.port === region.id);
+  if (recorded) return recorded.culture;
+  const tongue = ([north, from, south]) => (from === undefined || region.latitude >= from ? north : south);
+  if (Object.hasOwn(BOARD_NATIVE_TONGUES, cultureId ?? '')) return tongue(BOARD_NATIVE_TONGUES[cultureId]);
+  if (Object.hasOwn(BOARD_PLACEHOLDERS.tongues, cultureId ?? '')) return boardPlaceholderUsed('tongue', cultureId, tongue(BOARD_PLACEHOLDERS.tongues[cultureId]));
+  return boardPlaceholderUsed('tongue', cultureId ?? region.id ?? 'an unnamed people', BOARD_PLACEHOLDERS.tongue);
 }
 
 function runtimeBoardFoundingSite(heights, span, x, z) {
@@ -299,33 +338,45 @@ function runtimeBoardFoundingSite(heights, span, x, z) {
   return best ?? { x: clampX, z: clampZ };
 }
 
+// The one name a place is known by: its region's id, and so the key its board is founded, registered and kept under
+// (js/board-keep.js). A coordinate landfall with no id of its own is named here from its coordinates, and the coast's
+// generator (resolveGlobalCoastalRegion, js/coastal-world.js) takes that same name as the region's id, so the key a
+// board is looked for by before its land is made is the key it was kept under when the traveller left.
 export function runtimeBoardPortKey(region) {
   if (!region) return null;
   if (region.id) return region.id;
   if (Number.isFinite(region.latitude) && Number.isFinite(region.longitude)) {
-    return `coast_${region.latitude.toFixed(3)}_${region.longitude.toFixed(3)}`;
+    return `coastal-${region.latitude.toFixed(3)}_${region.longitude.toFixed(3)}`;
   }
   return null;
 }
 
-// Builds a runtime Castle & Commons board request for any unbaked inhabited coast (native villages, non-1550 years,
-// and English, Dutch, French, Spanish or Portuguese colonial ports); returns null on uninhabited pelagic shores.
-export function runtimeBoardFor({ region, heights, port }) {
+// What is asked of the model for the town a region's ground holds: the one builder of a board's request, for a board
+// founded in play (runtimeBoardFor) and one founded ahead of time (scripts/bake-board.mjs), so the same ground asks
+// the same of the model wherever it is asked. The town is the one whose record the ground holds (an Old World city, a
+// native or a planted town), else the colonial port or the native village the coast itself says stands there (English,
+// Dutch, French, Spanish or Portuguese; any year); null on a shore no one lives on. `port` is the coast's port as
+// placed: its `center`, and for a coast with no recorded town its colonyGrowth and indigenousSettlement.
+// The rest is the bake's to say and is left alone in play: a `year` other than the region's, a `seed` (a baked port
+// keeps its country's), a `seat`, `lived`, and the fitting of the `rivers`.
+// `cityAtPort` is the one rule the two still differ by, kept in sight until it is settled: every baked Old World city
+// was founded at its port's very middle, quay or no; in play its seat is moved off wet ground as any town's is.
+export function boardRequestFor({ region, heights, port, year: yearAsked = null, seed: seedAsked = null, seat: seatAsked = null, lived = false, rivers = BOARD_RIVERS, cityAtPort = false }) {
   if (!region || !heights || !port?.center || !Number.isFinite(region.latitude) || !Number.isFinite(region.longitude)) return null;
-  const year = Math.round(region.year ?? 1550), span = region.span;
+  const year = Math.round(yearAsked ?? region.year ?? 1550), span = region.span;
   const cos = Math.max(0.1, Math.cos(region.latitude * DEG));
   const east = (lon) => (lon - region.longitude) * cos * OLD_WORLD_METRES_PER_DEGREE;
   const south = (lat) => (region.latitude - lat) * OLD_WORLD_METRES_PER_DEGREE;
-  const held = boardTownHeld(region);
+  const held = boardTownHeld(yearAsked == null ? region : { ...region, year });
   const indig = port.indigenousSettlement ?? null;
   const isColonial = Boolean(port.hasColonialPort);
   const isIndigenous = Boolean(!isColonial && indig?.hasIndigenousSettlement);
   if (!held && !isColonial && !isIndigenous) return null;
 
-  let name, culture, seat, walls = null, manner = null, founded = null, settled = null, places = [];
+  let name, culture, seat, people, walls = null, manner = null, founded = null, settled = null, places = [];
   let rawX = port.center.x - (region.x ?? 0), rawZ = port.center.z - (region.z ?? 0);
   if (held) {
-    const people = oldWorldPeople(held, year);
+    people = oldWorldPeople(held, year);
     name = held.name;
     culture = held.culture;
     seat = held.seat ?? boardSeat(people);
@@ -336,9 +387,11 @@ export function runtimeBoardFor({ region, heights, port }) {
     places = (OLD_WORLD_PLACES[held.id] || held.places || []).map(([n, lat, lon, w]) => ({ name: n, x: east(lon), z: south(lat), weight: w }));
     if (held.native || held.colonial) { rawX = Math.round(east(held.longitude)); rawZ = Math.round(south(held.latitude)); }
   } else if (isColonial) {
-    const crownKey = port.colonyGrowth?.crown ?? region.crown ?? 'spain';
-    const crownSpec = RUNTIME_BOARD_CROWN[crownKey] ?? RUNTIME_BOARD_CROWN.spain;
-    const people = Math.max(120, port.colonyGrowth?.population || 600);
+    // Its crown is its record's own, wherever the coast keeps it; only a port with none known takes the placeholder.
+    const crownKey = [port.colonyGrowth?.crown, region.colonyGrowth?.crown, region.crown].find((crown) => Object.hasOwn(RUNTIME_BOARD_CROWN, crown ?? ''))
+      ?? boardPlaceholderUsed('crown', runtimeBoardPortKey(region), BOARD_PLACEHOLDERS.crown);
+    const crownSpec = RUNTIME_BOARD_CROWN[crownKey];
+    people = Math.max(120, port.colonyGrowth?.population || 600);
     name = String(region.name || 'Port').split(' · ')[0];
     culture = crownSpec.culture;
     manner = crownSpec.manner;
@@ -347,13 +400,17 @@ export function runtimeBoardFor({ region, heights, port }) {
     seat = Math.max(0.05, Math.min(2.0, people / (manner ? 4500 : 12400)));
     walls = { capital: 0, town: 0, village: 0 };
   } else {
-    const people = Math.max(180, indig.estimatedVillagePopulation || 300);
-    culture = runtimeBoardNativeCulture(indig.cultureId, region.latitude);
+    people = Math.max(180, indig.estimatedVillagePopulation || 300);
+    culture = runtimeBoardNativeCulture(region, indig.cultureId);
     name = indig.capitalName || String(region.name || indig.shortName || 'Village').split(' · ')[0];
     seat = Math.max(0.28, Math.min(0.75, people / 750));
     walls = { capital: (indig.fortified || indig.isSovereignPolity || culture === 'tupi') ? 1 : 0, town: 0, village: 0 };
   }
 
+  // The works the record says stood on this ground in this year (js/fort-records.js), whichever port's record names
+  // them: each in the form its phase in this year had, as big as the record says or as its form is. To the model a
+  // tower of either kind is a tower and a castle or bastioned work a fort; the form goes with it, for the board to
+  // build it by (js/old-world-board.js). A native town has none.
   const works = [];
   if (isColonial || (held && !held.native)) {
     const named = new Set();
@@ -364,6 +421,7 @@ export function runtimeBoardFor({ region, heights, port }) {
       if (Math.abs(wx) >= span * 0.47 || Math.abs(wz) >= span * 0.47) continue;
       named.add(record.name);
       const form = phase.form, kind = RUNTIME_BOARD_WORK_KIND[form];
+      // A gun tower with a battery at its foot holds the ground of both, the battery toward the water.
       const size = form === 'battery' ? [record.sizeM?.[0] ?? RUNTIME_BOARD_WORK_SIZE.battery[0], Math.min(16, Math.max(10, record.sizeM?.[1] ?? RUNTIME_BOARD_WORK_SIZE.battery[1]))]
         : form === 'tower' ? RUNTIME_BOARD_WORK_SIZE.tower
           : form === 'artillery-tower' ? (record.sizeM ?? (phase.battery ? [36, 40] : RUNTIME_BOARD_WORK_SIZE['artillery-tower']))
@@ -377,19 +435,27 @@ export function runtimeBoardFor({ region, heights, port }) {
     }
   }
 
-  const sitePos = runtimeBoardFoundingSite(heights, span, rawX, rawZ);
-  const seed = (region.vegetationSeed ?? region.seed ?? ((Math.imul(Math.round(region.latitude * 1000), 73856093) ^ Math.imul(Math.round(region.longitude * 1000), 19349663)) >>> 0)) || 1550;
+  // An Old World city is founded about its port, a native or planted town at its own recorded site: on dry ground,
+  // however low on its bank, there; in the water or on the strand, on the nearest terrace above it.
+  const sitePos = cityAtPort && held && !held.native && !held.colonial ? { x: rawX, z: rawZ } : runtimeBoardFoundingSite(heights, span, rawX, rawZ);
+  const seed = seedAsked ?? ((region.vegetationSeed ?? region.seed ?? ((Math.imul(Math.round(region.latitude * 1000), 73856093) ^ Math.imul(Math.round(region.longitude * 1000), 19349663)) >>> 0)) || 1550);
   const request = boardRequest({
-    heights, span, seed, era: year, seat,
+    heights, span, seed, era: year, seat: seatAsked ?? seat,
     ...(walls ? { walls } : {}),
     site: { name, culture, x: sitePos.x, z: sitePos.z },
     places,
-    lived: false,
+    lived,
     ...(manner ? { manner, founded, settled } : founded != null ? { founded, settled } : {}),
     works,
-    rivers: BOARD_RIVERS,
+    rivers,
   });
-  return { port: runtimeBoardPortKey(region) ?? 'coast', year, request, runtime: true, world: null };
+  return { request, year, held, people };
+}
+
+// A board founded in play: the request for any unbaked inhabited coast, under the key it is founded and kept by.
+export function runtimeBoardFor({ region, heights, port }) {
+  const asked = boardRequestFor({ region, heights, port });
+  return asked && { port: runtimeBoardPortKey(region) ?? BOARD_PLACEHOLDERS.port, year: asked.year, request: asked.request, runtime: true, world: null };
 }
 
 // The country a board founded on a region's ground, or null where none stands and the rules of a wild shore hold.
@@ -426,7 +492,7 @@ export function refreshOldWorldBoardCountry(nextBoardJson, region, heights, port
   }
   const baseBaked = bakedBoardFor(region);
   const nextBaked = {
-    ...(baseBaked || { port: runtimeBoardPortKey(region) || 'lisbon', year: region.year ?? 1550 }),
+    ...(baseBaked || { port: runtimeBoardPortKey(region) || BOARD_PLACEHOLDERS.port, year: region.year ?? 1550 }),
     board: nextBoardJson,
   };
   registerBakedBoard(nextBaked);

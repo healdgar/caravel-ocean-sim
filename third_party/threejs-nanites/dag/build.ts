@@ -97,7 +97,7 @@ function partClusters(idx: Uint32Array, pos: Float32Array, parts: ArrayLike<numb
 
 interface BarkHooks {
   parts?: ArrayLike<number>;
-  groupError?: (children: Uint32Array, simplified: Uint32Array, error: number) => number;
+  groupError?: (children: Uint32Array, simplified: Uint32Array, error: number, level: number) => number;
 }
 
 function groupClusters(clusters: Cluster[], remap: Uint32Array, parts: ArrayLike<number> | undefined): Cluster[][] {
@@ -165,9 +165,10 @@ function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out:
       progress = true;
       const groupId = groupCount++;
       for (const c of g) c.parentGroup = groupId;
-      // A caller may measure the group's error its own way (a skinned body measures it in every pose it can take),
-      // never below what the simplifier reports.
-      const own = hooks.groupError ? Math.max(err, hooks.groupError(merged, Uint32Array.from(res, (v) => verts[v]), err)) : err;
+      // A caller may measure the group's error its own way (a skinned body measures how far its surface moves, at rest
+      // and in every pose it can take): its measure then stands. The simplifier's own figure also counts a turned
+      // normal and a slid UV as metres, which a measured distance does not.
+      const own = hooks.groupError ? hooks.groupError(merged, Uint32Array.from(res, (v) => verts[v]), err, level) : err;
       const childMax = Math.max(...g.map((c) => c.err));
       // The group's error: the largest of its children's and its own simplification's (measured from the children's
       // mesh), as Nanite does: each switch then moves the image by at most tau. The sum (meshoptimizer's demo:

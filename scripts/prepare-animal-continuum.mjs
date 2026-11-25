@@ -32,7 +32,7 @@ import {
 } from '../js/animal-continuum.js';
 import { CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
 import { CONTINUUM_HEADER_WORDS, assembleContinuumAtlas, checkContinuumAtlas, continuumFloatWord, packContinuumBody, packContinuumUV } from '../js/continuum-format.js';
-import { bakeContinuumBody, closest, triangleSpheres, nearestTriangle, triangleGrid } from '../js/continuum-bake.js';
+import { bakeContinuumBody, closest, triangleGrid, posedGroupError } from '../js/continuum-bake.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -314,51 +314,6 @@ function whaleType(id) {
     id, family: 'whale', rig: { neck: [0, 0, 0, 0], legs: [0, 0, 0, 0] }, body, skinOf, colourOf: (v) => Array.from(F.subarray(v * 11 + 6, v * 11 + 9)), poses,
     wordOf: (kind) => Math.round(kind[0] / KIND_WORD) >>> 0, uvOf: (kind) => packContinuumUV(placeOf(Math.round(kind[1] / KIND_WORD))),
     sourceTriangles: model.indices.length / 3, sourceBytes: [F, model.indices, joints, weights],
-  };
-}
-
-// ------------------------------------------------------------------------------------------------ posed measures
-// How far apart, in the worst pose, a point of one posed set (vertex a) and the barycentric point (s, t) on triangle
-// (b0, b1, b2) of the same are.
-function posedGap(A, a, b0, b1, b2, s, t) {
-  const r = 1 - s - t;
-  let worst = 0;
-  for (const X of A) {
-    const dx = X[a * 3] - (r * X[b0 * 3] + s * X[b1 * 3] + t * X[b2 * 3]);
-    const dy = X[a * 3 + 1] - (r * X[b0 * 3 + 1] + s * X[b1 * 3 + 1] + t * X[b2 * 3 + 1]);
-    const dz = X[a * 3 + 2] - (r * X[b0 * 3 + 2] + s * X[b1 * 3 + 2] + t * X[b2 * 3 + 2]);
-    worst = Math.max(worst, dx * dx + dy * dy + dz * dz);
-  }
-  return Math.sqrt(worst);
-}
-// The builder's group error, measured posed: each point a group removes is matched, at rest, to its nearest point on
-// what the group keeps of the same piece, and the error is the farthest those two come apart in any pose.
-function posedGroupError(welded, posed) {
-  const kept = new Int32Array(welded.count).fill(-1), seen = new Int32Array(welded.count).fill(-1), mesh = { position: welded.position, corners: null };
-  let stamp = 0;
-  return (children, simplified, error) => {
-    stamp++;
-    const count = simplified.length / 3;
-    if (!count) return error;
-    for (const v of simplified) kept[v] = stamp;
-    const byPiece = new Map(), every = Array.from({ length: count }, (_, t) => t);
-    for (let t = 0; t < count; t++) {
-      const p = welded.part[simplified[t * 3]];
-      if (!byPiece.has(p)) byPiece.set(p, []);
-      byPiece.get(p).push(t);
-    }
-    mesh.corners = simplified;
-    const spheres = triangleSpheres(welded.position, simplified, every), pieceSpheres = new Map();
-    let worst = 0;
-    for (const v of children) {
-      if (kept[v] === stamp || seen[v] === stamp) continue;
-      seen[v] = stamp;
-      const list = byPiece.get(welded.part[v]) ?? every;
-      if (!pieceSpheres.has(list)) pieceSpheres.set(list, list === every ? spheres : triangleSpheres(welded.position, simplified, list));
-      const k = nearestTriangle(welded.position[v * 3], welded.position[v * 3 + 1], welded.position[v * 3 + 2], list, mesh, pieceSpheres.get(list)), t = list[k];
-      worst = Math.max(worst, posedGap(posed, v, simplified[t * 3], simplified[t * 3 + 1], simplified[t * 3 + 2], closest[1], closest[2]));
-    }
-    return Math.max(worst, error);
   };
 }
 

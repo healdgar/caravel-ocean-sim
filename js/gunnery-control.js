@@ -2615,6 +2615,9 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
         hitPartId: null,
         hitSubAssembly: null,
         hitLayer: null,
+        // The land shader's kind of the face the ball entered (js/wgsl/terrain.js kinds 10 to 18), read off the
+        // struck triangle by the trace; null where the building is known only by its box.
+        hitMaterialKind: met ? met.kind : null,
         localPosition,
         normal,
         floorHit,
@@ -2645,13 +2648,41 @@ const TIMBER_BUILDING_PREFABS = new Set([
   'city_timber_bridge',
   // A gun's carriage (js/old-world-buildings.js gunSpec).
   'city_gun',
+  // A native town's works (js/native-works.js NATIVE_WORKS_TARGETS): bark or reed mats over bent saplings, palm thatch
+  // on canes, stakes in a bank. None has a stone in its walls, and as wholes they stand, burn and are rebuilt as wood.
+  'native_longhouse',
+  'native_house',
+  'native_chief_house',
+  'native_charnel_house',
+  'native_sweat_lodge',
+  'native_palisade',
+  'indigenous_canoe_landing',
 ]);
 
+// What a building is as a whole: the budget it stands on, how it burns, falls and is rebuilt (js/port-damage.js), and
+// how tough its pieces are (js/building-fracture.js). What a ball meets where it strikes is the face's own fabric
+// (buildingStruckFabric).
 export function classifyBuildingMaterial(building) {
   const prefabId = typeof building === 'string' ? building : building?.prefabId ?? '';
   if (FORTIFIED_STONE_PREFABS.has(prefabId)) return 'fortified-stone';
   if (TIMBER_BUILDING_PREFABS.has(prefabId)) return 'timber';
   return 'masonry';
+}
+
+// The fabrics of a building's faces that are no stone, by the land shader's kind of the face (js/wgsl/terrain.js: 10
+// dressed timber, 15 thatch and reed mats, 17 bark sheathing; js/building-fracture.js cuts the same three as wood).
+// `passJoules` is what a ball must carry to go through one (timber's is a timber building's own outer wall,
+// createBuildingDamageState), `hotIgnite` how surely hot shot sets it alight.
+const BUILDING_ORGANIC_FABRICS = Object.freeze({
+  10: Object.freeze({ fabric: 'timber', passJoules: 32000, hotIgnite: 0.68 }),
+  15: Object.freeze({ fabric: 'thatch', passJoules: 2500, hotIgnite: 0.92 }),
+  17: Object.freeze({ fabric: 'bark', passJoules: 5000, hotIgnite: 0.8 }),
+});
+// What a ball met where it struck a building: the fabric of the face the trace entered (sweepBuildingSegment's
+// `hitMaterialKind`) where that is timber, thatch or bark, whatever the building is as a whole; null where it is
+// stone, glass or iron, or where no face was read, and the building's own class answers.
+export function buildingStruckFabric(event) {
+  return BUILDING_ORGANIC_FABRICS[event?.hitMaterialKind] ?? null;
 }
 
 function buildingLocalToWorld(building, localPt) {
@@ -3017,6 +3048,11 @@ export function applyBuildingImpactDamage(building, event) {
   if (event.sourceBoat) (d.attackers ??= new Set()).add(event.sourceBoat);
   const mag = d.magazine;
   const materialClass = d.materialClass;
+  // What the ball met where it struck: the face's own fabric where the trace read timber, thatch or bark there, and
+  // otherwise what the building is as a whole. A bark longhouse, a thatched roof over stuccoed walls and a fort's
+  // timber gate answer shot as what they are, and never as the stone beside them.
+  const struck = buildingStruckFabric(event);
+  const struckClass = struck ? 'timber' : materialClass;
   const vel = event.velocity ?? [200, 0, 0];
   const speed = Math.hypot(vel[0], vel[1], vel[2]);
   const mass = event.mass ?? 5.4;
@@ -3029,7 +3065,7 @@ export function applyBuildingImpactDamage(building, event) {
   const hasExplicitAmmo = Boolean(event.ammo && GUNNERY_AMMO_TYPES.includes(event.ammo));
   const ammoStructuralMul = !hasExplicitAmmo
     ? 1.0
-    : materialClass === 'timber'
+    : struckClass === 'timber'
       ? (ammo === 'hot' ? 1.25 : ammo === 'chain' ? 0.85 : ammo === 'grape' ? 0.55 : 1.0)
       : (ammo === 'hot' ? 0.92 : ammo === 'chain' ? 0.18 : ammo === 'grape' ? 0.12 : 1.0);
   const effectiveEnergy = energy * ammoStructuralMul;
@@ -3059,7 +3095,8 @@ export function applyBuildingImpactDamage(building, event) {
   d.partDamage[hitPartId] = nextPartDamage;
 
   const isEmbrasure = Boolean(hitPartId?.includes('embrasure') || hitSubAssembly === 'ordnance-and-embrasures');
-  const penThreshold = isEmbrasure ? 45000 : d.outerPenetrationJoules;
+  // A face of timber, thatch or bark is passed at its own fabric's figure, however stout the building's stone.
+  const penThreshold = isEmbrasure ? 45000 : struck ? Math.min(struck.passJoules, d.outerPenetrationJoules) : d.outerPenetrationJoules;
   const penetratedOuter = ammo !== 'chain' && ammo !== 'grape' && effectiveEnergy >= penThreshold;
   if (penetratedOuter) {
     d.breaches = (d.breaches ?? 0) + 1;
@@ -3069,12 +3106,12 @@ export function applyBuildingImpactDamage(building, event) {
   const worldHitPos = event.surfacePosition ?? event.position ?? buildingLocalToWorld(building, localPos);
   const worldNormal = event.normal ?? [0, 0, 1];
   const siteSeverity = Math.min(1.4, Math.max(0.38, Math.cbrt(effectiveEnergy / 110000) * 0.68));
-  const craterRadius = materialClass === 'timber'
+  const craterRadius = struckClass === 'timber'
     ? Math.min(1.45, Math.max(0.55, 0.50 + siteSeverity * 0.45))
     : Math.min(1.65, Math.max(0.62, 0.55 + siteSeverity * 0.52));
   const stepDepth = penetratedOuter
-    ? (materialClass === 'timber' ? 0.52 : 0.44)
-    : (materialClass === 'timber' ? 0.28 : 0.22);
+    ? (struckClass === 'timber' ? 0.52 : 0.44)
+    : (struckClass === 'timber' ? 0.28 : 0.22);
 
   d.craters.push({
     position: [...worldHitPos],
@@ -3087,7 +3124,7 @@ export function applyBuildingImpactDamage(building, event) {
   if (d.craters.length > 32) d.craters.shift();
 
   d.pendingBakes.push({
-    kind: materialClass === 'timber' ? 'timber-splinter' : 'stone-crater',
+    kind: struckClass === 'timber' ? 'timber-splinter' : 'stone-crater',
     x: +worldHitPos[0].toFixed(3),
     y: +worldHitPos[1].toFixed(3),
     z: +worldHitPos[2].toFixed(3),
@@ -3097,7 +3134,7 @@ export function applyBuildingImpactDamage(building, event) {
     radius: +craterRadius.toFixed(3),
     stepDepth: +stepDepth.toFixed(3),
     severity: +siteSeverity.toFixed(3),
-    materialClass,
+    materialClass: struckClass,
   });
 
   // When repeated shots batter the lower scarp/foundation wall, propagate shock & spalling up into the
@@ -3216,9 +3253,9 @@ export function applyBuildingImpactDamage(building, event) {
     if (canIgniteStone) {
       d.fireCount = (d.fireCount ?? 0) + 1;
       const baseIgnite = ammo === 'hot'
-        ? (materialClass === 'timber' ? 0.68 : materialClass === 'masonry' ? 0.46 : 0.40)
-        : (materialClass === 'timber' ? 0.36 : 0.28);
-      const addIntensity = Math.min(1.25, baseIgnite + energy / (materialClass === 'timber' ? 420000 : 680000));
+        ? (struck ? struck.hotIgnite : materialClass === 'timber' ? 0.68 : materialClass === 'masonry' ? 0.46 : 0.40)
+        : (struckClass === 'timber' ? 0.36 : 0.28);
+      const addIntensity = Math.min(1.25, baseIgnite + energy / (struckClass === 'timber' ? 420000 : 680000));
       const bH = building.height ?? 8;
       const rawFireY = (localPos[1] ?? 0) > 1.2 ? Math.max(localPos[1] * 0.82, bH * 0.56) : bH * 0.62;
       const fireLocal = [
@@ -3376,7 +3413,9 @@ export function applyBuildingImpactDamage(building, event) {
   if (building.workBuilding) strikeWorkThroughPiece(building, d, worldHitPos);
 
   d.revision = (d.revision ?? 0) + 1;
-  event.materialClass = materialClass;
+  // The class of what was struck, for whoever answers the hit by it (its sound, js/gunnery-audio.js), and its fabric.
+  event.materialClass = struckClass;
+  event.struckFabric = struck?.fabric ?? null;
   event.collapsed = Boolean(emittedCollapseThisHit || d.state === 'ruined');
   event.breached = Boolean(penetratedOuter);
   const bName = building.label ?? building.prefabId;
@@ -3387,6 +3426,7 @@ export function applyBuildingImpactDamage(building, event) {
     targetName: bName,
     prefabId: building.prefabId,
     materialClass,
+    struckFabric: struck?.fabric ?? null,
     collapsed: Boolean(emittedCollapseThisHit || d.state === 'ruined'),
     ammo,
     hitPartId,

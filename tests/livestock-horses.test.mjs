@@ -17,11 +17,18 @@ import {
   caravanRiderWaySeeds,
   createLivestockHerds,
   evaluateHerdStateAt,
+  herdAvoidSlack,
+  herdShotNear,
+  herdShotReach,
   sweepHerdHit,
 } from '../js/herds.js';
 import {
+  HERD_AVOID_BEYOND_ROAM_M,
+  HERD_AVOID_LEAST_M,
   HERD_CONTINUUM_MATERIAL_SPEC,
   HERD_FATE_FLOATS,
+  HERD_MOUNT_AVOID_ASIDE_M,
+  HERD_SEED_FLOATS,
   HERDS_STEP_WGSL,
 } from '../js/wgsl/herds.js';
 import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
@@ -320,6 +327,99 @@ test('sweepHerdHit fells struck livestock with knockback, triggers 38 m stampede
   assert.ok(boltedAfter.z > 28, `stampeding cow bolted radially away from z=20 to z=${boltedAfter.z.toFixed(2)}`);
 });
 
+// The step draws a loose beast or a street mount aside of its closed-form place by an offset it sums on the GPU, which
+// JavaScript never reads. The shot test's broad phase is laid from the bound of that offset, so no drawn beast is
+// missed by it; a shot that sweeps no beast's reach stands none.
+test('a shot stands only the beasts whose reach it sweeps, and that reach holds wherever the step may draw them', () => {
+  const elev = () => 2.5;
+  const pasture = [];
+  for (let i = 0; i < 40; i++) pasture.push(-300 + (i % 8) * 90, -260 + Math.floor(i / 8) * 110, 1 + (i % 5) * 7, (i * 0.137) % 1, 0.3, 1, i % 4, i * 0.7);
+  const road = caravanHerdSeeds([
+    { mode: 'cart', key: 'grain', good: 'grain', carts: 2, points: [-400, 420, 300, 470, 900, 1100], depart: 0, arrive: 4 },
+    { mode: 'cart', key: 'flock', good: 'sheep', qty: 9, points: [-400, 420, 300, 470, 900, 1100], depart: 0, arrive: 4 },
+    { mode: 'rider', key: 'post', riders: 2, points: [900, 1100, 300, 470, -400, 420], depart: 0, arrive: 4 },
+  ], { x: 0, z: 0 });
+  const seeds = new Float32Array([...pasture, ...road.seeds]);
+  const count = seeds.length / HERD_SEED_FLOATS, firstOnRoad = pasture.length / HERD_SEED_FLOATS;
+  const reach = herdShotReach(seeds, road.routes);
+
+  // What the step never moves aside is tested exactly; what it does is bounded by the step's own clamp.
+  assert.equal(herdAvoidSlack(seeds, 4), 1 + 4 * 7 + HERD_AVOID_BEYOND_ROAM_M, 'a grazing beast: its roam and the step\'s margin');
+  assert.equal(herdAvoidSlack(seeds, 0), HERD_AVOID_LEAST_M);
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map((k) => herdAvoidSlack(seeds, firstOnRoad + k)), [0, 0, 0, 0, 0, 0], 'two wains and their yokes are never moved aside');
+  assert.equal(herdAvoidSlack(seeds, firstOnRoad + 6), HERD_AVOID_LEAST_M, 'a drove walks loose');
+  assert.equal(herdAvoidSlack(seeds, count - 1), HERD_AVOID_LEAST_M, 'and so does a road rider\'s horse');
+
+  const at = (x, z, margin = 0) => herdShotNear(reach, [x, 3, z], [x, 3, z], 0, 0, margin);
+  let stood = 0;
+  for (let step = 0; step < 60; step++) {
+    const clock = { time: step * 9.7, boardDay: step * 4 / 59, daysPerSecond: 0 };
+    for (let idx = 0; idx < count; idx++) {
+      const st = evaluateHerdStateAt(seeds, road.routes, null, idx, clock, elev);
+      if (!st) continue;
+      stood++;
+      const slack = herdAvoidSlack(seeds, idx);
+      for (let dir = 0; dir < 8; dir++) {
+        const x = st.x + Math.cos(dir * Math.PI / 4) * slack, z = st.z + Math.sin(dir * Math.PI / 4) * slack;
+        assert.ok(at(x, z).includes(idx), `beast ${idx} drawn ${slack} m aside at t=${clock.time} is within its reach`);
+      }
+    }
+  }
+  assert.ok(stood > count * 30, `beasts stand on pasture and road (${stood})`);
+
+  // The same answer and the same fates as a sweep of the whole herd, by far fewer beasts; under a shifted world too.
+  let rnd = 12345;
+  const roll = () => (rnd = (Math.imul(rnd, 1664525) + 1013904223) >>> 0) / 4294967296;
+  let hits = 0, started = 0, none = 0, most = 0;
+  for (let shot = 0; shot < 400; shot++) {
+    const shiftX = shot % 2 ? 5000 : 0, shiftZ = shot % 2 ? -3000 : 0;
+    const clock = { time: roll() * 500, boardDay: roll() * 4, daysPerSecond: 0, shiftX, shiftZ };
+    const aim = evaluateHerdStateAt(seeds, road.routes, null, Math.floor(roll() * count), clock, elev);
+    const wild = shot % 4 === 3 || !aim;
+    const cx = wild ? -2000 + roll() * 4000 : aim.x + (roll() - 0.5) * 30, cz = wild ? -2000 + roll() * 4000 : aim.z + (roll() - 0.5) * 30;
+    const bearing = roll() * Math.PI * 2, half = 2 + roll() * 12;
+    const from = [cx - Math.cos(bearing) * half, 3.2, cz - Math.sin(bearing) * half], to = [cx + Math.cos(bearing) * half, 3.0, cz + Math.sin(bearing) * half];
+    const whole = new Float32Array(count * HERD_FATE_FLOATS), few = new Float32Array(count * HERD_FATE_FLOATS);
+    const near = herdShotNear(reach, from, to, shiftX, shiftZ);
+    most = Math.max(most, near.length);
+    if (!near.length) none++;
+    const wholeHit = sweepHerdHit(seeds, road.routes, whole, clock, elev, from, to, 0.09);
+    assert.deepEqual(sweepHerdHit(seeds, road.routes, few, clock, elev, from, to, 0.09, near), wholeHit);
+    assert.deepEqual(few, whole);
+    if (wholeHit) hits++;
+    if (whole.some((v, k) => k % HERD_FATE_FLOATS === 0 && v === 1)) started++;
+  }
+  assert.ok(hits > 5 && started > 100 && none > 20, `shots strike (${hits}), start stampedes (${started}) and pass clear of every reach (${none})`);
+  assert.ok(most < count, `no shot stands the whole herd (${most} of ${count} at most)`);
+
+  // Whoever a shot may have started running leaves its reach, and is stood for every shot until it has settled.
+  const fates = new Float32Array(count * HERD_FATE_FLOATS);
+  const cow = evaluateHerdStateAt(seeds, road.routes, fates, 1, 20, elev);
+  const miss = [[cow.x - 9, 3, cow.z - 15], [cow.x - 9, 3, cow.z + 15]];
+  assert.equal(sweepHerdHit(seeds, road.routes, fates, 20, elev, miss[0], miss[1], 0.09, herdShotNear(reach, miss[0], miss[1]), reach.astray), null);
+  assert.equal(fates[HERD_FATE_FLOATS], 1.0, 'a ball 9 m off starts it');
+  assert.ok(reach.astray.has(1) && !reach.astray.has(count - 1));
+  assert.deepEqual([...at(6000, 6000, 38)], [...reach.astray.keys()].sort((a, b) => a - b), 'a shot leagues off stands the astray and no other');
+  reach.astray.clear();
+  assert.equal(at(6000, 6000, 38).length, 0);
+
+  // A street mount keeps to its way but may be anywhere along it: its reach is the whole way and the step's room aside.
+  const way = caravanRiderWaySeeds([{ mode: 'rider', key: 'envoy', riders: 2, points: [0, 0, 160, 30, 260, 180] }], { x: 0, z: 0 }).mountSeeds;
+  const wayReach = herdShotReach(way.seeds, way.routes);
+  assert.equal(way.count, 2);
+  assert.equal(herdAvoidSlack(way.seeds, 0), Infinity);
+  for (let idx = 0; idx < way.count; idx++) {
+    const rh = Math.round(way.seeds[idx * HERD_SEED_FLOATS]) * 4, samples = Math.round(way.routes[rh]);
+    for (let k = 0; k < samples; k += 3) {
+      for (let dir = 0; dir < 8; dir++) {
+        const x = way.routes[rh + 8 + k * 4] + Math.cos(dir * Math.PI / 4) * HERD_MOUNT_AVOID_ASIDE_M, z = way.routes[rh + 10 + k * 4] + Math.sin(dir * Math.PI / 4) * HERD_MOUNT_AVOID_ASIDE_M;
+        assert.ok(herdShotNear(wayReach, [x, 3, z], [x, 3, z], 0, 0, 0).includes(idx), `mount ${idx} aside of sample ${k} is within its reach`);
+      }
+    }
+  }
+  assert.equal(herdShotNear(wayReach, [900, 3, 900], [910, 3, 900]).length, 0);
+});
+
 // Townsfolk are drawn through the continuum alone, from bodies baked here (their streams are not committed).
 test('mounted street riders lock < 1 mm on sloped banks, draw only through the continuum, skip offshore >3km crowds, and spawn zero horses in Indigenous towns', { skip: !crewContinuumBaked(townsfolkBodiesFor()) && 'continuum bodies not baked here' }, async (t) => {
   assert.equal(crowdFromBoard, boardFolkStreets);
@@ -469,14 +569,16 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
   assert.equal(herds.streetMounts, colonialStreets.mountSeeds.count);
   assert.equal(herds.animals.count, herds.count, 'every installed beast is a place in the continuum set');
 
-  // The step places every beast, the GPU empties and refills the continuum's lists, and one pipeline draws the view's
+  // Every beast's body and fate are copied as the last step left them, the step places every beast reading its
+  // neighbours from that copy, the GPU empties and refills the continuum's lists, and one pipeline draws the view's
   // four lists (clusters, small clusters, far body, splat) and one the shadow map's far bodies, all indirect.
   writes.length = 0; dispatches.length = 0; indexedDraws.length = 0; indirectDraws.length = 0;
   herds.encode(makePass(), 7.25);
   herds.draw(makePass());
   herds.drawShadow(makePass());
   assert.ok(!writes.includes('livestock continuum draws') && !writes.includes('livestock continuum lists'), 'the GPU resets the lists and draws without writeBuffer');
-  assert.deepEqual(dispatches.map((d) => d.pipe), ['livestock herds step', 'animal continuum reset', 'animal continuum cut']);
+  assert.deepEqual(dispatches.map((d) => d.pipe), ['livestock herds seen', 'livestock herds step', 'animal continuum reset', 'animal continuum cut']);
+  assert.equal(dispatches[0].n, dispatches[1].n, 'the copy covers every beast the step places');
   assert.equal(indexedDraws.length, 0, 'herds draw no indexed meshes');
   assert.deepEqual(indirectDraws.filter((d) => d.pipe === 'livestock herds').map((d) => d.off), [0, 16, 32, 48], 'the view draws the four continuum lists');
   assert.deepEqual(indirectDraws.filter((d) => d.pipe === 'livestock herds shadow').map((d) => d.off), [64], 'the shadow map draws the fifth');
@@ -496,13 +598,25 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
   // Fire a cannonball across a mounted courier on Rua Nova
   herds.setSimClock(7.25);
   const riderPos = townWalkerStride(lisbonPort.streets, 0, 7.25, 0.8).position;
+  // A ball out at sea sweeps no beast's reach: none is stood for it, and it takes none of the step's places. Where the
+  // land is not given the world's shift is unknown, and the step is sent the shot all the same.
+  const atSea = [[riderPos.x + 4000, 3, riderPos.z], [riderPos.x + 4010, 3, riderPos.z]];
+  writes.length = 0;
+  assert.equal(herds.watchShot(atSea[0], atSea[1], { fraction: 1 }, { radius: 0.09 }, { surfaceHeight: centerlineHeightAt, getWorldOffset: () => ({ x: 0, z: 0 }) }), null);
+  herds.encode(makePass(), 7.25);
+  assert.ok(!writes.includes('livestock shots'), 'a shot clear of every reach is not sent to the step');
+  assert.equal(herds.watchShot(atSea[0], atSea[1], { fraction: 1 }, { radius: 0.09 }), null);
+  herds.encode(makePass(), 7.25);
+  assert.ok(writes.includes('livestock shots'), 'a shot is sent to the step when the land, and so the shift, is not given');
+  herds.encode(makePass(), 7.25);
+  writes.length = 0;
   const best = { fraction: 1, distance: 40 };
   const mountHit = herds.watchShot(
     [riderPos.x - 10, riderPos.y + 1.1, riderPos.z],
     [riderPos.x + 10, riderPos.y + 1.1, riderPos.z],
     best,
     { radius: 0.09, mass: 10.9, velocity: [220, 0, 0] },
-    { surfaceHeight: centerlineHeightAt },
+    { surfaceHeight: centerlineHeightAt, getWorldOffset: () => ({ x: 0, z: 0 }) },
   );
   lisbonPort.townsfolkWatch(
     [riderPos.x - 10, riderPos.y + 1.1, riderPos.z],
@@ -513,6 +627,8 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
   assert.equal(mountHit?.kind, 'livestock');
   assert.equal(mountHit?.species, 3);
   assert.equal(herds.fates[mountHit.herdIndex * HERD_FATE_FLOATS], 2.0);
+  herds.encode(makePass(), 7.25);
+  assert.ok(writes.includes('livestock shots'), 'the shot that swept a mount\'s way is sent to the step');
 
   // Visiting pre-contact Maguana clears all street horses to strictly zero
   for (let k = 0; k < 45; k++) townsfolk.follow([lisbonPort, tainoPort], { x: 5000, z: 0 });

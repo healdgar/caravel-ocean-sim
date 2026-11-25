@@ -236,11 +236,12 @@ test('crew stand gates body inset on CREW_STAND_FLAG_CLOTHED, exposes aux load e
     },
   });
 
-  // 1. Failing hair/clothing fetch must NOT fail silently: must expose hairError/clothingError and record to __waterworldAssetErrors.
+  // 1. A failing hair fetch must NOT fail silently: it exposes hairError and records to __waterworldAssetErrors. The
+  // clothing pack is not asked for: every baked body is a dressed scan, and nothing draws garments over one.
   const devErr = makeMockDevice();
   const prevErrors = globalThis.__waterworldAssetErrors;
   const origConsoleError = console.error;
-  const logged = [];
+  const logged = [], asked = [];
   globalThis.__waterworldAssetErrors = [];
   console.error = (...args) => logged.push(args.join(' '));
   let Pfail;
@@ -248,61 +249,38 @@ test('crew stand gates body inset on CREW_STAND_FLAG_CLOTHED, exposes aux load e
     Pfail = await requestCrewContinuumPipelines({
       device: devErr,
       shader: async (code) => ({ code }),
-      fetchAsset: async () => new Response(null, { status: 404 }),
+      fetchAsset: async (url) => { asked.push(String(url)); return new Response(null, { status: 404 }); },
     });
   } finally {
     console.error = origConsoleError;
   }
   assert.equal(Pfail.hair, null);
-  assert.equal(Pfail.clothing, null);
   assert.ok(Pfail.hairError instanceof Error, 'hairError exposed');
-  assert.ok(Pfail.clothingError instanceof Error, 'clothingError exposed');
-  assert.ok(logged.length >= 2, 'errors logged via console.error');
-  assert.ok(globalThis.__waterworldAssetErrors.length >= 2, 'errors recorded on globalThis.__waterworldAssetErrors');
+  assert.ok(logged.length >= 1, 'errors logged via console.error');
+  assert.ok(globalThis.__waterworldAssetErrors.length >= 1, 'errors recorded on globalThis.__waterworldAssetErrors');
   globalThis.__waterworldAssetErrors = prevErrors;
+  assert.ok(asked.some((url) => url.includes('hair-continuum')), 'the hair pack is asked for');
+  assert.deepEqual(asked.filter((url) => url.includes('clothing')), [], 'the clothing pack is not fetched');
+  assert.ok(!('clothing' in Pfail) && !('clothingView' in Pfail) && !('clothingStand' in Pfail), 'no clothing programs are compiled');
 
-  // 2. Dressed body never attaches modular clothingScene and never sets CREW_STAND_FLAG_CLOTHED (4).
+  // 2. No batch sets CREW_STAND_FLAG_CLOTHED (4): a body is never inset under garments nothing draws.
   const devDressed = makeMockDevice();
   const dressedBody = await loadCrewContinuumBody(devDressed, 'sailor-male', { fetchAsset: fetchCrewContinuumAsset, mobile: true });
   assert.equal(dressedBody.mobile, true, 'compact mobile pack loaded when mobile=true');
-  const PfakeCloth = {
-    ...Pfail,
-    clothing: { atlas: dressedBody.atlas, types: dressedBody.types },
-  };
-  writes.length = 0;
-  const batchDressed = createCrewContinuumBatch({
-    device: devDressed, pipelines: PfakeCloth, body: dressedBody, capacity: 2,
-    frame: {}, hull: {}, bones: {}, actor: {}, main: [], shadows: { uniform: {}, bind: () => ({}) },
-  });
-  assert.equal(batchDressed.clothingScene, null, 'dressed body skips modular clothingScene');
-  batchDressed.update([{}]);
-  const dressedStand = writes.findLast((w) => w.label === 'crew continuum sailor-male stand');
-  assert.equal((dressedStand.words[3] & CREW_STAND_FLAG_CLOTHED), 0, 'CREW_STAND_FLAG_CLOTHED clear on dressed body');
-
-  // 3. Undressed body whose clothing failed to load also leaves CREW_STAND_FLAG_CLOTHED clear (never shrinks body!).
   const undressedBody = { ...dressedBody, manifest: { ...dressedBody.manifest, regionMedians: [dressedBody.manifest.regionMedians[0], null, null, dressedBody.manifest.regionMedians[3], null] } };
-  writes.length = 0;
-  const batchNakedFail = createCrewContinuumBatch({
-    device: devDressed, pipelines: Pfail, body: undressedBody, capacity: 2,
-    frame: {}, hull: {}, bones: {}, actor: {}, main: [], shadows: { uniform: {}, bind: () => ({}) },
-  });
-  assert.equal(batchNakedFail.clothingScene, null);
-  batchNakedFail.update([{}]);
-  const nakedStand = writes.findLast((w) => w.label === 'crew continuum sailor-male stand');
-  assert.equal((nakedStand.words[3] & CREW_STAND_FLAG_CLOTHED), 0, 'CREW_STAND_FLAG_CLOTHED clear when clothing failed');
+  for (const [what, body] of [['dressed', dressedBody], ['undressed', undressedBody]]) {
+    writes.length = 0;
+    const batch = createCrewContinuumBatch({
+      device: devDressed, pipelines: Pfail, body, capacity: 2,
+      frame: {}, hull: {}, bones: {}, actor: {}, main: [], shadows: { uniform: {}, bind: () => ({}) },
+    });
+    batch.update([{}]);
+    const stood = writes.findLast((w) => w.label === 'crew continuum sailor-male stand');
+    assert.equal((stood.words[3] & CREW_STAND_FLAG_CLOTHED), 0, `CREW_STAND_FLAG_CLOTHED clear on a ${what} body`);
+    assert.deepEqual(batch.continuumDraws().filter((draw) => draw.clothing), [], `a ${what} body draws no clothing scene`);
+  }
 
-  // 4. Undressed body WITH loaded clothing DOES attach clothingScene and sets CREW_STAND_FLAG_CLOTHED (4).
-  writes.length = 0;
-  const batchClothed = createCrewContinuumBatch({
-    device: devDressed, pipelines: PfakeCloth, body: undressedBody, capacity: 2,
-    frame: {}, hull: {}, bones: {}, actor: {}, main: [], shadows: { uniform: {}, bind: () => ({}) },
-  });
-  assert.ok(batchClothed.clothingScene != null);
-  batchClothed.update([{}]);
-  const clothedStand = writes.findLast((w) => w.label === 'crew continuum sailor-male stand');
-  assert.equal((clothedStand.words[3] & CREW_STAND_FLAG_CLOTHED), CREW_STAND_FLAG_CLOTHED, 'CREW_STAND_FLAG_CLOTHED set when modular clothing active');
-
-  // 5. SHA-256 verification rejects tampered compressed stream by default.
+  // 3. SHA-256 verification rejects tampered compressed stream by default.
   const devTamper = makeMockDevice();
   const tamperedFetch = async (url, init) => {
     const res = await fetchCrewContinuumAsset(url, init);

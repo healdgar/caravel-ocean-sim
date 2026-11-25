@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { waterworldChannel, waterworldApiBase, getWaterworldBuild, formatBuildLabel } from '../js/version.js';
 
@@ -113,11 +115,11 @@ test('forest/meadow continuum performance without visual degradation: GPU block/
   }
 });
 
-test('universal One-Continuum prefix micro-surfels, tiled 563-type cards, unified cut, GPU armies & dt-scaled vessel separation', async () => {
+test('universal One-Continuum prefix micro-surfels, tiled 563-type cards, unified cut, verified atlases & dt-scaled vessel separation', async () => {
   const {
     CONTINUUM_HEADER, CONTINUUM_SURFEL_ENTRY, CONTINUUM_SURFEL_HEADER_WORDS, CONTINUUM_SURFEL_WORDS,
     CONTINUUM_SURFEL_ORGANIC_FLAG, CONTINUUM_SURFEL_COUNT_MASK,
-    packContinuumBody, assembleContinuumAtlas, continuumFinestClusters, continuumPiecesFar, buildContinuumSurfels,
+    packContinuumBody, assembleContinuumAtlas, continuumFinestClusters, continuumPiecesFar, buildContinuumSurfels, loadContinuumAtlas,
   } = await import('../js/continuum-format.js');
   const { continuumModuleWGSL } = await import('../js/wgsl/continuum-cut.js');
   const { continuumCardViewWGSL } = await import('../js/wgsl/continuum-cards.js');
@@ -180,32 +182,48 @@ test('universal One-Continuum prefix micro-surfels, tiled 563-type cards, unifie
   }
   assert.equal(prefixParts.size, 3, 'even a 32-surfel prefix spans all 3 spatial faces uniformly');
 
+  // An atlas baked without surfels is given them at upload unless its family opts out: the uploaded header points at them.
+  globalThis.GPUBufferUsage ??= { STORAGE: 128, COPY_DST: 8 };
+  const { uploadContinuumAtlas } = await import('../js/continuum-scene.js');
+  const uploaded = (options) => {
+    const writes = [];
+    const device = { limits: {}, createBuffer: ({ size }) => ({ size, destroy() {} }), queue: { writeBuffer: (buffer, at, data) => writes.push([at, data]) } };
+    const { pages } = uploadContinuumAtlas(device, atlas, 'test', options);
+    return { bytes: pages[0].size, surfelsAt: writes.find(([at, data]) => at === CONTINUUM_HEADER.surfels * 4 && data.length === 1)?.[1][0] ?? 0 };
+  };
+  const withSurfels = uploaded(), withoutSurfels = uploaded({ surfels: false });
+  assert.equal(atlas[CONTINUUM_HEADER.surfels], 0, 'the bake left the surfel slot empty');
+  assert.ok(withSurfels.surfelsAt >= atlas.length && withSurfels.bytes > withoutSurfels.bytes, 'an upload appends universal micro-surfels by default and points the header at them');
+  assert.equal(withoutSurfels.surfelsAt, 0, 'surfels: false uploads none');
+
+  // A pack whose atlas does not match its manifest's SHA-256 is refused unless the caller opts out.
+  const atlasBytes = new Uint8Array(atlas.buffer, atlas.byteOffset, atlas.byteLength), packed = zlib.gzipSync(atlasBytes);
+  const pack = (sha256) => ({
+    assets: { 'manifest.json': 'manifest.json', 'atlas.bin.gz': 'atlas.bin.gz' }, validate: (manifest) => manifest, label: 'test',
+    fetchAsset: async (path) => new Response(path === 'manifest.json' ? JSON.stringify({ atlas: { bytes: atlasBytes.byteLength, sha256 } }) : packed),
+  });
+  assert.deepEqual((await loadContinuumAtlas(pack(createHash('sha256').update(atlasBytes).digest('hex')))).words, atlas, 'a pack that matches its receipt loads');
+  await assert.rejects(loadContinuumAtlas(pack('0'.repeat(64))), /failed verification/, 'SHA-256 asset integrity verification is on by default');
+  assert.equal((await loadContinuumAtlas({ ...pack('0'.repeat(64)), verifySha256: false })).words.length, atlas.length, 'verifySha256: false opts out');
+
   const selectWgsl = continuumModuleWGSL({ pass: 'select' });
   const visWgsl = continuumModuleWGSL({ pass: 'visibility' });
   const cardWgsl = continuumCardViewWGSL();
   const meadowSrc = fs.readFileSync(new URL('../js/wgsl/meadow-continuum.js', import.meta.url), 'utf8');
   const forestSrc = fs.readFileSync(new URL('../js/wgsl/forest-continuum.js', import.meta.url), 'utf8');
-  const sceneSrc = fs.readFileSync(new URL('../js/continuum-scene.js', import.meta.url), 'utf8');
-  const fmtSrc = fs.readFileSync(new URL('../js/continuum-format.js', import.meta.url), 'utf8');
-  const cardsJsSrc = fs.readFileSync(new URL('../js/continuum-cards.js', import.meta.url), 'utf8');
-  const armiesSrc = fs.readFileSync(new URL('../js/board-armies.js', import.meta.url), 'utf8');
   const tradeSrc = fs.readFileSync(new URL('../js/trade-vessels.js', import.meta.url), 'utf8');
 
   assert.match(selectWgsl, /continuumSurfelHeader\(/, 'continuumSelect queries universal surfel header');
   assert.match(selectWgsl, /CONTINUUM_SURFEL_ENTRY/, 'continuumSelect emits CONTINUUM_SURFEL_ENTRY chunks into list 2');
   assert.doesNotMatch(selectWgsl, /\blowGrounded\b/, 'continuumSelect has zero meadow-specific lowGrounded branch');
-  assert.match(selectWgsl, /continuumErrorScale\(/, 'continuumSelect delegates relief foreshortening polymorphically via continuum-kinds');
   assert.match(visWgsl, /continuumSurfelFill\(/, 'continuumVisibility expands universal micro-surfels');
   assert.match(visWgsl, /continuumSurfelMask\(/, 'continuumVisibility applies zero-discard circular MSAA disc mask');
   assert.doesNotMatch(visWgsl, /\bdiscard\b/, 'continuumVisibility never uses discard (TBDR rule 2)');
-  assert.match(sceneSrc, /surfels\s*=\s*true/, 'universal micro-surfels enabled by default across all 3D continuum atlases');
-  assert.match(fmtSrc, /verifySha256\s*=\s*true/, 'SHA-256 asset integrity verification is enabled by default');
-  assert.match(cardsJsSrc, /tilesPerSide/, 'octahedral card atlas tiles multiple types per layer so all 563 city types fit');
   assert.match(cardWgsl, /var<storage,read>\s*cardSpheres:array<vec4f>/, 'card view reads tight per-type bounding spheres');
   assert.match(cardWgsl, /mix\(vec3f\(1\.0\),continuumCardCityWash\(tint\),washW\)/, 'city card wash uses linear matFlag blend immune to mip corruption');
-  assert.match(armiesSrc, /BOARD_ARMY_STEP_WGSL/, 'board-armies advances marching soldiers on GPU compute without per-frame JS soldier loops');
   assert.match(tradeSrc, /1\s*-\s*Math\.exp\(-3\.5\s*\*\s*simDt\)/, 'trade vessel separation scales smoothly with frame time dt');
-  assert.match(tradeSrc, /let\s+extrapDt\s*=/, 'trade vessels advance continuously in GPU compute between sparse AI order steps');
+  assert.match(tradeSrc, /maxPush\s*=\s*TRADE_VESSEL_SEPARATION_DRIFT_MPS\s*\*\s*simDt/, 'trade vessel separation is limited to a drift speed times the step, so it is a motion at any step length');
+  assert.doesNotMatch(tradeSrc, /maxPush\s*=\s*4\.5\s*\*\s*Math\.min\(1,\s*simDt\s*\*\s*6\)/, 'no fixed-distance shove that lets a hull jump metres in one order step');
   assert.match(forestSrc, /CONTINUUM_SURFEL_ENTRY/, 'forest material shades micro-surfels without FS leaf texture fetches');
   assert.match(meadowSrc, /blIntercept\s*=\s*1\.0\s*-\s*\(cV\s*\/\s*2\.2\)/, 'meadowParallaxSward uses Beer-Lambert grazing canopy interception');
   assert.match(meadowSrc, /if\s*\(dist\s*<\s*220\.0\)/, 'meadow receives tree/building shadows across full shadow frustum');

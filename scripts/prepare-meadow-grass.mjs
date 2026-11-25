@@ -6,8 +6,13 @@
 // scripts/prepare-tropical-sward.mjs). Usage: node scripts/prepare-meadow-grass.mjs [portugal] [tropical] [--check]
 // (both when none is named; --check reads the baked atlas back and checks it, baking nothing). Each tile becomes one
 // type of an atlas of the one format (js/continuum-format.js), drawn by the one cut:
-//   - a cluster hierarchy of eight levels, cells 16 to a side halving to one by the fifth. A level keeps half the
-//     organs (leaves, culms, florets) of every plant of the level below, never fewer than one, and widens each kept
+//   - a cluster hierarchy of up to ten levels, cells 16 to a side halving to one by the fifth. A level keeps half the
+//     organs (leaves, culms, florets) of every plant of the level below; a plant down to its last organ keeps it or
+//     goes whole, half of such plants at each level, by where it stands. So the hierarchy halves all the way down to
+//     about a thousand triangles a patch, where a tall sward's error reaches what its far body begins at: the far
+//     body then takes over from a cut little heavier than itself. (Were no plant ever to go, the coarsest level would
+//     hold one organ of every plant, thousands of triangles, drawn over the whole range before the far body; two
+//     levels more, and the organs left are widened past the far body's own error.) Each level widens each kept
 //     organ about its own midrib until the patch covers, seen from above and from two sides, what the full sward did;
 //     each level's kept organs are their own vertices, widened as that level draws them. As the forest's leaves, a
 //     cell's error is a share of the width its kept organs are grown to (and, should no widening restore the cover,
@@ -50,7 +55,9 @@ const PACKS = Object.freeze({
   tropical: { source: 'assets/ground-cover/tropical/meadows', assets: TROPICAL_MEADOW_GRASS_ASSETS },
 });
 const P = MEADOW_PATCH_METRES;
-const LEVELS = MEADOW_CONTINUUM_LEVELS;
+// The levels a sward is baked with: the hierarchy's most, or as many as it needs before its far body can take over
+// (bakePack), set for each sward a worker bakes.
+let LEVELS = MEADOW_CONTINUUM_LEVELS;
 const STRIDE = 12; // position, normal, linear colour, along, stiffness, anchor
 // The groves' single-leaf reflectance, scaled to the sunlit meadow the land is lit as.
 const ALBEDO_SCALE = 0.46;
@@ -147,21 +154,27 @@ function organsOf(variant, V, I) {
     for (let k = 0; k < n; k++) { const r = find(k); if (!pieces.has(r)) pieces.set(r, { vertices: [], triangles: [] }); pieces.get(r).vertices.push(clump.firstVertex + k); }
     for (let i = clump.firstIndex; i < end; i += 3) pieces.get(find(I[i] - clump.firstVertex)).triangles.push(I[i], I[i + 1], I[i + 2]);
     const where = [millimetres(clump.root[0]), millimetres(clump.root[1])];
-    const clumpRand = hash01(0x6d656164, ...where);
+    const clumpRand = hash01(0x6d656164, ...where), stays = hash01(0x73746179, ...where);
     const plantOrgans = [...pieces.values()].filter((o) => o.triangles.length).map((o) => {
       const c = [0, 1, 2].map((k) => o.vertices.reduce((s, v) => s + V[v * STRIDE + k], 0) / o.vertices.length);
       let r = 0, low = 0;
       o.vertices.forEach((v, j) => { r = Math.max(r, Math.hypot(V[v * STRIDE] - c[0], V[v * STRIDE + 1] - c[1], V[v * STRIDE + 2] - c[2])); if (V[v * STRIDE + 1] < V[o.vertices[low] * STRIDE + 1]) low = j; });
       const base = o.vertices[low];
-      return { ...o, plant, clumpRand, centre: c, radius: r, root: [V[base * STRIDE], V[base * STRIDE + 2]], order: hash01(0x6f726761, ...where, millimetres(c[0]), millimetres(c[1]), millimetres(c[2])) };
+      return { ...o, plant, clumpRand, stays, centre: c, radius: r, root: [V[base * STRIDE], V[base * STRIDE + 2]], order: hash01(0x6f726761, ...where, millimetres(c[0]), millimetres(c[1]), millimetres(c[2])) };
     });
     plantOrgans.sort((a, b) => a.order - b.order);
     plantOrgans.forEach((o, rank) => { o.rank = rank; o.siblings = plantOrgans.length; organs.push(o); });
   });
   return organs;
 }
-// Whether an organ is kept at a level: the first half of its plant's organs, by a hash of where they stand, at each.
-const keptAt = (organ, level) => organ.rank < Math.max(1, Math.ceil(organ.siblings / 2 ** level));
+// Whether an organ is kept at a level: the first half of its plant's organs, by a hash of where they stand, at each;
+// and of a plant with less than one organ left to keep, its first organ, should the plant itself be kept: that share
+// of such plants, by a hash of where each stands (the same in every variant for a plant on a tile's edge band). What
+// a level keeps the level below keeps too.
+const keptAt = (organ, level) => {
+  const share = organ.siblings / 2 ** level;
+  return share >= 1 ? organ.rank < Math.ceil(share) : organ.rank === 0 && organ.stays < share;
+};
 
 // How each vertex moves when its organ is widened by g: offset * (g - 1). A leaf or culm is rows of three vertices
 // round its midrib (and a tip), and widens about each row's middle; a floret or a single scale grows about its centre.
@@ -587,9 +600,6 @@ function bakeBody(sward, rim) {
   for (let t = 0; t < ST; t++) if (chain.death[t] >= 0) dying[chain.death[t]]++;
   const alive = [];
   for (let s = 0, n = ST; s <= S; s++) { n -= dying[s]; alive.push(n); }
-  // The far body takes over only where the clusters have reached their coarsest: from the first step whose error is
-  // no finer than the patch's coarsest cell's.
-  const reached = Array.from(stepErrors).findIndex((e) => e >= sward.rootError), farFirst = reached < 0 ? S : reached;
   let canopy = 0;
   for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) canopy += heightAt(i, j) / (side1 * side1);
 
@@ -602,7 +612,7 @@ function bakeBody(sward, rim) {
   // leave a lattice of the land between them.
   const rx = P / Math.SQRT2, ry = Math.max(canopy / 2, 0.03);
   const far = {
-    position: lifted, normal: Float32Array.from(slabN), index: Uint32Array.from(index), order, chain, farFirst,
+    position: lifted, normal: Float32Array.from(slabN), index: Uint32Array.from(index), order, chain, farFirst: 0,
     stats: { inflateMax: Math.max(...inflates) },
     splat: { centre: [P / 2, BODY_FLOOR + canopy / 2, P / 2], ry, rx, area: 3 * Math.sqrt(3) * rx * ry },
   };
@@ -617,8 +627,15 @@ function bakeBody(sward, rim) {
   far.optics = packFarOptics(far, own, new Uint8Array(SV).fill(1));
   return {
     far, stepErrors, inflates, alive, canopy,
-    chain: { baseTriangles: ST, steps: S, coreTriangles: alive[S], farFirst, baseError, firstError: stepErrors[farFirst], lastError: stepErrors[S], depth, vertices: SV, knots: knots.length },
+    chain: { baseTriangles: ST, steps: S, coreTriangles: alive[S], farFirst: 0, baseError, firstError: stepErrors[0], lastError: stepErrors[S], depth, vertices: SV, knots: knots.length },
   };
+}
+// The far body takes over only where the clusters have reached their coarsest: from the first step whose error is no
+// finer than the patch's coarsest cell's.
+function handOver(body, rootError) {
+  const reached = Array.from(body.stepErrors).findIndex((e) => e >= rootError), farFirst = reached < 0 ? body.chain.steps : reached;
+  body.far.farFirst = body.chain.farFirst = farFirst;
+  body.chain.firstError = body.stepErrors[farFirst];
 }
 // A body's steps, its errors raised from its first drawn step to the meadow's one far error, so every patch hands over
 // to its far body at one distance, rising from there as its own do and never less than the step before.
@@ -635,8 +652,9 @@ function farSteps(body, farError) {
 // The worker: one variant's sward at a time, the groves shared.
 if (!isMainThread) {
   const V = new Float32Array(workerData.vertices), I = new Uint32Array(workerData.indices);
-  parentPort.on('message', ({ id, variant }) => {
+  parentPort.on('message', ({ id, variant, levels }) => {
     try {
+      LEVELS = levels;
       const s = bakeSward({ V, I, variant });
       parentPort.postMessage({ id, sward: s }, [s.indices.buffer, s.position.buffer, s.normal.buffer, s.high.buffer, s.word.buffer, s.wind.buffer, s.visible.buffer]);
     } catch (error) { parentPort.postMessage({ id, error: String(error?.stack ?? error) }); }
@@ -660,27 +678,39 @@ async function bakePack(name) {
   if (jobs.length !== 12) throw Error(`The ${name} groves hold ${jobs.length} variants, not 12`);
   const swards = new Array(jobs.length);
   const threads = Math.max(1, Math.min(jobs.length, os.availableParallelism?.() ?? os.cpus().length, 8));
-  await new Promise((resolve, reject) => {
+  // The listed variants' swards, each baked with its levels, by the workers.
+  const bakeSwards = (list, levelsOf) => new Promise((resolve, reject) => {
+    if (!list.length) { resolve(); return; }
     let next = 0, done = 0;
-    const workers = Array.from({ length: threads }, () => new Worker(new URL(import.meta.url), { workerData: { vertices, indices } }));
-    const feed = (worker) => { if (next < jobs.length) { const job = jobs[next++]; worker.postMessage({ id: job.id, variant: job.variant }); } };
+    const workers = Array.from({ length: Math.min(threads, list.length) }, () => new Worker(new URL(import.meta.url), { workerData: { vertices, indices } }));
+    const feed = (worker) => { if (next < list.length) { const job = jobs[list[next++]]; worker.postMessage({ id: job.id, variant: job.variant, levels: levelsOf(job.id) }); } };
     for (const worker of workers) {
       worker.on('message', ({ id, sward, error }) => {
         if (error) { workers.forEach((w) => w.terminate()); reject(Error(`${name} ${jobs[id].mix} ${jobs[id].variantIndex}: ${error}`)); return; }
         swards[id] = sward;
-        console.log(`${name} ${jobs[id].mix} ${jobs[id].variantIndex}: ${sward.sourceTriangles} triangles, ${sward.organs} organs, cover ${(sward.coverage * 100).toFixed(1)}%; levels ${sward.levelTriangles.join(' / ')}; errors ${sward.levelErrors.map((e) => e.toFixed(3)).join(' / ')} m; growth ${sward.growth.map((g) => g.toFixed(1)).join(' / ')}`);
-        if (++done === jobs.length) { workers.forEach((w) => w.terminate()); resolve(); } else feed(worker);
+        if (++done === list.length) { workers.forEach((w) => w.terminate()); resolve(); } else feed(worker);
       });
       worker.on('error', (error) => { workers.forEach((w) => w.terminate()); reject(error); });
       feed(worker);
     }
   });
+  await bakeSwards(jobs.map((job) => job.id), () => MEADOW_CONTINUUM_LEVELS);
 
   const rim = commonRim(swards);
-  const bodies = swards.map((s, id) => {
-    const b = bakeBody(s, rim);
-    console.log(`${name} ${jobs[id].mix} ${jobs[id].variantIndex}: body ${b.canopy.toFixed(3)} m, ${b.chain.baseTriangles} -> ${b.chain.coreTriangles} triangles in ${b.chain.steps} steps (${b.chain.knots} knots), from step ${b.chain.farFirst} at ${b.chain.firstError.toFixed(3)} m to ${b.chain.lastError.toFixed(3)} m`);
-    return b;
+  const bodies = swards.map((s) => bakeBody(s, rim));
+  // A sward's hierarchy is carried on only as far as it is drawn: through the levels finer than what every variant's
+  // far body begins at (the far body hands over at one error for them all, so no level coarser than that is ever
+  // cut). A tall sward needs every level to come down to about its far body's weight; a short one, whose far body is
+  // true from near, would carry levels of a few widened blades for ground its far body already shows as it is. Such
+  // a sward is baked again with the levels it needs, so its vertices, spheres and frame hold nothing it never draws.
+  const begins = Math.max(...bodies.map((b) => b.chain.baseError));
+  const needed = swards.map((s) => { const at = s.levelErrors.findIndex((e, level) => level > 0 && e >= begins); return at < 0 ? MEADOW_CONTINUUM_LEVELS : at; });
+  await bakeSwards(jobs.map((job) => job.id).filter((id) => needed[id] < MEADOW_CONTINUUM_LEVELS), (id) => needed[id]);
+  swards.forEach((s, id) => {
+    handOver(bodies[id], s.rootError);
+    const b = bodies[id];
+    console.log(`${name} ${jobs[id].mix} ${jobs[id].variantIndex}: ${s.sourceTriangles} triangles, ${s.organs} organs, cover ${(s.coverage * 100).toFixed(1)}%; levels ${s.levelTriangles.join(' / ')}; errors ${s.levelErrors.map((e) => e.toFixed(3)).join(' / ')} m; growth ${s.growth.map((g) => g.toFixed(1)).join(' / ')}`);
+    console.log(`${name} ${jobs[id].mix} ${jobs[id].variantIndex}: body ${b.canopy.toFixed(3)} m, ${b.chain.baseTriangles} -> ${b.chain.coreTriangles} triangles in ${b.chain.steps} steps (${b.chain.knots} knots), begins at ${b.chain.baseError.toFixed(3)} m, taken from step ${b.chain.farFirst} at ${b.chain.firstError.toFixed(3)} m to ${b.chain.lastError.toFixed(3)} m`);
   });
   // Every patch hands over at one error, and only once every variant's clusters have reached their coarsest.
   const farError = Math.max(...bodies.map((b) => b.chain.firstError), ...swards.map((s) => s.rootError)), canopy = bodies.reduce((s, b) => s + b.canopy, 0) / bodies.length;

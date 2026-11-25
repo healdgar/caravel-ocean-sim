@@ -32,7 +32,6 @@ export const TOWN_FALL_FRAMES = 21;
 export const TOWN_FALL_RATE = 15;
 export const TOWN_RUN_CYCLE_METRES = 2.4;
 export const TOWN_RIDE_CYCLE_METRES = 2.2;
-export const WALKER_MOUNTED_BIT = 16;
 export const TOWN_RUN_SPEEDS = Object.freeze([3.4, 5.2]);
 // Who reacts to what. Fear is 1 at the shot and 0 at the edge of its reach, and fear times this is the chance of it.
 export const TOWN_REACT_GAIN = 2.5;
@@ -61,6 +60,8 @@ struct Walker {first:u32,count:u32,phase:f32,speed:f32,side:f32,pauseAt:f32,paus
 struct TownCrowd {clips:array<vec4u,6>,second:u32,looks:u32,hours:f32,ride:u32};
 struct TownShot {start:vec3f,strike:f32,end:vec3f,blast:f32,reach:f32,seed:f32,padding:vec2f};
 struct TownShots {count:u32,list:array<TownShot,${TOWN_SHOT_LIMIT}>};
+// lane: how far aside of their way's centreline they are, in metres toward its right hand going out along it. It is
+// metres in every mode (about, afraid, falling, down), so where they are does not jump as their mode changes.
 struct TownFate {mode:u32,since:f32,until:f32,runFor:f32,along:f32,going:f32,lane:f32,heading:f32,clock:f32,speed:f32,look:f32,how:u32};
 struct TownIntent {pos:vec4f,state:vec4f};
 struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32,onDeck:f32};
@@ -239,7 +240,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     fates[id.x]=fate;
   }
   let isMounted=(w.flags&16u)!=0u;
-  var metres=fate.along;var going=fate.going;var lane=fate.lane;var walked=0.0;var ran=0.0;var stopped=false;var hidden=false;
+  // latM: where they are aside of their way, as fate.lane keeps it (metres toward the way's right hand).
+  var metres=fate.along;var going=fate.going;var latM=fate.lane;var walked=0.0;var ran=0.0;var stopped=false;var hidden=false;
   var mountPosApplied=false;var bodyHeading=0.0;var useBodyHeading=false;
   var spot:TownSpot;
   if(fate.mode==ABOUT){
@@ -283,7 +285,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
         }
       }
       if(!usedMountPose){spot=wayAt(w,metres,going);}
-      lane=going;
+      // The lane a rider keeps on the way itself; one a steered horse carries is measured from it when they are struck.
+      latM=going*w.side*spot.halfWidth;
     }else{
       let init=(fate.how&1u)!=0u;
       let dt=select(0.0,clamp(secondsSince(fate.since,time),0.0,0.25),init);
@@ -452,7 +455,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       let maxTurn=max(0.10,dt*5.0);
       bodyHeading=prevYaw+clamp(turnTo(prevYaw,targetYaw),-maxTurn,maxTurn);
       useBodyHeading=true;
-      lane=going;
+      latM=finalLatM;
       fate.since=time;
       fate.lane=finalLatM;
       fate.going=going;
@@ -468,13 +471,16 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   }else if(fate.mode==AFRAID){
     ran=clamp(age-${TOWN_STARTLE_S.toFixed(2)},0.0,fate.runFor);
     metres=clamp(fate.along+fate.going*fate.speed*ran,0.0,w.length);
-    // Turning back on their way takes them across it to the other side.
-    lane=mix(fate.lane,going,smoothstep(0.0,1.0,age));
+    // From where they stood when it took them, across to the right hand of the way they now go: turning back on
+    // their way takes them over to its other side.
+    let middle=wayAtOffset(w,metres,0.0);
+    latM=mix(fate.lane,going*w.side*middle.halfWidth,smoothstep(0.0,1.0,age));
     // Run to the end of the way and they are through the door, until it is over.
     hidden=ran>0.0&&(metres<=0.0||metres>=w.length)&&((w.flags>>select(2u,1u,going<0.0))&1u)==0u;
-    spot=wayAt(w,metres,lane);
+    spot=wayAtOffset(w,metres,latM);
   }else{
-    spot=wayAt(w,metres,lane);
+    // Falling or down: where they were when they were struck.
+    spot=wayAtOffset(w,metres,latM);
   }
   var position=spot.position;
   let facing=spot.forward*going;
@@ -532,12 +538,23 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       let seed3=u32(townRoll(id.x,hitSeed+12.0)*7.99)&7u;
       let dmgCode=injuryKind|(wound4<<3u)|(scorch4<<7u)|(seed3<<11u);
       let toward=fallsTo*select(-1.0,1.0,onBack==0u)+vec2f(1e-4,0.0);
+      if(mountPosApplied){
+        // A rider goes down from where the horse carried them: as far along the way as it has walked, which its own
+        // delays put behind the clock's place (and on the leg it is still on, whichever lies nearer it), and as far
+        // aside of the way as its steering took it.
+        let outAt=wayAtOffset(w,walked,0.0);
+        let backAt=wayAtOffset(w,w.length-walked,0.0);
+        var under=backAt;
+        metres=w.length-walked;
+        if(distance(position.xz,outAt.centerXZ)<=distance(position.xz,backAt.centerXZ)){under=outAt;metres=walked;}
+        latM=dot(position.xz-under.centerXZ,vec2f(under.forward.y,-under.forward.x));
+      }
       fate.how=onBack|(dmgCode<<1u);
       fate.until=throwDir.x*throwSpeed;
       fate.runFor=throwDir.y*throwSpeed;
       fate.speed=throwVy;
       fate.look=f32(dmgCode);
-      fate.mode=FALLING;fate.since=time;fate.along=metres;fate.going=going;fate.lane=lane;fate.heading=atan2(toward.x,toward.y);
+      fate.mode=FALLING;fate.since=time;fate.along=metres;fate.going=going;fate.lane=latM;fate.heading=atan2(toward.x,toward.y);
       // Their day runs by its own clock only while they are about, so the hour they fell is kept in its place.
       fate.clock=crowd.hours;
       heading=fate.heading;age=0.0;
@@ -566,7 +583,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
           survDmg=sInj|(sWound<<3u)|(sScorch<<7u)|(sSeed<<11u);
         }
         fate.how=select(0u,1u,cowers);
-        fate.mode=AFRAID;fate.since=time;fate.along=metres;fate.lane=lane;fate.heading=heading;
+        fate.mode=AFRAID;fate.since=time;fate.along=metres;fate.lane=latM;fate.heading=heading;
         fate.look=select(atan2(toDanger.x,toDanger.y),f32(survDmg),!onlyLooks);
         fate.speed=${TOWN_RUN_SPEEDS[0].toFixed(2)}+townRoll(id.x,fearSeed+4.0)*${(TOWN_RUN_SPEEDS[1] - TOWN_RUN_SPEEDS[0]).toFixed(2)};
         if(cowers||onlyLooks){
@@ -609,7 +626,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       let slideT=select(0.0,clamp((1.0-exp(-groundT*5.0))/slideMax,0.0,1.0)*0.16,groundT>0.0);
       let dispXZ=vHoriz*(flyT+slideT);
       let alongDelta=dot(dispXZ,spot.forward);
-      let landSpot=wayAt(w,clamp(metres+alongDelta,0.0,w.length),lane);
+      let landSpot=wayAtOffset(w,clamp(metres+alongDelta,0.0,w.length),latM);
       let latSlopeLift=select(0.0,min(0.45,abs(dot(dispXZ,rightVec))*0.09)+0.06,spot.position.y>0.05);
       let groundY=select(spot.position.y,max(spot.position.y,landSpot.position.y)+latSlopeLift,spot.position.y>0.05);
       let baseY=mix(spot.position.y,groundY,clamp(throwAge/max(tAirFlat,0.01),0.0,1.0));
@@ -634,6 +651,9 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let realAge=(w.flags>>8u)&127u;
   let lifeStage=humanLifeStageFromAge(realAge,id.x,true,isMounted);
   let bodyScale=lifeStage.x;
+  // The age their record carries: the board's own, or the one this life stage was drawn at, so the stand that draws
+  // them (js/wgsl/crew-continuum.js) gives a child's height a child's proportions and guesses no stage of its own.
+  let shownAge=select(realAge,u32(clamp(round(lifeStage.w),1.0,127.0)),realAge==0u);
   let model=w.flags&1u;
   let plain=crowd.clips[model*3u];let fright=crowd.clips[model*3u+1u];let fall=crowd.clips[model*3u+2u];
   var first=plain.z;var frames=plain.w;var frame=0.0;var looped=true;
@@ -679,8 +699,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let c=cos(heading)*bodyScale;let s=sin(heading)*bodyScale;
   // Turned by their heading about the vertical and scaled by their base height (children 0.64..0.82, adults 0.92..1.09).
   let transform=mat4x4f(vec4f(c,0.0,-s,0.0),vec4f(0.0,bodyScale,0.0,0.0),vec4f(s,0.0,c,0.0),vec4f(position,1.0));
-  // The fallen and the hurt are cut finer, mounted riders carry bit 0, bits 8..14 carry exact board age, and anyone in the sea is wet through.
-  let important=select(0u,${CREW_CONTINUUM_ORDER_IMPORTANT}u,fate.mode>=FALLING||dmgCode>0u)|select(0u,${CREW_CONTINUUM_ORDER_MOUNTED}u,isMounted)|(realAge<<8u);
+  // The fallen and the hurt are cut finer, mounted riders carry bit 0, bits 8..14 carry their age, and anyone in the sea is wet through.
+  let important=select(0u,${CREW_CONTINUUM_ORDER_IMPORTANT}u,fate.mode>=FALLING||dmgCode>0u)|select(0u,${CREW_CONTINUUM_ORDER_MOUNTED}u,isMounted)|(shownAge<<8u);
   let wet=select(0u,${TOWNSFOLK_SEA_MOISTURE}u,!dry);
   placed[select(0u,crowd.second,model==1u)+kept]=CrewPlaced(transform,vec4u(first+whole,first+after,first+whole,model*crowd.looks+w.look%crowd.looks),vec4f(blend,0.0,0.0,0.0),vec4u(id.x,dmgCode,important,wet));
 }

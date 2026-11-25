@@ -12,7 +12,7 @@ import {foreshorePalmPlacement} from './forest-trunks.js';
 import {createPortFractures} from './building-fracture.js';
 import {bridgeDeckYAt,bridgeSurfaceAt,layTownStreets,paveCityStreets,streetEdgeAt,waterfrontDeckYAt} from './town-streets.js';
 import {layPortProps} from './port-props.js';
-import {bakedBoardFor,oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard,runtimeBoardPortKey,syncOldWorldHeights} from './old-world.js';
+import {bakedBoardFor,oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard,syncOldWorldHeights} from './old-world.js';
 import {nativeOwnGroundFor} from './native-towns.js';
 import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset,resolveBakedBoardYear} from './board-model.js';
@@ -65,6 +65,7 @@ import {
   classifyKoppenClimateFromNormals,
   estimateLocalClimateProfile,
   fetchPublicClimateProfile,
+  coastalRegionId,
 } from './coastal-world.js';
 
 function hash32Forest(value) {
@@ -1053,6 +1054,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       ?resolveColonialEra(astroYear).year
       :(colonialPortPreset?.foundedYear>1550?Math.min(1685,colonialPortPreset.foundedYear+15):1550);
   const ownNativePreset=regionParam?nativeOwnGroundFor(regionParam,resolvedYear):null;
+  // The id the land is made under and its board fetched, kept and looked for by (coastalRegionId): a native town asked
+  // for by its own name stands on its coast's, never under a second one.
+  const regionKey=regionParam?coastalRegionId({id:regionParam,year:resolvedYear}):regionParam;
   const effectivePreset=ownNativePreset
     ?{...(presetMatch||{}),id:ownNativePreset.port,name:`${ownNativePreset.name} · Chickahominy`,latitude:ownNativePreset.latitude,longitude:ownNativePreset.longitude,shoreBearing:ownNativePreset.shoreBearing??presetMatch?.shoreBearing}
     :presetMatch;
@@ -1113,14 +1117,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     useProcedural&&!isMobile?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
   // An Old World city is the board Castle and Commons' model founded for its port ahead of time: the board is fetched
   // while the rest loads, and handed over before the land is made. A city whose board is missing has no town.
-  const bakedBoardYear=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?resolveBakedBoardYear(regionParam,resolvedYear):null;
-  const bakedBoardPath=bakedBoardYear!=null?bakedBoardAsset(regionParam,bakedBoardYear):null;
-  const runtimeKeepKey=!bakedBoardPath&&useProcedural&&search.get('board')!=='off'&&!placement?runtimeBoardPortKey({id:regionParam||undefined,latitude:targetLat,longitude:targetLon}):null;
+  const bakedBoardYear=useProcedural&&typeof regionKey==='string'&&search.get('board')!=='off'?resolveBakedBoardYear(regionKey,resolvedYear):null;
+  const bakedBoardPath=bakedBoardYear!=null?bakedBoardAsset(regionKey,bakedBoardYear):null;
+  const runtimeKeepKey=!bakedBoardPath&&useProcedural&&search.get('board')!=='off'&&!placement?coastalRegionId({id:regionKey||undefined,latitude:targetLat,longitude:targetLon,year:resolvedYear}):null;
   // If the model has lived here since (js/board-keep.js), the land is laid from the board as the traveller left it:
   // whatever was built, burnt or thrown down while they were away is there on their return, never changed in sight.
   // `boardKept` is {clock, dateMs}: whose calendar the kept world must be of, and the game's date now.
   const bakedBoardPromise=bakedBoardPath?Promise.all([fetch(bakedBoardPath).then(response=>response.ok?response.json():null).catch(()=>null),
-    boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionParam,bakedBoardYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs))
+    boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionKey,bakedBoardYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs))
     :(runtimeKeepKey&&boardKept?keptBoard(runtimeKeepKey,resolvedYear,{clock:boardKept.clock}).then(kept=>kept?.board?{port:runtimeKeepKey,year:kept.year??resolvedYear,board:kept.board,lived:{day:kept.day,days:0,keptAt:kept.keptAt??null}}:null).catch(()=>null):null);
   if(bakedBoardPath||runtimeKeepKey)requestBoardStampPipelines({device,shader}).catch(()=>{});
   const useCompactScenery=isMobile||(device.limits?.maxStorageBufferBindingSize??Infinity)<256*1024*1024;
@@ -1161,7 +1165,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     ?regionParam
     :{
       ...(effectivePreset||{}),
-      id:regionParam||undefined,
+      id:regionKey||undefined,
       name:explicitObj?.name||(!ignoreSearchLocation?search.get('regionName'):null)||effectivePreset?.name||undefined,
       latitude:targetLat,
       longitude:targetLon,
@@ -1556,7 +1560,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const LAND_BIND_IDS=new Set([0,1,2,3,4,5,6,7,8,9,12,13,14,15,16,17,19,20,21,22,23,24]);
   const CITY_BIND_IDS=new Set([0,1,2,3,4,5,6,8,13,17,18,19,20,21,22,23,24]);
   const landEntries=entries=>entries.filter(([b])=>LAND_BIND_IDS.has(b));
-  const cityEntries=entries=>entries.filter(([b])=>CITY_BIND_IDS.has(b)).map(([b,r])=>b===18?[18,groundDetail.archTextureView]:[b,r]);
+  const cityEntries=entries=>entries.filter(([b])=>CITY_BIND_IDS.has(b));
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],...activeLandShadows.terrainResources];
   // Every building of a city, cut and drawn through the one continuum from the atlas baked for every type
@@ -2888,7 +2892,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get coastalField(){return coastalField;},
     inlandWaterAt(x,z){return inlandWaterSampler?inlandWaterSampler(x-worldOffset.x,z-worldOffset.z):null;},
     get herds(){return herds;},
-    herdsWatch(from,to,best,projectile){return herds?.watchShot?herds.watchShot(from,to,best,projectile):best;},
+    // The land goes with the shot: the herd's test needs the world's shift and the ground under each beast.
+    herdsWatch(from,to,best,projectile){return herds?.watchShot?herds.watchShot(from,to,best,projectile,this):best;},
     setStreetMounts(mountSeeds,routes){return herds?.setStreetMounts?.(mountSeeds,routes);},
     refreshBoardFabric,
     get meadowGrass(){return meadowGrass;},
@@ -3151,7 +3156,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       // The city's cut reads the scene's one pixel error itself (js/continuum-scene.js).
       if(cityContinuum){split('Cut: city');cityContinuum.encode(p);}
       if(forest){split('Cut: forest');forest.encode(p);}
-      if(herds){split('Cut: herds');herds.encode(p);}
+      // The step's clock (Frame.camPos.w), so the herd's shot test places each beast at the same instant.
+      if(herds){split('Cut: herds');herds.encode(p,frame?frame[19]:null);}
       if(meadowGrass){split('Cut: meadow');meadowGrass.encode(p);}
       for(const sec of loadedSections.values())if(sec.meadowGrass&&(!lastCamera||isSectionVisible(sec.region,lastCamera,lastView,9500)))sec.meadowGrass.encode(p);
       if(tradeVessels?.encode){split('Cut: trade vessels');tradeVessels.encode(p);}

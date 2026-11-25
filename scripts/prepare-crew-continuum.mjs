@@ -8,12 +8,13 @@
 //   clusters   a cluster hierarchy cut on the GPU by projected error. Each piece of the body (CREW_CONTINUUM_PIECES: the
 //              trunk in two, the neck, the head, each limb by its segments) is clustered apart, its boundary a seam both
 //              sides coarsen together, and each piece's clusters ride the joint its points weigh on most. Each group's
-//              error is measured in every pose of a set the body is held to (rest, its clips, each joint swung through
-//              its range), so a cut keeps its bound while it moves.
+//              error is how far its surface moves, measured both ways at rest and in every pose of a set the body is
+//              held to (rest, its clips, each joint swung through its range; js/continuum-bake.js posedGroupError), so
+//              a cut keeps its bound while it moves.
 //   far body   the one bake's, wrapped round a light even simplification of the fit (the far source) whose points wear
-//              the colour of the surface about them. Each far point wears the skin of the far source's point nearest
-//              it; each step's error is raised by how far the far source strays from the fit posed, and by how much
-//              farther apart the far body and the far source come posed than at rest.
+//              the colour of the surface about them, and begun about as heavy as the clusters' coarsest cut. Each far
+//              point wears the skin of the far source's point nearest it; its error is measured posed, each way: the
+//              fit's seen points from the posed far body, and the far body's points from the posed far source.
 //   rig        each joint's sphere at rest, and the pose slack: the farthest any point comes, in any pose, from where
 //              its cluster's joint, or its own strongest joint, alone would carry it.
 //   splat      the one bake's, with each region's share of its outline and mean colour.
@@ -36,7 +37,7 @@ import {
 } from '../js/crew-continuum.js';
 import { CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
 import { CONTINUUM_HEADER_WORDS, assembleContinuumAtlas, checkContinuumAtlas, packContinuumBody, packContinuumUV } from '../js/continuum-format.js';
-import { bakeContinuumBody, closest, triangleSpheres, nearestTriangle, triangleGrid, outline } from '../js/continuum-bake.js';
+import { bakeContinuumBody, closest, triangleSpheres, triangleGrid, outline, posedGroupError, posedMeasure } from '../js/continuum-bake.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -62,6 +63,8 @@ const CLIP_FRAMES = [['Idle', 3], ['Walk', 8], ['Brace', 3]];
 // What a far-source point wears rides the bake as its two kind floats: its colour's three bytes (the square root of
 // its linear colour) and its region, each kept below 1 by a power of two, so exactly.
 const KIND_WORD = 2 ** -24;
+// How many times dearer a far-body collapse is that would drag one region's border over another (collapseChain).
+const FAR_BORDER_COST = 64;
 
 // ------------------------------------------------------------------------------------------------ glTF reading
 const COMPONENT = { 5121: Uint8Array, 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array };
@@ -209,51 +212,6 @@ function packSkin(joints, weights) {
   let J = 0, W = 0;
   pairs.forEach(([j, q], k) => { J |= j << (k * 8); W |= q << (k * 8); });
   return [J >>> 0, W >>> 0];
-}
-
-// ------------------------------------------------------------------------------------------------ posed measures
-// How far apart, in the worst pose, a point of one posed set (vertex a) and the barycentric point (s, t) on triangle
-// (b0, b1, b2) of the same are.
-function posedGap(posed, a, b0, b1, b2, s, t) {
-  const r = 1 - s - t;
-  let worst = 0;
-  for (const X of posed) {
-    const dx = X[a * 3] - (r * X[b0 * 3] + s * X[b1 * 3] + t * X[b2 * 3]);
-    const dy = X[a * 3 + 1] - (r * X[b0 * 3 + 1] + s * X[b1 * 3 + 1] + t * X[b2 * 3 + 1]);
-    const dz = X[a * 3 + 2] - (r * X[b0 * 3 + 2] + s * X[b1 * 3 + 2] + t * X[b2 * 3 + 2]);
-    worst = Math.max(worst, dx * dx + dy * dy + dz * dz);
-  }
-  return Math.sqrt(worst);
-}
-// The builder's group error, measured posed: each point a group removes is matched, at rest, to its nearest point on
-// what the group keeps of the same piece, and the error is the farthest those two come apart in any pose.
-function posedGroupError(welded, posed) {
-  const kept = new Int32Array(welded.count).fill(-1), seen = new Int32Array(welded.count).fill(-1), mesh = { position: welded.position, corners: null };
-  let stamp = 0;
-  return (children, simplified, error) => {
-    stamp++;
-    const count = simplified.length / 3;
-    if (!count) return error;
-    for (const v of simplified) kept[v] = stamp;
-    const byPiece = new Map(), every = Array.from({ length: count }, (_, t) => t);
-    for (let t = 0; t < count; t++) {
-      const p = welded.part[simplified[t * 3]];
-      if (!byPiece.has(p)) byPiece.set(p, []);
-      byPiece.get(p).push(t);
-    }
-    mesh.corners = simplified;
-    const pieceSpheres = new Map();
-    let worst = 0;
-    for (const v of children) {
-      if (kept[v] === stamp || seen[v] === stamp) continue;
-      seen[v] = stamp;
-      const list = byPiece.get(welded.part[v]) ?? every;
-      if (!pieceSpheres.has(list)) pieceSpheres.set(list, triangleSpheres(welded.position, simplified, list));
-      const k = nearestTriangle(welded.position[v * 3], welded.position[v * 3 + 1], welded.position[v * 3 + 2], list, mesh, pieceSpheres.get(list)), t = list[k];
-      worst = Math.max(worst, posedGap(posed, v, simplified[t * 3], simplified[t * 3 + 1], simplified[t * 3 + 2], closest[1], closest[2]));
-    }
-    return Math.max(worst, error);
-  };
 }
 
 // ------------------------------------------------------------------------------------------------ texture
@@ -454,12 +412,10 @@ function farSource(fit, welded, surface) {
       vertices[at + 7] = fit.region[v] * KIND_WORD;
     }
   }
-  // Each triangle's piece, for matching the fit to it piece by piece.
-  const piece = Uint8Array.from({ length: T }, (_, t) => {
-    const [a, b, c] = [0, 1, 2].map((k) => CREW_CONTINUUM_JOINT_PIECE[strongest(fit, corners[t * 3 + k])]);
-    return a === b || a === c ? a : b === c ? b : a;
-  });
-  return { type: { name: 'far source', vertices, triangles: T, parts }, corners, piece, triangles: T, vertices: base.vertices, simplifyError: base.error };
+  // A person has no plain face, and wears each region dyed its own way: every far triangle keeps the colour nearest
+  // it, and the regions' borders hold their places while the far body thins.
+  const type = { name: 'far source', vertices, triangles: T, parts, plain: false, borders: (colour, region) => Math.round(region / KIND_WORD), borderCost: FAR_BORDER_COST };
+  return { type, corners, triangles: T, vertices: base.vertices, simplifyError: base.error };
 }
 
 // ------------------------------------------------------------------------------------------------ body.glb
@@ -605,38 +561,45 @@ async function bake(entry) {
     slack = Math.max(slack, ...pieceSlack) + SPHERE_MARGIN;
     lap(`slack ${slack.toFixed(3)} m`);
 
-    // The far source's own error, posed: a sample of the fit's points, each matched by piece to its nearest far-source
-    // triangle at rest, and how far apart the two come in any pose.
-    const bySourcePiece = new Map();
-    for (let t = 0; t < far.triangles; t++) { if (!bySourcePiece.has(far.piece[t])) bySourcePiece.set(far.piece[t], []); bySourcePiece.get(far.piece[t]).push(t); }
-    const allSource = Array.from({ length: far.triangles }, (_, t) => t), sourceMesh = { position: fit.position, corners: far.corners }, sourceSpheres = new Map();
-    const stride = Math.max(1, Math.floor(fitCount / 40000));
-    let sourceError = 0;
-    for (let v = 0; v < fitCount; v += stride) {
-      const list = bySourcePiece.get(CREW_CONTINUUM_JOINT_PIECE[strongest(fit, v)]) ?? allSource;
-      if (!sourceSpheres.has(list)) sourceSpheres.set(list, triangleSpheres(fit.position, far.corners, list));
-      const k = nearestTriangle(fit.position[v * 3], fit.position[v * 3 + 1], fit.position[v * 3 + 2], list, sourceMesh, sourceSpheres.get(list)), t = list[k];
-      sourceError = Math.max(sourceError, posedGap(posed, v, far.corners[t * 3], far.corners[t * 3 + 1], far.corners[t * 3 + 2], closest[1], closest[2]));
-    }
-    // The far body posed: how much farther it and the far source come apart than at rest.
-    const restGap = new Float32Array(V), sourceVertices = far.vertices, sourceGap = new Float32Array(sourceVertices.length);
+    // The far body's error posed, measured each way in every pose. (Summed from parts, the far source's error and the
+    // far body's own at rest and its growth posed, each part's greatest falls on a different point, and the sum is
+    // nearly twice what any point shows.)
+    //   inward   a sample of the fit's points that can be seen from outside, each from the posed far body: the far
+    //            source's error and the far body's skin in one measure.
+    //   outward  each far point from the posed far source, and the far source's own surface from the fit's: the middle
+    //            of each of its triangles from the fit's triangles about its corners (posedMeasure).
+    // A point that cannot be seen (a shirt under a coat) is not measured from the far body: were the far body's skin
+    // to carry it inside what hides that point, the points that hide it would be left outside the far body, and the
+    // inward measure has them.
+    const stride = Math.max(1, Math.floor(fitCount / 120000)), sampled = [];
+    for (let v = 0; v < fitCount; v += stride) if (farBody.exteriorAt(fit.position[v * 3], fit.position[v * 3 + 1], fit.position[v * 3 + 2])) sampled.push(v);
+    let sourceBack = 0;
     {
-      const toFar = triangleGrid(farBody.position, farBody.index, 0.1);
-      for (let i = 0; i < V; i++) { toSource(farBody.position[i * 3], farBody.position[i * 3 + 1], farBody.position[i * 3 + 2]); restGap[i] = Math.sqrt(closest[0]); }
-      sourceVertices.forEach((v, i) => { toFar(fit.position[v * 3], fit.position[v * 3 + 1], fit.position[v * 3 + 2]); sourceGap[i] = Math.sqrt(closest[0]); });
+      const W = weldedFit.index, start = new Uint32Array(fitCount + 1), P = fit.position;
+      for (const v of W) start[v + 1]++;
+      for (let v = 0; v < fitCount; v++) start[v + 1] += start[v];
+      const fill = start.slice(0, fitCount), about = new Uint32Array(W.length);
+      for (let t = 0; t < W.length / 3; t++) for (let k = 0; k < 3; k++) about[fill[W[t * 3 + k]]++] = t;
+      const fitMesh = { position: P, corners: W }, toFit = posedMeasure(posed);
+      for (let t = 0; t < far.triangles; t++) {
+        const a = far.corners[t * 3], b = far.corners[t * 3 + 1], c = far.corners[t * 3 + 2], list = [];
+        for (const v of [a, b, c]) for (let at = start[v]; at < start[v + 1]; at++) list.push(about[at]);
+        sourceBack = Math.max(sourceBack, toFit((P[a * 3] + P[b * 3] + P[c * 3]) / 3, (P[a * 3 + 1] + P[b * 3 + 1] + P[c * 3 + 1]) / 3, (P[a * 3 + 2] + P[b * 3 + 2] + P[c * 3 + 2]) / 3, a, b, c, 1 / 3, 1 / 3, 1 / 3, list, fitMesh, triangleSpheres(P, W, list)));
+      }
     }
-    let posedDelta = 0;
+    let inward = 0, outward = 0;
     const farPosed = new Float32Array(V * 3);
     palettes.forEach((palette, k) => {
       const X = posed[k];
       for (let i = 0; i < V; i++) skinPoint(palette, farJoints, farWeights, i, farBody.position[i * 3], farBody.position[i * 3 + 1], farBody.position[i * 3 + 2], farPosed, i * 3);
       const toX = triangleGrid(X, far.corners, 0.1), toY = triangleGrid(farPosed, farBody.index, 0.1);
-      for (let i = 0; i < V; i++) { toX(farPosed[i * 3], farPosed[i * 3 + 1], farPosed[i * 3 + 2]); posedDelta = Math.max(posedDelta, Math.sqrt(closest[0]) - restGap[i]); }
-      sourceVertices.forEach((v, i) => { toY(X[v * 3], X[v * 3 + 1], X[v * 3 + 2]); posedDelta = Math.max(posedDelta, Math.sqrt(closest[0]) - sourceGap[i]); });
+      for (let i = 0; i < V; i++) { toX(farPosed[i * 3], farPosed[i * 3 + 1], farPosed[i * 3 + 2]); outward = Math.max(outward, Math.sqrt(closest[0])); }
+      for (const v of sampled) { toY(X[v * 3], X[v * 3 + 1], X[v * 3 + 2]); inward = Math.max(inward, Math.sqrt(closest[0])); }
     });
+    const posedError = Math.max(farBody.baseError, inward, outward + sourceBack);
     const stepFloats = new Float32Array(farBody.steps.buffer, farBody.steps.byteOffset, farBody.steps.length);
-    for (let s = 0; s < farBody.steps.length / CONTINUUM_STEP_WORDS; s++) stepFloats[s * CONTINUUM_STEP_WORDS + 1] += sourceError + posedDelta;
-    lap(`far posed +${(sourceError + posedDelta).toFixed(3)} m`);
+    for (let s = 0; s < farBody.steps.length / CONTINUUM_STEP_WORDS; s++) stepFloats[s * CONTINUUM_STEP_WORDS + 1] += posedError - farBody.baseError;
+    lap(`far posed ${posedError.toFixed(3)} m (in ${inward.toFixed(3)}, out ${outward.toFixed(3)} + ${sourceBack.toFixed(3)})`);
 
     // Each joint's sphere at rest: every cluster and far point it carries, grown by the far body's inflation.
     const lo = Array.from({ length: CREW_JOINT_COUNT }, () => [Infinity, Infinity, Infinity]), hi = Array.from({ length: CREW_JOINT_COUNT }, () => [-Infinity, -Infinity, -Infinity]);
@@ -697,7 +660,7 @@ async function bake(entry) {
       pieces: CREW_CONTINUUM_PIECES, regions: CREW_CONTINUUM_REGIONS, regionMedians: surface.medians,
       rig: { joints: CREW_JOINT_COUNT, slack: +slack.toFixed(5), pieceSlack: Object.fromEntries(CREW_CONTINUUM_PIECES.map((name, p) => [name, +pieceSlack[p].toFixed(4)])), leads: leadOf.map((j) => CREW_JOINT_NAMES[j]), spheres },
       clusters: { count: clusters.count, levels: clusters.levels, roots: clusters.roots, finestTriangles: clusters.finestTriangles, rootError: +clusters.rootError.toFixed(4), pieceCopies: body.copies },
-      chain: { ...farBody.stats, farSourceTriangles: far.triangles, farSourceError: +sourceError.toFixed(4), posedDelta: +posedDelta.toFixed(4) },
+      chain: { ...farBody.stats, farSourceTriangles: far.triangles, posedError: +posedError.toFixed(4), posedInward: +inward.toFixed(4), posedOutward: +outward.toFixed(4), farSourceBack: +sourceBack.toFixed(4) },
       splat,
       texture: { width: texture.levels.width, height: texture.levels.height, coverage: texture.levels.coverage, delightVersion: texture.delightVersion, levels: texture.levels.levels },
       body: { file: 'body.glb', bytes: standIn.bytes.length, sha256: createHash('sha256').update(standIn.bytes).digest('hex'), triangles: standIn.triangles, vertices: standIn.vertices, contactDrift: drift },

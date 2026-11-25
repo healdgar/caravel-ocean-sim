@@ -634,11 +634,13 @@ export function requestMeadowStand(device, shader) {
     for (const name of names) {
       layouts[name] = device.createBindGroupLayout({ label: `meadow stand ${name}`, entries: entries[name] });
     }
-    const built = await Promise.all(names.map((name) => device.createComputePipelineAsync({
-      label: `meadow stand ${name}`, layout: device.createPipelineLayout({ label: `meadow stand ${name}`, bindGroupLayouts: [layouts[name]] }),
-      compute: { module, entryPoint: points[name] },
-    })));
-    names.forEach((name, i) => { pipelines[name] = built[i]; });
+    // One at a time: five pipeline states compiled at once have run D3D12 out of memory.
+    for (const name of names) {
+      pipelines[name] = await device.createComputePipelineAsync({
+        label: `meadow stand ${name}`, layout: device.createPipelineLayout({ label: `meadow stand ${name}`, bindGroupLayouts: [layouts[name]] }),
+        compute: { module, entryPoint: points[name] },
+      });
+    }
     return { layouts, pipelines };
   });
 }

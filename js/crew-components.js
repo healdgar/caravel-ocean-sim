@@ -3,27 +3,6 @@
 // for crew, fort garrisons, and port townsfolk. Zero extra draw calls; zero fragment discard.
 const CREW_COMPONENTS_ASSET_URL = 'assets/crew/components-1550.json';
 let cachedCrewComponentPacks = null;
-let pendingCrewComponentPacks = null;
-
-export async function ensureCrewComponentPacks() {
-  if (cachedCrewComponentPacks) return cachedCrewComponentPacks;
-  if (!pendingCrewComponentPacks && typeof fetch === 'function') {
-    pendingCrewComponentPacks = fetch(CREW_COMPONENTS_ASSET_URL)
-      .then((res) => {
-        if (!res.ok) throw Error('Crew component asset unavailable: ' + CREW_COMPONENTS_ASSET_URL);
-        return res.json();
-      })
-      .then((json) => {
-        cachedCrewComponentPacks = Object.freeze(json);
-        return cachedCrewComponentPacks;
-      })
-      .catch((err) => {
-        pendingCrewComponentPacks = null;
-        throw err;
-      });
-  }
-  return pendingCrewComponentPacks;
-}
 
 export function getCrewComponentPacks() {
   if (cachedCrewComponentPacks) return cachedCrewComponentPacks;

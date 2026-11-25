@@ -123,7 +123,8 @@ import { createMateFigure, mateDoing, stepMateFigure } from './first-mate.js';
 import { mateAbout, mateCandidateAccount, mateCandidateLine, mateCounsel, mateReply, mateTopics } from './mate-counsel.js';
 import { WALKER_WORDS, townSolids } from './town-streets.js';
 import { worldBodiesForDevice } from './world-bodies.js';
-import { bakedBoardFor, runtimeBoardFor, runtimeBoardPortKey } from './old-world.js';
+import { bakedBoardFor, runtimeBoardFor } from './old-world.js';
+import { coastalRegionId, resolveColonialEra } from './coastal-world.js';
 import { createProps } from './props.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
@@ -1142,7 +1143,8 @@ async function main() {
     // Land is about to be made. If it is the living board's own port, the world is kept first, so that the port come
     // back to is laid as the model has it now; a keeping that is slow in coming is not waited for (the last stands).
     const living=window.oceanBoard;
-    const nextPortKey=runtimeBoardPortKey({id:region?.id,latitude:lat??region?.latitude,longitude:lon??region?.longitude});
+    // The key the land about to be made will be known by (js/coastal-world.js coastalRegionId), in the year it is made in.
+    const nextPortKey=coastalRegionId({id:region?.id,latitude:lat??region?.latitude,longitude:lon??region?.longitude,year:resolveColonialEra(liveYear).year});
     if(!placement&&living){
       if(BOARD_KEPT&&living.state==='alive')await Promise.race([living.keep(),new Promise(resolve=>setTimeout(resolve,BOARD_KEEP_WAIT_MS))]);
       const nextBakedYear=resolveBakedBoardYear(nextPortKey,liveYear);
@@ -1243,7 +1245,7 @@ async function main() {
   const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto',
     {initial:Math.sqrt(AUTO_START_PIXELS/Math.max(1,canvas.clientWidth*canvas.clientHeight*(window.devicePixelRatio||1)**2))});
   const fixedPolygons = fixedResolution && !qs.has('polygons');
-  const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto', { minimum: 0.15 });
+  const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto', { minimum: 0.35 });
   setContinuumPixelError(polygons.pixelError);
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView;
@@ -5947,7 +5949,7 @@ async function main() {
     // Each new count of the scene's submitted triangles holds it to the one budget through the same scalar, judged
     // at the error the count was taken at; the scalar glides to wherever the governors aim it.
     const census=continuumCensus?.latest;
-    if(census&&census!==censusSeen){censusSeen=census;if(polygons.observeTriangles(census.total,census.budget,census.pixels))aimContinuumPixelError(polygons.pixelError);}
+    if(census&&census!==censusSeen){censusSeen=census;if(polygons.observeTriangles(census.budgeted,census.budget,census.pixels))aimContinuumPixelError(polygons.pixelError);}
     stepContinuumPixelError(elapsed);
     resize();
     let camDt = Math.min(0.1, elapsed);
@@ -6425,7 +6427,8 @@ async function main() {
     if (isWebKit && cameraMediumBand && !underwaterReady) ensureUnderwaterDeferred();
     const activeMediumBand = cameraMediumBand && underwaterReady;
     const shaftsActive = Boolean(volumetricShafts) && !activeMediumBand && P.clouds > 0.001 && frameF[33] > 0.025 && frameF[115] < 0.5;
-    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||activeMediumBand||shaftsActive||(useNeuralLight&&neuralPass.wantsDepth) ? 'store' : 'discard';
+    // The occlusion pyramid reads this pass's depth every frame it is on (js/continuum-hiz.js): it must be kept then.
+    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||activeMediumBand||shaftsActive||(useNeuralLight&&neuralPass.wantsDepth)||Boolean(continuumHiZ?.enabled) ? 'store' : 'discard';
     // One pass for the whole scene keeps its multisampled attachments in tile memory. Whole hulls
     // come first: they neither discard nor blend, so what they hide is never shaded, sea included.
     if(drawProw){

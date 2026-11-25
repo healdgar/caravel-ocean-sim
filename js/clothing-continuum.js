@@ -5,11 +5,9 @@
 // weight transfer) and the wind stream (per-vertex cloth hem flex + fold phase) so skirts, sleeves, tunics, and
 // shoulder cloaks physically billow in wind and sway with walking stride on the GPU — eliminating baked garment
 // intersection and color-bleed stains permanently.
-import {
-  CONTINUUM_ATLAS_VERSION, CONTINUUM_HEADER_WORDS, CONTINUUM_NEVER,
-  continuumAtlasMetaWords, continuumAtlasTypes, loadContinuumAtlas,
-} from './continuum-format.js';
-import { uploadContinuumAtlas } from './continuum-scene.js';
+// The game neither fetches nor draws it now: every baked body is a dressed scan (js/crew-continuum-draw.js). What is
+// left here is the pack's format, for its bake and its test.
+import { CONTINUUM_ATLAS_VERSION, CONTINUUM_HEADER_WORDS, CONTINUUM_NEVER } from './continuum-format.js';
 
 export const CLOTHING_CONTINUUM_FORMAT = 'waterworld.clothing-continuum';
 export const CLOTHING_CONTINUUM_VERSION = CONTINUUM_ATLAS_VERSION;
@@ -79,26 +77,4 @@ export function validateClothingContinuumManifest(manifest) {
     }
   });
   return manifest;
-}
-
-const clothingContinuumCache = new WeakMap();
-
-export function loadClothingContinuum(device, { fetchAsset = fetch } = {}) {
-  let pending = clothingContinuumCache.get(device);
-  if (!pending) {
-    pending = loadContinuumAtlas({
-      assets: CLOTHING_CONTINUUM_ASSETS,
-      validate: validateClothingContinuumManifest,
-      label: 'clothing continuum',
-      fetchAsset,
-    }).then(({ manifest, words }) => {
-      const atlas = uploadContinuumAtlas(device, words, 'clothing continuum');
-      return { manifest, words: continuumAtlasMetaWords(words), types: atlas.types, atlas };
-    }).catch((err) => {
-      if (clothingContinuumCache.get(device) === pending) clothingContinuumCache.delete(device);
-      throw err;
-    });
-    clothingContinuumCache.set(device, pending);
-  }
-  return pending;
 }

@@ -90,7 +90,7 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
     get budget() { return CONTINUUM_TRIANGLE_BUDGET; },
     // No read is in flight: a count encoded now is read back.
     get idle() { return !reading; },
-    // The last count read: { families: { name: triangles }, total, submittedTotal, shadowTotal, breakdown, budget, pixels },
+    // The last count read: { families: { name: triangles }, total, submittedTotal, shadowTotal, budgeted, breakdown, budget, pixels },
     // or null before the first arrives; `pixels` is the scene's pixel error the count was taken at.
     get latest() { return latest; },
     // After the frame's selections: copy each family's records and sum them. sources: [{ name, draws }].
@@ -180,7 +180,8 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
           shadowTotal += b.shadowSubmitted;
           if (b.clamped.length) clampedFamilies.push(`${name}(${b.clamped.join(',')})`);
         }
-        latest = { families, total, submittedTotal, shadowTotal, clampedFamilies, breakdown, aux: auxSnap, budget: CONTINUUM_TRIANGLE_BUDGET, pixels };
+        // The one budget counts every triangle the frame draws: the view's demand and what its shadow passes submit.
+        latest = { families, total, submittedTotal, shadowTotal, budgeted: total + shadowTotal, clampedFamilies, breakdown, aux: auxSnap, budget: CONTINUUM_TRIANGLE_BUDGET, pixels };
       }).catch(() => {}).finally(() => { reading = false; });
     },
     destroy() { gather?.destroy(); regionBuffer?.destroy(); totals.destroy(); staging.destroy(); },

@@ -36,6 +36,7 @@ import {
 import { continuumKindsWGSL } from './continuum-kinds.js';
 import { CONTINUUM_GROUNDED, continuumGroundWGSL } from '../continuum-ground.js';
 import { CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING, continuumHiZWGSL } from '../continuum-hiz.js';
+import { WATER_CAPTURE_CEILING } from '../water-optics.js';
 
 // The vertices of one entry of each list.
 export const CONTINUUM_ENTRY_VERTICES = Object.freeze(CONTINUUM_ENTRY_TRIANGLES.map((n) => 3 * n));
@@ -62,6 +63,10 @@ export const CONTINUUM_STATE_ENTRIES = 3;
 export const CONTINUUM_ENTRY_LAYOUT = Object.freeze([Object.freeze({ arrayStride: 8, stepMode: 'instance', attributes: Object.freeze([Object.freeze({ shaderLocation: 0, offset: 0, format: 'uint32x2' })]) })]);
 // How many shadow-map texels a shadow's cut may be in error (matches the 2x2 hardware PCF shadow filter footprint).
 export const CONTINUUM_SHADOW_TEXELS = 2.0;
+// A cast shadow is a filtered silhouette, with none of its caster's relief: its cut may be this many times coarser
+// than the view's own cut of the caster, whatever the map's texel (a ship's own map resolves a centimetre, which
+// no shadow on her deck is seen to). It reads the scene's one pixel error, so shadows yield under the one budget too.
+export const CONTINUUM_SHADOW_COARSER = 4.0;
 // What a shadow pass casts: 'whole' every surface, opaque or cut (a leaf's coverage); a ship's own maps hold her
 // 'solid' surfaces apart from her 'canvas', whose depth and the colour it lets through go to a map of their own.
 export const CONTINUUM_SHADOW_PARTS = Object.freeze(['whole', 'solid', 'canvas']);
@@ -319,6 +324,7 @@ export function continuumSelectWGSL(paging = CONTINUUM_SINGLE_PAGE) {
 @group(0) @binding(1) var<uniform> SH:ShadowFrame;
 @group(0) @binding(7) var<storage,read_write> continuumDraws:array<atomic<u32>>;
 const CONTINUUM_SHADOW_TEXELS:f32=${CONTINUUM_SHADOW_TEXELS.toFixed(4)};
+const CONTINUUM_SHADOW_COARSER:f32=${CONTINUUM_SHADOW_COARSER.toFixed(4)};
 const CONTINUUM_FULL:u32=0xffffffffu;
 const CONTINUUM_BATCH:u32=${B}u;
 const CONTINUUM_LEVELS:u32=${L}u;
@@ -524,18 +530,20 @@ fn continuumTry(slot:u32,i:u32)->u32 {
           let detail=min(continuumType(model,${CONTINUUM_TYPE.flags}u)>>${CONTINUUM_TYPE_DETAIL_SHIFT}u,clusterCount);
           tries.z=first;tries.w=detail;
           cut=vec4f(focal,pixels,scale,0.0);
-          // Its shadow, cut coarse enough for the shadow map, is bounded solely by the shadow-map frustum (zero hard
-          // per-family shadow range cutoffs). Objects shorter than max(2.5 shadow texels, 0.50 m) sit inside the
-          // shadow bias + 2x2 PCF filter footprint and cannot cast a resolvable land shadow.
-          let shadowStretch=continuumStretch(record);
-          let shadowHeight=2.0*continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*shadowStretch.y*record.place.w;
-          if(continuumView.counts.z!=0u&&(shadowHeight>=max(SH.texel.x*2.5,0.50)||continuumFlagged(record,CONTINUUM_EXACT))){
+          // Its shadow, cut coarse enough for the shadow map, is bounded by the map's frustum alone: no range and no
+          // size switch. A caster narrower than the error its shadow is allowed cannot be resolved by the map, and
+          // thins away by the one hash the horizon thins by (continuumThin), a caster at a time as the texel grows.
+          // One that stands on the ground casts by its height above it: lower than that error, its shadow lies
+          // within its own footprint, however wide it spreads (a sward, a kerb, a flat stone).
+          let shadowTall=2.0*continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*continuumStretch(record).y*record.place.w;
+          let shadowSpan=select(2.0*reach,min(2.0*reach,shadowTall),continuumFlagged(record,CONTINUUM_GROUNDED))/max(CONTINUUM_SHADOW_TEXELS*SH.texel.x,1e-5);
+          if(continuumView.counts.z!=0u&&(continuumFlagged(record,CONTINUUM_EXACT)||continuumThin(shadowSpan,record.tag.z*0x9e3779b9u+0x7f4a7c15u)>0.0)){
             let light=SH.lightView*vec4f(world-SH.origin.xyz,1.0);
             let r=reach*vec3f(length(vec3f(SH.lightView[0].x,SH.lightView[1].x,SH.lightView[2].x)),length(vec3f(SH.lightView[0].y,SH.lightView[1].y,SH.lightView[2].y)),length(vec3f(SH.lightView[0].z,SH.lightView[1].z,SH.lightView[2].z)));
             if(abs(light.x)<=1.0+r.x&&abs(light.y)<=1.0+r.y&&light.z>= -r.z&&light.z<=1.0+r.z){
               let shadowFloor=select(continuumView.limits.z,0.0,continuumFlagged(record,CONTINUUM_EXACT));
               let lightPerspective=continuumErrorScale(record,normalize(SH.sun.xyz+vec3f(0.0,1e-5,0.0)));
-              let allowed=max(max(CONTINUUM_SHADOW_TEXELS*SH.texel.x/lightPerspective,shadowFloor),pixels*away/focal)/scale;
+              let allowed=max(max(CONTINUUM_SHADOW_TEXELS*SH.texel.x/lightPerspective,shadowFloor),CONTINUUM_SHADOW_COARSER*pixels*away/focal)/scale;
               if(!alone){shadowShare=u32(round(continuumHandoff(allowed,farError)*255.0));}
               if(shadowShare>0u){
                 for(var j=0u;j<CONTINUUM_LEVELS;j++){
@@ -1253,7 +1261,12 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
 }
 `;
   }
-  const skipHigh = material.captureWatersideOnly ? 'if(captureMode.x<0.5&&listed.entry.x<continuumView.counts.x&&continuumRecords[listed.entry.x].place.y>5.0){var h:ContinuumVarying;h.position=CONTINUUM_HIDDEN;return h;}' : '';
+  // A capture keeps only what lies on its side of the sea. An instance whose whole sphere stands clear of the highest
+  // (or lowest) the sea is cut at places no vertex: every family's, by its own bound, as its fragments would all leave.
+  const captureSphere = `vec4f(continuumTypeF(m,${CONTINUUM_TYPE.sphere}u),continuumTypeF(m,${CONTINUUM_TYPE.sphere + 1}u),continuumTypeF(m,${CONTINUUM_TYPE.sphere + 2}u),continuumTypeF(m,${CONTINUUM_TYPE.sphere + 3}u))`;
+  const skipHigh = `if(listed.entry.x<continuumView.counts.x){let r=continuumRecords[listed.entry.x];let m=continuumTypeOf(r);let b=continuumSphere(r,CONTINUUM_WHOLE,${captureSphere});`
+    + `let y=continuumPlace(r,b.xyz).y;let reach=b.w*continuumScale(r)+bitcast<f32>(r.tag.w);`
+    + `if(b.w>=0.0&&select((y-reach>${WATER_CAPTURE_CEILING.toFixed(1)}),(y+reach< -${WATER_CAPTURE_CEILING.toFixed(1)}),(captureMode.x>0.5))){var h:ContinuumVarying;h.position=CONTINUUM_HIDDEN;return h;}}`;
   return capture.directive + body + /* wgsl */`
 @vertex fn continuumCaptureVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { ${skipHigh}var out=continuumVertex(vertex,listed,false);out.coverage.w=1u;return out; }
 fn waterCaptureMaterial(v:ContinuumVarying,front:bool)->vec4f { return ${material.name}Shade(v,front); }

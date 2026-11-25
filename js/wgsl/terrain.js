@@ -741,62 +741,6 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
 }
 `;
 
-const ARCH_MATERIAL_BUF_SAMPLERS = /* wgsl */ `
-@group(0) @binding(18) var<storage,read> archMaterialBuf:array<u32>;
-const ARCH_LAYER_STRIDE:u32=87360u;
-fn archMipOffset(mip:u32)->u32{
-  switch(mip){
-    case 0u:{return 0u;}
-    case 1u:{return 65536u;}
-    case 2u:{return 81920u;}
-    case 3u:{return 86016u;}
-    case 4u:{return 87040u;}
-    default:{return 87296u;}
-  }
-}
-fn sampleArchLayerMip(layer:u32,uv:vec2f,mip:u32)->vec4f{
-  let size=256u>>mip;
-  let mask=size-1u;
-  let st=fract(uv)*f32(size)-0.5;
-  let i0=vec2u(vec2i(floor(st)))&vec2u(mask);
-  let i1=(i0+vec2u(1u))&vec2u(mask);
-  let f=fract(st);
-  let base=layer*ARCH_LAYER_STRIDE+archMipOffset(mip);
-  let c00=unpack4x8unorm(archMaterialBuf[base+i0.y*size+i0.x]);
-  let c10=unpack4x8unorm(archMaterialBuf[base+i0.y*size+i1.x]);
-  let c01=unpack4x8unorm(archMaterialBuf[base+i1.y*size+i0.x]);
-  let c11=unpack4x8unorm(archMaterialBuf[base+i1.y*size+i1.x]);
-  return mix(mix(c00,c10,f.x),mix(c01,c11,f.x),f.y);
-}
-fn sampleArchLayerGrad(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
-  let uLayer=u32(max(layer,0));
-  let lx=length(ddx);let ly=length(ddy);
-  let minL=min(lx,ly);let maxL=max(lx,ly);
-  let foot=max(minL,maxL*0.35)*256.0;
-  let lod=clamp(log2(max(foot,1.0)),0.0,5.0);
-  let m0=u32(floor(lod));
-  let m1=min(m0+1u,5u);
-  let aniso=maxL>minL*1.85&&m0<2u;
-  var s0:vec4f;
-  if(aniso){
-    let major=select(ddy,ddx,lx>=ly);
-    s0=0.5*(sampleArchLayerMip(uLayer,uv-major*0.25,m0)+sampleArchLayerMip(uLayer,uv+major*0.25,m0));
-  }else{
-    s0=sampleArchLayerMip(uLayer,uv,m0);
-  }
-  let frac=fract(lod);
-  if(m0==m1||m0>=2u||frac<0.08||frac>0.92){return s0;}
-  let s1=sampleArchLayerMip(uLayer,uv,m1);
-  return mix(s0,s1,frac);
-}
-fn sampleArchNormalMip(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
-  let uLayer=u32(max(layer,0));
-  let foot=max(length(ddx),length(ddy))*180.0;
-  let m0=u32(clamp(floor(log2(max(foot,1.0))),0.0,5.0));
-  return sampleArchLayerMip(uLayer,uv,m0);
-}
-`;
-
 // Hardware 2D-array texture path for TERRAIN_CITY: replaces 12-20 uncached storage reads per building pixel
 // with 1-2 hardware trilinear+anisotropic fetches (city uses only 9 sampled textures out of WebGPU's 16 ceiling).
 const ARCH_MATERIAL_TEX_SAMPLERS = /* wgsl */ `
@@ -892,7 +836,7 @@ fn landOrientedJoint(p:vec3f,n:vec3f,dx:vec3f,dy:vec3f)->f32 {
 }
 `;
 
-// Extracted reusable surface blocks so TERRAIN_LAND, TERRAIN_CITY, and legacy TERRAIN share 100% identical
+// Extracted reusable surface blocks so TERRAIN_LAND and TERRAIN_CITY share 100% identical
 // material math without forcing Apple Metal to compile and register-spill unused terrain/city branches.
 const TERRAIN_LAND_MATERIAL_BLOCK = /* wgsl */ `
     let crownW1=footprint*0.105;let crownW2=footprint*0.046;
@@ -1072,8 +1016,8 @@ const TERRAIN_CITY_MATERIAL_BLOCK = /* wgsl */ `
     let shadeAlbedo=0.52+0.48*portShade;
     let instYaw=clamp((fract(in.kind.x)-0.02)/0.46,0.0,1.0)*PI;
     let camDist=distance(world,F.camPos.xyz);
-    let microLodFade=(1.0-smoothstep(45.0,115.0,camDist))*detailFade;
-    let archLodFade=(1.0-smoothstep(95.0,240.0,camDist))*detailFade;
+    let microLodFade=(1.0-smoothstep(140.0,340.0,camDist))*detailFade;
+    let archLodFade=(1.0-smoothstep(320.0,900.0,camDist))*detailFade;
     var detailA=0.0;
     var detailB=0.0;
     if(archLodFade>0.01){detailA=landOrientedDetail(world,n,dx,dy,1.45);}
@@ -1498,7 +1442,7 @@ const TERRAIN_CITY_DMG_BLOCK = /* wgsl */ `
   }
 `;
 
-// Terrain-only surface shader (landContinuum & submerged): zero architectural material branches, zero archMaterialBuf,
+// Terrain-only surface shader (landContinuum & submerged): zero architectural material branches or bindings,
 // zero structDmg, zero unused building derivatives — eliminates Metal register spilling on land fragments.
 export const TERRAIN_LAND = TERRAIN_FINISH_ONLY + /* wgsl */ `
 @group(0) @binding(7) var landAlbedo:texture_2d<f32>;
@@ -1613,107 +1557,3 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 `;
-
-// Combined legacy TERRAIN shader (kept intact for unit tests and direct callers).
-export const TERRAIN = TERRAIN_FINISH_ONLY + /* wgsl */ `
-@group(0) @binding(7) var landAlbedo:texture_2d<f32>;
-@group(0) @binding(8) var landSampler:sampler;
-@group(0) @binding(9) var vegetationMask:texture_2d<f32>;
-struct NearLand {domain:vec4f,grid:vec4f};
-@group(0) @binding(12) var<uniform> nearTerrain:NearLand;
-@group(0) @binding(13) var nearAlbedo:texture_2d<f32>;
-@group(0) @binding(14) var townField:texture_2d<f32>;
-@group(0) @binding(15) var<uniform> townWindow:vec4f;
-` + TERRAIN_FILTERING + TERRAIN_NEAR_MATERIAL + GROUND_DETAIL_RENDER + ARCH_MATERIAL_BUF_SAMPLERS + ARCH_MATERIAL_PBR_FN + /* wgsl */ `
-@vertex fn vs(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f)->LandVertex{
-  var o:LandVertex;o.world=position;o.normal=normal;o.kind=kind;o.leafUV=vec2f(0);
-  let shifted=position+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
-  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);return o;
-}
-fn landOpaque(in:LandVertex)->vec4f{return landSurface(in,LandPit(vec3f(0.0),-1.0,vec3f(0.0),0.0,1.0,1.0,0.0,1.0,0.0));}
-fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
-  let world=in.world;
-  let rawNLen=length(in.normal);
-  let structDmg=clamp(rawNLen-1.0,0.0,1.5);
-  var n=in.normal/max(rawNLen,1e-4);
-  let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
-  let dx=dpdx(world);let dy=dpdy(world);let nx=dpdx(n);let ny=dpdy(n);
-  let footprint=max(length(dx),length(dy));
-  let detailFade=1.0-smoothstep(0.25,2.5,footprint);
-  let bldgUV=clamp(vec2f(in.kind.x-20.0,in.kind.y),vec2f(0.001),vec2f(0.999));
-  let bldgDx=dpdx(bldgUV);let bldgDy=dpdy(bldgUV);
-  let winUV=clamp(vec2f((in.kind.x-14.02)/0.44,(in.kind.y-0.32)/0.64),vec2f(0.0),vec2f(1.0));
-  let winDx=dpdx(winUV);let winDy=dpdy(winUV);
-  let cityWide=max(fwidth(in.leafUV.x),1e-4);let cityTall=max(fwidth(in.leafUV.y),1e-4);
-  let imageSteep=smoothstep(.12,.42,1.0-max(n.y,0.0));
-  let imageBlur=max(footprint,imageSteep*4.0*LAND.domain.z/f32(textureDimensions(landAlbedo).x))/LAND.domain.z;
-  var source=pow(textureSampleGrad(landAlbedo,landSampler,uv,mix(dx.xz/LAND.domain.z,vec2f(imageBlur,0.0),imageSteep),mix(dy.xz/LAND.domain.z,vec2f(0.0,imageBlur),imageSteep)).rgb,vec3f(2.2));
-  var vegetation=0.0;
-  let nearGround=in.kind.x>.5&&in.kind.x<1.5&&nearTerrain.domain.w>.5;
-  if(nearGround){
-    source=landNearColour(source,world,n,dx,dy,nx,ny,1.0-in.kind.y);
-  }
-  var grain=0.0;
-  var rocky=0.0;
-  var materialUV=world.xz;
-  var materialSeam=1.0;
-  let materialWidth=landMaterialFootprint3(dx,dy);
-  if(in.kind.x<2.5){
-    vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0.0).r;
-    grain=landFilteredNoise(world.xz*0.019,landMaterialFootprint(dx.xz,dy.xz)*0.019);
-    rocky=smoothstep(0.22,0.56,1.0-n.y+grain*0.07);
-    let verticalBias=abs(n.z)-abs(n.x);
-    let vertical=select(world.zy,world.xy,verticalBias>0.0);
-    materialUV=select(world.xz,vertical,rocky>.5);
-    materialSeam=smoothstep(0.0,.1,abs(rocky-.5))*select(1.0,smoothstep(0.0,.08,abs(verticalBias)),rocky>.5);
-  }
-  var albedo=source;var relief=0.0;var roughness=0.95;
-  var ambientVisibility=0.42+0.35*max(n.y,0.0);
-  var surfaceWet=0.0;var mirrorSpread=0.0;
-  var canopyBackscatter=0.0;
-  var landOnPavedWay=0.0;
-  var gd=GroundDetail(0.0,0.0,vec4f(0.0),vec4f(0.0),vec4f(0.0));
-  if(in.kind.x<2.5){
-` + TERRAIN_LAND_MATERIAL_BLOCK + /* wgsl */ `
-  }else ` + TERRAIN_CITY_MATERIAL_BLOCK + /* wgsl */ `
-  if(in.kind.x<2.5){
-` + TERRAIN_TOWN_WAYS_BLOCK + /* wgsl */ `
-  }
-` + TERRAIN_CITY_DMG_BLOCK + /* wgsl */ `
-  if(pit.cover>=0.0){
-    // Under turf it is dark earth. Where the ground is bare it is more of itself, damp from below.
-    let bare=max(pit.sand,1.0-smoothstep(-.12,-.04,(albedo.g-max(albedo.r,albedo.b))/max(max(albedo.r,max(albedo.g,albedo.b)),.02)));
-    albedo=mix(albedo,mix(mix(pit.soil,albedo*pit.damp,bare),vec3f(.022,.036,.04),pit.pool),pit.cover);
-    relief=mix(relief,pit.relief*(1.0-.6*bare),pit.cover);
-    roughness=mix(roughness,mix(.97,.05,pit.pool),pit.cover);
-    canopyBackscatter*=1.0-pit.cover;
-    surfaceWet=mix(surfaceWet,pit.pool*.96,pit.cover);
-    n=pit.normal;
-  }
-  // The sky that reaches it: a pit's walls shut some out, as does the body a far surface stands for (its optical
-  // moments, js/wgsl/continuum-cut.js continuumOpticLight).
-  ambientVisibility*=pit.sky;
-  let reliefX=dpdx(relief);let reliefY=dpdy(relief);
-  n=landFilteredBump(n,dx,dy,reliefX,reliefY);
-  let turnX=dpdx(n);let turnY=dpdy(n);
-  landNormalSpread=min(mirrorSpread+.5*(dot(turnX,turnX)+dot(turnY,turnY)),.18);
-  let tidePulse=0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02);
-  let shoreWet=(1.0-smoothstep(0.35,2.2,world.y))*tidePulse*select(0.45,0.22,in.kind.x>=9.5);
-  let wet=select(clamp(max(shoreWet,surfaceWet),0.0,0.96),surfaceWet-shoreWet*0.14,surfaceWet<-0.01);
-  roughness=mix(roughness,min(roughness,0.24),shoreWet*0.65);
-  let nDotL=dot(n,F.sunDir.xyz);
-  var sunReach=pit.sun;
-  // Woodland beyond the shadow map still shades the ground beside it, read from the vegetation up-sun.
-  // Inside the map the trees cast for themselves, and shading twice would darken the ground twice.
-  let beyondShadowMap=(1.0-landShadowCoverage(world))*smoothstep(60.0,120.0,distance(world,F.camPos.xyz));
-  if(in.kind.x<2.5&&F.sunDir.y>0.02&&beyondShadowMap>0.0){
-    let sunStep=F.sunDir.xz*(14.0/max(F.sunDir.y,0.28))/LAND.domain.z;
-    let vegSun=textureSampleLevel(vegetationMask,landSampler,clamp(uv+sunStep,vec2f(0.0),vec2f(1.0)),0.0).r;
-    let farCanopyShadow=smoothstep(0.18,0.62,vegSun)*(1.0-smoothstep(0.55,0.92,vegetation)*0.55);
-    sunReach*=1.0-farCanopyShadow*0.48*beyondShadowMap;
-  }
-  let diffuse=(max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter)*sunReach;
-  return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
-}
-@fragment fn fs(in:LandVertex)->@location(0) vec4f{return landOpaque(in);}
-` + LAND_CRATER_PIT;

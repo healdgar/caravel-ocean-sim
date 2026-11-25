@@ -17,7 +17,7 @@ import {
 } from '../js/coastal-world.js';
 import { MEADOW_CONTINUUM_SPEC, meadowContinuumStandWGSL } from '../js/wgsl/meadow-continuum.js';
 import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
-import { validateMeadowGrass } from '../js/meadow-continuum.js';
+import { MEADOW_CONTINUUM_LEVELS, validateMeadowGrass } from '../js/meadow-continuum.js';
 import { OLD_WORLD_LAND, registerBakedBoard } from '../js/old-world.js';
 import {
   BOARD_ROAD_BRIDGE,
@@ -179,9 +179,12 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, and stamp 
 test('meadow grass is one continuum atlas cut on the GPU: clusters, the box of its square as its core, ballistic wakes and terrain bindings', () => {
   const manifest = validateMeadowGrass(JSON.parse(fs.readFileSync('assets/ground-cover/portugal/meadows-gpu/manifest.json', 'utf8')));
   assert.equal(manifest.patchMetres, 4);
-  assert.equal(manifest.levels, 8);
+  assert.equal(manifest.levels, MEADOW_CONTINUUM_LEVELS);
   assert.equal(manifest.types.length, 12);
   for (const variant of manifest.types) {
+    // A sward keeps only the levels whose error lies below the far body's first step, so no level is drawn past the handoff.
+    assert.ok(variant.levels.length >= 2 && variant.levels.length <= MEADOW_CONTINUUM_LEVELS, `variant ${variant.id} has ${variant.levels.length} levels`);
+    assert.ok(variant.levels.every((l) => l.error < manifest.farError), `variant ${variant.id} keeps a level past the far body's start`);
     // A patch tiles, so its body ends in the 12-triangle box of its square's eight fixed corners.
     assert.equal(variant.chain.coreTriangles, 12, `variant ${variant.id} must end in the box of its square, got ${variant.chain.coreTriangles}`);
     assert.ok(variant.clusters > 0 && variant.chain.baseTriangles > variant.chain.coreTriangles);

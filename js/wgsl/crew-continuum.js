@@ -22,7 +22,7 @@ export const CREW_CONTINUUM_ORDER_MOUNTED = 1;    // riding astride a horse: sta
 export const CREW_CONTINUUM_ORDER_IMPORTANT = 2;  // wounded, spoken to or aimed at: cut at the core's CONTINUUM_IMPORTANT
 export const CREW_CONTINUUM_AGE_SHIFT = 2;        // bits 2..8: exact board age in years (0 = fallback deterministic life stage)
 export const CREW_CONTINUUM_IDENTITY_SHIFT = 9;   // bits 9..31: stable person identity + 1 (8.3M unique IDs)
-export const CREW_STAND_FLAG_CLOTHED = 4;         // run.flags bit 2: modular clothing attached (gate body under-cloth inset)
+export const CREW_STAND_FLAG_CLOTHED = 4;         // run.flags bit 2: garments drawn over the body (gates its under-cloth inset); no batch sets it now
 // A person's pose data in its scene's pose buffer: the SKINNED kind's head, then every joint's rows and posed sphere.
 export const CREW_CONTINUUM_POSE_VEC4S = skinnedPoseVec4s(CREW_JOINT_COUNT);
 // How far a severed person's points may stray from their joints' bounds: a forearm, shin or head drawn in to its stump
@@ -195,7 +195,9 @@ fn crewStandTurn(p:vec3f)->vec3f { return crewStandHull.right.xyz*p.x+crewStandH
     let realAge=(orders>>${CREW_CONTINUUM_AGE_SHIFT}u)&127u;
     let isMounted=(orders&${CREW_CONTINUUM_ORDER_MOUNTED}u)!=0u;
     let female=actor.skin.w>0.5&&actor.skin.w<1.5;
-    let stage=humanLifeStageFromAge(realAge,identity,${ground ? 'true' : 'false'},isMounted);
+    // Their age is theirs to carry (the order's age bits: a roll's soul, a town's walker). With none, they are a hand,
+    // a soldier or a mate, of working age: whoever is stood here is never guessed to be a child, ashore or afloat.
+    let stage=humanLifeStageFromAge(realAge,identity,false,isMounted);
     // Townsfolk bake baseScale into actor.transform on placement; deck crew apply height diversity directly here!
     let finalScale=select(scale,scale*stage.x,${ground ? 'false' : 'true'}&&abs(scale-1.0)<0.01);
     let morphZ=humanMorphPackZ(identity,female);
@@ -245,6 +247,28 @@ fn crewScalpMode(actor:CrewActor,identity:u32,slot:u32)->f32 {
   if(roll==1u){return 2.0;}
   return 1.0;
 }
+// What a region of a dressed body wears by its label alone, wherever on the body it lies: paint and skin as the picture
+// has them, cloth the person's own shirt or trousers at the shade the picture holds against that region's median, and
+// hair the person's own colour at the picture's shade. w: how much of it is skin. The body adds to this what depends
+// on the place (crewContinuumWorn); the far splat, which has no place on the body, wears each region's mean by this.
+fn crewContinuumRegionWorn(region:u32,picture:vec3f,actor:CrewActor)->vec4f {
+  let median=crewWear[min(region,4u)];
+  if(median.w>=0.5){
+    if(region==1u||region==2u){
+      let worn=select(actor.trousers.rgb,actor.shirt.rgb,region==1u);
+      // Bounded, so a stain or a pale fleck in dark cloth stays a fleck and does not blaze in a pale shirt.
+      let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
+      return vec4f(worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2),0.0);
+    }
+    if(region==4u){
+      let hairCol=max(actor.hair.rgb,vec3f(0.012,0.010,0.008));
+      let hairMedLuma=max(dot(median.xyz,vec3f(0.299,0.587,0.114)),0.03);
+      let hairShade=clamp(dot(picture,vec3f(0.299,0.587,0.114))/hairMedLuma,0.42,1.28);
+      return vec4f(hairCol*hairShade*0.72,0.0);
+    }
+  }
+  return vec4f(picture,select(0.0,1.0,region==3u));
+}
 fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scalpMode:f32)->vec4f {
   let female=actor.skin.w>0.5&&actor.skin.w<1.5;
   let indigenous=actor.face.w>1.5;
@@ -290,27 +314,17 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
     else if(strayHairOnTrousers){effRegion=2u;}
 
     let median=crewWear[min(effRegion,4u)];
-    var baseOut=vec4f(picture,select(0.0,1.0,effRegion==3u));
-    if(effRegion==1u||effRegion==2u){
-      if(median.w>=0.5){
-        let worn=select(actor.trousers.rgb,actor.shirt.rgb,effRegion==1u);
-        let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
-        let dyed=worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2);
-        let cuffX=select(0.495,0.62,female);
-        let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.025&&neckRad<neckROut+0.010)||abs(bodyPos.x)>cuffX),effRegion==1u);
-        if(!atBorder||skin.w<=0.5){
-          baseOut=vec4f(dyed,0.0);
-        }else{
-          let away=length(picture/bright-skin.xyz/skinBright)+abs(log2(bright/skinBright))*0.15;
-          let cloth=smoothstep(0.035,0.095,away);
-          baseOut=vec4f(mix(picture,dyed,cloth),1.0-cloth);
-        }
+    // By its label (cloth dyed, hair tinted, paint and skin as painted), then by its place: cloth the colour of this
+    // body's skin on a neck, wrist or ankle border is worn as skin.
+    var baseOut=crewContinuumRegionWorn(effRegion,picture,actor);
+    if((effRegion==1u||effRegion==2u)&&median.w>=0.5&&skin.w>0.5){
+      let cuffX=select(0.495,0.62,female);
+      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.025&&neckRad<neckROut+0.010)||abs(bodyPos.x)>cuffX),effRegion==1u);
+      if(atBorder){
+        let away=length(picture/bright-skin.xyz/skinBright)+abs(log2(bright/skinBright))*0.15;
+        let cloth=smoothstep(0.035,0.095,away);
+        baseOut=vec4f(mix(picture,baseOut.rgb,cloth),1.0-cloth);
       }
-    }else if(effRegion==4u&&median.w>=0.5){
-      let hairCol=max(actor.hair.rgb,vec3f(0.012,0.010,0.008));
-      let hairMedLuma=max(dot(median.xyz,vec3f(0.299,0.587,0.114)),0.03);
-      let hairShade=clamp(picLuma/hairMedLuma,0.42,1.28);
-      baseOut=vec4f(hairCol*hairShade*0.72,0.0);
     }
     let maxC=max(max(picture.r,picture.g),picture.b);
     let minC=min(min(picture.r,picture.g),picture.b);
@@ -452,12 +466,17 @@ fn crewContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   (*v).uv=vec2f(0.5);
   let scalpMode=crewScalpMode(actor,s.record.tag.z,slot);
   if(s.what==CONTINUUM_SPLAT_ENTRY){
-    // Each region's mean, worn, by its share of the outline.
+    // Each region's mean, worn, by its share of the outline. A splat has no place on the body, so a dressed body's
+    // regions are worn by their labels alone: judged at one stand-in point, as the body's are by theirs, every share of
+    // hair and of paint (boots, belts, iron) was taken for a stray patch on the legs and dyed as trousers.
+    let dressed=crewWear[1u].w>=0.5||crewWear[2u].w>=0.5;
     var colour=vec3f(0.0);var skin=0.0;
     for(var r=0u;r<5u;r++){
       let share=crewWear[5u+r];
       if(share.w<=0.0){continue;}
-      let worn=crewContinuumWorn(r,share.xyz,actor,vec3f(0.0,1.0,0.0),0.0);
+      var worn:vec4f;
+      if(dressed){worn=crewContinuumRegionWorn(r,share.xyz,actor);}
+      else{worn=crewContinuumWorn(r,share.xyz,actor,vec3f(0.0,1.0,0.0),0.0);}
       colour+=worn.rgb*share.w;skin+=worn.w*share.w;
     }
     tone=vec4f(colour,skin);region=0u;
@@ -906,248 +925,4 @@ export const HAIR_CONTINUUM_MATERIAL = Object.freeze({
   varyings: Object.freeze([['fiberT', 'vec3f'], ['strand', 'vec4f'], ['tone', 'vec3f'], ['wet', 'vec2f']].map(Object.freeze)),
   wgsl: hairContinuumMaterialWGSL, salt: 19,
   cullMode: 'none', air: true, capture: true, coverage: true,
-});
-
-// --------------------------------------------------------------------------------------------- kinematic 1550 clothing
-// Pairs each stood undressed person with up to three separate physical 3D garment records in the clothing continuum
-// (3 * person + 0 = upper garment, + 1 = lower garment + belt + shoes, + 2 = optional shoulder cloak), sharing the
-// exact same posed 93-joint palette in skinnedPoses (including walking stride sway in skinnedPoses[at].zw) so skirts,
-// sleeves, tunics, and cloaks deform and billow physically on the GPU with zero garment-to-garment stain bleed.
-export function crewContinuumClothingStandWGSL() {
-  return CONTINUUM_RECORD_WGSL + /* wgsl */`
-struct CrewStandActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
-struct CrewClothInfo { counts:vec4u }; // x=count, y=female(0/1), z=roleCode(0=hand,1=captain,2=soldier,3=indigenous), w=pad
-@group(0) @binding(0) var<storage,read> crewStandRecords:array<ContinuumRecord>;
-@group(0) @binding(1) var<storage,read> crewStandActors:array<CrewStandActor>;
-@group(0) @binding(2) var<uniform> crewClothInfo:CrewClothInfo;
-@group(0) @binding(3) var<storage,read_write> clothRecords:array<ContinuumRecord>;
-
-fn crewClothHash(v:u32)->u32 {
-  var h=v*0x9e3779b1u+0x85ebca6bu;
-  h=(h^(h>>15u))*0x2c1b3c6du;
-  return h^(h>>13u);
-}
-
-@compute @workgroup_size(64) fn crewContinuumClothingStand(@builtin(global_invocation_id) gid:vec3u){
-  let person=gid.x;
-  let cap=crewClothInfo.counts.x;
-  if(person>=cap){return;}
-  let rec=crewStandRecords[person];
-  let at=rec.tag.y;
-  let personGone=(rec.tag.x&CONTINUUM_GONE)!=0u;
-  let baseFlags=rec.tag.x&(~65535u)&(~CONTINUUM_GONE);
-  if(personGone){
-    let dead=ContinuumRecord(rec.place,rec.turn,vec4u(baseFlags|CONTINUUM_GONE,at,rec.tag.z*3u,0u),vec4u(rec.spare.x,0u,0u,0u));
-    clothRecords[person*3u]=dead;
-    clothRecords[person*3u+1u]=dead;
-    clothRecords[person*3u+2u]=dead;
-    return;
-  }
-
-  let slot=min(rec.spare.x,arrayLength(&crewStandActors)-1u);
-  let actor=crewStandActors[slot];
-  let identity=rec.tag.z;
-  let h=crewClothHash(identity*197u+7u);
-
-  let female=crewClothInfo.counts.y!=0u||(actor.skin.w>0.5&&actor.skin.w<1.5);
-  let roleCode=crewClothInfo.counts.z;
-  let indigenous=roleCode==3u||actor.face.w>1.5;
-  let isChild=(rec.spare.w&255u)>45u;
-  let isMounted=((rec.spare.w>>16u)&1u)!=0u;
-
-  var upperType=0u;
-  var lowerType=7u;
-  var cloakGone=true;
-
-  if(indigenous){
-    if(female){
-      upperType=6u; // indigenous-huipil-f
-      lowerType=select(12u,14u,isMounted); // tailored riding breeches when astride a horse
-    }else{
-      upperType=5u; // indigenous-tunic-m
-      lowerType=11u; // indigenous-breechcloth-m
-    }
-  }else if(female){
-    // European women: gathered linen chemise blouse or laced bodice;
-    // pleated kirtle / apron skirt on foot, tailored female riding breeches when riding astride a horse!
-    upperType=select(3u,4u,(h&1u)!=0u);
-    lowerType=select(select(9u,10u,((h>>1u)&1u)!=0u),14u,isMounted);
-  }else if(roleCode==1u){
-    // Captain / Iberian officer: tailored doublet + paned trunk hose + shoulder cloak!
-    upperType=1u;
-    lowerType=8u;
-    cloakGone=isChild;
-  }else if(roleCode==2u){
-    // Tercio / presidio garrison soldier: buff leather jerkin + trunk hose!
-    upperType=2u;
-    lowerType=8u;
-  }else{
-    // European mariner / townsman / rower: 72% loose open V-neck linen shirt + mariner slops,
-    // 28% tailored doublet + trunk hose; never equip stiff shoulder cloaks on common townsfolk or seated barge rowers!
-    let styleRoll=(h&15u);
-    upperType=select(0u,1u,styleRoll>=11u&&!isChild);
-    lowerType=select(7u,8u,styleRoll>=11u&&!isChild);
-    cloakGone=true;
-  }
-
-  // Generous reach margin (0.72 m) so cluster bounding spheres rooted on pelvis/spine_02 always cover outstretched sleeves & morphed builds.
-  let reachWord=bitcast<u32>(0.72f);
-  let cleanW=rec.spare.w&(~(1u<<17u));
-  clothRecords[person*3u]=ContinuumRecord(rec.place,rec.turn,vec4u(baseFlags|upperType,at,identity*3u,reachWord),vec4u(slot,upperType,rec.spare.z,cleanW));
-  clothRecords[person*3u+1u]=ContinuumRecord(rec.place,rec.turn,vec4u(baseFlags|lowerType,at,identity*3u+1u,reachWord),vec4u(slot,lowerType,rec.spare.z,cleanW));
-  let cFlags=select(baseFlags|13u,baseFlags|CONTINUUM_GONE,cloakGone);
-  clothRecords[person*3u+2u]=ContinuumRecord(rec.place,rec.turn,vec4u(cFlags,at,identity*3u+2u,reachWord),vec4u(slot,13u,rec.spare.z,cleanW));
-}
-`;
-}
-
-function clothingContinuumMaterialWGSL() {
-  return /* wgsl */`
-fn clothContinuumTouch()->f32 {
-  if(continuumView.counts.y!=0xffffffffu){return 0.0;}
-  return textureSampleLevel(transLUT,sampC,vec2f(0.0),0.0).x+textureSampleLevel(skyLUT,sampC,vec2f(0.0),0.0).x+textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),0.0).x
-    +textureSampleLevel(captainTex,captainSampler,vec2f(0.0),0.0).x+sunVis[0]+joints[0][0].x+hull.origin.x+moisture[0].x+actors[0].shirt.x;
-}
-fn clothContinuumChannelColor(ch:u32,actor:CrewActor)->vec3f {
-  switch ch {
-    case 0u: { return actor.shirt.rgb; }
-    case 1u: { return actor.trousers.rgb; }
-    case 2u: { return vec3f(0.74,0.71,0.64); }    // crisp off-white linen (chemise sleeves, collar/cuff trim, working apron)
-    case 3u: { return vec3f(0.068,0.044,0.028); } // dark oiled leather (belt, shoes/boots)
-    case 4u: { return vec3f(0.46,0.30,0.08); }    // burnished brass (buckle, studs)
-    case 5u: { return vec3f(0.32,0.21,0.11); }    // buff leather / tan hide (soldier jerkin, moccasins)
-    case 6u: { return vec3f(0.055,0.052,0.058); } // dark charcoal wool (fitted hose/stockings, officer cloak)
-    default: { return vec3f(0.36,0.085,0.055); }  // woven madder-red decorative trim
-  }
-}
-fn clothingContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
-  let slot=s.record.spare.x;
-  let actor=actors[slot];
-  let ch=s.word&7u;
-  let fab=(s.word>>3u)&7u;
-  let foldAO=mix(0.68,1.05,f32((s.word>>8u)&255u)/255.0);
-  let wu=f32((s.word>>16u)&255u)/255.0;
-  let wv=f32((s.word>>24u)&255u)/255.0;
-  var baseCol=clothContinuumChannelColor(ch,actor);
-  if(s.what==CONTINUUM_SPLAT_ENTRY){
-    let gType=s.record.spare.y;
-    baseCol=select(actor.trousers.rgb,actor.shirt.rgb,gType<=6u);
-    if(gType==13u){baseCol=vec3f(0.055,0.052,0.058);}
-  }
-  (*v).tone=vec4f(baseCol,foldAO);
-  (*v).cloth=vec4f(wu,wv,f32(fab),f32(ch));
-  let y=s.local.y;
-  let mBase=crewMoistureBase(actor.hair.w);
-  let lower=mix(moisture[mBase],moisture[mBase+1u],smoothstep(.08,.48,y));
-  let upper=mix(moisture[mBase+2u],moisture[mBase+3u],smoothstep(1.02,1.48,y));
-  (*v).wet=mix(lower,upper,smoothstep(.48,1.02,y));
-  (*v).bodyPos=s.local+vec3f(clothContinuumTouch());
-}
-fn clothingContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
-  // Compute all screen-space derivatives in uniform control flow for TBDR-safe, zero-shimmer woven cloth PBR!
-  let dPdx=dpdx(v.world);
-  let dPdy=dpdy(v.world);
-  let bp=v.bodyPos;
-  let dBpdx=dpdx(bp);
-  let dBpdy=dpdy(bp);
-  let chEdge=fwidth(v.cloth.w);
-  let nGeom=normalize(select(-v.normal,v.normal,front));
-  let view=normalize(F.camPos.xyz-v.world);
-  let sun=F.sunDir.xyz;
-  let fab=u32(v.cloth.z+0.5);
-  let isWool=(fab==1u);
-  let isLeather=(fab==2u);
-  let isBrass=(fab==3u);
-
-  // Nyquist-band-limited high-frequency woven textile grain (zero coarse corduroy/stripe moire):
-  //   fab 0/4 (linen/cotton): ~260/m subtle orthogonal plain weave
-  //   fab 1   (wool):         ~190/m soft diagonal twill nap
-  //   fab 2   (leather):      ~180/m fine organic pebble grain
-  //   fab 3   (brass):        smooth burnished metal
-  let bpFoot=max(length(dBpdx),length(dBpdy));
-  let fineVis=(1.0-smoothstep(0.0007,0.0028,bpFoot))*step(1e-6,bpFoot);
-  let tau=6.2831853;
-
-  // Linen / cotton fine plain weave (~260/m)
-  let uLin=(bp.x+bp.z*0.72)*260.0*tau;
-  let vLin=bp.y*260.0*tau;
-  let gLin=vec3f(cos(uLin)*sin(vLin)*260.0,sin(uLin)*cos(vLin)*260.0,cos(uLin)*sin(vLin)*187.2)*(0.00014*fineVis);
-  let modLin=sin(uLin)*sin(vLin)*0.018*fineVis;
-
-  // Wool fine twill (~190/m)
-  let tW1=(bp.x*190.0-bp.y*190.0+bp.z*165.0)*tau;
-  let gWool=vec3f(cos(tW1)*190.0,-cos(tW1)*190.0,cos(tW1)*165.0)*(0.00015*fineVis);
-  let modWool=sin(tW1)*0.022*fineVis;
-
-  // Leather fine pebble grain (~180/m)
-  let l1=(bp.x*180.0+bp.y*155.0-bp.z*170.0)*tau;
-  let l2=(bp.x*150.0-bp.y*185.0+bp.z*140.0)*tau;
-  let gLeath=vec3f(cos(l1)*sin(l2)*180.0+sin(l1)*cos(l2)*150.0,cos(l1)*sin(l2)*155.0-sin(l1)*cos(l2)*185.0,-cos(l1)*sin(l2)*170.0+sin(l1)*cos(l2)*140.0)*(0.00014*fineVis);
-  let modLeath=sin(l1)*sin(l2)*0.020*fineVis;
-
-  var gradBp=select(gLin,gWool,isWool);
-  gradBp=select(gradBp,gLeath,isLeather);
-  gradBp=select(gradBp,vec3f(0.0),isBrass);
-  var weaveMod=select(modLin,modWool,isWool);
-  weaveMod=select(weaveMod,modLeath,isLeather);
-  weaveMod=select(weaveMod,0.0,isBrass);
-
-  // Subtle stitched seam & hem/trim edge definition (channel border seam + side-seam running stitch)
-  let borderSeam=smoothstep(0.06,0.35,chEdge)*step(0.0001,bpFoot);
-  let sideSeam=exp(-pow((bp.z+0.032)/0.0045,2.0))*smoothstep(0.84,0.92,bp.y)*(1.0-smoothstep(1.36,1.42,bp.y));
-  let stitchTick=smoothstep(0.45,0.92,sin(bp.y*130.0*tau))*fineVis;
-  let seamDark=select(borderSeam*0.10+sideSeam*stitchTick*0.06,0.0,isBrass);
-  gradBp+=select(vec3f(0.0,cos(bp.y*130.0*tau)*sideSeam*0.015*fineVis,0.0),vec3f(0.0),isBrass);
-
-  let dhdx=dot(gradBp,dBpdx);
-  let dhdy=dot(gradBp,dBpdy);
-  let r1=cross(dPdy,nGeom);
-  let r2=cross(nGeom,dPdx);
-  let det=dot(dPdx,r1);
-  let detScale=length(dPdx)*length(dPdy);
-  let detOk=abs(det)>1e-5 && abs(det)>1e-4*detScale;
-  let safeDet=select(1.0,det,detOk);
-  let rawPerturb=select(vec3f(0.0),(r1*dhdx+r2*dhdy)/safeDet,detOk);
-  let pLen=length(rawPerturb);
-  let perturb=select(rawPerturb,rawPerturb*(0.14/pLen),pLen>0.14);
-  let n=normalize(nGeom-perturb);
-
-  let wet=clamp(v.wet,vec2f(0.0),vec2f(1.0));
-  let foldAO=v.tone.w;
-  var albedo=clamp(v.tone.rgb*foldAO*(1.0+weaveMod-seamDark)*mix(1.0,0.62,wet.x),vec3f(0.008),vec3f(0.95));
-
-  let shadowSample=vesselShadow(v.world,n);
-  let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
-  let sky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
-  let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-0.65,n.z)),${ENV_MIPS - 1}.0).rgb;
-  let ambient=vesselAmbient(n,sky,sea)*mix(0.80,1.0,clamp(foldAO,0.68,1.0));
-
-  let ndl=max(dot(n,sun),0.0);
-  let ndv=max(dot(n,view),0.0);
-  // Natural matte textile roughness: 0.88 linen/cotton, 0.92 wool, 0.56 leather, 0.30 brass
-  let dryClothRough=select(0.88,0.92,isWool);
-  let wetClothRough=select(0.54,0.58,isWool);
-  let rough=select(select(mix(dryClothRough,wetClothRough,wet.y),mix(0.56,0.26,wet.y),isLeather),0.30,isBrass);
-  let f0=select(select(vec3f(0.028),vec3f(0.042),isLeather),albedo,isBrass);
-  let diffuse=select(albedo*(1.0/3.14159265),albedo*0.18,isBrass);
-  let clothSheen=select(pow(1.0-ndv,3.4)*select(0.060,0.075,isWool)*(1.0-wet.x*0.55),0.0,isBrass||isLeather);
-  let spec=vesselSpecular(n,view,sun,rough,f0)*ndl;
-  let envScale=select(select(0.018,0.048,isLeather),0.45,isBrass);
-  let envRefl=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*6.5).rgb*envScale*F.windP[1].w;
-
-  var col=direct*(diffuse*ndl+spec)+albedo*ambient+envRefl+albedo*clothSheen*(ambient+direct*0.28);
-  col+=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))
-    +lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough);
-  return vec4f(continuumAir(col,v.world),1.0);
-}
-`;
-}
-
-export const CLOTHING_CONTINUUM_MATERIAL = Object.freeze({
-  name: 'clothingContinuum',
-  prelude: () => crewRenderWGSL(),
-  core: false, data: Object.freeze({ group: 2, binding: 0 }),
-  varyings: Object.freeze([['tone', 'vec4f'], ['cloth', 'vec4f'], ['wet', 'vec2f'], ['bodyPos', 'vec3f']].map(Object.freeze)),
-  wgsl: clothingContinuumMaterialWGSL, salt: 23,
-  cullMode: 'none', air: true, capture: true, visibility: true,
 });

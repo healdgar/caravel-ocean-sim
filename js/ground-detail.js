@@ -41,19 +41,14 @@ export async function createGroundDetail({ device, computePipe, mipPipe }) {
   pass.end();
   device.queue.submit([encoder.finish()]);
 
-  // MaterialCraft-cooked 18-layer mipmapped PBR storage buffer (Kind 10..18: even = BaseColor+Roughness, odd = Normal+AO)
-  // Using a read-only storage buffer adds 0 sampled textures to @group(0), preserving WebGPU's 16-texture ceiling in water-optics capture.
+  // MaterialCraft-cooked 18 layers and their mips, staged here as words for the texture array below
+  // (Kind 10..18: even = BaseColor+Roughness, odd = Normal+AO).
   const totalWords = ARCH_MATERIAL_LAYERS * ARCH_LAYER_STRIDE;
   const archWords = new Uint32Array(totalWords);
   for (let layer = 0; layer < ARCH_MATERIAL_LAYERS; layer++) {
     const fillWord = (layer & 1) === 0 ? 0xc08ea2b0 : 0xebff8080;
     archWords.fill(fillWord, layer * ARCH_LAYER_STRIDE, (layer + 1) * ARCH_LAYER_STRIDE);
   }
-  const archBuffer = device.createBuffer({
-    label: 'MaterialCraft architectural PBR storage buffer',
-    size: archWords.byteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
 
   if (typeof fetch === 'function' && typeof createImageBitmap === 'function') {
     try {
@@ -119,10 +114,9 @@ export async function createGroundDetail({ device, computePipe, mipPipe }) {
       // Keep fallback words when asset route is unavailable in isolated unit tests
     }
   }
-  device.queue.writeBuffer(archBuffer, 0, archWords);
 
-  // Hardware 2D-array texture holding the exact same 18 layers x 6 mip levels so city/architectural shading uses
-  // L1-cached hardware trilinear + anisotropic sampling instead of 12-20 manual storage-buffer reads per fragment.
+  // Hardware 2D-array texture of those 18 layers x 6 mip levels: city/architectural shading samples it with
+  // hardware trilinear + anisotropic filtering (js/wgsl/terrain.js archMaterialTex, binding 18). The land does not bind it.
   const ARCH_MIPS = 6;
   const archTexture = device.createTexture({
     label: 'MaterialCraft architectural PBR texture array',
@@ -151,9 +145,8 @@ export async function createGroundDetail({ device, computePipe, mipPipe }) {
 
   const sampler = device.createSampler({ label: 'ground detail', minFilter: 'linear', magFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   return {
-    texture, archBuffer, archTexture, archTextureView,
-    resources: [[16, texture.createView()], [17, sampler], [18, { buffer: archBuffer }]],
-    cityResources: [[17, sampler], [18, archTextureView]],
+    texture, archTexture, archTextureView,
+    resources: [[16, texture.createView()], [17, sampler], [18, archTextureView]],
     // What the land looks like with none of this. For tests and for looking into what went wrong.
     flatten() {
       const texel = GROUND_DETAIL_MEAN.map((v) => Math.round(v * 255));
@@ -162,6 +155,6 @@ export async function createGroundDetail({ device, computePipe, mipPipe }) {
         device.queue.writeTexture({ texture, mipLevel: m }, new Uint8Array(size * size * 4).map((_, i) => texel[i & 3]), { bytesPerRow: size * 4 }, [size, size]);
       }
     },
-    dispose() { texture.destroy(); archBuffer.destroy(); archTexture.destroy(); },
+    dispose() { texture.destroy(); archTexture.destroy(); },
   };
 }

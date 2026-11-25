@@ -23,12 +23,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
-import { BOARD_RIVERS, boardGroundDigest, boardGroundOff, boardGroundSurvey, boardKey, boardRequest, boardSeat, bakedBoardAsset, bakedWorldAsset } from '../js/board-model.js';
+import { BOARD_RIVERS, boardGroundDigest, boardGroundOff, boardGroundSurvey, boardKey, bakedBoardAsset, bakedWorldAsset } from '../js/board-model.js';
 import { coastalRegionStageURL } from '../js/landfall.js';
-import { OLD_WORLD_PLACES, boardTownHeld, oldWorldPeople } from '../js/old-world.js';
+import { boardRequestFor } from '../js/old-world.js';
 import { NATIVE_TOWNS } from '../js/native-towns.js';
 import { COLONIAL_TOWNS } from '../js/colonial-towns.js';
-import { FORT_RECORDS, fortPhaseFor, fortRecordsFor } from '../js/fort-records.js';
 import { openBoard } from './board-host.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -79,79 +78,25 @@ if (kept && existsSync(kept)) {
 }
 const { region } = land;
 say(`${region.name}: ${region.size} by ${region.size} heights over ${region.span} m, from ${land.source}; port at ${Math.round(land.centre.x - region.x)}, ${Math.round(land.centre.z - region.z)}`);
-const city = boardTownHeld(region);
-if (!city) throw new Error(`${port}'s ground holds no Old World city, native town nor planted town in ${year}`);
-const people = oldWorldPeople(city, year), seat = Number(option('seat', city.seat ?? boardSeat(people)));
-// Where a spot of the globe lies on this ground: metres east and south of its middle.
-const east = (longitude) => (longitude - region.longitude) * Math.cos(region.latitude * Math.PI / 180) * 111195;
-const south = (latitude) => (region.latitude - latitude) * 111195;
 const number = (name, fallback) => Number(option(name, fallback));
-// A town's recorded site on dry ground, however low on its bank, is where it is founded. Only where this ground puts
-// the site in the water or on the strand (a harbour's channel surveyed a little wide, a record's point set in the
-// river) does the town stand elsewhere: on the nearest terrace some metres above the water, with dry ground about it,
-// as its founders stood it on the shore of the water the survey shows.
-const STRAND = 1, FOUNDING_GROUND = 4, FOUNDING_REACH = 1600;
-function onFoundingGround(x, z) {
-  const n = Math.round(Math.sqrt(land.heights.length)), step = region.span / (n - 1), at = (i, j) => i < 0 || j < 0 || i >= n || j >= n ? -1 : land.heights[j * n + i];
-  const i0 = Math.round((x + region.span / 2) / step), j0 = Math.round((z + region.span / 2) / step);
-  const fits = (i, j) => at(i, j) >= FOUNDING_GROUND && [[-2, 0], [2, 0], [0, -2], [0, 2], [-2, -2], [2, 2], [-2, 2], [2, -2]].every(([di, dj]) => at(i + di, j + dj) > STRAND);
-  say(`recorded site (${x}, ${z}) stands on ${at(i0, j0).toFixed(1)} m of ground`);
-  if (at(i0, j0) >= STRAND) return { x, z };
-  let best = null, least = Infinity;
-  for (let r = 0; r * step <= FOUNDING_REACH && r <= least; r++) for (let j = j0 - r; j <= j0 + r; j++) for (let i = i0 - r; i <= i0 + r; i++) {
-    if (Math.max(Math.abs(i - i0), Math.abs(j - j0)) !== r || !fits(i, j)) continue;
-    const d = Math.hypot(i - i0, j - j0);
-    if (d < least) { least = d; best = { x: i * step - region.span / 2, z: j * step - region.span / 2 }; }
-  }
-  if (best) say(`  in the water: founded ${Math.round(Math.hypot(best.x - x, best.z - z))} m off, at (${Math.round(best.x)}, ${Math.round(best.z)})`);
-  return best ?? { x, z };
-}
-// The works the record says stood on this ground in this year (js/fort-records.js), wherever on it they stood and
-// whichever port's record names them: each in the form its phase in this year had (fortPhaseFor), as big as the
-// record says or as its form is, which the model sets on dry ground and stands as a building of the nearest place.
-// To the model a tower of either kind is a tower and a castle or bastioned work a fort; the form goes with it, for the
-// board to build it by (js/old-world-board.js).
-const WORK_KIND = Object.freeze({ tower: 'tower', 'artillery-tower': 'tower', battery: 'battery', enclosed: 'fort', bastioned: 'fort', citadel: 'fort' });
-const WORK_SIZE = Object.freeze({ tower: [12, 12], 'artillery-tower': [22, 22], battery: [44, 14], enclosed: [52, 52], bastioned: [76, 76], citadel: [120, 120] });
-function workOf(record, phase) {
-  const form = phase.form, kind = WORK_KIND[form];
-  // A gun tower with a battery at its foot holds the ground of both, the battery toward the water.
-  const size = form === 'battery' ? [record.sizeM?.[0] ?? WORK_SIZE.battery[0], Math.min(16, Math.max(10, record.sizeM?.[1] ?? WORK_SIZE.battery[1]))]
-    : form === 'tower' ? WORK_SIZE.tower
-      : form === 'artillery-tower' ? (record.sizeM ?? (phase.battery ? [36, 40] : WORK_SIZE['artillery-tower']))
-        : record.sizeM ?? WORK_SIZE[form];
-  return {
-    kind, form, ...(phase.round ? { round: true } : {}), ...(phase.battery ? { battery: true } : {}), ...(phase.earth ?? record.earth ? { earth: true } : {}),
-    name: record.name, x: Math.round(east(record.lon)), z: Math.round(south(record.lat)), size, from: phase.from, until: record.until ?? null,
-    role: record.role ?? '', side: record.side ?? '', ...(record.rough ? { rough: true } : {}),
-    ...(record.landmark ? { landmark: record.landmark } : {}),
-    ...(record.encloses ? { encloses: record.encloses } : {}),
-    ...(record.gate ? { gate: record.gate } : {}),
-  };
-}
-const works = [], named = new Set();
-for (const id of Object.keys(FORT_RECORDS)) for (const record of fortRecordsFor(id, year).forts) {
-  const phase = fortPhaseFor(record, year);
-  if (named.has(record.name) || !phase) continue;
-  named.add(record.name);
-  works.push(workOf(record, phase));
-}
 // A port already baked for this year keeps the country it was given: its seed, unless another is asked for.
 const exactBoardAsset = bakedBoardAsset(port, year, { exact: true });
 const keptRecord = exactBoardAsset && existsSync(resolve(root, exactBoardAsset)) ? JSON.parse(readFileSync(resolve(root, exactBoardAsset), 'utf8')).request : null;
 const livedIndex = args.indexOf('--lived');
 const livedArg = livedIndex >= 0 ? (args[livedIndex + 1] && !args[livedIndex + 1].startsWith('--') && Number.isFinite(Number(args[livedIndex + 1])) ? Number(args[livedIndex + 1]) : true) : false;
-const request = boardRequest({
-  heights: land.heights, span: region.span, seed: number('seed', keptRecord?.seed ?? region.seed ?? 1550), era: year, seat,
-  ...(city.walls ? { walls: city.walls } : {}),
-  // An Old World city is founded about its port; a native or planted town at its own recorded site.
-  site: { name: city.name, culture: city.culture, ...(city.native || city.colonial ? onFoundingGround(Math.round(east(city.longitude)), Math.round(south(city.latitude))) : { x: land.centre.x - region.x, z: land.centre.z - region.z }) },
-  places: (OLD_WORLD_PLACES[city.id] || city.places || []).map(([name, latitude, longitude, weight]) => ({ name, x: east(longitude), z: south(latitude), weight })),
-  lived: livedArg,
-  ...(city.manner ? { manner: city.manner, founded: city.founded, settled: city.settled } : city.founded != null ? { founded: city.founded, settled: city.settled } : {}),
-  works,
+// The request is the game's own (js/old-world.js boardRequestFor): the town this ground holds, founded at its site
+// with the seat, walls, neighbours and works its record gives it, as a board founded in play is asked for. Only what
+// is the bake's to say is said here: the year, the seed, a seat, a lived realm and the fitting of the rivers; and an
+// Old World city is founded at its port's middle, as every one baked was (cityAtPort).
+const seedAsked = option('seed', keptRecord?.seed ?? null), seatAsked = option('seat', null);
+const asked = boardRequestFor({
+  region, heights: land.heights, port: { center: land.centre }, year, cityAtPort: true,
+  seed: seedAsked == null ? null : Number(seedAsked), seat: seatAsked == null ? null : Number(seatAsked), lived: livedArg,
   rivers: { catchment: number('catchment', BOARD_RIVERS.catchment), width: number('width', BOARD_RIVERS.width), least: number('least', BOARD_RIVERS.least), carve: number('carve', BOARD_RIVERS.carve) },
 });
+if (!asked?.held) throw new Error(`${port}'s ground holds no Old World city, native town nor planted town in ${year}`);
+const { request, held: city, people } = asked;
+say(`${city.name} is founded at (${request.site.x}, ${request.site.z})`);
 say(`real places on this ground: ${request.places.map((p) => `${p.name} (${p.x}, ${p.z})`).join(', ') || 'none'}`);
 say(`works the record stands on it: ${(request.works ?? []).map((w) => `${w.kind} ${w.name} (${w.x}, ${w.z})`).join(', ') || 'none'}`);
 say(`founding ${city.name} of ${people} people in ${year}: seat ${request.seat}, request ${boardKey(request)}`);

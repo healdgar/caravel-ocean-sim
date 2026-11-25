@@ -1,7 +1,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
 import { VESSEL_RIG, VESSEL_LIGHTING } from './vessel.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
-import { SHADOW_SAMPLE, SHADOW_FRAME } from './shadows.js';
+import { SHADOW_SAMPLE } from './shadows.js';
 import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 import { CREW_JOINT_COUNT, CREW_REST_MALE_PLACES, CREW_REST_FEMALE_PLACES } from '../crew-skeleton.js';
 
@@ -16,10 +16,6 @@ const crewRestPlacesWgsl = (places) => places.map(([x, y, z]) => `vec3f(${x.toFi
 export const CREW_JOINT_BLEND_WGSL = /* wgsl */ `
 const CREW_REST_MALE=array<vec3f,${CREW_JOINT_COUNT}>(${crewRestPlacesWgsl(CREW_REST_MALE_PLACES)});
 const CREW_REST_FEMALE=array<vec3f,${CREW_JOINT_COUNT}>(${crewRestPlacesWgsl(CREW_REST_FEMALE_PLACES)});
-fn crewRestJoint(joint:u32,isFemale:bool)->vec3f {
-  let j=min(joint,${CREW_JOINT_COUNT - 1}u);
-  return select(CREW_REST_MALE[j],CREW_REST_FEMALE[j],isFemale);
-}
 fn crewRestJointMid(joint:u32)->vec3f {
   let j=min(joint,${CREW_JOINT_COUNT - 1}u);
   return 0.5*(CREW_REST_MALE[j]+CREW_REST_FEMALE[j]);
@@ -445,14 +441,6 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f { return vec4f(surface
 `;
 export const CREW_RENDER = crewRenderWGSL();
 export const CREW_WGSL = CREW_RENDER;
-export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
-@group(0) @binding(0) var<uniform> SH:ShadowFrame;
-@vertex fn vs(v:CrewInput)->@builtin(position) vec4f {
-  let actor=actors[v.instance];
-  if(actor.shirt.w>0.5||crewCompHidden(v.color,crewCompMask(actor.face.w))){return vec4f(2,2,0,1);}
-  return SH.lightView*vec4f(rotateHull((crewSkin(v)*vec4f(crewSurface(v).position,1)).xyz)+hull.origin.xyz-SH.origin.xyz,1);
-}
-`;
 
 // Sailors further from the eye are solved less often. Each frame the GPU carries every joint from
 // the last solved pose towards the newest one, so their limbs still move smoothly between solves.

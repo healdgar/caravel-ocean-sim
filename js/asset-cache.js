@@ -1,13 +1,20 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Persistent SHA-256 content-addressed client asset cache (OPFS primary, CacheStorage fallback).
+// Persistent client asset cache keyed by the content hash in each asset's name (OPFS primary, CacheStorage fallback).
 //
 // Every published Waterworld asset carries a 16-hex SHA-256 hash in its filename
 // (`assets/.../<name>.<16hex>.<ext>`). Standard browser HTTP disk caches drop very large
 // entries (such as the 186 MiB meadow and 331 MiB forest atlases) or evict aggressively on
-// iPhone Safari. This module transparently caches verified immutable assets locally by
-// content hash, streams straight from disk with zero duplicate RAM copies, shares unchanged
-// assets across /waterworld/ and /waterworld-test/, automatically busts on any content change,
-// and garbage-collects obsolete hashes from older builds.
+// iPhone Safari. This module transparently keeps immutable assets locally under that hash,
+// streams straight from disk with zero duplicate RAM copies, shares unchanged assets across
+// /waterworld/ and /waterworld-test/, busts on any content change (a new name), and
+// garbage-collects obsolete hashes from older builds.
+//
+// What it checks, and what it does not: a stored entry is taken on its LENGTH alone (the bytes the
+// build's asset index gives for its hash; any non-empty length where the index has none). It never
+// reads an entry's bytes or hashes them, on the way in or on the way out, so a stored file of the
+// right length and the wrong content is served as a hit. Content is verified by whoever reads the
+// asset (loadContinuumAtlas, js/continuum-format.js: SHA-256 against the manifest's receipt), and a
+// reader that finds a file wrong calls `evict` so the bad copy is not served again.
 
 const CACHE_DIR = 'waterworld-assets-v1';
 const META_KEY = 'waterworld.assetCacheMeta.v1';
@@ -306,6 +313,17 @@ export function createPersistentAssetCache({
     saveMeta(meta);
   }
 
+  // One stored entry removed, with its record of use and its share of the stored totals.
+  async function dropStored(backend, key) {
+    await backend.remove(key);
+    const known = meta[key];
+    if (!known) return;
+    delete meta[key];
+    saveMeta(meta);
+    stats.storedCount = Math.max(0, stats.storedCount - 1);
+    stats.storedBytes = Math.max(0, stats.storedBytes - (Number(known.b) || 0));
+  }
+
   function activeHashSet() {
     if (!assetIndex || typeof assetIndex !== 'object') return null;
     return new Set(Object.keys(assetIndex));
@@ -367,7 +385,10 @@ export function createPersistentAssetCache({
     if (!origFetch) throw new Error('fetch unavailable');
     const method = (init?.method || (typeof input === 'object' && input?.method) || 'GET').toUpperCase();
     if (method !== 'GET') return origFetch(input, init);
-    if (init?.cache === 'no-store' || init?.cache === 'reload') return origFetch(input, init);
+    if (init?.cache === 'no-store') return origFetch(input, init);
+    // `cache: 'reload'` is a refresh, as it is of the browser's own cache: the stored copy is dropped unread, the
+    // asset is fetched from the network, and what comes is stored in its place.
+    const refresh = init?.cache === 'reload';
     const reqHeaders = init?.headers || (typeof input === 'object' ? input?.headers : null);
     if (reqHeaders) {
       try {
@@ -386,8 +407,11 @@ export function createPersistentAssetCache({
     scheduleGc();
 
     // Wait briefly if the exact same key is already being written by an in-flight request? No: don't stall on miss;
-    // simply check for an already-completed file first.
-    if (!activeWrites.has(parsed.key)) {
+    // simply check for an already-completed file first. A hit is a stored file of the expected length: its content
+    // is not read here (see the head of this file).
+    if (refresh) {
+      if (!activeWrites.has(parsed.key)) await dropStored(backend, parsed.key);
+    } else if (!activeWrites.has(parsed.key)) {
       const hit = await backend.read(parsed.key, expectedBytes, parsed.contentType);
       if (hit) {
         const bytes = Number(hit.headers.get('Content-Length') || expectedBytes || 0);
@@ -444,6 +468,21 @@ export function createPersistentAssetCache({
     });
   }
 
+  // Drop one asset's stored copy, named by its URL: for a reader that has checked the bytes it was given and found
+  // them wrong, which this cache never does itself. A write of the same asset still in flight is waited out first, so
+  // that the bad copy cannot land after it was dropped. Resolves false where the URL names no hashed asset or there
+  // is no store, and true once no copy of it is stored.
+  async function evict(rawUrl) {
+    const parsed = parseHashedAssetUrl(rawUrl);
+    if (!parsed) return false;
+    const backend = await resolvedBackend;
+    if (!backend) return false;
+    await Promise.allSettled([activeWrites.get(parsed.key)]);
+    await dropStored(backend, parsed.key);
+    stats.evictedCount++;
+    return true;
+  }
+
   async function clear() {
     await Promise.allSettled([...activeWrites.values()]);
     const backend = await resolvedBackend;
@@ -462,6 +501,7 @@ export function createPersistentAssetCache({
   return {
     fetch: cachedFetch,
     stats,
+    evict,
     clear,
     ready,
     gc: runGarbageCollect,

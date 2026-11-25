@@ -25,6 +25,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+__pycache__/
 # Large raw offline meadow source binaries (the meadows-gpu/ manifests are tracked)
 assets/ground-cover/portugal/meadows/
 # The people continuum's baked streams: npm run deploy publishes them, scripts/prepare-crew-continuum.mjs bakes them.

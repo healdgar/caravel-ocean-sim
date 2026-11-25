@@ -702,7 +702,91 @@ function buildCraggyRockSurface(outerPoly, archetype) {
       out.push(p[0], p[1], p[2], vn[0], vn[1], vn[2], shade, archTag);
     }
   }
-  return { nearVertices: new Float32Array(out), outerTriangles };
+  // Each triangle as it lay on the polyhedron before it was sculpted, in `nearVertices`' order: the cleavage cells
+  // divide that polyhedron, so this is where a shard finds the part of the crag that is its own.
+  const flatTriangles = tris.map(([a, b, c]) => [verts[a], verts[b], verts[c]]);
+  return { nearVertices: new Float32Array(out), outerTriangles, flatTriangles };
+}
+
+// A shard is cut from the crag itself: what breaks is what is drawn and struck (AGENTS.md rule 1). The cleavage cells
+// divide the unsculpted polyhedron, on whose faces the crag's triangles lay before sculpting. So a cell's outer face is
+// those triangles clipped to it, each corner then carried where its triangle's sculpting carries it (the same
+// barycentric point of the sculpted triangle, with its normal): together the shards' outer faces are the crag's
+// surface, exactly. A cleavage face follows it: its rim on the surface takes the same corners, and it fans from its
+// centre. One list of triangles a face of `poly`, each of three { p, n, flat } corners in the template's frame (n
+// null on a cleavage face, which keeps its plane's).
+const CRAG_WELD = 1e6, CRAG_ON = 2e-6;
+const cragKey = (p) => `${Math.round(p[0] * CRAG_WELD)},${Math.round(p[1] * CRAG_WELD)},${Math.round(p[2] * CRAG_WELD)}`;
+function buildCellCragMesh(poly, flatTriangles, nearVertices) {
+  const rim = new Map(), size = (v) => Math.hypot(v[0], v[1], v[2]);
+  const corner = (t, k) => { const at = (t * 3 + k) * 8; return nearVertices.subarray(at, at + 6); };
+  const outer = (face) => {
+    const ring = face.v.map((i) => poly.vertices[i]), n = norm3(face.n), triangles = [];
+    const centre = ring.reduce((sum, q) => [sum[0] + q[0] / ring.length, sum[1] + q[1] / ring.length, sum[2] + q[2] / ring.length], [0, 0, 0]);
+    // The half-planes of the face's edges, each turned to hold its centre.
+    const edges = ring.map((a, i) => {
+      const inward = norm3(cross3(n, sub3(ring[(i + 1) % ring.length], a)));
+      return dot3(inward, sub3(centre, a)) >= 0 ? { n: inward, d: dot3(inward, a) } : { n: [-inward[0], -inward[1], -inward[2]], d: -dot3(inward, a) };
+    });
+    for (let t = 0; t < flatTriangles.length; t++) {
+      const flat = flatTriangles[t];
+      if (flat.some((q) => Math.abs(dot3(n, sub3(q, ring[0]))) > CRAG_ON)) continue;
+      const e1 = sub3(flat[1], flat[0]), e2 = sub3(flat[2], flat[0]), tn = cross3(e1, e2);
+      if (dot3(tn, n) <= 0) continue;
+      let piece = flat;
+      for (const edge of edges) {
+        const next = [];
+        for (let k = 0; k < piece.length; k++) {
+          const a = piece[k], b = piece[(k + 1) % piece.length], sa = dot3(edge.n, a) - edge.d, sb = dot3(edge.n, b) - edge.d;
+          if (sa >= -CRAG_ON) next.push(a);
+          if ((sa >= -CRAG_ON) !== (sb >= -CRAG_ON)) { const f = sa / (sa - sb); next.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]); }
+        }
+        piece = next;
+        if (piece.length < 3) break;
+      }
+      if (piece.length < 3) continue;
+      const d00 = dot3(e1, e1), d01 = dot3(e1, e2), d11 = dot3(e2, e2), denom = d00 * d11 - d01 * d01;
+      if (!(denom > 1e-18)) continue;
+      const A = corner(t, 0), B = corner(t, 1), C = corner(t, 2);
+      const carried = piece.map((q) => {
+        const e = sub3(q, flat[0]), d20 = dot3(e, e1), d21 = dot3(e, e2);
+        const v = (d11 * d20 - d01 * d21) / denom, w = (d00 * d21 - d01 * d20) / denom, u = 1 - v - w;
+        const at = (i) => u * A[i] + v * B[i] + w * C[i];
+        const made = { p: [at(0), at(1), at(2)], n: norm3([at(3), at(4), at(5)]), flat: q };
+        rim.set(cragKey(q), made);
+        return made;
+      });
+      for (let k = 1; k + 1 < carried.length; k++) {
+        if (size(cross3(sub3(carried[k].flat, carried[0].flat), sub3(carried[k + 1].flat, carried[0].flat))) > 1e-12) triangles.push([carried[0], carried[k], carried[k + 1]]);
+      }
+    }
+    return triangles;
+  };
+  const faces = poly.faces.map((face) => (face.raw ? null : outer(face)));
+  const carriedAt = [...rim.values()];
+  const cleft = (face) => {
+    const ring = face.v.map((i) => poly.vertices[i]), around = [];
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length], e = sub3(b, a), length2 = dot3(e, e);
+      const at = rim.get(cragKey(a)) ?? carriedAt.find((c) => size(sub3(c.flat, a)) < CRAG_ON);
+      around.push({ p: at ? at.p : a, n: null, flat: a });
+      if (!(length2 > 1e-18)) continue;
+      // The corners its neighbouring outer face made along this edge, in order.
+      const along = [];
+      for (const c of carriedAt) {
+        const d = sub3(c.flat, a), f = dot3(d, e) / length2;
+        if (f * f * length2 <= CRAG_ON * CRAG_ON || (1 - f) * (1 - f) * length2 <= CRAG_ON * CRAG_ON || f < 0 || f > 1) continue;
+        if (size(sub3(d, [e[0] * f, e[1] * f, e[2] * f])) < CRAG_ON) along.push({ f, c });
+      }
+      along.sort((x, y) => x.f - y.f);
+      let last = -1;
+      for (const { f, c } of along) { if (f - last > 1e-9) around.push({ p: c.p, n: null, flat: c.flat }); last = f; }
+    }
+    const centre = { p: ring.reduce((sum, q) => [sum[0] + q[0] / ring.length, sum[1] + q[1] / ring.length, sum[2] + q[2] / ring.length], [0, 0, 0]), n: null };
+    centre.flat = centre.p;
+    return around.map((v, i) => [centre, v, around[(i + 1) % around.length]]);
+  };
+  return poly.faces.map((face, f) => faces[f] ?? cleft(face));
 }
 
 const templateCache = new Array(ROCK_ARCHETYPES).fill(null);
@@ -714,7 +798,8 @@ export function getBoulderCleavageTemplate(archetype = 0) {
   const outerPoly = buildOuterBoulderPolyhedron(arch);
   const outerStats = measurePolyhedron(outerPoly);
   const cells = decomposeBoulderCleavage(outerPoly, arch);
-  const { nearVertices, outerTriangles } = buildCraggyRockSurface(outerPoly, arch);
+  const { nearVertices, outerTriangles, flatTriangles } = buildCraggyRockSurface(outerPoly, arch);
+  const cellMeshes = cells.map((cell) => buildCellCragMesh(cell.poly, flatTriangles, nearVertices));
 
   let shardVolumeSum = 0;
   for (const c of cells) shardVolumeSum += c.stats.volume;
@@ -725,6 +810,7 @@ export function getBoulderCleavageTemplate(archetype = 0) {
     outerStats,
     outerTriangles,
     cells,
+    cellMeshes,
     shardCount: cells.length,
     shardVolumeSum,
     nearVertices,
@@ -774,19 +860,10 @@ export function prepareBoulderFracture(boulder, {
   for (let s = 0; s < template.cells.length; s++) {
     const cell = template.cells[s];
     const poly = cell.poly;
-    const worldVerts = poly.vertices.map((lp) => boulderLocalToWorldPoint(basis, lp[0], lp[1], lp[2]));
-
+    // Its faces as the crag has them (buildCellCragMesh): the bounds below are of what is drawn, not of the cell.
+    const mesh = template.cellMeshes[s];
     let wMin = [Infinity, Infinity, Infinity], wMax = [-Infinity, -Infinity, -Infinity];
     let lMin = [Infinity, Infinity, Infinity], lMax = [-Infinity, -Infinity, -Infinity];
-    for (const wp of worldVerts) {
-      const lp = toLocal(wp[0], wp[1], wp[2]);
-      for (let c = 0; c < 3; c++) {
-        if (wp[c] < wMin[c]) wMin[c] = wp[c];
-        if (wp[c] > wMax[c]) wMax[c] = wp[c];
-        if (lp[c] < lMin[c]) lMin[c] = lp[c];
-        if (lp[c] > lMax[c]) lMax[c] = lp[c];
-      }
-    }
 
     const wCentroid = boulderLocalToWorldPoint(
       basis,
@@ -798,7 +875,8 @@ export function prepareBoulderFracture(boulder, {
     const linksSet = new Set();
     let touchesStump = false;
 
-    for (const face of poly.faces) {
+    for (let f = 0; f < poly.faces.length; f++) {
+      const face = poly.faces[f];
       const rawScale = face.raw ? BOULDER_RAW_SURFACE : 1.0;
       const wn = boulderLocalToWorldNormal(
         basis,
@@ -816,20 +894,27 @@ export function prepareBoulderFracture(boulder, {
         linksSet.add(face.neighbor);
       }
 
-      const ring = face.v;
-      const baseV = restList.length / FRACTURE_STRIDE;
-      for (let i = 0; i < ring.length; i++) {
-        const wp = worldVerts[ring[i]];
-        const lp = poly.vertices[ring[i]];
-        const heightTerm = Math.max(0, Math.min(1, (lp[1] + 0.24) / 1.04));
-        const shade = face.raw
-          ? 0.56 + 0.22 * heightTerm
-          : 0.44 + 0.52 * (0.55 * heightTerm + 0.45 * Math.max(0, face.n[1] * 0.5 + 0.5));
-        restList.push(wp[0], wp[1], wp[2], wn[0], wn[1], wn[2], stoneKind, shade);
-        shardTagList.push(s);
-      }
-      for (let i = 1; i + 1 < ring.length; i++) {
-        indexList.push(baseV, baseV + i, baseV + i + 1);
+      for (const triangle of mesh[f]) {
+        const baseV = restList.length / FRACTURE_STRIDE;
+        for (const corner of triangle) {
+          const lp = corner.p;
+          const wp = boulderLocalToWorldPoint(basis, lp[0], lp[1], lp[2]);
+          const vn = corner.n ? boulderLocalToWorldNormal(basis, corner.n[0], corner.n[1], corner.n[2]) : wn;
+          const heightTerm = Math.max(0, Math.min(1, (lp[1] + 0.24) / 1.04));
+          const shade = face.raw
+            ? 0.56 + 0.22 * heightTerm
+            : 0.44 + 0.52 * (0.55 * heightTerm + 0.45 * Math.max(0, corner.n[1] * 0.5 + 0.5));
+          restList.push(wp[0], wp[1], wp[2], vn[0], vn[1], vn[2], stoneKind, shade);
+          shardTagList.push(s);
+          const yawed = toLocal(wp[0], wp[1], wp[2]);
+          for (let c = 0; c < 3; c++) {
+            if (wp[c] < wMin[c]) wMin[c] = wp[c];
+            if (wp[c] > wMax[c]) wMax[c] = wp[c];
+            if (yawed[c] < lMin[c]) lMin[c] = yawed[c];
+            if (yawed[c] > lMax[c]) lMax[c] = yawed[c];
+          }
+        }
+        indexList.push(baseV, baseV + 1, baseV + 2);
       }
     }
 

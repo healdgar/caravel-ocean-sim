@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {SURFACE_WAVE_UPDATE,SURFACE_WAVE_SPEED} from './wgsl/surface-waves.js';
+import {SHALLOW_WATER_MAX_STEP} from './wgsl/shallow-water.js';
 
 export const SURFACE_WAVE_LIMITS=Object.freeze({emitters:64,hulls:24,nearExtent:256,farExtent:1024,maxDt:.1,restSeconds:45,maxEventAge:.5,dedupe:4096});
 const surfaceWaveFinite=(v,fallback=0)=>Number.isFinite(v)?v:fallback;
@@ -116,8 +117,9 @@ export async function createSurfaceWaves({device,computePipe,size=512}){
       stats.hulls=hullCount;
       if(hullCount){lastEmission=time;device.queue.writeBuffer(hulls,0,hullValues,0,hullCount*8);}
       const wavesLive=(time-lastEmission)<=SURFACE_WAVE_LIMITS.restSeconds;
-      const maxStep=.45*domains[3]/SURFACE_WAVE_SPEED;
-      const stepCount=Math.max(1,Math.min(3,Math.ceil(dt/maxStep)));
+      // While the shallow water runs beside them (as of the last frame), a substep is no longer than its solver takes.
+      const maxStep=Math.min(.45*domains[3]/SURFACE_WAVE_SPEED,sweActive?SHALLOW_WATER_MAX_STEP:Infinity);
+      const stepCount=Math.max(1,Math.min(3,Math.ceil(dt/maxStep-1e-6)));
       sweActive=Boolean(shallowWater&&shallowWater.update({
         domains,committed,dt,steps:stepCount,time,hulls:pendingHulls,resetField:resetField||teleport,
         ...(sweForcing||{}),

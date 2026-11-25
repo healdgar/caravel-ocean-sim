@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Live 3D GPU-driven field armies, standing royal/noble household hosts, siege lines, and marching columns
 // from Castle & Commons (`W.armies`, exposed via `boardLife.armies()`). Every rendered commander and soldier
-// is drawn through the One Continuum (`soldier` & `captain` bodies + 3D clothing + strand hair) on the GPU
+// is drawn through the One Continuum (`soldier` & `captain` bodies + strand hair) on the GPU
 // with zero fake scenery units: only hosts actually living in `W.armies` exist here, wearing their house's
 // heraldic livery (`sigilHue`) and carrying real named Castle & Commons souls clickable in `folkCard`.
 import { CREW_ACTOR_FLOATS } from './crew.js';
@@ -17,7 +17,6 @@ import { CREW_CONTINUUM_IDENTITY_SHIFT, CREW_CONTINUUM_AGE_SHIFT } from './wgsl/
 const MAX_ARMY_SOLDIERS = 256;
 const MAX_ARMY_COMMANDERS = 24;
 const MAX_SOLDIERS_PER_HOST = 36;
-const ARMY_SIGHT_M = 2800;
 const BOARD_ARMY_SEED_FLOATS = 12;
 
 // GPU compute pass advancing marching formation stride, sloped ground footing, actor transforms, and clip frames
@@ -566,9 +565,10 @@ export async function createBoardArmies({
     batch.dirty = false;
   }
 
-  function stepBatch(batch, anyInRange) {
+  // No range switch: a host however far is posed and offered to the one cut, which thins it below a pixel.
+  function stepBatch(batch) {
     const n = batch.people.length;
-    if (!n || !anyInRange) {
+    if (!n) {
       batch.activeCount = 0;
       batch.clip.setGpuDriven(0);
       batch.cut.update(0, undefined, false);
@@ -584,15 +584,6 @@ export async function createBoardArmies({
     batch.clip.setGpuDriven(n);
     batch.cut.update(n, undefined, true);
     return true;
-  }
-
-  function hostsInRange(camera) {
-    if (!camera || !Number.isFinite(camera.x)) return true;
-    for (let i = 0; i < hostRecords.length; i++) {
-      const h = hostRecords[i];
-      if (Math.hypot(h.x + worldOffsetX - camera.x, h.z + worldOffsetZ - camera.z) <= ARMY_SIGHT_M + 40) return true;
-    }
-    return false;
   }
 
   return {
@@ -613,9 +604,8 @@ export async function createBoardArmies({
           device.queue.writeBuffer(hullUBO, 0, hullData);
         }
       }
-      const inRange = hostsInRange(camera);
-      const a = stepBatch(soldierBatch, inRange);
-      const b = stepBatch(captainBatch, inRange);
+      const a = stepBatch(soldierBatch);
+      const b = stepBatch(captainBatch);
       drawEnabled = a || b;
     },
     encodePose(pass) {

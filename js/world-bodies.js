@@ -48,7 +48,21 @@ export function worldBodiesForDevice(device) {
   const headerData = new Float32Array(WORLD_BODY_FLOATS);
   const captainData = new Float32Array(WORLD_BODY_FLOATS);
   let captainWasActive = false;
-  let lastStaticKey = '';
+  // What the static slots were last sent, word for word, so a call that changes nothing uploads nothing. It is the
+  // packed obstacles themselves that are compared: another port's list with as many pieces and the same first one is
+  // never taken for the one already there.
+  const staticData = new Float32Array(MAX_STATIC_BODIES * WORLD_BODY_FLOATS);
+  const staticSent = new Float32Array(MAX_STATIC_BODIES * WORLD_BODY_FLOATS);
+  const staticDataBits = new Uint32Array(staticData.buffer);
+  const staticSentBits = new Uint32Array(staticSent.buffer);
+  let staticSentCount = -1;
+  // The list those words were last packed from, with its length, its revision and the offset it was packed at. The
+  // same list again with none of these changed packs to the same words, so it is not packed at all: a frame that
+  // changes nothing reads none of its obstacles. A board's list is made once and replaced whole
+  // (js/old-world-board.js), and any other list is packed and compared as before; whoever comes to edit one in place
+  // at the same length says so by raising its `revision`.
+  const staticNone = [];
+  let staticPackedList = null, staticPackedLength = -1, staticPackedRevision = 0, staticPackedOx = NaN, staticPackedOz = NaN;
 
   const writeHeader = () => {
     device.queue.writeBuffer(buffer, BODY_HEADER_SLOT * WORLD_BODY_BYTES, headerData);
@@ -81,35 +95,43 @@ export function worldBodiesForDevice(device) {
       device.queue.writeBuffer(buffer, BODY_CAPTAIN_SLOT * WORLD_BODY_BYTES, captainData);
     },
     setStaticObstacles(furniture, worldOffset = { x: 0, z: 0 }) {
-      const list = Array.isArray(furniture) ? furniture : [];
+      const list = Array.isArray(furniture) ? furniture : staticNone;
       const ox = worldOffset?.x ?? 0;
       const oz = worldOffset?.z ?? 0;
+      const revision = list.revision ?? 0;
+      if (list === staticPackedList && list.length === staticPackedLength && revision === staticPackedRevision && ox === staticPackedOx && oz === staticPackedOz) return;
       const count = Math.min(MAX_STATIC_BODIES, list.length);
-      const first = list[0];
-      const key = `${count}:${ox.toFixed(1)}:${oz.toFixed(1)}:${first ? `${first.x?.toFixed(1)},${first.z?.toFixed(1)}` : ''}`;
-      if (key === lastStaticKey) return;
-      lastStaticKey = key;
+      const words = count * WORLD_BODY_FLOATS;
+      for (let i = 0; i < count; i++) {
+        const f = list[i];
+        const o = i * WORLD_BODY_FLOATS;
+        const r = f.radius ?? Math.max(1.2, Math.min(f.width ?? 3, f.length ?? 3) * 0.5);
+        const hl = f.halfLen ?? Math.max(0, Math.abs((f.length ?? 0) - (f.width ?? 0)) * 0.5);
+        staticData[o] = (f.x ?? 0) + ox;
+        staticData[o + 1] = f.y ?? 0;
+        staticData[o + 2] = (f.z ?? 0) + oz;
+        staticData[o + 3] = r;
+        staticData[o + 4] = f.yaw ?? 0;
+        staticData[o + 5] = hl;
+        staticData[o + 6] = 0;
+        staticData[o + 7] = BODY_FLAG_ACTIVE | BODY_FLAG_STATIC | BODY_FLAG_STOPPED;
+      }
+      staticPackedList = list;
+      staticPackedLength = list.length;
+      staticPackedRevision = revision;
+      staticPackedOx = ox;
+      staticPackedOz = oz;
+      let changed = count !== staticSentCount;
+      for (let k = 0; k < words && !changed; k++) changed = staticDataBits[k] !== staticSentBits[k];
+      if (!changed) return;
 
-      const prevCount = Math.round(headerData[0]);
+      const prevCount = Math.max(0, staticSentCount);
       if (count > 0) {
-        const data = new Float32Array(count * WORLD_BODY_FLOATS);
-        for (let i = 0; i < count; i++) {
-          const f = list[i];
-          const o = i * WORLD_BODY_FLOATS;
-          const r = f.radius ?? Math.max(1.2, Math.min(f.width ?? 3, f.length ?? 3) * 0.5);
-          const hl = f.halfLen ?? Math.max(0, Math.abs((f.length ?? 0) - (f.width ?? 0)) * 0.5);
-          data[o] = (f.x ?? 0) + ox;
-          data[o + 1] = f.y ?? 0;
-          data[o + 2] = (f.z ?? 0) + oz;
-          data[o + 3] = r;
-          data[o + 4] = f.yaw ?? 0;
-          data[o + 5] = hl;
-          data[o + 6] = 0;
-          data[o + 7] = BODY_FLAG_ACTIVE | BODY_FLAG_STATIC | BODY_FLAG_STOPPED;
-        }
-        device.queue.writeBuffer(buffer, BODY_STATIC_BASE * WORLD_BODY_BYTES, data);
+        device.queue.writeBuffer(buffer, BODY_STATIC_BASE * WORLD_BODY_BYTES, staticData, 0, words);
+        staticSent.set(staticData.subarray(0, words));
       }
       if (prevCount > count) zeroSlice(BODY_STATIC_BASE + count, prevCount - count);
+      staticSentCount = count;
       headerData[0] = count;
       writeHeader();
     },

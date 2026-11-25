@@ -9,7 +9,8 @@ import {CITY_BLOCK_FLOATS} from '../js/old-world-city.js';
 import {CITY_BUILDING_TYPES,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityFamilyOf,cityHouseType,cityTypeTarget,compileCityBuildingTypes} from '../js/old-world-buildings.js';
 import {createCityTargets,standCityBuildingMesh} from '../js/city-targets.js';
 import {applyBuildingFractureEvents,buildingFractureStateOf,buildingKindWithYaw,buildingReach,prepareBuildingFracture} from '../js/building-fracture.js';
-import {applyBuildingImpactDamage,classifyBuildingMaterial,sweepBuildingSegment} from '../js/gunnery-control.js';
+import {applyBuildingImpactDamage,buildingStruckFabric,classifyBuildingMaterial,sweepBuildingSegment} from '../js/gunnery-control.js';
+import {NATIVE_WORKS_TARGETS} from '../js/native-works.js';
 import {createPortDamageStore} from '../js/port-damage.js';
 
 // The shore the plan's own tests use: sea to the south, ground rising inland, a height the town can climb.
@@ -59,6 +60,13 @@ test('every block of the plan belongs to one typed building, and each type keeps
   assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.KEEP)),'fortified-stone');
   assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.HOUSE_EAVES+2)),'masonry');
   assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.CHURCH_GREAT)),'masonry');
+  // A native town's works are bark, reed mats, thatch and stakes: wood to the guns as wholes, never masonry.
+  for(const target of Object.values(NATIVE_WORKS_TARGETS))assert.equal(classifyBuildingMaterial(target),'timber',target.label);
+  // And a ball meets the fabric of the face it enters, whatever the building: timber, thatch and bark by the land
+  // shader's kinds, thatch passed more easily than bark and bark than timber; stone, glass and iron are the building's.
+  assert.deepEqual([10,15,17].map(kind=>buildingStruckFabric({hitMaterialKind:kind}).fabric),['timber','thatch','bark']);
+  assert.ok(buildingStruckFabric({hitMaterialKind:15}).passJoules<buildingStruckFabric({hitMaterialKind:17}).passJoules&&buildingStruckFabric({hitMaterialKind:17}).passJoules<buildingStruckFabric({hitMaterialKind:10}).passJoules);
+  for(const kind of [11,12,13,14,16,18,null,undefined])assert.equal(buildingStruckFabric({hitMaterialKind:kind}),null);
 });
 
 test('a type stood in the world is the mesh the land shader would draw of it',()=>{

@@ -6,6 +6,9 @@
 // deploys either:
 //   --target=test (default): sixcailloux-waterworld-test -> https://www.sixcailloux.com/waterworld-test/
 //   --target=prod:           sixcailloux-waterworld      -> https://www.sixcailloux.com/waterworld/
+// Production is deployed only from committed sources: a bundle its build stamped `dirty` (uncommitted changes
+// under js/, index.html, build.mjs or scripts/), or one with no stamp to tell by, is refused unless --allow-dirty
+// is passed. The test target deploys whatever is built.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -57,6 +60,29 @@ const manifestPath = path.join(docsDir, 'assets-manifest.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const buildInfoPath = path.join(docsDir, 'build-info.json');
 const buildInfo = fs.existsSync(buildInfoPath) ? JSON.parse(fs.readFileSync(buildInfoPath, 'utf8')) : null;
+
+// The production gate, before anything is staged or sent. `buildInfo.dirty` is build.mjs's own reading of the tree
+// the bundle in docs/ was built from (with --skip-build, the tree of that earlier build).
+if (target.id === 'prod' && !args.has('--stage-only') && !args.has('--allow-dirty') && (!buildInfo || buildInfo.dirty)) {
+  const stamp = buildInfo ? `build #${buildInfo.build} v${buildInfo.version} (${buildInfo.commit}*)` : 'the bundle in docs/';
+  console.error([
+    '',
+    buildInfo
+      ? `Refusing to deploy to production: ${stamp} was built from a git tree with uncommitted changes under js/, index.html, build.mjs or scripts/.`
+      : `Refusing to deploy to production: ${stamp} has no build stamp (docs/build-info.json), so the tree it was built from cannot be told clean.`,
+    buildInfo
+      ? 'Commit those changes (git status shows them) and deploy again, so that what is live is what is committed.'
+      : 'Build it (node build.mjs) from a committed tree and deploy again.',
+    'To ship the uncommitted state knowingly, pass --allow-dirty:',
+    '  npm run deploy:prod -- --allow-dirty',
+    'Nothing was staged or deployed.',
+    '',
+  ].join('\n'));
+  process.exit(1);
+}
+if (target.id === 'prod' && args.has('--allow-dirty') && (!buildInfo || buildInfo.dirty)) {
+  console.warn(`--allow-dirty: deploying to production ${buildInfo ? 'a bundle built from a tree with uncommitted changes' : 'a bundle with no build stamp'}.`);
+}
 
 const cfDir = path.join(root, target.cfDirName);
 const outRoot = path.join(cfDir, 'public', target.mountName);

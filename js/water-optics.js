@@ -16,6 +16,9 @@ function opticsMatching(source,start,open,close){
 // `land` marks ground, which is captured up to WATER_CAPTURE_LAND_MARGIN above the surface so a shore seen
 // through a wave has ground behind it; everything else stops at the surface.
 export const WATER_CAPTURE_LAND_MARGIN=0.45,WATER_CAPTURE_MARGIN=0.08;
+// No sea stands higher than this above its datum, or lower below: past it a capture keeps nothing, so a fragment
+// leaves before the surface is found, and a whole instance past it places no vertex (js/wgsl/continuum-cut.js).
+export const WATER_CAPTURE_CEILING=14.0;
 export function createSubmergedShader(source,entry='fs',world='v.world',surfaceWaves=false,land=false){
   // Explicit vessel-material opt-in. Do not guess by material number, rename
   // arbitrary booleans or apply an air/water toggle to unrelated scene shaders.
@@ -82,7 +85,7 @@ fn captureHeight(p:vec2f,footprint:f32)->f32{
 ${fragment}{
   // Most of a ship is on the wrong side of the surface here. Leave before lighting any of it.
   let captureWorld=${world};
-  if(select((captureWorld.y > 14.0), (captureWorld.y < -14.0), (captureMode.x > 0.5))){discard;return vec4f(0);}
+  if(select((captureWorld.y > ${WATER_CAPTURE_CEILING.toFixed(1)}), (captureWorld.y < -${WATER_CAPTURE_CEILING.toFixed(1)}), (captureMode.x > 0.5))){discard;return vec4f(0);}
   let eyeDist=length(captureWorld-F.camPos.xyz);
   let pxSpan=max(length(F.camRight.xyz)/max(F.screen.x,1.0),length(F.camUp.xyz)/max(F.screen.y,1.0));
   let footprint=2.0*eyeDist*pxSpan*4.0;

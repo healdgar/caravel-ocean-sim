@@ -348,9 +348,9 @@ fn meadowOutside(at: vec3f, reach: f32) -> bool {
   return false;
 }
 // Whether a sphere about 'at' (the scene's frame, as the one cut casts it) reaches into the sun's box, when the land
-// casts shadows and the sward height clears the shadow map's bias + 2x2 PCF resolution threshold.
+// casts shadows. Which stands then cast, and how coarsely, is the one cut's to decide (js/wgsl/continuum-cut.js).
 fn meadowInLight(at: vec3f, reach: f32) -> bool {
-  if (cfg.params.w == 0u || shadowBox.origin.w < 0.5 || max(shadowBox.texel.x * 2.5, 0.50) > 0.45) { return false; }
+  if (cfg.params.w == 0u || shadowBox.origin.w < 0.5) { return false; }
   let m = shadowBox.lightView;
   let scales = vec3f(length(vec3f(m[0].x, m[1].x, m[2].x)), length(vec3f(m[0].y, m[1].y, m[2].y)), length(vec3f(m[0].z, m[1].z, m[2].z))) * reach;
   let lit = (m * vec4f(at - shadowBox.origin.xyz, 1.0)).xyz;

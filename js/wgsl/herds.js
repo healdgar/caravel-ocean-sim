@@ -30,6 +30,14 @@ export const HERD_SHOTS_WORDS = 4 + HERD_SHOT_LIMIT * HERD_SHOT_FLOATS;
 export const HERD_SPECIES = 7;
 export const HERD_ROUTE_HEADER = 1;
 export const HERD_STAMPEDE_RADIUS_M = 38.0;
+export const HERD_STAMPEDE_SECONDS = 14.0;
+// How far the step's avoidance (main, below: herdAvoid) may stand a beast from its closed-form place. A loose beast's
+// offset is clamped to its roam and HERD_AVOID_BEYOND_ROAM_M, and to no less than HERD_AVOID_LEAST_M; a street mount is
+// held within HERD_MOUNT_AVOID_ASIDE_M of its way's middle, or the way's half width where that is more. The shot tests
+// of js/herds.js bound the drawn place by these same figures (herdAvoidSlack).
+export const HERD_AVOID_BEYOND_ROAM_M = 3.0;
+export const HERD_AVOID_LEAST_M = 5.2;
+export const HERD_MOUNT_AVOID_ASIDE_M = 5.6;
 
 // The herd rig as joints (js/animal-continuum.js ANIMAL_JOINT; mirrored by scripts/prepare-animal-continuum.mjs, whose
 // bake measures every cluster and far step in these very poses). A beast: its body; its neck and head pitched about the
@@ -174,7 +182,7 @@ struct HerdFate {
 
 const CARAVAN_YOKE_AHEAD_M: f32 = 4.05;
 const HERD_STAMPEDE_M: f32 = ${HERD_STAMPEDE_RADIUS_M.toFixed(1)};
-const HERD_STAMPEDE_SPAN_S: f32 = 14.0;
+const HERD_STAMPEDE_SPAN_S: f32 = ${HERD_STAMPEDE_SECONDS.toFixed(1)};
 
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> LAND: HerdLand;
@@ -192,7 +200,24 @@ const HERD_STAMPEDE_SPAN_S: f32 = 14.0;
 @group(0) @binding(11) var<storage, read_write> fates: array<HerdFate>;
 ` + continuumGroundWGSL(0, 12) + /* wgsl */ `
 @group(0) @binding(13) var<storage, read_write> herdAvoid: array<vec4f>;
-` + worldBodiesWGSL(0, 14, 'read_write') + HERD_JOINTS_WGSL + /* wgsl */ `
+` + worldBodiesWGSL(0, 14, 'read_write') + /* wgsl */ `
+// What every beast, mount and vehicle was left as before this step: its body in the world and its fate. The step
+// reads its neighbours, and the others of its hitch, from here and never from the slots they are writing in the same
+// dispatch, so what one sees of another does not depend on which of them ran first. Each invocation writes only its
+// own elements of fates, herdAvoid, herdRecords, skinnedPoses and worldBodies.
+struct HerdSeen { body: WorldBody, fate: HerdFate };
+@group(0) @binding(15) var<storage, read_write> herdSeen: array<HerdSeen>;
+` + HERD_JOINTS_WGSL + /* wgsl */ `
+
+// Before the step (js/herds.js encode): each one's own body and fate as the last step left them, copied to herdSeen.
+@compute @workgroup_size(64)
+fn herdSee(@builtin(global_invocation_id) gid: vec3u) {
+  let idx = gid.x;
+  if (idx >= cfg.count) { return; }
+  var body = WorldBody(vec4f(0.0), vec4f(0.0));
+  if (idx < WB_HERD_MAX) { body = worldBodies[WB_HERD_BASE + idx]; }
+  herdSeen[idx] = HerdSeen(body, fates[idx]);
+}
 
 // Not drawn this frame.
 fn herdGone(idx: u32) {
@@ -463,9 +488,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       let draftL = vehIdx + 1u;
       let draftR = vehIdx + 2u;
       if (vehIdx < cfg.count && draftR < cfg.count && abs(seeds[vehIdx].anchor.y - seed.anchor.y) < 1e-3) {
-        let vf = fates[vehIdx];
-        let dlf = fates[draftL];
-        let drf = fates[draftR];
+        // The hitch as the last step left it (herdSeen), the same for all three of it whichever runs first.
+        let vf = herdSeen[vehIdx].fate;
+        let dlf = herdSeen[draftL].fate;
+        let drf = herdSeen[draftR].fate;
         if (vf.status.x >= 1.5) {
           hitchDamaged = true;
           if (isVehicle) {
@@ -609,7 +635,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         for (var bi = bStart; bi < bEnd; bi++) {
           if (passKind == 2u && bi == WB_HERD_BASE + idx) { continue; }
           if (passKind == 3u && streetMountWalkerIdx < WB_WALKER_MAX && bi == WB_WALKER_BASE + streetMountWalkerIdx) { continue; }
-          let ob = worldBodies[bi];
+          // Other herds are read as the last step left them, never from the slots this step is writing.
+          var ob: WorldBody;
+          if (passKind == 2u) { ob = herdSeen[bi - WB_HERD_BASE].body; } else { ob = worldBodies[bi]; }
           if (ob.pos.w <= 0.01) { continue; }
           let dXZ = ob.pos.xz - selfW;
           if (abs(dXZ.x) > 7.5 || abs(dXZ.y) > 7.5 || abs(ob.pos.y - selfY) > 2.6) { continue; }
@@ -661,7 +689,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         }
       }
 
-      let maxLat = max(streetMountHalfW, select(0.55, 5.6, sawStatic));
+      let maxLat = max(streetMountHalfW, select(0.55, ${HERD_MOUNT_AVOID_ASIDE_M.toFixed(1)}, sawStatic));
       let wantRightM = clamp(prefRightM + clamp(steerRightM, -maxLat * 1.4, maxLat * 1.4), -maxLat, maxLat);
       let latRate = select(1.85, 3.6, sawStatic || abs(pushRightM) > 0.05);
       let maxLatStep = max(0.03, dt * latRate);
@@ -708,7 +736,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         else if (passKind == 3u) { bStart = WB_WALKER_BASE; bEnd = WB_WALKER_BASE + nWalkers; }
         for (var bi = bStart; bi < bEnd; bi++) {
           if (passKind == 2u && bi == WB_HERD_BASE + idx) { continue; }
-          let ob = worldBodies[bi];
+          var ob: WorldBody;
+          if (passKind == 2u) { ob = herdSeen[bi - WB_HERD_BASE].body; } else { ob = worldBodies[bi]; }
           if (ob.pos.w <= 0.01) { continue; }
           let dXZ = ob.pos.xz - selfW;
           if (abs(dXZ.x) > 5.5 || abs(dXZ.y) > 5.5 || abs(ob.pos.y - selfY) > 2.4) { continue; }
@@ -744,7 +773,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       let decay = exp(-dt * 0.45);
       let stepVec = clamp(steerXZ, vec2f(-2.0), vec2f(2.0)) * dt * 1.35 + clamp(pushXZ, vec2f(-0.75), vec2f(0.75));
       let candOff = curOff * decay + stepVec;
-      let maxOff = max(abs(roamR) + 3.0, 5.2);
+      let maxOff = max(abs(roamR) + ${HERD_AVOID_BEYOND_ROAM_M.toFixed(1)}, ${HERD_AVOID_LEAST_M.toFixed(1)});
       let candLen = length(candOff);
       let clampedOff = select(candOff, candOff * (maxOff / candLen), candLen > maxOff);
       let candXZ = nomXZ + clampedOff;

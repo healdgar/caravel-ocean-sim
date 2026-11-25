@@ -29,7 +29,7 @@ import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, cr
 import { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
 import { crewComponentMaskForActor, packCrewFaceW } from './crew-components.js';
 import { CREW_JOINT_COUNT, CREW_SLOT } from './crew-skeleton.js';
-import { CREW_CONTINUUM_ORDER_IMPORTANT, createCrewContinuumBatch, loadCrewContinuumBodies, requestCrewContinuumPipelines } from './crew-continuum-draw.js';
+import { CREW_CONTINUUM_AGE_SHIFT, CREW_CONTINUUM_ORDER_IMPORTANT, createCrewContinuumBatch, loadCrewContinuumBodies, requestCrewContinuumPipelines } from './crew-continuum-draw.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -624,8 +624,15 @@ export function requestCrewPipelines({device,shader,format='rgba16float',samples
 // How far off, allowing for the lens, a company is still drawn. By then a person is a fifth of a pixel and thinned
 // nearly to nothing; the GPU culls and thins everyone nearer.
 export const CREW_CONTINUUM_SIGHT=6000;
-// What the cut is told of a person: cut finer while hurt or falling.
-const crewContinuumOrder=s=>(s.casualtyState==='wounded'||s.casualtyState==='fallen'||s.pendingWounds?.length||s.stuckArrows?.length||(s.knockdownTimer??0)>0?CREW_CONTINUUM_ORDER_IMPORTANT:0);
+// The youngest anyone who stands a post or works a ship is drawn: a roll that lists someone younger still mans the
+// post with them, drawn as the youngest who would, and never with a child's proportions.
+const CREW_POST_LEAST_AGE=16;
+// A person's age in years as the model knows it (the roll a port's posts are manned from gives each soul's), for the
+// order's age bits; 0 where no model says, and the stand then draws a hand, soldier or mate of working age.
+const crewContinuumAge=s=>{const age=s.soul?.age;return Number.isFinite(age)&&age>0?Math.min(127,Math.max(CREW_POST_LEAST_AGE,Math.round(age))):0;};
+// What the cut is told of a person: cut finer while hurt or falling, and their own age where the model knows it, so
+// the stand (js/wgsl/crew-continuum.js) draws them at that age and guesses nothing.
+const crewContinuumOrder=s=>(s.casualtyState==='wounded'||s.casualtyState==='fallen'||s.pendingWounds?.length||s.stuckArrows?.length||(s.knockdownTimer??0)>0?CREW_CONTINUUM_ORDER_IMPORTANT:0)|(crewContinuumAge(s)<<CREW_CONTINUUM_AGE_SHIFT);
 // The bodies a company or garrison wears, and the programs that cut and draw them. People are drawn through nothing
 // else: a body that is not baked fails the load, naming its missing files and how to bake them.
 function loadCrewContinuum({device,shader,format,samples,waterOptics},ids){

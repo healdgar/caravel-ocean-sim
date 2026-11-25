@@ -197,8 +197,8 @@ fn cityContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSa
 `,
 });
 
-// The city's material (js/wgsl/continuum-cut.js), shaded with the land's module source (js/wgsl/terrain.js TERRAIN as
-// the terrain draws it), which holds the shared core, the frame and the land's bindings (groups 0 and 1).
+// The city's material (js/wgsl/continuum-cut.js), shaded with the city's module source (js/wgsl/terrain.js TERRAIN_CITY
+// as js/terrain.js composes it), which holds the shared core, the frame and the city's bindings (groups 0 and 1).
 export function cityContinuumMaterial(landSource) {
   const captured = withCapturedAir(landSource);
   return Object.freeze({
@@ -206,7 +206,7 @@ export function cityContinuumMaterial(landSource) {
     varyings: [['kind', 'vec2f'], ['leafUV', 'vec2f'], ['splatKinds', 'vec4f', true], ['splat', 'vec2f']],
     wgsl: () => CITY_CONTINUUM_MATERIAL_WGSL, salt: 1,
     // Every type, its far body and its splat are wound outward, so the far faces are left out.
-    cullMode: 'back', air: false, capture: true, captureWatersideOnly: true, visibility: true,
+    cullMode: 'back', air: false, capture: true, visibility: true,
     cardBake: CITY_CONTINUUM_CARD_BAKE,
   });
 }

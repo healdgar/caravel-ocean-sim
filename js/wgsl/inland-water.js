@@ -49,6 +49,11 @@ struct InlandWaterOut {
   @location(6) rel: vec3f,        // camera-relative displaced position
 };
 
+// What the live wave fields (js/surface-waves.js, js/shallow-water.js) raise a river by, and how the raising dies at
+// a bank. The fragment tilts the surface by the slope of this same height: one gain a field, read by both stages.
+const INLAND_WAVE_GAIN: f32 = 1.15;
+const INLAND_SHALLOW_GAIN: f32 = 1.35;
+fn inlandSplashMask(bankAbs: f32, estuaryT: f32) -> f32 { return mix(1.0 - 0.72 * smoothstep(0.78, 1.0, bankAbs), 1.0, smoothstep(0.32, 0.56, estuaryT)); }
 fn inlandShadowVis(world: vec3f) -> vec3f {
   if (landSH.origin.w < 0.5) { return vec3f(1.0); }
   let p = landSH.lightView * vec4f(world - landSH.origin.xyz + vec3f(0.0, 0.04, 0.0) + landSH.sun.xyz * 0.03, 1.0);
@@ -240,8 +245,7 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let displacedXZ = xzBase + oceanDisp.xz * horzW + fluvialXZ;
   let sweV2 = shallowWaterAt(displacedXZ);
   let swV = surfaceWaveAt(displacedXZ);
-  let cfdBankMask = mix(1.0 - 0.72 * smoothstep(0.78, 1.0, bankAbs), 1.0, seaBlendV);
-  let splashY = (swV.x * 1.15 + sweV2.x * 1.35) * cfdBankMask;
+  let splashY = (swV.x * INLAND_WAVE_GAIN + sweV2.x * INLAND_SHALLOW_GAIN) * inlandSplashMask(bankAbs, estuaryT);
   let rawRelY = posKind.y + fluvialY + barY;
   let plumeRelY = max(rawRelY, 0.0) + mix(0.095, 0.065, smoothstep(0.42, 0.98, estuaryT));
   let relToOceanY = mix(
@@ -409,14 +413,15 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     let swC = surfaceWaveAt(xz);
     let swX = surfaceWaveAt(xz + vec2f(dxW, 0.0)).x - surfaceWaveAt(xz - vec2f(dxW, 0.0)).x;
     let swZ = surfaceWaveAt(xz + vec2f(0.0, dxW)).x - surfaceWaveAt(xz - vec2f(0.0, dxW)).x;
-    splashSl = vec2f(swX, swZ) / (2.0 * dxW);
+    splashSl = vec2f(swX, swZ) / (2.0 * dxW) * INLAND_WAVE_GAIN;
     splashFoam = clamp(swC.z * 0.82 + swC.w * 0.42, 0.0, 1.0);
     if (SW.step.w > 1.5) {
       let sweX = shallowWaterAt(xz + vec2f(dxW, 0.0)).x - shallowWaterAt(xz - vec2f(dxW, 0.0)).x;
       let sweZ = shallowWaterAt(xz + vec2f(0.0, dxW)).x - shallowWaterAt(xz - vec2f(0.0, dxW)).x;
-      splashSl += (vec2f(sweX, sweZ) / (2.0 * dxW)) * 1.25;
+      splashSl += (vec2f(sweX, sweZ) / (2.0 * dxW)) * INLAND_SHALLOW_GAIN;
       splashFoam = max(splashFoam, clamp(sweC.w * 0.78, 0.0, 1.0));
     }
+    splashSl *= inlandSplashMask(bankAbs, estuaryT);
   }
 
   // ---- Estuary-to-ocean wave-current convergence (derivTex / momTex / coastalWaveState) ----

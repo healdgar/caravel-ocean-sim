@@ -28,8 +28,9 @@ export const MEADOW_PATCH_METRES = 4;
 // collapse that folds a top onto the floor lays that face on the ground, never under it.
 export const MEADOW_BODY_FLOOR = 0.02;
 // Levels of the hierarchy inside a patch: cells 16 to a side at the finest, halving to one by the fifth; each level
-// keeps half the organs of the one below.
-export const MEADOW_CONTINUUM_LEVELS = 8;
+// keeps half the organs of the one below, down to about a thousand triangles a patch, where its error reaches what its far body begins
+// at: the far body takes over from a cut little heavier than itself (scripts/prepare-meadow-grass.mjs).
+export const MEADOW_CONTINUUM_LEVELS = 10;
 export const MEADOW_CONTINUUM_CELLS = 16;
 export const meadowContinuumCellsAt = (level) => MEADOW_CONTINUUM_CELLS >> Math.min(level, 4);
 export const MEADOW_CONTINUUM_STIFFNESS_UNIT = 1.5;

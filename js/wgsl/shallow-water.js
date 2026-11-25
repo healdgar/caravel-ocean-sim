@@ -11,10 +11,14 @@ export const SHALLOW_WATER_LIMITS = Object.freeze({
   sprayParticles: 2048,
 });
 
+// The longest substep the solver takes: its fluxes are explicit, and at the 0.5 m cell and the 4.6 m/s it caps a wave
+// at, a longer one passes its CFL bound. The caller divides a frame into substeps no longer (js/surface-waves.js), so
+// the water keeps real time down to a frame of three of them; past that it runs slow sooner than unstable.
+export const SHALLOW_WATER_MAX_STEP = 0.032;
 export const SHALLOW_WATER_TYPES = /* wgsl */ `
 struct SweUniform {
   domain: vec4f,        // cx, cz, extent (256 m), dx (0.5 m)
-  prevAndCounts: vec4f, // prevCx, prevCz, packedCounts (obs | reach<<10 | hull<<20), flags (bit0=clear, bit1=hasCoast, bit2=hasRiver, bit3=emitSpray)
+  prevAndCounts: vec4f, // prevCx, prevCz, counts (obs | reach<<10), flags (bit0=clear, bit1=hasCoast, bit2=hasRiver, bit3=emitSpray) | hulls<<8: each whole under 2^24, exact in an f32
   coastalWin: vec4f,    // coastalCenterX, coastalCenterZ, coastalHalfSpan, fieldSpanM
   forcing: vec4f,       // dt, time, swellDirX, swellDirZ
   seaParams: vec4f,     // swellHs, swellK0, swellOmega, windSpeed
@@ -84,8 +88,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let packed = u32(max(0.0, sweU.prevAndCounts.z) + 0.5);
   let obsCount = packed & 1023u;
   let reachCount = (packed >> 10u) & 1023u;
-  let hullCount = (packed >> 20u) & 1023u;
   let flags = u32(max(0.0, sweU.prevAndCounts.w) + 0.5);
+  let hullCount = (flags >> 8u) & 1023u;
   let hasCoast = (flags & 2u) != 0u;
   let hasRiver = (flags & 4u) != 0u;
 
@@ -270,7 +274,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let emitSpray = (flags & 8u) != 0u;
 
   let dx = max(sweU.domain.w, 0.25);
-  let dt = clamp(sweU.forcing.x, 0.0, 0.032);
+  let dt = clamp(sweU.forcing.x, 0.0, ${SHALLOW_WATER_MAX_STEP});
   let t = sweU.forcing.y;
   let shift = vec2i(round((sweU.domain.xy - sweU.prevAndCounts.xy) / dx));
   let oldQ = q + shift;

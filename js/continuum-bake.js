@@ -84,6 +84,100 @@ export function nearestTriangle(px, py, pz, list, mesh, spheres) {
   closest[0] = best; closest[1] = bs; closest[2] = bt;
   return found;
 }
+// The `most` triangles of a list nearest p, nearest first: their corners into C, their barycentric pairs into S and
+// T, their squared distances into D. Returns how many.
+function nearestFew(px, py, pz, list, mesh, spheres, most, C, S, T, D) {
+  let n = 0;
+  for (let k = 0; k < list.length; k++) {
+    if (n === most) {
+      const sx = spheres[k * 4] - px, sy = spheres[k * 4 + 1] - py, sz = spheres[k * 4 + 2] - pz, gap = Math.sqrt(sx * sx + sy * sy + sz * sz) - spheres[k * 4 + 3];
+      if (gap > 0 && gap * gap >= D[n - 1]) continue;
+    }
+    const t = list[k], a = mesh.corners[t * 3], b = mesh.corners[t * 3 + 1], c = mesh.corners[t * 3 + 2], X = mesh.position;
+    closestOnTriangle(px, py, pz, X[a * 3], X[a * 3 + 1], X[a * 3 + 2], X[b * 3], X[b * 3 + 1], X[b * 3 + 2], X[c * 3], X[c * 3 + 1], X[c * 3 + 2]);
+    const d = closest[0];
+    if (n === most && d >= D[n - 1]) continue;
+    let at = n < most ? n++ : n - 1;
+    for (; at > 0 && D[at - 1] > d; at--) { D[at] = D[at - 1]; S[at] = S[at - 1]; T[at] = T[at - 1]; C[at * 3] = C[at * 3 - 3]; C[at * 3 + 1] = C[at * 3 - 2]; C[at * 3 + 2] = C[at * 3 - 1]; }
+    D[at] = d; S[at] = closest[1]; T[at] = closest[2]; C[at * 3] = a; C[at * 3 + 1] = b; C[at * 3 + 2] = c;
+  }
+  return n;
+}
+// A measure over posed sets (each every vertex's place in one pose, three floats a vertex): how far, in the worst
+// pose, the point riding corners (a0, a1, a2) at weights (u, v, w) comes from the listed triangles of `mesh`, whose
+// corners ride the same sets. The point is matched at rest (p, its place there) to the triangles nearest it, and in
+// each pose its gap is the least to any of those matches: the posed surface is no farther from it than that, so the
+// greatest such gap of any pose bounds how far the surface ever is. One match alone overstates it wherever two
+// neighbours ride different joints (the nearest at rest may go the other way). `gap.rest` is the distance at rest.
+export function posedMeasure(posed, nearest = 16) {
+  const C = new Uint32Array(nearest * 3), S = new Float64Array(nearest), T = new Float64Array(nearest), D = new Float64Array(nearest);
+  const worstOf = (a0, a1, a2, u, v, w, n) => {
+    let worst = 0;
+    for (const X of posed) {
+      const px = u * X[a0 * 3] + v * X[a1 * 3] + w * X[a2 * 3], py = u * X[a0 * 3 + 1] + v * X[a1 * 3 + 1] + w * X[a2 * 3 + 1], pz = u * X[a0 * 3 + 2] + v * X[a1 * 3 + 2] + w * X[a2 * 3 + 2];
+      let least = Infinity;
+      for (let j = 0; j < n; j++) {
+        const b0 = C[j * 3] * 3, b1 = C[j * 3 + 1] * 3, b2 = C[j * 3 + 2] * 3, s = S[j], t = T[j], r = 1 - s - t;
+        const dx = px - (r * X[b0] + s * X[b1] + t * X[b2]), dy = py - (r * X[b0 + 1] + s * X[b1 + 1] + t * X[b2 + 1]), dz = pz - (r * X[b0 + 2] + s * X[b1 + 2] + t * X[b2 + 2]);
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < least) least = d;
+      }
+      if (least > worst) worst = least;
+    }
+    return worst;
+  };
+  const gap = (px, py, pz, a0, a1, a2, u, v, w, list, mesh, spheres) => {
+    if (!nearestFew(px, py, pz, list, mesh, spheres, 1, C, S, T, D)) { gap.rest = 0; return 0; }
+    const rest = D[0];
+    let worst = worstOf(a0, a1, a2, u, v, w, 1);
+    // A match that stays as near in every pose as at rest needs no second look.
+    if (worst > rest * 1.5625 + 4e-8 && nearest > 1) worst = worstOf(a0, a1, a2, u, v, w, nearestFew(px, py, pz, list, mesh, spheres, nearest, C, S, T, D));
+    gap.rest = Math.sqrt(rest);
+    return Math.sqrt(Math.max(worst, rest));
+  };
+  gap.rest = 0;
+  return gap;
+}
+// A skinned body's group error (bakeClusters' `groupError`), measured in metres, both ways: each point a group
+// removes against what the group keeps of the same part, and the middle of each triangle it keeps against what was
+// there, at rest and in every pose (posedMeasure). It is the error the cut projects: how far the drawn surface moves.
+// The simplifier's own figure is not part of it, for that counts a turned normal or a slid UV as metres, which on a
+// scanned body is many times how far anything moves. `seen`, if given, is told each group's level, the simplifier's
+// figure, and the distances measured at rest and posed.
+export function posedGroupError(welded, posed, { nearest = 16, seen = null } = {}) {
+  const kept = new Int32Array(welded.count).fill(-1), met = new Int32Array(welded.count).fill(-1), gap = posedMeasure(posed, nearest), P = welded.position;
+  const byPart = (corners) => {
+    const lists = new Map();
+    for (let t = 0; t < corners.length / 3; t++) { const part = welded.part[corners[t * 3]]; let list = lists.get(part); if (!list) lists.set(part, (list = [])); list.push(t); }
+    return lists;
+  };
+  let stamp = 0;
+  return (children, simplified, error, level) => {
+    if (!simplified.length) return error;
+    stamp++;
+    for (const v of simplified) kept[v] = stamp;
+    const keptMesh = { position: P, corners: simplified }, wasMesh = { position: P, corners: children };
+    const keptLists = byPart(simplified), wasLists = byPart(children), spheres = new Map();
+    const spheresOf = (mesh, list) => { let s = spheres.get(list); if (!s) spheres.set(list, (s = triangleSpheres(P, mesh.corners, list))); return s; };
+    const everyKept = keptLists.size > 1 ? Array.from({ length: simplified.length / 3 }, (_, t) => t) : keptLists.values().next().value;
+    let rest = 0, worst = 0;
+    for (const v of children) {
+      if (kept[v] === stamp || met[v] === stamp) continue;
+      met[v] = stamp;
+      const list = keptLists.get(welded.part[v]) ?? everyKept;
+      worst = Math.max(worst, gap(P[v * 3], P[v * 3 + 1], P[v * 3 + 2], v, v, v, 1, 0, 0, list, keptMesh, spheresOf(keptMesh, list)));
+      rest = Math.max(rest, gap.rest);
+    }
+    for (let t = 0; t < simplified.length / 3; t++) {
+      const a = simplified[t * 3], b = simplified[t * 3 + 1], c = simplified[t * 3 + 2], list = wasLists.get(welded.part[a]);
+      if (!list) continue;
+      worst = Math.max(worst, gap((P[a * 3] + P[b * 3] + P[c * 3]) / 3, (P[a * 3 + 1] + P[b * 3 + 1] + P[c * 3 + 1]) / 3, (P[a * 3 + 2] + P[b * 3 + 2] + P[c * 3 + 2]) / 3, a, b, c, 1 / 3, 1 / 3, 1 / 3, list, wasMesh, spheresOf(wasMesh, list)));
+      rest = Math.max(rest, gap.rest);
+    }
+    seen?.(level, error, rest, worst);
+    return worst;
+  };
+}
 // Nearest-triangle queries over a whole mesh, through a uniform grid of its triangles' bounds.
 export function triangleGrid(position, corners, cell) {
   const T = corners.length / 3, lo = [Infinity, Infinity, Infinity];
@@ -150,9 +244,12 @@ export const surfaceArea = (corners, triangles, X) => triangles.reduce((sum, t) 
 // pinch the surface (the link condition), lay two triangles on the same corners, or turn a triangle further than
 // `fold(living)` allows (the least cosine, given how many triangles are left) is refused, so a closed body stays closed
 // and keeps its genus while it can. Where `region` gives each vertex a class (a ship's wood, canvas, iron and paint), a
-// collapse across a border of class costs `border` times as much, so borders go last.
+// collapse across a border of class costs `border` times as much, so borders go last. Where `masks` gives each vertex
+// the set of labels its triangles wear (a person's skin, hair, shirt), a vertex taken into one that lacks any of its
+// labels would drag a border of label across the surface, and costs `border` times as much: a point inside a label
+// may go to its border and a border point along it, so the labels keep their places while the surface thins.
 export const CHAIN_FOLD = (living) => (living > 24 ? 0.35 : living > 10 ? 0.05 : -0.35);
-export function collapseChain(position, index, least, { region = null, border = 6, fold = CHAIN_FOLD, fixed = null } = {}) {
+export function collapseChain(position, index, least, { region = null, masks = null, border = 6, fold = CHAIN_FOLD, fixed = null } = {}) {
   const V = position.length / 3, T = index.length / 3, corners = Int32Array.from(index), alive = new Uint8Array(T).fill(1), death = new Int32Array(T).fill(-1);
   const Q = new Float64Array(V * 10), baseFace = new Float64Array(T * 3), fans = Array.from({ length: V }, () => []);
   for (let t = 0; t < T; t++) {
@@ -177,7 +274,7 @@ export function collapseChain(position, index, least, { region = null, border = 
     const x = position[v * 3], y = position[v * 3 + 1], z = position[v * 3 + 2], a = u * 10, b = v * 10, q = (k) => Q[a + k] + Q[b + k];
     const e = q(0) * x * x + 2 * q(1) * x * y + 2 * q(2) * x * z + 2 * q(3) * x + q(4) * y * y + 2 * q(5) * y * z + 2 * q(6) * y + q(7) * z * z + 2 * q(8) * z + q(9);
     const l2 = (position[u * 3] - x) ** 2 + (position[u * 3 + 1] - y) ** 2 + (position[u * 3 + 2] - z) ** 2;
-    return (Math.max(0, e) + 1e-4 * l2 * l2) * (region && region[u] !== region[v] ? border : 1);
+    return (Math.max(0, e) + 1e-4 * l2 * l2) * ((region && region[u] !== region[v]) || (masks && (masks[u] & ~masks[v]) !== 0) ? border : 1);
   };
   const hasCorner = (t, w) => corners[t * 3] === w || corners[t * 3 + 1] === w || corners[t * 3 + 2] === w;
   // A triangle about w as the two corners it has besides w: one number, whichever way round it is wound.
@@ -644,7 +741,12 @@ export function voxelPieces(position, index, pieces, { h, least = 27, smooth = 8
 // The far body's cells: about this many across a type's longest side, within these sizes (metres).
 const WRAP_CELLS = 80, WRAP_FINEST = 0.04, WRAP_COARSEST = 0.3;
 // A far body that will not simplify below this many triangles and stay manifold is wrapped again in coarser cells.
-const WRAP_MOST_TRIANGLES = 4096;
+// A body whose clusters end heavier than that (many parts, none simplified across another's border: a person's
+// eighteen pieces end at some twenty thousand triangles) is wrapped in cells fine enough for its far body to begin
+// about as heavy as that end, up to WRAP_HEAVIEST: it takes over from the clusters' coarsest cut, and a far body many
+// times lighter and coarser than what it takes over from leaves a range of distances drawn at the clusters' full
+// root weight.
+const WRAP_MOST_TRIANGLES = 4096, WRAP_HEAVIEST = 32768;
 // Gaps up to about twice this many cells wide are bridged before the surface is taken.
 const WRAP_CLOSING = 2;
 // The far body's core: it collapses until no more than this many triangles are left, one closed body (a closed body
@@ -1220,10 +1322,42 @@ function plainKinds(position, index, face, kinds) {
   for (let t = 0; t < T; t++) { const [x, y] = winner.get(find(t)); kinds[t * 2] = x; kinds[t * 2 + 1] = y; }
 }
 
+// Each far vertex's labels, a bit to a label (`label(kind, kind)` of each triangle round it), for a body whose far
+// triangles wear labels that are coloured apart (a person's hair, skin and cloth, each dyed its own way): collapseChain
+// keeps their borders in place by these. A triangle none of whose neighbours wears its label, a stray of the nearest
+// surface, first takes the kind of the neighbours that agree, or of its largest.
+function labelMasks(name, position, index, kinds, label) {
+  const V = position.length / 3, T = index.length / 3, edges = new Map(), across = new Int32Array(T * 3).fill(-1), bits = new Map();
+  for (let t = 0; t < T; t++) for (let k = 0; k < 3; k++) {
+    const a = index[t * 3 + k], b = index[t * 3 + ((k + 1) % 3)], key = a < b ? a * V + b : b * V + a, other = edges.get(key);
+    if (other === undefined) { edges.set(key, t * 3 + k); continue; }
+    across[t * 3 + k] = Math.floor(other / 3); across[other] = t;
+  }
+  const labels = Int32Array.from({ length: T }, (_, t) => label(kinds[t * 2], kinds[t * 2 + 1]));
+  const stray = [];
+  for (let t = 0; t < T; t++) {
+    const near = [0, 1, 2].map((k) => across[t * 3 + k]).filter((n) => n >= 0);
+    if (!near.length || near.some((n) => labels[n] === labels[t])) continue;
+    const agreed = near.find((n) => near.some((m) => m !== n && labels[m] === labels[n]));
+    stray.push([t, agreed ?? near.reduce((p, q) => (surfaceArea(index, [q], position) > surfaceArea(index, [p], position) ? q : p))]);
+  }
+  for (const [t, from] of stray) { kinds[t * 2] = kinds[from * 2]; kinds[t * 2 + 1] = kinds[from * 2 + 1]; labels[t] = labels[from]; }
+  const masks = new Uint32Array(V);
+  for (let t = 0; t < T; t++) {
+    if (!bits.has(labels[t])) { if (bits.size >= 32) throw Error(`${name}: more than 32 labels on its far body`); bits.set(labels[t], bits.size); }
+    for (let k = 0; k < 3; k++) masks[index[t * 3 + k]] |= (1 << bits.get(labels[t])) >>> 0;
+  }
+  return masks;
+}
+
 // ------------------------------------------------------------------------------------------------ far body
-// `type.snap` false: the wrap is not stood on the body's faces (a crown of leaves has no plain face). `type.optics`
+// `type.snap` false: the wrap is not stood on the body's faces (a crown of leaves has no plain face). `type.plain`
+// false: its faces are not plain (a person's): each far triangle keeps the kind of the surface nearest it, where a
+// wall's all take their face's. `type.borders` (a triangle's two kinds to its label) and `type.borderCost`: the labels
+// whose borders the far body's collapses hold in place (labelMasks). `type.optics`
 // ({ cover, albedo }): how its triangles stop and colour the light, for its optical moments (continuumFarOptics).
-function bakeFar(type, welded) {
+function bakeFar(type, welded, weight = 0) {
+  const most = Math.min(WRAP_HEAVIEST, Math.max(WRAP_MOST_TRIANGLES, weight));
   let wrapped, base;
   if (type.closed) {
     // A body closed in itself (a rod, say), its corners joined where they meet whatever their normals, is its own
@@ -1242,7 +1376,7 @@ function bakeFar(type, welded) {
   }
   // A wrap the simplifier cannot bring down and keep manifold is stood less far onto the body's faces (where opposite
   // sides of a part thinner than a cell come too near each other), then taken again in coarser cells.
-  else for (let coarser = 1; ; coarser *= 1.5) {
+  else for (let coarser = Math.sqrt(WRAP_MOST_TRIANGLES / most); ; coarser *= 1.5) {
     let failed = null;
     wrapped = wrap(type, coarser);
     const grid = wrapped.position, snapped = type.snap !== false ? snapWrap(wrapped, type, welded) : grid;
@@ -1251,7 +1385,7 @@ function bakeFar(type, welded) {
       try { base = simplifyWrap(type.name, wrapped); failed = null; break; } catch (error) { failed = error; }
     }
     if (failed) { if (coarser > 5) throw failed; continue; }
-    if (base.index.length / 3 <= WRAP_MOST_TRIANGLES || coarser > 5) break;
+    if (base.index.length / 3 <= most || coarser > 5) break;
   }
   const position = base.position, index = base.index;
   const V = position.length / 3, T = index.length / 3, { normal, face } = normalsOf(position, index), allBase = Array.from({ length: T }, (_, t) => t);
@@ -1295,9 +1429,10 @@ function bakeFar(type, welded) {
     const v = found >= 0 ? welded.index[found * 3] : 0;
     kinds[t * 2] = welded.kind[v * 2]; kinds[t * 2 + 1] = welded.kind[v * 2 + 1];
   }
-  if (type.snap !== false) plainKinds(position, index, face, kinds);
+  if (type.snap !== false && type.plain !== false) plainKinds(position, index, face, kinds);
 
-  const chain = collapseChain(position, index, CHAIN_LEAST_TRIANGLES), S = chain.steps.length;
+  const masks = type.borders ? labelMasks(type.name, position, index, kinds, type.borders) : null;
+  const chain = collapseChain(position, index, CHAIN_LEAST_TRIANGLES, masks ? { masks, border: type.borderCost ?? 6 } : {}), S = chain.steps.length;
   let depth = 0;
   for (let v = 0; v < V; v++) { let d = 0; for (let w = v; chain.dieStep[w] >= 0; w = chain.target[w]) d++; depth = Math.max(depth, d); }
   // The GPU follows a vertex's collapses only so far (js/wgsl/continuum-cut.js continuumAncestor).
@@ -1410,6 +1545,9 @@ function bakeFar(type, welded) {
   const optics = continuumFarOptics({ position, normal, index, chain }, type, type.optics ?? {});
   return {
     position, normal, index, kinds, chain, steps, order, splat, face, baseError, optics,
+    // Whether a point at rest can be seen from outside the body (before any gap was bridged): what a caller measuring
+    // the far body its own way (a skinned body, posed) may leave out.
+    exteriorAt: wrapped.exteriorAt,
     stats: {
       cell: +wrapped.h.toFixed(4), cells: wrapped.cells, wellComposedCells: wrapped.added, wrapTriangles: wrapped.index.length / 3, baseTriangles: T, baseVertices: V,
       baseError: +baseError.toFixed(4), outward: +outward.toFixed(4), inward: +inward.toFixed(4), simplifyError: +base.error.toFixed(4),
@@ -1428,13 +1566,15 @@ function bakeFar(type, welded) {
 export async function bakeContinuumBody(body) {
   await MeshoptSimplifier.ready;
   const welded = body.welded ?? weldDrawn(body), clusters = await bakeClusters(welded, { uv: body.uv?.(welded) ?? welded.kind, groupError: body.groupError?.(welded) ?? null });
-  const far = body.far ? bakeFar(body.far, weldDrawn(body.far)) : bakeFar(body, welded);
+  const weight = continuumRootTriangles(clusters), far = body.far ? bakeFar(body.far, weldDrawn(body.far), weight) : bakeFar(body, welded, weight);
   continuumFarFirst(clusters, far);
   return { welded, clusters, far };
 }
+// The weight of a body's coarsest cluster cut: its roots' triangles.
+export const continuumRootTriangles = (clusters) => clusters.records.reduce((n, record) => n + (record.parentError === Infinity ? record.triangles : 0), 0);
 // The step from which a far body takes over from its clusters: the first no heavier than their roots.
 export function continuumFarFirst(clusters, far) {
-  const rootTriangles = clusters.records.reduce((n, record) => n + (record.parentError === Infinity ? record.triangles : 0), 0);
+  const rootTriangles = continuumRootTriangles(clusters);
   far.farFirst = 0;
   while (far.farFirst < far.chain.steps.length && far.steps[far.farFirst * CONTINUUM_STEP_WORDS] > rootTriangles) far.farFirst++;
   Object.assign(far.stats, { rootTriangles, farFirst: far.farFirst, farFirstTriangles: far.steps[far.farFirst * CONTINUUM_STEP_WORDS], handoffError: +new Float32Array(far.steps.buffer)[far.farFirst * CONTINUUM_STEP_WORDS + 1].toFixed(4) });

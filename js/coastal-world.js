@@ -19,7 +19,7 @@ import {
 import { vegetationProbability } from './vegetation.js';
 import { readCrossingRiver } from './river-water.js';
 import { nativeOwnGroundFor } from './native-towns.js';
-import { boardTownHeld, oldWorldCountry, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity } from './old-world.js';
+import { BOARD_PLACEHOLDERS, boardTownHeld, oldWorldCountry, oldWorldCityNear, oldWorldPeople, oldWorldPortOnCity, runtimeBoardPortKey } from './old-world.js';
 import { CITY_BLOCK_FLOATS } from './old-world-city.js';
 import { createInlandWaterSampler } from './inland-water.js';
 import { createPartAssemblyCatalog } from './part-assembly.js';
@@ -621,6 +621,21 @@ export function findHistoricalColonialPort(latitude, longitude, regionId = null,
   return simYear >= nearestAnyYear.foundedYear ? nearestAnyYear : null;
 }
 
+// The id a coast is known by, which is also the key its board is kept under and looked for by (js/board-keep.js):
+// its own id where it has one; in any year but 1550, the historical port standing there by then; otherwise the name
+// of its coordinates (runtimeBoardPortKey, js/old-world.js). resolveGlobalCoastalRegion names every region through
+// this, so whoever must know a place's key before its region is made asks here and is given the same one. A native
+// town on its own ground (js/native-towns.js nativeOwnGroundFor) is known by its coast's id, the one its board is
+// baked and kept under and its town is looked for by, whether it was asked for by its coast's name or by its own.
+export function coastalRegionId({ id, latitude, longitude, year } = {}) {
+  const rawYr = Number(year);
+  const simYear = Number.isFinite(rawYr) && rawYr >= 1490 && rawYr <= 1850 ? Math.round(rawYr) : 1550;
+  if (id) return nativeOwnGroundFor(id, simYear)?.port ?? id;
+  const lat = Number(latitude), lon = Number(longitude);
+  const standing = simYear !== 1550 ? findHistoricalColonialPort(lat, lon, null, simYear, 0.32) : null;
+  return runtimeBoardPortKey({ id: standing?.id, latitude: lat, longitude: lon });
+}
+
 export function hasHistorical1550ColonialPort(latitude, longitude, regionId = null, maxDistDeg = 0.32, year = 1550) {
   const simYear = Number.isFinite(Number(year)) ? Math.round(Number(year)) : 1550;
   if (typeof regionId === 'string' && Object.hasOwn(SPANISH_MAIN_1550_REGIONS, regionId) && simYear >= 1550) {
@@ -780,7 +795,8 @@ export function computeColonyGrowthProfile(specOrPort = {}, year = 1550) {
     portName: matchedAnyYear?.name ?? specOrPort?.name ?? null,
     foundedYear,
     colonyAge,
-    crown: matchedAnyYear?.crown ?? 'spain',
+    // A colony with no port of record is its spec's own crown's; one that names none takes the placeholder, which is not history.
+    crown: matchedAnyYear?.crown ?? (typeof specOrPort?.crown === 'string' && specOrPort.crown ? specOrPort.crown : BOARD_PLACEHOLDERS.crown),
     stage,
     growthFactor,
     fortificationTier,
@@ -1934,7 +1950,7 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const biomeSize = spec.biomeSize ?? (size - 1);
   const albedoSize = spec.albedoSize ?? (size - 1);
   const span = spec.span ?? 8192;
-  const id = ownNative ? ownNative.port : (spec.id ?? (matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.id : `coastal-${latitude.toFixed(3)}_${longitude.toFixed(3)}`));
+  const id = coastalRegionId({ id: spec.id, latitude, longitude, year: simYear });
   const name = spec.name ?? (ownNative ? `${ownNative.name} · Chickahominy` : matchedHistoricalPort && simYear !== 1550 ? matchedHistoricalPort.name : `Coastal Landfall (${Math.abs(latitude).toFixed(2)}°${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(2)}°${longitude >= 0 ? 'E' : 'W'})`);
   const rawColonyGrowth = spec.colonyGrowth ?? computeColonyGrowthProfile(
     { ...spec, id, name, latitude, longitude, hasColonialPort, settlementKind },

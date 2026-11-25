@@ -373,49 +373,95 @@ export function checkContinuumAtlas(words, label = 'continuum') {
 // A family's baked atlas, fetched, unpacked, checked against its manifest's receipt and checked as an atlas. `assets`
 // names its 'manifest.json' and 'atlas.bin.gz'; `validate` checks its manifest. Resolves to { manifest, words }.
 // Streams decompressed bytes directly into a single exact-sized Uint8Array so large atlases never double-buffer on CPU.
+// Files that came and were not the pack (a manifest that does not read, an atlas that does not unpack, is of the wrong
+// size or fails its SHA-256) are dropped from the persistent cache, which takes a stored file on its length alone
+// (js/asset-cache.js), and both are fetched once more from the network before the fault is thrown.
 export async function loadContinuumAtlas({ assets, validate, label, fetchAsset = fetch, verifySha256 = true }) {
-  const get = async (path) => {
-    const response = await fetchAsset(path);
-    if (!response.ok) throw Error(`The ${label} continuum is unavailable (${response.status}): ${path}`);
-    return response;
-  };
-  // Fetch manifest and compressed atlas concurrently to save a full round-trip on every continuum family.
-  const [manifestRes, atlasRes] = await Promise.all([get(assets['manifest.json']), get(assets['atlas.bin.gz'])]);
-  const manifest = validate(await manifestRes.json());
-  const expectedBytes = manifest.atlas.bytes;
-  let bytes;
-  const stream = atlasRes.body?.pipeThrough ? atlasRes.body.pipeThrough(new DecompressionStream('gzip')) : null;
-  if (stream?.getReader) {
-    bytes = new Uint8Array(expectedBytes);
-    const reader = stream.getReader();
-    let offset = 0;
+  const manifestPath = assets['manifest.json'], atlasPath = assets['atlas.bin.gz'];
+  // Faults of the fetching itself (no network, a refusal): nothing was read, so nothing stored is to blame.
+  const unfetched = new WeakSet();
+  const get = async (path, init) => {
     try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (offset + value.byteLength > expectedBytes) {
-          await reader.cancel();
-          throw Error(`The ${label} continuum atlas has the wrong size`);
-        }
-        bytes.set(value, offset);
-        offset += value.byteLength;
-      }
-    } finally {
-      reader.releaseLock();
+      const response = await (init ? fetchAsset(path, init) : fetchAsset(path));
+      if (!response.ok) throw Error(`The ${label} continuum is unavailable (${response.status}): ${path}`);
+      return response;
+    } catch (fault) {
+      if (fault && typeof fault === 'object') unfetched.add(fault);
+      throw fault;
     }
-    if (offset !== expectedBytes) throw Error(`The ${label} continuum atlas has the wrong size`);
-  } else {
-    const bytesBuf = await new Response(atlasRes.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-    bytes = new Uint8Array(bytesBuf);
-    if (bytes.byteLength !== expectedBytes) throw Error(`The ${label} continuum atlas has the wrong size`);
-  }
+  };
   const verifyParam = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('verifyAssets') : null;
   const wantVerify = verifyParam === '0' ? false : verifyParam === '1' ? true : Boolean(verifySha256);
-  if (wantVerify) {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-    if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== manifest.atlas.sha256) throw Error(`The ${label} continuum atlas failed verification`);
+  const unpack = async (atlasRes, manifest) => {
+    const expectedBytes = manifest.atlas.bytes;
+    let bytes;
+    const stream = atlasRes.body?.pipeThrough ? atlasRes.body.pipeThrough(new DecompressionStream('gzip')) : null;
+    if (stream?.getReader) {
+      bytes = new Uint8Array(expectedBytes);
+      const reader = stream.getReader();
+      let offset = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (offset + value.byteLength > expectedBytes) {
+            await reader.cancel();
+            throw Error(`The ${label} continuum atlas has the wrong size`);
+          }
+          bytes.set(value, offset);
+          offset += value.byteLength;
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      if (offset !== expectedBytes) throw Error(`The ${label} continuum atlas has the wrong size`);
+    } else {
+      const bytesBuf = await new Response(atlasRes.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      bytes = new Uint8Array(bytesBuf);
+      if (bytes.byteLength !== expectedBytes) throw Error(`The ${label} continuum atlas has the wrong size`);
+    }
+    if (wantVerify) {
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+      if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== manifest.atlas.sha256) throw Error(`The ${label} continuum atlas failed verification`);
+    }
+    return bytes;
+  };
+  // One reading of the pack. The first fetches manifest and compressed atlas concurrently, to save a full round-trip
+  // on every continuum family; a second (`init` given) asks for the manifest first, since an atlas is only worth
+  // fetching again against a manifest that reads.
+  const read = async (init) => {
+    const atlasAsked = init ? null : get(atlasPath);
+    atlasAsked?.catch(() => {});
+    let manifest;
+    try {
+      manifest = validate(await (await get(manifestPath, init)).json());
+    } catch (fault) {
+      atlasAsked?.then((response) => response.body?.cancel()).catch(() => {});
+      throw fault;
+    }
+    return { manifest, bytes: await unpack(await (atlasAsked ?? get(atlasPath, init)), manifest) };
+  };
+  const evictStored = async () => {
+    const stored = globalThis.__WATERWORLD_ASSET_CACHE__;
+    if (typeof stored?.evict !== 'function') return;
+    await Promise.allSettled([stored.evict(manifestPath), stored.evict(atlasPath)]);
+  };
+  let pack;
+  try {
+    pack = await read();
+  } catch (fault) {
+    if (unfetched.has(fault)) throw fault;
+    await evictStored();
+    try {
+      pack = await read({ cache: 'reload' });
+    } catch (again) {
+      // Where the network's own copy was read and is wrong too, it is not left stored either. The fault thrown is
+      // the first one, of the files as they first came.
+      if (!unfetched.has(again)) await evictStored();
+      throw fault;
+    }
   }
-  return { manifest, words: checkContinuumAtlas(new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4), label) };
+  return { manifest: pack.manifest, words: checkContinuumAtlas(new Uint32Array(pack.bytes.buffer, pack.bytes.byteOffset, pack.bytes.byteLength / 4), label) };
 }
 // Compact CPU metadata prefix of an atlas (header + type table + cluster table, typically <2% of atlas size),
 // sufficient for card-bake cluster cuts, type material reads, and GPU page counts after raw vertices are uploaded.

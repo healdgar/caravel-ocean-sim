@@ -58,7 +58,7 @@ test('the one cut, the crew\'s view of it, its capture under water, its stands a
       const groups = [0, 1, 2].map((g) => { try { return P.view.pipeline.getBindGroupLayout(g) ? 1 : 0; } catch { return -1; } });
       const view = continuumModuleWGSL({ pass: 'view', material: CREW_CONTINUUM_MATERIAL }).replace(/\/\/.*$/gm, '');
       await device.queue.onSubmittedWorkDone();
-      return { errors, compiled, groups, made: [P.programs.select, P.programs.shadow, P.view.pipeline, P.stand.afloat, P.stand.ashore, P.hairView.pipeline, P.hairStand, P.clothingView.pipeline, P.clothingStand, pose, capture].every(Boolean), hairLoaded: Boolean(P.hair), hairError: P.hairError?.message ?? null, discards: /\bdiscard\b/.test(view) };
+      return { errors, compiled, groups, made: [P.programs.select, P.programs.shadow, P.view.pipeline, P.stand.afloat, P.stand.ashore, P.hairView.pipeline, P.hairStand, pose, capture].every(Boolean), hairLoaded: Boolean(P.hair), hairError: P.hairError?.message ?? null, discards: /\bdiscard\b/.test(view) };
     }, programs.toString());
     assert.deepEqual(result.compiled, []);
     assert.deepEqual(result.errors, []);

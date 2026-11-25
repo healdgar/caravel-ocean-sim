@@ -48,6 +48,137 @@ export const TRADE_VESSEL_INSTANCE_FLOATS = 12; // posYaw(4), attitudeScaleArch(
 export const TRADE_VESSEL_ARCHETYPES = 7; // 0: cog sail, 1: cog moored, 2: carrack sail, 3: carrack moored, 4: river barge, 5: lateen caravel, 6: harbor barque
 export const MAX_TRADE_VESSELS = 84;
 export const MAX_DECK_STATIONS_PER_VESSEL = 10;
+// The fastest one hull is set apart from those overlapping her: a hull's sideways drift in metres per second, so that
+// separation is a motion at any step length and never a jump (updateAllVessels).
+const TRADE_VESSEL_SEPARATION_DRIFT_MPS = 2.0;
+
+// Hull separation's broad phase (updateAllVessels). The hulls in play are hashed by the cell each lies in, a cell as
+// wide as the widest berth any two of them keep of each other, so a hull is weighed only against those of her own
+// cell and the eight about it: the work is linear in the fleet while its traffic is sparse. A cell's hulls are chained
+// in rising order and a hull's neighbours merged in rising order, so each pair is met once, in the order a loop over
+// every pair meets it, and the summed asks are the same to the bit. The scratch is the module's, grown only when a
+// fleet outgrows it: a step allocates nothing.
+const tvSepScratch = {
+  capacity: 0, slots: 0,
+  askX: null, askZ: null, // what the overlaps ask of each hull, summed: metres east and south
+  x: null, z: null, length: null, kind: null, // each hull in play: 1 free, 2 docked or anchored; 0 out of play
+  cellX: null, cellZ: null, slotOf: null, next: null, // her cell, its slot in the hash, the next hull of her cell
+  slotX: null, slotZ: null, slotHead: null, // a slot's cell and its first hull: -1 none left, -2 never claimed
+  cursor: new Int32Array(9),
+};
+
+function tvSepReserve(count) {
+  const s = tvSepScratch;
+  if (s.slotHead && count <= s.capacity) return s;
+  const capacity = Math.max(MAX_TRADE_VESSELS, count * 2);
+  let slots = 256;
+  while (slots < capacity * 3) slots *= 2;
+  s.capacity = capacity;
+  s.slots = slots;
+  s.askX = new Float64Array(capacity);
+  s.askZ = new Float64Array(capacity);
+  s.x = new Float64Array(capacity);
+  s.z = new Float64Array(capacity);
+  s.length = new Float64Array(capacity);
+  s.kind = new Uint8Array(capacity);
+  s.cellX = new Int32Array(capacity);
+  s.cellZ = new Int32Array(capacity);
+  s.slotOf = new Int32Array(capacity);
+  s.next = new Int32Array(capacity);
+  s.slotX = new Int32Array(slots);
+  s.slotZ = new Int32Array(slots);
+  s.slotHead = new Int32Array(slots);
+  return s;
+}
+
+// The slot of a cell in the hash, or -1 where it has none; `claim` gives it one.
+function tvSepSlot(s, cx, cz, claim) {
+  const mask = s.slots - 1, head = s.slotHead, sx = s.slotX, sz = s.slotZ;
+  let at = (Math.imul(cx, 73856093) ^ Math.imul(cz, 19349663)) & mask;
+  while (head[at] !== -2) {
+    if (sx[at] === cx && sz[at] === cz) return at;
+    at = (at + 1) & mask;
+  }
+  if (!claim) return -1;
+  sx[at] = cx;
+  sz[at] = cz;
+  head[at] = -1;
+  return at;
+}
+
+// Sums what every overlap asks of each hull into the scratch's askX and askZ, by the hull's place in `vessels`.
+function tradeVesselSeparationAsks(vessels, sepBlend) {
+  const n = vessels.length, s = tvSepReserve(n);
+  const { askX, askZ, x, z, length, kind, cellX, cellZ, slotOf, next, slotHead, cursor } = s;
+  let longest = 0;
+  for (let i = 0; i < n; i++) {
+    const v = vessels[i];
+    askX[i] = 0;
+    askZ[i] = 0;
+    kind[i] = 0;
+    if (!v || v.route?.mode === 'river' || v.boat?.damage?.sunk || v.ai.state === 'sunk') continue;
+    // A hull with no place presses on none and is pressed by none.
+    const px = v.ai.x, pz = v.ai.z;
+    if (!Number.isFinite(px) || !Number.isFinite(pz)) continue;
+    const len = v.boat.length || 18;
+    x[i] = px;
+    z[i] = pz;
+    length[i] = len;
+    kind[i] = v.ai.state === 'docked' || v.ai.state === 'anchored' ? 2 : 1;
+    if (len > longest) longest = len;
+  }
+  // No two hulls in play keep more than this of each other; the millimetre over it keeps a pair at the very limit,
+  // whatever the rounding of its cells, within one cell of each other.
+  const cell = Math.max(22, (longest + longest) * 0.56) + 0.001;
+  slotHead.fill(-2);
+  for (let i = n - 1; i >= 0; i--) {
+    if (!kind[i]) continue;
+    const cx = Math.floor(x[i] / cell) | 0, cz = Math.floor(z[i] / cell) | 0;
+    const at = tvSepSlot(s, cx, cz, true);
+    cellX[i] = cx;
+    cellZ[i] = cz;
+    slotOf[i] = at;
+    next[i] = slotHead[at];
+    slotHead[at] = i;
+  }
+  for (let i = 0; i < n; i++) {
+    if (!kind[i]) continue;
+    // She leaves her cell, so whoever is left in any cell comes after her.
+    slotHead[slotOf[i]] = next[i];
+    let open = 0;
+    for (let oz = -1; oz <= 1; oz++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const at = tvSepSlot(s, (cellX[i] + ox) | 0, (cellZ[i] + oz) | 0, false);
+        if (at >= 0 && slotHead[at] >= 0) cursor[open++] = slotHead[at];
+      }
+    }
+    const fixedA = kind[i] === 2;
+    while (open > 0) {
+      let least = 0;
+      for (let c = 1; c < open; c++) if (cursor[c] < cursor[least]) least = c;
+      const j = cursor[least];
+      if (next[j] >= 0) cursor[least] = next[j];
+      else cursor[least] = cursor[--open];
+      const fixedB = kind[j] === 2;
+      if (fixedA && fixedB) continue;
+      const dx = x[j] - x[i];
+      const dz = z[j] - z[i];
+      const sep = Math.hypot(dx, dz);
+      const minSep = Math.max(22, (length[i] + length[j]) * 0.56);
+      if (sep >= minSep) continue;
+      const ux = sep > 1e-3 ? dx / sep : Math.cos((i * 1.7 + j * 2.3));
+      const uz = sep > 1e-3 ? dz / sep : Math.sin((i * 1.7 + j * 2.3));
+      const ask = (minSep - sep) * sepBlend;
+      const shareA = fixedA ? 0 : (fixedB ? 1 : 0.5);
+      const shareB = fixedB ? 0 : (fixedA ? 1 : 0.5);
+      askX[i] -= ux * ask * shareA;
+      askZ[i] -= uz * ask * shareA;
+      askX[j] += ux * ask * shareB;
+      askZ[j] += uz * ask * shareB;
+    }
+  }
+  return s;
+}
 
 const TV_HULL_FLOOD_WORDS = 4 * (2 + 2 * HULL_HOLE_LIMIT);
 const BARGE_Y_LIFT = 0.0;
@@ -7079,49 +7210,27 @@ export async function createTradeVessels({
       worldOffsetZ,
     });
 
-    // Enforce frame-rate-independent water-safe non-overlap hull separation between live sea vessels (zero drift when paused).
+    // Water-safe hull separation between live sea vessels, as a motion and never a jump: every overlap asks each free
+    // hull to give way, the asks on a hull are summed, and she is moved by their sum no faster than a hull drifts
+    // sideways (TRADE_VESSEL_SEPARATION_DRIFT_MPS x simDt), whatever the length of the step and however many press on
+    // her, and only onto water that floats her at her draught. Nothing moves while paused. Which hulls overlap is found
+    // through a grid of cells, never by weighing every hull against every other (tradeVesselSeparationAsks).
     if (vessels.length > 1 && simDt > 0) {
-      const sepBlend = 1 - Math.exp(-3.5 * simDt);
-      const maxPush = 4.5 * Math.min(1, simDt * 6);
+      const maxPush = TRADE_VESSEL_SEPARATION_DRIFT_MPS * simDt;
+      const { askX, askZ } = tradeVesselSeparationAsks(vessels, 1 - Math.exp(-3.5 * simDt));
       for (let i = 0; i < vessels.length; i++) {
-        const va = vessels[i];
-        if (!va || va.route?.mode === 'river' || va.boat?.damage?.sunk || va.ai.state === 'sunk') continue;
-        for (let j = i + 1; j < vessels.length; j++) {
-          const vb = vessels[j];
-          if (!vb || vb.route?.mode === 'river' || vb.boat?.damage?.sunk || vb.ai.state === 'sunk') continue;
-          const fixedA = va.ai.state === 'docked' || va.ai.state === 'anchored';
-          const fixedB = vb.ai.state === 'docked' || vb.ai.state === 'anchored';
-          if (fixedA && fixedB) continue;
-          const dx = vb.ai.x - va.ai.x;
-          const dz = vb.ai.z - va.ai.z;
-          const sep = Math.hypot(dx, dz);
-          const minSep = Math.max(22, ((va.boat.length || 18) + (vb.boat.length || 18)) * 0.56);
-          if (sep >= minSep) continue;
-          const ux = sep > 1e-3 ? dx / sep : Math.cos((i * 1.7 + j * 2.3));
-          const uz = sep > 1e-3 ? dz / sep : Math.sin((i * 1.7 + j * 2.3));
-          const push = Math.min(maxPush, (minSep - sep) * sepBlend);
-          const shareA = fixedA ? 0 : (fixedB ? 1 : 0.5);
-          const shareB = fixedB ? 0 : (fixedA ? 1 : 0.5);
-          if (shareA > 0) {
-            const nx = va.ai.x - ux * push * shareA;
-            const nz = va.ai.z - uz * push * shareA;
-            if (!bedAt || bedAt(nx + worldOffsetX, nz + worldOffsetZ) <= -(va.boat.draft + 0.5)) {
-              va.ai.x = nx;
-              va.ai.z = nz;
-              va.boat.x = nx + worldOffsetX;
-              va.boat.z = nz + worldOffsetZ;
-            }
-          }
-          if (shareB > 0) {
-            const nx = vb.ai.x + ux * push * shareB;
-            const nz = vb.ai.z + uz * push * shareB;
-            if (!bedAt || bedAt(nx + worldOffsetX, nz + worldOffsetZ) <= -(vb.boat.draft + 0.5)) {
-              vb.ai.x = nx;
-              vb.ai.z = nz;
-              vb.boat.x = nx + worldOffsetX;
-              vb.boat.z = nz + worldOffsetZ;
-            }
-          }
+        const v = vessels[i];
+        if (!v) continue;
+        const asked = Math.hypot(askX[i], askZ[i]);
+        if (!(asked > 1e-6)) continue;
+        const give = Math.min(1, maxPush / asked);
+        const nx = v.ai.x + askX[i] * give;
+        const nz = v.ai.z + askZ[i] * give;
+        if (!bedAt || bedAt(nx + worldOffsetX, nz + worldOffsetZ) <= -(v.boat.draft + 0.5)) {
+          v.ai.x = nx;
+          v.ai.z = nz;
+          v.boat.x = nx + worldOffsetX;
+          v.boat.z = nz + worldOffsetZ;
         }
       }
     }

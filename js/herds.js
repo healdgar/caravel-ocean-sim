@@ -10,12 +10,15 @@ import { ANIMAL_CONTINUUM_TYPES } from './animal-continuum.js';
 import { requestAnimalContinuumAtlas, requestLivestockTextures, createAnimalScene } from './animal-scene.js';
 import { requestContinuumPrograms, requestContinuumView } from './continuum-scene.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
-import { ROUTE_STEP_M, WALKER_WORDS, bridgeSurfaceAt, bridgeDeckYAt } from './town-streets.js';
+import { ROUTE_STEP_M, WALKER_WORDS, bridgeSurfaceAt, bridgeDeckYAt, unpackRouteHalfWidthSlope } from './town-streets.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { worldBodiesForDevice } from './world-bodies.js';
 import {
+  HERD_AVOID_BEYOND_ROAM_M,
+  HERD_AVOID_LEAST_M,
   HERD_CONTINUUM_MATERIAL_SPEC,
   HERD_FATE_FLOATS,
+  HERD_MOUNT_AVOID_ASIDE_M,
   HERD_ROUTE_HEADER,
   HERD_SEED_FLOATS,
   HERD_SHOT_FLOATS,
@@ -23,6 +26,7 @@ import {
   HERD_SHOTS_WORDS,
   HERD_SPECIES,
   HERD_STAMPEDE_RADIUS_M,
+  HERD_STAMPEDE_SECONDS,
   HERDS_STEP_WGSL,
 } from './wgsl/herds.js';
 
@@ -445,12 +449,9 @@ export function evaluateHerdStateAt(seeds, routes, fates, idx, clock = 0, elevat
       const behind = rh + 8 + Math.max(si - 2, 0) * 4;
       const fx = routes[ahead] - routes[behind] + 1e-4, fz = routes[ahead + 2] - routes[behind + 2];
       const fl = Math.hypot(fx, fz) || 1;
-      const decW = (raw) => {
-        if (raw < 16) return [raw, 0];
-        const v = Math.round(raw - 16);
-        return [(v & 511) * 0.01, (v >> 9) * 0.001 - 0.5];
-      };
-      const [hw0, sl0] = decW(routes[a0 + 3]), [hw1, sl1] = decW(routes[a1 + 3]);
+      // The way's own packing (js/town-streets.js), as the step reads it: the slope is eleven bits, below the bit that
+      // says a made deck carries the way.
+      const [hw0, sl0] = unpackRouteHalfWidthSlope(routes[a0 + 3]), [hw1, sl1] = unpackRouteHalfWidthSlope(routes[a1 + 3]);
       const room = hw0 + (hw1 - hw0) * frac;
       const crossSlope = sl0 + (sl1 - sl0) * frac;
       const aside = going * side * room;
@@ -619,9 +620,128 @@ export function evaluateHerdStateAt(seeds, routes, fates, idx, clock = 0, elevat
   };
 }
 
+// How far the step's avoidance (js/wgsl/herds.js main: herdAvoid) may draw a beast from the closed-form place
+// evaluateHerdStateAt gives it. The step sums that offset frame by frame from the bodies about the beast and nothing
+// reads it back, so JavaScript can only bound it: nothing for a vehicle or a hitched beast, which the step never moves
+// aside; a loose beast's clamp; and no bound along its way for a street mount, whose waits are summed too (aside it
+// keeps within HERD_MOUNT_AVOID_ASIDE_M of the way's middle, or the way's half width where that is more).
+export function herdAvoidSlack(seeds, idx) {
+  const so = idx * HERD_SEED_FLOATS, roamR = seeds[so + 2];
+  if (roamR <= -10) return Infinity;
+  if (Math.round(seeds[so + 6] || 0) >= 4 || (roamR < 0 && seeds[so + 4] < 1)) return 0;
+  return Math.max(Math.abs(roamR) + HERD_AVOID_BEYOND_ROAM_M, HERD_AVOID_LEAST_M);
+}
+
+const HERD_REACH_CELL_M = 64, HERD_REACH_CELLS_MOST = 1024;
+const herdReachKey = (cx, cz) => (cx + 65536) * 131072 + cz + 65536;
+
+// Where the step may draw each beast that no shot has started running, laid once into cells of the ground: its
+// closed-form path (its roam about its anchor; its road or its way from end to end, and as far aside as it goes)
+// widened by herdAvoidSlack. A shot asks the cells it sweeps (herdShotNear), never the whole herd. `wide` are the few
+// too far-flung to lay; `astray` (beast -> the clock when a shot last came near) are those a shot may have started,
+// which leave these bounds until the stampede is over.
+export function herdShotReach(seeds, routes, astray = new Map()) {
+  const count = Math.floor((seeds?.length ?? 0) / HERD_SEED_FLOATS);
+  const cells = new Map(), wide = [];
+  let last = -1, lx0 = 0, lx1 = 0, lz0 = 0, lz1 = 0;
+  const lay = (idx, ax, az, bx, bz, pad) => {
+    const cx0 = Math.floor((Math.min(ax, bx) - pad) / HERD_REACH_CELL_M), cx1 = Math.floor((Math.max(ax, bx) + pad) / HERD_REACH_CELL_M);
+    const cz0 = Math.floor((Math.min(az, bz) - pad) / HERD_REACH_CELL_M), cz1 = Math.floor((Math.max(az, bz) + pad) / HERD_REACH_CELL_M);
+    // The next piece of a path most often lies in the cells of the last.
+    if (idx === last && cx0 === lx0 && cx1 === lx1 && cz0 === lz0 && cz1 === lz1) return;
+    last = idx; lx0 = cx0; lx1 = cx1; lz0 = cz0; lz1 = cz1;
+    if (!((cx1 - cx0 + 1) * (cz1 - cz0 + 1) <= HERD_REACH_CELLS_MOST) || Math.max(-cx0, cx1, -cz0, cz1) > 65535) {
+      if (wide[wide.length - 1] !== idx) wide.push(idx);
+      return;
+    }
+    for (let cx = cx0; cx <= cx1; cx++) {
+      for (let cz = cz0; cz <= cz1; cz++) {
+        const key = herdReachKey(cx, cz);
+        let list = cells.get(key);
+        if (!list) cells.set(key, list = []);
+        if (list[list.length - 1] !== idx) list.push(idx);
+      }
+    }
+  };
+  // A line of `n` points of four floats from `at`, z `zAt` floats after x, laid in pieces no longer than a cell.
+  const layPath = (idx, at, n, zAt, pad) => {
+    if (!(n >= 2) || !(pad >= 0) || at + n * 4 > routes.length) { wide.push(idx); return; }
+    for (let k = 0; k + 1 < n; k++) {
+      const a = at + k * 4, b = a + 4;
+      const ax = routes[a], az = routes[a + zAt], dx = routes[b] - ax, dz = routes[b + zAt] - az;
+      const pieces = Math.min(4096, Math.ceil(Math.hypot(dx, dz) / HERD_REACH_CELL_M)) || 1;
+      for (let p = 0; p < pieces; p++) {
+        const u = p / pieces, v = (p + 1) / pieces;
+        lay(idx, ax + dx * u, az + dz * u, ax + dx * v, az + dz * v, pad);
+      }
+    }
+  };
+  for (let idx = 0; idx < count; idx++) {
+    const so = idx * HERD_SEED_FLOATS, roamR = seeds[so + 2], slack = herdAvoidSlack(seeds, idx);
+    const rh = Math.round(seeds[so]) * 4;
+    if (roamR >= 0) {
+      // Its roam: within roamR on each of two axes turned to its flock's heading.
+      lay(idx, seeds[so], seeds[so + 1], seeds[so], seeds[so + 1], Math.SQRT2 * roamR + slack);
+    } else if (!routes || !(rh >= 0)) {
+      wide.push(idx);
+    } else if (roamR <= -10) {
+      // A street mount: its way, and as far aside as its lane or a monument in it sends it.
+      const n = Math.round(routes[rh]);
+      let half = 0;
+      for (let k = 0; k < n && rh + 12 + k * 4 <= routes.length; k++) half = Math.max(half, unpackRouteHalfWidthSlope(routes[rh + 11 + k * 4])[0]);
+      layPath(idx, rh + 8, n, 2, Math.max(half * Math.max(1, Math.abs(routes[rh + 6])), HERD_MOUNT_AVOID_ASIDE_M));
+    } else {
+      // A traveller: its road, and its place in the file aside of it (a loose one wanders 1.1 m more; a draft beast
+      // broken from a shattered hitch veers to 1.45 of its own).
+      const aside = Math.abs(seeds[so + 7] || 0);
+      layPath(idx, rh + 4, Math.round(routes[rh + 2]), 1, Math.max(aside + 1.1, aside * 1.45) + slack);
+    }
+  }
+  return { count, cells, wide, astray, near: [], seen: new Uint32Array(count), serial: 0 };
+}
+
+// The beasts a shot from `from` to `to` may strike or start (world places: `shift` is the world's offset from the
+// seeds'): those laid within `margin` of it, the wide and the astray, in the herd's order. One scratch list, good
+// until the next call.
+export function herdShotNear(reach, from, to, shiftX = 0, shiftZ = 0, margin = HERD_STAMPEDE_RADIUS_M) {
+  const { count, cells, seen, near } = reach;
+  near.length = 0;
+  if (++reach.serial > 0xffffffff) { seen.fill(0); reach.serial = 1; }
+  const serial = reach.serial;
+  const cx0 = Math.floor((Math.min(from[0], to[0]) - shiftX - margin) / HERD_REACH_CELL_M), cx1 = Math.floor((Math.max(from[0], to[0]) - shiftX + margin) / HERD_REACH_CELL_M);
+  const cz0 = Math.floor((Math.min(from[2], to[2]) - shiftZ - margin) / HERD_REACH_CELL_M), cz1 = Math.floor((Math.max(from[2], to[2]) - shiftZ + margin) / HERD_REACH_CELL_M);
+  if (!((cx1 - cx0 + 1) * (cz1 - cz0 + 1) <= HERD_REACH_CELLS_MOST)) {
+    for (let idx = 0; idx < count; idx++) near.push(idx);
+    return near;
+  }
+  const put = (idx) => {
+    if (idx < count && seen[idx] !== serial) { seen[idx] = serial; near.push(idx); }
+  };
+  for (let cx = cx0; cx <= cx1; cx++) {
+    for (let cz = cz0; cz <= cz1; cz++) cells.get(herdReachKey(cx, cz))?.forEach(put);
+  }
+  reach.wide.forEach(put);
+  for (const idx of reach.astray.keys()) put(idx);
+  return near.sort((a, b) => a - b);
+}
+
+// The astray whose stampede is over, as the step ends it: each is within its reach again, and calm.
+function herdAstraySettle(astray, fates, t) {
+  for (const [idx, since] of astray) {
+    if (secondsSinceCPU(since, t) < HERD_STAMPEDE_SECONDS + 1) continue;
+    const fo = idx * HERD_FATE_FLOATS;
+    if (fates[fo] > 0.5 && fates[fo] < 1.5) fates[fo] = 0;
+    astray.delete(idx);
+  }
+}
+
 // Pure CPU shot sweep matching `HERDS_STEP_WGSL`: updates `fates` (felling/shattering struck targets
 // and triggering 38 m near-miss stampedes) and returns the earliest bounding-volume impact for `gunnery-control.js`.
-export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to, radius = 0.08) {
+// Each beast is tested at its closed-form place. That is where the step draws a vehicle and a hitched beast; a loose
+// beast or a street mount it draws up to herdAvoidSlack away, and only the step's own test, at the drawn place, fells
+// or starts that one on screen. `only` (herdShotNear) lists the beasts to test in place of the whole herd, and `astray`
+// (herdShotReach) is told whom the step may start.
+export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to, radius = 0.08, only = null, astray = null) {
   const count = Math.floor((seeds?.length ?? 0) / HERD_SEED_FLOATS);
   if (!count || !from || !to) return null;
   const t = typeof clock === 'number' ? clock : (clock?.time ?? 0);
@@ -630,7 +750,9 @@ export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to,
   const segLen = Math.sqrt(segLen2);
 
   let best = null;
-  for (let idx = 0; idx < count; idx++) {
+  const tested = only ? only.length : count;
+  for (let k = 0; k < tested; k++) {
+    const idx = only ? only[k] : k;
     const fo = idx * HERD_FATE_FLOATS;
     if (fates && fates[fo] >= 1.5) continue;
     const st = evaluateHerdStateAt(seeds, routes, fates, idx, clock, elevationFn);
@@ -650,6 +772,12 @@ export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to,
     const dx = cx - px, dz = cz - pz;
     const dyBox = Math.max(0, st.y - py, py - (st.y + hitH));
     const dist = Math.hypot(dx, dyBox, dz);
+    // Whom the step may start running: its test is at the drawn place, as far as the slack from this one.
+    if (astray && !st.isVehicle && !st.isHitch && !st.isStreetMount) {
+      const flat2 = sx * sx + sz * sz;
+      const u = flat2 > 1e-8 ? Math.max(0, Math.min(1, ((cx - from[0]) * sx + (cz - from[2]) * sz) / flat2)) : 0;
+      if (Math.hypot(cx - from[0] - sx * u, cz - from[2] - sz * u) < HERD_STAMPEDE_RADIUS_M + herdAvoidSlack(seeds, idx)) astray.set(idx, t);
+    }
 
     if (dist <= hitR + radius) {
       let dirX = sx, dirZ = sz;
@@ -711,12 +839,17 @@ export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to,
 // the herds' material's view.
 export function requestHerdsPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
   return requestOnce(device, `livestock herds continuum ${format} ${samples}`, async () => {
-    const [programs, view, step] = await Promise.all([
+    // One module, two programs: `seen` copies every beast's body and fate as the last step left them, and `step` then
+    // reads its neighbours and hitch from that copy while it writes this frame's (js/wgsl/herds.js herdSee, main).
+    const [programs, view, [step, seen]] = await Promise.all([
       requestContinuumPrograms({ device, shader, shadowFormat: LAND_SHADOW_FORMAT }),
       requestContinuumView({ device, shader, material: HERD_CONTINUUM_MATERIAL_SPEC, format, samples }),
-      shader(HERDS_STEP_WGSL, 'livestock herds step').then((module) => device.createComputePipelineAsync({ label: 'livestock herds step', layout: 'auto', compute: { module, entryPoint: 'main' } })),
+      shader(HERDS_STEP_WGSL, 'livestock herds step').then((module) => Promise.all([
+        device.createComputePipelineAsync({ label: 'livestock herds step', layout: 'auto', compute: { module, entryPoint: 'main' } }),
+        device.createComputePipelineAsync({ label: 'livestock herds seen', layout: 'auto', compute: { module, entryPoint: 'herdSee' } }),
+      ])),
     ]);
-    return { programs, view, step };
+    return { programs, view, step, seen };
   });
 }
 
@@ -758,8 +891,12 @@ export async function createLivestockHerds({
   const fatesBuf = mkBuf('livestock fates', cpuFates, B.STORAGE);
   const cpuAvoid = new Float32Array(MAX_HERDS * 4);
   const avoidBuf = mkBuf('livestock avoid', cpuAvoid, B.STORAGE);
+  // Each one's body and fate as the last step left them (HerdSeen: four vec4f), which the step reads its neighbours from.
+  const seenBuf = device.createBuffer({ label: 'livestock seen', size: MAX_HERDS * 64, usage: B.STORAGE });
   const worldBodies = worldBodiesForDevice(device);
   const shotFlights = new Map();
+  // The beasts a shot may have started running (herdShotReach), which outlive a change of seeds as their fates do.
+  const astray = new Map();
   let shotsSentLastFrame = 0;
   let simClockSec = 0;
 
@@ -815,6 +952,7 @@ export async function createLivestockHerds({
     );
     cpuAvoid.fill(0, s * 4, e * 4);
     device.queue.writeBuffer(avoidBuf, s * 16, cpuAvoid, s * 4, (e - s) * 4);
+    for (const idx of astray.keys()) if (idx >= s && idx < e) astray.delete(idx);
   }
 
   function setHerds(herdData) {
@@ -914,6 +1052,17 @@ export async function createLivestockHerds({
         { binding: 12, resource: continuumGroundView(device) },
         { binding: 13, resource: { buffer: avoidBuf } },
         { binding: 14, resource: { buffer: worldBodies.buffer } },
+        { binding: 15, resource: { buffer: seenBuf } },
+      ],
+    });
+    const seenGroup = device.createBindGroup({
+      label: 'livestock seen',
+      layout: pipelines.seen.getBindGroupLayout(0),
+      entries: [
+        { binding: 4, resource: { buffer: cfg } },
+        { binding: 11, resource: { buffer: fatesBuf } },
+        { binding: 14, resource: { buffer: worldBodies.buffer } },
+        { binding: 15, resource: { buffer: seenBuf } },
       ],
     });
 
@@ -929,6 +1078,7 @@ export async function createLivestockHerds({
       cpuSeeds: sliceData,
       cpuRoutes: combinedRoutes,
       stepGroup,
+      seenGroup,
       viewGroup: null,
     };
     rebuildGroups();
@@ -943,15 +1093,26 @@ export async function createLivestockHerds({
       from[2] + (to[2] - from[2]) * maxFrac,
     ];
     const radius = projectile?.sweepRadius ?? projectile?.radius ?? 0.08;
-    const key = projectile ?? Symbol('shot');
-    const prev = shotFlights.get(key);
-    if (prev) {
-      prev.end = end;
-    } else if (shotFlights.size < HERD_SHOT_LIMIT) {
-      shotFlights.set(key, { start: [from[0], from[1], from[2]], end, radius, time: simClockSec });
-    }
-
     const offset = land?.getWorldOffset?.() ?? { x: 0, z: 0 };
+    // The broad phase, sure for wherever the step may have drawn a beast: a shot that sweeps no beast's reach is tested
+    // against none here and is not sent to the step, whose few places are kept for the shots that do. The step's test
+    // of those, at the drawn places, is the one that fells and starts beasts on screen; the sweep below, at their
+    // closed-form places, says where the ball stops. Without the land the world's shift is not known here, and the
+    // step, which has it, is sent the shot whatever this finds.
+    state.reach ??= herdShotReach(state.cpuSeeds, state.cpuRoutes, astray);
+    herdAstraySettle(astray, cpuFates, simClockSec);
+    const near = herdShotNear(state.reach, from, end, offset.x, offset.z);
+    if (near.length || typeof land?.getWorldOffset !== 'function') {
+      const key = projectile ?? Symbol('shot');
+      const prev = shotFlights.get(key);
+      if (prev) {
+        prev.end = end;
+      } else if (shotFlights.size < HERD_SHOT_LIMIT) {
+        shotFlights.set(key, { start: [from[0], from[1], from[2]], end, radius, time: simClockSec });
+      }
+    }
+    if (!near.length) return null;
+
     const elevFn = typeof land?.surfaceHeight === 'function'
       ? (ux, uz) => land.surfaceHeight(ux + offset.x, uz + offset.z)
       : () => 2.0;
@@ -970,6 +1131,8 @@ export async function createLivestockHerds({
       from,
       end,
       radius,
+      near,
+      astray,
     );
     if (!hit) return null;
     const fullLen = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) || 1;
@@ -1011,6 +1174,7 @@ export async function createLivestockHerds({
     },
     encode(pass, timeSeconds = null) {
       if (Number.isFinite(timeSeconds)) simClockSec = timeSeconds;
+      if (astray.size) herdAstraySettle(astray, cpuFates, simClockSec);
       if (!state) return;
       if (travellers.seeds.length || streetMounts.seeds.length) {
         device.queue.writeBuffer(state.cfg, 8, clock, 8, 8);
@@ -1037,10 +1201,15 @@ export async function createLivestockHerds({
         device.queue.writeBuffer(shotsBuf, 0, shotsU32, 0, 4 + pendingCount * HERD_SHOT_FLOATS);
         shotsSentLastFrame = pendingCount;
       }
-      // Every beast placed, then every beast cut: the cut reads the places the step has just written.
+      // Every beast as it was left, copied; then every beast placed, reading its neighbours from that copy; then every
+      // beast cut: the cut reads the places the step has just written.
+      const herdGroups = Math.ceil(state.count / 64);
+      pass.setPipeline(pipelines.seen);
+      pass.setBindGroup(0, state.seenGroup);
+      pass.dispatchWorkgroups(herdGroups);
       pass.setPipeline(pipelines.step);
       pass.setBindGroup(0, state.stepGroup);
-      pass.dispatchWorkgroups(Math.ceil(state.count / 64));
+      pass.dispatchWorkgroups(herdGroups);
       state.animals.encode(pass);
     },
     // The view's four lists, one pipeline.
@@ -1064,6 +1233,7 @@ export async function createLivestockHerds({
       shotsBuf.destroy();
       fatesBuf.destroy();
       avoidBuf.destroy();
+      seenBuf.destroy();
     },
   };
   if (device && typeof device === 'object') {

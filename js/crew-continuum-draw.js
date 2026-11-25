@@ -19,15 +19,14 @@ import {
   validateCrewContinuumManifest,
 } from './crew-continuum.js';
 import { hairContinuumShiftsFor, loadHairContinuum } from './hair-continuum.js';
-import { clothingInfoFor, loadClothingContinuum } from './clothing-continuum.js';
 import {
-  CLOTHING_CONTINUUM_MATERIAL, CREW_CONTINUUM_MATERIAL, CREW_CONTINUUM_POSE_VEC4S, CREW_STAND_FLAG_CLOTHED, HAIR_CONTINUUM_MATERIAL,
-  crewContinuumClothingStandWGSL, crewContinuumHairStandWGSL, crewContinuumPoseWGSL, crewContinuumStandWGSL,
+  CREW_CONTINUUM_MATERIAL, CREW_CONTINUUM_POSE_VEC4S, HAIR_CONTINUUM_MATERIAL,
+  crewContinuumHairStandWGSL, crewContinuumPoseWGSL, crewContinuumStandWGSL,
 } from './wgsl/crew-continuum.js';
 import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 
 // What the GPU is told of a person, beside their joints and actor record (the batch's orders).
-export { CREW_CONTINUUM_ORDER_IMPORTANT } from './wgsl/crew-continuum.js';
+export { CREW_CONTINUUM_AGE_SHIFT, CREW_CONTINUUM_ORDER_IMPORTANT } from './wgsl/crew-continuum.js';
 
 // Which body each person wears (the owner's choice of 2026-11-17): hands by sex, captains, soldiers, and each
 // indigenous culture its own pair.
@@ -38,8 +37,6 @@ export function crewContinuumBodyFor({ sex = 'male', role = 'hand', culture = nu
   if (role === 'soldier') return female ? 'villager-female' : 'soldier';
   return female ? 'villager-female' : 'sailor-male';
 }
-// The baked cultures, by the archetypes js/crew.js names (INDIGENOUS_ARCHETYPE_IDS).
-export const CREW_CONTINUUM_CULTURES = Object.freeze(['algonquian', 'caribbean', 'maya', 'andean']);
 
 // The picture in the first codec the device reads; a device that reads neither has the BC7 picture decoded on the GPU
 // at load into rgba8 (js/bc7-transcode.js), the same texels, so every device draws a person's own picture.
@@ -56,11 +53,14 @@ function crewContinuumVerifyEnabled(verifySha256) {
   return true;
 }
 
+const CREW_CONTINUUM_FULL_PACK_BYTES = 128 * 1024 * 1024;
 function crewContinuumIsMobile(device, mobile) {
   if (typeof mobile === 'boolean') return mobile;
   const mobileUA = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-  const lowBind = (device?.limits?.maxStorageBufferBindingSize ?? Infinity) < 256 * 1024 * 1024;
-  const lowBuf = (device?.limits?.maxBufferSize ?? Infinity) < 256 * 1024 * 1024;
+  // A body's full atlas is under 100 MiB, so a device that binds WebGPU's least storage buffer (128 MiB) holds it: only
+  // one that binds less (a compatibility adapter) takes the compact pack for want of room.
+  const lowBind = (device?.limits?.maxStorageBufferBindingSize ?? Infinity) < CREW_CONTINUUM_FULL_PACK_BYTES;
+  const lowBuf = (device?.limits?.maxBufferSize ?? Infinity) < CREW_CONTINUUM_FULL_PACK_BYTES;
   return mobileUA || lowBind || lowBuf;
 }
 
@@ -143,7 +143,9 @@ async function openCrewContinuumBody(device, id, fetchAsset, { mobile, verifySha
       device.queue.writeTexture({ texture, mipLevel }, picture, { offset: level.offset, bytesPerRow: across * 16, rowsPerImage: down }, [across * 4, down * 4]);
     });
   }
-  const uploadedAtlas = uploadContinuumAtlas(device, words, `crew ${id}`);
+  // No micro-surfels: a person past the handoff wears the far body (a closed skin, each triangle its region's dye),
+  // which a few hundred points at a time cannot stand for at the ranges a deck is seen from.
+  const uploadedAtlas = uploadContinuumAtlas(device, words, `crew ${id}`, { surfels: false });
   return {
     id, manifest, standIn, words: continuumAtlasMetaWords(words), types: uploadedAtlas.types, atlas: uploadedAtlas,
     rig: uniform(`crew continuum ${id} rig`, crewContinuumRig(manifest)), wear: uniform(`crew continuum ${id} wear`, crewContinuumWear(manifest)),
@@ -198,10 +200,6 @@ export function requestCrewContinuumPipelines({ device, shader, format = 'rgba16
     label: 'crew continuum hair stand', layout: 'auto',
     compute: { module: await shader(crewContinuumHairStandWGSL(), 'crew continuum hair stand'), entryPoint: 'crewContinuumHairStand' },
   }));
-  const clothingStand = requestOnce(device, 'crew continuum clothing stand', async () => device.createComputePipelineAsync({
-    label: 'crew continuum clothing stand', layout: 'auto',
-    compute: { module: await shader(crewContinuumClothingStandWGSL(), 'crew continuum clothing stand'), entryPoint: 'crewContinuumClothingStand' },
-  }));
   const loadAux = (asset, promise) => promise
     .then((value) => ({ value, error: null }))
     .catch((error) => crewContinuumRecordAssetError(asset, error));
@@ -214,14 +212,9 @@ export function requestCrewContinuumPipelines({ device, shader, format = 'rgba16
     waterOptics ? requestOnce(device, `hair continuum capture ${format} ${samples}`, () => requestContinuumCapture(waterOptics, HAIR_CONTINUUM_MATERIAL)) : null,
     hairStand,
     fetchAsset ? loadAux('hair continuum', loadHairContinuum(device, { fetchAsset })) : { value: null, error: null },
-    requestContinuumView({ device, shader, material: CLOTHING_CONTINUUM_MATERIAL, format, samples }),
-    waterOptics ? requestOnce(device, `clothing continuum capture ${format} ${samples}`, () => requestContinuumCapture(waterOptics, CLOTHING_CONTINUUM_MATERIAL)) : null,
-    clothingStand,
-    fetchAsset ? loadAux('clothing continuum', loadClothingContinuum(device, { fetchAsset })) : { value: null, error: null },
-  ]).then(([programs, view, capture, afloat, ashore, hairView, hairCapture, hairStandPipe, hairRes, clothingView, clothingCapture, clothingStandPipe, clothingRes]) => ({
+  ]).then(([programs, view, capture, afloat, ashore, hairView, hairCapture, hairStandPipe, hairRes]) => ({
     programs, view, capture, stand: { afloat, ashore },
     hair: hairRes.value, hairError: hairRes.error, hairView, hairCapture, hairStand: hairStandPipe,
-    clothing: clothingRes.value, clothingError: clothingRes.error, clothingView, clothingCapture, clothingStand: clothingStandPipe,
   }));
 }
 
@@ -339,37 +332,9 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
   ]);
   const hairCapture = () => (hairUnder === undefined ? (hairUnder = continuumCaptureDraw(P.hairCapture, hairEntries, shadows)) : hairUnder);
 
-  // Paired modular 3D kinematic 1550 clothing scene sharing `scene.poses` (3 records per person: upper, lower, optional cloak).
-  // Only attach modular clothing on undressed base bodies; restored ~1.9M dressed historical bodies carry baked shirt/trousers
-  // regions (`regionMedians[1]` / `regionMedians[2]`) and must never double-draw or inset under modular garments.
-  const bodyHasClothing = Boolean(body.manifest?.regionMedians?.[1] || body.manifest?.regionMedians?.[2]);
-  let clothingScene = null, clothingInfo = null, clothingStandGroup = null, clothingView = null, clothingUnder;
-  const clothingInfoWords = clothingInfoFor(body.id, body.manifest?.sex, body.manifest?.role);
-  if (!bodyHasClothing && P.clothing && P.clothingView && P.clothingStand) {
-    const clothCapacity = Math.max(3, capacity * 3);
-    const perType = Math.max(1, Math.ceil(capacity * 0.45));
-    const clothRoom = continuumRoom(P.clothing.types, Array(P.clothing.types.length).fill(perType)).room;
-    clothingScene = createContinuumScene({
-      device, atlas: P.clothing.atlas, programs: P.programs, capacity: clothCapacity, room: clothRoom, view: P.clothingView,
-      poses: scene.poses, frame, shadowUniform: shadows.uniform, samples, label: `clothing ${body.id}`, profile: 'people',
-    });
-    clothingInfo = device.createBuffer({ label: `clothing continuum ${body.id} info`, size: 16, usage: B.UNIFORM | B.COPY_DST });
-    device.queue.writeBuffer(clothingInfo, 0, clothingInfoWords);
-    clothingStandGroup = device.createBindGroup({
-      label: `clothing continuum ${body.id} stand`,
-      layout: P.clothingStand.getBindGroupLayout(0),
-      entries: [scene.records, actor, clothingInfo, clothingScene.records].map((buffer, binding) => ({ binding, resource: { buffer } })),
-    });
-  }
-  const clothingViewGroups = () => (clothingView ??= [
-    device.createBindGroup({ label: `clothing continuum ${body.id}`, layout: P.clothingView.pipeline.getBindGroupLayout(0), entries: hairEntries }),
-    shadows.bind(P.clothingView.pipeline),
-  ]);
-  const clothingCapture = () => (clothingUnder === undefined ? (clothingUnder = continuumCaptureDraw(P.clothingCapture, hairEntries, shadows)) : clothingUnder);
-
   let count = 0, armed = false;
   return {
-    body, scene, hairScene, clothingScene, orders,
+    body, scene, hairScene, orders,
     get count() { return count; },
     // Before the frame's passes: who is drawn, with what orders. `at` moves the batch's first slot, where a garrison's
     // captains follow however many soldiers a port has. A counted batch is given how many it may hold (a number), and
@@ -378,7 +343,7 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
       count = Math.min(typeof people === 'number' ? people : people.length, capacity);
       if (!counted) for (let i = 0; i < count; i++) orderWords[i] = orderOf(people[i], i) >>> 0;
       if (count && !counted) device.queue.writeBuffer(orders, 0, orderWords, 0, Math.max(4, count));
-      runWords.set([at, count, counted ? counted.offset / 4 : 0, (counted ? 1 : 0) | (sea ? 2 : 0) | (clothingScene ? CREW_STAND_FLAG_CLOTHED : 0)]);
+      runWords.set([at, count, counted ? counted.offset / 4 : 0, (counted ? 1 : 0) | (sea ? 2 : 0)]);
       device.queue.writeBuffer(run, 0, runWords);
       scene.setCount(count);
       scene.setShadows(castShadows);
@@ -387,12 +352,6 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
         device.queue.writeBuffer(hairInfo, 32, hairInfoWords, 8, 4);
         hairScene.setCount(count * 2);
         hairScene.setShadows(castShadows);
-      }
-      if (clothingScene) {
-        clothingInfoWords[0] = count >>> 0;
-        device.queue.writeBuffer(clothingInfo, 0, clothingInfoWords, 0, 4);
-        clothingScene.setCount(count * 3);
-        clothingScene.setShadows(castShadows);
       }
       armed = true;
     },
@@ -409,34 +368,25 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
           pass.setBindGroup(0, hairStandGroup);
           pass.dispatchWorkgroups(Math.ceil(count / 64));
         }
-        if (clothingScene) {
-          pass.setPipeline(P.clothingStand);
-          pass.setBindGroup(0, clothingStandGroup);
-          pass.dispatchWorkgroups(Math.ceil(count / 64));
-        }
       }
       scene.encode(pass);
       if (hairScene) hairScene.encode(pass);
-      if (clothingScene) clothingScene.encode(pass);
     },
     drawOpaque(pass) {
       if (!count) return;
       scene.draw(pass, ...viewGroups());
       if (hairScene) hairScene.draw(pass, ...hairViewGroups());
-      if (clothingScene) clothingScene.draw(pass, ...clothingViewGroups());
     },
     drawShadow(pass) {
       if (!count) return;
       scene.drawShadow(pass);
       if (hairScene) hairScene.drawShadow(pass);
-      if (clothingScene) clothingScene.drawShadow(pass);
     },
     // Under water, single-sampled, through the water's own capture: the coarse cut the shadow's lists hold.
     drawSubmerged(pass, above = false) {
       if (!count) return;
       capture()?.draw(pass, [scene], above);
       if (hairScene) hairCapture()?.draw(pass, [hairScene], above);
-      if (clothingScene) clothingCapture()?.draw(pass, [clothingScene], above);
     },
     // For the continuum census: the one cut's triangle counts, with how many people the batch stands (for a counted
     // batch, how many it may hold).
@@ -444,14 +394,12 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
       if (!count) return [];
       const bodyDraws = scene.continuumDraws().map((draw) => ({ ...draw, people: count }));
       const strandDraws = hairScene ? hairScene.continuumDraws().map((draw) => ({ ...draw, hair: true, people: count })) : [];
-      const clothDraws = clothingScene ? clothingScene.continuumDraws().map((draw) => ({ ...draw, clothing: true, people: count })) : [];
-      return [...bodyDraws, ...strandDraws, ...clothDraws];
+      return [...bodyDraws, ...strandDraws];
     },
     destroy() {
-      for (const resource of [orders, run, hairInfo, clothingInfo]) resource?.destroy();
+      for (const resource of [orders, run, hairInfo]) resource?.destroy();
       scene.destroy();
       hairScene?.destroy();
-      clothingScene?.destroy();
     },
   };
 }
