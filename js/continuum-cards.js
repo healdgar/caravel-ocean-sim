@@ -102,8 +102,8 @@ export function collectContinuumLevel0Clusters(words, typeId, cellSize = 64, ove
       f32[typeBase + CONTINUUM_TYPE.sphere + 2],
       f32[typeBase + CONTINUUM_TYPE.sphere + 3],
     ];
-  // Half-texel orthographic error tolerance: diameter 2*R across cellSize texels -> 0.5 texel = R / cellSize.
-  const allowed = Math.max(sphere[3] / Math.max(cellSize, 8), 1e-4);
+  // Half-texel orthographic error tolerance (capped at 0.16 m so coarse foliage cards never bake inflated multi-texel leaves).
+  const allowed = Math.max(Math.min(sphere[3] / Math.max(cellSize, 8), 0.16), 1e-4);
   const clusters = [];
   for (let i = 0; i < count; i++) {
     const cb = clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS;

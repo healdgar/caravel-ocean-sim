@@ -7,12 +7,13 @@
 // by the same select and cast by the same shadow program (or its material's part of it); each family's material has
 // its view (and, if it is seen under water, its capture) composed by the one composer.
 import { requestOnce } from './gpu-program-cache.js';
-import { continuumPixelError, packContinuumProfile } from './continuum-core.js';
+import { continuumPixelError, packContinuumProfile, CONTINUUM_STEP_WORDS } from './continuum-core.js';
 import { continuumProfile } from './continuum-profiles.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { continuumHiZView, continuumHiZUniform, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from './continuum-hiz.js';
 import {
-  CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_CHUNK_TRIANGLES,
+  CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_CLUSTER_WORDS,
+  CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_CHUNK_TRIANGLES,
   writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, buildContinuumSurfels, computeContinuumTightSpheres,
 } from './continuum-format.js';
 import {
@@ -235,6 +236,47 @@ export function uploadContinuumAtlas(device, words, label, { surfels = true } = 
       device.queue.writeBuffer(buffer, CONTINUUM_HEADER.surfels * 4, new Uint32Array([surfelsAt]));
     }
     pages.push(buffer);
+  }
+  // Eliminate multi-cluster root plateaus: if a type's coarsest cluster level holds >8 clusters (cannot simplify further
+  // in the cluster DAG) yet its baked farFirst step error sits >1.15x above the highest finite cluster parentError, clamp
+  // only the GPU copy's farFirst error to that cluster boundary (strictly preserving step monotonicity & disk SHA-256).
+  {
+    const typeCount = words[CONTINUUM_HEADER.typeCount];
+    const typesAt = words[CONTINUUM_HEADER.typesAt];
+    const clustersAt = words[CONTINUUM_HEADER.clustersAt];
+    const f32 = new Float32Array(words.buffer, words.byteOffset, words.length);
+    for (let ty = 0; ty < typeCount; ty++) {
+      const tb = typesAt + ty * CONTINUUM_TYPE_WORDS;
+      const cFirst = words[tb + CONTINUUM_TYPE.clusterFirst];
+      const cCount = words[tb + CONTINUUM_TYPE.clusterCount];
+      const stepsAt = words[tb + CONTINUUM_TYPE.steps];
+      const farFirst = words[tb + CONTINUUM_TYPE.farFirst];
+      if (!cCount || !stepsAt) continue;
+      let maxLvl = 0;
+      let maxFinitePE = 0;
+      for (let i = 0; i < cCount; i++) {
+        const cb = clustersAt + (cFirst + i) * CONTINUUM_CLUSTER_WORDS;
+        const lv = (words[cb + 15] >>> 8) & 255;
+        if (lv > maxLvl) maxLvl = lv;
+        const pe = f32[cb + 13];
+        if (pe > maxFinitePE && pe < 1e20) maxFinitePE = pe;
+      }
+      if (!(maxFinitePE > 1e-4)) continue;
+      let rootClusters = 0;
+      for (let i = 0; i < cCount; i++) {
+        const cb = clustersAt + (cFirst + i) * CONTINUUM_CLUSTER_WORDS;
+        if (((words[cb + 15] >>> 8) & 255) === maxLvl) rootClusters++;
+      }
+      const errWord = stepsAt + farFirst * CONTINUUM_STEP_WORDS + 1;
+      const farErr = f32[errWord];
+      const minAllowed = farFirst > 0 ? f32[stepsAt + (farFirst - 1) * CONTINUUM_STEP_WORDS + 1] : 0;
+      const clampedErr = Math.max(maxFinitePE, minAllowed);
+      if (rootClusters > 8 && farErr > clampedErr * 1.15) {
+        const pIdx = Math.floor(errWord / pageWords);
+        const pOff = (errWord - pIdx * pageWords) * 4;
+        if (pages[pIdx]) device.queue.writeBuffer(pages[pIdx], pOff, new Float32Array([clampedErr]));
+      }
+    }
   }
   const types = continuumAtlasTypes(words);
   if (surfelBuild?.counts) {

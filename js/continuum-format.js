@@ -686,6 +686,8 @@ export function buildContinuumSurfels(words, { maxSurfels = 8192, minLevel0Tris 
     let candCount = 0;
     let totalWeight = 0;
     let sampledEffArea = 0;
+    let sampledRawArea = 0;
+    let sampledAreaTriR = 0;
     let triSkip = 0;
 
     for (let i = 0; i < cnt; i++) {
@@ -716,6 +718,9 @@ export function buildContinuumSurfels(words, { maxSurfels = 8192, minLevel0Tris 
         const cz = e1x * e2y - e1y * e2x;
         const area = 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz) * qAreaScale;
         if (!(area > 1e-10)) continue;
+        const triR = Math.sqrt(area / Math.PI);
+        sampledRawArea += area;
+        sampledAreaTriR += area * triR;
 
         let effArea = area;
         let weight = area;
@@ -730,7 +735,6 @@ export function buildContinuumSurfels(words, { maxSurfels = 8192, minLevel0Tris 
           } else {
             // Keep solid trunks & primary boughs crisp while filtering out sub-1.2 cm outer twigs
             // so thin canopy twigs never inflate into floating brown dots among the leaves.
-            const triR = Math.sqrt(area / Math.PI);
             const trunkFactor = Math.max(0, Math.min(1, (triR - 0.012) / 0.025));
             effArea = area * (0.20 + 0.80 * trunkFactor);
             weight = area * (0.04 + 1.12 * trunkFactor);
@@ -773,8 +777,14 @@ export function buildContinuumSurfels(words, { maxSurfels = 8192, minLevel0Tris 
 
     const nNeeded = Math.ceil((areaRadius / Math.max(handoffError * 1.05, 0.008)) ** 2);
     const targetCount = Math.max(256, Math.min(maxSurfels, lv0Tris, nNeeded));
+    // Geometric coverage check: vertex-anchored surfels can only cover faces without pinholes when Level-0 triangles
+    // are comparable to or smaller than the surfel spacing. Sparse planar meshes (e.g. flat stone walls, castle towers,
+    // sails, planks) stay on their watertight half-edge morph chain + octahedral G-buffer card.
+    const meanTriR = sampledRawArea > 0 ? sampledAreaTriR / sampledRawArea : 0;
+    const surfelSpacingR = areaRadius / Math.sqrt(targetCount);
+    if (meanTriR > surfelSpacingR * 1.15) { perType[ty] = null; continue; }
     // Guarantee surfels never project larger than ~1.8 px radius at handoff start, even on huge high-LAI models.
-    handoffError = Math.max(handoffError, 0.72 * areaRadius / Math.sqrt(targetCount));
+    handoffError = Math.max(handoffError, 0.72 * surfelSpacingR);
 
     // Stratified CDF sampling -> 30-bit Morton spatial sort -> Van der Corput bit-reversed blue-noise prefix order.
     const sVerts = new Uint32Array(targetCount);

@@ -525,11 +525,11 @@ fn continuumTry(slot:u32,i:u32)->u32 {
           tries.z=first;tries.w=detail;
           cut=vec4f(focal,pixels,scale,0.0);
           // Its shadow, cut coarse enough for the shadow map, is bounded solely by the shadow-map frustum (zero hard
-          // per-family shadow range cutoffs). Objects shorter than 1.5 shadow-map texels cannot resolve a shadow in
-          // the map and skip sub-texel shadow rasterization automatically.
+          // per-family shadow range cutoffs). Objects shorter than max(2.5 shadow texels, 0.50 m) sit inside the
+          // shadow bias + 2x2 PCF filter footprint and cannot cast a resolvable land shadow.
           let shadowStretch=continuumStretch(record);
           let shadowHeight=2.0*continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*shadowStretch.y*record.place.w;
-          if(continuumView.counts.z!=0u&&(shadowHeight>=SH.texel.x*1.5||continuumFlagged(record,CONTINUUM_EXACT))){
+          if(continuumView.counts.z!=0u&&(shadowHeight>=max(SH.texel.x*2.5,0.50)||continuumFlagged(record,CONTINUUM_EXACT))){
             let light=SH.lightView*vec4f(world-SH.origin.xyz,1.0);
             let r=reach*vec3f(length(vec3f(SH.lightView[0].x,SH.lightView[1].x,SH.lightView[2].x)),length(vec3f(SH.lightView[0].y,SH.lightView[1].y,SH.lightView[2].y)),length(vec3f(SH.lightView[0].z,SH.lightView[1].z,SH.lightView[2].z)));
             if(abs(light.x)<=1.0+r.x&&abs(light.y)<=1.0+r.y&&light.z>= -r.z&&light.z<=1.0+r.z){
@@ -570,8 +570,10 @@ fn continuumTry(slot:u32,i:u32)->u32 {
               let effFarError=select(farError,bitcast<f32>(surfelHdr.w),hasSurfels);
               var start=effFarError*scale*focal/max(pixels,1e-4);
               if(hasSurfels){
-                // Enforce hard pixel-scale ceiling: never activate surfels closer than where maxSurfels stays <= 1.35 px radius.
-                let minSurfelDist=(surfelAreaR/sqrt(max(f32(surfelCount),1.0)))*focal/1.35;
+                // Enforce pixel-scale ceiling scaled by the live scene pixel error so budget pressure smoothly hands
+                // porous canopies to leaf-sized micro-surfels instead of locking them into coarse inflated cluster levels.
+                let surfelMaxPx=max(1.45,pixels*0.95);
+                let minSurfelDist=(surfelAreaR/sqrt(max(f32(surfelCount),1.0)))*focal/surfelMaxPx;
                 start=max(start,minSurfelDist);
               }
               share=u32(round(continuumHandoff(away,start)*255.0));
@@ -601,7 +603,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
                 if(splatShare<255u){
                   if(hasSurfels){
                     let nominalPx=max(CONTINUUM_BASE_PIXEL_ERROR*max(continuumView.curve.x,0.05),0.25);
-                    let targetPx=clamp(1.05*sqrt(max(pixels/nominalPx,0.5)),0.98,1.48);
+                    let targetPx=clamp(1.05*sqrt(max(pixels/nominalPx,0.5)),0.98,2.25);
                     let baseRad=targetPx*away/max(focal,1e-4);
                     let baseN=clamp((surfelAreaR*surfelAreaR)/max(baseRad*baseRad,1e-6),32.0,f32(surfelCount));
                     for(var j=0u;j<CONTINUUM_LEVELS;j++){

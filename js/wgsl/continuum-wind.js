@@ -254,7 +254,8 @@ fn continuumWindErrorScale(record:ContinuumRecord,data:u32,toEye:vec3f)->f32 {
   let faceN=continuumQuat(record.turn,normalize(vec3f(-0.5*(dh.y-dh.x+dh.w-dh.z)/patchSpan,1.0,-0.5*(dh.z-dh.x+dh.w-dh.y)/patchSpan)));
   let cosT=abs(dot(toEye,faceN));
   let sinT=sqrt(max(1.0-cosT*cosT,0.0));
-  let angleErr=sqrt(0.0064*cosT*cosT+sinT*sinT);
+  let grazingRelief=sinT*(1.0-0.35*cosT);
+  let angleErr=sqrt(0.0064*cosT*cosT+grazingRelief*grazingRelief);
   let reliefScale=clamp(stretch.y*record.place.w/max(continuumScale(record),1e-3),0.01,1.0);
   return max(angleErr*reliefScale,0.02);
 }
