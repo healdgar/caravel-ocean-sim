@@ -13,9 +13,12 @@ import {
   checkContinuumAtlas,
 } from '../js/continuum-format.js';
 import {
-  CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, CREW_CONTINUUM_JOINT_PIECE, CREW_CONTINUUM_PIECES, CREW_CONTINUUM_REGIONS, CREW_CONTINUUM_STREAMS,
+  CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, CREW_CONTINUUM_JOINT_PIECE, CREW_CONTINUUM_MOBILE_ASSETS, CREW_CONTINUUM_PIECES, CREW_CONTINUUM_REGIONS, CREW_CONTINUUM_STREAMS,
   crewContinuumRig, crewContinuumWear, CREW_CONTINUUM_RIG_VEC4S, CREW_CONTINUUM_WEAR_VEC4S, validateCrewContinuumManifest,
 } from '../js/crew-continuum.js';
+import { CREW_CONTINUUM_MATERIAL, CREW_STAND_FLAG_CLOTHED, crewContinuumStandWGSL } from '../js/wgsl/crew-continuum.js';
+import { createCrewContinuumBatch, loadCrewContinuumBody, requestCrewContinuumPipelines } from '../js/crew-continuum-draw.js';
+import { crewContinuumDevice, crewContinuumGlobals, fetchCrewContinuumAsset } from './helpers/crew-continuum-fixture.mjs';
 
 const at = (file) => new URL(`../${file}`, import.meta.url);
 const exists = (file) => fs.existsSync(at(file));
@@ -169,3 +172,151 @@ for (const { id } of CREW_CONTINUUM_BODIES) {
     assert.equal(createHash('sha256').update(body).digest('hex'), manifest.body.sha256);
   });
 }
+
+test('all 12 restored bodies are unique ~1.9M-triangle dressed historical meshes with compact mobile fallbacks', { skip: streamed.length < 12 && 'all 12 crew bodies not baked here' }, () => {
+  const source = fs.readFileSync(new URL('../js/crew-continuum.js', import.meta.url), 'utf8');
+  const sourceShas = new Set();
+  for (const { id } of CREW_CONTINUUM_BODIES) {
+    const manifest = manifestOf(id);
+    sourceShas.add(manifest.source.sha256);
+    assert.ok(manifest.source.triangles > 1_500_000, `${id} has ${manifest.source.triangles} triangles`);
+    assert.ok(manifest.regionMedians[1] && manifest.regionMedians[2], `${id} carries baked shirt and trousers regions`);
+
+    const mobilePaths = CREW_CONTINUUM_MOBILE_ASSETS[id];
+    for (const file of Object.values(mobilePaths)) assert.ok(source.includes(`'${file}'`), `mobile path quoted: ${file}`);
+    assert.ok(exists(mobilePaths['manifest.json']), `${id} mobile manifest exists`);
+    const mobileManifest = validateCrewContinuumManifest(JSON.parse(fs.readFileSync(at(mobilePaths['manifest.json']), 'utf8')));
+    assert.ok(mobileManifest.atlas.bytes < 4 * 1024 * 1024, `${id} mobile atlas ${mobileManifest.atlas.bytes} B < 4 MiB`);
+    assert.ok(mobileManifest.texture.width <= 1024, `${id} mobile texture ${mobileManifest.texture.width} <= 1024`);
+    assert.ok(mobileManifest.clusters.finestTriangles >= 20000 && mobileManifest.clusters.finestTriangles <= 60000, `${id} mobile tris ${mobileManifest.clusters.finestTriangles}`);
+
+    const mGz = fs.readFileSync(at(mobilePaths['atlas.bin.gz']));
+    assert.equal(createHash('sha256').update(mGz).digest('hex'), mobileManifest.files['atlas.bin'].gzip.sha256);
+    const mRaw = zlib.gunzipSync(mGz);
+    assert.equal(createHash('sha256').update(mRaw).digest('hex'), mobileManifest.files['atlas.bin'].sha256);
+    const words = checkContinuumAtlas(wordsOf(mRaw), `${id} mobile`);
+    const floats = new Float32Array(words.buffer, words.byteOffset, words.length);
+    const H = CONTINUUM_HEADER, T = CONTINUUM_TYPE, tb = words[H.typesAt];
+    const C = words[tb + T.clusterCount];
+    let prevPErr = Infinity;
+    for (let k = 0; k < C; k++) {
+      const o = words[H.clustersAt] + (words[tb + T.clusterFirst] + k) * CONTINUUM_CLUSTER_WORDS;
+      const err = floats[o + 12], pErr = floats[o + 13], lvl = (words[o + 15] >>> 8) & 255;
+      assert.ok(err >= 0 && err <= pErr, `${id} mobile cluster ${k} error order`);
+      assert.ok(pErr <= prevPErr, `${id} mobile cluster ${k} parentError order`);
+      if (lvl === 0) assert.equal(err, 0, `${id} mobile L0 cluster ${k} ownErr === 0`);
+      prevPErr = pErr;
+    }
+    for (const codec of ['albedo.bc7.bin', 'albedo.astc.bin']) {
+      const tGz = fs.readFileSync(at(mobilePaths[`${codec}.gz`]));
+      assert.equal(createHash('sha256').update(tGz).digest('hex'), mobileManifest.files[codec].gzip.sha256);
+      const tRaw = zlib.gunzipSync(tGz);
+      assert.equal(createHash('sha256').update(tRaw).digest('hex'), mobileManifest.files[codec].sha256);
+    }
+  }
+  assert.equal(sourceShas.size, CREW_CONTINUUM_BODIES.length, 'all 12 bodies have unique source GLB hashes');
+});
+
+test('crew stand gates body inset on CREW_STAND_FLAG_CLOTHED, exposes aux load errors, and verifies SHA-256 by default', { skip: !exists(CREW_CONTINUUM_ASSETS['sailor-male']['atlas.bin.gz']) && 'streams not baked here' }, async (t) => {
+  crewContinuumGlobals(t);
+  const standWgsl = crewContinuumStandWGSL(false);
+  assert.match(standWgsl, /crewStandRun\.flags\s*&\s*4u/, 'body inset bit gated on CREW_STAND_FLAG_CLOTHED (4u)');
+  assert.match(CREW_CONTINUUM_MATERIAL.wgsl(), /let\s+isEye\s*=\s*!hasBakedCloth/, 'eyeball UV clamp gated off on dressed bodies');
+
+  const writes = [];
+  const makeMockDevice = (limits = {}) => crewContinuumDevice({
+    limits,
+    createBuffer: (d) => ({ ...d, destroy() {} }),
+    createBindGroup: (d) => ({ ...d }),
+    createShaderModule: (d) => ({ ...d, getCompilationInfo: async () => ({ messages: [] }) }),
+    createComputePipelineAsync: async (d) => ({ ...d, getBindGroupLayout: () => ({}) }),
+    createRenderPipelineAsync: async (d) => ({ ...d, getBindGroupLayout: () => ({}) }),
+    queue: {
+      writeBuffer(buf, off, data) { writes.push({ label: buf.label, off, words: new Uint32Array(data.buffer, data.byteOffset, Math.floor(data.byteLength / 4)).slice() }); },
+    },
+  });
+
+  // 1. Failing hair/clothing fetch must NOT fail silently: must expose hairError/clothingError and record to __waterworldAssetErrors.
+  const devErr = makeMockDevice();
+  const prevErrors = globalThis.__waterworldAssetErrors;
+  const origConsoleError = console.error;
+  const logged = [];
+  globalThis.__waterworldAssetErrors = [];
+  console.error = (...args) => logged.push(args.join(' '));
+  let Pfail;
+  try {
+    Pfail = await requestCrewContinuumPipelines({
+      device: devErr,
+      shader: async (code) => ({ code }),
+      fetchAsset: async () => new Response(null, { status: 404 }),
+    });
+  } finally {
+    console.error = origConsoleError;
+  }
+  assert.equal(Pfail.hair, null);
+  assert.equal(Pfail.clothing, null);
+  assert.ok(Pfail.hairError instanceof Error, 'hairError exposed');
+  assert.ok(Pfail.clothingError instanceof Error, 'clothingError exposed');
+  assert.ok(logged.length >= 2, 'errors logged via console.error');
+  assert.ok(globalThis.__waterworldAssetErrors.length >= 2, 'errors recorded on globalThis.__waterworldAssetErrors');
+  globalThis.__waterworldAssetErrors = prevErrors;
+
+  // 2. Dressed body never attaches modular clothingScene and never sets CREW_STAND_FLAG_CLOTHED (4).
+  const devDressed = makeMockDevice();
+  const dressedBody = await loadCrewContinuumBody(devDressed, 'sailor-male', { fetchAsset: fetchCrewContinuumAsset, mobile: true });
+  assert.equal(dressedBody.mobile, true, 'compact mobile pack loaded when mobile=true');
+  const PfakeCloth = {
+    ...Pfail,
+    clothing: { atlas: dressedBody.atlas, types: dressedBody.types },
+  };
+  writes.length = 0;
+  const batchDressed = createCrewContinuumBatch({
+    device: devDressed, pipelines: PfakeCloth, body: dressedBody, capacity: 2,
+    frame: {}, hull: {}, bones: {}, actor: {}, main: [], shadows: { uniform: {}, bind: () => ({}) },
+  });
+  assert.equal(batchDressed.clothingScene, null, 'dressed body skips modular clothingScene');
+  batchDressed.update([{}]);
+  const dressedStand = writes.findLast((w) => w.label === 'crew continuum sailor-male stand');
+  assert.equal((dressedStand.words[3] & CREW_STAND_FLAG_CLOTHED), 0, 'CREW_STAND_FLAG_CLOTHED clear on dressed body');
+
+  // 3. Undressed body whose clothing failed to load also leaves CREW_STAND_FLAG_CLOTHED clear (never shrinks body!).
+  const undressedBody = { ...dressedBody, manifest: { ...dressedBody.manifest, regionMedians: [dressedBody.manifest.regionMedians[0], null, null, dressedBody.manifest.regionMedians[3], null] } };
+  writes.length = 0;
+  const batchNakedFail = createCrewContinuumBatch({
+    device: devDressed, pipelines: Pfail, body: undressedBody, capacity: 2,
+    frame: {}, hull: {}, bones: {}, actor: {}, main: [], shadows: { uniform: {}, bind: () => ({}) },
+  });
+  assert.equal(batchNakedFail.clothingScene, null);
+  batchNakedFail.update([{}]);
+  const nakedStand = writes.findLast((w) => w.label === 'crew continuum sailor-male stand');
+  assert.equal((nakedStand.words[3] & CREW_STAND_FLAG_CLOTHED), 0, 'CREW_STAND_FLAG_CLOTHED clear when clothing failed');
+
+  // 4. Undressed body WITH loaded clothing DOES attach clothingScene and sets CREW_STAND_FLAG_CLOTHED (4).
+  writes.length = 0;
+  const batchClothed = createCrewContinuumBatch({
+    device: devDressed, pipelines: PfakeCloth, body: undressedBody, capacity: 2,
+    frame: {}, hull: {}, bones: {}, actor: {}, main: [], shadows: { uniform: {}, bind: () => ({}) },
+  });
+  assert.ok(batchClothed.clothingScene != null);
+  batchClothed.update([{}]);
+  const clothedStand = writes.findLast((w) => w.label === 'crew continuum sailor-male stand');
+  assert.equal((clothedStand.words[3] & CREW_STAND_FLAG_CLOTHED), CREW_STAND_FLAG_CLOTHED, 'CREW_STAND_FLAG_CLOTHED set when modular clothing active');
+
+  // 5. SHA-256 verification rejects tampered compressed stream by default.
+  const devTamper = makeMockDevice();
+  const tamperedFetch = async (url, init) => {
+    const res = await fetchCrewContinuumAsset(url, init);
+    if (init?.method === 'HEAD' || !url.endsWith('albedo.bc7.bin.gz')) return res;
+    const raw = Buffer.from(zlib.gunzipSync(Buffer.from(await res.arrayBuffer())));
+    raw[0] ^= 0xff;
+    return new Response(zlib.gzipSync(raw));
+  };
+  await assert.rejects(
+    loadCrewContinuumBody(devTamper, 'sailor-male', { fetchAsset: tamperedFetch, mobile: true }),
+    /failed verification/,
+    'tampered stream rejected by default SHA-256 check',
+  );
+  const devOptOut = makeMockDevice();
+  const loadedOptOut = await loadCrewContinuumBody(devOptOut, 'sailor-male', { fetchAsset: tamperedFetch, mobile: true, verifySha256: false });
+  assert.equal(loadedOptOut.id, 'sailor-male', 'explicit verifySha256: false opts out cleanly');
+});

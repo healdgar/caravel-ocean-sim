@@ -63,6 +63,7 @@ export function packContinuumWindBones({ bone0, bone1 = bone0, weight0 = 1, phas
 
 defineContinuumKind(CONTINUUM_KIND.WIND, {
   name: 'Wind',
+  errorScale: true,
   wgsl: () => {
     const wind = CONTINUUM_STREAMS.find((s) => s.name === 'wind'), F = CONTINUUM_WIND_FORM;
     return /* wgsl */`
@@ -239,6 +240,23 @@ fn continuumWindSphere(record:ContinuumRecord,data:u32,part:u32,sphere:vec4f)->v
   var reach=continuumWindReach(u32(gust.x),s);
   if(gust.y>=0.0&&gust.z>0.0){reach=max(reach,continuumWindReach(u32(gust.y),s));}
   return vec4f(s.xyz,s.w+reach+${(CONTINUUM_WIND_FLUTTER * 1.6).toFixed(4)}/max(record.place.w,0.85));
+}
+// Perspective foreshortening of vertical relief on a draped surface: at grazing views (sinT -> 1) 100% of vertical
+// relief faces the eye; looking straight down (cosT -> 1) only slender edge width faces the eye so coarse/2D layers
+// take over cleanly without any family-specific branch inside continuum-cut.js.
+fn continuumWindErrorScale(record:ContinuumRecord,data:u32,toEye:vec3f)->f32 {
+  let form=u32(round(continuumPoses[data].w));
+  if(form!=${F.DRAPED}u){return 1.0;}
+  let model=continuumTypeOf(record);
+  let stretch=continuumStretch(record);
+  let dh=continuumPoses[data+1u]*stretch.y;
+  let patchSpan=max(continuumTypeF(model,${CONTINUUM_TYPE.span}u)*max(stretch.x,1e-3),1e-3);
+  let faceN=continuumQuat(record.turn,normalize(vec3f(-0.5*(dh.y-dh.x+dh.w-dh.z)/patchSpan,1.0,-0.5*(dh.z-dh.x+dh.w-dh.y)/patchSpan)));
+  let cosT=abs(dot(toEye,faceN));
+  let sinT=sqrt(max(1.0-cosT*cosT,0.0));
+  let angleErr=sqrt(0.0064*cosT*cosT+sinT*sinT);
+  let reliefScale=clamp(stretch.y*record.place.w/max(continuumScale(record),1e-3),0.01,1.0);
+  return max(angleErr*reliefScale,0.02);
 }
 `;
   },

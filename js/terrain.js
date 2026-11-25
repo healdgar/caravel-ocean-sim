@@ -15,7 +15,7 @@ import {layPortProps} from './port-props.js';
 import {bakedBoardFor,oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard,runtimeBoardPortKey,syncOldWorldHeights} from './old-world.js';
 import {nativeOwnGroundFor} from './native-towns.js';
 import {boardAsKept,keptBoard} from './board-keep.js';
-import {bakedBoardAsset} from './board-model.js';
+import {bakedBoardAsset,resolveBakedBoardYear} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
 import {createLivestockHerds} from './herds.js';
@@ -1113,14 +1113,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     useProcedural&&!isMobile?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
   // An Old World city is the board Castle and Commons' model founded for its port ahead of time: the board is fetched
   // while the rest loads, and handed over before the land is made. A city whose board is missing has no town.
-  const bakedBoardPath=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?bakedBoardAsset(regionParam,resolvedYear):null;
+  const bakedBoardYear=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?resolveBakedBoardYear(regionParam,resolvedYear):null;
+  const bakedBoardPath=bakedBoardYear!=null?bakedBoardAsset(regionParam,bakedBoardYear):null;
   const runtimeKeepKey=!bakedBoardPath&&useProcedural&&search.get('board')!=='off'&&!placement?runtimeBoardPortKey({id:regionParam||undefined,latitude:targetLat,longitude:targetLon}):null;
   // If the model has lived here since (js/board-keep.js), the land is laid from the board as the traveller left it:
   // whatever was built, burnt or thrown down while they were away is there on their return, never changed in sight.
   // `boardKept` is {clock, dateMs}: whose calendar the kept world must be of, and the game's date now.
   const bakedBoardPromise=bakedBoardPath?Promise.all([fetch(bakedBoardPath).then(response=>response.ok?response.json():null).catch(()=>null),
-    boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionParam,resolvedYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs))
-    :(runtimeKeepKey&&boardKept?keptBoard(runtimeKeepKey,resolvedYear,{clock:boardKept.clock}).then(kept=>kept?.board?{port:runtimeKeepKey,year:resolvedYear,board:kept.board,lived:{day:kept.day,days:0,keptAt:kept.keptAt??null}}:null).catch(()=>null):null);
+    boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionParam,bakedBoardYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs))
+    :(runtimeKeepKey&&boardKept?keptBoard(runtimeKeepKey,resolvedYear,{clock:boardKept.clock}).then(kept=>kept?.board?{port:runtimeKeepKey,year:kept.year??resolvedYear,board:kept.board,lived:{day:kept.day,days:0,keptAt:kept.keptAt??null}}:null).catch(()=>null):null);
   if(bakedBoardPath||runtimeKeepKey)requestBoardStampPipelines({device,shader}).catch(()=>{});
   const useCompactScenery=isMobile||(device.limits?.maxStorageBufferBindingSize??Infinity)<256*1024*1024;
   let forestFailure=null;
@@ -1156,7 +1157,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const placedX=Number.isFinite(placement?.x)?Number(placement.x):Number.isFinite(explicitObj?.x)?Number(explicitObj.x):undefined;
   const placedZ=Number.isFinite(placement?.z)?Number(placement.z):Number.isFinite(explicitObj?.z)?Number(explicitObj.z):undefined;
   const hasPlacementOverride=placedX!==undefined||placedZ!==undefined;
-  const proceduralSpec=isKnownSpanishMain&&!hasPlacementOverride&&resolvedYear===1550
+  const proceduralSpec=isKnownSpanishMain&&!hasPlacementOverride&&(resolvedYear===1550||bakedBoardYear===1550)
     ?regionParam
     :{
       ...(effectivePreset||{}),
@@ -1618,7 +1619,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const baked=await bakeContinuumCardAtlas({
         device,shader,renderer:cardRenderer,atlas,material:cityView.material,
         typeIds:placedTypes,bakeGroup0Entries,cellSize,gridSize,tintMode:CONTINUUM_CARD_TINT_CITY,salt:1,
-        batchSize:6,isCancelled:()=>made!==cityContinuumMade||terrainDisposed,label:'city cards',
+        aboveGround:true,batchSize:8,isCancelled:()=>made!==cityContinuumMade||terrainDisposed,label:'city cards',
       });
       if(!baked)return;
       if(made!==cityContinuumMade||terrainDisposed){baked.destroy();return;}

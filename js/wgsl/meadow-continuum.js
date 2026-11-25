@@ -386,7 +386,7 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
   let seen = (cfg.scene.z <= 0.0 || nearDist < cfg.scene.z)
     && !meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach)
     && (dist <= reach * 1.4 + 10.0 || !continuumHiZOccluded(centre, reach + 2.0, false));
-  let lit = (cfg.scene.w <= 0.0 || nearDist <= cfg.scene.w) && meadowInLight(centre, reach);
+  let lit = meadowInLight(centre, reach);
   if (!seen && !lit) { return; }
   let band = u32(clamp(floor(log2(max(nearDist, 8.0) / 8.0) * 3.0), 0.0, f32(MEADOW_BANDS - 1u)));
   let most = bitcast<u32>(data.w);
@@ -398,15 +398,16 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
 
 // The grain of each band, the nearest first: the finest that fits the records, as far out as it can go. Bands from s
 // out are coarsened, their grain doubling every three bands (an octave) beyond s; the search takes the farthest s
-// whose bands' counts fit, so the near bands keep every patch and an overflow coarsens only the far. Each count is an
-// upper bound of the records its blocks take at that grain, so no patch is ever stood past the scene's capacity.
+// whose bands' counts fit, so the near bands keep every patch and an overflow coarsens cleanly down to grain 16
+// without ever dropping patches past capacity.
 fn meadowGrainFrom(band: u32, s: i32) -> u32 { return select(u32(min((i32(band) - s) / 3 + 1, i32(MEADOW_GRAINS) - 1)), 0u, i32(band) < s); }
 @compute @workgroup_size(1) fn meadowStandBudget() {
-  // Size the fine grain=1 (4 m) radius directly from the live grazing perspective cutoff so tuning pixel error
-  // from 1 px ("best") to coarser budgets keeps 3D cluster patches at grain=1 while coarsening pure 2D bands beyond.
-  let grazingDist = 0.145 * meadowFocal() / max(cfg.scene.x, 1.0);
-  var s = i32(clamp(ceil(log2(max(grazingDist, 32.0) / 8.0) * 3.0), 6.0, 12.0));
-  for (; s > 6; s--) {
+  // Size the fine grain=1 (4 m) radius from the true farError grazing handoff (~327 m at 1.5 px) and allow
+  // coarsening all the way down to -3 * MEADOW_GRAINS so wide vistas never overflow and drop meadow patches.
+  let grazingDist = 0.35 * meadowFocal() / max(cfg.scene.x, 1.0);
+  let minS = -i32(MEADOW_GRAINS) * 3;
+  var s = i32(clamp(ceil(log2(max(grazingDist, 32.0) / 8.0) * 3.0), 6.0, f32(MEADOW_BANDS)));
+  for (; s > minS; s--) {
     var total = 0u;
     for (var b = 0u; b < MEADOW_BANDS; b++) { total += atomicLoad(&meadowBlockWork[MEADOW_COUNTS + b * MEADOW_GRAINS + meadowGrainFrom(b, s)]); }
     if (total <= cfg.params.z) { break; }
@@ -700,10 +701,10 @@ fn meadowParallaxSward(
   cosV: f32
 ) -> MeadowParallaxHit {
   // Strict Nyquist band-limiting per stalk scale so each octave fades cleanly into its exact mean before aliasing:
-  let wBlade = 1.0 - smoothstep(0.014, 0.048, footPixel); // ~4.5 cm individual blade needles (near/mid top-down & mid grazing)
-  let wStalk = 1.0 - smoothstep(0.036, 0.125, footPixel); // ~10 cm crisp stalk & seed-head tufts (~15..95 m)
-  let wTuft  = 1.0 - smoothstep(0.11, 0.38, footPixel);   // ~28 cm wild oat / fescue pockets (~30..300 m)
-  let wSward = 1.0 - smoothstep(0.45, 1.85, footPixel);   // ~1.1 m organic pasture density & shade (~100 m..1.5 km)
+  let wBlade = 1.0 - smoothstep(0.016, 0.056, footPixel); // ~4.5 cm individual blade needles (near/mid top-down & mid grazing)
+  let wStalk = 1.0 - smoothstep(0.055, 0.21, footPixel);  // ~10 cm crisp stalk & seed-head tufts through ~300 m grazing views
+  let wTuft  = 1.0 - smoothstep(0.16, 0.56, footPixel);   // ~28 cm wild oat / fescue pockets (~60..500 m)
+  let wSward = 1.0 - smoothstep(0.50, 2.10, footPixel);   // ~1.1 m organic pasture density & shade (~120 m..1.8 km)
   let detailEnergy = clamp(wBlade * 0.34 + wStalk * 0.34 + wTuft * 0.22 + wSward * 0.10, 0.0, 1.0);
 
   let cV = clamp(cosV, 0.04, 1.0);
@@ -781,7 +782,7 @@ fn meadowColourOf(word: u32) -> vec3f { let root = unpack4x8unorm(word).rgb; ret
 fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>) {
   let seed = s.record.tag.z;
   let splat = s.what == CONTINUUM_SPLAT_ENTRY;
-  let cluster = s.what == CONTINUUM_CLUSTER_ENTRY;
+  let cluster = s.what == CONTINUUM_CLUSTER_ENTRY || s.what == CONTINUUM_SURFEL_ENTRY;
   // A splat is read at its patch's middle; every other corner where it stands.
   let at = select(s.world.xz, continuumPlace(s.record, vec3f(MEADOW_PATCH * 0.5, 0.0, MEADOW_PATCH * 0.5)).xz, splat);
   let eye = continuumEye();
@@ -906,7 +907,7 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let gust = clamp(v.blade.y, 0.0, 1.0);
   let swell = v.blade.z;
   let bendSlope = clamp(v.harm.y, 0.0, 1.0);
-  let isContinuum = v.coverage.x != CONTINUUM_CLUSTER_ENTRY;
+  let isContinuum = v.coverage.x != CONTINUUM_CLUSTER_ENTRY && v.coverage.x != CONTINUUM_SURFEL_ENTRY;
 
   let dist = v.flow.z;
   let unshiftedWorldXZ = v.world.xz;

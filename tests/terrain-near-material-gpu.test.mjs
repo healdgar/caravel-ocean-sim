@@ -13,12 +13,17 @@ test('near-coast material preserves fine colour and samples dry landward cliff s
     const page=await browser.newPage();await page.route('**/__near_material_gpu',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto('http://127.0.0.1:'+server.address().port+'/__near_material_gpu');
     const result=await page.evaluate(async()=>{
-      const {TERRAIN,TERRAIN_FILTERING,TERRAIN_NEAR_MATERIAL}=await import('/js/wgsl/terrain.js');
+      const {TERRAIN_LAND,TERRAIN_CITY,TERRAIN_FILTERING,TERRAIN_NEAR_MATERIAL}=await import('/js/wgsl/terrain.js');
+      const {withNeuralPbrLand,withNeuralPbrCity}=await import('/js/wgsl/neural-pbr.js');
+      const {landContinuumMaterial}=await import('/js/wgsl/land-continuum.js');
+      const {cityContinuumMaterial}=await import('/js/wgsl/city-continuum.js');
+      const {continuumModuleWGSL}=await import('/js/wgsl/continuum-cut.js');
       const {NOISE_WGSL}=await import('/js/wgsl/common.js'),{RGBA8_MIPS}=await import('/js/wgsl/sim.js');
       const adapter=await navigator.gpu.requestAdapter();if(!adapter)throw Error('WebGPU adapter unavailable');
       const d=await adapter.requestDevice(),errors=[];d.onuncapturederror=e=>errors.push(e.error.message);
       const compile=async code=>{const module=d.createShaderModule({code}),bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
-      await compile(TERRAIN);
+      await compile(continuumModuleWGSL({pass:'view',material:landContinuumMaterial(withNeuralPbrLand(TERRAIN_LAND))}));
+      await compile(continuumModuleWGSL({pass:'view',material:cityContinuumMaterial(withNeuralPbrCity(TERRAIN_CITY))}));
       const code=NOISE_WGSL+TERRAIN_FILTERING+`
 struct NearLand {domain:vec4f,grid:vec4f};
 struct Settings {world:vec4f,normal:vec4f,dx:vec4f,dy:vec4f,coarse:vec4f};

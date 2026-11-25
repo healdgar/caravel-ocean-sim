@@ -11,10 +11,11 @@ import { createAdaptivePolygons } from '../js/resolution.js';
 
 test('one scene scalar: the governor starts at the core\'s base error and the core holds what it sets', () => {
   assert.equal(createAdaptivePolygons('auto').pixelError, CONTINUUM_BASE_PIXEL_ERROR);
-  assert.equal(setContinuumPixelError(6), 6);
-  assert.equal(continuumPixelError(), 6);
+  const doubled = CONTINUUM_BASE_PIXEL_ERROR * 2;
+  assert.equal(setContinuumPixelError(doubled), doubled);
+  assert.equal(continuumPixelError(), doubled);
   assert.equal(continuumCoarsening(), 2);
-  assert.equal(setContinuumPixelError(Number.NaN), 6, 'a bad value leaves the scalar as it was');
+  assert.equal(setContinuumPixelError(Number.NaN), doubled, 'a bad value leaves the scalar as it was');
   setContinuumPixelError(CONTINUUM_BASE_PIXEL_ERROR);
   assert.equal(continuumCoarsening(), 1);
 });

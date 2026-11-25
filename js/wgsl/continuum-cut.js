@@ -31,6 +31,7 @@ import {
   CONTINUUM_IMPORTANT_FLAG, CONTINUUM_SHATTERED, CONTINUUM_DAMAGED, CONTINUUM_STRETCHED, CONTINUUM_STREAMS, CONTINUUM_SURFACE_RANGE,
   CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY, CONTINUUM_SURFEL_ENTRY,
   CONTINUUM_SURFEL_HEADER_WORDS, CONTINUUM_SURFEL_WORDS, CONTINUUM_SURFEL_SCALE_MAX,
+  CONTINUUM_SURFEL_ORGANIC_FLAG, CONTINUUM_SURFEL_COUNT_MASK,
 } from '../continuum-format.js';
 import { continuumKindsWGSL } from './continuum-kinds.js';
 import { CONTINUUM_GROUNDED, continuumGroundWGSL } from '../continuum-ground.js';
@@ -59,8 +60,8 @@ const CONTINUUM_KEPT_WORDS = (CONTINUUM_KEPT_ITERS / 4) * CONTINUUM_WORKGROUP;
 export const CONTINUUM_STATE_ENTRIES = 3;
 // How each draw reads its list: the list buffer bound as an instance-rate vertex buffer at the list's first entry.
 export const CONTINUUM_ENTRY_LAYOUT = Object.freeze([Object.freeze({ arrayStride: 8, stepMode: 'instance', attributes: Object.freeze([Object.freeze({ shaderLocation: 0, offset: 0, format: 'uint32x2' })]) })]);
-// How many shadow-map texels a shadow's cut may be in error.
-export const CONTINUUM_SHADOW_TEXELS = 1.5;
+// How many shadow-map texels a shadow's cut may be in error (matches the 2x2 hardware PCF shadow filter footprint).
+export const CONTINUUM_SHADOW_TEXELS = 2.0;
 // What a shadow pass casts: 'whole' every surface, opaque or cut (a leaf's coverage); a ship's own maps hold her
 // 'solid' surfaces apart from her 'canvas', whose depth and the colour it lets through go to a map of their own.
 export const CONTINUUM_SHADOW_PARTS = Object.freeze(['whole', 'solid', 'canvas']);
@@ -510,35 +511,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
         let aimed=aim.w>0.0&&length(relative+F.camPos.xyz-aim.xyz)<=reach+aim.w;
         let isImportant=aimed||continuumFlagged(record,${important >>> 0}u);
         if(maxDist<=0.0||nearDist<maxDist||isImportant){
-          // For surface-draped parallax layers (GROUNDED + WIND + STRETCHED, e.g. meadow sward), the visible
-          // difference between 3D relief and the 2D parallax volumetric shell depends on the eye's perspective angle
-          // to the draped triangle face normal N (cosT = |dot(V, N)|):
-          //   - Looking straight down (cosT -> 1, "as the crow flies"): vertical blades foreshorten to 0; only
-          //     micro-width (~0.05x height) differs, so 2D parallax takes over seamlessly as soon as blades < allowedPx.
-          //   - Grazing along the face or over a ridge crest (cosT -> 0, sinT -> 1): side-on blade profile and
-          //     parallax step error (~0.20*sinT, rising +35% below 15 deg where parallax clamps) stay visible farther
-          //     out and remain 3D strictly until their projected screen difference drops below allowedPx (1 px at best,
-          //     tunable to worst via the shared scene pixel threshold).
-          // Scaling vertical relief by (tall / scale) also ensures horizontal grain coarsening never re-inflates height.
-          let lowGrounded=continuumFlagged(record,CONTINUUM_GROUNDED)&&continuumKindOf(record)==${CONTINUUM_KIND.WIND}u&&continuumFlagged(record,CONTINUUM_STRETCHED);
-          var perspectiveFactor=1.0;
-          if(lowGrounded){
-            let stretch=continuumStretch(record);
-            let data=continuumKindData(record);
-            let dh=continuumPoses[data+1u]*stretch.y;
-            let patchSpan=max(continuumTypeF(model,${CONTINUUM_TYPE.span}u)*max(stretch.x,1e-3),1e-3);
-            let faceN=continuumQuat(record.turn,normalize(vec3f(-0.5*(dh.y-dh.x+dh.w-dh.z)/patchSpan,1.0,-0.5*(dh.z-dh.x+dh.w-dh.y)/patchSpan)));
-            let cosT=abs(dot(normalize(-relative),faceN));
-            let sinT=sqrt(max(1.0-cosT*cosT,0.0));
-            // Pure face-vs-edge perspective visibility:
-            //   - Grazing / walking (sinT -> 1): 100% of vertical blade face height is visible (1.0), preserving
-            //     full crisp 3D blades in front of the player with zero artificial near-field coarsening.
-            //   - Top-down / "as the crow flies" (cosT -> 1, sinT -> 0): only the ~1.5 cm blade edge (~0.06x height)
-            //     faces the eye, so 2D takes over immediately once blade edges fall <= allowedPx.
-            let angleErr=sqrt(0.0036*cosT*cosT+sinT*sinT);
-            let reliefScale=clamp(stretch.y*record.place.w/max(scale,1e-3),0.01,1.0);
-            perspectiveFactor=max(angleErr*reliefScale,0.015);
-          }
+          let perspectiveFactor=continuumErrorScale(record,-relative/away);
           let pixels=select(continuumProfilePixels(continuumView.scene.x,isImportant,away,continuumView.curve)/perspectiveFactor,0.0,continuumFlagged(record,CONTINUUM_EXACT));
           let steps=continuumType(model,${CONTINUUM_TYPE.stepCount}u);
           // The far body is drawn from the first step no heavier than the clusters' coarsest cut; finer is theirs.
@@ -551,15 +524,18 @@ fn continuumTry(slot:u32,i:u32)->u32 {
           let detail=min(continuumType(model,${CONTINUUM_TYPE.flags}u)>>${CONTINUUM_TYPE_DETAIL_SHIFT}u,clusterCount);
           tries.z=first;tries.w=detail;
           cut=vec4f(focal,pixels,scale,0.0);
-          // Its shadow, cut coarse enough for the shadow map (and bounded by the family profile's shadow floor/range),
-          // is cast whether it is seen or not.
-          let shadowMaxDist=continuumView.limits.w;
-          if(continuumView.counts.z!=0u&&(shadowMaxDist<=0.0||nearDist<=shadowMaxDist||isImportant)){
+          // Its shadow, cut coarse enough for the shadow map, is bounded solely by the shadow-map frustum (zero hard
+          // per-family shadow range cutoffs). Objects shorter than 1.5 shadow-map texels cannot resolve a shadow in
+          // the map and skip sub-texel shadow rasterization automatically.
+          let shadowStretch=continuumStretch(record);
+          let shadowHeight=2.0*continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*shadowStretch.y*record.place.w;
+          if(continuumView.counts.z!=0u&&(shadowHeight>=SH.texel.x*1.5||continuumFlagged(record,CONTINUUM_EXACT))){
             let light=SH.lightView*vec4f(world-SH.origin.xyz,1.0);
             let r=reach*vec3f(length(vec3f(SH.lightView[0].x,SH.lightView[1].x,SH.lightView[2].x)),length(vec3f(SH.lightView[0].y,SH.lightView[1].y,SH.lightView[2].y)),length(vec3f(SH.lightView[0].z,SH.lightView[1].z,SH.lightView[2].z)));
             if(abs(light.x)<=1.0+r.x&&abs(light.y)<=1.0+r.y&&light.z>= -r.z&&light.z<=1.0+r.z){
               let shadowFloor=select(continuumView.limits.z,0.0,continuumFlagged(record,CONTINUUM_EXACT));
-              let allowed=max(max(CONTINUUM_SHADOW_TEXELS*SH.texel.x,shadowFloor),pixels*away/focal)/scale;
+              let lightPerspective=continuumErrorScale(record,normalize(SH.sun.xyz+vec3f(0.0,1e-5,0.0)));
+              let allowed=max(max(CONTINUUM_SHADOW_TEXELS*SH.texel.x/lightPerspective,shadowFloor),pixels*away/focal)/scale;
               if(!alone){shadowShare=u32(round(continuumHandoff(allowed,farError)*255.0));}
               if(shadowShare>0u){
                 for(var j=0u;j<CONTINUUM_LEVELS;j++){
@@ -574,8 +550,9 @@ fn continuumTry(slot:u32,i:u32)->u32 {
           }
           // Afloat, the earth's curve does not bend it: the sea's own surface is drawn flat about the eye.
           let sea=continuumFlagged(record,CONTINUUM_SEA);
-          let hiZWorld=select(world,world+vec3f(0.0,0.9,0.0),lowGrounded);
-          let hiZReach=select(reach,reach+0.6,lowGrounded);
+          let groundSlack=select(0.0,min(reach*0.35,0.9),continuumFlagged(record,CONTINUUM_GROUNDED));
+          let hiZWorld=world+vec3f(0.0,groundSlack,0.0);
+          let hiZReach=reach+groundSlack*0.65;
           let viewVisible=!continuumOutside(select(earthCurve(relative,F.camPos.y),relative,sea),reach)
             &&(isImportant||continuumFlagged(record,CONTINUUM_EXACT)||away<=reach*1.4+4.0||!continuumHiZOccluded(hiZWorld,hiZReach,sea));
           if(viewVisible){
@@ -586,27 +563,32 @@ fn continuumTry(slot:u32,i:u32)->u32 {
               share=255u;splatShare=255u;splatScale=0.0;
             }else if(!alone){
               let surfelHdr=continuumSurfelHeader(model);
-              let hasSurfels=surfelHdr.y>0u&&!continuumFlagged(record,CONTINUUM_STRUCK);
+              let surfelCount=surfelHdr.y&${CONTINUUM_SURFEL_COUNT_MASK >>> 0}u;
+              let hasSurfels=surfelCount>0u&&!continuumFlagged(record,CONTINUUM_STRUCK);
               let singleSided=(continuumView.counts.w&0x80000000u)!=0u;
               let surfelAreaR=bitcast<f32>(surfelHdr.z)*scale*select(1.0,1.4142136,singleSided);
-              let effFarError=select(select(farError,farError*0.44,lowGrounded),bitcast<f32>(surfelHdr.w),hasSurfels);
+              let effFarError=select(farError,bitcast<f32>(surfelHdr.w),hasSurfels);
               var start=effFarError*scale*focal/max(pixels,1e-4);
               if(hasSurfels){
                 // Enforce hard pixel-scale ceiling: never activate surfels closer than where maxSurfels stays <= 1.35 px radius.
-                let minSurfelDist=(surfelAreaR/sqrt(max(f32(surfelHdr.y),1.0)))*focal/1.35;
+                let minSurfelDist=(surfelAreaR/sqrt(max(f32(surfelCount),1.0)))*focal/1.35;
                 start=max(start,minSurfelDist);
               }
-              let band=select(CONTINUUM_HANDOFF_BAND,0.65,lowGrounded&&!hasSurfels);
-              share=u32(round(clamp((away-start)/max(start*band,1e-6),0.0,1.0)*255.0));
+              share=u32(round(continuumHandoff(away,start)*255.0));
               let stretch=continuumStretch(record);
               let span=2.0*max(continuumTypeF(model,${CONTINUUM_TYPE.splatRx}u)*0.5*(stretch.x+stretch.z),continuumTypeF(model,${CONTINUUM_TYPE.splatRy}u)*stretch.y)*record.place.w*focal/away;
               let basePixels=continuumImportance(continuumView.scene.x,isImportant);
-              splatShare=u32(round(continuumProfileSplatShare(span,basePixels,continuumView.curve)*255.0));
+              let cardCellSize=continuumView.scene.w;
+              let hasCards=cardCellSize>0.5&&!continuumFlagged(record,CONTINUUM_STRUCK);
+              // Nyquist handoff derived directly from attached card cellSize (1.0 for 1-triangle horizon splats;
+              // ~0.45..0.68 * cellSize px for cellSize x cellSize octahedral cards, giving >=1.5x texel supersampling).
+              let cardScale=select(1.0,max(cardCellSize*0.13,1.0),hasCards);
+              let effCurve=vec4f(continuumView.curve.x,continuumView.curve.y,continuumView.curve.z*cardScale,continuumView.curve.w);
+              splatShare=u32(round(continuumProfileSplatShare(span,basePixels,effCurve)*255.0));
               // When relightable octahedral G-buffer cards are attached to this scene (continuumView.scene.w > 0.5):
               //   - With universal prefix micro-surfels, crisp clusters hand off to ~1.1 px micro-surfels (list 2),
               //     which then hand off seamlessly to the pixel-dense octahedral card (list 3) at far distance.
               //   - Without surfels, clusters hand off directly into the card across the MSAA band.
-              let hasCards=continuumView.scene.w>0.5&&!continuumFlagged(record,CONTINUUM_STRUCK);
               if(hasCards){
                 if(hasSurfels){share=max(share,splatShare);}
                 else{share=splatShare;splatShare=255u;}
@@ -621,10 +603,10 @@ fn continuumTry(slot:u32,i:u32)->u32 {
                     let nominalPx=max(CONTINUUM_BASE_PIXEL_ERROR*max(continuumView.curve.x,0.05),0.25);
                     let targetPx=clamp(1.05*sqrt(max(pixels/nominalPx,0.5)),0.98,1.48);
                     let baseRad=targetPx*away/max(focal,1e-4);
-                    let baseN=clamp((surfelAreaR*surfelAreaR)/max(baseRad*baseRad,1e-6),32.0,f32(surfelHdr.y));
+                    let baseN=clamp((surfelAreaR*surfelAreaR)/max(baseRad*baseRad,1e-6),32.0,f32(surfelCount));
                     for(var j=0u;j<CONTINUUM_LEVELS;j++){
                       let nJ=max(32.0,baseN/f32(1u<<j));
-                      let nCount=min(surfelHdr.y,u32(ceil(nJ)));
+                      let nCount=min(surfelCount,u32(ceil(nJ)));
                       if(j==0u){atomicAdd(&continuumCounted[2],nCount);}
                       let chunks=(nCount+${CONTINUUM_CHUNK_TRIANGLES - 1}u)/${CONTINUUM_CHUNK_TRIANGLES}u;
                       let at=continuumReserve(2u,chunks);
@@ -908,9 +890,11 @@ fn continuumEye()->vec3f { return F.camPos.xyz-continuumShift(); }
 fn continuumSurfelFill(s:ptr<function,ContinuumSurface>,record:ContinuumRecord,chunk:u32,vertex:u32,countFloat:f32,lift:vec3f)->bool {
   let model=(*s).model;
   let hdr=continuumSurfelHeader(model);
+  let surfelCount=hdr.y&${CONTINUUM_SURFEL_COUNT_MASK >>> 0}u;
+  let organicAspect=(hdr.y&${CONTINUUM_SURFEL_ORGANIC_FLAG >>> 0}u)!=0u;
   let sIdx=chunk*${CONTINUUM_CHUNK_TRIANGLES}u+vertex/3u;
   let nFloat=max(countFloat,1.0);
-  if(hdr.y==0u||sIdx>=hdr.y||f32(sIdx)>=nFloat){return false;}
+  if(surfelCount==0u||sIdx>=surfelCount||f32(sIdx)>=nFloat){return false;}
   let payloadBase=continuumAtlas[${CONTINUUM_HEADER.surfels}u]+continuumAtlas[${CONTINUUM_HEADER.typeCount}u]*${CONTINUUM_SURFEL_HEADER_WORDS}u;
   let at=payloadBase+(hdr.x+sIdx)*${CONTINUUM_SURFEL_WORDS}u;
   let vIdx=continuumWord(at);
@@ -939,9 +923,9 @@ fn continuumSurfelFill(s:ptr<function,ContinuumSurface>,record:ContinuumRecord,c
   var right=normalize(cross(refUp,toEye));
   var up=cross(toEye,right);
   var radX=rad;var radY=rad;
-  if(!singleSided){
+  if(organicAspect){
     // Area-preserving organic leaf/strand aspect (0.74 * 1.35 ~= 1.0) at a deterministic per-surfel angle so
-    // double-sided foliage/hair micro-surfels read as tiny natural leaves/strands rather than identical round dots.
+    // foliage/strand micro-surfels read as tiny natural leaves/strands while solid shells stay isotropic discs.
     let ang=f32(continuumHash(vIdx^(sIdx*2654435761u))&1023u)*(6.2831853/1024.0);
     let ca=cos(ang);let sa=sin(ang);
     let rRot=right*ca+up*sa;

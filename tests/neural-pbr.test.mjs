@@ -1,11 +1,10 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { before, after, test } from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
@@ -23,33 +22,21 @@ import { parseNeuralPbrLatentBinary } from '../js/neural-pbr.js';
 import {
   createNeuralPbrWGSL,
   withNeuralPbrVessel,
-  withNeuralPbrTerrain,
+  withNeuralPbrLand,
+  withNeuralPbrCity,
 } from '../js/wgsl/neural-pbr.js';
 import { CARAVEL } from '../js/wgsl/caravel.js';
 import { VESSEL_CONTINUUM_MATERIAL } from '../js/vessel-continuum.js';
-import { TERRAIN } from '../js/wgsl/terrain.js';
+import { TERRAIN_LAND, TERRAIN_CITY } from '../js/wgsl/terrain.js';
+import { landContinuumMaterial } from '../js/wgsl/land-continuum.js';
+import { cityContinuumMaterial } from '../js/wgsl/city-continuum.js';
 import { PROP_CONTINUUM_MATERIAL_SPEC } from '../js/wgsl/prop-continuum.js';
 import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
-import { createSubmergedShader } from '../js/water-optics.js';
+import { createSubmergedShader, waterCaptureWGSL, WATER_CAPTURE_DIRECTIVE } from '../js/water-optics.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 let pbrServer, pbrBrowser, pbrOrigin;
-
-async function importFromGitRef(ref, relPath) {
-  const src = execFileSync('git', ['show', `${ref}:${relPath}`], {
-    cwd: ROOT,
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  const baseDir = path.dirname(path.join(ROOT, relPath));
-  const rewritten = src.replace(
-    /(from\s+['"])(\.[^'"]+)(['"])/g,
-    (_m, pre, spec, post) => `${pre}${pathToFileURL(path.resolve(baseDir, spec)).href}${post}`
-  );
-  const b64 = Buffer.from(rewritten, 'utf8').toString('base64');
-  return import(`data:text/javascript;base64,${b64}`);
-}
 
 before(async () => {
   pbrServer = createDevServer();
@@ -116,39 +103,38 @@ test('WGSL transforms respect zero-sampled-texture budget, minification invarian
   assert.doesNotMatch(wgslBlock, /\btexture_2d\b|\btexture_cube\b|\bsampler\b/, 'NPBR must add zero textures/samplers');
   assert.doesNotMatch(wgslBlock, /\bdiscard\b/, 'NPBR must never introduce discard into opaque passes');
 
-  const baseSubTer = createSubmergedShader(TERRAIN, 'fs', 'in.world', true, true);
-  const npbrSubTer = createSubmergedShader(withNeuralPbrTerrain(TERRAIN), 'fs', 'in.world', true, true);
+  const captureTail = { directive: WATER_CAPTURE_DIRECTIVE, tail: o => waterCaptureWGSL({ ...o, surfaceWaves: true }) };
+  const baseSubLand = continuumModuleWGSL({ pass: 'capture', material: landContinuumMaterial(TERRAIN_LAND), capture: captureTail });
+  const npbrSubLand = continuumModuleWGSL({ pass: 'capture', material: landContinuumMaterial(withNeuralPbrLand(TERRAIN_LAND)), capture: captureTail });
+  const baseSubCity = continuumModuleWGSL({ pass: 'capture', material: cityContinuumMaterial(TERRAIN_CITY), capture: captureTail });
+  const npbrSubCity = continuumModuleWGSL({ pass: 'capture', material: cityContinuumMaterial(withNeuralPbrCity(TERRAIN_CITY)), capture: captureTail });
   const countTex = s => [...s.matchAll(/\bvar\s+\w+\s*:\s*texture_(?!storage)/g)].length;
-  assert.equal(countTex(npbrSubTer), countTex(baseSubTer), 'NPBR must add zero sampled textures to submerged terrain');
+  assert.equal(countTex(npbrSubLand), countTex(baseSubLand), 'NPBR must add zero sampled textures to submerged land');
+  assert.equal(countTex(npbrSubCity), countTex(baseSubCity), 'NPBR must add zero sampled textures to submerged city');
 
   const minify = src => src.replace(/\s+/g, ' ').replace(/ ?([{}()[\],;:=<>*&|^!%@.]) ?/g, '$1');
   assert.match(withNeuralPbrVessel(minify(CARAVEL)), /neuralPbrAnisoSpecular/);
-  assert.match(withNeuralPbrTerrain(minify(TERRAIN)), /evalNeuralPbr/);
+  assert.match(withNeuralPbrLand(minify(TERRAIN_LAND)), /evalNeuralPbr/);
+  assert.match(withNeuralPbrCity(minify(TERRAIN_CITY)), /evalNeuralPbr/);
   // The props' material writes the bank into its own shade: its composed view carries it with no rewriting.
   assert.match(continuumModuleWGSL({ pass: 'view', material: PROP_CONTINUUM_MATERIAL_SPEC }), /neuralPbrAnisoSpecular/);
 
   assert.throws(() => withNeuralPbrVessel('fn broken() {}'), /missing anchor/);
-  assert.throws(() => withNeuralPbrTerrain('fn broken() {}'), /missing anchor/);
+  assert.throws(() => withNeuralPbrLand('fn broken() {}'), /missing anchor/);
+  assert.throws(() => withNeuralPbrCity('fn broken() {}'), /missing anchor/);
 });
 
-test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero errors and isolates non-landSurface bindings', { timeout: 120000 }, async () => {
-  // Load actual `main` branch shader modules directly from git to prove zero-conflict portability!
-  const [mainCaravel, mainTerrain] = await Promise.all([
-    importFromGitRef('main', 'js/wgsl/caravel.js'),
-    importFromGitRef('main', 'js/wgsl/terrain.js'),
-  ]);
-
-  const mainVariants = {
-    caravel: withNeuralPbrVessel(mainCaravel.CARAVEL),
-    terrain: withNeuralPbrTerrain(mainTerrain.TERRAIN),
-  };
+test('WebGPU compiles live HEAD + submerged land/city/vessel/prop Neural PBR shaders with zero errors', { timeout: 120000 }, async () => {
+  const captureTail = { directive: WATER_CAPTURE_DIRECTIVE, tail: o => waterCaptureWGSL(o) };
 
   const headVariants = {
     caravel: withNeuralPbrVessel(CARAVEL),
     // The ships' continuum view wears the bank in her shading, damage and all (js/vessel-continuum.js).
     vessel: continuumModuleWGSL({ pass: 'view', material: VESSEL_CONTINUUM_MATERIAL }),
-    terrain: withNeuralPbrTerrain(TERRAIN),
-    terrainSubmerged: createSubmergedShader(withNeuralPbrTerrain(TERRAIN), 'fs', 'in.world', true, true),
+    land: continuumModuleWGSL({ pass: 'view', material: landContinuumMaterial(withNeuralPbrLand(TERRAIN_LAND)) }),
+    city: continuumModuleWGSL({ pass: 'view', material: cityContinuumMaterial(withNeuralPbrCity(TERRAIN_CITY)) }),
+    landSubmerged: continuumModuleWGSL({ pass: 'capture', material: landContinuumMaterial(withNeuralPbrLand(TERRAIN_LAND)), capture: captureTail }),
+    citySubmerged: continuumModuleWGSL({ pass: 'capture', material: cityContinuumMaterial(withNeuralPbrCity(TERRAIN_CITY)), capture: captureTail }),
     vesselSubmerged: createSubmergedShader(withNeuralPbrVessel(CARAVEL), 'fs', 'in.world', false, false),
     props: continuumModuleWGSL({ pass: 'view', material: PROP_CONTINUUM_MATERIAL_SPEC }),
   };
@@ -158,7 +144,7 @@ test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero 
     await page.route('**/__neural-pbr-compile', r => r.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
     await page.goto(pbrOrigin + '/__neural-pbr-compile');
 
-    const report = await page.evaluate(async ({ headSrcs, mainSrcs }) => {
+    const report = await page.evaluate(async ({ headSrcs }) => {
       const { withCelestialFrame } = await import('/js/wgsl/celestial.js');
       const { pruneWGSLFunctions } = await import('/js/wgsl-prune.js');
       const adapter = await navigator.gpu.requestAdapter();
@@ -182,15 +168,10 @@ test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero 
         errors.push(...res.errs);
         compiledHead[k] = res.mod;
       }
-      for (const [k, src] of Object.entries(mainSrcs)) {
-        const res = await compileCheck(`main.${k}`, src);
-        errors.push(...res.errs);
-      }
-
 
       await device.queue.onSubmittedWorkDone();
       return { errors, uncaptured };
-    }, { headSrcs: headVariants, mainSrcs: mainVariants });
+    }, { headSrcs: headVariants });
 
     assert.deepEqual(report.errors, [], `Shader compilation errors:\n${report.errors.join('\n')}`);
     assert.deepEqual(report.uncaptured, [], `Uncaptured WebGPU errors:\n${report.uncaptured.join('\n')}`);

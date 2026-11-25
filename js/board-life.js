@@ -116,7 +116,7 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
       // The world as the traveller left it, if this program kept one; else the world as it was founded (ahead of time or here).
       const left = kept ? await Promise.resolve().then(kept).catch(() => null) : null;
       if (runtime) {
-        const keptBytes = left?.world && left.port === baked.port && left.year === baked.year ? new Uint8Array(left.world) : null;
+        const keptBytes = left?.world && left.port === baked.port && (left.year === baked.year || ((left.clock ?? 'career') === 'career' && left.year <= baked.year)) ? new Uint8Array(left.world) : null;
         model = await open(baked.request, { world: keptBytes, fetchImpl });
         if (keptBytes && left.program && model.program !== left.program) {
           model.close();
@@ -127,7 +127,7 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
         model.on.fault = (fault) => state('failed', String(fault?.error || fault));
         const summary = await model.ready;
         const settledDay = Number.isFinite(summary?.day) ? summary.day : (left?.day ?? 0);
-        world = { program: model.program, day: settledDay, year: summary?.year ?? baked.year };
+        world = { program: model.program, day: settledDay, year: summary?.year ?? (life.resumed != null ? left.year : baked.year) };
         const foundedBoard = (life.resumed != null && left?.board) ? left.board : await model.hook('board');
         if (foundedBoard) await onFounded?.(foundedBoard);
         life.day = settledDay; told = settledDay; life.keptDay = settledDay; life.wanted = Math.max(life.wanted, settledDay);

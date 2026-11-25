@@ -139,3 +139,51 @@ test('the living world is kept as it goes, and taken up again from where it was 
   await afresh.start();
   assert.deepEqual(third.made.opened, [1, 2, 3, 4]); assert.equal(afresh.resumed, null);
 });
+
+test('kept career worlds survive 1551+ year rollovers for both baked epochs and unbaked runtime ports', async () => {
+  const idb = fakeIndexedDB();
+  const lisbon1550 = board({ day: 410 });
+  assert.equal(await keepBoard({ port: 'lisbon', year: 1550, program: 'the-program', day: 410, board: lisbon1550, world: Uint8Array.of(5, 4, 3) }, idb), true);
+  // 1551..1649 resolve to the 1550 baked epoch and find the kept 1550 career board without breaking the 1550 key.
+  assert.equal(boardKeepKey('lisbon', 1550), 'lisbon:1550:career');
+  assert.equal(boardKeepKey('lisbon', 1551), 'lisbon:1550:career');
+  assert.equal(boardKeepKey('lisbon', 1649), 'lisbon:1550:career');
+  assert.equal(boardKeepKey('lisbon', 1650), 'lisbon:1650:career');
+  assert.equal(boardKeepKey('lisbon', 1655), 'lisbon:1650:career');
+  const found1551 = await keptBoard('lisbon', 1551, { idb });
+  assert.equal(found1551?.day, 410);
+  assert.equal(found1551?.year, 1550);
+  assert.equal(await keptBoard('lisbon', 1650, { idb }), null, 'a later distinct baked epoch stays isolated');
+  // Applying the kept 1550 board on a 1551 game date preserves the living town.
+  const laid1551 = boardAsKept(baked(), found1551, Date.UTC(1551, 5, 1));
+  assert.equal(laid1551.board.day, 410);
+
+  // Single-epoch baked port (cadiz only has :1550) remains stable for 1551 and beyond.
+  assert.equal(await keepBoard({ port: 'cadiz', year: 1551, program: 'the-program', day: 390, board: board({ day: 390 }), world: Uint8Array.of(2, 1) }, idb), true);
+  assert.equal(boardKeepKey('cadiz', 1551), 'cadiz:1550:career');
+  assert.equal((await keptBoard('cadiz', 1550, { idb }))?.day, 390);
+  assert.equal((await keptBoard('cadiz', 1610, { idb }))?.day, 390);
+
+  // Unbaked runtime career port kept in 1550 is still found in 1551+, while earlier years and visit clocks stay isolated.
+  const sabaBoard = board({ day: 280 });
+  assert.equal(await keepBoard({ port: 'saba', year: 1550, program: 'the-program', day: 280, board: sabaBoard, world: Uint8Array.of(77, 120) }, idb), true);
+  assert.equal((await keptBoard('saba', 1550, { idb }))?.day, 280);
+  assert.equal((await keptBoard('saba', 1551, { idb }))?.day, 280);
+  assert.equal((await keptBoard('saba', 1555, { idb }))?.day, 280);
+  assert.equal(await keptBoard('saba', 1549, { idb }), null, 'career fallback never returns a world kept from a future year');
+  assert.equal(await keptBoard('saba', 1551, { clock: 'visit-a', idb }), null, 'visit clock stays isolated from career fallback');
+
+  // Runtime board-life resumes a kept 1550 career world when returning to the same unbaked port in 1551.
+  const runtimeModel = model();
+  const runtimeLife = createBoardLife({
+    baked: { port: 'saba', year: 1551, request: { seed: 7 }, runtime: true, world: null },
+    open: runtimeModel.open,
+    kept: () => keptBoard('saba', 1551, { idb }),
+    keep: (record) => keepBoard(record, idb),
+  });
+  await runtimeLife.start();
+  assert.equal(runtimeLife.state, 'alive');
+  assert.equal(runtimeLife.resumed, 280);
+  assert.deepEqual(runtimeModel.made.opened, [77, 120]);
+  runtimeLife.close();
+});

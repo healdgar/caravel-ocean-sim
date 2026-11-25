@@ -171,7 +171,12 @@ export const BAKED_BOARDS = Object.freeze({
   'malacca:1600': 'assets/boards/malacca-1600.json',
   'nagasaki:1550': 'assets/boards/nagasaki-1550.json',
 });
-export function bakedBoardAsset(port, year) { return BAKED_BOARDS[`${port}:${year}`] ?? null; }
+export function bakedBoardAsset(port, year, { exact = false } = {}) {
+  if (typeof port !== 'string' || !port) return null;
+  if (exact) return BAKED_BOARDS[`${port}:${year}`] ?? null;
+  const resolved = resolveBakedBoardYear(port, year, BAKED_BOARDS);
+  return resolved != null ? BAKED_BOARDS[`${port}:${resolved}`] ?? null : null;
+}
 // And the whole world each was founded as: the model's own save of everything it holds, frozen on its first day.
 // The game takes it up in a worker and lets it live; nothing of it was chosen or left out.
 export const BAKED_WORLDS = Object.freeze({
@@ -223,7 +228,64 @@ export const BAKED_WORLDS = Object.freeze({
   'malacca:1600': 'assets/boards/malacca-1600.world',
   'nagasaki:1550': 'assets/boards/nagasaki-1550.world',
 });
-export function bakedWorldAsset(port, year) { return BAKED_WORLDS[`${port}:${year}`] ?? null; }
+function indexBakedEpochs(table) {
+  const byPort = new Map();
+  for (const key of Object.keys(table)) {
+    const sep = key.lastIndexOf(':');
+    if (sep <= 0) continue;
+    const port = key.slice(0, sep), y = Number(key.slice(sep + 1));
+    if (!Number.isFinite(y)) continue;
+    let years = byPort.get(port);
+    if (!years) { years = []; byPort.set(port, years); }
+    years.push(y);
+  }
+  for (const years of byPort.values()) years.sort((a, b) => a - b);
+  return byPort;
+}
+const BAKED_BOARD_EPOCHS = indexBakedEpochs(BAKED_BOARDS);
+const BAKED_WORLD_EPOCHS = indexBakedEpochs(BAKED_WORLDS);
+
+function pickBakedEpochYear(years, year) {
+  if (!years?.length) return null;
+  let best = null;
+  for (let i = 0; i < years.length; i++) {
+    const y = years[i];
+    if (y === year) return y;
+    if (y <= year) best = y;
+    else break;
+  }
+  return best ?? years[0];
+}
+
+// Resolve a port's baked epoch for `year`: exact match if present, else the closest baked epoch <= year,
+// else the earliest baked epoch for that port (null if the port has no baked boards at all).
+// `source` may be a table object (default BAKED_BOARDS), a Map, or an iterable of `${port}:${year}` keys.
+export function resolveBakedBoardYear(port, year, source = BAKED_BOARDS) {
+  if (typeof port !== 'string' || !port) return null;
+  const target = year == null || year === '' ? NaN : Number(year);
+  if (!Number.isFinite(target)) return null;
+  if (source === BAKED_BOARDS) return pickBakedEpochYear(BAKED_BOARD_EPOCHS.get(port), target);
+  if (source === BAKED_WORLDS) return pickBakedEpochYear(BAKED_WORLD_EPOCHS.get(port), target);
+  if (!source) return null;
+  const keys = source instanceof Map ? source.keys() : (typeof source[Symbol.iterator] === 'function' ? source : Object.keys(source));
+  const prefix = `${port}:`;
+  const years = [];
+  for (const key of keys) {
+    if (typeof key !== 'string' || !key.startsWith(prefix)) continue;
+    const y = Number(key.slice(prefix.length));
+    if (Number.isFinite(y)) years.push(y);
+  }
+  if (!years.length) return null;
+  years.sort((a, b) => a - b);
+  return pickBakedEpochYear(years, target);
+}
+
+export function bakedWorldAsset(port, year, { exact = false } = {}) {
+  if (typeof port !== 'string' || !port) return null;
+  if (exact) return BAKED_WORLDS[`${port}:${year}`] ?? null;
+  const resolved = resolveBakedBoardYear(port, year, BAKED_WORLDS);
+  return resolved != null ? BAKED_WORLDS[`${port}:${resolved}`] ?? null : null;
+}
 
 function boardBase64(bytes) {
   let text = '';

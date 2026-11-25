@@ -58,11 +58,12 @@ test('the one cut, the crew\'s view of it, its capture under water, its stands a
       const groups = [0, 1, 2].map((g) => { try { return P.view.pipeline.getBindGroupLayout(g) ? 1 : 0; } catch { return -1; } });
       const view = continuumModuleWGSL({ pass: 'view', material: CREW_CONTINUUM_MATERIAL }).replace(/\/\/.*$/gm, '');
       await device.queue.onSubmittedWorkDone();
-      return { errors, compiled, groups, made: [P.programs.select, P.programs.shadow, P.view.pipeline, P.stand.afloat, P.stand.ashore, pose, capture].every(Boolean), discards: /\bdiscard\b/.test(view) };
+      return { errors, compiled, groups, made: [P.programs.select, P.programs.shadow, P.view.pipeline, P.stand.afloat, P.stand.ashore, P.hairView.pipeline, P.hairStand, P.clothingView.pipeline, P.clothingStand, pose, capture].every(Boolean), hairLoaded: Boolean(P.hair), hairError: P.hairError?.message ?? null, discards: /\bdiscard\b/.test(view) };
     }, programs.toString());
     assert.deepEqual(result.compiled, []);
     assert.deepEqual(result.errors, []);
     assert.ok(result.made);
+    assert.equal(result.hairLoaded, true, `hair continuum loaded (${result.hairError})`);
     assert.deepEqual(result.groups, [1, 1, 1]);
     assert.equal(result.discards, false, 'no main pass people are drawn by discards');
   } finally { await page.close(); }
@@ -168,6 +169,6 @@ test('a placed person is posed from the clips, wounded and worn, with who they a
     near(result.actor.slice(0, 16), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 0, 5, 1], 'where the record put them');
     near(result.actor.slice(16, 20), [0.5 * 0.55 + 0.2, 0.4 * 0.32, 0.3 * 0.32, 0.45], 'a shirt soaked through, and the wound in its w');
     near([result.actor[27], result.actor[31]], [1 + 0.06 + (2 / 7) * 0.32, 4.25], 'a woman with her bandage seed, in moisture slot 4 and her dress');
-    assert.equal(result.orders, 2 | (43 << 2), 'cut finer, and known by who they are');
+    assert.equal(result.orders, 2 | (43 << 9), 'cut finer, and known by who they are');
   } finally { await page.close(); }
 });

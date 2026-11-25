@@ -70,7 +70,10 @@ export function createCrewClipBatch(device, pipeline, model, joints, capacity, a
   const group = device.createBindGroup({ label: 'crew clip pose', layout: pipeline.getBindGroupLayout(0), entries: [paletteBuffer, info, stateBuffer, joints].map((buffer, binding) => ({ binding, resource: { buffer } })) });
   let any = false, count = 0;
   return {
+    stateBuffer,
+    clips,
     begin(people) { any = false; count = people; },
+    setGpuDriven(people) { count = people; any = people > 0; },
     set(index, idleSeconds, walkSeconds, walkWeight) {
       const at = index * 4;
       states[at] = crewClipFrame(clips[0], idleSeconds); states[at + 1] = crewClipFrame(clips[1], walkSeconds); states[at + 2] = walkWeight; states[at + 3] = CREW_CLIP_MODES.walk;

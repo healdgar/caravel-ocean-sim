@@ -346,3 +346,60 @@ test('the game\'s socket opens only to the game\'s own pages, and goes deaf to a
   const deaf = await knock(port, { origin: 'https://sixcailloux.com' }); assert.equal(deaf.closed, 4008); deaf.socket.destroy();
   assert.match(dm.errs, /too many wrong pairing codes/);
 });
+
+test('test environment DM API and Cloudflare deploy config isolate test R2 storage strictly from production', async (t) => {
+  const relay = await standInRelay();
+  t.after(() => relay.server.close());
+  const token = sessionFor('u_iso_1', 'iso@example.com');
+  relay.live.add(token);
+
+  const makeBucket = () => {
+    const kept = new Map();
+    return {
+      kept,
+      get: async (key) => (kept.has(key) ? { json: async () => JSON.parse(kept.get(key)) } : null),
+      put: async (key, value) => { kept.set(key, String(value)); },
+    };
+  };
+  const testBucket = makeBucket(), prodBucket = makeBucket();
+
+  // Test route handled directly under /waterworld-test/api/dm/ with keyPrefix='test/', never rewriting into /waterworld/.
+  const wrongBase = await handleDmApi(
+    new Request('https://www.sixcailloux.com/waterworld/api/dm/me', { headers: { authorization: 'Bearer ' + token } }),
+    { LANDFALL_CACHE: testBucket },
+    {},
+    { apiBase: '/waterworld-test/api/dm/', keyPrefix: 'test/', relay: relay.base },
+  );
+  assert.equal(wrongBase.status, 404, 'test DM handler rejects non-test base path');
+
+  const postTest = await handleDmApi(
+    new Request('https://www.sixcailloux.com/waterworld-test/api/dm/telemetry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+      body: JSON.stringify({ v: 1, session: 'test1234', events: [{ k: 'tool', tool: 'say', ms: 12 }] }),
+    }),
+    { LANDFALL_CACHE: testBucket },
+    {},
+    { apiBase: '/waterworld-test/api/dm/', keyPrefix: 'test/', relay: relay.base },
+  );
+  assert.equal(postTest.status, 200);
+  assert.deepEqual(await postTest.json(), { taken: 1 });
+  assert.equal(prodBucket.kept.size, 0, 'prod bucket receives nothing from test traffic');
+  assert.ok([...testBucket.kept.keys()].every((k) => k.startsWith('test/dm/')), `all test keys carry test/ prefix: ${[...testBucket.kept.keys()]}`);
+
+  const meTest = await handleDmApi(
+    new Request('https://www.sixcailloux.com/waterworld-test/api/dm/me', { headers: { authorization: 'Bearer ' + token } }),
+    { LANDFALL_CACHE: testBucket },
+    {},
+    { apiBase: '/waterworld-test/api/dm/', keyPrefix: 'test/', relay: relay.base },
+  );
+  assert.equal(meTest.status, 200);
+  assert.equal((await meTest.json()).calls, 1);
+
+  // Verify scripts/deploy-cloudflare.mjs binds separate R2 buckets and never rewrites test DM URLs to /waterworld.
+  const deploySrc = fs.readFileSync(new URL('../scripts/deploy-cloudflare.mjs', import.meta.url), 'utf8');
+  assert.match(deploySrc, /r2BucketName:\s*'waterworld-landfall-cache-test'/);
+  assert.match(deploySrc, /r2BucketName:\s*'waterworld-landfall-cache'/);
+  assert.match(deploySrc, /bucket_name:\s*target\.r2BucketName/);
+  assert.doesNotMatch(deploySrc, /dmUrl\.pathname\s*=\s*'\/waterworld'/);
+});

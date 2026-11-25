@@ -132,13 +132,15 @@ fn forestStandReach(skeleton:u32,sphere:vec4f)->f32{let h=forestPoses[skeleton];
 fn forestStandOwn(tree:u32,touched:bool,near:f32,lane:u32)->vec2f{
  let start=(tree*2654435761u)&${FOREST_WIND_OWN - 1}u;let stride=(((tree>>8u)*2u+1u)&${FOREST_WIND_OWN - 1}u);
  var slot=-1;
- for(var k=0u;k<12u;k++){let at=(start+k*stride)&${FOREST_WIND_OWN - 1}u;if(atomicLoad(&forestWindOwners[at])==tree+1u){slot=i32(at);break;}}
+ for(var k=0u;k<12u;k++){let at=(start+k*stride)&${FOREST_WIND_OWN - 1}u;if((atomicLoad(&forestWindOwners[at])&0x7fffffffu)==tree+1u){slot=i32(at);break;}}
  let now=forestWindState[0].x;
  if(slot<0&&touched){
   for(var k=0u;k<12u;k++){
    let at=(start+k*stride)&${FOREST_WIND_OWN - 1}u;
-   // Avoid atomicCompareExchangeWeak: Apple WebKit MSL codegen fails with "field may not be qualified with an address space".
-   if(atomicLoad(&forestWindOwners[at])==0u&&atomicMax(&forestWindOwners[at],tree+1u)==0u){
+   // Bit 31 (0x80000000u) is a race-free atomic claim lock (Apple WebKit MSL rejects atomicCompareExchangeWeak):
+   // only the single thread seeing bit 31 clear wins the slot; losers' atomicOr never mutates bits 0..30.
+   if((atomicOr(&forestWindOwners[at],0x80000000u)&0x80000000u)==0u){
+    atomicStore(&forestWindOwners[at],0x80000000u|(tree+1u));
     slot=i32(at);
     let source=${FOREST_WIND_STATE_BONES}u+lane*FOREST_WIND_BONES*2u;let into=${FOREST_WIND_STATE_BONES}u+(forestWind.counts.z*${FOREST_WIND_LANES}u+at)*FOREST_WIND_BONES*2u;
     for(var b=0u;b<FOREST_WIND_BONES*2u;b++){forestWindState[into+b]=forestWindState[source+b];}
@@ -178,9 +180,7 @@ var<workgroup>forestStandBase:u32;
    let coarseRadius=sphere.w*scale*1.35+6.0;
    let coarseRel=coarseCentre+shift-F.camPos.xyz;
    let coarseDist=length(coarseRel);
-   let shadowMaxDist=forestStand.limits.y;
-   let inShadowRange=shadowMaxDist<=0.0||max(coarseDist-coarseRadius,0.0)<=shadowMaxDist;
-   let inShadow=forestStand.counts.z!=0u&&inShadowRange&&forestStandShadowed(coarseCentre,coarseRadius);
+   let inShadow=forestStand.counts.z!=0u&&forestStandShadowed(coarseCentre,coarseRadius);
    let inView=!forestStandOutside(earthCurve(coarseRel,F.camPos.y),coarseRadius);
    if(inView||inShadow){
     felled=r.identity.w<0.0;wounded=r.identity.w>0.0;
@@ -233,7 +233,7 @@ var<workgroup>forestStandBase:u32;
      let radius=(sphere.w+sway*1.25+${(CONTINUUM_WIND_FLUTTER * 2).toFixed(3)})*scale+reach;
      let centre=position+forestStandTurn(yaw,sphere.xyz)*scale;
      let relative=centre+shift-F.camPos.xyz;
-     keep=!forestStandOutside(earthCurve(relative,F.camPos.y),radius)||(forestStand.counts.z!=0u&&inShadowRange&&forestStandShadowed(centre,radius));
+     keep=!forestStandOutside(earthCurve(relative,F.camPos.y),radius)||(forestStand.counts.z!=0u&&forestStandShadowed(centre,radius));
     }
    }
   }
@@ -366,9 +366,7 @@ var<workgroup>fbBase:u32;
    let shift=forestStand.shift.xyz;
    let rel=b.xyz+shift-F.camPos.xyz;
    let dist=length(rel);
-   let shadowMaxDist=forestStand.limits.y;
-   let inShadowRange=shadowMaxDist<=0.0||max(dist-b.w,0.0)<=shadowMaxDist;
-   let inShadow=forestStand.counts.z!=0u&&inShadowRange&&forestBlockShadowed(b.xyz,b.w);
+   let inShadow=forestStand.counts.z!=0u&&forestBlockShadowed(b.xyz,b.w);
    let inView=!forestBlockOutside(earthCurve(rel,F.camPos.y),b.w);
    if(inView||inShadow){
     keep=true;
@@ -501,7 +499,7 @@ fn forestWindCapsuleAt(c:ForestWindCapsule,at:vec3f,now:f32)->vec3f{
  forestWindState[0]=vec4f(now,select(dir,blown/max(speed,1e-5),speed>1e-4),speed*forestWind.tuning.x);
  forestWindState[1]=vec4f(dt,select(2.0,1.0,first),blown);
  for(var s=0u;s<${FOREST_WIND_OWN}u;s++){
-  if(atomicLoad(&forestWindOwners[s])==0u){continue;}
+  if((atomicLoad(&forestWindOwners[s])&0x7fffffffu)==0u){continue;}
   var own=forestWindState[2u+s];
   if(now<own.y){own.y=now;}
   let age=now-own.y;
@@ -596,7 +594,7 @@ fn forestWindStep(skeleton:u32,model:u32,toward:vec3f,speed:f32,gust:f32,phase:f
 @compute @workgroup_size(64)fn forestWindOwn(@builtin(global_invocation_id)id:vec3u){
  let types=forestWind.counts.z;
  if(id.x>=${FOREST_WIND_OWN}u||types==0u){return;}
- let owner=atomicLoad(&forestWindOwners[id.x]);
+ let owner=atomicLoad(&forestWindOwners[id.x])&0x7fffffffu;
  if(owner==0u){return;}
  let tree=forestRoots[owner-1u];let model=min(u32(max(tree.identity.x,0.0)),types-1u);
  let now=forestWindState[0].x;let dir=forestWindState[0].yz;let speed=forestWindState[0].w;

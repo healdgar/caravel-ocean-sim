@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { TERRAIN as TERRAIN_RENDER } from '../js/wgsl/terrain.js';
+import { TERRAIN_LAND, TERRAIN_CITY } from '../js/wgsl/terrain.js';
 import { CARAVEL as CARAVEL_RENDER } from '../js/wgsl/caravel.js';
 import { TOWN_CASUALTY_STAY_S } from '../js/wgsl/townsfolk.js';
 import { GARRISON_CASUALTY_STAY_S } from '../js/crew.js';
@@ -76,18 +76,18 @@ test('shader source audit: cobblestone, shoreline, and rope shaders enforce deri
   // which also feeds the highlight, before it lets go of the colour. Kind 16 keeps its own early damping.
   const paved = pavedStreetBlock();
   assert.equal((paved.match(/landSetts\(/g) ?? []).length, 4, 'a street is two sizes of sett, each read twice along the pixel');
-  assert.match(TERRAIN_RENDER, /fn landSetts\(p:vec2f\)->vec2f\{\s*let base=vec2i\(floor\(p\)\);[^}]*for\(var j=-1;j<2;j\+\+\)\{for\(var i=-1;i<2;i\+\+\)\{/, 'a sett is found among all nine cells about it, or the lattice shows as seams');
+  assert.match(TERRAIN_LAND, /fn landSetts\(p:vec2f\)->vec2f\{\s*let base=vec2i\(floor\(p\)\);[^}]*for\(var j=-1;j<2;j\+\+\)\{for\(var i=-1;i<2;i\+\+\)\{/, 'a sett is found among all nine cells about it, or the lattice shows as seams');
   assert.match(paved, /let midWeight=stoneMidFade\*\(1\.0-stoneFineFade\);/, 'the large stones stand in for the small and are never laid over them');
   assert.match(paved, /let majorXZ=select\(dy\.xz,dx\.xz,lx>=ly\);/, 'the two reads lie along the pixel\'s long side');
   assert.match(paved, /let setts=vec3f\([\d., ]+\)\*\(1\.0\+macroTone\+toneMix\)\*\(1\.0-mortarMix\);/, 'each stone has its own tone, and mortar lies between stones');
-  assert.match(TERRAIN_RENDER, /fn groundDetailTexel\([^)]*\)->vec4f\{[^}]*textureSampleGrad\(groundDetailTexture/, 'ground detail is read through its mip chain with the surface\'s own gradients');
+  assert.match(TERRAIN_LAND, /fn groundDetailTexel\([^)]*\)->vec4f\{[^}]*textureSampleGrad\(groundDetailTexture/, 'ground detail is read through its mip chain with the surface\'s own gradients');
   assert.ok(streetBumpFade(1) === 0 && streetBumpFade(0) === 1, 'street relief fades out with the pixel footprint');
   for (const size of ['stoneFineFade', 'stoneMidFade']) assert.ok(streetStoneFade(size, 1) === 0 && streetStoneFade(size, 0) === 1, `${size} fades the stones out with the pixel footprint`);
   assert.ok(streetFadeLimits('stoneBumpFade', 'anisoFoot')[1] < streetFadeLimits('stoneFineFade', 'roadFoot')[1] && streetFadeLimits('stoneFineFade', 'roadFoot')[1] < streetFadeLimits('stoneMidFade', 'roadFoot')[1], 'relief goes first, then the small stones, then the large');
   assert.ok(kind16BumpFade(1, 1) === 0 && kind16BumpFade(0, 1) === 1, 'Kind 16 relief fades out with the pixel footprint');
   assert.ok(
-    TERRAIN_RENDER.includes('rippleW=landDetailWeight') && TERRAIN_RENDER.includes('rippled=landDetailWeight(cycles)'),
-    'TERRAIN_RENDER must include landDetailWeight derivative filtering on beach & shoreline ripples'
+    TERRAIN_LAND.includes('rippleW=landDetailWeight') && TERRAIN_LAND.includes('rippled=landDetailWeight(cycles)'),
+    'TERRAIN_LAND must include landDetailWeight derivative filtering on beach & shoreline ripples'
   );
 
   // 2. 3-strand laid hemp hawser in caravel.js, which shades her rigging and her detail layer's lines alike
@@ -105,9 +105,9 @@ test('shader source audit: cobblestone, shoreline, and rope shaders enforce deri
 
 // The paved branch of a town way, as it ships.
 function pavedStreetBlock() {
-  const start = TERRAIN_RENDER.indexOf('if(paved>0.0){'), end = TERRAIN_RENDER.indexOf('albedo=mix(albedo*(1.0-trodden', start);
-  assert.ok(start > 0 && end > start, 'the paved street block is missing from the terrain shader');
-  return TERRAIN_RENDER.slice(start, end);
+  const start = TERRAIN_LAND.indexOf('if(paved>0.0){'), end = TERRAIN_LAND.indexOf('albedo=mix(albedo*(1.0-trodden', start);
+  assert.ok(start > 0 && end > start, 'the paved street block is missing from the land terrain shader');
+  return TERRAIN_LAND.slice(start, end);
 }
 // The fades the shipped shader applies, with their limits read from its source and not copied here.
 function streetFadeLimits(name, measure) {
@@ -128,7 +128,7 @@ function streetStoneFade(name, short, long = short) {
   return 1 - smoothstep(low, high, Math.max(Math.min(short, long), Math.max(short, long) * Number(share[1])));
 }
 function kind16BumpFade(footprint, upward) {
-  const found = /let cobbleBumpFade=archLodFade\*\(1\.0-smoothstep\(([\d.]+),([\d.]+),cobbleAniso\)\)\*smoothstep\(([\d.]+),([\d.]+),max\(abs\(n\.y\),([\d.]+)\)\);/.exec(TERRAIN_RENDER);
+  const found = /let cobbleBumpFade=archLodFade\*\(1\.0-smoothstep\(([\d.]+),([\d.]+),cobbleAniso\)\)\*smoothstep\(([\d.]+),([\d.]+),max\(abs\(n\.y\),([\d.]+)\)\);/.exec(TERRAIN_CITY);
   assert.ok(found, 'Kind 16 relief must fade with the pixel footprint and at grazing faces');
   const [low, high, steep, flat, least] = found.slice(1).map(Number);
   return (1 - smoothstep(low, high, footprint)) * smoothstep(steep, flat, Math.max(Math.abs(upward), least));

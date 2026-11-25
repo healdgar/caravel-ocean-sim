@@ -13,7 +13,7 @@ import { continuumGroundView } from './continuum-ground.js';
 import { continuumHiZView, continuumHiZUniform, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from './continuum-hiz.js';
 import {
   CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_CHUNK_TRIANGLES,
-  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, buildContinuumSurfels,
+  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, buildContinuumSurfels, computeContinuumTightSpheres,
 } from './continuum-format.js';
 import {
   CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_BATCH, CONTINUUM_STATE_ENTRIES,
@@ -200,7 +200,7 @@ function makeAtlasDestroy(pages) {
 // types can enter in the lists (continuumAtlasTypes): { pages, buffer (the first page, which holds its header and
 // types), types, destroy() }. Every scene of the one cut binds its atlas so, with programs of as many pages.
 // Appends per-cluster normal cones and optional universal prefix micro-surfels directly into GPU upload pages.
-export function uploadContinuumAtlas(device, words, label, { surfels = false } = {}) {
+export function uploadContinuumAtlas(device, words, label, { surfels = true } = {}) {
   const needCones = words[CONTINUUM_HEADER.cones] === 0 && words[CONTINUUM_HEADER.clusterCount] > 0;
   const cones = needCones ? buildContinuumClusterCones(words) : null;
   const conesAt = cones ? words.length : words[CONTINUUM_HEADER.cones];
@@ -210,6 +210,8 @@ export function uploadContinuumAtlas(device, words, label, { surfels = false } =
   const surfelWords = surfelBuild?.words?.length ? surfelBuild.words : null;
   const surfelsAt = surfelWords ? afterCones : words[CONTINUUM_HEADER.surfels];
   const totalWords = surfelWords ? afterCones + surfelWords.length : afterCones;
+  const tightSpheres = computeContinuumTightSpheres(words);
+  const aboveGroundSpheres = computeContinuumTightSpheres(words, { clipBelowY: -2.2 });
   const count = continuumAtlasPages(device, totalWords), { pageWords } = continuumAtlasPaging(device, count);
   const segments = [[0, words]];
   if (cones) segments.push([words.length, cones]);
@@ -241,7 +243,7 @@ export function uploadContinuumAtlas(device, words, label, { surfels = false } =
       if (sc > 0) types[t].farChunks = Math.max(types[t].farChunks, Math.ceil(sc / CONTINUUM_CHUNK_TRIANGLES));
     }
   }
-  return { pages, buffer: pages[0], types, destroy: makeAtlasDestroy(pages) };
+  return { pages, buffer: pages[0], types, tightSpheres, aboveGroundSpheres, destroy: makeAtlasDestroy(pages) };
 }
 
 // Where a scene of `capacity` instances keeps its lists in its one list buffer: CONTINUUM_STATE_ENTRIES entries an
@@ -367,7 +369,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       if (cardRenderer.paging !== paging) throw Error(`Card renderer paging (${cardRenderer.paging.pages}) does not match ${label} scene (${paging.pages})`);
       const dataGroup = group(cardRenderer.pipeline.getBindGroupLayout(2), dataAt(0));
       cards = { atlas: cardAtlas, renderer: cardRenderer, bindings: cardBindings, dataGroup };
-      setFloat(7, 1);
+      setFloat(7, Math.max(cardAtlas.cellSize || 64, 1));
     },
     // Instance `index`'s record (js/continuum-format.js writeContinuumRecord), on the CPU until sent.
     place(index, record) { onCPU(); writeContinuumRecord(words, floats, index, record); },

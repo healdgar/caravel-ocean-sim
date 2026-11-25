@@ -46,7 +46,7 @@ fn propContinuumAlbedo(v:ContinuumVarying)->vec3f {
   let layer=select(v.surface.x,0u,v.surface.x==PROP_CONTINUUM_PLAIN);
   let fine=textureSample(pigment,pigmentSampler,v.uv,layer).rgb;
   let coarse=textureSampleLevel(pigment,pigmentSampler,v.uv,layer,f32(v.surface.y)).rgb;
-  return select(select(fine,coarse,v.coverage.x!=CONTINUUM_CLUSTER_ENTRY),v.plain.rgb,v.surface.x==PROP_CONTINUUM_PLAIN);
+  return select(select(fine,coarse,v.coverage.x!=CONTINUUM_CLUSTER_ENTRY&&v.coverage.x!=CONTINUUM_SURFEL_ENTRY),v.plain.rgb,v.surface.x==PROP_CONTINUUM_PLAIN);
 }
 fn propContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let plain=v.surface.x==PROP_CONTINUUM_PLAIN;

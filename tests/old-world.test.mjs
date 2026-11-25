@@ -5,7 +5,6 @@ import {OLD_WORLD_CITIES,inIberia,oldWorldPeople,oldWorldCityNear,oldWorldCountr
 import {CITY_BLOCK_FLOATS,CITY_GROUND,CITY_ROOF,CITY_TREES,CITY_WALL,cityFootprintsOverlap} from '../js/old-world-city.js';
 import {streetEdgeAt} from '../js/town-streets.js';
 import {CITY_BUILDING_TYPES,CITY_CHURCH,CITY_FAMILIES,CITY_HOUSE_STOREYS,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPE_SLIGHT_FROM,cityFamilyOf,cityHouseType,compileCityBuildingTypes} from '../js/old-world-buildings.js';
-import {TERRAIN} from '../js/wgsl/terrain.js';
 import {readFileSync} from 'node:fs';
 
 // A straight shore along z=0 with the sea to the south, ground rising gently inland, and one

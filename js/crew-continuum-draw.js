@@ -15,13 +15,13 @@ import { continuumGroundView } from './continuum-ground.js';
 import { transcodeBC7Texture } from './bc7-transcode.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import {
-  CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, crewContinuumMissingMessage, crewContinuumRig, crewContinuumWear,
+  CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, CREW_CONTINUUM_MOBILE_ASSETS, crewContinuumMissingMessage, crewContinuumRig, crewContinuumWear,
   validateCrewContinuumManifest,
 } from './crew-continuum.js';
 import { hairContinuumShiftsFor, loadHairContinuum } from './hair-continuum.js';
 import { clothingInfoFor, loadClothingContinuum } from './clothing-continuum.js';
 import {
-  CLOTHING_CONTINUUM_MATERIAL, CREW_CONTINUUM_MATERIAL, CREW_CONTINUUM_POSE_VEC4S, HAIR_CONTINUUM_MATERIAL,
+  CLOTHING_CONTINUUM_MATERIAL, CREW_CONTINUUM_MATERIAL, CREW_CONTINUUM_POSE_VEC4S, CREW_STAND_FLAG_CLOTHED, HAIR_CONTINUUM_MATERIAL,
   crewContinuumClothingStandWGSL, crewContinuumHairStandWGSL, crewContinuumPoseWGSL, crewContinuumStandWGSL,
 } from './wgsl/crew-continuum.js';
 import { CREW_JOINT_COUNT } from './crew-skeleton.js';
@@ -49,18 +49,33 @@ const crewContinuumCodecs = Object.freeze([
   Object.freeze({ feature: null, format: 'rgba8unorm-srgb', stream: 'albedo.bc7.bin', transcode: true }),
 ]);
 
+function crewContinuumVerifyEnabled(verifySha256) {
+  if (verifySha256 === false) return false;
+  if (verifySha256 === true) return true;
+  if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('verifyAssets') === '0') return false;
+  return true;
+}
+
+function crewContinuumIsMobile(device, mobile) {
+  if (typeof mobile === 'boolean') return mobile;
+  const mobileUA = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  const lowBind = (device?.limits?.maxStorageBufferBindingSize ?? Infinity) < 256 * 1024 * 1024;
+  const lowBuf = (device?.limits?.maxBufferSize ?? Infinity) < 256 * 1024 * 1024;
+  return mobileUA || lowBind || lowBuf;
+}
+
 async function crewContinuumFetch(path, fetchAsset) {
   const response = await fetchAsset(path);
   if (!response.ok) throw Error(`Crew continuum unavailable (${response.status}): ${path}`);
   return response;
 }
-// One stream, unpacked and checked against its receipt.
-async function crewContinuumStream(manifest, name, fetchAsset) {
-  const receipt = manifest.files[name], response = await crewContinuumFetch(CREW_CONTINUUM_ASSETS[manifest.id][receipt.gzip.file], fetchAsset);
+// One stream, unpacked and checked against its receipt (SHA-256 verified by default; opt out via ?verifyAssets=0 or false).
+async function crewContinuumStream(manifest, name, fetchAsset, paths = CREW_CONTINUUM_ASSETS[manifest.id], verifySha256 = undefined) {
+  const receipt = manifest.files[name], response = await crewContinuumFetch(paths[receipt.gzip.file], fetchAsset);
   const bytes = new Uint8Array(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
   if (bytes.byteLength !== receipt.bytes) throw Error(`Crew continuum stream has the wrong size: ${manifest.id} ${name}`);
-  if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('verifyAssets') === '1') {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  if (crewContinuumVerifyEnabled(verifySha256) && globalThis.crypto?.subtle?.digest) {
+    const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes));
     if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== receipt.sha256) throw Error(`Crew continuum stream failed verification: ${manifest.id} ${name}`);
   }
   return bytes;
@@ -70,23 +85,35 @@ async function crewContinuumStream(manifest, name, fetchAsset) {
 const crewContinuumMissingError = (missing, cause) => Object.assign(Error(crewContinuumMissingMessage(missing), cause ? { cause } : undefined), { missing });
 // Which of the files a body is drawn from are not there: its manifest, atlas, light mesh and the picture this device
 // reads. Asked beside the load, so a body missing any of them fails at load, naming every one.
-function crewContinuumAbsent(id, codec, fetchAsset) {
-  const paths = CREW_CONTINUUM_ASSETS[id];
+function crewContinuumAbsent(paths, codec, fetchAsset) {
   const wanted = ['manifest.json', 'body.glb', 'atlas.bin.gz', ...(codec ? [`${codec.stream}.gz`] : [])].map((name) => paths[name]);
   return Promise.all(wanted.map((path) => Promise.resolve().then(() => fetchAsset(path, { method: 'HEAD' })).then((r) => r.ok, () => false)))
     .then((present) => wanted.filter((_, i) => !present[i]));
 }
 
-async function openCrewContinuumBody(device, id, fetchAsset) {
+async function openCrewContinuumBody(device, id, fetchAsset, { mobile, verifySha256 } = {}) {
   if (!CREW_CONTINUUM_BODIES.some((b) => b.id === id)) throw Error(`Unknown crew continuum body: ${id}`);
-  const paths = CREW_CONTINUUM_ASSETS[id];
+  const useMobile = crewContinuumIsMobile(device, mobile);
+  let paths = CREW_CONTINUUM_ASSETS[id];
+  if (useMobile && CREW_CONTINUUM_MOBILE_ASSETS[id]) {
+    const mobilePaths = CREW_CONTINUUM_MOBILE_ASSETS[id];
+    const hasMobile = await Promise.resolve()
+      .then(() => fetchAsset(mobilePaths['manifest.json'], { method: 'HEAD' }))
+      .then((r) => r.ok, () => false);
+    if (hasMobile) {
+      paths = mobilePaths;
+    } else {
+      console.warn(`[crew-continuum] Compact mobile pack unavailable for ${id}; falling back to desktop pack`);
+    }
+  }
+  const verify = Boolean(crewContinuumVerifyEnabled(verifySha256) && globalThis.crypto?.subtle?.digest);
   const codec = crewContinuumCodecs.find((c) => !c.feature || device.features.has(c.feature));
-  const absent = crewContinuumAbsent(id, codec, fetchAsset);
+  const absent = crewContinuumAbsent(paths, codec, fetchAsset);
   let atlas, picture, standIn;
   try {
-    atlas = await loadContinuumAtlas({ assets: paths, validate: validateCrewContinuumManifest, label: `crew ${id}`, fetchAsset });
+    atlas = await loadContinuumAtlas({ assets: paths, validate: validateCrewContinuumManifest, label: `crew ${id}`, fetchAsset, verifySha256: verify });
     [picture, standIn] = await Promise.all([
-      crewContinuumStream(atlas.manifest, codec.stream, fetchAsset),
+      crewContinuumStream(atlas.manifest, codec.stream, fetchAsset, paths, verify),
       crewContinuumFetch(paths['body.glb'], fetchAsset).then((r) => r.arrayBuffer()).then(loadCrewGLB),
     ]);
   } catch (error) {
@@ -103,7 +130,7 @@ async function openCrewContinuumBody(device, id, fetchAsset) {
   };
   const { width, height, levels } = manifest.texture;
   const label = `crew continuum ${id} picture`;
-  const isMobileCrew = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  const isMobileCrew = useMobile;
   const dropTopMip = isMobileCrew && !codec.transcode && levels.length > 1 && width >= 2048 && height >= 2048;
   const texLevels = dropTopMip ? levels.slice(1) : levels;
   const texW = texLevels[0].width, texH = texLevels[0].height;
@@ -123,21 +150,23 @@ async function openCrewContinuumBody(device, id, fetchAsset) {
     texture, albedo: texture.createView(),
     sampler: device.createSampler({ label: `crew continuum ${id} picture`, magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', maxAnisotropy: 8 }),
     triangles: manifest.source.triangles,
+    mobile: paths === CREW_CONTINUUM_MOBILE_ASSETS[id],
   };
 }
 
 const crewContinuumBodyCache = new WeakMap();
 // A body on this device, fetched once. Resolves when it is wholly on the GPU. A body that is not baked rejects, naming
 // its missing files: nothing stands in for it.
-export function loadCrewContinuumBody(device, id, { fetchAsset = fetch } = {}) {
+export function loadCrewContinuumBody(device, id, { fetchAsset = fetch, mobile, verifySha256 } = {}) {
   let bodies = crewContinuumBodyCache.get(device);
   if (!bodies) crewContinuumBodyCache.set(device, (bodies = new Map()));
-  if (!bodies.has(id)) {
-    const pending = openCrewContinuumBody(device, id, fetchAsset);
-    pending.catch(() => { if (bodies.get(id) === pending) bodies.delete(id); });
-    bodies.set(id, pending);
+  const key = `${id}:${crewContinuumIsMobile(device, mobile) ? 'm' : 'd'}`;
+  if (!bodies.has(key)) {
+    const pending = openCrewContinuumBody(device, id, fetchAsset, { mobile, verifySha256 });
+    pending.catch(() => { if (bodies.get(key) === pending) bodies.delete(key); });
+    bodies.set(key, pending);
   }
-  return bodies.get(id);
+  return bodies.get(key);
 }
 // Several bodies on this device. Those not baked fail the load together, in one error that names every missing file.
 export async function loadCrewContinuumBodies(device, ids, options) {
@@ -147,6 +176,15 @@ export async function loadCrewContinuumBodies(device, ids, options) {
   const other = failed.find((error) => !error?.missing);
   if (other) throw other;
   throw crewContinuumMissingError([...new Set(failed.flatMap((error) => error.missing))]);
+}
+
+function crewContinuumRecordAssetError(asset, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[crew-continuum] Failed to load ${asset}: ${message}`, error);
+  if (typeof globalThis !== 'undefined') {
+    (globalThis.__waterworldAssetErrors ??= []).push({ asset, message, error });
+  }
+  return { value: null, error };
 }
 
 // Every program people are stood, cut and drawn with, once a device and target: the one cut's programs, the crew's
@@ -164,6 +202,9 @@ export function requestCrewContinuumPipelines({ device, shader, format = 'rgba16
     label: 'crew continuum clothing stand', layout: 'auto',
     compute: { module: await shader(crewContinuumClothingStandWGSL(), 'crew continuum clothing stand'), entryPoint: 'crewContinuumClothingStand' },
   }));
+  const loadAux = (asset, promise) => promise
+    .then((value) => ({ value, error: null }))
+    .catch((error) => crewContinuumRecordAssetError(asset, error));
   return Promise.all([
     requestContinuumPrograms({ device, shader, shadowFormat: LAND_SHADOW_FORMAT }),
     requestContinuumView({ device, shader, material: CREW_CONTINUUM_MATERIAL, format, samples }),
@@ -172,15 +213,15 @@ export function requestCrewContinuumPipelines({ device, shader, format = 'rgba16
     requestContinuumView({ device, shader, material: HAIR_CONTINUUM_MATERIAL, format, samples }),
     waterOptics ? requestOnce(device, `hair continuum capture ${format} ${samples}`, () => requestContinuumCapture(waterOptics, HAIR_CONTINUUM_MATERIAL)) : null,
     hairStand,
-    fetchAsset ? loadHairContinuum(device, { fetchAsset }).catch(() => null) : null,
+    fetchAsset ? loadAux('hair continuum', loadHairContinuum(device, { fetchAsset })) : { value: null, error: null },
     requestContinuumView({ device, shader, material: CLOTHING_CONTINUUM_MATERIAL, format, samples }),
     waterOptics ? requestOnce(device, `clothing continuum capture ${format} ${samples}`, () => requestContinuumCapture(waterOptics, CLOTHING_CONTINUUM_MATERIAL)) : null,
     clothingStand,
-    fetchAsset ? loadClothingContinuum(device, { fetchAsset }).catch(() => null) : null,
-  ]).then(([programs, view, capture, afloat, ashore, hairView, hairCapture, hairStandPipe, hair, clothingView, clothingCapture, clothingStandPipe, clothing]) => ({
+    fetchAsset ? loadAux('clothing continuum', loadClothingContinuum(device, { fetchAsset })) : { value: null, error: null },
+  ]).then(([programs, view, capture, afloat, ashore, hairView, hairCapture, hairStandPipe, hairRes, clothingView, clothingCapture, clothingStandPipe, clothingRes]) => ({
     programs, view, capture, stand: { afloat, ashore },
-    hair, hairView, hairCapture, hairStand: hairStandPipe,
-    clothing, clothingView, clothingCapture, clothingStand: clothingStandPipe,
+    hair: hairRes.value, hairError: hairRes.error, hairView, hairCapture, hairStand: hairStandPipe,
+    clothing: clothingRes.value, clothingError: clothingRes.error, clothingView, clothingCapture, clothingStand: clothingStandPipe,
   }));
 }
 
@@ -299,9 +340,12 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
   const hairCapture = () => (hairUnder === undefined ? (hairUnder = continuumCaptureDraw(P.hairCapture, hairEntries, shadows)) : hairUnder);
 
   // Paired modular 3D kinematic 1550 clothing scene sharing `scene.poses` (3 records per person: upper, lower, optional cloak).
+  // Only attach modular clothing on undressed base bodies; restored ~1.9M dressed historical bodies carry baked shirt/trousers
+  // regions (`regionMedians[1]` / `regionMedians[2]`) and must never double-draw or inset under modular garments.
+  const bodyHasClothing = Boolean(body.manifest?.regionMedians?.[1] || body.manifest?.regionMedians?.[2]);
   let clothingScene = null, clothingInfo = null, clothingStandGroup = null, clothingView = null, clothingUnder;
   const clothingInfoWords = clothingInfoFor(body.id, body.manifest?.sex, body.manifest?.role);
-  if (P.clothing && P.clothingView && P.clothingStand) {
+  if (!bodyHasClothing && P.clothing && P.clothingView && P.clothingStand) {
     const clothCapacity = Math.max(3, capacity * 3);
     const perType = Math.max(1, Math.ceil(capacity * 0.45));
     const clothRoom = continuumRoom(P.clothing.types, Array(P.clothing.types.length).fill(perType)).room;
@@ -334,7 +378,7 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
       count = Math.min(typeof people === 'number' ? people : people.length, capacity);
       if (!counted) for (let i = 0; i < count; i++) orderWords[i] = orderOf(people[i], i) >>> 0;
       if (count && !counted) device.queue.writeBuffer(orders, 0, orderWords, 0, Math.max(4, count));
-      runWords.set([at, count, counted ? counted.offset / 4 : 0, (counted ? 1 : 0) | (sea ? 2 : 0)]);
+      runWords.set([at, count, counted ? counted.offset / 4 : 0, (counted ? 1 : 0) | (sea ? 2 : 0) | (clothingScene ? CREW_STAND_FLAG_CLOTHED : 0)]);
       device.queue.writeBuffer(run, 0, runWords);
       scene.setCount(count);
       scene.setShadows(castShadows);

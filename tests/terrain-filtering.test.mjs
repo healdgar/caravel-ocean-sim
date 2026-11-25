@@ -15,13 +15,18 @@ test('terrain procedurals reject unresolved and oblique crack frequencies before
     const page=await browser.newPage();await page.route('**/__terrain_filtering',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto('http://127.0.0.1:'+server.address().port+'/__terrain_filtering');
     const result=await page.evaluate(async()=>{
-      const {TERRAIN,TERRAIN_FILTERING}=await import('/js/wgsl/terrain.js'),{NOISE_WGSL}=await import('/js/wgsl/common.js');
+      const {TERRAIN_LAND,TERRAIN_CITY,TERRAIN_FILTERING}=await import('/js/wgsl/terrain.js'),{NOISE_WGSL}=await import('/js/wgsl/common.js');
+      const {withNeuralPbrLand,withNeuralPbrCity}=await import('/js/wgsl/neural-pbr.js');
+      const {landContinuumMaterial}=await import('/js/wgsl/land-continuum.js');
+      const {cityContinuumMaterial}=await import('/js/wgsl/city-continuum.js');
+      const {continuumModuleWGSL}=await import('/js/wgsl/continuum-cut.js');
       const adapter=await navigator.gpu.requestAdapter();if(!adapter)throw Error('WebGPU adapter unavailable');
       const d=await adapter.requestDevice(),errors=[];d.onuncapturederror=e=>errors.push(e.error.message);
       const compile=async code=>{const module=d.createShaderModule({code}),bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
-      // The complete production module must still compile; the fixture below
+      // The complete production modules must still compile; the fixture below
       // deliberately removes its lighting and captures unclamped linear values.
-      await compile(TERRAIN);
+      await compile(continuumModuleWGSL({pass:'view',material:landContinuumMaterial(withNeuralPbrLand(TERRAIN_LAND))}));
+      await compile(continuumModuleWGSL({pass:'view',material:cityContinuumMaterial(withNeuralPbrCity(TERRAIN_CITY))}));
       const code=NOISE_WGSL+TERRAIN_FILTERING+`
 struct State {origin:vec4f,stepX:vec4f,stepY:vec4f,controls:vec4f};
 @group(0) @binding(0) var<uniform> S:State;

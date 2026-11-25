@@ -22,6 +22,7 @@ export const CREW_CONTINUUM_ORDER_MOUNTED = 1;    // riding astride a horse: sta
 export const CREW_CONTINUUM_ORDER_IMPORTANT = 2;  // wounded, spoken to or aimed at: cut at the core's CONTINUUM_IMPORTANT
 export const CREW_CONTINUUM_AGE_SHIFT = 2;        // bits 2..8: exact board age in years (0 = fallback deterministic life stage)
 export const CREW_CONTINUUM_IDENTITY_SHIFT = 9;   // bits 9..31: stable person identity + 1 (8.3M unique IDs)
+export const CREW_STAND_FLAG_CLOTHED = 4;         // run.flags bit 2: modular clothing attached (gate body under-cloth inset)
 // A person's pose data in its scene's pose buffer: the SKINNED kind's head, then every joint's rows and posed sphere.
 export const CREW_CONTINUUM_POSE_VEC4S = skinnedPoseVec4s(CREW_JOINT_COUNT);
 // How far a severed person's points may stray from their joints' bounds: a forearm, shin or head drawn in to its stump
@@ -198,8 +199,10 @@ fn crewStandTurn(p:vec3f)->vec3f { return crewStandHull.right.xyz*p.x+crewStandH
     // Townsfolk bake baseScale into actor.transform on placement; deck crew apply height diversity directly here!
     let finalScale=select(scale,scale*stage.x,${ground ? 'false' : 'true'}&&abs(scale-1.0)<0.01);
     let morphZ=humanMorphPackZ(identity,female);
-    // Set HUMAN_MORPH_BODY_INSET_BIT on the clothed body skin record alone (cleared when forwarded to clothing & hair!)
-    let morphW=humanMorphPackW(stage.y,stage.z,isMounted)|HUMAN_MORPH_BODY_INSET_BIT;
+    // Gate HUMAN_MORPH_BODY_INSET_BIT strictly on CREW_STAND_FLAG_CLOTHED (4u) so dressed bodies and any body whose
+    // modular clothing failed to load are NEVER shrunk/pinched inward.
+    let bodyInset=select(0u,HUMAN_MORPH_BODY_INSET_BIT,(crewStandRun.flags&${CREW_STAND_FLAG_CLOTHED}u)!=0u);
+    let morphW=humanMorphPackW(stage.y,stage.z,isMounted)|bodyInset;
     var flags=${CONTINUUM_KIND.SKINNED}u<<CONTINUUM_KIND_SHIFT;
     if(gone){flags|=CONTINUUM_GONE;}
     if((crewStandRun.flags&2u)!=0u){flags|=CONTINUUM_SEA;}
@@ -243,18 +246,124 @@ fn crewScalpMode(actor:CrewActor,identity:u32,slot:u32)->f32 {
   return 1.0;
 }
 fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scalpMode:f32)->vec4f {
+  let female=actor.skin.w>0.5&&actor.skin.w<1.5;
+  let indigenous=actor.face.w>1.5;
+  let hasBakedCloth=crewWear[1u].w>=0.5||crewWear[2u].w>=0.5;
+  let skin=crewWear[3u];
+  let skinLuma=max(dot(skin.xyz,vec3f(0.299,0.587,0.114)),0.05);
+  let picLuma=dot(picture,vec3f(0.299,0.587,0.114));
+
+  if(hasBakedCloth){
+    // Dressed ~1.9M historical bodies (.tripo/1550-hd/fit-regions):
+    //   region 0 = paint (boots, leather belts, buckles, iron armor, trim, painted eyes — kept verbatim)
+    //   region 1 = shirt / doublet / tunic (dyed by actor.shirt.rgb relative to crewWear[1u])
+    //   region 2 = trousers / skirt / breechcloth (dyed by actor.trousers.rgb relative to crewWear[2u])
+    //   region 3 = skin (4K painted face/hands/limbs kept authentic with skin shading flag = 1.0)
+    //   region 4 = hair (baked crown/sideburns tinted cleanly toward actor.hair.rgb)
+    let bright=max(dot(picture,vec3f(0.3333)),1e-3);
+    let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
+    let neckLineY=select(1.475,1.425,female);
+    let neckRad=length(vec2f(bodyPos.x*1.02,bodyPos.z+select(0.010,0.036,female)));
+    let neckRIn=select(0.088,0.056,female);
+    let neckROut=select(0.118,0.072,female);
+    let neckSkinMask=select(0.0,
+      smoothstep(neckLineY-0.014,neckLineY+0.014,bodyPos.y)*(1.0-smoothstep(neckLineY+0.125,neckLineY+0.150,bodyPos.y))*(1.0-smoothstep(neckRIn,neckROut,neckRad)),
+      skin.w>0.5);
+
+    // Smooth torso/sleeve cleanup for European sailor/villager fits only (never override indigenous bare skin/ornaments).
+    let sleeveLimit=select(0.495,0.62,female);
+    let waistY=1.00;
+    let strayHairOnShirt=!indigenous&&((region==4u)||(region==0u&&bodyPos.y>1.095))&&bodyPos.y>waistY&&bodyPos.y<select(1.468,1.445,female)&&abs(bodyPos.x)<sleeveLimit;
+    let strayHairOnTrousers=!indigenous&&(region==4u||region==0u)&&bodyPos.y>=0.24&&bodyPos.y<=waistY;
+    let maleOpenVNeck=!female&&bodyPos.z>0.06&&abs(bodyPos.x)<0.050&&bodyPos.y>1.32&&bodyPos.y<1.46;
+    let torsoSkinOnShirt=!indigenous&&region==3u&&bodyPos.y>waistY&&abs(bodyPos.x)<sleeveLimit&&(
+      select(
+        bodyPos.y<1.465&&!(neckRad<0.105&&bodyPos.y>1.43)&&!maleOpenVNeck,
+        bodyPos.y<1.445&&(neckRad>=0.072||bodyPos.z<-0.045),
+        female
+      )
+    );
+    let strayClothOnForearm=!indigenous&&!female&&(region==1u||region==4u)&&bodyPos.y>1.00&&bodyPos.y<1.52&&abs(bodyPos.x)>=0.495;
+    var effRegion=region;
+    if(strayClothOnForearm){effRegion=3u;}
+    else if(strayHairOnShirt||torsoSkinOnShirt){effRegion=1u;}
+    else if(strayHairOnTrousers){effRegion=2u;}
+
+    let median=crewWear[min(effRegion,4u)];
+    var baseOut=vec4f(picture,select(0.0,1.0,effRegion==3u));
+    if(effRegion==1u||effRegion==2u){
+      if(median.w>=0.5){
+        let worn=select(actor.trousers.rgb,actor.shirt.rgb,effRegion==1u);
+        let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
+        let dyed=worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2);
+        let cuffX=select(0.495,0.62,female);
+        let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.025&&neckRad<neckROut+0.010)||abs(bodyPos.x)>cuffX),effRegion==1u);
+        if(!atBorder||skin.w<=0.5){
+          baseOut=vec4f(dyed,0.0);
+        }else{
+          let away=length(picture/bright-skin.xyz/skinBright)+abs(log2(bright/skinBright))*0.15;
+          let cloth=smoothstep(0.035,0.095,away);
+          baseOut=vec4f(mix(picture,dyed,cloth),1.0-cloth);
+        }
+      }
+    }else if(effRegion==4u&&median.w>=0.5){
+      let hairCol=max(actor.hair.rgb,vec3f(0.012,0.010,0.008));
+      let hairMedLuma=max(dot(median.xyz,vec3f(0.299,0.587,0.114)),0.03);
+      let hairShade=clamp(picLuma/hairMedLuma,0.42,1.28);
+      baseOut=vec4f(hairCol*hairShade*0.72,0.0);
+    }
+    let maxC=max(max(picture.r,picture.g),picture.b);
+    let minC=min(min(picture.r,picture.g),picture.b);
+    let whiteNeckBleed=!indigenous&&female&&effRegion==3u&&bright>0.28&&minC/max(maxC,1e-3)>0.68;
+    if(neckSkinMask>0.001&&(effRegion==1u||whiteNeckBleed)){
+      let neckRef=select(max(dot(median.xyz,vec3f(0.3333)),1e-3),skinBright,effRegion==3u);
+      let neckShade=clamp(bright/neckRef,0.72,1.06);
+      let cleanNeck=skin.xyz*(0.80*mix(1.0,neckShade,0.22));
+      baseOut=vec4f(mix(baseOut.rgb,cleanNeck,neckSkinMask),mix(baseOut.w,1.0,neckSkinMask));
+    }
+    // Fibrous hair-root scalp under-coat inside the hair-bearing cranium so bare scalp never flashes through locks.
+    let crownY=select(select(1.768,1.769,indigenous),1.705,female);
+    if(bodyPos.y>crownY-0.185&&(effRegion==3u||effRegion==4u||effRegion==0u||effRegion==1u)){
+      let midZ=select(select(0.021,-0.025,indigenous),-0.027,female);
+      let ax=abs(bodyPos.x);
+      let rz=bodyPos.z-midZ;
+      let wispNoise=sin(bodyPos.x*220.0+bodyPos.z*140.0)*0.0028+sin(bodyPos.x*470.0-bodyPos.y*280.0)*0.0014;
+      let widowDip=0.005*exp(-((bodyPos.x/0.020)*(bodyPos.x/0.020)));
+      let templeRec=0.011*exp(-(((ax-0.044)/0.020)*((ax-0.044)/0.020)));
+      let foreLine=(crownY-0.044)-widowDip+templeRec+wispNoise;
+      let frontMask=select(1.0,smoothstep(foreLine-0.004,foreLine+0.016,bodyPos.y),rz>0.008);
+      let earDy=(bodyPos.y-(crownY-0.128))/0.038;
+      let earDz=(rz+0.018)/0.030;
+      let earKeep=smoothstep(0.90,1.25,earDy*earDy+earDz*earDz+select(2.0,0.0,ax>0.050));
+      let napeLine=(crownY-0.165)+0.024*max(0.0,(rz+0.075)*4.0)+wispNoise;
+      let napeMask=smoothstep(napeLine-0.004,napeLine+0.018,bodyPos.y);
+      let tonsureR=length(vec2f(bodyPos.x/0.058,(rz+0.004)/0.070));
+      let tonsureKeep=select(1.0,max(smoothstep(0.86,1.10,tonsureR),1.0-smoothstep(crownY-0.072,crownY-0.056,bodyPos.y)),scalpMode>1.5);
+      let cranialMask=frontMask*earKeep*napeMask;
+      let scalpCov=select(0.0,cranialMask*tonsureKeep,scalpMode>0.5);
+      if(scalpCov>0.002){
+        let hairCol=max(actor.hair.rgb,vec3f(0.010,0.008,0.007));
+        let fiberA=sin(bodyPos.x*520.0+sin(bodyPos.z*190.0)*1.6);
+        let fiberB=sin((bodyPos.x*0.7+bodyPos.z*0.7)*860.0+bodyPos.y*240.0);
+        let rootGrain=0.38+0.14*(0.5+0.5*fiberA)+0.08*(0.5+0.5*fiberB);
+        let scalpTint=hairCol*rootGrain;
+        baseOut=vec4f(mix(baseOut.rgb,scalpTint,scalpCov*0.92),mix(baseOut.w,0.0,scalpCov*0.92));
+      }else if((effRegion==4u||effRegion==1u)&&cranialMask>0.15&&skin.w>0.5&&(scalpMode<=0.5||(scalpMode>1.5&&tonsureKeep<0.5))){
+        let bareMask=cranialMask*select(1.0,1.0-tonsureKeep,scalpMode>1.5);
+        let bareSkin=skin.xyz*(0.84*clamp(bright/skinBright,0.75,1.08));
+        baseOut=vec4f(mix(baseOut.rgb,bareSkin,bareMask),mix(baseOut.w,1.0,bareMask));
+      }
+    }
+    return baseOut;
+  }
+
   // Clean 50k anatomical base bodies with real 3D spherical eyeballs:
   //   region 0 = real 3D spherical eyeballs (crisp painted iris/pupil/sclera kept verbatim, glossy wet cornea in shade!)
   //   region 3 = clean continuous pelt skin (luminance-preserving transfer onto actor.skin.rgb, zero discoloration!)
   //   region 4 = legacy brow tag -> treated cleanly as skin
-  //   region 1/2 = fallback dyed cloth only if a legacy body is ever loaded
   if(region==0u){
     return vec4f(picture,0.0);
   }
-  let female=actor.skin.w>0.5&&actor.skin.w<1.5;
-  let skin=crewWear[3u];
-  let skinLuma=max(dot(skin.xyz,vec3f(0.299,0.587,0.114)),0.05);
-  let picLuma=dot(picture,vec3f(0.299,0.587,0.114));
 
   // Luminance-preserving warm skin transfer: avoids raw per-channel RGB division AND avoids additive fair-skin
   // chroma bias on darker complexions (relChroma = 0 on plain skin, proportional to actorLuma on lips/cheeks)!
@@ -271,16 +380,6 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   skinTone=mix(skinTone,skinTone*vec3f(1.06,0.88,0.86),lipMask*0.14);
 
   var baseOut=vec4f(skinTone,1.0);
-  if(region==1u||region==2u){
-    let median=crewWear[min(region,4u)];
-    if(median.w>=0.5){
-      let worn=select(actor.trousers.rgb,actor.shirt.rgb,region==1u);
-      let shade=clamp(picture/max(median.xyz,vec3f(1e-3)),vec3f(0.35),vec3f(1.45));
-      baseOut=vec4f(worn*mix(vec3f(dot(shade,vec3f(0.299,0.587,0.114))),shade,0.2),0.0);
-    }else{
-      baseOut=vec4f(picture,0.0);
-    }
-  }
   // Softly harmonize the painted 4K/8K eyebrows toward each person's actor.hair.rgb without stamping opaque stripes over skin.
   let axFace=abs(bodyPos.x);
   let browMinZ=select(0.066,0.078,female);
@@ -423,7 +522,10 @@ fn crewEyeGaze(time:f32,seed:u32)->vec2f {
   return vec2f(gx,gy);
 }
 fn crewContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
-  let isEye=v.look.x==CONTINUUM_CLUSTER_ENTRY&&v.look.y==0u;
+  let hasBakedCloth=crewWear[1u].w>=0.5||crewWear[2u].w>=0.5;
+  // On dressed bodies, region 0 is general painted detail (boots, belts, armor, buckles); only undressed clean-pelt
+  // bodies reserve region 0 exclusively for dedicated spherical eyeball UV patches.
+  let isEye=!hasBakedCloth&&v.look.x==CONTINUUM_CLUSTER_ENTRY&&v.look.y==0u;
   // Subtle conjugate eye micro-gaze offset (constant per actor across eyeball triangles, preserving mip derivatives).
   let gazeUV=crewEyeGaze(F.camPos.w,v.coverage.z);
   let eyeSampleUV=clamp(v.uv-gazeUV,vec2f(0.145,0.785),vec2f(0.355,0.995));
@@ -688,18 +790,25 @@ fn hairContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
 fn hairContinuumCoverage(v:ContinuumVarying,front:bool)->u32 {
   if(v.coverage.x!=CONTINUUM_CLUSTER_ENTRY){return 0xffffffffu;}
   let along=clamp(v.strand.x,0.0,1.0);
-  // Keep scalp cap and entire crown/mid-length hair volume 100% solid (zero stipple dots through dark locks);
-  // soften only the very distal tapered strand tips (along > 0.85) into wispy ends via MSAA sample_mask.
-  if(along<0.85){return 0xffffffffu;}
+  // Keep scalp under-cap (along ~= 0.06, crossV == 0) and immediate follicle roots 100% solid.
+  if(along<0.07){return 0xffffffffu;}
   let crossV=clamp(v.strand.y,-1.0,1.0);
   let absCross=abs(crossV);
   let seedPhase=v.strand.w;
-  let wobble=sin(along*14.0+seedPhase*6.2831853)*0.16;
+  // Multi-fiber cross-ribbon striations driving deterministic MSAA @builtin(sample_mask) coverage (zero discard!):
+  // splits every fine 6..10 mm ribbon into individual parallel hair fibers with staggered wispy tips.
+  let wobble=sin(along*12.0+seedPhase*6.2831853)*0.11+cos(along*23.0-seedPhase*9.424778)*0.04;
   let uFiber=crossV+wobble;
-  let strandWave=0.52+0.30*sin(uFiber*28.27+seedPhase*6.2831853)+0.18*sin(uFiber*56.55-seedPhase*11.3+along*5.0);
-  let tipJitter=0.85+0.11*strandWave;
-  let tipT=smoothstep(tipJitter,1.02,along);
-  let alpha=clamp(1.0-tipT*(0.62+0.38*smoothstep(0.30,0.90,absCross)),0.0,1.0);
+  let fCell=fract((uFiber*0.5+0.5)*5.5+seedPhase*3.7);
+  let fiberCore=1.0-smoothstep(0.18,0.48,abs(fCell-0.5));
+  let subFiber=0.5+0.5*sin(uFiber*34.5575+seedPhase*6.2831853+along*3.2);
+  let fiberDensity=clamp(0.28+0.54*fiberCore+0.24*subFiber,0.0,1.0);
+  let rootSolid=1.0-smoothstep(0.07,0.22,along);
+  let edgeMask=1.0-smoothstep(0.40+0.36*fiberDensity,1.02,absCross);
+  let tipEnd=0.68+0.30*fiberDensity;
+  let tipMask=1.0-smoothstep(tipEnd-0.18,tipEnd+0.04,along);
+  let midCarve=mix(1.0,0.40+0.60*fiberDensity,smoothstep(0.18,0.62,along)*smoothstep(0.16,0.72,absCross));
+  let alpha=clamp(max(rootSolid,edgeMask*tipMask*midCarve),0.0,1.0);
   if(alpha>=0.995){return 0xffffffffu;}
   let hairSeed=v.coverage.z*0x9e3779b9u+u32(clamp(seedPhase,0.0,1.0)*255.0)*2654435761u+97u;
   return continuumSamples(alpha,v.position.xy,v.coverage.w,hairSeed);

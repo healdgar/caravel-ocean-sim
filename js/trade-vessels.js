@@ -4858,13 +4858,13 @@ fn tvFarShade(in: ContinuumVarying, front: bool) -> vec4f {
 fn tradeVesselContinuumShade(in: ContinuumVarying, front: bool) -> vec4f {
   let near = tvShadeFragment(in, front);
   let far = tvFarShade(in, front);
-  return select(near, far, in.coverage.x != CONTINUUM_CLUSTER_ENTRY);
+  return select(near, far, in.coverage.x != CONTINUUM_CLUSTER_ENTRY && in.coverage.x != CONTINUUM_SURFEL_ENTRY);
 }
 
 // The samples a damaged vessel's clusters keep: none where shot has holed her timber, parted her rope or torn her canvas.
 fn tradeVesselContinuumMask(in: ContinuumVarying, front: bool) -> u32 {
   let tvSlot = in.ids.z;
-  if (tvSlot == 0u || in.coverage.x != CONTINUUM_CLUSTER_ENTRY) { return 0xffffffffu; }
+  if (tvSlot == 0u || (in.coverage.x != CONTINUUM_CLUSTER_ENTRY && in.coverage.x != CONTINUUM_SURFEL_ENTRY)) { return 0xffffffffu; }
   let slot = min(tvSlot - 1u, arrayLength(&hullDamage) - 1u);
   let m = in.ids.x;
   let dmg = in.state.x;
@@ -5009,13 +5009,15 @@ struct TradeInstance {
 export const TRADE_VESSEL_WAVE_WGSL = FRAME_WGSL + SURFACE_WAVE_SAMPLE + TRADE_SHARED_TYPES_WGSL + CONTINUUM_RECORD_WGSL + SHIP_CONTINUUM_TURN_WGSL + /* wgsl */ `
 struct TradeWaveParams {
   ctrl: vec4u,   // x: activeCount, y: maxSlots, z: hasSeaDisp, w: pad
-  timing: vec4f, // x: dt, y: elapsedSec, z: windSpeed, w: storm
+  timing: vec4f, // x: dt, y: elapsedSec, z: windX, w: windZ
+  extra: vec4f,  // x: extrapDt (seconds since last sparse order update), yzw: pad
 };
 struct VesselWaveInput {
-  posYaw: vec4f,  // x: localX, y: baseWaterY, z: localZ, w: yaw
-  spans: vec4f,   // x: zSpan, y: xSpan, z: totalSinkage, w: minKeelY
-  weights: vec4f, // x: swellWeight, y: wakeWeight, z: basePitch, w: baseRoll
-  slots: vec4u,   // x: stateSlot, y: intactSlot, z: crewSlot, w: flags (bit0: groundedOrSunk, bit1: isRiver, bit2: reset)
+  posYaw: vec4f,   // x: localX, y: baseWaterY, z: localZ, w: yaw
+  spans: vec4f,    // x: zSpan, y: xSpan, z: totalSinkage, w: minKeelY
+  weights: vec4f,  // x: swellWeight, y: wakeWeight, z: basePitch, w: baseRoll
+  slots: vec4u,    // x: stateSlot, y: intactSlot, z: crewSlot, w: flags (bit0: groundedOrSunk, bit1: isRiver, bit2: reset)
+  velPhase: vec4f, // x: vx, y: vz, z: yawRate, w: basePhase (at sparse order time)
 };
 struct VesselHydroState {
   pose: vec4f,    // x: heaveY, y: pitch, z: roll, w: initialized
@@ -5115,7 +5117,11 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
   let isRiver = (flags & 2u) != 0u;
   let forceReset = (flags & 4u) != 0u;
 
-  let yaw = inp.posYaw.w;
+  let extrapDt = select(clamp(waveP.extra.x, 0.0, 0.5), 0.0, groundedOrSunk || forceReset);
+  let curX = inp.posYaw.x + inp.velPhase.x * extrapDt;
+  let curZ = inp.posYaw.z + inp.velPhase.y * extrapDt;
+  let yaw = inp.posYaw.w + inp.velPhase.z * extrapDt;
+  let curPhase = inp.velPhase.w + extrapDt * 1.35;
   let bow = vec2f(sin(yaw), -cos(yaw));
   let stbd = vec2f(cos(yaw), sin(yaw));
   let zSpan = max(1.8, inp.spans.x);
@@ -5129,7 +5135,7 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
   let elapsedSec = select(F.camPos.w, waveP.timing.y, abs(waveP.timing.y) > 1e-5);
   let footprint = max(1.35, xSpan * 1.15);
 
-  let pMid = inp.posYaw.xz + nearTerrain.grid.yz;
+  let pMid = vec2f(curX, curZ) + nearTerrain.grid.yz;
   let hMid = tvSampleWaterOffset(pMid, footprint, swellWeight, wakeWeight, isRiver, elapsedSec);
   let hBow = tvSampleWaterOffset(pMid + bow * zSpan, footprint, swellWeight, wakeWeight, isRiver, elapsedSec);
   let hStern = tvSampleWaterOffset(pMid - bow * zSpan, footprint, swellWeight, wakeWeight, isRiver, elapsedSec);
@@ -5176,13 +5182,15 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
   hydroState[stateSlot] = st;
 
   if (intactSlot < maxSlots && intactSlot < arrayLength(&vesselRecords)) {
-    vesselRecords[intactSlot].place.y = st.pose.x;
+    vesselRecords[intactSlot].place = vec4f(curX, st.pose.x, curZ, vesselRecords[intactSlot].place.w);
     vesselRecords[intactSlot].turn = shipContinuumTurn(yaw, st.pose.y, st.pose.z);
+    vesselRecords[intactSlot].spare.y = bitcast<u32>(curPhase);
   }
   if (crewSlot < maxSlots && crewSlot < arrayLength(&crewInstances)) {
-    crewInstances[crewSlot].posYaw.y = st.pose.x;
+    crewInstances[crewSlot].posYaw = vec4f(curX, st.pose.x, curZ, yaw);
     crewInstances[crewSlot].attScaleArch.x = st.pose.y;
     crewInstances[crewSlot].attScaleArch.y = st.pose.z;
+    crewInstances[crewSlot].animSink.x = curPhase;
   }
 }
 `;
@@ -5683,17 +5691,18 @@ export async function createTradeVessels({
   const U_COPY_DST = GPUBufferUsage.COPY_DST ?? 8;
   const U_COPY_SRC = GPUBufferUsage.COPY_SRC ?? 4;
 
-  const waveParamsBuf = new ArrayBuffer(32);
+  const waveParamsBuf = new ArrayBuffer(48);
   const waveParamsU32 = new Uint32Array(waveParamsBuf, 0, 4);
   const waveParamsF32 = new Float32Array(waveParamsBuf, 16, 4);
+  const waveParamsExtraF32 = new Float32Array(waveParamsBuf, 32, 4);
   waveParamsU32[0] = 0;
   waveParamsU32[1] = MAX_TRADE_VESSELS;
   waveParamsU32[2] = oceanBridge?.dispView ? 1 : 0;
   waveParamsU32[3] = 0;
-  const waveInputBuf = new ArrayBuffer(MAX_TRADE_VESSELS * 64);
+  const waveInputBuf = new ArrayBuffer(MAX_TRADE_VESSELS * 80);
   const waveInputF32 = new Float32Array(waveInputBuf);
   const waveInputU32 = new Uint32Array(waveInputBuf);
-  const waveParamsBuffer = device.createBuffer({ label: 'trade vessel wave params', size: 32, usage: U_UNIFORM | U_COPY_DST });
+  const waveParamsBuffer = device.createBuffer({ label: 'trade vessel wave params', size: 48, usage: U_UNIFORM | U_COPY_DST });
   device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsBuf);
   const vesselWaveInputBuffer = device.createBuffer({ label: 'trade vessel wave inputs', size: waveInputBuf.byteLength, usage: U_STORAGE | U_COPY_DST });
   const vesselHydroStateBuffer = device.createBuffer({ label: 'trade vessel hydro state', size: MAX_TRADE_VESSELS * 32, usage: U_STORAGE | U_COPY_DST });
@@ -6423,6 +6432,8 @@ export async function createTradeVessels({
   let boardDay = 0, daysPerSecond = 0, simElapsedSec = 0, hasSimClock = false;
   let worldOffsetX = 0, worldOffsetZ = 0;
   let lastUploadTime = -Infinity;
+  let lastOrderTime = -Infinity;
+  let orderAccumDt = 0;
   let totalIntact = 0;
   // Once the wave pass has posed the vessels on the GPU, the CPU stops sampling the swell for those it leaves to it.
   let hasEncodedGpuOnce = false;
@@ -6897,6 +6908,21 @@ export async function createTradeVessels({
     );
   }
 
+  function hasInteractiveOrDamagedVessel(list, avoidList) {
+    const px = avoidList?.[0]?.x, pz = avoidList?.[0]?.z;
+    const hasPlayer = Number.isFinite(px) && Number.isFinite(pz);
+    for (let i = 0; i < list.length; i++) {
+      const v = list[i];
+      if (!v) continue;
+      if ((v.boat?.damage?.hits ?? 0) > 0 || v.damaged?.ready) return true;
+      if (hasPlayer) {
+        const dx = (v.ai.x + worldOffsetX) - px, dz = (v.ai.z + worldOffsetZ) - pz;
+        if (dx * dx + dz * dz < 140 * 140) return true;
+      }
+    }
+    return false;
+  }
+
   function updateAllVessels(dt, elapsedSec, terrain = null, forceUpload = false, env = lastEnv) {
     if (!vessels.length) {
       totalIntact = 0;
@@ -6904,6 +6930,8 @@ export async function createTradeVessels({
       activeCrewVessels = 0;
       activeWaveVesselCount = 0;
       activeDeckSoulCount = 0;
+      lastOrderTime = -Infinity;
+      orderAccumDt = 0;
       deckConfigU32[0] = 0;
       device.queue.writeBuffer(crewConfigBuffer, 0, deckConfigU32, 0, 4);
       waveParamsU32[0] = 0;
@@ -6913,9 +6941,41 @@ export async function createTradeVessels({
     }
     const off = terrain?.getWorldOffset?.() ?? lastContext?.worldOffset ?? null;
     if (off && Number.isFinite(off.x) && Number.isFinite(off.z)) {
+      if (off.x !== worldOffsetX || off.z !== worldOffsetZ) lastOrderTime = -Infinity;
       worldOffsetX = off.x;
       worldOffsetZ = off.z;
     }
+
+    const clampedDt = Number.isFinite(dt) && dt > 0 ? Math.min(0.25, dt) : 0;
+    orderAccumDt += clampedDt;
+    const windVec = env?.windVec ?? [8, 0];
+    const stormFlag = Boolean(env?.storm);
+
+    // Intact cruising trade vessels advance continuously in GPU compute (TRADE_VESSEL_WAVE_WGSL);
+    // JavaScript only steps sparse AI/berth/separation orders (~5 Hz, or live for nearby/damaged ships).
+    const needSparseOrder = forceUpload
+      || lastOrderTime === -Infinity
+      || crewStationsDirty
+      || orderAccumDt >= 0.20
+      || activeWaveVesselCount === 0
+      || hasInteractiveOrDamagedVessel(vessels, env?.avoidVessels);
+    if (!needSparseOrder) {
+      waveParamsU32[0] = activeWaveVesselCount;
+      waveParamsU32[1] = MAX_TRADE_VESSELS;
+      waveParamsU32[2] = oceanBridge?.dispView ? 1 : 0;
+      waveParamsU32[3] = 0;
+      waveParamsF32[0] = Math.max(0, Math.min(0.05, clampedDt));
+      waveParamsF32[1] = Number.isFinite(elapsedSec) ? elapsedSec : 0;
+      waveParamsF32[2] = (windVec?.[0] ?? 8) * (stormFlag ? 1.25 : 1.0);
+      waveParamsF32[3] = (windVec?.[1] ?? 0) * (stormFlag ? 1.25 : 1.0);
+      waveParamsExtraF32[0] = Math.max(0, Math.min(0.5, elapsedSec - lastOrderTime));
+      device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsBuf);
+      crewEncoded = false;
+      return;
+    }
+    const simDt = lastOrderTime === -Infinity ? clampedDt : Math.min(0.5, orderAccumDt);
+    orderAccumDt = 0;
+    lastOrderTime = elapsedSec;
 
     const bedAt = makeBedSampler(terrain);
     const riverFlowAt = typeof terrain?.inlandWaterAt === 'function'
@@ -7007,13 +7067,11 @@ export async function createTradeVessels({
     for (const u of vessels) peerTargets.push(u.boat);
 
     totalIntact = 0;
-    const windVec = env?.windVec ?? [8, 0];
-    const stormFlag = Boolean(env?.storm);
     const swellDirRad = Math.atan2(windVec?.[1] ?? 0, windVec?.[0] ?? 8);
 
     // Coordinate live harbor dock reservations & FIFO waiting queue before stepping autopilots.
     assignHarborBerthsAndQueue(vessels, {
-      dt,
+      dt: simDt,
       elapsedSec,
       storm: stormFlag,
       avoidVessels: env?.avoidVessels ?? null,
@@ -7021,8 +7079,10 @@ export async function createTradeVessels({
       worldOffsetZ,
     });
 
-    // Enforce water-safe non-overlap hull separation between live sea vessels so no two hulls ever merge.
-    if (vessels.length > 1) {
+    // Enforce frame-rate-independent water-safe non-overlap hull separation between live sea vessels (zero drift when paused).
+    if (vessels.length > 1 && simDt > 0) {
+      const sepBlend = 1 - Math.exp(-3.5 * simDt);
+      const maxPush = 4.5 * Math.min(1, simDt * 6);
       for (let i = 0; i < vessels.length; i++) {
         const va = vessels[i];
         if (!va || va.route?.mode === 'river' || va.boat?.damage?.sunk || va.ai.state === 'sunk') continue;
@@ -7039,7 +7099,7 @@ export async function createTradeVessels({
           if (sep >= minSep) continue;
           const ux = sep > 1e-3 ? dx / sep : Math.cos((i * 1.7 + j * 2.3));
           const uz = sep > 1e-3 ? dz / sep : Math.sin((i * 1.7 + j * 2.3));
-          const push = Math.min(4.5, (minSep - sep) * 0.45);
+          const push = Math.min(maxPush, (minSep - sep) * sepBlend);
           const shareA = fixedA ? 0 : (fixedB ? 1 : 0.5);
           const shareB = fixedB ? 0 : (fixedA ? 1 : 0.5);
           if (shareA > 0) {
@@ -7078,11 +7138,12 @@ export async function createTradeVessels({
 
       const prevAiX = ai.x;
       const prevAiZ = ai.z;
+      const prevAiYaw = ai.yaw;
       const prevSpeed = ai.speed || 0;
 
       const rigFactor = dmg.hits > 0 ? Math.max(0.06, dmg.rigIntegrity ?? 1) : 1;
       const sinkFrac = Math.min(1, (dmg.floodingSinkage ?? 0) / Math.max(0.4, v.boat.freeboard));
-      const stepDt = (dmg.sunk || v.boat.aground) ? 0 : dt;
+      const stepDt = (dmg.sunk || v.boat.aground) ? 0 : simDt;
       stepTradeVesselAutopilot(ai, v.route, v.archIndex, {
         dt: stepDt,
         elapsedSec,
@@ -7098,6 +7159,18 @@ export async function createTradeVessels({
         beam: v.boat.beam,
         draft: v.boat.draft,
       });
+      if (stepDt > 1e-4 && !dmg.sunk && !v.boat.aground && !v.damaged?.ready && ai.state !== 'docked' && ai.state !== 'anchored') {
+        let dyaw = ai.yaw - prevAiYaw;
+        while (dyaw > Math.PI) dyaw -= 2 * Math.PI;
+        while (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+        v._gpuVx = Math.max(-16, Math.min(16, (ai.x - prevAiX) / stepDt));
+        v._gpuVz = Math.max(-16, Math.min(16, (ai.z - prevAiZ) / stepDt));
+        v._gpuYawRate = Math.max(-0.8, Math.min(0.8, dyaw / stepDt));
+      } else {
+        v._gpuVx = 0;
+        v._gpuVz = 0;
+        v._gpuYawRate = 0;
+      }
       if (dmg.hits > 0 || (dmg.floodingTonnes ?? 0) > 0) {
         ai.speed *= rigFactor * Math.max(0.20, 1 - 0.68 * sinkFrac);
       }
@@ -7298,7 +7371,7 @@ export async function createTradeVessels({
         const bilgeHeel = Math.abs(rawSlopeRoll) < 0.05 ? (ai.tackSide || 1) * 0.16 * shoalSeverity : 0;
         const targetGroundRoll = Math.max(-0.42, Math.min(0.42, rawSlopeRoll * 0.85 + bilgeHeel));
         const targetGroundPitch = Math.max(-0.24, Math.min(0.24, Math.atan2(colBow.bedY - colStern.bedY, Math.max(3.5, halfL * 2)) * 0.78));
-        const settleRate = dt > 0 ? (1 - Math.exp(-dt * 3.2)) : 1;
+        const settleRate = simDt > 0 ? (1 - Math.exp(-simDt * 3.2)) : 1;
         v.boat.groundingRoll = (v.boat.groundingRoll ?? 0) + (targetGroundRoll - (v.boat.groundingRoll ?? 0)) * settleRate;
         v.boat.groundingPitch = (v.boat.groundingPitch ?? 0) + (targetGroundPitch - (v.boat.groundingPitch ?? 0)) * settleRate;
 
@@ -7339,7 +7412,7 @@ export async function createTradeVessels({
         v.boat.aground = false;
       }
       if (!v.boat.aground && ((v.boat.groundingRoll ?? 0) !== 0 || (v.boat.groundingPitch ?? 0) !== 0)) {
-        const relax = dt > 0 ? Math.exp(-dt * 2.5) : 0;
+        const relax = simDt > 0 ? Math.exp(-simDt * 2.5) : 0;
         v.boat.groundingRoll = (v.boat.groundingRoll ?? 0) * relax;
         v.boat.groundingPitch = (v.boat.groundingPitch ?? 0) * relax;
         if (Math.abs(v.boat.groundingRoll) < 1e-4) v.boat.groundingRoll = 0;
@@ -7646,7 +7719,7 @@ export async function createTradeVessels({
       const v = vessels[vi];
       const wm = v._waveMeta;
       if (!wm) continue;
-      const wOff = waveCount * 16;
+      const wOff = waveCount * 20;
       waveInputF32[wOff + 0] = v.ai.x;
       waveInputF32[wOff + 1] = wm.baseWaterY;
       waveInputF32[wOff + 2] = v.ai.z;
@@ -7663,6 +7736,10 @@ export async function createTradeVessels({
       waveInputU32[wOff + 13] = (v.intactSlot ?? 0xFFFFFFFF) >>> 0;
       waveInputU32[wOff + 14] = (v.crewSlot >= 0 ? v.crewSlot : 0xFFFFFFFF) >>> 0;
       waveInputU32[wOff + 15] = wm.flags >>> 0;
+      waveInputF32[wOff + 16] = v._gpuVx ?? 0;
+      waveInputF32[wOff + 17] = v._gpuVz ?? 0;
+      waveInputF32[wOff + 18] = v._gpuYawRate ?? 0;
+      waveInputF32[wOff + 19] = v.ai.phaseRad + elapsedSec * 1.35;
       waveCount++;
     }
     activeWaveVesselCount = waveCount;
@@ -7673,13 +7750,14 @@ export async function createTradeVessels({
       waveParamsU32[1] = MAX_TRADE_VESSELS;
       waveParamsU32[2] = oceanBridge?.dispView ? 1 : 0;
       waveParamsU32[3] = 0;
-      waveParamsF32[0] = Math.max(0, Math.min(0.05, Number.isFinite(dt) ? dt : 0));
+      waveParamsF32[0] = Math.max(0, Math.min(0.05, clampedDt));
       waveParamsF32[1] = Number.isFinite(elapsedSec) ? elapsedSec : 0;
       waveParamsF32[2] = (windVec?.[0] ?? 8) * (stormFlag ? 1.25 : 1.0);
       waveParamsF32[3] = (windVec?.[1] ?? 0) * (stormFlag ? 1.25 : 1.0);
+      waveParamsExtraF32[0] = 0;
       device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsBuf);
       if (activeWaveVesselCount > 0) {
-        device.queue.writeBuffer(vesselWaveInputBuffer, 0, waveInputBuf, 0, activeWaveVesselCount * 64);
+        device.queue.writeBuffer(vesselWaveInputBuffer, 0, waveInputBuf, 0, activeWaveVesselCount * 80);
       }
       scene.send(0, totalIntact);
       sentIntact = totalIntact;
@@ -7747,6 +7825,8 @@ export async function createTradeVessels({
       contextRiverAt = buildReachChannelSampler(effReaches);
       routes = buildTradeVesselRoutes(snapshot, origin, { riverReaches: effReaches, places, ...(lastContext || {}) });
       lastUploadTime = -Infinity;
+      lastOrderTime = -Infinity;
+      orderAccumDt = 0;
       if (Number.isFinite(snapshot?.day)) boardDay = snapshot.day;
       rebuildVesselsFromRoutes();
     },

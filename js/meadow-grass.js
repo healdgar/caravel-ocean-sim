@@ -687,7 +687,7 @@ export async function createMeadowGrass({
   let packRef = pack;
   pack = null; // Release parameter slot so returned closures never retain the full raw CPU meadow words buffer.
   const [atlas, programs, view, stand] = await Promise.all([
-    requestContinuumAtlas(device, `meadow ${packManifest.pack}`, async () => { const p = packRef; packRef = null; return p; }),
+    requestContinuumAtlas(device, `meadow ${packManifest.pack}`, async () => { const p = packRef; packRef = null; return p; }, { surfels: false }),
     requestContinuumPrograms({ device, shader, shadowFormat, pages }),
     requestContinuumView({ device, shader, material: MEADOW_CONTINUUM_SPEC, format, samples, pages }),
     requestMeadowStand(device, shader),
@@ -712,8 +712,7 @@ export async function createMeadowGrass({
   const most = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / (MEADOW_CONTINUUM_POSE * 16));
   const perType = Math.floor(Math.min(wanted, most) / atlas.types.length);
   const { capacity, room } = continuumRoom(atlas.types, atlas.types.map(() => perType));
-  const meadowProfile = isMobile ? { ...continuumProfile('meadow'), errorScale: 3.10, taperMetres: 0, taperPower: 1.0, shadowMaxDistance: 20 } : 'meadow';
-  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: isSecondary ? 'meadow secondary' : 'meadow', written: true, profile: meadowProfile });
+  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: isSecondary ? 'meadow secondary' : 'meadow', written: true, profile: 'meadow' });
   scene.setCount(capacity);
   scene.setWorldOffset(worldOffset?.x ?? 0, worldOffset?.z ?? 0);
   const stood = mkBuf('meadow stood', MEADOW_CONTINUUM_STOOD_BYTES, B.STORAGE | B.INDIRECT);

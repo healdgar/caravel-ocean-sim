@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fitLandShadow, landShadowRadiusStep, landShadowRelief, LAND_SHADOW_RADII, LAND_SHADOW_RESOLUTION } from '../js/shadows.js';
 import { SHADOW_SAMPLE } from '../js/wgsl/shadows.js';
-import { TERRAIN } from '../js/wgsl/terrain.js';
+import { TERRAIN_LAND, TERRAIN_CITY } from '../js/wgsl/terrain.js';
 import { forestContinuumStandWGSL } from '../js/wgsl/forest-continuum.js';
 
 const RESOLUTION = LAND_SHADOW_RESOLUTION;
@@ -94,13 +94,15 @@ test('a ship keeps its full shadow filter and the land map takes four taps', () 
 });
 
 test('land is shaded by whichever light the map was drawn from', () => {
-  const finish = TERRAIN.slice(TERRAIN.indexOf('fn landFinishShadowed('), TERRAIN.indexOf('fn landFinish('));
-  assert.match(finish, /shadowVis:vec3f\)->vec4f/, 'the canvas between colours the light');
-  assert.match(finish, /sunIlluminance\(\)\*sunlight\*solarShadowVisibility\(shadowVis\)/);
-  assert.match(finish, /lunarSurface\([^;]*lunarShadowVisibility\(shadowVis\)\);/);
-  // The land draws no trees of its own: every tree casts through the forest's cluster cut (below).
-  assert.ok(!/treeShadowVS|treeVS|treeWorld/.test(TERRAIN));
-  const canopy = TERRAIN.slice(TERRAIN.indexOf('let beyondShadowMap='), TERRAIN.indexOf('let diffuse=', TERRAIN.indexOf('let beyondShadowMap=')));
+  for (const src of [TERRAIN_LAND, TERRAIN_CITY]) {
+    const finish = src.slice(src.indexOf('fn landFinishShadowed('), src.indexOf('fn landFinish('));
+    assert.match(finish, /shadowVis:vec3f\)->vec4f/, 'the canvas between colours the light');
+    assert.match(finish, /sunIlluminance\(\)\*sunlight\*solarShadowVisibility\(shadowVis\)/);
+    assert.match(finish, /lunarSurface\([^;]*lunarShadowVisibility\(shadowVis\)\);/);
+    // The land draws no trees of its own: every tree casts through the forest's cluster cut (below).
+    assert.ok(!/treeShadowVS|treeVS|treeWorld/.test(src));
+  }
+  const canopy = TERRAIN_LAND.slice(TERRAIN_LAND.indexOf('let beyondShadowMap='), TERRAIN_LAND.indexOf('let diffuse=', TERRAIN_LAND.indexOf('let beyondShadowMap=')));
   assert.match(canopy, /1\.0-landShadowCoverage\(world\)/, 'the stand-in canopy shade applies only where the map does not reach');
   assert.match(canopy, /beyondShadowMap>0\.0\)\{[^}]*vegetationMask/, 'and its texture is read only there');
 });

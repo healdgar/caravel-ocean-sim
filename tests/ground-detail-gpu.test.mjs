@@ -7,7 +7,7 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 import {GROUND_DETAIL_BAKE,GROUND_DETAIL_CUT_M,GROUND_DETAIL_FADE_M,GROUND_DETAIL_FINE_CUT_M,GROUND_DETAIL_MEAN,GROUND_DETAIL_RENDER} from '../js/wgsl/ground-detail.js';
-import {TERRAIN} from '../js/wgsl/terrain.js';
+import {TERRAIN_LAND,TERRAIN_CITY} from '../js/wgsl/terrain.js';
 import {LAND_CONTINUUM_RENDER} from '../js/wgsl/land-continuum.js';
 
 let browser,server,base;
@@ -26,10 +26,12 @@ const blank=async()=>{
 
 test('the land shader never discards, fetches nothing before its cut, and crater tiles shade through the same material',()=>{
   assert.doesNotMatch(GROUND_DETAIL_RENDER,/\bdiscard\b/);
-  const body=(name,from=TERRAIN)=>{const at=from.indexOf(`fn ${name}(`);assert.ok(at>=0,name);let depth=0;for(let i=from.indexOf('{',at);i<from.length;i++){if(from[i]==='{')depth++;if(from[i]==='}'&&!--depth)return from.slice(at,i+1);}throw Error(name);};
-  assert.doesNotMatch(body('landSurface'),/\bdiscard\b/);
-  assert.doesNotMatch(body('landOpaque'),/\bdiscard\b/);
-  assert.doesNotMatch(body('landFinish'),/\bdiscard\b/);
+  const body=(name,from=TERRAIN_LAND)=>{const at=from.indexOf(`fn ${name}(`);assert.ok(at>=0,name);let depth=0;for(let i=from.indexOf('{',at);i<from.length;i++){if(from[i]==='{')depth++;if(from[i]==='}'&&!--depth)return from.slice(at,i+1);}throw Error(name);};
+  assert.doesNotMatch(body('landSurface',TERRAIN_LAND),/\bdiscard\b/);
+  assert.doesNotMatch(body('landOpaque',TERRAIN_LAND),/\bdiscard\b/);
+  assert.doesNotMatch(body('landFinish',TERRAIN_LAND),/\bdiscard\b/);
+  assert.doesNotMatch(body('landSurface',TERRAIN_CITY),/\bdiscard\b/);
+  assert.doesNotMatch(body('landOpaque',TERRAIN_CITY),/\bdiscard\b/);
   // The cut comes first. Past it not one fetch happens, on any path.
   const at=body('groundDetailAt',GROUND_DETAIL_RENDER);
   assert.ok(at.indexOf(`if(away>=${GROUND_DETAIL_CUT_M}.0){return d;}`)>=0);

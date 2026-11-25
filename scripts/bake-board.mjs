@@ -137,7 +137,8 @@ for (const id of Object.keys(FORT_RECORDS)) for (const record of fortRecordsFor(
   works.push(workOf(record, phase));
 }
 // A port already baked for this year keeps the country it was given: its seed, unless another is asked for.
-const keptRecord = bakedBoardAsset(port, year) && existsSync(resolve(root, bakedBoardAsset(port, year))) ? JSON.parse(readFileSync(resolve(root, bakedBoardAsset(port, year)), 'utf8')).request : null;
+const exactBoardAsset = bakedBoardAsset(port, year, { exact: true });
+const keptRecord = exactBoardAsset && existsSync(resolve(root, exactBoardAsset)) ? JSON.parse(readFileSync(resolve(root, exactBoardAsset), 'utf8')).request : null;
 const livedIndex = args.indexOf('--lived');
 const livedArg = livedIndex >= 0 ? (args[livedIndex + 1] && !args[livedIndex + 1].startsWith('--') && Number.isFinite(Number(args[livedIndex + 1])) ? Number(args[livedIndex + 1]) : true) : false;
 const request = boardRequest({
@@ -162,8 +163,8 @@ const world = Buffer.from(await open.freeze()), record = await open.request('vie
 await open.close();
 say(`founded in ${((performance.now() - began) / 1000).toFixed(1)} s: ${board.places.map((p) => `${p.kind} ${p.name} (${p.people})`).join(', ')}; ${board.buildings.count} buildings, ${board.fields.length} furlongs, ${board.people} people`);
 
-const out = resolve(root, option('out', bakedBoardAsset(port, year) ?? `assets/boards/${port}-${year}.json`));
-const worldOut = option('out', null) ? out.replace(/\.json$/, '') + '.world' : resolve(root, bakedWorldAsset(port, year) ?? `assets/boards/${port}-${year}.world`);
+const out = resolve(root, option('out', exactBoardAsset ?? `assets/boards/${port}-${year}.json`));
+const worldOut = option('out', null) ? out.replace(/\.json$/, '') + '.world' : resolve(root, bakedWorldAsset(port, year, { exact: true }) ?? `assets/boards/${port}-${year}.world`);
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(worldOut, world);
 const held = Object.fromEntries(['settlements', 'houses', 'buildings', 'fields', 'roads', 'bridges', 'armies', 'ships', 'caravans', 'envoys', 'travellers', 'banditCamps', 'memorials', 'projects', 'tracks', 'fences', 'trees', 'petitions']

@@ -13,7 +13,7 @@ import { CITY_TREES } from './old-world-city.js';
 import { layBoardCountry } from './old-world-board.js';
 import { nativeTownHeld } from './native-towns.js';
 import { colonialTownHeld } from './colonial-towns.js';
-import { BOARD_RIVERS, boardRequest, boardSeat } from './board-model.js';
+import { BOARD_RIVERS, boardRequest, boardSeat, resolveBakedBoardYear } from './board-model.js';
 import { FORT_RECORDS, fortPhaseFor, fortRecordsFor } from './fort-records.js';
 
 const DEG = Math.PI / 180;
@@ -236,9 +236,14 @@ const uncarvedSurveys = new WeakMap();
 export function registerBakedBoard(baked) {
   if (baked && baked.board && baked.port) bakedBoards.set(`${baked.port}:${baked.year}`, baked);
 }
-export function bakedBoardFor(region) {
-  const key = runtimeBoardPortKey(region);
-  return key ? bakedBoards.get(`${key}:${region.year ?? 1550}`) || null : null;
+export function bakedBoardFor(regionOrPort, year = null) {
+  const key = typeof regionOrPort === 'string' ? regionOrPort : runtimeBoardPortKey(regionOrPort);
+  if (!key) return null;
+  const targetYear = year ?? (typeof regionOrPort === 'object' ? regionOrPort?.year : null) ?? 1550;
+  const exact = bakedBoards.get(`${key}:${targetYear}`);
+  if (exact) return exact;
+  const resolved = resolveBakedBoardYear(key, targetYear, bakedBoards);
+  return resolved != null ? bakedBoards.get(`${key}:${resolved}`) || null : null;
 }
 // A city on ground that holds it, with no board founded there: it has no town and no country, and says why once.
 const unbakedSaid = new Set();

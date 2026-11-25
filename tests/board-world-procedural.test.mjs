@@ -36,7 +36,7 @@ import { caravanHerdSeeds } from '../js/herds.js';
 import { cityContinuumMaterial } from '../js/wgsl/city-continuum.js';
 import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
 import { HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
-import { TERRAIN } from '../js/wgsl/terrain.js';
+import { TERRAIN_LAND, TERRAIN_CITY } from '../js/wgsl/terrain.js';
 import { GROUND_DETAIL_RENDER } from '../js/wgsl/ground-detail.js';
 
 function upsampleSurvey(survey, targetN = 257) {
@@ -56,7 +56,7 @@ function upsampleSurvey(survey, targetN = 257) {
   return out;
 }
 
-function wgslBody(name, src = TERRAIN) {
+function wgslBody(name, src = TERRAIN_LAND) {
   const at = src.indexOf(`fn ${name}(`);
   assert.ok(at >= 0, `missing WGSL fn ${name}`);
   let depth = 0;
@@ -272,19 +272,22 @@ test('herd, vessel and city WGSL: zero discard and the city continuum\'s sample-
 
   // Zero-discard invariant across terrain and city passes (the city continuum hands off via MSAA @builtin(sample_mask)).
   assert.doesNotMatch(GROUND_DETAIL_RENDER, /\bdiscard\b/);
-  assert.doesNotMatch(wgslBody('landSurface'), /\bdiscard\b/);
-  assert.doesNotMatch(wgslBody('landOpaque'), /\bdiscard\b/);
-  assert.doesNotMatch(wgslBody('landFinish'), /\bdiscard\b/);
+  assert.doesNotMatch(wgslBody('landSurface', TERRAIN_LAND), /\bdiscard\b/);
+  assert.doesNotMatch(wgslBody('landOpaque', TERRAIN_LAND), /\bdiscard\b/);
+  assert.doesNotMatch(wgslBody('landFinish', TERRAIN_LAND), /\bdiscard\b/);
+  assert.doesNotMatch(wgslBody('landSurface', TERRAIN_CITY), /\bdiscard\b/);
+  assert.doesNotMatch(wgslBody('landOpaque', TERRAIN_CITY), /\bdiscard\b/);
   // The city's view: its material composed into the one pipeline family, shaded by the land's own surfaces.
-  const CITY_RENDER = continuumModuleWGSL({ pass: 'view', material: cityContinuumMaterial(TERRAIN) });
-  assert.doesNotMatch(CITY_RENDER, /\bdiscard\b/);
+  const CITY_RENDER = continuumModuleWGSL({ pass: 'view', material: cityContinuumMaterial(TERRAIN_CITY) });
+  assert.doesNotMatch(CITY_RENDER.replace(/\/\/[^\n]*/g, ''), /\bdiscard\b/);
   // Clusters, far body and splat split each pixel's samples through the continuum core: complements, each sample once.
   const cityMask = wgslBody('continuumMask', CITY_RENDER);
   assert.match(cityMask, /let handoff=continuumSamples\(/);
   assert.match(cityMask, /let splat=handoff&continuumSamples\(/);
   assert.match(cityMask, /return all&~handoff;/);
   assert.match(cityMask, /return handoff&~splat;/);
-  assert.match(wgslBody('continuumFS', CITY_RENDER), /out\.mask=continuumMask\(/);
+  assert.match(wgslBody('continuumSurfelMask', CITY_RENDER), /continuumMask\(/);
+  assert.match(wgslBody('continuumFS', CITY_RENDER), /out\.mask=continuum(?:Surfel)?Mask\(/);
 });
 
 test('harbor fleet archetypes, bathymetry & berth safety, caravan bridge decks, and Lisbon street bridges', async () => {

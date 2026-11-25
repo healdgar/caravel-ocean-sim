@@ -20,8 +20,11 @@ import {
 } from '../js/continuum-format.js';
 import { validateForestContinuumManifest } from '../js/forest-continuum.js';
 import { validateMeadowGrass } from '../js/meadow-continuum.js';
+import { CREW_CONTINUUM_BODIES, validateCrewContinuumManifest } from '../js/crew-continuum.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const onlyArg = process.argv.slice(2).find((a) => a.startsWith('--only='))?.slice(7) ?? null;
+const onlySet = onlyArg ? new Set(onlyArg.split(',').filter(Boolean)) : null;
 
 const JOBS = [
   {
@@ -56,13 +59,23 @@ const JOBS = [
     minLevel: 5,
     validate: validateMeadowGrass,
   },
+  ...CREW_CONTINUUM_BODIES.map(({ id }) => ({
+    name: `crew-${id}`,
+    kind: 'crew',
+    srcDir: `assets/crew/continuum/${id}`,
+    outDir: `assets/mobile-continuum/crew/${id}`,
+    minLevel: 6,
+    keepRootsBelow: true,
+    maxTextureSize: 1024,
+    validate: validateCrewContinuumManifest,
+  })),
 ];
 
 function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex');
 }
 
-function pruneContinuumAtlas(srcWords, minLevel, label) {
+function pruneContinuumAtlas(srcWords, minLevel, label, { keepRootsBelow = false } = {}) {
   checkContinuumAtlas(srcWords, label);
   const H = CONTINUUM_HEADER, T = CONTINUUM_TYPE;
   const srcF = new Float32Array(srcWords.buffer, srcWords.byteOffset, srcWords.length);
@@ -112,13 +125,19 @@ function pruneContinuumAtlas(srcWords, minLevel, label) {
       const lvl = (packed >>> 8) & 255;
       const ownErr = srcF[cb + 12];
       const pErr = srcF[cb + 13];
+      const isRoot = !Number.isFinite(pErr) || pErr > 1e20;
       if (lvl < minLevel) {
-        if (!Number.isFinite(pErr) || pErr > 1e20) {
-          throw Error(`${label} type ${t}: cluster ${cIdx} at L${lvl} is a root below minLevel=${minLevel}`);
+        if (isRoot) {
+          if (!keepRootsBelow) {
+            throw Error(`${label} type ${t}: cluster ${cIdx} at L${lvl} is a root below minLevel=${minLevel}`);
+          }
+          // Preserve small-piece roots below minLevel as standalone leaf-roots (newLvl=0, ownErr=0) so every piece
+          // remains 100% watertight at every cut threshold.
+        } else {
+          continue;
         }
-        continue;
       }
-      const newLvl = lvl - minLevel;
+      const newLvl = lvl <= minLevel ? 0 : lvl - minLevel;
       if (newLvl > maxKeptLevel) maxKeptLevel = newLvl;
       if (newLvl === 0) {
         minLevelParentErrors.add(pErr);
@@ -278,13 +297,19 @@ function pruneContinuumAtlas(srcWords, minLevel, label) {
 }
 
 for (const job of JOBS) {
+  if (onlySet && !onlySet.has(job.name) && !onlySet.has(job.kind)) continue;
   const srcManifestPath = path.join(root, job.srcDir, 'manifest.json');
   const srcAtlasPath = path.join(root, job.srcDir, 'atlas.bin.gz');
   const manifest = JSON.parse(fs.readFileSync(srcManifestPath, 'utf8'));
   const srcBuf = zlib.gunzipSync(fs.readFileSync(srcAtlasPath));
   const srcWords = new Uint32Array(srcBuf.buffer, srcBuf.byteOffset, srcBuf.byteLength / 4);
 
-  const { out, perType, totalClusters, totalVertices, totalIndices } = pruneContinuumAtlas(srcWords, job.minLevel, job.name);
+  const { out, perType, totalClusters, totalVertices, totalIndices } = pruneContinuumAtlas(
+    srcWords,
+    job.minLevel,
+    job.name,
+    { keepRootsBelow: Boolean(job.keepRootsBelow) },
+  );
   const rawBytes = Buffer.from(out.buffer, out.byteOffset, out.byteLength);
   const gzBytes = zlib.gzipSync(rawBytes, { level: 9 });
   const rawSha = sha256Hex(rawBytes);
@@ -303,6 +328,9 @@ for (const job of JOBS) {
       sha256: gzSha,
     },
   };
+  const outDir = path.join(root, job.outDir);
+  fs.mkdirSync(outDir, { recursive: true });
+  let extraLog = '';
   if (job.kind === 'forest') {
     nextManifest.types.forEach((t, i) => {
       const pt = perType[i];
@@ -328,19 +356,59 @@ for (const job of JOBS) {
       const pt = perType[i];
       t.clusters = pt.keptClusters.length;
     });
+  } else if (job.kind === 'crew') {
+    const pt = perType[0];
+    nextManifest.clusters = {
+      ...nextManifest.clusters,
+      count: pt.keptClusters.length,
+      levels: pt.levels,
+      finestTriangles: pt.finestTriangles,
+    };
+    nextManifest.files['atlas.bin'] = {
+      bytes: rawBytes.length,
+      sha256: rawSha,
+      gzip: { file: 'atlas.bin.gz', bytes: gzBytes.length, sha256: gzSha },
+    };
+    // Slice desktop 4K mip chain down to maxTextureSize (1024x1024 -> 1x1, 1.33 MiB raw / ~0.5 MiB gz per codec).
+    const maxTex = job.maxTextureSize ?? 1024;
+    const startMip = Math.max(0, manifest.texture.levels.findIndex((l) => l.width <= maxTex && l.height <= maxTex));
+    const baseOffset = manifest.texture.levels[startMip].offset;
+    const slicedLevels = manifest.texture.levels.slice(startMip).map((l) => ({ ...l, offset: l.offset - baseOffset }));
+    const expectedTexBytes = slicedLevels.reduce((s, l) => s + l.bytes, 0);
+    nextManifest.texture = {
+      ...nextManifest.texture,
+      width: slicedLevels[0].width,
+      height: slicedLevels[0].height,
+      levels: slicedLevels,
+    };
+    let texGzSum = 0;
+    for (const codecStream of ['albedo.bc7.bin', 'albedo.astc.bin']) {
+      const srcTex = zlib.gunzipSync(fs.readFileSync(path.join(root, job.srcDir, `${codecStream}.gz`)));
+      const sliced = srcTex.subarray(baseOffset);
+      if (sliced.byteLength !== expectedTexBytes) {
+        throw Error(`${job.name} ${codecStream}: sliced ${sliced.byteLength} !== expected ${expectedTexBytes}`);
+      }
+      const texGz = zlib.gzipSync(sliced, { level: 9 });
+      fs.writeFileSync(path.join(outDir, `${codecStream}.gz`), texGz);
+      nextManifest.files[codecStream] = {
+        bytes: sliced.byteLength,
+        sha256: sha256Hex(sliced),
+        gzip: { file: `${codecStream}.gz`, bytes: texGz.length, sha256: sha256Hex(texGz) },
+      };
+      texGzSum += texGz.length;
+    }
+    extraLog = ` | ${pt.finestTriangles} tris, ${slicedLevels[0].width}px tex (${(expectedTexBytes / 1048576).toFixed(2)} MB raw, ${(texGzSum / 2 / 1048576).toFixed(2)} MB gz/codec)`;
   }
 
   // Validate against the exact runtime validator before writing to disk.
   job.validate(nextManifest);
 
-  const outDir = path.join(root, job.outDir);
-  fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'atlas.bin.gz'), gzBytes);
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(nextManifest, null, 2) + '\n');
 
   console.log(
     `[mobile-continuum] ${job.name}: ` +
     `${(srcBuf.byteLength / 1048576).toFixed(1)} MB -> ${(rawBytes.length / 1048576).toFixed(2)} MB raw ` +
-    `(${(gzBytes.length / 1048576).toFixed(2)} MB gz) | ${totalClusters} clusters, ${totalVertices} verts`
+    `(${(gzBytes.length / 1048576).toFixed(2)} MB gz) | ${totalClusters} clusters, ${totalVertices} verts${extraLog}`
   );
 }

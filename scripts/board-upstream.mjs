@@ -14,7 +14,7 @@
 //           real map's region speaks them (REALMAPS, built by that game's tools/realmap.py, or a host's own map); a
 //           realm made up from a seed is never drawn in them, nor are its sell-swords (CULT_DRAWN).
 //
-// Two more go back with these, each kept in a table of its own since each is a whole people's custom, not a fix:
+// Three more go back with these, each kept in a table of its own since each is a whole people's custom or map layer, not a fix:
 //   native   the peoples of the Americas and their ways (scripts/board-native.mjs)
 //   colonial the towns the crowns planted overseas (scripts/board-colonial.mjs), changing the simulation so:
 //            - a real map may name the manner a tongue's towns on it were planted by (REALMAP.manners), its colony's
@@ -39,6 +39,15 @@
 //            - layoutSettlement: no street or house on a work's ground (buildable); a citadel is where the place's
 //              castle on the hill stands; a place's works are stood as its buildings once its streets are laid
 //              (worksStand); its wall goes round them
+//
+// Staged upstream copy-back queue (BOARD_UPSTREAM_PENDING):
+//   `BOARD_UPSTREAM` holds the 28 passages currently applied to `assets/board/game.js` (as recorded in
+//   `assets/board/SOURCE.json`), whose SHA-256 is pinned inside all pre-baked `assets/boards/*.world` saves.
+//   `BOARD_UPSTREAM_PENDING` holds subsequent generic simulation improvements written in Castle and Commons' own
+//   code and verified offline against both the untuned source and `assets/board/game.js` by
+//   `scripts/vendor-castle-and-commons.mjs --check` and `tests/board-model.test.mjs`. Until the next `--retune`
+//   and full board rebake promotes them into `BOARD_UPSTREAM`, guarded fallback shims in `assets/board/runtime.js`
+//   mirror them and yield automatically the moment each upstream hook exists in `assets/board/game.js`.
 export const BOARD_UPSTREAM = Object.freeze([
   // Fixes.
   {
@@ -248,3 +257,259 @@ dutch:{
     replace: "const houseKey=n=>n.replace(/^House /,'').replace(/^(de |von |van der |van den |van |di |da |della |del )/,'')",
   },
 ]);
+
+// Staged upstream simulation changes ready to copy back into Castle and Commons' index.html and to promote into
+// BOARD_UPSTREAM on the next `vendor-castle-and-commons.mjs --retune` + full board rebake. Every passage is pure
+// Castle and Commons code (zero host-specific globals, zero PRNG perturbation when not called), applies cleanly to
+// both the untuned upstream source and the tuned assets/board/game.js, and maps 1:1 to a guarded runtime fallback
+// shim in assets/board/runtime.js so zero simulation logic is duplicated once promoted.
+export const BOARD_UPSTREAM_PENDING = Object.freeze([
+  {
+    id: 'find-person-armies',
+    runtimeHook: 'findPerson',
+    runtimeShim: 'buildArmySoldierInspect',
+    why: 'findPerson missed levied householders and hired sell-swords serving in W.armies (referenceTarget had a one-off fallback, while property, tenure, tree, and inspector lookups calling findPerson returned null). Search living hosts before returning null.',
+    find: "const t=(W.travellers||[]).find(x=>x.p.id===id);if(t)return {p:t.p,s:W.settlements[t.to],t};return null;}",
+    replace:
+      "const t=(W.travellers||[]).find(x=>x.p.id===id);if(t)return {p:t.p,s:W.settlements[t.to],t};\n" +
+      "  for(const a of W.armies||[])if(!a.gone){const p=(a.men||[]).find(x=>x.id===id);if(p){const s=W.settlements[p.home]||W.settlements[p.si]||W.settlements[a.at];if(s)return {p,s,a};}}\n" +
+      "  return null;}",
+  },
+  {
+    id: 'opening-market-listing',
+    runtimeHook: 'openingMarketListing',
+    runtimeShim: 'ensureOpeningMarketListing',
+    why: 'On opening day before the first daily market tick runs (while !s.storage), settlements hold genuine s.stores surplus (spareOf > 0) with zero seller lots listed on mkt(s, g), starving opening-day caravans, barges, and coasters. List real spare surplus under living local folk without minting goods.',
+    find: 'function avail(s,g,p){const L=mkt(s,g),R=s.rsv&&s.rsv[g];let a=0;for(const[w,v]of L.ownedEntries())if(!(R&&R.get(w)>p))a+=forSale(w,v,g);return a;}',
+    replace:
+      'function avail(s,g,p){const L=mkt(s,g),R=s.rsv&&s.rsv[g];let a=0;for(const[w,v]of L.ownedEntries())if(!(R&&R.get(w)>p))a+=forSale(w,v,g);return a;}\n' +
+      'function openingMarketListing(s){ // list genuine opening-day s.stores surplus under living folk before the first daily market tick (zero goods minted)\n' +
+      '  if(!s||s.storage||!s.stores)return;const now=day(),folk=Array.isArray(s.folk)?s.folk:[];\n' +
+      '  const open=p=>p&&!p.dead&&!(p.away&&now<(p.away.until??0));\n' +
+      "  const sellers=folk.filter(p=>open(p)&&(p.tr==='merchant'||p.tr==='trader'||p.tr==='chandler'||p.tr==='spicer'||p.tr==='farmer'||p.tr==='peasant'||p.tr==='weaver'||p.tr==='smith'));\n" +
+      '  const pool=sellers.length?sellers:folk.filter(open);if(!pool.length)return;\n' +
+      '  let idx=0;\n' +
+      '  for(const g of GOODS){\n' +
+      '    if(avail(s,g,price(s,g)*1.5)>=3)continue;\n' +
+      '    const raw=Math.max(0,Number(s.stores[g])||0),sp=typeof spareOf===\'function\'?Math.max(0,Number(spareOf(s,g))||0):raw,qty=Math.min(raw*0.65,sp);\n' +
+      '    if(qty<3)continue;\n' +
+      '    offer(s,g,pool[(idx++)%pool.length],qty,price(s,g)*0.9);\n' +
+      '  }\n' +
+      '}',
+  },
+  {
+    id: 'opening-trade-backdate',
+    runtimeHook: 'openingTradeBackdate',
+    runtimeShim: 'openingTradeSpreadFrac',
+    why: 'Opening-day trade dispatches (Day 0 or forced opening pass) start all caravans, barges, and coasters stacked at departDay === now on their origin gates. Provide deterministic openingTradeBackdate(mode, i, now, force) and optional openingSpread handling in tickTrade without altering normal daily ticks.',
+    find: 'function tickTrade(){\n  const S=W.settlements,',
+    replace:
+      'function openingTradeBackdate(mode,i=0,now=day(),force=false){ // deterministic en-route spread on opening day so traffic is not stacked at the gates\n' +
+      '  if(!(force||now<=0.01))return 0;\n' +
+      "  if(mode==='sea')return 0.16+((i*0.21)%0.62);\n" +
+      "  if(mode==='river')return 0.20+((i*0.27)%0.56);\n" +
+      "  if(mode==='cart-coach')return 0.15+((i*0.17)%0.55);\n" +
+      '  return 0.18+((i*0.19)%0.58);\n' +
+      '}\n' +
+      'function tickTrade(opts){\n' +
+      '  const openingSpread=!!(opts&&opts.openingSpread);let openingIdx=0;\n' +
+      '  const S=W.settlements,',
+  },
+  {
+    id: 'opening-trade-spread-dispatch',
+    runtimeHook: 'openingTradeBackdate',
+    runtimeShim: 'openingTradeSpreadFrac',
+    why: 'Apply openingTradeBackdate when tickTrade({ openingSpread: true }) runs on opening day; ordinary simTick() calls pass no opts so departDay stays day() bit-for-bit.',
+    find: "const c={origin:oi,dest:di,good:g,qty:bq,value:bq*price(d,g),poly:b.mode==='cart'?b.leg.poly:null,len:b.len,departDay:day(),arriveDay:day()+b.days,robbed:false,sea,unit:b.unit};",
+    replace:
+      "const spread=openingSpread?openingTradeBackdate(b.mode,openingIdx++,day(),true):0,d0=day()-spread*b.days,c={origin:oi,dest:di,good:g,qty:bq,value:bq*price(d,g),poly:b.mode==='cart'?b.leg.poly:null,len:b.len,departDay:d0,arriveDay:d0+b.days,robbed:false,sea,unit:b.unit};",
+  },
+  {
+    id: 'river-economic-corridors',
+    runtimeHook: 'riverEconomicCorridors',
+    runtimeShim: 'buildRiverEconomicCorridors',
+    why: 'Local river fishing and ferry boats need navigable multi-endpoint economic corridors (settlement-to-settlement or settlement-to-estuary via sea-connected confluences), never isolated upland creeks or headwaters past the last settlement. Derive navigable corridors from W.rivStrips, W.water, and W.settlements.',
+    find: 'if(r&&r.len>400)W.riverPairs.push({a:i,b:j,route:r});\n  }\n  if(seed)seedFolk(); // every soul in every place, with a name, a family, a nature and a schooling\n}',
+    replace:
+      'if(r&&r.len>400)W.riverPairs.push({a:i,b:j,route:r});\n  }\n  if(seed)seedFolk(); // every soul in every place, with a name, a family, a nature and a schooling\n}\n' +
+      'function riverEconomicCorridors(estuaryLabel){ // navigable multi-endpoint river legs (settlement <-> settlement or settlement <-> sea-connected estuary)\n' +
+      '  const S=W.settlements||[],rivStrips=Array.isArray(W.rivStrips)?W.rivStrips:[];\n' +
+      '  const distPt=(a,b)=>Math.hypot((b.x||0)-(a.x||0),(b.z||0)-(a.z||0));\n' +
+      '  const hubSettlement=S.find(s=>s?.harbor)||S[0]||null,hubSi=hubSettlement?Math.max(0,S.indexOf(hubSettlement)):0;\n' +
+      "  const hubName=String(hubSettlement?.name||W?.capital?.name||'Harbor'),estuaryName=estuaryLabel||`${hubName} Estuary`;\n" +
+      '  const isNearSea=pt=>{\n' +
+      "    if(!pt||!W.water||typeof toCell!=='function'||typeof inB!=='function'||typeof cIdx!=='function')return false;\n" +
+      "    const cx0=toCell(pt.x),cz0=toCell(pt.z),rad=Math.max(1,Math.ceil(120/(typeof CELL==='number'&&CELL>0?CELL:40)));\n" +
+      '    for(let dz=-rad;dz<=rad;dz++)for(let dx=-rad;dx<=rad;dx++){\n' +
+      '      const cx=cx0+dx,cz=cz0+dz;if(!inB(cx,cz)||W.water[cIdx(cx,cz)]!==1)continue;\n' +
+      '      if(Math.hypot(cellX(cx)-pt.x,cellZ(cz)-pt.z)<=120)return true;\n' +
+      '    }\n' +
+      '    return false;\n' +
+      '  };\n' +
+      '  const stripEndSea=rivStrips.map(q=>!q||q.canal||!Array.isArray(q.pts)||q.pts.length<4?[false,false]:[isNearSea(q.pts[0]),isNearSea(q.pts[q.pts.length-1])]);\n' +
+      '  let seaChanged=true;\n' +
+      '  for(let pass=0;pass<4&&seaChanged;pass++){\n' +
+      '    seaChanged=false;\n' +
+      '    for(let ri=0;ri<rivStrips.length;ri++){\n' +
+      '      const q=rivStrips[ri];if(!q||q.canal||!Array.isArray(q.pts)||q.pts.length<4)continue;\n' +
+      '      for(const endIdx of [0,1]){\n' +
+      '        if(stripEndSea[ri][endIdx])continue;\n' +
+      '        const endPt=endIdx===0?q.pts[0]:q.pts[q.pts.length-1];\n' +
+      '        for(let rj=0;rj<rivStrips.length;rj++){\n' +
+      '          if(rj===ri||(!stripEndSea[rj][0]&&!stripEndSea[rj][1]))continue;\n' +
+      '          const o=rivStrips[rj];if(!o||o.canal||!Array.isArray(o.pts)||o.pts.length<4)continue;\n' +
+      '          for(let k=0;k<o.pts.length;k++)if(distPt(endPt,o.pts[k])<=32){stripEndSea[ri][endIdx]=true;seaChanged=true;break;}\n' +
+      '          if(stripEndSea[ri][endIdx])break;\n' +
+      '        }\n' +
+      '      }\n' +
+      '    }\n' +
+      '  }\n' +
+      '  const corridors=[],validRiverIndices=new Set();\n' +
+      '  for(let ri=0;ri<rivStrips.length;ri++){\n' +
+      '    const q=rivStrips[ri];if(!q||q.canal||!Array.isArray(q.pts)||q.pts.length<4)continue;\n' +
+      '    const pts=q.pts,cumLen=new Float64Array(pts.length);\n' +
+      '    for(let k=1;k<pts.length;k++)cumLen[k]=cumLen[k-1]+distPt(pts[k-1],pts[k]);\n' +
+      '    const rawWaypoints=[];\n' +
+      '    for(let si=0;si<S.length;si++){\n' +
+      '      const s=S[si];if(!s?.pos)continue;\n' +
+      '      const reachRadius=Math.max(Math.min(Number(s.extentR)||120,380),260);\n' +
+      '      let bestK=-1,bestD=Infinity;\n' +
+      '      for(let k=0;k<pts.length;k++){const d=distPt(pts[k],s.pos);if(d<bestD){bestD=d;bestK=k;}}\n' +
+      "      if(bestK>=0&&bestD<=reachRadius)rawWaypoints.push({kind:'settlement',si,name:String(s.name||`Place ${si+1}`),k:bestK,dist:bestD});\n" +
+      '    }\n' +
+      '    if(!rawWaypoints.length)continue;\n' +
+      "    if(stripEndSea[ri][0]&&!rawWaypoints.some(w=>distPt(pts[w.k],pts[0])<=140))rawWaypoints.push({kind:'estuary',si:-1,name:estuaryName,k:0,dist:0});\n" +
+      "    if(stripEndSea[ri][1]&&!rawWaypoints.some(w=>distPt(pts[w.k],pts[pts.length-1])<=140))rawWaypoints.push({kind:'estuary',si:-1,name:estuaryName,k:pts.length-1,dist:0});\n" +
+      '    rawWaypoints.sort((a,b)=>a.k-b.k||a.dist-b.dist);\n' +
+      '    const waypoints=[];\n' +
+      '    for(const wp of rawWaypoints){const prev=waypoints[waypoints.length-1];if(prev&&prev.si===wp.si&&prev.kind===wp.kind){if(wp.dist<prev.dist)waypoints[waypoints.length-1]=wp;continue;}waypoints.push(wp);}\n' +
+      "    if(!waypoints.some(w=>w.kind==='settlement')||waypoints.length<2)continue;\n" +
+      '    const addLeg=(wpA,wpB,legIdx)=>{\n' +
+      "      if(!wpA||!wpB||wpA.k===wpB.k||(wpA.si>=0&&wpA.si===wpB.si)||(wpA.kind!=='settlement'&&wpB.kind!=='settlement'))return;\n" +
+      '      const kLo=Math.min(wpA.k,wpB.k),kHi=Math.max(wpA.k,wpB.k);if(kHi-kLo<3)return;\n' +
+      '      const segLen=cumLen[kHi]-cumLen[kLo];if(segLen<140)return;\n' +
+      '      let hwSum=0;for(let k=kLo;k<=kHi;k++)hwSum+=q.hw?.[k]??2;\n' +
+      '      const avgHw=hwSum/(kHi-kLo+1);if(avgHw<1.35)return;\n' +
+      '      const slice=pts.slice(kLo,kHi+1).map(p=>({x:p.x,z:p.z})),fromWp=wpA.k<=wpB.k?wpA:wpB,toWp=wpA.k<=wpB.k?wpB:wpA;\n' +
+      '      validRiverIndices.add(ri);\n' +
+      '      corridors.push({ri,legIdx,key:`${ri}:${fromWp.si}>${toWp.si}:${kLo}-${kHi}`,pts:slice,totalLen:segLen,avgHw,fromWp,toWp});\n' +
+      '    };\n' +
+      '    let addedAny=false;\n' +
+      '    for(let wi=0;wi+1<waypoints.length;wi++){const before=corridors.length;addLeg(waypoints[wi],waypoints[wi+1],wi);if(corridors.length>before)addedAny=true;}\n' +
+      '    if(!addedAny)addLeg(waypoints[0],waypoints[waypoints.length-1],0);\n' +
+      '  }\n' +
+      '  corridors.sort((a,b)=>b.totalLen-a.totalLen||a.ri-b.ri||a.legIdx-b.legIdx);\n' +
+      '  return {corridors,validRiverIndices,hubSi,estuaryName};\n' +
+      '}',
+  },
+  {
+    id: 'river-boat-cargo-transfer',
+    runtimeHook: 'stepRiverBoatArrival',
+    runtimeShim: 'advanceRiverBoatArrival',
+    why: 'Local river shuttles (W.riverBoats) must prune sunk, ghost-piloted, or non-corridor craft, cap boat counts strictly by living riverside fishers/boatmen and corridors, and transfer real available cargo between endpoint settlements on leg arrival without minting goods or perturbing PRNG streams.',
+    find: '  for(const r of W.roads)r.vol=(r.vol||0)*0.995;\n}',
+    replace:
+      '  for(const r of W.roads)r.vol=(r.vol||0)*0.995;\n}\n' +
+      'function riverBoatHash(a,b=0,c=0){let h=(Math.imul(a|0,0x27d4eb2d)^Math.imul(b|0,0x165667b1)^Math.imul(c|0,0x9e3779b9))|0;h=Math.imul(h^(h>>>15),0x2c1b3c6d);h=Math.imul(h^(h>>>12),0x297a2d39);return (h^(h>>>15))>>>0;}\n' +
+      'function riverBoatTargetCount(corridors){\n' +
+      '  const S=W.settlements||[];let riverFolkCount=0,totalFishStore=0;\n' +
+      '  for(const s of S){if(!s||!(s.riverside||s.river||s.harbor))continue;totalFishStore+=Math.max(0,Number(s.stores?.fish)||0);for(const p of s.folk||[])if(p&&!p.dead&&(p.tr===\'fisher\'||p.tr===\'boatman\'))riverFolkCount++;}\n' +
+      '  return (riverFolkCount>=3&&Array.isArray(corridors)&&corridors.length>0)?Math.min(8,Math.max(1,Math.min(Math.floor(riverFolkCount/3),1+Math.floor(totalFishStore/45)))):0;\n' +
+      '}\n' +
+      'function pruneRiverBoats(validRiverIndices,targetCount){\n' +
+      '  if(!Array.isArray(W.riverBoats))W.riverBoats=[];\n' +
+      '  W.riverBoats=W.riverBoats.filter(b=>Boolean(b&&!b.sunk&&!(b.pilotId>=900000)&&validRiverIndices.has(b.riverIdx)&&b.from&&b.to&&!(b.si>=0&&b.destSi>=0&&b.si===b.destSi)));\n' +
+      '  if(Number.isFinite(targetCount)&&W.riverBoats.length>Math.max(0,targetCount))W.riverBoats.length=Math.max(0,targetCount);\n' +
+      '  return W.riverBoats;\n' +
+      '}\n' +
+      "const RIVER_PARCEL_GOODS=['fish','grain','wine','timber','salt','char','ore'];\n" +
+      'function riverBoatParcel(si,idSalt,hubSi=0){\n' +
+      "  const S=W.settlements||[],worldSeed=typeof SEED==='number'?SEED:1550,safeSi=si>=0&&si<S.length?si:hubSi,stores=S[safeSi]?.stores||{};\n" +
+      "  if((Number(stores.fish)||0)>=2&&(idSalt%2===0))return {good:'fish',qty:Math.min(5,Math.max(2,Math.round(Math.min(5,Number(stores.fish)*0.08))))};\n" +
+      '  const availGoods=RIVER_PARCEL_GOODS.filter(g=>(Number(stores[g])||0)>=2);\n' +
+      "  if(!availGoods.length)return {good:'fish',qty:Math.min(2,Math.max(1,Math.floor(Number(stores.fish)||1)))};\n" +
+      '  const good=availGoods[riverBoatHash(worldSeed,idSalt,17)%availGoods.length];\n' +
+      '  const qty=Math.min(5,Math.max(2,Math.min(Math.floor(Number(stores[good])||2),2+(riverBoatHash(worldSeed,idSalt,23)%4))));\n' +
+      '  return {good,qty};\n' +
+      '}\n' +
+      'function stepRiverBoatArrival(b,now=day(),hubSi=0){ // transfer available parcel stock without minting goods and reverse the shuttle leg\n' +
+      '  if(!b||now<(b.arriveDay??-Infinity))return false;\n' +
+      '  const S=W.settlements||[],srcIdx=b.si>=0?b.si:hubSi,dstIdx=b.destSi>=0?b.destSi:hubSi,srcS=S[srcIdx],dstS=S[dstIdx];\n' +
+      '  if(srcS?.stores&&dstS?.stores&&srcIdx!==dstIdx&&b.good&&b.qty>0){\n' +
+      '    const availStock=Math.max(0,Number(srcS.stores[b.good])||0),moved=Math.min(availStock,Math.max(0,Number(b.qty)||0));\n' +
+      '    if(moved>0){srcS.stores[b.good]=Math.max(0,availStock-moved);dstS.stores[b.good]=(Number(dstS.stores[b.good])||0)+moved;}\n' +
+      '  }\n' +
+      '  const prevSi=b.si,prevFrom=b.from;b.si=b.destSi;b.destSi=prevSi;b.from=b.to;b.to=prevFrom;b.forward=!b.forward;\n' +
+      '  if(Array.isArray(b.points)&&b.points.length>=2)b.points=[...b.points].reverse();\n' +
+      '  const span=Math.max(2.0,b.tripSpan||3.2);b.departDay=now;b.arriveDay=now+span;\n' +
+      '  const nextHomeSi=b.si>=0?b.si:(b.destSi>=0?b.destSi:hubSi),nextParcel=riverBoatParcel(nextHomeSi,(b.id||1)+Math.floor(now),hubSi);\n' +
+      '  b.good=nextParcel.good;b.qty=nextParcel.qty;\n' +
+      '  return true;\n' +
+      '}',
+  },
+  {
+    id: 'settle-founding-month',
+    runtimeHook: 'settleFoundingMonth',
+    runtimeShim: 'ensureFoundingMonthSettled',
+    why: 'Direct-era worlds frozen or opened at Day 0 stand before the first monthly livestock (day % 30 === 18) and domain/standing-host (day % 30 === 20) ticks fire, leaving all herds at zero and W.armies empty. Provide settleFoundingMonth() to run those genuine monthly handlers cleanly through Day 21 on opening or thaw without altering prehistory or Day-21+ saves.',
+    find: "if(typeof freedomPrepare==='function')freedomPrepare();estateEcologyPrepare();initForeignWorld();\n}",
+    replace:
+      "if(typeof freedomPrepare==='function')freedomPrepare();estateEcologyPrepare();initForeignWorld();\n}\n" +
+      'async function settleFoundingMonth(){ // execute the founding month livestock (day 18) and standing-host (day 20) ticks cleanly through day 21\n' +
+      '  if(!W||!W.clock||!Array.isArray(W.settlements)||!W.settlements.length)return;\n' +
+      '  if(day()>=21)return;\n' +
+      '  const hasHerds=W.settlements.some(s=>Boolean(s?.hm));\n' +
+      '  const hasArmies=Array.isArray(W.armies)&&W.armies.some(a=>a&&!a.gone&&(a.strength>0||a.men?.length>0));\n' +
+      '  if(hasHerds&&hasArmies)return;\n' +
+      '  await STORAGE_OUTCOMES.wait();\n' +
+      "  if(typeof peoplePrepare==='function')peoplePrepare();\n" +
+      "  if(day()<18||!hasHerds){W.clock.day=18;if(typeof dailyLabourBegin==='function')dailyLabourBegin(W.clock.day);if(typeof tickLivestock==='function')tickLivestock();if(typeof dailyLabourEnd==='function')dailyLabourEnd();}\n" +
+      "  if(day()<20||!hasArmies){W.clock.day=20;if(typeof dailyLabourBegin==='function')dailyLabourBegin(W.clock.day);if(typeof tickDomains==='function')tickDomains();if(typeof tickMilitary==='function')tickMilitary();if(typeof dailyLabourEnd==='function')dailyLabourEnd();}\n" +
+      '  if(day()<21)W.clock.day=21;\n' +
+      '  if(STORAGE_OUTCOMES.journal?.flush)await STORAGE_OUTCOMES.journal.flush();\n' +
+      '  await STORAGE_OUTCOMES.wait();\n' +
+      '}',
+  },
+  {
+    id: 'settlement-herd-totals',
+    runtimeHook: 'herdTotals',
+    runtimeShim: 'settlementHerds',
+    why: 'Reading a settlement\'s standing livestock strictly from s.stores misses beasts recorded in per-owner s._owners ledgers before herdSync runs. Provide herdTotals(s) falling back to summing s._owners animals when s.stores is empty.',
+    find: '  if(!W.prehistory&&G.herdMesh)G.herdsDirty=true;} // the flocks are laid out again when someone is near enough to see them',
+    replace:
+      '  if(!W.prehistory&&G.herdMesh)G.herdsDirty=true;} // the flocks are laid out again when someone is near enough to see them\n' +
+      'function herdTotals(s){ // standing beasts in a place: s.stores with per-owner s._owners fallback\n' +
+      '  const out={sheep:0,cattle:0,horses:0,swine:0};if(!s)return out;const st=s.stores||{};\n' +
+      '  for(const k of BEASTS)out[k]=Math.max(0,Number(st[k])||0);\n' +
+      "  if(out.sheep+out.cattle+out.horses+out.swine<0.5&&s._owners&&typeof s._owners.values==='function'){\n" +
+      '    for(const rec of s._owners.values()){const a=rec?.animals;if(!a)continue;for(const k of BEASTS)out[k]+=Math.max(0,Number(a[k])||0);}\n' +
+      '  }\n' +
+      '  return {sheep:Math.round(out.sheep),cattle:Math.round(out.cattle),horses:Math.round(out.horses),swine:Math.round(out.swine)};\n' +
+      '}',
+  },
+]);
+
+// Complete upstream copy-back set (applied + staged) for upstreaming into Castle and Commons.
+export const BOARD_UPSTREAM_ALL = Object.freeze([...BOARD_UPSTREAM, ...BOARD_UPSTREAM_PENDING]);
+
+// Apply staged upstream passages in order, failing loudly if any anchor drifts.
+export function applyPendingUpstream(source) {
+  let patched = source;
+  for (const { id, find, replace, count = 1 } of BOARD_UPSTREAM_PENDING) {
+    const found = patched.split(find).length - 1;
+    if (found !== count) throw new Error(`Staged upstream passage "${id}" drifted: found ${found} of ${count} of "${find.slice(0, 70)}"`);
+    patched = patched.split(find).join(replace);
+  }
+  return patched;
+}
+
+// Reverse staged upstream passages in reverse order for exact round-trip verification.
+export function undoPendingUpstream(patched) {
+  let source = patched;
+  for (const { id, find, replace, count = 1 } of [...BOARD_UPSTREAM_PENDING].reverse()) {
+    const found = source.split(replace).length - 1;
+    if (found !== count) throw new Error(`Staged upstream passage "${id}" cannot be undone: found ${found} of ${count} of "${replace.slice(0, 70)}"`);
+    source = source.split(replace).join(find);
+  }
+  return source;
+}

@@ -59,6 +59,16 @@ fn cityContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   // Every corner of a far-body triangle carries the triangle's own kind.
   let worn=cityContinuumWorn(select(cityContinuumKind(s.high,s.word),cityContinuumFarKind(s.word),s.what==CONTINUUM_FAR_ENTRY),s.record,height);
   (*v).kind=worn.kind;(*v).leafUV=worn.leafUV;
+  // Collapsed far-body walls drop individual mat-14 window triangles; supply bay/storey coordinates on vertical
+  // limewash walls (where TERRAIN_CITY_MATERIAL_BLOCK draws crisp shuttered/glazed openings) so far silhouettes never read as blank blocks.
+  if(s.what==CONTINUUM_FAR_ENTRY&&abs(s.normal.y)<0.35&&height>0.35){
+    let tint=bitcast<f32>(s.record.spare.x);
+    let mat=floor(worn.kind.x+0.01);
+    if(tint>=-150.0&&abs(mat-19.0)<0.5){
+      let uWall=select(s.local.x,s.local.z,abs(s.normal.x)>abs(s.normal.z))*s.record.place.w;
+      (*v).leafUV=vec2f(uWall/2.6+0.5,height/3.1);
+    }
+  }
   // The land reads a face's damage by its normal's length past one: raw stone or timber where a cut opened it, and
   // scorch where fire has been.
   (*v).normal=s.normal*(1.0+s.wear);
@@ -108,15 +118,20 @@ fn cityContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSa
   let mat=floor(v.kind.x+0.01);
   let portShade=clamp(v.kind.y,0.18,1.0);
   let shadeAlbedo=0.52+0.48*portShade;
+  // Trim buried underground foundation shafts below -2.2 m via sample mask (zero discard) so cards frame tightly
+  // around visible facades and downhill stone plinths without wasting texels or poking through slopes.
+  let alpha=select(1.0,0.0,v.local.y< -2.2);
   var archIdx=2;
   var sc=vec2f(0.38,0.38);
+  // Continuous limewash-wall weight ONLY (1.0 on mat 12/19 limewash walls, 0.0 on windows/stone/timber/roofs)
+  // so linear mipmap averaging across wall-window edges never mis-classifies windows as roofs.
   var matFlag=0.0;
   if(mat<10.5){archIdx=0;sc=vec2f(0.32,0.52);}
   else if(mat<11.5){archIdx=1;sc=vec2f(0.70,0.80);}
   else if(mat<12.5){archIdx=2;sc=vec2f(0.38,0.38);matFlag=1.0;}
-  else if(mat<13.5){archIdx=3;sc=vec2f(0.62,0.68);matFlag=0.5;}
+  else if(mat<13.5){archIdx=3;sc=vec2f(0.62,0.68);}
   else if(mat<14.5){archIdx=4;sc=vec2f(1.0,1.0);}
-  else if(mat<15.5){archIdx=5;sc=vec2f(0.55,0.62);matFlag=0.5;}
+  else if(mat<15.5){archIdx=5;sc=vec2f(0.55,0.62);}
   else if(mat<16.5){archIdx=6;sc=vec2f(0.42,0.42);}
   else if(mat<17.5){archIdx=7;sc=vec2f(0.52,0.58);}
   else if(mat<18.5){archIdx=8;sc=vec2f(0.65,0.65);}
@@ -140,41 +155,44 @@ fn cityContinuumCardBake(v:ContinuumCardBakeVarying,front:bool)->ContinuumCardSa
   let rawAO=textureSampleGrad(cityCardArchTex,cityCardArchSamp,sampUV,texLayer+1,sampDx,sampDy).a;
   let rawPhoto=textureSampleGrad(cityCardNearAlbedo,cityCardLandSamp,bldgUV,dpdx(bldgUV),dpdy(bldgUV)).rgb;
   let archLin=pow(max(rawArch.rgb,vec3f(0.005)),vec3f(2.2));
-  var albedo=archLin*shadeAlbedo*(0.82+0.18*rawAO);
+  var albedo=archLin*shadeAlbedo*(0.76+0.24*rawAO);
   if(v.kind.x>=19.5){
     albedo=pow(max(rawPhoto,vec3f(0.005)),vec3f(2.2));
     matFlag=0.0;
   }else if(abs(mat-14.0)<0.5){
+    // Deep recessed interior glass & dark timber shutters/frames matching live 3D buildings so windows read crisply from afar.
     let isGlazed=v.kind.y>0.25;
     if(isGlazed){
       let bDist=min(min(winUV.x,1.0-winUV.x),min(winUV.y,1.0-winUV.y));
-      let frame=max(1.0-smoothstep(0.075,0.098,bDist),max(1.0-smoothstep(0.028,0.044,abs(winUV.x-0.5)),1.0-smoothstep(0.026,0.042,abs(winUV.y-0.38))));
-      albedo=mix(archLin*(0.72+0.28*(0.84-0.14*winUV.y)),vec3f(0.082,0.056,0.036),frame);
+      let frame=max(1.0-smoothstep(0.075,0.11,bDist),max(1.0-smoothstep(0.032,0.052,abs(winUV.x-0.5)),1.0-smoothstep(0.030,0.048,abs(winUV.y-0.38))));
+      let pane=mix(archLin*0.36*(0.78-0.16*winUV.y),vec3f(0.034,0.031,0.030),0.60);
+      albedo=mix(pane,vec3f(0.068,0.048,0.032),frame);
     }else{
-      albedo=vec3f(0.044,0.037,0.030)*portShade;
+      albedo=vec3f(0.032,0.027,0.023)*portShade;
     }
     matFlag=0.0;
   }else if(abs(mat-10.0)<0.5){
     let tLuma=dot(archLin,vec3f(0.299,0.587,0.114));
-    albedo=mix(vec3f(tLuma),archLin,0.72)*vec3f(0.93,0.96,1.02)*shadeAlbedo*(0.82+0.18*rawAO);
+    albedo=mix(vec3f(tLuma),archLin,0.72)*vec3f(0.93,0.96,1.02)*shadeAlbedo*(0.76+0.24*rawAO);
   }else if(abs(mat-11.0)<0.5){
-    albedo*=vec3f(1.00,0.99,0.96);
+    albedo*=vec3f(0.96,0.94,0.90);
   }else if(abs(mat-12.0)<0.5||abs(mat-19.0)<0.5){
-    // Bake neutral chalky limewash stucco matching landSurface; continuumCardFS applies exact limewash tint.
+    // Warm weathered Iberian plaster with damp stone foot & subtle mottling matching landSurface (never pale chalk).
     let damp=smoothstep(0.4,3.8,v.local.y);
-    let foot=1.0-smoothstep(0.0,0.85,v.local.y);
+    let foot=1.0-smoothstep(0.0,1.05,v.local.y);
+    let mottle=sin(v.local.x*0.95+v.local.z*0.73)*cos(v.local.y*1.15-v.local.x*0.41)*0.055;
     let stLuma=dot(archLin,vec3f(0.299,0.587,0.114));
     let neutralArch=mix(vec3f(stLuma),archLin,0.58);
-    let baseTint=mix(vec3f(0.76,0.74,0.70),vec3f(0.99,0.98,0.96),damp)*mix(1.0,0.72,foot*(1.0-abs(n.y)));
-    albedo=neutralArch*baseTint*shadeAlbedo*(0.84+0.16*rawAO);
+    let baseTint=mix(vec3f(0.72,0.69,0.64),vec3f(0.92,0.90,0.86),damp)*mix(1.0,0.66,foot*(1.0-abs(n.y)));
+    albedo=neutralArch*baseTint*shadeAlbedo*(0.78+0.22*rawAO)*(1.0+mottle);
   }else if(abs(mat-13.0)<0.5){
-    let rawT=archLin*0.81*shadeAlbedo*(0.82+0.18*rawAO);
+    let rawT=archLin*0.81*shadeAlbedo*(0.76+0.24*rawAO);
     let tLuma=dot(rawT,vec3f(0.299,0.587,0.114));
     albedo=mix(vec3f(tLuma)*vec3f(1.06,0.89,0.76),rawT*vec3f(0.84,0.88,0.96),0.44);
   }else if(abs(mat-18.0)<0.5){
     albedo=archLin*0.82*(0.68+0.32*portShade);
   }
-  return ContinuumCardSample(albedo,1.0,n,matFlag);
+  return ContinuumCardSample(albedo,alpha,n,matFlag);
 }
 `,
 });

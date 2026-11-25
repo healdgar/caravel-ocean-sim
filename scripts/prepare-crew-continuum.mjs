@@ -274,17 +274,24 @@ function coverageMask(fit, size) {
 }
 const DELIGHT_VERSION = 3;
 function bakeTexture(fit, glbFile, work, reuseDir = null) {
+  let hasClothing = false;
+  for (let i = 0; i < fit.region.length; i++) {
+    if (fit.region[i] === 1 || fit.region[i] === 2) { hasClothing = true; break; }
+  }
+  const delightVersion = hasClothing ? 0 : DELIGHT_VERSION;
   let prev = null;
   if (reuseDir && fs.existsSync(path.join(reuseDir, 'manifest.json')) && fs.existsSync(path.join(reuseDir, 'albedo.bc7.bin.gz')) && fs.existsSync(path.join(reuseDir, 'albedo.astc.bin.gz'))) {
     try {
       const m = JSON.parse(fs.readFileSync(path.join(reuseDir, 'manifest.json'), 'utf8'));
-      if (m?.source?.sha256 === fit.sha256 && m?.texture?.width === TEXTURE_SIZE && m?.texture?.delightVersion === DELIGHT_VERSION && m?.files?.['albedo.bc7.bin'] && m?.files?.['albedo.astc.bin']) prev = m;
+      if (m?.source?.sha256 === fit.sha256 && m?.texture?.width === TEXTURE_SIZE && (m?.texture?.delightVersion ?? 0) === delightVersion && m?.files?.['albedo.bc7.bin'] && m?.files?.['albedo.astc.bin']) prev = m;
     } catch { /* rebake full texture */ }
   }
   const image = path.join(work, fit.mime === 'image/png' ? 'albedo.png' : 'albedo.jpg'), mask = path.join(work, 'mask.u8');
   fs.writeFileSync(image, fit.picture);
   fs.writeFileSync(mask, coverageMask(fit, TEXTURE_SIZE));
-  const pyArgs = [fileURLToPath(new URL('./crew-continuum-texture.py', import.meta.url)), image, mask, work, `--size=${TEXTURE_SIZE}`, `--sample=${SAMPLE_SIZE}`, `--glb=${glbFile}`, ...(prev ? ['--sample-only'] : [])];
+  // Only pass --glb to run undressed-skin delighting on clean base bodies; dressed historical bodies carry painted
+  // shirt/trouser/armor/boot textures that delight_and_equalize_face must never normalize as skin.
+  const pyArgs = [fileURLToPath(new URL('./crew-continuum-texture.py', import.meta.url)), image, mask, work, `--size=${TEXTURE_SIZE}`, `--sample=${SAMPLE_SIZE}`, ...(hasClothing ? [] : [`--glb=${glbFile}`]), ...(prev ? ['--sample-only'] : [])];
   execFileSync('python3', pyArgs, { stdio: ['ignore', 'inherit', 'inherit'] });
   const sample = fs.readFileSync(path.join(work, 'sample.rgb')), toLinear = Float32Array.from({ length: 256 }, (_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
   // Bilinear, in linear light, wrapping as the GPU's sampler does.
@@ -297,8 +304,8 @@ function bakeTexture(fit, glbFile, work, reuseDir = null) {
     }
     return out;
   };
-  if (prev) return { levels: prev.texture, bc7: null, astc: null, reusedFiles: prev.files, at };
-  return { levels: JSON.parse(fs.readFileSync(path.join(work, 'levels.json'), 'utf8')), bc7: fs.readFileSync(path.join(work, 'albedo.bc7.bin')), astc: fs.readFileSync(path.join(work, 'albedo.astc.bin')), reusedFiles: null, at };
+  if (prev) return { levels: prev.texture, delightVersion, bc7: null, astc: null, reusedFiles: prev.files, at };
+  return { levels: JSON.parse(fs.readFileSync(path.join(work, 'levels.json'), 'utf8')), delightVersion, bc7: fs.readFileSync(path.join(work, 'albedo.bc7.bin')), astc: fs.readFileSync(path.join(work, 'albedo.astc.bin')), reusedFiles: null, at };
 }
 // Each triangle's colour and area, and each region's median colour (area-weighted, a channel at a time).
 function surfaceColours(fit, texture) {
@@ -692,7 +699,7 @@ async function bake(entry) {
       clusters: { count: clusters.count, levels: clusters.levels, roots: clusters.roots, finestTriangles: clusters.finestTriangles, rootError: +clusters.rootError.toFixed(4), pieceCopies: body.copies },
       chain: { ...farBody.stats, farSourceTriangles: far.triangles, farSourceError: +sourceError.toFixed(4), posedDelta: +posedDelta.toFixed(4) },
       splat,
-      texture: { width: texture.levels.width, height: texture.levels.height, coverage: texture.levels.coverage, delightVersion: DELIGHT_VERSION, levels: texture.levels.levels },
+      texture: { width: texture.levels.width, height: texture.levels.height, coverage: texture.levels.coverage, delightVersion: texture.delightVersion, levels: texture.levels.levels },
       body: { file: 'body.glb', bytes: standIn.bytes.length, sha256: createHash('sha256').update(standIn.bytes).digest('hex'), triangles: standIn.triangles, vertices: standIn.vertices, contactDrift: drift },
       poses: palettes.length, files, bakeSeconds: +((Date.now() - started) / 1000).toFixed(1),
     };

@@ -115,6 +115,7 @@ import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
 import { createBoardArmies } from './board-armies.js';
 import { createBoardLife } from './board-life.js';
 import { BOARD_KEEP_CAREER, forgetKeptBoards, keepBoard, keptBoard } from './board-keep.js';
+import { resolveBakedBoardYear } from './board-model.js';
 import { boardFolkStreets, folkDoing, watchDoing } from './board-folk.js';
 import { createFolkCard, folkCardFacts, folkSoulOfTitle } from './folk-card.js';
 import { createStoryteller, mateShortlist, storytellerScene } from './storyteller.js';
@@ -1144,7 +1145,9 @@ async function main() {
     const nextPortKey=runtimeBoardPortKey({id:region?.id,latitude:lat??region?.latitude,longitude:lon??region?.longitude});
     if(!placement&&living){
       if(BOARD_KEPT&&living.state==='alive')await Promise.race([living.keep(),new Promise(resolve=>setTimeout(resolve,BOARD_KEEP_WAIT_MS))]);
-      if(living.port!==nextPortKey||living.year!==liveYear){living.close();if(boardLife===living)boardLife=null;}
+      const nextBakedYear=resolveBakedBoardYear(nextPortKey,liveYear);
+      const sameLivingBoard=living.port===nextPortKey&&(nextBakedYear!=null?living.year===nextBakedYear:(living.year===liveYear||(boardKeepClock()===BOARD_KEEP_CAREER&&living.year<=liveYear)));
+      if(!sameLivingBoard){living.close();if(boardLife===living)boardLife=null;}
     }
     const nextTerrain=await createTerrain({
       waterOptics,oceanBridge,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,

@@ -74,7 +74,7 @@ test('tree vs grass wind physics: calm wood branches, twisting leaves, quivering
   assert.doesNotMatch(groundSrc, /max\(windParam\.z\s*,\s*4\.8\)/, 'grassWindWave must not clamp grass wind to 4.8 m/s');
 });
 
-test('forest/meadow continuum performance without visual degradation: GPU block/Hi-Z culling, dead-work elimination, full-fidelity profiles', async () => {
+test('forest/meadow continuum performance without visual degradation: GPU block/Hi-Z culling, race-free wind owners, unified profiles & overflow-safe meadow', async () => {
   const { forestContinuumBlocksWGSL, forestContinuumStandWGSL } = await import('../js/wgsl/forest-continuum.js');
   const { meadowContinuumStandWGSL } = await import('../js/wgsl/meadow-continuum.js');
   const { CONTINUUM_FAMILY_DEFAULTS } = await import('../js/continuum-profiles.js');
@@ -93,8 +93,11 @@ test('forest/meadow continuum performance without visual degradation: GPU block/
 
   assert.match(standWgsl, /forestBlockList/, 'forestStandRoots reads visible blocks from forestBlockList');
   assert.match(standWgsl, /continuumHiZOccluded\(/, 'forestStandRoots tests conservative Hi-Z before ground-lift/record writes');
-  assert.match(standWgsl, /inShadowRange/, 'forestStandRoots gates shadow-box checks by shadowMaxDistance');
+  assert.match(standWgsl, /atomicOr\(&forestWindOwners\[at\],0x80000000u\)/, 'forestStandOwn uses race-free bit-31 atomicOr lock without atomicCompareExchangeWeak');
+  assert.doesNotMatch(standWgsl, /atomicMax\(&forestWindOwners/, 'forestStandOwn never uses destructive atomicMax owner overwrite');
+  assert.doesNotMatch(standWgsl, /inShadowRange/, 'forestStandRoots uses shadow-map frustum without hard per-family shadowMaxDistance cutoff');
   assert.match(meadowStandWgsl, /continuumHiZOccluded\(/, 'meadowBlocksInView tests conservative Hi-Z occlusion');
+  assert.match(meadowStandWgsl, /minS\s*=\s*-i32\(MEADOW_GRAINS\)\s*\*\s*3/, 'meadowStandBudget coarsens down to grain 16 on overflow so patches are never dropped');
   assert.match(terrainSrc, /if\(reflStrength>0\.001\)/, 'landFinishShadowed skips dead envCube specular fetch when reflStrength <= 0.001');
   assert.match(forestSrc, /fn forestLeafShadowVis\(/, 'forest leaves use 1-tap hardware-PCF shadow lookup');
 
@@ -102,20 +105,22 @@ test('forest/meadow continuum performance without visual degradation: GPU block/
   assert.ok(countStorage(blocksWgsl) <= 8, `forestBlocks storage buffers (${countStorage(blocksWgsl)}) must stay <= 8`);
   assert.ok(countStorage(standWgsl) <= 8, `forestStand storage buffers (${countStorage(standWgsl)}) must stay <= 8`);
 
-  const f = CONTINUUM_FAMILY_DEFAULTS.forest;
-  const m = CONTINUUM_FAMILY_DEFAULTS.meadow;
-  assert.equal(f.errorScale, 0.44, 'forest preserves sharp 3D leaf fidelity without coarse mid-range banana leaves');
-  assert.equal(f.splatScale, 6.5, 'forest keeps cards at far pixel-perfect range, never premature floppy cards');
-  assert.equal(m.errorScale, 2.5, 'meadow preserves full flyover grass fidelity without chunky squares');
-  assert.equal(m.taperMetres, 0, 'meadow preserves full flyover visibility range');
+  for (const [family, prof] of Object.entries(CONTINUUM_FAMILY_DEFAULTS)) {
+    assert.equal(prof.errorScale, 1.0, `${family} shares unified errorScale=1.0`);
+    assert.equal(prof.taperMetres, 0, `${family} shares unified linear perspective taperMetres=0`);
+    assert.equal(prof.shadowMaxDistance, 0, `${family} has zero hard shadowMaxDistance cutoff`);
+    assert.equal(prof.shadowMinError, 0, `${family} has zero per-family shadowMinError override`);
+  }
 });
 
-test('universal One-Continuum prefix micro-surfels and Beer-Lambert grazing meadow continuity', async () => {
+test('universal One-Continuum prefix micro-surfels, tiled 563-type cards, unified cut, GPU armies & dt-scaled vessel separation', async () => {
   const {
     CONTINUUM_HEADER, CONTINUUM_SURFEL_ENTRY, CONTINUUM_SURFEL_HEADER_WORDS, CONTINUUM_SURFEL_WORDS,
+    CONTINUUM_SURFEL_ORGANIC_FLAG, CONTINUUM_SURFEL_COUNT_MASK,
     packContinuumBody, assembleContinuumAtlas, continuumFinestClusters, continuumPiecesFar, buildContinuumSurfels,
   } = await import('../js/continuum-format.js');
   const { continuumModuleWGSL } = await import('../js/wgsl/continuum-cut.js');
+  const { continuumCardViewWGSL } = await import('../js/wgsl/continuum-cards.js');
   await import('../js/wgsl/continuum-wind.js');
 
   assert.equal(CONTINUUM_HEADER.surfels, 22, 'atlas header reserves slot 22 for universal surfels');
@@ -160,6 +165,8 @@ test('universal One-Continuum prefix micro-surfels and Beer-Lambert grazing mead
   const atlas = assembleContinuumAtlas([body.words]);
   const built = buildContinuumSurfels(atlas, { maxSurfels: 512, minLevel0Tris: 256 });
   assert.ok(built.counts[0] >= 256 && built.counts[0] <= 512, `built ${built.counts[0]} surfels for generic 3D body`);
+  assert.equal((built.words[1] & CONTINUUM_SURFEL_ORGANIC_FLAG) >>> 0, 0, 'non-foliage surfels stay isotropic discs');
+  assert.equal(built.words[1] & CONTINUUM_SURFEL_COUNT_MASK, built.counts[0], 'surfel count masked cleanly in low 24 bits');
   const f32 = new Float32Array(built.words.buffer);
   const areaR = f32[2], handoffErr = f32[3];
   assert.ok(areaR > 1.5 && areaR < 5.0, `physically plausible projected areaRadius=${areaR}`);
@@ -175,20 +182,31 @@ test('universal One-Continuum prefix micro-surfels and Beer-Lambert grazing mead
 
   const selectWgsl = continuumModuleWGSL({ pass: 'select' });
   const visWgsl = continuumModuleWGSL({ pass: 'visibility' });
+  const cardWgsl = continuumCardViewWGSL();
   const meadowSrc = fs.readFileSync(new URL('../js/wgsl/meadow-continuum.js', import.meta.url), 'utf8');
   const forestSrc = fs.readFileSync(new URL('../js/wgsl/forest-continuum.js', import.meta.url), 'utf8');
-  const forestScenerySrc = fs.readFileSync(new URL('../js/forest-scenery.js', import.meta.url), 'utf8');
-  const hairSrc = fs.readFileSync(new URL('../js/hair-continuum.js', import.meta.url), 'utf8');
+  const sceneSrc = fs.readFileSync(new URL('../js/continuum-scene.js', import.meta.url), 'utf8');
+  const fmtSrc = fs.readFileSync(new URL('../js/continuum-format.js', import.meta.url), 'utf8');
+  const cardsJsSrc = fs.readFileSync(new URL('../js/continuum-cards.js', import.meta.url), 'utf8');
+  const armiesSrc = fs.readFileSync(new URL('../js/board-armies.js', import.meta.url), 'utf8');
+  const tradeSrc = fs.readFileSync(new URL('../js/trade-vessels.js', import.meta.url), 'utf8');
 
   assert.match(selectWgsl, /continuumSurfelHeader\(/, 'continuumSelect queries universal surfel header');
   assert.match(selectWgsl, /CONTINUUM_SURFEL_ENTRY/, 'continuumSelect emits CONTINUUM_SURFEL_ENTRY chunks into list 2');
-  assert.match(selectWgsl, /farError\*0\.44,lowGrounded/, 'lowGrounded meadow hands off before bloated Level 7 squares');
+  assert.doesNotMatch(selectWgsl, /\blowGrounded\b/, 'continuumSelect has zero meadow-specific lowGrounded branch');
+  assert.match(selectWgsl, /continuumErrorScale\(/, 'continuumSelect delegates relief foreshortening polymorphically via continuum-kinds');
   assert.match(visWgsl, /continuumSurfelFill\(/, 'continuumVisibility expands universal micro-surfels');
   assert.match(visWgsl, /continuumSurfelMask\(/, 'continuumVisibility applies zero-discard circular MSAA disc mask');
   assert.doesNotMatch(visWgsl, /\bdiscard\b/, 'continuumVisibility never uses discard (TBDR rule 2)');
+  assert.match(sceneSrc, /surfels\s*=\s*true/, 'universal micro-surfels enabled by default across all 3D continuum atlases');
+  assert.match(fmtSrc, /verifySha256\s*=\s*true/, 'SHA-256 asset integrity verification is enabled by default');
+  assert.match(cardsJsSrc, /tilesPerSide/, 'octahedral card atlas tiles multiple types per layer so all 563 city types fit');
+  assert.match(cardWgsl, /var<storage,read>\s*cardSpheres:array<vec4f>/, 'card view reads tight per-type bounding spheres');
+  assert.match(cardWgsl, /mix\(vec3f\(1\.0\),continuumCardCityWash\(tint\),washW\)/, 'city card wash uses linear matFlag blend immune to mip corruption');
+  assert.match(armiesSrc, /BOARD_ARMY_STEP_WGSL/, 'board-armies advances marching soldiers on GPU compute without per-frame JS soldier loops');
+  assert.match(tradeSrc, /1\s*-\s*Math\.exp\(-3\.5\s*\*\s*simDt\)/, 'trade vessel separation scales smoothly with frame time dt');
+  assert.match(tradeSrc, /let\s+extrapDt\s*=/, 'trade vessels advance continuously in GPU compute between sparse AI order steps');
   assert.match(forestSrc, /CONTINUUM_SURFEL_ENTRY/, 'forest material shades micro-surfels without FS leaf texture fetches');
-  assert.match(forestScenerySrc, /surfels:\s*\{\s*foliage:\s*true/, 'forest enables foliage micro-surfel prefix stream');
-  assert.match(hairSrc, /surfels:\s*\{\s*maxSurfels:/, 'hair enables micro-surfel prefix stream');
   assert.match(meadowSrc, /blIntercept\s*=\s*1\.0\s*-\s*\(cV\s*\/\s*2\.2\)/, 'meadowParallaxSward uses Beer-Lambert grazing canopy interception');
   assert.match(meadowSrc, /if\s*\(dist\s*<\s*220\.0\)/, 'meadow receives tree/building shadows across full shadow frustum');
 });

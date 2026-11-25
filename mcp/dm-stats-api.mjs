@@ -61,16 +61,21 @@ export function dmTally(sum, events, now) {
 const fresh = (account, now) => ({ account, first: now.toISOString(), last: now.toISOString(), sessions: 0, calls: 0, errors: 0, seconds: 0, briefs: 0, tools: {}, played: {}, clients: {}, game: null, lore: null });
 
 /**
- * Answer a request under DM_API. `env.DM_STATS` (or, until it has a bucket of its own, `env.LANDFALL_CACHE`) is the
- * R2 bucket the statistics are kept in, under `dm/`. `relay`, `fetcher` and `clock` are for the tests.
+ * Answer a request under `apiBase` (default `DM_API`, i.e. `/waterworld/api/dm/`). `env.DM_STATS` (or, until it has a
+ * bucket of its own, `env.LANDFALL_CACHE`) is the R2 bucket the statistics are kept in, under `${keyPrefix}dm/`.
+ * `apiBase`, `keyPrefix`, `relay`, `fetcher` and `clock` are configurable for isolated environments and tests.
  */
-export async function handleDmApi(request, env, ctx, { relay = DM_RELAY, fetcher = (...args) => fetch(...args), clock = () => Date.now() } = {}) {
-  const route = new URL(request.url).pathname.slice(DM_API.length), store = env?.DM_STATS || env?.LANDFALL_CACHE;
+export async function handleDmApi(request, env, ctx, { apiBase = DM_API, keyPrefix = '', relay = DM_RELAY, fetcher = (...args) => fetch(...args), clock = () => Date.now() } = {}) {
+  const base = apiBase.endsWith('/') ? apiBase : apiBase + '/';
+  const pathname = new URL(request.url).pathname;
+  if (!pathname.startsWith(base)) return answer(404, { error: 'No such thing here' });
+  const route = pathname.slice(base.length), store = env?.DM_STATS || env?.LANDFALL_CACHE;
+  const prefix = typeof keyPrefix === 'string' && keyPrefix ? (keyPrefix.endsWith('/') ? keyPrefix : keyPrefix + '/') : '';
   if (!(route === 'telemetry' && request.method === 'POST') && !(route === 'me' && request.method === 'GET')) return answer(404, { error: 'No such thing here' });
   if (!store) return answer(503, { error: 'Statistics are not kept here yet' });
   const who = await whose(request, { relay, fetcher, clock });
   if (!who.account) return answer(who.status, { error: who.status === 401 ? 'Sign in with a Caiioo account' : 'Caiioo could not be asked just now' });
-  const now = new Date(clock()), sumKey = `dm/accounts/${who.account}.json`, json = { httpMetadata: { contentType: 'application/json' } };
+  const now = new Date(clock()), sumKey = `${prefix}dm/accounts/${who.account}.json`, json = { httpMetadata: { contentType: 'application/json' } };
   const had = await store.get(sumKey);
   let sum = null;
   try { sum = had ? await had.json() : null; } catch { sum = null; }
@@ -84,7 +89,7 @@ export async function handleDmApi(request, env, ctx, { relay = DM_RELAY, fetcher
   if (!events.length) return answer(200, { taken: 0 });
   const session = /^[A-Za-z0-9_-]{6,32}$/.test(String(body?.session ?? '')) ? body.session : 'none';
   const mark = [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await store.put(`dm/events/${now.toISOString().slice(0, 10)}/${who.account}/${now.getTime()}-${mark}.json`, JSON.stringify({ account: who.account, session, received: now.toISOString(), events }), json);
+  await store.put(`${prefix}dm/events/${now.toISOString().slice(0, 10)}/${who.account}/${now.getTime()}-${mark}.json`, JSON.stringify({ account: who.account, session, received: now.toISOString(), events }), json);
   await store.put(sumKey, JSON.stringify(dmTally(sum ?? fresh(who.account, now), events, now)), json);
   return answer(200, { taken: events.length });
 }

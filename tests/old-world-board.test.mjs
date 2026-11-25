@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
+import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest, resolveBakedBoardYear } from '../js/board-model.js';
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
 import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_WORKS, alignWaterfrontWharves, boardRoadCrossings } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
@@ -14,7 +14,7 @@ import { CITY_BUILDING_TYPES, CITY_FAMILIES, CITY_THATCH_ROOF, CITY_TYPE, CITY_T
 import { WORKS_FENCE, WORKS_WHEEL } from '../js/old-world-works.js';
 import { cityContinuumMaterial } from '../js/wgsl/city-continuum.js';
 import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
-import { TERRAIN } from '../js/wgsl/terrain.js';
+import { TERRAIN_CITY } from '../js/wgsl/terrain.js';
 import { OLD_WORLD_LAND, OLD_WORLD_NO_TREES, OLD_WORLD_PLACES, bakedBoardFor, oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
 import { openBoard } from '../scripts/board-host.mjs';
 
@@ -70,7 +70,10 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   const baked = { port: 'test-bay', year: 1550, survey: boardGroundSurvey(heights), board };
   registerBakedBoard(baked);
   assert.equal(bakedBoardFor(region()), baked);
-  assert.equal(bakedBoardFor(region({ year: 1650 })), null, 'a board is for its year');
+  assert.equal(bakedBoardFor(region({ year: 1551 })), baked, 'later years resolve to the closest baked epoch <= year');
+  assert.equal(bakedBoardFor(region({ year: 1500 })), baked, 'years before the earliest baked epoch fall back to the earliest');
+  assert.equal(bakedBoardFor('test-bay', 1555), baked, 'also accepts (port, year) directly');
+  assert.equal(bakedBoardFor(region({ id: 'unbaked-bay', year: 1650 })), null, 'a port with no registered board returns null');
 
   const country = oldWorldCountry(region(), heights, port()), plan = country.plan, stats = plan.stats;
   t.diagnostic(JSON.stringify({ founded: board.buildings.count, stats }));
@@ -271,14 +274,63 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   stamp.uses.forEach((use, k) => { if (tables.parcels[(k + 1) * 8 + 3] > 0) tinted++; else wild++; });
   assert.ok(tinted > 50 && wild > 0, `furlongs tinted ${tinted}, left to the ground's own colour ${wild}`);
 
-  // A year with no board founded for it: the city has no town and its ground no country; none is grown in its place.
-  assert.equal(oldWorldCountry(region({ year: 1650 }), ground(), port()), null, 'no town is grown here');
+  // A port with no board founded for it: the city has no town and its ground no country; none is grown in its place.
+  assert.equal(oldWorldCountry(region({ id: 'unbaked-bay', year: 1650 }), ground(), port()), null, 'no town is grown here');
+});
+
+test('baked board epoch fallback resolves exact, closest <= year, and earliest epochs for 1551+ rollovers', () => {
+  assert.equal(resolveBakedBoardYear('lisbon', 1550), 1550);
+  assert.equal(resolveBakedBoardYear('lisbon', 1551), 1550);
+  assert.equal(resolveBakedBoardYear('lisbon', 1649), 1550);
+  assert.equal(resolveBakedBoardYear('lisbon', 1650), 1650);
+  assert.equal(resolveBakedBoardYear('lisbon', 1655), 1650);
+  assert.equal(resolveBakedBoardYear('lisbon', 1750), 1650);
+  assert.equal(resolveBakedBoardYear('lisbon', 1500), 1550);
+  assert.equal(resolveBakedBoardYear('havana', 1551), 1550);
+  assert.equal(resolveBakedBoardYear('havana', 1599), 1550);
+  assert.equal(resolveBakedBoardYear('havana', 1600), 1600);
+  assert.equal(resolveBakedBoardYear('havana', 1680), 1600);
+  assert.equal(resolveBakedBoardYear('jamestown', 1606), 1550);
+  assert.equal(resolveBakedBoardYear('jamestown', 1607), 1607);
+  assert.equal(resolveBakedBoardYear('jamestown', 1630), 1607);
+  assert.equal(resolveBakedBoardYear('cadiz', 1551), 1550);
+  assert.equal(resolveBakedBoardYear('cadiz', 1689), 1550);
+  assert.equal(resolveBakedBoardYear('cadiz', 1492), 1550);
+  assert.equal(resolveBakedBoardYear('nowhere', 1550), null);
+  assert.equal(resolveBakedBoardYear('', 1550), null);
+  assert.equal(resolveBakedBoardYear('lisbon', null), null);
+  assert.equal(bakedBoardAsset('cadiz', 1551), BAKED_BOARDS['cadiz:1550']);
+  assert.equal(bakedBoardAsset('lisbon', 1551), BAKED_BOARDS['lisbon:1550']);
+  assert.equal(bakedBoardAsset('lisbon', 1650), BAKED_BOARDS['lisbon:1650']);
+  assert.equal(bakedBoardAsset('lisbon', 1750), BAKED_BOARDS['lisbon:1650']);
+  assert.equal(bakedBoardAsset('lisbon', 1750, { exact: true }), null);
+  assert.equal(bakedBoardAsset('nowhere', 1550), null);
+  assert.equal(bakedWorldAsset('cadiz', 1551), BAKED_WORLDS['cadiz:1550']);
+  assert.equal(bakedWorldAsset('lisbon', 1551), BAKED_WORLDS['lisbon:1550']);
+  assert.equal(bakedWorldAsset('lisbon', 1750), BAKED_WORLDS['lisbon:1650']);
+  assert.equal(bakedWorldAsset('lisbon', 1750, { exact: true }), null);
+  assert.equal(bakedWorldAsset('nowhere', 1550), null);
+
+  // Registered multi-epoch boards in old-world.js also select closest <= year, falling back to earliest.
+  const b1550 = { port: 'epoch-test', year: 1550, board: { span: 4096 } };
+  const b1600 = { port: 'epoch-test', year: 1600, board: { span: 4096 } };
+  registerBakedBoard(b1550);
+  registerBakedBoard(b1600);
+  assert.equal(bakedBoardFor({ id: 'epoch-test', year: 1500 }), b1550);
+  assert.equal(bakedBoardFor({ id: 'epoch-test', year: 1550 }), b1550);
+  assert.equal(bakedBoardFor({ id: 'epoch-test', year: 1551 }), b1550);
+  assert.equal(bakedBoardFor({ id: 'epoch-test', year: 1599 }), b1550);
+  assert.equal(bakedBoardFor({ id: 'epoch-test', year: 1600 }), b1600);
+  assert.equal(bakedBoardFor({ id: 'epoch-test', year: 1655 }), b1600);
+  assert.equal(bakedBoardFor('epoch-test', 1551), b1550);
+  assert.equal(bakedBoardFor('epoch-test', 1625), b1600);
+  assert.equal(bakedBoardFor('unknown-port', 1551), null);
 });
 
 test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and its real places', () => {
   assert.equal(bakedBoardAsset('lisbon', 1550), BAKED_BOARDS['lisbon:1550']);
   assert.equal(bakedBoardAsset('lisbon', 1650), BAKED_BOARDS['lisbon:1650']);
-  assert.equal(bakedBoardAsset('lisbon', 1750), null);
+  assert.equal(bakedBoardAsset('lisbon', 1750), BAKED_BOARDS['lisbon:1650']);
   const path = new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url);
   assert.ok(existsSync(path));
   const baked = JSON.parse(readFileSync(path, 'utf8')), board = baked.board;
@@ -320,7 +372,7 @@ test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and
 test('Lisbon\'s whole founded world is frozen beside its board, by the program that is here', () => {
   assert.equal(bakedWorldAsset('lisbon', 1550), BAKED_WORLDS['lisbon:1550']);
   assert.equal(bakedWorldAsset('lisbon', 1650), BAKED_WORLDS['lisbon:1650']);
-  assert.equal(bakedWorldAsset('lisbon', 1750), null);
+  assert.equal(bakedWorldAsset('lisbon', 1750), BAKED_WORLDS['lisbon:1650']);
   const baked = JSON.parse(readFileSync(new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url), 'utf8')), world = baked.world;
   const bytes = readFileSync(new URL('../' + BAKED_WORLDS['lisbon:1550'], import.meta.url));
   assert.equal(bytes.length, world.bytes);
@@ -428,8 +480,8 @@ test('waterfront wharves chain continuously along shoreline contours and roadsid
   assert.ok(hillside > 500, `fence sections on hillsides, each on its own ground: ${hillside}`);
   // The city's records are its types at their own size: its material reads no stretch; and the horizon's sections are
   // thinned through the shared core's area-preserving hash, not a copy of it.
-  const CITY_RENDER = continuumModuleWGSL({ pass: 'view', material: cityContinuumMaterial(TERRAIN) }), CITY_SELECT = continuumModuleWGSL({ pass: 'select' });
-  assert.doesNotMatch(cityContinuumMaterial(TERRAIN).wgsl(), /continuumStretch/);
+  const CITY_RENDER = continuumModuleWGSL({ pass: 'view', material: cityContinuumMaterial(TERRAIN_CITY) }), CITY_SELECT = continuumModuleWGSL({ pass: 'select' });
+  assert.doesNotMatch(cityContinuumMaterial(TERRAIN_CITY).wgsl(), /continuumStretch/);
   assert.match(CITY_SELECT, /splatScale=continuumThin\(span,/);
   assert.doesNotMatch(CITY_SELECT + CITY_RENDER, /keepProb/);
 });

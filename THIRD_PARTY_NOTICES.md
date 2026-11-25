@@ -232,11 +232,21 @@ repository), copyright (c) 2026 healdgar, under the MIT licence reproduced in
 `assets/board/LICENSE`. The commit it was taken from and the SHA-256 of the
 program as it stood there are recorded in `assets/board/SOURCE.json`.
 
-The program is **modified** only by the passages listed in
-`scripts/board-tuning.mjs` (fitting it to this game) and
-`scripts/board-upstream.mjs` (changes to its simulation, written to be copied
-back into Castle and Commons), applied in that order by
-`scripts/vendor-castle-and-commons.mjs`; `tests/board-model.test.mjs` undoes
-those tables and checks the result against the recorded hash. Its mathematical functions are fdlibm as ported in V8, which
-the program carries itself. `assets/board/runtime.js`, which drives the program
-for this game, is original project code under the project MIT licence.
+The program is **modified** only by the passages listed in five ordered tables:
+`scripts/board-tuning.mjs` (fitting it to this game's surveyed ground and host),
+`scripts/board-upstream.mjs` (generic fixes and tongues for its simulation,
+written to be copied back into Castle and Commons, alongside
+`BOARD_UPSTREAM_PENDING` for staged upstream copy-back patches mirrored by
+guarded fallback shims in `assets/board/runtime.js` until the next `--retune`
+and full board rebake), `scripts/board-native.mjs` (the peoples of the Americas
+and their ways, written to be copied back), `scripts/board-colonial.mjs` (towns
+planted overseas by colonial manners, written to be copied back), and
+`scripts/board-forts.mjs` (coastal forts, batteries, and watchtowers recorded
+on real maps, written to be copied back). These tables are applied in that order
+by `scripts/vendor-castle-and-commons.mjs` (which also verifies all applied
+tables and staged copy-back patches offline with `--check`);
+`tests/board-model.test.mjs` undoes the applied tables, checks the result
+against the recorded hash in `assets/board/SOURCE.json`, and verifies every
+staged upstream passage. Its mathematical functions are fdlibm as ported in V8,
+which the program carries itself. `assets/board/runtime.js`, which drives the
+program for this game, is original project code under the project MIT licence.

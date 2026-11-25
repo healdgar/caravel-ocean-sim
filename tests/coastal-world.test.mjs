@@ -990,20 +990,20 @@ test('uncolonized 1550 coastlines (such as Boston) generate wilderness anchorage
 });
 
 test('scenery pass: beach wet sand, stratified stone, baked distant canopy domes, and multi-tier tree LOD shaders', async () => {
-  const { TERRAIN } = await import('../js/wgsl/terrain.js');
+  const { TERRAIN_LAND } = await import('../js/wgsl/terrain.js');
   const { forestContinuumMaterial } = await import('../js/wgsl/forest-continuum.js');
 
   // Verify WGSL terrain shader includes wet-film Fresnel reflection, active wave-swash film, capillary damp sand,
   // dual-scale wave/wind beach ripples, stepped cliff strata, and derivative-filtered baked canopy crown domes
-  assert.match(TERRAIN, /waterFilm/);
-  assert.match(TERRAIN, /capillaryZone/);
-  assert.match(TERRAIN, /waveRipple/);
-  assert.match(TERRAIN, /windRipple/);
-  assert.match(TERRAIN, /ledgeStep/);
-  assert.match(TERRAIN, /cragFacet/);
-  assert.match(TERRAIN, /crownBillow/);
-  assert.match(TERRAIN, /crownGap/);
-  assert.match(TERRAIN, /skyRefl/);
+  assert.match(TERRAIN_LAND, /waterFilm/);
+  assert.match(TERRAIN_LAND, /capillaryZone/);
+  assert.match(TERRAIN_LAND, /waveRipple/);
+  assert.match(TERRAIN_LAND, /windRipple/);
+  assert.match(TERRAIN_LAND, /ledgeStep/);
+  assert.match(TERRAIN_LAND, /cragFacet/);
+  assert.match(TERRAIN_LAND, /crownBillow/);
+  assert.match(TERRAIN_LAND, /crownGap/);
+  assert.match(TERRAIN_LAND, /skyRefl/);
 
   // Trees near and far are the one continuum's (js/wgsl/forest-continuum.js): each leaf cut by its own sample mask.
   assert.match(forestContinuumMaterial('').wgsl(), /forestLeafSampleMask/);
@@ -1276,7 +1276,7 @@ test('rogue liberator path strengthens Native American settlements through trade
 test('Santa María stern colors clear rear mizzen-lateen sail across all wind angles and port building geometry/shaders prevent interference stripes', async () => {
   const { sternEnsignDesignStation, crowsNestDesignStation } = await import('../js/boat.js');
   const { createShipAssetCache } = await import('../js/ship-mesh.js');
-  const { TERRAIN, TERRAIN_FILTERING } = await import('../js/wgsl/terrain.js');
+  const { TERRAIN_LAND, TERRAIN_CITY, TERRAIN_FILTERING } = await import('../js/wgsl/terrain.js');
 
   // 1. Verify Santa María, Pinta, Niña, and Victory stern ensign stations sit abaft the aftmost sail clew
   for (const modelId of ['santa-maria', 'pinta', 'nina', 'victory']) {
@@ -1326,12 +1326,12 @@ test('Santa María stern colors clear rear mizzen-lateen sail across all wind an
   }
   assert.ok(maxStaffZ >= 1.40, `Stern flagstaff top reaches z >= 1.40 aft of base (got ${maxStaffZ.toFixed(2)})`);
 
-  // 5. Verify TERRAIN_FILTERING and TERRAIN band-limit building materials with landFilteredWave, landFilteredCourse & landFilteredBump
+  // 5. Verify TERRAIN_FILTERING, TERRAIN_LAND and TERRAIN_CITY band-limit building materials with landFilteredWave, landFilteredCourse & landFilteredBump
   assert.ok(TERRAIN_FILTERING.includes('fn landFilteredWave('), 'TERRAIN_FILTERING defines landFilteredWave');
   assert.ok(TERRAIN_FILTERING.includes('fn landFilteredCourse('), 'TERRAIN_FILTERING defines landFilteredCourse');
-  assert.ok(TERRAIN.includes('let flute=landFilteredWave('), 'Kind 13 terracotta roof tiles use landFilteredWave');
-  assert.ok(TERRAIN.includes('let courseWave=landFilteredCourse('), 'Kind 13 terracotta roof courses use landFilteredCourse');
-  assert.ok(!TERRAIN.includes('if(in.kind.x<2.5){n=landFilteredBump'), 'All terrain and building kinds use landFilteredBump');
+  assert.ok(TERRAIN_CITY.includes('let flute=landFilteredWave('), 'Kind 13 terracotta roof tiles use landFilteredWave');
+  assert.ok(TERRAIN_CITY.includes('let courseWave=landFilteredCourse('), 'Kind 13 terracotta roof courses use landFilteredCourse');
+  assert.ok(!TERRAIN_LAND.includes('if(in.kind.x<2.5){n=landFilteredBump') && !TERRAIN_CITY.includes('if(in.kind.x<2.5){n=landFilteredBump'), 'All terrain and building kinds use landFilteredBump');
 
   // 6. Verify the customhouse's builder steps its arch_vault (kind 14) proud of its outer walls (kind 12)
   const geom = buildType(CITY_TYPE.CUSTOMHOUSE);
@@ -1602,18 +1602,20 @@ test('Crow’s nest, masthead pennant, stern outlicker, yard parrels, and rear m
 });
 
 test('Blender-audited architectural models feature per-vertex 3D AO gradients, smooth curved normals, PBR reflections, and multi-tier LOD', async () => {
-  const { TERRAIN } = await import('../js/wgsl/terrain.js');
-  // 1. Verify WGSL shader includes directional sky-hemisphere + bounce GI, mipmapped envCube reflections, GGX specular, leaded glass, and slope-aligned tejas
-  assert.ok(TERRAIN.includes('reflect(-v,n)'), 'landFinish computes environment reflection vector');
-  assert.ok(TERRAIN.includes('let specBRDF=(D*G*fresnelSun)'), 'landFinish computes physical GGX microfacet specular BRDF');
-  assert.ok(TERRAIN.includes('let archShadow=smoothstep('), 'landFinish applies architectural cavity & eave self-shadowing');
-  assert.ok(!/mix\(world\.(xz|zy),/.test(TERRAIN), 'material coordinates pick one world plane, since blending planes thousands of metres apart stripes slopes');
-  assert.ok(TERRAIN.includes('let screeWeight='), 'bare slopes rest as loose stone at every viewing range');
-  assert.ok(TERRAIN.includes('let isGlazedWindow=in.kind.y>0.25'), 'landOpaque renders reflective diamond-leaded casement glass on kind 14 windows');
-  assert.ok(TERRAIN.includes('let tileTan=select('), 'landOpaque aligns terracotta barrel tile flutes along roof slope tangent');
-  assert.ok(TERRAIN.includes('let archLodFade='), 'landOpaque applies multi-tier distance LOD fade on architectural materials');
-  const branchBlock = TERRAIN.slice(TERRAIN.indexOf('var canopyBackscatter=0.0;'), TERRAIN.indexOf('let reliefX=dpdx(relief);'));
-  assert.ok(!/dpdx|dpdy|fwidth/.test(branchBlock), 'No WGSL screen-space derivative calls inside non-uniform kind branches');
+  const { TERRAIN_LAND, TERRAIN_CITY } = await import('../js/wgsl/terrain.js');
+  // 1. Verify WGSL shaders include directional sky-hemisphere + bounce GI, mipmapped envCube reflections, GGX specular, leaded glass, and slope-aligned tejas
+  assert.ok(TERRAIN_LAND.includes('reflect(-v,n)') && TERRAIN_CITY.includes('reflect(-v,n)'), 'landFinish computes environment reflection vector');
+  assert.ok(TERRAIN_LAND.includes('let specBRDF=(D*G*fresnelSun)') && TERRAIN_CITY.includes('let specBRDF=(D*G*fresnelSun)'), 'landFinish computes physical GGX microfacet specular BRDF');
+  assert.ok(TERRAIN_LAND.includes('let archShadow=smoothstep(') && TERRAIN_CITY.includes('let archShadow=smoothstep('), 'landFinish applies architectural cavity & eave self-shadowing');
+  assert.ok(!/mix\(world\.(xz|zy),/.test(TERRAIN_LAND) && !/mix\(world\.(xz|zy),/.test(TERRAIN_CITY), 'material coordinates pick one world plane, since blending planes thousands of metres apart stripes slopes');
+  assert.ok(TERRAIN_LAND.includes('let screeWeight='), 'bare slopes rest as loose stone at every viewing range');
+  assert.ok(TERRAIN_CITY.includes('let isGlazedWindow=in.kind.y>0.25'), 'landOpaque renders reflective diamond-leaded casement glass on kind 14 windows');
+  assert.ok(TERRAIN_CITY.includes('let tileTan=select('), 'landOpaque aligns terracotta barrel tile flutes along roof slope tangent');
+  assert.ok(TERRAIN_CITY.includes('let archLodFade='), 'landOpaque applies multi-tier distance LOD fade on architectural materials');
+  const landBranchBlock = TERRAIN_LAND.slice(TERRAIN_LAND.indexOf('var canopyBackscatter=0.0;'), TERRAIN_LAND.indexOf('let reliefX=dpdx(relief);'));
+  const cityBranchBlock = TERRAIN_CITY.slice(TERRAIN_CITY.indexOf('var surfaceWet=0.0;'), TERRAIN_CITY.indexOf('let reliefX=dpdx(relief);'));
+  assert.ok(!/dpdx|dpdy|fwidth/.test(landBranchBlock), 'No WGSL screen-space derivative calls inside non-uniform land branches');
+  assert.ok(!/dpdx|dpdy|fwidth/.test(cityBranchBlock), 'No WGSL screen-space derivative calls inside non-uniform city branches');
 
   // 2. Verify the city's types emit continuous per-vertex AO gradients, and smooth curved normals on a round tower
   for (const key of ['GUN_TOWER_ROUND', 'CHURCH_GREAT', 'CUSTOMHOUSE', 'HOUSE_EAVES']) {
@@ -1638,8 +1640,8 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
   }
 
   // 3. Verify a work's iron gun emits lathe-turned cast-iron barrel and trunnions (kind 18) with smooth radial normals
-  assert.ok(TERRAIN.includes('let bareIron=clamp('), 'landOpaque shades kind 18 as dark sand-cast ordnance iron');
-  assert.ok(TERRAIN.includes('let isMetal=wet<-0.01;'), 'landFinish applies conductor Fresnel reflectance for cast-iron ordnance');
+  assert.ok(TERRAIN_CITY.includes('let bareIron=clamp('), 'landOpaque shades kind 18 as dark sand-cast ordnance iron');
+  assert.ok(TERRAIN_CITY.includes('let isMetal=wet<-0.01;'), 'landFinish applies conductor Fresnel reflectance for cast-iron ordnance');
   {
     const geom = buildType(cityGunType(1650));
     const v = geom.vertices;
@@ -1904,10 +1906,10 @@ test('real elevation keeps its low coast and its own relief unless the region is
 });
 
 test('damage shading reads a building kind as a whole number, whatever turn or window coordinate its fraction carries', async () => {
-  const { TERRAIN } = await import('../js/wgsl/terrain.js');
+  const { TERRAIN_CITY } = await import('../js/wgsl/terrain.js');
   // The shader's own tests, run here on every value the mesh writes. Their syntax is JavaScript's but for abs.
-  const names = ['isAperture', 'isThatch', 'isCastIron', 'isStoneRubble'].filter((name) => TERRAIN.includes(`let ${name}=`));
-  const source = names.map((name) => `const ${name}=${TERRAIN.match(new RegExp(`let ${name}=([^;]+);`))[1]};`).join('').replace(/in\.kind\.x/g, 'k').replace(/\babs\(/g, 'Math.abs(');
+  const names = ['isAperture', 'isThatch', 'isCastIron', 'isStoneRubble'].filter((name) => TERRAIN_CITY.includes(`let ${name}=`));
+  const source = names.map((name) => `const ${name}=${TERRAIN_CITY.match(new RegExp(`let ${name}=([^;]+);`))[1]};`).join('').replace(/in\.kind\.x/g, 'k').replace(/\babs\(/g, 'Math.abs(');
   const shadedAs = new Function('k', `${source}return isAperture?'opening':isCastIron?'iron':isStoneRubble?'stone':'timber';`);
   const wanted = { 10: 'timber', 11: 'stone', 12: 'stone', 13: 'stone', 14: 'opening', 15: 'timber', 16: 'stone', 17: 'timber', 18: 'iron' };
   // buildCityTypeGeometry writes kind + 0.02 + (turn / pi) * 0.46, and across a glazed window 14.02 to 14.46.
@@ -1916,7 +1918,7 @@ test('damage shading reads a building kind as a whole number, whatever turn or w
     assert.equal(shadedAs(k), as, `kind ${k.toFixed(2)}, a building turned ${Math.round((step / 46) * 180)} degrees`);
   }
   // Spalled stone, its grit and splintered timber each have their own noise: one sample reused makes them move as one.
-  const offsets = ['spallDetail', 'gritDetail', 'splinterNoise'].map((name) => TERRAIN.match(new RegExp(`let ${name}=landOrientedDetail\\(world\\+vec3f\\(([^)]+)\\)`))?.[1]);
+  const offsets = ['spallDetail', 'gritDetail', 'splinterNoise'].map((name) => TERRAIN_CITY.match(new RegExp(`let ${name}=landOrientedDetail\\(world\\+vec3f\\(([^)]+)\\)`))?.[1]);
   assert.ok(offsets.every(Boolean), `each is its own sample: ${offsets}`);
   assert.equal(new Set(offsets).size, 3);
 });

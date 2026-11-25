@@ -139,6 +139,95 @@ export const CREW_CONTINUUM_ASSETS = Object.freeze({
     'albedo.astc.bin.gz': 'assets/crew/continuum/andean-female/albedo.astc.bin.gz',
   }),
 });
+// Compact mobile crew continuum packs (scripts/prepare-mobile-continuum.mjs): pruned cluster depth (~25k-50k tris) and
+// 1024x1024 compressed albedo mip chains (~3-5 MiB VRAM per body instead of ~98 MiB) so iOS Safari never hits Jetsam
+// when multiple crew bodies load simultaneously. Shares the light rig mesh body.glb with the desktop pack.
+export const CREW_CONTINUUM_MOBILE_ASSETS = Object.freeze({
+  'sailor-male': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/sailor-male/manifest.json',
+    'body.glb': 'assets/crew/continuum/sailor-male/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/sailor-male/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/sailor-male/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/sailor-male/albedo.astc.bin.gz',
+  }),
+  'villager-female': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/villager-female/manifest.json',
+    'body.glb': 'assets/crew/continuum/villager-female/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/villager-female/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/villager-female/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/villager-female/albedo.astc.bin.gz',
+  }),
+  'captain': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/captain/manifest.json',
+    'body.glb': 'assets/crew/continuum/captain/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/captain/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/captain/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/captain/albedo.astc.bin.gz',
+  }),
+  'soldier': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/soldier/manifest.json',
+    'body.glb': 'assets/crew/continuum/soldier/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/soldier/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/soldier/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/soldier/albedo.astc.bin.gz',
+  }),
+  'algonquian-male': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/algonquian-male/manifest.json',
+    'body.glb': 'assets/crew/continuum/algonquian-male/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/algonquian-male/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/algonquian-male/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/algonquian-male/albedo.astc.bin.gz',
+  }),
+  'algonquian-female': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/algonquian-female/manifest.json',
+    'body.glb': 'assets/crew/continuum/algonquian-female/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/algonquian-female/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/algonquian-female/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/algonquian-female/albedo.astc.bin.gz',
+  }),
+  'caribbean-male': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/caribbean-male/manifest.json',
+    'body.glb': 'assets/crew/continuum/caribbean-male/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/caribbean-male/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/caribbean-male/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/caribbean-male/albedo.astc.bin.gz',
+  }),
+  'caribbean-female': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/caribbean-female/manifest.json',
+    'body.glb': 'assets/crew/continuum/caribbean-female/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/caribbean-female/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/caribbean-female/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/caribbean-female/albedo.astc.bin.gz',
+  }),
+  'maya-male': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/maya-male/manifest.json',
+    'body.glb': 'assets/crew/continuum/maya-male/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/maya-male/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/maya-male/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/maya-male/albedo.astc.bin.gz',
+  }),
+  'maya-female': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/maya-female/manifest.json',
+    'body.glb': 'assets/crew/continuum/maya-female/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/maya-female/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/maya-female/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/maya-female/albedo.astc.bin.gz',
+  }),
+  'andean-male': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/andean-male/manifest.json',
+    'body.glb': 'assets/crew/continuum/andean-male/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/andean-male/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/andean-male/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/andean-male/albedo.astc.bin.gz',
+  }),
+  'andean-female': Object.freeze({
+    'manifest.json': 'assets/mobile-continuum/crew/andean-female/manifest.json',
+    'body.glb': 'assets/crew/continuum/andean-female/body.glb',
+    'atlas.bin.gz': 'assets/mobile-continuum/crew/andean-female/atlas.bin.gz',
+    'albedo.bc7.bin.gz': 'assets/mobile-continuum/crew/andean-female/albedo.bc7.bin.gz',
+    'albedo.astc.bin.gz': 'assets/mobile-continuum/crew/andean-female/albedo.astc.bin.gz',
+  }),
+});
 // People are drawn through the continuum alone: there are no old bodies to stand in. A body that is not baked is an
 // error, for the build (build.mjs) and at load (js/crew-continuum-draw.js), and this says which files are missing,
 // by body, and how they are made. `missing` holds paths from CREW_CONTINUUM_ASSETS.

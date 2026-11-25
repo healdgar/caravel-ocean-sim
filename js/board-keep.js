@@ -10,11 +10,16 @@
 // beside a save), that visit's alone. The career's is never written by a visit, and a visit reads only what it kept
 // itself. Neither is taken up on a date earlier than its own day: a world from after today is another voyage's.
 import { BOARD_KEEP_DAYS, boardDayOf, boardEpochYear } from './board-life.js';
+import { resolveBakedBoardYear } from './board-model.js';
 
 const BOARD_KEEP_DB = 'waterworld-boards', BOARD_KEEP_STORE = 'kept';
 export const BOARD_KEEP_CAREER = 'career';
 
-export const boardKeepKey = (port, year, clock = BOARD_KEEP_CAREER) => `${port}:${year}:${clock === BOARD_KEEP_CAREER ? 'career' : 'visit'}`;
+export const boardKeepCareerKey = (port) => `${port}:career`;
+export const boardKeepKey = (port, year, clock = BOARD_KEEP_CAREER) => {
+  const keepYear = resolveBakedBoardYear(port, year) ?? year;
+  return `${port}:${keepYear}:${clock === BOARD_KEEP_CAREER ? 'career' : 'visit'}`;
+};
 // What makes a kept board one this game can still lay: the parts of its record, by name.
 export const boardShape = (board) => board ? `${board.version}:${Object.keys(board).sort().join(',')}:${Object.keys(board.buildings ?? {}).sort().join(',')}:${Object.keys(board.works ?? {}).sort().join(',')}` : '';
 
@@ -57,8 +62,14 @@ export async function keepBoard(record, idb = null) {
   const store = boardKeepStore(idb);
   if (!store || !record?.board || !record.world) return false;
   const clock = record.clock ?? BOARD_KEEP_CAREER;
+  const epochYear = resolveBakedBoardYear(record.port, record.year);
+  const entry = { ...record, year: epochYear ?? record.year, clock, shape: boardShape(record.board), keptAt: Date.now() };
   try {
-    await boardKeepDo(store, 'readwrite', (kept) => kept.put({ ...record, clock, shape: boardShape(record.board), keptAt: Date.now() }, boardKeepKey(record.port, record.year, clock)));
+    await boardKeepDo(store, 'readwrite', (kept) => {
+      const req = kept.put(entry, boardKeepKey(entry.port, entry.year, clock));
+      if (clock === BOARD_KEEP_CAREER && epochYear == null) kept.put(entry, boardKeepCareerKey(entry.port));
+      return req;
+    });
     return true;
   } catch (fault) { console.warn('The board was not kept:', fault); return false; }
 }
@@ -68,7 +79,15 @@ export async function keptBoard(port, year, { clock = BOARD_KEEP_CAREER, idb = n
   if (!store) return null;
   try {
     const kept = await boardKeepDo(store, 'readonly', (rows) => rows.get(boardKeepKey(port, year, clock)));
-    return kept && (kept.clock ?? BOARD_KEEP_CAREER) === clock ? kept : null;
+    if (kept && (kept.clock ?? BOARD_KEEP_CAREER) === clock) return kept;
+    if (clock === BOARD_KEEP_CAREER && resolveBakedBoardYear(port, year) == null) {
+      const career = await boardKeepDo(store, 'readonly', (rows) => rows.get(boardKeepCareerKey(port)));
+      const targetYear = year == null || year === '' ? NaN : Number(year);
+      if (career && career.port === port && (career.clock ?? BOARD_KEEP_CAREER) === clock && (!Number.isFinite(targetYear) || !(career.year > targetYear))) {
+        return career;
+      }
+    }
+    return null;
   } catch { return null; }
 }
 // Forget every kept world: a new career begins from each port's founding.

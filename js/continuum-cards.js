@@ -87,19 +87,21 @@ function requestContinuumCardBakePipeline({ device, shader, material, paging }) 
 // Collects a half-texel-accurate cluster cut (error <= R / cellSize, matching the Continuum DAG cut) for `typeId`
 // directly from the atlas word stream. For dense multi-million-triangle trees this cuts bake triangles by ~67x while
 // remaining sub-texel identical at `cellSize x cellSize` resolution.
-export function collectContinuumLevel0Clusters(words, typeId, cellSize = 64) {
+export function collectContinuumLevel0Clusters(words, typeId, cellSize = 64, overrideSphere = null) {
   const f32 = new Float32Array(words.buffer, words.byteOffset, words.length);
   const typesAt = words[CONTINUUM_HEADER.typesAt];
   const clustersAt = words[CONTINUUM_HEADER.clustersAt];
   const typeBase = typesAt + typeId * CONTINUUM_TYPE_WORDS;
   const first = words[typeBase + CONTINUUM_TYPE.clusterFirst];
   const count = words[typeBase + CONTINUUM_TYPE.clusterCount];
-  const sphere = [
-    f32[typeBase + CONTINUUM_TYPE.sphere],
-    f32[typeBase + CONTINUUM_TYPE.sphere + 1],
-    f32[typeBase + CONTINUUM_TYPE.sphere + 2],
-    f32[typeBase + CONTINUUM_TYPE.sphere + 3],
-  ];
+  const sphere = overrideSphere && overrideSphere[3] > 0
+    ? [overrideSphere[0], overrideSphere[1], overrideSphere[2], overrideSphere[3]]
+    : [
+      f32[typeBase + CONTINUUM_TYPE.sphere],
+      f32[typeBase + CONTINUUM_TYPE.sphere + 1],
+      f32[typeBase + CONTINUUM_TYPE.sphere + 2],
+      f32[typeBase + CONTINUUM_TYPE.sphere + 3],
+    ];
   // Half-texel orthographic error tolerance: diameter 2*R across cellSize texels -> 0.5 texel = R / cellSize.
   const allowed = Math.max(sphere[3] / Math.max(cellSize, 8), 1e-4);
   const clusters = [];
@@ -125,8 +127,9 @@ export function collectContinuumLevel0Clusters(words, typeId, cellSize = 64) {
 }
 
 // Bakes relightable depth-aware octahedral G-buffer cards for `typeIds` on the GPU from their half-texel cluster cut.
-// Paces small batches with queue.onSubmittedWorkDone() + rAF so GPU command buffers never stall or trigger watchdogs.
-// Returns { albedoTex, geoTex, layerBuf, paramsBuf, bindGroup, layerCount, cellSize, destroy() }.
+// Packs T x T types per 2D array layer when `typeIds.length > maxTextureArrayLayers` (e.g. all 563 city types in 141
+// 2x2-tiled layers) so zero types ever fall back to flat discs, while keeping cell-isolated power-of-two mipmaps.
+// Returns { albedoTex, geoTex, layerBuf, sphereBuf, paramsBuf, bindGroup, layerCount, typeCount, tilesPerSide, cellSize, destroy() }.
 export function bakeContinuumCardAtlas(options) {
   return enqueueContinuumCardBake(options.device, () => runContinuumCardBake(options));
 }
@@ -134,11 +137,14 @@ export function bakeContinuumCardAtlas(options) {
 async function runContinuumCardBake({
   device, shader, renderer, atlas, words = atlas.words, material, typeIds,
   bakeGroup0Entries = null, cellSize = 64, gridSize = CONTINUUM_CARD_GRID, tintMode = 0, salt = 0, neutralSpareX = 0,
-  batchSize = 2, isCancelled = null, label = 'continuum cards',
+  aboveGround = false, batchSize = 2, isCancelled = null, label = 'continuum cards',
 }) {
   if (!words || !atlas?.pages?.length) throw Error(`Cannot bake ${label}: atlas words/pages missing`);
   const maxLayers = Math.min(256, device.limits?.maxTextureArrayLayers ?? 256);
+  const maxTexDim = device.limits?.maxTextureDimension2D ?? 8192;
   const totalTypes = atlas.types.length;
+  const grid = Math.max(2, gridSize | 0);
+  const tileDim = grid * cellSize;
   const seen = new Set();
   const uniqueIds = [];
   for (const rawId of typeIds) {
@@ -146,9 +152,17 @@ async function runContinuumCardBake({
     if (id < 0 || id >= totalTypes || seen.has(id)) continue;
     seen.add(id);
     uniqueIds.push(id);
-    if (uniqueIds.length >= maxLayers) break;
   }
   if (!uniqueIds.length) return null;
+
+  // Choose smallest power-of-two T x T tiling per array layer so EVERY requested type fits within device layer limits.
+  let tilesPerSide = 1;
+  while (Math.ceil(uniqueIds.length / (tilesPerSide * tilesPerSide)) > maxLayers && tilesPerSide * 2 * tileDim <= maxTexDim && tilesPerSide < 16) {
+    tilesPerSide *= 2;
+  }
+  const tilesPerLayer = tilesPerSide * tilesPerSide;
+  const maxTypes = maxLayers * tilesPerLayer;
+  if (uniqueIds.length > maxTypes) uniqueIds.length = maxTypes;
 
   const paging = continuumAtlasPaging(device, atlas.pages.length);
   if (renderer.paging !== paging) {
@@ -157,11 +171,11 @@ async function runContinuumCardBake({
   const bakePipeline = await requestContinuumCardBakePipeline({ device, shader, material, paging });
   if (isCancelled?.()) return null;
 
-  const grid = Math.max(2, gridSize | 0);
   const viewsPerType = grid * grid;
-  const atlasDim = grid * cellSize;
+  const atlasDim = tileDim * tilesPerSide;
   const mipLevels = Math.round(Math.log2(cellSize)) + 1;
-  const layerCount = uniqueIds.length;
+  const bakedCount = uniqueIds.length;
+  const layerCount = Math.ceil(bakedCount / tilesPerLayer);
   const B = GPUBufferUsage, T = GPUTextureUsage;
 
   const cardAlbedoTex = device.createTexture({
@@ -173,12 +187,12 @@ async function runContinuumCardBake({
     format: 'rgba8unorm', usage: T.TEXTURE_BINDING | T.STORAGE_BINDING,
   });
 
-  // Reusable single-layer 4x MSAA scratch targets (freed non-blockingly once GPU bake work completes).
-  const msaaAlbedo = device.createTexture({ label: `${label} msaa albedo`, size: [atlasDim, atlasDim], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
-  const msaaGeo = device.createTexture({ label: `${label} msaa geo`, size: [atlasDim, atlasDim], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
-  const msaaDepth = device.createTexture({ label: `${label} msaa depth`, size: [atlasDim, atlasDim], sampleCount: 4, format: 'depth32float', usage: T.RENDER_ATTACHMENT });
-  const resAlbedo = device.createTexture({ label: `${label} res albedo`, size: [atlasDim, atlasDim], format: 'rgba16float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
-  const resGeo = device.createTexture({ label: `${label} res geo`, size: [atlasDim, atlasDim], format: 'rgba16float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
+  // Reusable single-type 4x MSAA scratch targets (sized to one tileDim x tileDim type sheet, never tiled atlasDim).
+  const msaaAlbedo = device.createTexture({ label: `${label} msaa albedo`, size: [tileDim, tileDim], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
+  const msaaGeo = device.createTexture({ label: `${label} msaa geo`, size: [tileDim, tileDim], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
+  const msaaDepth = device.createTexture({ label: `${label} msaa depth`, size: [tileDim, tileDim], sampleCount: 4, format: 'depth32float', usage: T.RENDER_ATTACHMENT });
+  const resAlbedo = device.createTexture({ label: `${label} res albedo`, size: [tileDim, tileDim], format: 'rgba16float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
+  const resGeo = device.createTexture({ label: `${label} res geo`, size: [tileDim, tileDim], format: 'rgba16float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
 
   const msaaAlbedoView = msaaAlbedo.createView(), msaaGeoView = msaaGeo.createView(), msaaDepthView = msaaDepth.createView();
   const resAlbedoView = resAlbedo.createView(), resGeoView = resGeo.createView();
@@ -201,14 +215,18 @@ async function runContinuumCardBake({
     }
   }
 
-  // Build 1 neutral ContinuumRecord per baked type and viewsPerType ContinuumCardView structs per type (80 bytes each).
-  const recWords = new Uint32Array(layerCount * CONTINUUM_RECORD_WORDS);
-  const recFloats = new Float32Array(recWords.buffer);
-  const viewFloats = new Float32Array(layerCount * viewsPerType * 20);
-  const viewU32 = new Uint32Array(viewFloats.buffer);
-  const typeClusters = new Array(layerCount);
+  // Tight per-type spheres computed from Level-0 geometry (and above-ground clipping for buildings with buried footings).
+  const srcSpheres = aboveGround ? (atlas.aboveGroundSpheres ?? atlas.tightSpheres) : atlas.tightSpheres;
+  const sphereTable = new Float32Array(Math.max(1, totalTypes) * 4);
 
-  for (let r = 0; r < layerCount; r++) {
+  // Build 1 neutral ContinuumRecord per baked type and viewsPerType ContinuumCardView structs per type (80 bytes each).
+  const recWords = new Uint32Array(bakedCount * CONTINUUM_RECORD_WORDS);
+  const recFloats = new Float32Array(recWords.buffer);
+  const viewFloats = new Float32Array(bakedCount * viewsPerType * 20);
+  const viewU32 = new Uint32Array(viewFloats.buffer);
+  const typeClusters = new Array(bakedCount);
+
+  for (let r = 0; r < bakedCount; r++) {
     const typeId = uniqueIds[r];
     writeContinuumRecord(recWords, recFloats, r, {
       position: [0, 0, 0], scale: 1, yaw: 0, type: typeId, kind: CONTINUUM_KIND.RIGID,
@@ -216,9 +234,13 @@ async function runContinuumCardBake({
     });
     // Set neutral spare.x word directly (e.g. packed neutral tint for forest, neutral f32 for city).
     recWords[r * CONTINUUM_RECORD_WORDS + 12] = neutralSpareX >>> 0;
-    const info = collectContinuumLevel0Clusters(words, typeId, cellSize);
+    const tightSp = srcSpheres && (typeId * 4 + 3) < srcSpheres.length
+      ? [srcSpheres[typeId * 4], srcSpheres[typeId * 4 + 1], srcSpheres[typeId * 4 + 2], srcSpheres[typeId * 4 + 3]]
+      : null;
+    const info = collectContinuumLevel0Clusters(words, typeId, cellSize, tightSp);
     typeClusters[r] = info.clusters;
     const [cx, cy, cz, rawR] = info.sphere;
+    sphereTable.set([cx, cy, cz, rawR], typeId * 4);
     const R = Math.max(rawR, 1e-4) * CONTINUUM_CARD_PAD;
     for (let v = 0; v < viewsPerType; v++) {
       const at = (r * viewsPerType + v) * 20;
@@ -236,7 +258,10 @@ async function runContinuumCardBake({
   const bakeViewBuf = makeBuf(new Uint32Array(CONTINUUM_VIEW_BYTES / 4), B.UNIFORM, 'bake view');
   const bakePosesBuf = makeBuf(new Float32Array(4), B.STORAGE, 'bake poses');
   const bakeViewsBuf = makeBuf(viewFloats, B.STORAGE, 'bake views');
-  const packParamsBuf = makeBuf(new Uint32Array([cellSize, grid, 0, 0]), B.UNIFORM, 'pack params');
+  const packParamsBufs = Array.from({ length: tilesPerLayer }, (_, slot) => {
+    const tx = slot % tilesPerSide, ty = Math.floor(slot / tilesPerSide);
+    return makeBuf(new Uint32Array([cellSize, grid, tx * tileDim, ty * tileDim]), B.UNIFORM, `pack params ${slot}`);
+  });
 
   const bakeGroup0 = bakeGroup0Entries?.length
     ? device.createBindGroup({ label: `${label} bake g0`, layout: bakePipeline.getBindGroupLayout(0), entries: bakeGroup0Entries })
@@ -271,9 +296,10 @@ async function runContinuumCardBake({
   };
   const nextFrame = () => new Promise((resolve) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(resolve) : setTimeout(resolve, 0)));
 
+  const layersPerBatch = Math.max(1, Math.ceil(batchSize / tilesPerLayer));
   let submittedAny = false;
   try {
-    for (let start = 0; start < layerCount; start += batchSize) {
+    for (let layerStart = 0; layerStart < layerCount; layerStart += layersPerBatch) {
       if (isCancelled?.()) {
         if (submittedAny && typeof device.queue?.onSubmittedWorkDone === 'function') {
           device.queue.onSubmittedWorkDone().then(() => { cardAlbedoTex.destroy(); cardGeoTex.destroy(); }, () => {});
@@ -282,15 +308,17 @@ async function runContinuumCardBake({
         }
         return null;
       }
-      const end = Math.min(layerCount, start + batchSize);
+      const layerEnd = Math.min(layerCount, layerStart + layersPerBatch);
+      const rStart = layerStart * tilesPerLayer;
+      const rEnd = Math.min(bakedCount, layerEnd * tilesPerLayer);
       let batchEntryCount = 0;
-      for (let r = start; r < end; r++) batchEntryCount += typeClusters[r].length * viewsPerType;
+      for (let r = rStart; r < rEnd; r++) batchEntryCount += typeClusters[r].length * viewsPerType;
       if (batchEntryCount === 0) continue;
 
       const entries = new Uint32Array(batchEntryCount * 2);
-      const offsets = [];
+      const offsets = new Map();
       let cursor = 0;
-      for (let r = start; r < end; r++) {
+      for (let r = rStart; r < rEnd; r++) {
         const clusters = typeClusters[r];
         const firstForType = cursor;
         for (let v = 0; v < viewsPerType; v++) {
@@ -301,60 +329,70 @@ async function runContinuumCardBake({
             cursor++;
           }
         }
-        offsets.push({ r, first: firstForType, perView: clusters.length });
+        offsets.set(r, { first: firstForType, perView: clusters.length });
       }
       const entriesBuf = device.createBuffer({ label: `${label} bake entries`, size: entries.byteLength, usage: B.VERTEX | B.COPY_DST });
       device.queue.writeBuffer(entriesBuf, 0, entries);
       tempBuffers.push(entriesBuf);
 
-      const encoder = device.createCommandEncoder({ label: `${label} bake batch ${start}` });
-      for (const { r, first, perView } of offsets) {
-        if (!perView) continue;
-        const rpass = encoder.beginRenderPass({
-          colorAttachments: [
-            { view: msaaAlbedoView, resolveTarget: resAlbedoView, clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: 'clear', storeOp: 'discard' },
-            { view: msaaGeoView, resolveTarget: resGeoView, clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: 'clear', storeOp: 'discard' },
-          ],
-          depthStencilAttachment: { view: msaaDepthView, depthClearValue: 1.0, depthLoadOp: 'clear', depthStoreOp: 'discard' },
-        });
-        rpass.setPipeline(bakePipeline);
-        if (bakeGroup0) rpass.setBindGroup(0, bakeGroup0);
-        rpass.setBindGroup(1, bakeGroup1);
-        rpass.setVertexBuffer(0, entriesBuf);
-        for (let iy = 0; iy < grid; iy++) {
-          for (let ix = 0; ix < grid; ix++) {
-            const v = iy * grid + ix;
-            rpass.setViewport(ix * cellSize, iy * cellSize, cellSize, cellSize, 0, 1);
-            rpass.setScissorRect(ix * cellSize, iy * cellSize, cellSize, cellSize);
-            rpass.draw(CONTINUUM_ENTRY_VERTICES[0], perView, 0, first + v * perView);
+      const encoder = device.createCommandEncoder({ label: `${label} bake layers ${layerStart}-${layerEnd - 1}` });
+      for (let layerIdx = layerStart; layerIdx < layerEnd; layerIdx++) {
+        const dstMip0A = cardAlbedoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 });
+        const dstMip0G = cardGeoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 });
+        const slotStart = layerIdx * tilesPerLayer;
+        const slotEnd = Math.min(bakedCount, slotStart + tilesPerLayer);
+        let anyTile = false;
+        for (let r = slotStart; r < slotEnd; r++) {
+          const info = offsets.get(r);
+          if (!info?.perView) continue;
+          anyTile = true;
+          const slot = r - slotStart;
+          const rpass = encoder.beginRenderPass({
+            colorAttachments: [
+              { view: msaaAlbedoView, resolveTarget: resAlbedoView, clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: 'clear', storeOp: 'discard' },
+              { view: msaaGeoView, resolveTarget: resGeoView, clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: 'clear', storeOp: 'discard' },
+            ],
+            depthStencilAttachment: { view: msaaDepthView, depthClearValue: 1.0, depthLoadOp: 'clear', depthStoreOp: 'discard' },
+          });
+          rpass.setPipeline(bakePipeline);
+          if (bakeGroup0) rpass.setBindGroup(0, bakeGroup0);
+          rpass.setBindGroup(1, bakeGroup1);
+          rpass.setVertexBuffer(0, entriesBuf);
+          for (let iy = 0; iy < grid; iy++) {
+            for (let ix = 0; ix < grid; ix++) {
+              const v = iy * grid + ix;
+              rpass.setViewport(ix * cellSize, iy * cellSize, cellSize, cellSize, 0, 1);
+              rpass.setScissorRect(ix * cellSize, iy * cellSize, cellSize, cellSize);
+              rpass.draw(CONTINUUM_ENTRY_VERTICES[0], info.perView, 0, info.first + v * info.perView);
+            }
           }
+          rpass.end();
+
+          const dpass = encoder.beginComputePass();
+          const dilateBG = device.createBindGroup({
+            layout: dilateLayout,
+            entries: [
+              { binding: 0, resource: resAlbedoView },
+              { binding: 1, resource: resGeoView },
+              { binding: 2, resource: dstMip0A },
+              { binding: 3, resource: dstMip0G },
+              { binding: 4, resource: { buffer: packParamsBufs[slot] } },
+            ],
+          });
+          dpass.setPipeline(renderer.dilatePipeline);
+          dpass.setBindGroup(0, dilateBG);
+          dpass.dispatchWorkgroups(Math.ceil(tileDim / 8), Math.ceil(tileDim / 8));
+          dpass.end();
         }
-        rpass.end();
-
-        const cpass = encoder.beginComputePass();
-        const dstMip0A = cardAlbedoTex.createView({ dimension: '2d', baseArrayLayer: r, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 });
-        const dstMip0G = cardGeoTex.createView({ dimension: '2d', baseArrayLayer: r, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 });
-        const dilateBG = device.createBindGroup({
-          layout: dilateLayout,
-          entries: [
-            { binding: 0, resource: resAlbedoView },
-            { binding: 1, resource: resGeoView },
-            { binding: 2, resource: dstMip0A },
-            { binding: 3, resource: dstMip0G },
-            { binding: 4, resource: { buffer: packParamsBuf } },
-          ],
-        });
-        cpass.setPipeline(renderer.dilatePipeline);
-        cpass.setBindGroup(0, dilateBG);
-        cpass.dispatchWorkgroups(Math.ceil(atlasDim / 8), Math.ceil(atlasDim / 8));
-
-        cpass.setPipeline(renderer.mipPipeline);
+        if (!anyTile) continue;
+        const mpass = encoder.beginComputePass();
+        mpass.setPipeline(renderer.mipPipeline);
         for (let m = 1; m < mipLevels; m++) {
           const dimM = atlasDim >> m;
-          const srcA = cardAlbedoTex.createView({ dimension: '2d', baseArrayLayer: r, arrayLayerCount: 1, baseMipLevel: m - 1, mipLevelCount: 1 });
-          const srcG = cardGeoTex.createView({ dimension: '2d', baseArrayLayer: r, arrayLayerCount: 1, baseMipLevel: m - 1, mipLevelCount: 1 });
-          const dstA = cardAlbedoTex.createView({ dimension: '2d', baseArrayLayer: r, arrayLayerCount: 1, baseMipLevel: m, mipLevelCount: 1 });
-          const dstG = cardGeoTex.createView({ dimension: '2d', baseArrayLayer: r, arrayLayerCount: 1, baseMipLevel: m, mipLevelCount: 1 });
+          const srcA = cardAlbedoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: m - 1, mipLevelCount: 1 });
+          const srcG = cardGeoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: m - 1, mipLevelCount: 1 });
+          const dstA = cardAlbedoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: m, mipLevelCount: 1 });
+          const dstG = cardGeoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: m, mipLevelCount: 1 });
           const mipBG = device.createBindGroup({
             layout: mipLayout,
             entries: [
@@ -364,15 +402,15 @@ async function runContinuumCardBake({
               { binding: 3, resource: dstG },
             ],
           });
-          cpass.setBindGroup(0, mipBG);
-          cpass.dispatchWorkgroups(Math.ceil(dimM / 8), Math.ceil(dimM / 8));
+          mpass.setBindGroup(0, mipBG);
+          mpass.dispatchWorkgroups(Math.ceil(dimM / 8), Math.ceil(dimM / 8));
         }
-        cpass.end();
+        mpass.end();
       }
       device.queue.submit([encoder.finish()]);
       submittedAny = true;
       // Pace tiny batches across frames WITHOUT blocking GPU-CPU onSubmittedWorkDone flushes (avoids Metal render stalls).
-      if (end < layerCount) await nextFrame();
+      if (layerEnd < layerCount) await nextFrame();
     }
   } finally {
     if (submittedAny) retireScratch();
@@ -385,12 +423,20 @@ async function runContinuumCardBake({
   }
 
   const layerTable = new Uint32Array(Math.max(1, totalTypes)).fill(0xffffffff);
-  for (let i = 0; i < layerCount; i++) layerTable[uniqueIds[i]] = i;
+  for (let i = 0; i < bakedCount; i++) {
+    const layerIdx = Math.floor(i / tilesPerLayer);
+    const slot = i % tilesPerLayer;
+    const tx = slot % tilesPerSide, ty = Math.floor(slot / tilesPerSide);
+    layerTable[uniqueIds[i]] = ((layerIdx << 8) | (ty << 4) | tx) >>> 0;
+  }
   const layerBuf = device.createBuffer({ label: `${label} layers`, size: layerTable.byteLength, usage: B.STORAGE | B.COPY_DST });
   device.queue.writeBuffer(layerBuf, 0, layerTable);
 
+  const sphereBuf = device.createBuffer({ label: `${label} spheres`, size: sphereTable.byteLength, usage: B.STORAGE | B.COPY_DST });
+  device.queue.writeBuffer(sphereBuf, 0, sphereTable);
+
   const paramsBuf = device.createBuffer({ label: `${label} params`, size: 16, usage: B.UNIFORM | B.COPY_DST });
-  device.queue.writeBuffer(paramsBuf, 0, new Uint32Array([grid, cellSize, tintMode >>> 0, salt >>> 0]));
+  device.queue.writeBuffer(paramsBuf, 0, new Uint32Array([(grid | (tilesPerSide << 16)) >>> 0, cellSize, tintMode >>> 0, salt >>> 0]));
 
   const bindGroup = device.createBindGroup({
     label: `${label} group`,
@@ -401,6 +447,7 @@ async function runContinuumCardBake({
       { binding: 2, resource: renderer.sampler },
       { binding: 3, resource: { buffer: layerBuf } },
       { binding: 4, resource: { buffer: paramsBuf } },
+      { binding: 5, resource: { buffer: sphereBuf } },
     ],
   });
 
@@ -409,9 +456,12 @@ async function runContinuumCardBake({
     albedoTex: cardAlbedoTex,
     geoTex: cardGeoTex,
     layerBuf,
+    sphereBuf,
     paramsBuf,
     bindGroup,
     layerCount,
+    typeCount: bakedCount,
+    tilesPerSide,
     cellSize,
     destroy() {
       if (disposed) return;
@@ -419,6 +469,7 @@ async function runContinuumCardBake({
       cardAlbedoTex.destroy();
       cardGeoTex.destroy();
       layerBuf.destroy();
+      sphereBuf.destroy();
       paramsBuf.destroy();
     },
   };

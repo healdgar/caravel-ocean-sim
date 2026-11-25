@@ -17,7 +17,7 @@ import { FOREST_CONTINUUM_ASSETS, SUBTROPICAL_FOREST_CONTINUUM_ASSETS, PORTUGAL_
 import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
 import { PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS, PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS, TROPICAL_MEADOW_GRASS_MOBILE_ASSETS } from './js/meadow-continuum.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
-import { CREW_CONTINUUM_ASSETS, crewContinuumMissingMessage } from './js/crew-continuum.js';
+import { CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_MOBILE_ASSETS, crewContinuumMissingMessage } from './js/crew-continuum.js';
 import { HAIR_CONTINUUM_ASSETS } from './js/hair-continuum.js';
 import { CLOTHING_CONTINUUM_ASSETS } from './js/clothing-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
@@ -212,6 +212,8 @@ const missingCrewContinuum=Object.values(CREW_CONTINUUM_ASSETS).flatMap(files=>O
 if(missingCrewContinuum.length)throw Error(crewContinuumMissingMessage(missingCrewContinuum));
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))
   runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.glb')?'model/gltf-binary':'application/octet-stream');
+for(const files of Object.values(CREW_CONTINUUM_MOBILE_ASSETS))for(const file of Object.values(files))
+  if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.glb')?'model/gltf-binary':'application/octet-stream');
 for(const file of Object.values(HAIR_CONTINUUM_ASSETS))
   runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 for(const file of Object.values(CLOTHING_CONTINUUM_ASSETS))
@@ -235,6 +237,7 @@ const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','asset
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 // The people continuum's bodies (hundreds of MB) stay out of the downloads, which fetch the published copies.
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))externalDownloadGeometry.add(file);
+for(const files of Object.values(CREW_CONTINUUM_MOBILE_ASSETS))for(const file of Object.values(files))externalDownloadGeometry.add(file);
 // So do the founded worlds of the Old World cities.
 for(const file of Object.values(BAKED_WORLDS))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){

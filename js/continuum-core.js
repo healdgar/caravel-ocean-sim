@@ -21,7 +21,7 @@ export const CONTINUUM_HANDOFF_BAND = 0.45;
 // The scene's one triangle budget, in submitted triangles (rule 3, item 5).
 export const CONTINUUM_TRIANGLE_BUDGET = 3_000_000;
 // The pixel error the scene's cut is drawn at before any governor moves it.
-export const CONTINUUM_BASE_PIXEL_ERROR = 3;
+export const CONTINUUM_BASE_PIXEL_ERROR = 1.5;
 // What the player is looking at, speaking to or firing upon, and whatever is wounded or struck, is cut at this share
 // of the base pixel error (rule 3, item 5), and yields to the budget only as the square root of the scene's coarsening:
 // when a governor doubles the scene's error, an important instance's grows by √2, so it keeps four times the share of

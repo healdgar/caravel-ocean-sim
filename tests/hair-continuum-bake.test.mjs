@@ -3,11 +3,12 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import test from 'node:test';
 import {
-  CONTINUUM_HEADER, CONTINUUM_STREAMS, checkContinuumAtlas,
+  CONTINUUM_HEADER, CONTINUUM_STREAMS, CONTINUUM_SURFEL_HEADER_WORDS, checkContinuumAtlas,
 } from '../js/continuum-format.js';
 import {
-  HAIR_CONTINUUM_ASSETS, HAIR_CONTINUUM_TYPES, hairContinuumShiftsFor, validateHairContinuumManifest,
+  HAIR_BODY_ANCHORS, HAIR_CONTINUUM_ASSETS, HAIR_CONTINUUM_TYPES, appendHairContinuumSurfels, hairContinuumShiftsFor, validateHairContinuumManifest,
 } from '../js/hair-continuum.js';
+import { HAIR_CONTINUUM_MATERIAL } from '../js/wgsl/crew-continuum.js';
 import { CREW_CONTINUUM_BODIES } from '../js/crew-continuum.js';
 import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 
@@ -45,6 +46,33 @@ test('hair continuum manifest and 12 strand grooms pass atlas, skin, and wind ve
     assert.equal(shifts.length, 8);
     assert.equal(shifts[3], sex === 'female' ? 1 : 0);
   }
+  assert.deepEqual(HAIR_BODY_ANCHORS['sailor-male'].scalp, [0, 0, 0], 'sailor-male scalp flush at [0,0,0]');
+  assert.deepEqual(HAIR_BODY_ANCHORS['villager-female'].scalp, [0, 0, 0], 'villager-female scalp flush at [0,0,0]');
+
+  // Fine mid-range hair surfels: dense (>= 1024 scalp / >= 512 beard) with >= 15 mm scalp handoffError (no 7 m blotches).
+  const { words: withSurfels, counts } = appendHairContinuumSurfels(words);
+  const surfelBase = withSurfels[H.surfels];
+  assert.ok(surfelBase > 0, 'hair surfel section appended');
+  const surfelF32 = new Float32Array(withSurfels.buffer, withSurfels.byteOffset, withSurfels.length);
+  HAIR_CONTINUUM_TYPES.forEach((spec, ty) => {
+    const hAt = surfelBase + ty * CONTINUUM_SURFEL_HEADER_WORDS;
+    const sc = withSurfels[hAt + 1];
+    const handoffErr = surfelF32[hAt + 3];
+    assert.equal(sc, counts[ty]);
+    if (spec.slot === 'scalp') {
+      assert.ok(sc >= 1536, `${spec.id} scalp surfel count ${sc} >= 1536`);
+      assert.ok(handoffErr >= Math.fround(0.015), `${spec.id} scalp handoffError ${handoffErr} >= 0.015 m`);
+    } else {
+      assert.ok(sc >= 512, `${spec.id} beard surfel count ${sc} >= 512`);
+      assert.ok(handoffErr >= Math.fround(0.010), `${spec.id} beard handoffError ${handoffErr} >= 0.010 m`);
+    }
+  });
+
+  // Fibrous MSAA hair coverage applies across mid/tip ribbon length (zero discard, no flat <0.85 rectangle bypass).
+  const hairWgsl = HAIR_CONTINUUM_MATERIAL.wgsl().replace(/\/\/[^\n]*/g, '');
+  assert.doesNotMatch(hairWgsl, /\bdiscard\b/);
+  assert.doesNotMatch(hairWgsl, /if\s*\(\s*along\s*<\s*0\.85\s*\)/);
+  assert.match(hairWgsl, /continuumSamples\(/);
 
   const build = fs.readFileSync('build.mjs', 'utf8');
   assert.match(build, /HAIR_CONTINUUM_ASSETS/);

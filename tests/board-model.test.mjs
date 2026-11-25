@@ -1,10 +1,14 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Castle and Commons' own model, whole, founding a coast on this game's ground and living on it.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BOARD_TABLES, tuneBoardSource } from '../scripts/board-tuning.mjs';
+import vm from 'node:vm';
+import { BOARD_TABLES, tuneBoardSource, untuneBoardSource } from '../scripts/board-tuning.mjs';
+import { BOARD_UPSTREAM, BOARD_UPSTREAM_ALL, BOARD_UPSTREAM_PENDING, applyPendingUpstream, undoPendingUpstream } from '../scripts/board-upstream.mjs';
+import { verifyBoardVendoring } from '../scripts/vendor-castle-and-commons.mjs';
 import { BOARD_RIVERS, boardKey, boardPrefix, boardRequest, boardSeat } from '../js/board-model.js';
 import { openBoard } from '../scripts/board-host.mjs';
 
@@ -279,4 +283,150 @@ test('a short lived span unlocks all era technologies, keeps household grain led
   const totalAnimals = board.places.reduce((sum, p) => sum + p.herds.sheep + p.herds.cattle + p.herds.horses + p.herds.swine, 0);
   assert.ok(totalAnimals > 0, `standing livestock after 1 lived year: ${totalAnimals}`);
   await open.close();
+});
+
+test('every staged upstream copy-back passage applies cleanly, compiles, stays pure, and wires to runtime.js without drift', async () => {
+  const source = JSON.parse(asset('SOURCE.json')), game = asset('game.js'), runtime = asset('runtime.js');
+  const body = game.replace(/^(\/\/.*\n)+/, '');
+  const raw = untuneBoardSource(body, source);
+
+  // Offline vendoring check works without an external Castle & Commons checkout and verifies all 5 applied tables + pending queue.
+  const info = verifyBoardVendoring();
+  assert.equal(info.sha256, source.sha256);
+  assert.equal(info.pendingCount, BOARD_UPSTREAM_PENDING.length);
+  assert.equal(BOARD_UPSTREAM_ALL.length, BOARD_UPSTREAM.length + BOARD_UPSTREAM_PENDING.length);
+  assert.ok(BOARD_UPSTREAM_PENDING.length >= 8, `expected staged upstream passages, got ${BOARD_UPSTREAM_PENDING.length}`);
+  const cliOut = execFileSync('node', ['scripts/vendor-castle-and-commons.mjs', '--check'], { encoding: 'utf8' });
+  assert.match(cliOut, /^OK assets\/board\/game\.js:/);
+
+  // THIRD_PARTY_NOTICES.md accurately documents all five board tables.
+  const notices = readFileSync(new URL('../THIRD_PARTY_NOTICES.md', import.meta.url), 'utf8');
+  for (const file of ['scripts/board-tuning.mjs', 'scripts/board-upstream.mjs', 'scripts/board-native.mjs', 'scripts/board-colonial.mjs', 'scripts/board-forts.mjs']) {
+    assert.ok(notices.includes(file), `THIRD_PARTY_NOTICES.md must list ${file}`);
+  }
+
+  // Every staged entry applies cleanly to both raw and tuned sources, round-trips, rejects drift, stays host-free, and maps to runtime.js.
+  const rawPatched = applyPendingUpstream(raw);
+  assert.equal(undoPendingUpstream(rawPatched), raw, 'raw source round-trips through BOARD_UPSTREAM_PENDING');
+  const tunedPatched = applyPendingUpstream(body);
+  assert.equal(undoPendingUpstream(tunedPatched), body, 'tuned game.js round-trips through BOARD_UPSTREAM_PENDING');
+  for (const entry of BOARD_UPSTREAM_PENDING) {
+    assert.throws(() => applyPendingUpstream(raw.replace(entry.find, '')), /drifted/, `missing anchor stops vendoring for ${entry.id}`);
+    assert.ok(runtime.includes(entry.runtimeHook), `runtime.js delegates to upstream hook ${entry.runtimeHook}`);
+    assert.ok(runtime.includes(entry.runtimeShim), `runtime.js retains guarded fallback shim ${entry.runtimeShim}`);
+  }
+
+  // Evaluate the in-memory staged game.js + runtime.js (without modifying assets/board/game.js on disk) and verify
+  // every upstream hook compiles and executes with exact domain semantics.
+  const ctx = vm.createContext({
+    setTimeout, clearTimeout, console, TextEncoder, TextDecoder, CompressionStream, DecompressionStream,
+    Blob, Response, atob, btoa,
+    addEventListener: () => {}, removeEventListener: () => {}, requestAnimationFrame: () => 0, postMessage: () => {},
+  });
+  vm.runInContext(
+    `${boardPrefix({ ...ask(), heights: null })}${tunedPatched}\n${runtime}\n` +
+    `globalThis.__UP = { get W() { return W; }, setW(v) { W = v; }, findPerson, openingMarketListing, openingTradeBackdate, riverEconomicCorridors, riverBoatTargetCount, pruneRiverBoats, riverBoatParcel, stepRiverBoatArrival, settleFoundingMonth, herdTotals, avail };`,
+    ctx,
+  );
+  const up = ctx.__UP;
+  for (const fn of ['findPerson', 'openingMarketListing', 'openingTradeBackdate', 'riverEconomicCorridors', 'riverBoatTargetCount', 'pruneRiverBoats', 'riverBoatParcel', 'stepRiverBoatArrival', 'settleFoundingMonth', 'herdTotals']) {
+    assert.equal(typeof up[fn], 'function', `upstream hook ${fn} must be defined`);
+  }
+
+  // 1. openingTradeBackdate spreads Day-0/forced dispatches and stays 0 on normal days.
+  assert.equal(up.openingTradeBackdate('sea', 0, 5, false), 0);
+  assert.ok(Math.abs(up.openingTradeBackdate('sea', 1, 0, false) - (0.16 + 0.21)) < 1e-9);
+  assert.ok(Math.abs(up.openingTradeBackdate('river', 0, 0, false) - 0.20) < 1e-9);
+  assert.ok(Math.abs(up.openingTradeBackdate('cart-coach', 0, 10, true) - 0.15) < 1e-9);
+  assert.ok(Math.abs(up.openingTradeBackdate('cart', 0, 0, false) - 0.18) < 1e-9);
+
+  // 2. findPerson finds living army soldiers and ignores disbanded/gone hosts.
+  const s0 = { name: 'Alpha', pos: { x: 0, z: 0 }, extentR: 200, harbor: true, river: true, folk: [], dead: [], stores: { grain: 80, fish: 60, sheep: 0, cattle: 0, horses: 0, swine: 0 } };
+  const s1 = { name: 'Beta', pos: { x: 400, z: 0 }, extentR: 200, harbor: false, river: true, folk: [], dead: [], stores: { grain: 20, fish: 10, sheep: 14, cattle: 6, horses: 2, swine: 8 } };
+  const soldier = { id: 77701, gn: 'Diogo', sx: 'm', home: 0, si: 0, tr: 'soldier' };
+  const goneSoldier = { id: 77702, gn: 'Ghost', sx: 'm', home: 0, si: 0, tr: 'soldier' };
+  up.setW({
+    clock: { day: 0 },
+    settlements: [s0, s1],
+    travellers: [],
+    armies: [
+      { id: 1, gone: false, at: 0, men: [soldier] },
+      { id: 2, gone: true, at: 0, men: [goneSoldier] },
+    ],
+    rivStrips: [
+      // Corridor connecting Alpha (x=0) to Beta (x=400), length 400 m >= 140 m, avgHw 3.0 >= 1.35 m.
+      { pts: [{ x: 0, z: 0 }, { x: 100, z: 0 }, { x: 200, z: 0 }, { x: 300, z: 0 }, { x: 400, z: 0 }], hw: [3, 3, 3, 3, 3] },
+      // Isolated upland creek near only Alpha with no sea connection: must be rejected.
+      { pts: [{ x: 0, z: 50 }, { x: 0, z: 250 }, { x: 0, z: 450 }, { x: 0, z: 650 }], hw: [3, 3, 3, 3] },
+    ],
+    riverBoats: [],
+    water: null,
+  });
+  const hit = up.findPerson(77701);
+  assert.equal(hit?.p, soldier);
+  assert.equal(hit?.s, s0);
+  assert.equal(hit?.a?.id, 1);
+  assert.equal(up.findPerson(77702), null);
+
+  // 3. herdTotals reads s.stores and falls back to s._owners when s.stores has zero beasts.
+  assert.deepEqual({ ...up.herdTotals(s1) }, { sheep: 14, cattle: 6, horses: 2, swine: 8 });
+  s0._owners = new Map([[{ id: 1 }, { held: {}, sale: {}, reserve: {}, animals: { sheep: 5.4, cattle: 3.1, horses: 1, swine: 2.2 } }]]);
+  assert.deepEqual({ ...up.herdTotals(s0) }, { sheep: 5, cattle: 3, horses: 1, swine: 2 });
+  delete s0._owners;
+
+  // 4. riverEconomicCorridors keeps multi-endpoint corridor (strip 0) and rejects isolated single-settlement creek (strip 1).
+  const cor = up.riverEconomicCorridors();
+  assert.equal(cor.corridors.length, 1);
+  assert.equal(cor.corridors[0].ri, 0);
+  assert.equal(cor.validRiverIndices.has(0), true);
+  assert.equal(cor.validRiverIndices.has(1), false);
+
+  // 5. riverBoatTargetCount & pruneRiverBoats reject ghost-piloted and non-corridor craft and cap by real fishers/boatmen.
+  s0.folk = [
+    { id: 11, dead: false, tr: 'fisher', sx: 'm' },
+    { id: 12, dead: false, tr: 'boatman', sx: 'm' },
+    { id: 13, dead: false, tr: 'fisher', sx: 'm' },
+    { id: 14, dead: false, tr: 'merchant', sx: 'm' },
+  ];
+  assert.equal(up.riverBoatTargetCount(cor.corridors), 1);
+  up.W.riverBoats = [
+    { id: 1, riverIdx: 0, si: 0, destSi: 1, from: 'Alpha', to: 'Beta', pilotId: 12, sunk: false },
+    { id: 2, riverIdx: 1, si: 0, destSi: 1, from: 'Alpha', to: 'Beta', pilotId: 11, sunk: false }, // invalid creek
+    { id: 3, riverIdx: 0, si: 0, destSi: 1, from: 'Alpha', to: 'Beta', pilotId: 900001, sunk: false }, // ghost pilot
+  ];
+  up.pruneRiverBoats(cor.validRiverIndices, 1);
+  assert.equal(up.W.riverBoats.length, 1);
+  assert.equal(up.W.riverBoats[0].id, 1);
+
+  // 6. openingMarketListing lists real opening-day s.stores surplus without minting goods when !s.storage.
+  s0.pop = 10;
+  s0.px = { grain: 1, fish: 1, wine: 2, cloth: 3, timber: 1, salt: 1, wool: 1, meat: 1, dairy: 1, ore: 2, char: 1, tools: 4, spice: 6, silk: 8, hay: 0.5, stone: 1, sheep: 4, cattle: 12, horses: 20, swine: 5 };
+  const grainBefore = s0.stores.grain;
+  up.openingMarketListing(s0);
+  assert.equal(s0.stores.grain, grainBefore, 'openingMarketListing never mints goods');
+  assert.ok(up.avail(s0, 'grain', 1.5) >= 3, 'openingMarketListing lists genuine grain surplus onto mkt');
+
+  // 7. stepRiverBoatArrival strictly conserves mass (never mints goods) and reverses the corridor leg.
+  const boat = {
+    id: 1, riverIdx: 0, si: 0, destSi: 1, from: 'Alpha', to: 'Beta',
+    forward: true, tripSpan: 3, departDay: 0, arriveDay: 3, good: 'fish', qty: 4,
+    points: [{ x: 0, z: 0 }, { x: 400, z: 0 }],
+  };
+  s0.stores.fish = 2; // fewer than boat.qty=4: must move only 2, never mint 4!
+  s1.stores.fish = 10;
+  assert.equal(up.stepRiverBoatArrival(boat, 3, 0), true);
+  assert.equal(s0.stores.fish, 0);
+  assert.equal(s1.stores.fish, 12);
+  assert.equal(boat.si, 1);
+  assert.equal(boat.destSi, 0);
+  assert.equal(boat.from, 'Beta');
+  assert.equal(boat.to, 'Alpha');
+  assert.equal(boat.forward, false);
+  assert.equal(boat.points[0].x, 400);
+
+  // 8. settleFoundingMonth is idempotent once day >= 21, and runtime BOARD_MODEL.herds() delegates to upstream herdTotals.
+  up.W.clock.day = 21;
+  await up.settleFoundingMonth();
+  assert.equal(up.W.clock.day, 21);
+  assert.deepEqual({ ...ctx.BOARD_MODEL.herds().totals }, { sheep: 14, cattle: 6, horses: 2, swine: 8, total: 30 });
 });

@@ -90,11 +90,12 @@ export const CONTINUUM_CARD_DILATE_WGSL = /* wgsl */`
 @group(0) @binding(1) var cardBakeGeoIn:texture_2d<f32>;
 @group(0) @binding(2) var cardAlbedoOut:texture_storage_2d<rgba8unorm,write>;
 @group(0) @binding(3) var cardGeoOut:texture_storage_2d<rgba8unorm,write>;
-@group(0) @binding(4) var<uniform> cardPackParams:vec4u; // x=cellSize, y=gridSize
+@group(0) @binding(4) var<uniform> cardPackParams:vec4u; // x=cellSize, y=gridSize, z=dstOffsetX, w=dstOffsetY
 @compute @workgroup_size(8,8) fn continuumCardPackDilate(@builtin(global_invocation_id) id:vec3u) {
-  let dim=textureDimensions(cardAlbedoOut);
-  if(any(id.xy>=dim)){return;}
+  let srcDim=textureDimensions(cardBakeAlbedoIn);
+  if(any(id.xy>=srcDim)){return;}
   let p=vec2i(id.xy);
+  let dst=p+vec2i(i32(cardPackParams.z),i32(cardPackParams.w));
   let cell=i32(cardPackParams.x);
   let cellMin=(p/cell)*cell;
   let cellMax=cellMin+vec2i(cell-1);
@@ -139,8 +140,8 @@ export const CONTINUUM_CARD_DILATE_WGSL = /* wgsl */`
       rgb=rSum*invW;nxy=nSum*invW;depth=dSum*invW;flag=fSum*invW;
     }
   }
-  textureStore(cardAlbedoOut,p,vec4f(sqrt(clamp(rgb,vec3f(0.0),vec3f(1.0))),cov));
-  textureStore(cardGeoOut,p,vec4f(nxy*0.5+0.5,depth,flag));
+  textureStore(cardAlbedoOut,dst,vec4f(sqrt(clamp(rgb,vec3f(0.0),vec3f(1.0))),cov));
+  textureStore(cardGeoOut,dst,vec4f(nxy*0.5+0.5,depth,flag));
 }
 `;
 
@@ -200,7 +201,8 @@ export function continuumCardViewWGSL(paging = CONTINUUM_SINGLE_PAGE) {
 @group(3) @binding(1) var cardGeoTex:texture_2d_array<f32>;
 @group(3) @binding(2) var cardSampler:sampler;
 @group(3) @binding(3) var<storage,read> cardLayers:array<u32>;
-@group(3) @binding(4) var<uniform> cardParams:vec4u; // x=gridSize, y=cellSize, z=tintMode, w=salt
+@group(3) @binding(4) var<uniform> cardParams:vec4u; // x=gridSize|(tilesPerSide<<16), y=cellSize, z=tintMode, w=salt
+@group(3) @binding(5) var<storage,read> cardSpheres:array<vec4f>;
 
 struct ContinuumCardVarying {
   @builtin(position) position:vec4f,
@@ -295,7 +297,8 @@ fn continuumCardFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisib
   let model=continuumTypeOf(record);
   let lift=continuumLift(state,false);
   let rawSphere=vec4f(continuumTypeF(model,${sphereAt}u),continuumTypeF(model,${sphereAt + 1}u),continuumTypeF(model,${sphereAt + 2}u),continuumTypeF(model,${sphereAt + 3}u));
-  let bound=continuumSphere(record,CONTINUUM_WHOLE,rawSphere);
+  let cardSp=select(rawSphere,cardSpheres[model],model<arrayLength(&cardSpheres)&&cardSpheres[model].w>0.0);
+  let bound=continuumSphere(record,CONTINUUM_WHOLE,cardSp);
   if(bound.w<=0.0){out.position=CONTINUUM_HIDDEN;return out;}
   let scale=continuumScale(record);
   let baseR=bound.w*scale*CONTINUUM_CARD_PAD;
@@ -313,8 +316,8 @@ fn continuumCardFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisib
   let triCorner=array<vec2f,3>(vec2f(0.0,2.0),vec2f(-1.7320508,-1.0),vec2f(1.7320508,-1.0))[min(vertex,2u)];
   let worldOnPlane=centre+rightW*(triCorner.x*triR)+upW*(triCorner.y*triR)+vec3f(touched);
   let layer=select(0xffffffffu,cardLayers[model],model<arrayLength(&cardLayers));
-  // Analytic front-pulled depth without frag_depth preserves full GPU Early-Z rejection against hills, buildings & front cards.
-  out.position=continuumCardClipPulled(worldOnPlane,baseR*0.28);
+  // Analytic front-pulled depth without frag_depth preserves full GPU Early-Z rejection while tight framing prevents plinth overhang.
+  out.position=continuumCardClipPulled(worldOnPlane,baseR*0.14);
   out.worldOnPlane=worldOnPlane;
   out.corner=triCorner*perspBoost;
   out.centreRadius=vec4f(centre,baseR);
@@ -330,13 +333,13 @@ fn continuumCardFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisib
 
 struct ContinuumCardTap { albedo:vec3f, alpha:f32, normalLocal:vec3f, zLocal:f32, matFlag:f32 };
 
-fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32,halfTexel:f32,invGrid:f32,invGridM1:f32,doParallax:bool)->ContinuumCardTap {
+fn continuumCardSampleCell(cell:vec2u,layer:i32,tileOffset:vec2f,invTiles:f32,p0:vec3f,rayLocal:vec3f,mipF:f32,halfTexel:f32,invGrid:f32,invGridM1:f32,doParallax:bool)->ContinuumCardTap {
   let dirK=continuumCardDirFromUV(vec2f(cell)*invGridM1);
   let basisK=continuumCardBasis(dirK);
   let rightK=basisK[0];
   let upK=basisK[1];
   let uv0=vec2f(0.5+0.5*dot(p0,rightK),0.5-0.5*dot(p0,upK));
-  let atlasUV0=(vec2f(cell)+clamp(uv0,vec2f(halfTexel),vec2f(1.0-halfTexel)))*invGrid;
+  let atlasUV0=(tileOffset+(vec2f(cell)+clamp(uv0,vec2f(halfTexel),vec2f(1.0-halfTexel)))*invGrid)*invTiles;
   var a=textureSampleLevel(cardAlbedoTex,cardSampler,atlasUV0,layer,mipF);
   var g=textureSampleLevel(cardGeoTex,cardSampler,atlasUV0,layer,mipF);
   var zK=1.0-2.0*g.b;
@@ -346,7 +349,7 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
     let p1=p0+rayLocal*tHit;
     let uv1=vec2f(0.5+0.5*dot(p1,rightK),0.5-0.5*dot(p1,upK));
     let inCell=all(uv1>=vec2f(-0.02))&&all(uv1<=vec2f(1.02));
-    let atlasUV1=(vec2f(cell)+clamp(uv1,vec2f(halfTexel),vec2f(1.0-halfTexel)))*invGrid;
+    let atlasUV1=(tileOffset+(vec2f(cell)+clamp(uv1,vec2f(halfTexel),vec2f(1.0-halfTexel)))*invGrid)*invTiles;
     let a1=textureSampleLevel(cardAlbedoTex,cardSampler,atlasUV1,layer,mipF);
     let g1=textureSampleLevel(cardGeoTex,cardSampler,atlasUV1,layer,mipF);
     if(inCell){a=a1;g=g1;zK=1.0-2.0*g1.b;tHit=clamp((zK-dot(p0,dirK))/denom,-0.9,0.9);}
@@ -365,7 +368,9 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
 @fragment fn continuumCardFS(v:ContinuumCardVarying)->ContinuumCardOut {
   let dcx=dpdx(v.corner);
   let dcy=dpdy(v.corner);
-  let grid=max(cardParams.x,2u);
+  let grid=max(cardParams.x&65535u,2u);
+  let tilesPerSide=max(cardParams.x>>16u,1u);
+  let invTiles=1.0/f32(tilesPerSide);
   let cellSize=max(cardParams.y,4u);
   let tintMode=cardParams.z;
   let salt=cardParams.w;
@@ -398,7 +403,8 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
   var matFlag=0.0;
 
   if(layerU!=0xffffffffu){
-    let layer=i32(layerU);
+    let layer=i32(layerU>>8u);
+    let tileOffset=vec2f(f32(layerU&15u),f32((layerU>>4u)&15u));
     let gridCoord=continuumCardUVFromDir(v.viewDirLocal)*f32(grid-1u);
     let baseCell=min(vec2u(floor(gridCoord)),vec2u(grid-2u));
     let f=clamp(gridCoord-vec2f(baseCell),vec2f(0.0),vec2f(1.0));
@@ -412,7 +418,7 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
     // Far horizon cards (<= 22 px, mipF >= 1.8, where parallax is already off) sample the single dominant octahedral view (2 taps vs 6).
     if(mipF>=1.8){
       let bestCell=select(select(c2,c1,w1>=w2),c0,w0>=w1&&w0>=w2);
-      let tb=continuumCardSampleCell(bestCell,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,false);
+      let tb=continuumCardSampleCell(bestCell,layer,tileOffset,invTiles,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,false);
       albedo=tb.albedo;alpha=tb.alpha;nLocal=tb.normalLocal;zLocal=tb.zLocal;matFlag=tb.matFlag;
     }else{
       // Sharpened barycentric weights prevent cross-view ghosting: cubic on rigid gables/masts, quadratic on foliage boughs.
@@ -423,9 +429,9 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
       let rwInv=1.0/max(rw0+rw1+rw2,1e-4);
       let bw0=rw0*rwInv;let bw1=rw1*rwInv;let bw2=rw2*rwInv;
       let doParallax=mipF<1.8;
-      let t0=continuumCardSampleCell(c0,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
-      let t1=continuumCardSampleCell(c1,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
-      let t2=continuumCardSampleCell(c2,layer,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
+      let t0=continuumCardSampleCell(c0,layer,tileOffset,invTiles,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
+      let t1=continuumCardSampleCell(c1,layer,tileOffset,invTiles,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
+      let t2=continuumCardSampleCell(c2,layer,tileOffset,invTiles,p0,rayLocal,mipF,halfTexel,invGrid,invGridM1,doParallax);
       alpha=bw0*t0.alpha+bw1*t1.alpha+bw2*t2.alpha;
       if(tintMode==${CONTINUUM_CARD_TINT_VESSEL}u){
         let maxA=max(t0.alpha,max(t1.alpha,t2.alpha));
@@ -493,14 +499,17 @@ fn continuumCardSampleCell(cell:vec2u,layer:i32,p0:vec3f,rayLocal:vec3f,mipF:f32
   }else if(tintMode==${CONTINUUM_CARD_TINT_CITY}u){
     let tint=bitcast<f32>(v.info.z);
     if(tint>=-150.0){
-      if(matFlag>0.72){
-        albedo*=continuumCardCityWash(tint);
-      }else if(matFlag>0.25){
+      // matFlag is a linear limewash-wall weight [0..1] (0 on windows/stone/timber/roofs) so linear mip averaging
+      // across wall-window borders never triggers false roof classification or bleaches dark window openings.
+      let washW=clamp(matFlag,0.0,1.0);
+      albedo*=mix(vec3f(1.0),continuumCardCityWash(tint),washW);
+      let roofW=smoothstep(0.35,0.65,nWorld.y)*(1.0-washW);
+      if(roofW>0.001){
         let roofShade=0.62+0.38*fract(fract(tint)*7.31+v.place.x*0.137+v.place.z*0.071);
-        albedo*=roofShade/0.81;
+        albedo*=mix(1.0,roofShade/0.81,roofW);
       }
     }
-    ambient=0.42+0.32*max(nWorld.y,0.0);
+    ambient=0.38+0.30*max(nWorld.y,0.0);
     roughness=0.84;
     if(landShadowCoverage(worldPos)>0.001){shadowVis=landShadowVisibility(worldPos,nWorld);}
   }else if(tintMode==${CONTINUUM_CARD_TINT_VESSEL}u){

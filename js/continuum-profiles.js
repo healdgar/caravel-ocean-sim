@@ -14,40 +14,21 @@
 
 import { CONTINUUM_DEFAULT_PROFILE, normalizeContinuumProfile } from './continuum-core.js';
 
+// Every family defaults to CONTINUUM_DEFAULT_PROFILE so every model family reads the exact same shared scene pixel
+// error scalar, perspective law, shadow frustum, and budget (AGENTS.md rule 3: no per-family errorScale divergence
+// and no hard shadowMaxDistance cutoffs). Live diagnostics may still override a family temporarily via setContinuumProfile.
 export const CONTINUUM_FAMILY_DEFAULTS = Object.freeze({
-  ships: normalizeContinuumProfile({
-    errorScale: 0.32, taperMetres: 600, taperPower: 1.0, splatScale: 0.75, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.0, shadowMaxDistance: 0,
-  }),
-  tradeVessels: normalizeContinuumProfile({
-    errorScale: 0.30, taperMetres: 600, taperPower: 1.0, splatScale: 5.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.02, shadowMaxDistance: 900,
-  }),
-  people: normalizeContinuumProfile({
-    errorScale: 0.28, taperMetres: 24.0, taperPower: 1.35, splatScale: 1.30, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.38, shadowMaxDistance: 80,
-  }),
-  hair: normalizeContinuumProfile({
-    errorScale: 0.24, taperMetres: 32.0, taperPower: 1.25, splatScale: 1.20, minPixels: 1.0, maxDistance: 160, shadowMinError: 0.12, shadowMaxDistance: 65,
-  }),
-  animals: normalizeContinuumProfile({
-    errorScale: 0.22, taperMetres: 48, taperPower: 1.10, splatScale: 1.0, minPixels: 1.1, maxDistance: 0, shadowMinError: 0.07, shadowMaxDistance: 240,
-  }),
-  props: normalizeContinuumProfile({
-    errorScale: 0.45, taperMetres: 48, taperPower: 1.15, splatScale: 0.90, minPixels: 1.3, maxDistance: 1400, shadowMinError: 0.05, shadowMaxDistance: 200,
-  }),
-  city: normalizeContinuumProfile({
-    errorScale: 0.24, taperMetres: 420, taperPower: 1.05, splatScale: 4.2, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.28, shadowMaxDistance: 380,
-  }),
-  boulders: normalizeContinuumProfile({
-    errorScale: 0.50, taperMetres: 420, taperPower: 1.0, splatScale: 0.85, minPixels: 1.2, maxDistance: 0, shadowMinError: 0.05, shadowMaxDistance: 400,
-  }),
-  forest: normalizeContinuumProfile({
-    errorScale: 0.44, taperMetres: 260, taperPower: 1.05, splatScale: 6.5, minPixels: 1.4, maxDistance: 0, shadowMinError: 1.35, shadowMaxDistance: 190,
-  }),
-  meadow: normalizeContinuumProfile({
-    errorScale: 2.50, taperMetres: 0, taperPower: 1.0, splatScale: 1.35, minPixels: 0.90, maxDistance: 0, shadowMinError: 0.95, shadowMaxDistance: 32,
-  }),
-  land: normalizeContinuumProfile({
-    errorScale: 1.0, taperMetres: 0, taperPower: 1.0, splatScale: 1.0, minPixels: 1.0, maxDistance: 0, shadowMinError: 0.0, shadowMaxDistance: 0,
-  }),
+  ships: CONTINUUM_DEFAULT_PROFILE,
+  tradeVessels: CONTINUUM_DEFAULT_PROFILE,
+  people: CONTINUUM_DEFAULT_PROFILE,
+  hair: CONTINUUM_DEFAULT_PROFILE,
+  animals: CONTINUUM_DEFAULT_PROFILE,
+  props: CONTINUUM_DEFAULT_PROFILE,
+  city: CONTINUUM_DEFAULT_PROFILE,
+  boulders: CONTINUUM_DEFAULT_PROFILE,
+  forest: CONTINUUM_DEFAULT_PROFILE,
+  meadow: CONTINUUM_DEFAULT_PROFILE,
+  land: CONTINUUM_DEFAULT_PROFILE,
 });
 
 const liveContinuumProfiles = new Map(Object.entries(CONTINUUM_FAMILY_DEFAULTS));

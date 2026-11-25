@@ -50,17 +50,19 @@ import { HUMAN_MORPH_WGSL } from './human-morph.js';
 
 const continuumKindsDefined = new Map();
 // A kind's two functions, named continuum<Name>Pose and continuum<Name>Sphere in `wgsl` (a function, written when a
-// module is, so it may read constants loaded later in the bundle).
-export function defineContinuumKind(kind, { name, wgsl }) {
+// module is, so it may read constants loaded later in the bundle), plus optional `errorScale: true` for
+// continuum<Name>ErrorScale(record, data, toEye)->f32 when a pose kind's surface orientation foreshortens relief error.
+export function defineContinuumKind(kind, { name, wgsl, errorScale = false }) {
   if (!Object.values(CONTINUUM_KIND).includes(kind)) throw Error(`No such continuum pose kind: ${kind}`);
   if (continuumKindsDefined.has(kind)) throw Error(`The continuum's ${name} kind is defined twice`);
-  continuumKindsDefined.set(kind, { kind, name, wgsl });
+  continuumKindsDefined.set(kind, { kind, name, wgsl, errorScale });
 }
 export const continuumKinds = () => [...continuumKindsDefined.values()].sort((a, b) => a.kind - b.kind);
 
 // The dispatch every pass calls: by the record's kind, to the kinds defined.
 export function continuumKindsWGSL(kinds = continuumKinds()) {
   const cases = (call) => kinds.map(({ kind, name }) => `case ${kind}u:{out=continuum${name}${call};}`).join('');
+  const scaleCases = kinds.filter((k) => k.errorScale).map(({ kind, name }) => `case ${kind}u:{out=continuum${name}ErrorScale(record,data,toEye);}`).join('');
   return kinds.map(({ wgsl }) => wgsl()).join('\n') + /* wgsl */`
 fn continuumPose(record:ContinuumRecord,part:u32,vertex:u32,p:ContinuumPosed)->ContinuumPosed {
   var out=p;let data=continuumKindData(record);
@@ -70,6 +72,10 @@ fn continuumPose(record:ContinuumRecord,part:u32,vertex:u32,p:ContinuumPosed)->C
 fn continuumSphere(record:ContinuumRecord,part:u32,sphere:vec4f)->vec4f {
   var out=vec4f(sphere.xyz,-1.0);let data=continuumKindData(record);
   switch(continuumKindOf(record)){${cases('Sphere(record,data,part,sphere)')}default:{}}
+  return out;
+}
+fn continuumErrorScale(record:ContinuumRecord,toEye:vec3f)->f32 {
+  var out=1.0;${scaleCases ? `let data=continuumKindData(record);switch(continuumKindOf(record)){${scaleCases}default:{}}` : ''}
   return out;
 }
 `;

@@ -12,10 +12,16 @@ test('production near-coast GPU height query matches rendered triangle planes ra
     const page=await browser.newPage();await page.route('**/__near_terrain_gpu',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto('http://127.0.0.1:'+server.address().port+'/__near_terrain_gpu');
     const result=await page.evaluate(async()=>{
-      const {TERRAIN_NEAR_HEIGHT,TERRAIN,TERRAIN_LIGHT}=await import('/js/wgsl/terrain.js');
+      const {TERRAIN_NEAR_HEIGHT,TERRAIN_LAND,TERRAIN_CITY,TERRAIN_LIGHT}=await import('/js/wgsl/terrain.js');
+      const {withNeuralPbrLand,withNeuralPbrCity}=await import('/js/wgsl/neural-pbr.js');
+      const {landContinuumMaterial}=await import('/js/wgsl/land-continuum.js');
+      const {cityContinuumMaterial}=await import('/js/wgsl/city-continuum.js');
+      const {continuumModuleWGSL}=await import('/js/wgsl/continuum-cut.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
       const compile=async code=>{const module=device.createShaderModule({code});const bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
-      await compile(TERRAIN);await compile(TERRAIN_LIGHT);
+      await compile(continuumModuleWGSL({pass:'view',material:landContinuumMaterial(withNeuralPbrLand(TERRAIN_LAND))}));
+      await compile(continuumModuleWGSL({pass:'view',material:cityContinuumMaterial(withNeuralPbrCity(TERRAIN_CITY))}));
+      await compile(TERRAIN_LIGHT);
       const shader=TERRAIN_NEAR_HEIGHT+`
 @group(0) @binding(0) var<uniform> nearTerrain:NearLand;
 @group(0) @binding(1) var<storage,read> nearElevation:array<f32>;

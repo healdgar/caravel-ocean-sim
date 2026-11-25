@@ -253,6 +253,8 @@ globalThis.BOARD_MODEL = (() => {
     return { kind: 'person', card, links };
   }
 
+  // Guarded runtime fallback for BOARD_UPSTREAM_PENDING['find-person-armies']: bypassed automatically once
+  // findPerson() in game.js scans living hosts in W.armies.
   function buildArmySoldierInspect(personId) {
     if (!W || !Array.isArray(W.armies)) return null;
     let soldier = null, army = null;
@@ -948,9 +950,10 @@ globalThis.BOARD_MODEL = (() => {
     const COACH_ROAD_GOODS = new Set(['cloth', 'silk', 'spice', 'tools']);
     // On opening day (Day 0 of a newly thawed world before the first daily market tick runs),
     // settlements hold real `s.stores` surplus (`spareOf > 0`) whose seller lots have not yet
-    // been listed on `mkt(s, g)`. List genuine spare surplus under living local folk (creating
-    // zero goods) so merchants, carters, and bargemen can lade real opening-day consignments.
+    // been listed on `mkt(s, g)`. Delegate to upstream `openingMarketListing(s)` (BOARD_UPSTREAM_PENDING
+    // 'opening-market-listing') when present; otherwise mirror it locally without minting goods.
     const ensureOpeningMarketListing = (s) => {
+      if (typeof openingMarketListing === 'function') { openingMarketListing(s); return; }
       if (!s || s.storage || !s.stores || typeof offer !== 'function' || typeof avail !== 'function') return;
       const folk = Array.isArray(s.folk) ? s.folk : [];
       const sellers = folk.filter((p) => p && !p.dead && !(p.away && now < (p.away.until ?? 0)) && (p.tr === 'merchant' || p.tr === 'trader' || p.tr === 'chandler' || p.tr === 'spicer' || p.tr === 'farmer' || p.tr === 'peasant' || p.tr === 'weaver' || p.tr === 'smith'));
@@ -1125,7 +1128,16 @@ globalThis.BOARD_MODEL = (() => {
       }
     }
 
-    const openingSpread = force || now <= 0.01;
+    // Delegate opening-day departure spreading to upstream `openingTradeBackdate` (BOARD_UPSTREAM_PENDING
+    // 'opening-trade-backdate') when present; mirror it identically until the next retune.
+    const openingTradeSpreadFrac = (mode, i) => {
+      if (typeof openingTradeBackdate === 'function') return openingTradeBackdate(mode, i, now, force);
+      if (!(force || now <= 0.01)) return 0;
+      if (mode === 'sea') return 0.16 + ((i * 0.21) % 0.62);
+      if (mode === 'river') return 0.20 + ((i * 0.27) % 0.56);
+      if (mode === 'cart-coach') return 0.15 + ((i * 0.17) % 0.55);
+      return 0.18 + ((i * 0.19) % 0.58);
+    };
     if (activeSea.length < 3 && harborPorts.length >= 2 && typeof seaRoute === 'function') {
       const seaPairs = [];
       for (let a = 0; a < harborPorts.length; a++) {
@@ -1140,7 +1152,7 @@ globalThis.BOARD_MODEL = (() => {
         const pair = seaPairs[i % seaPairs.length];
         const forward = (i % 2) === 0;
         const poly = forward ? pair.poly : [...pair.poly].reverse();
-        const backdate = openingSpread ? (0.16 + ((i * 0.21) % 0.62)) : 0;
+        const backdate = openingTradeSpreadFrac('sea', i);
         if (tryDispatchRoute('sea', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, backdate)) needSea--;
       }
     }
@@ -1158,7 +1170,7 @@ globalThis.BOARD_MODEL = (() => {
         if (!pr?.route?.poly || pr.route.poly.length < 2) continue;
         const forward = (i % 2) === 0;
         const poly = forward ? pr.route.poly : [...pr.route.poly].reverse();
-        const backdate = openingSpread ? (0.20 + ((i * 0.27) % 0.56)) : 0;
+        const backdate = openingTradeSpreadFrac('river', i);
         if (tryDispatchRoute('river', forward ? pr.a : pr.b, forward ? pr.b : pr.a, poly, pr.route.len || 400, backdate)) needRiv--;
       }
     }
@@ -1181,7 +1193,7 @@ globalThis.BOARD_MODEL = (() => {
             const pair = roadPairs[i % roadPairs.length];
             const forward = (i % 2) === 0;
             const poly = forward ? pair.poly : [...pair.poly].reverse();
-            const backdate = openingSpread ? (0.15 + ((i * 0.17) % 0.55)) : 0;
+            const backdate = openingTradeSpreadFrac('cart-coach', i);
             if (tryDispatchRoute('cart', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, backdate, true)) {
               hasCoachGood = true;
               if (needCart > 0) needCart--;
@@ -1192,7 +1204,7 @@ globalThis.BOARD_MODEL = (() => {
           const pair = roadPairs[i % roadPairs.length];
           const forward = (i % 2) === 0;
           const poly = forward ? pair.poly : [...pair.poly].reverse();
-          const backdate = openingSpread ? (0.18 + ((i * 0.19) % 0.58)) : 0;
+          const backdate = openingTradeSpreadFrac('cart', i);
           if (tryDispatchRoute('cart', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, backdate, false)) needCart--;
         }
       }
@@ -1201,167 +1213,186 @@ globalThis.BOARD_MODEL = (() => {
     // 3. Ground local river fishing & ferry boats (`W.riverBoats`) strictly in real `s.folk` fishers/boatmen,
     // real multi-endpoint economic corridors (settlement ↔ settlement or settlement ↔ estuary), and real
     // settlement stores (never placing boats on isolated upland creeks or headwaters past the last village).
+    // Delegate corridor topology, boat pruning/capping, parcel picks, and non-minting arrival cargo transfer
+    // to upstream hooks in BOARD_UPSTREAM_PENDING ('river-economic-corridors', 'river-boat-cargo-transfer')
+    // when present; mirror them identically until the next retune.
     if (!Array.isArray(W.riverBoats)) W.riverBoats = [];
-    const distPt = (a, b) => Math.hypot((b.x || 0) - (a.x || 0), (b.z || 0) - (a.z || 0));
     const hubSettlement = S.find((s) => s?.harbor) || S[0] || null;
-    const hubSi = hubSettlement ? Math.max(0, S.indexOf(hubSettlement)) : 0;
     const hubName = String(hubSettlement?.name || W?.capital?.name || 'Harbor');
     const estuaryName = /^lisbo[an]?$/i.test(hubName) ? 'Tagus Estuary' : `${hubName} Estuary`;
 
-    const isNearSea = (pt) => {
-      if (!pt || !W.water || typeof toCell !== 'function' || typeof inB !== 'function' || typeof cIdx !== 'function') return false;
-      const cx0 = toCell(pt.x), cz0 = toCell(pt.z);
-      const rad = Math.max(1, Math.ceil(120 / (typeof CELL === 'number' && CELL > 0 ? CELL : 40)));
-      for (let dz = -rad; dz <= rad; dz++) {
-        for (let dx = -rad; dx <= rad; dx++) {
-          const cx = cx0 + dx, cz = cz0 + dz;
-          if (!inB(cx, cz) || W.water[cIdx(cx, cz)] !== 1) continue;
-          if (Math.hypot(cellX(cx) - pt.x, cellZ(cz) - pt.z) <= 120) return true;
+    const buildRiverEconomicCorridors = (estuaryLabel) => {
+      if (typeof riverEconomicCorridors === 'function') return riverEconomicCorridors(estuaryLabel);
+      const distPt = (a, b) => Math.hypot((b.x || 0) - (a.x || 0), (b.z || 0) - (a.z || 0));
+      const fallbackHubSi = hubSettlement ? Math.max(0, S.indexOf(hubSettlement)) : 0;
+      const isNearSea = (pt) => {
+        if (!pt || !W.water || typeof toCell !== 'function' || typeof inB !== 'function' || typeof cIdx !== 'function') return false;
+        const cx0 = toCell(pt.x), cz0 = toCell(pt.z);
+        const rad = Math.max(1, Math.ceil(120 / (typeof CELL === 'number' && CELL > 0 ? CELL : 40)));
+        for (let dz = -rad; dz <= rad; dz++) {
+          for (let dx = -rad; dx <= rad; dx++) {
+            const cx = cx0 + dx, cz = cz0 + dz;
+            if (!inB(cx, cz) || W.water[cIdx(cx, cz)] !== 1) continue;
+            if (Math.hypot(cellX(cx) - pt.x, cellZ(cz) - pt.z) <= 120) return true;
+          }
         }
-      }
-      return false;
-    };
+        return false;
+      };
 
-    const rivStrips = Array.isArray(W.rivStrips) ? W.rivStrips : [];
-    const stripEndSea = rivStrips.map((q) => {
-      if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) return [false, false];
-      return [isNearSea(q.pts[0]), isNearSea(q.pts[q.pts.length - 1])];
-    });
-    // Propagate sea connectivity through river confluences (strip endpoints meeting a sea-connected strip within 32 m).
-    let seaChanged = true;
-    for (let pass = 0; pass < 4 && seaChanged; pass++) {
-      seaChanged = false;
-      for (let ri = 0; ri < rivStrips.length; ri++) {
-        const q = rivStrips[ri];
-        if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) continue;
-        for (const endIdx of [0, 1]) {
-          if (stripEndSea[ri][endIdx]) continue;
-          const endPt = endIdx === 0 ? q.pts[0] : q.pts[q.pts.length - 1];
-          for (let rj = 0; rj < rivStrips.length; rj++) {
-            if (rj === ri || (!stripEndSea[rj][0] && !stripEndSea[rj][1])) continue;
-            const o = rivStrips[rj];
-            if (!o || o.canal || !Array.isArray(o.pts) || o.pts.length < 4) continue;
-            for (let k = 0; k < o.pts.length; k++) {
-              if (distPt(endPt, o.pts[k]) <= 32) {
-                stripEndSea[ri][endIdx] = true;
-                seaChanged = true;
-                break;
+      const rivStrips = Array.isArray(W.rivStrips) ? W.rivStrips : [];
+      const stripEndSea = rivStrips.map((q) => {
+        if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) return [false, false];
+        return [isNearSea(q.pts[0]), isNearSea(q.pts[q.pts.length - 1])];
+      });
+      // Propagate sea connectivity through river confluences (strip endpoints meeting a sea-connected strip within 32 m).
+      let seaChanged = true;
+      for (let pass = 0; pass < 4 && seaChanged; pass++) {
+        seaChanged = false;
+        for (let ri = 0; ri < rivStrips.length; ri++) {
+          const q = rivStrips[ri];
+          if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) continue;
+          for (const endIdx of [0, 1]) {
+            if (stripEndSea[ri][endIdx]) continue;
+            const endPt = endIdx === 0 ? q.pts[0] : q.pts[q.pts.length - 1];
+            for (let rj = 0; rj < rivStrips.length; rj++) {
+              if (rj === ri || (!stripEndSea[rj][0] && !stripEndSea[rj][1])) continue;
+              const o = rivStrips[rj];
+              if (!o || o.canal || !Array.isArray(o.pts) || o.pts.length < 4) continue;
+              for (let k = 0; k < o.pts.length; k++) {
+                if (distPt(endPt, o.pts[k]) <= 32) {
+                  stripEndSea[ri][endIdx] = true;
+                  seaChanged = true;
+                  break;
+                }
               }
+              if (stripEndSea[ri][endIdx]) break;
             }
-            if (stripEndSea[ri][endIdx]) break;
           }
         }
       }
-    }
 
-    const economicCorridors = [];
-    const validRiverIndices = new Set();
-    for (let ri = 0; ri < rivStrips.length; ri++) {
-      const q = rivStrips[ri];
-      if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) continue;
-      const pts = q.pts;
-      const cumLen = new Float64Array(pts.length);
-      for (let k = 1; k < pts.length; k++) cumLen[k] = cumLen[k - 1] + distPt(pts[k - 1], pts[k]);
-      const rawWaypoints = [];
-      for (let si = 0; si < S.length; si++) {
-        const s = S[si];
-        if (!s?.pos) continue;
-        const reachRadius = Math.max(Math.min(Number(s.extentR) || 120, 380), 260);
-        let bestK = -1, bestD = Infinity;
-        for (let k = 0; k < pts.length; k++) {
-          const d = distPt(pts[k], s.pos);
-          if (d < bestD) { bestD = d; bestK = k; }
+      const corridors = [];
+      const validIndices = new Set();
+      for (let ri = 0; ri < rivStrips.length; ri++) {
+        const q = rivStrips[ri];
+        if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) continue;
+        const pts = q.pts;
+        const cumLen = new Float64Array(pts.length);
+        for (let k = 1; k < pts.length; k++) cumLen[k] = cumLen[k - 1] + distPt(pts[k - 1], pts[k]);
+        const rawWaypoints = [];
+        for (let si = 0; si < S.length; si++) {
+          const s = S[si];
+          if (!s?.pos) continue;
+          const reachRadius = Math.max(Math.min(Number(s.extentR) || 120, 380), 260);
+          let bestK = -1, bestD = Infinity;
+          for (let k = 0; k < pts.length; k++) {
+            const d = distPt(pts[k], s.pos);
+            if (d < bestD) { bestD = d; bestK = k; }
+          }
+          if (bestK >= 0 && bestD <= reachRadius) {
+            rawWaypoints.push({ kind: 'settlement', si, name: String(s.name || `Place ${si + 1}`), k: bestK, dist: bestD });
+          }
         }
-        if (bestK >= 0 && bestD <= reachRadius) {
-          rawWaypoints.push({ kind: 'settlement', si, name: String(s.name || `Place ${si + 1}`), k: bestK, dist: bestD });
+        if (!rawWaypoints.length) continue;
+        if (stripEndSea[ri][0] && !rawWaypoints.some((w) => distPt(pts[w.k], pts[0]) <= 140)) {
+          rawWaypoints.push({ kind: 'estuary', si: -1, name: estuaryLabel, k: 0, dist: 0 });
         }
-      }
-      if (!rawWaypoints.length) continue;
-      if (stripEndSea[ri][0] && !rawWaypoints.some((w) => distPt(pts[w.k], pts[0]) <= 140)) {
-        rawWaypoints.push({ kind: 'estuary', si: -1, name: estuaryName, k: 0, dist: 0 });
-      }
-      if (stripEndSea[ri][1] && !rawWaypoints.some((w) => distPt(pts[w.k], pts[pts.length - 1]) <= 140)) {
-        rawWaypoints.push({ kind: 'estuary', si: -1, name: estuaryName, k: pts.length - 1, dist: 0 });
-      }
-      rawWaypoints.sort((a, b) => a.k - b.k || a.dist - b.dist);
-      // Keep distinct economic endpoints ordered along the strip.
-      const waypoints = [];
-      for (const wp of rawWaypoints) {
-        const prev = waypoints[waypoints.length - 1];
-        if (prev && prev.si === wp.si && prev.kind === wp.kind) {
-          if (wp.dist < prev.dist) waypoints[waypoints.length - 1] = wp;
-          continue;
+        if (stripEndSea[ri][1] && !rawWaypoints.some((w) => distPt(pts[w.k], pts[pts.length - 1]) <= 140)) {
+          rawWaypoints.push({ kind: 'estuary', si: -1, name: estuaryLabel, k: pts.length - 1, dist: 0 });
         }
-        waypoints.push(wp);
-      }
-      const hasSettlement = waypoints.some((w) => w.kind === 'settlement');
-      if (!hasSettlement || waypoints.length < 2) continue;
+        rawWaypoints.sort((a, b) => a.k - b.k || a.dist - b.dist);
+        // Keep distinct economic endpoints ordered along the strip.
+        const waypoints = [];
+        for (const wp of rawWaypoints) {
+          const prev = waypoints[waypoints.length - 1];
+          if (prev && prev.si === wp.si && prev.kind === wp.kind) {
+            if (wp.dist < prev.dist) waypoints[waypoints.length - 1] = wp;
+            continue;
+          }
+          waypoints.push(wp);
+        }
+        const hasSettlement = waypoints.some((w) => w.kind === 'settlement');
+        if (!hasSettlement || waypoints.length < 2) continue;
 
-      const addLeg = (wpA, wpB, legIdx) => {
-        if (!wpA || !wpB || wpA.k === wpB.k) return;
-        if (wpA.si >= 0 && wpA.si === wpB.si) return;
-        if (wpA.kind !== 'settlement' && wpB.kind !== 'settlement') return;
-        const kLo = Math.min(wpA.k, wpB.k);
-        const kHi = Math.max(wpA.k, wpB.k);
-        if (kHi - kLo < 3) return;
-        const segLen = cumLen[kHi] - cumLen[kLo];
-        if (segLen < 140) return;
-        let hwSum = 0;
-        for (let k = kLo; k <= kHi; k++) hwSum += q.hw?.[k] ?? 2;
-        const avgHw = hwSum / (kHi - kLo + 1);
-        if (avgHw < 1.35) return;
-        const slice = pts.slice(kLo, kHi + 1).map((p) => ({ x: p.x, z: p.z }));
-        const fromWp = wpA.k <= wpB.k ? wpA : wpB;
-        const toWp = wpA.k <= wpB.k ? wpB : wpA;
-        validRiverIndices.add(ri);
-        economicCorridors.push({
-          ri,
-          legIdx,
-          key: `${ri}:${fromWp.si}>${toWp.si}:${kLo}-${kHi}`,
-          pts: slice,
-          totalLen: segLen,
-          avgHw,
-          fromWp,
-          toWp,
-        });
-      };
+        const addLeg = (wpA, wpB, legIdx) => {
+          if (!wpA || !wpB || wpA.k === wpB.k) return;
+          if (wpA.si >= 0 && wpA.si === wpB.si) return;
+          if (wpA.kind !== 'settlement' && wpB.kind !== 'settlement') return;
+          const kLo = Math.min(wpA.k, wpB.k);
+          const kHi = Math.max(wpA.k, wpB.k);
+          if (kHi - kLo < 3) return;
+          const segLen = cumLen[kHi] - cumLen[kLo];
+          if (segLen < 140) return;
+          let hwSum = 0;
+          for (let k = kLo; k <= kHi; k++) hwSum += q.hw?.[k] ?? 2;
+          const avgHw = hwSum / (kHi - kLo + 1);
+          if (avgHw < 1.35) return;
+          const slice = pts.slice(kLo, kHi + 1).map((p) => ({ x: p.x, z: p.z }));
+          const fromWp = wpA.k <= wpB.k ? wpA : wpB;
+          const toWp = wpA.k <= wpB.k ? wpB : wpA;
+          validIndices.add(ri);
+          corridors.push({
+            ri,
+            legIdx,
+            key: `${ri}:${fromWp.si}>${toWp.si}:${kLo}-${kHi}`,
+            pts: slice,
+            totalLen: segLen,
+            avgHw,
+            fromWp,
+            toWp,
+          });
+        };
 
-      let addedAny = false;
-      for (let wi = 0; wi + 1 < waypoints.length; wi++) {
-        const before = economicCorridors.length;
-        addLeg(waypoints[wi], waypoints[wi + 1], wi);
-        if (economicCorridors.length > before) addedAny = true;
+        let addedAny = false;
+        for (let wi = 0; wi + 1 < waypoints.length; wi++) {
+          const before = corridors.length;
+          addLeg(waypoints[wi], waypoints[wi + 1], wi);
+          if (corridors.length > before) addedAny = true;
+        }
+        if (!addedAny) {
+          addLeg(waypoints[0], waypoints[waypoints.length - 1], 0);
+        }
       }
-      if (!addedAny) {
-        addLeg(waypoints[0], waypoints[waypoints.length - 1], 0);
-      }
-    }
+      corridors.sort((a, b) => b.totalLen - a.totalLen || a.ri - b.ri || a.legIdx - b.legIdx);
+      return { corridors, validRiverIndices: validIndices, hubSi: fallbackHubSi, estuaryName: estuaryLabel };
+    };
+
+    const { corridors: economicCorridors, validRiverIndices, hubSi } = buildRiverEconomicCorridors(estuaryName);
+
+    const targetLocalRiverBoats = typeof riverBoatTargetCount === 'function'
+      ? riverBoatTargetCount(economicCorridors)
+      : (() => {
+        let riverFolkCount = 0, totalFishStore = 0;
+        for (const s of S) {
+          if (!s || !(s.riverside || s.river || s.harbor)) continue;
+          totalFishStore += Math.max(0, Number(s.stores?.fish) || 0);
+          for (const p of s.folk || []) {
+            if (p && !p.dead && (p.tr === 'fisher' || p.tr === 'boatman')) riverFolkCount++;
+          }
+        }
+        return (riverFolkCount >= 3 && economicCorridors.length > 0)
+          ? Math.min(8, Math.max(1, Math.min(Math.floor(riverFolkCount / 3), 1 + Math.floor(totalFishStore / 45))))
+          : 0;
+      })();
 
     // Purge any sunk, ghost-piloted, or non-economic-corridor boats (e.g. legacy saves with isolated creeks).
-    W.riverBoats = W.riverBoats.filter((b) => {
-      if (!b || b.sunk || (b.pilotId >= 900000)) return false;
-      if (!validRiverIndices.has(b.riverIdx)) return false;
-      if (!b.from || !b.to) return false;
-      if (b.si >= 0 && b.destSi >= 0 && b.si === b.destSi) return false;
-      return true;
-    });
-
-    let riverFolkCount = 0, totalFishStore = 0;
-    for (const s of S) {
-      if (!s || !(s.riverside || s.river || s.harbor)) continue;
-      totalFishStore += Math.max(0, Number(s.stores?.fish) || 0);
-      for (const p of s.folk || []) {
-        if (p && !p.dead && (p.tr === 'fisher' || p.tr === 'boatman')) riverFolkCount++;
+    if (typeof pruneRiverBoats === 'function') {
+      pruneRiverBoats(validRiverIndices, targetLocalRiverBoats);
+    } else {
+      W.riverBoats = W.riverBoats.filter((b) => {
+        if (!b || b.sunk || (b.pilotId >= 900000)) return false;
+        if (!validRiverIndices.has(b.riverIdx)) return false;
+        if (!b.from || !b.to) return false;
+        if (b.si >= 0 && b.destSi >= 0 && b.si === b.destSi) return false;
+        return true;
+      });
+      if (W.riverBoats.length > targetLocalRiverBoats) {
+        W.riverBoats.length = targetLocalRiverBoats;
       }
-    }
-    const targetLocalRiverBoats = (riverFolkCount >= 3 && economicCorridors.length > 0)
-      ? Math.min(8, Math.max(1, Math.min(Math.floor(riverFolkCount / 3), 1 + Math.floor(totalFishStore / 45))))
-      : 0;
-    if (W.riverBoats.length > targetLocalRiverBoats) {
-      W.riverBoats.length = targetLocalRiverBoats;
     }
     const RIVER_PARCEL_GOODS = ['fish', 'grain', 'wine', 'timber', 'salt', 'char', 'ore'];
     const pickRiverParcel = (si, idSalt) => {
+      if (typeof riverBoatParcel === 'function') return riverBoatParcel(si, idSalt, hubSi);
       const worldSeed = typeof SEED === 'number' ? SEED : 1550;
       const safeSi = si >= 0 && si < S.length ? si : hubSi;
       const stores = S[safeSi]?.stores || {};
@@ -1374,10 +1405,40 @@ globalThis.BOARD_MODEL = (() => {
       const qty = Math.min(5, Math.max(2, Math.min(Math.floor(Number(stores[good]) || 2), 2 + (maritimeHash(worldSeed, idSalt, 23) % 4))));
       return { good, qty };
     };
+    const advanceRiverBoatArrival = (b) => {
+      if (typeof stepRiverBoatArrival === 'function') return stepRiverBoatArrival(b, now, hubSi);
+      if (now < (b.arriveDay ?? -Infinity)) return false;
+      // Transfer actual available cargo parcel between endpoints without minting goods.
+      const srcIdx = b.si >= 0 ? b.si : hubSi;
+      const dstIdx = b.destSi >= 0 ? b.destSi : hubSi;
+      const srcS = S[srcIdx], dstS = S[dstIdx];
+      if (srcS?.stores && dstS?.stores && srcIdx !== dstIdx && b.good && b.qty > 0) {
+        const availStock = Math.max(0, Number(srcS.stores[b.good]) || 0);
+        const moved = Math.min(availStock, Math.max(0, Number(b.qty) || 0));
+        if (moved > 0) {
+          srcS.stores[b.good] = Math.max(0, availStock - moved);
+          dstS.stores[b.good] = (Number(dstS.stores[b.good]) || 0) + moved;
+        }
+      }
+      const prevSi = b.si, prevFrom = b.from;
+      b.si = b.destSi;
+      b.destSi = prevSi;
+      b.from = b.to;
+      b.to = prevFrom;
+      b.forward = !b.forward;
+      if (Array.isArray(b.points) && b.points.length >= 2) b.points = [...b.points].reverse();
+      const span = Math.max(2.0, b.tripSpan || 3.2);
+      b.departDay = now;
+      b.arriveDay = now + span;
+      const nextHomeSi = b.si >= 0 ? b.si : (b.destSi >= 0 ? b.destSi : hubSi);
+      const nextParcel = pickRiverParcel(nextHomeSi, (b.id || 1) + Math.floor(now));
+      b.good = nextParcel.good;
+      b.qty = nextParcel.qty;
+      return true;
+    };
     if (W.riverBoats.length < targetLocalRiverBoats && economicCorridors.length > 0 && S.length > 0) {
       const existingByKey = new Set(W.riverBoats.map((b) => `${b.corridorKey ?? b.riverIdx}:${b.slotCopy ?? b.id}`));
       let nextId = W.riverBoats.reduce((m, b) => Math.max(m, Number(b?.id) || 0), 0) + 1;
-      economicCorridors.sort((a, b) => b.totalLen - a.totalLen || a.ri - b.ri || a.legIdx - b.legIdx);
       // Deal 1 boat per distinct corridor first, then optional second boat on longer corridors.
       for (let copy = 0; copy < 2 && W.riverBoats.length < targetLocalRiverBoats; copy++) {
         for (let idx = 0; idx < economicCorridors.length && W.riverBoats.length < targetLocalRiverBoats; idx++) {
@@ -1441,34 +1502,7 @@ globalThis.BOARD_MODEL = (() => {
       if (!Number.isFinite(b.phaseOffset)) {
         b.phaseOffset = +((((b.id || 1) * 0.29) % 0.92) + 0.04).toFixed(4);
       }
-      if (now >= (b.arriveDay ?? -Infinity)) {
-        // Transfer actual available cargo parcel between endpoints without minting goods.
-        const srcIdx = b.si >= 0 ? b.si : hubSi;
-        const dstIdx = b.destSi >= 0 ? b.destSi : hubSi;
-        const srcS = S[srcIdx], dstS = S[dstIdx];
-        if (srcS?.stores && dstS?.stores && srcIdx !== dstIdx && b.good && b.qty > 0) {
-          const availStock = Math.max(0, Number(srcS.stores[b.good]) || 0);
-          const moved = Math.min(availStock, Math.max(0, Number(b.qty) || 0));
-          if (moved > 0) {
-            srcS.stores[b.good] = Math.max(0, availStock - moved);
-            dstS.stores[b.good] = (Number(dstS.stores[b.good]) || 0) + moved;
-          }
-        }
-        const prevSi = b.si, prevFrom = b.from;
-        b.si = b.destSi;
-        b.destSi = prevSi;
-        b.from = b.to;
-        b.to = prevFrom;
-        b.forward = !b.forward;
-        if (Array.isArray(b.points) && b.points.length >= 2) b.points = [...b.points].reverse();
-        const span = Math.max(2.0, b.tripSpan || 3.2);
-        b.departDay = now;
-        b.arriveDay = now + span;
-        const nextHomeSi = b.si >= 0 ? b.si : (b.destSi >= 0 ? b.destSi : hubSi);
-        const nextParcel = pickRiverParcel(nextHomeSi, (b.id || 1) + Math.floor(now));
-        b.good = nextParcel.good;
-        b.qty = nextParcel.qty;
-      }
+      advanceRiverBoatArrival(b);
       const staffSi = b.si >= 0 ? b.si : (b.destSi >= 0 ? b.destSi : hubSi);
       let pilotFolk = findFolkById(b.pilotId);
       if (!pilotFolk || usedRiverFolk.has(pilotFolk.id)) {
@@ -1527,8 +1561,10 @@ globalThis.BOARD_MODEL = (() => {
 
   // Day-0 baked worlds are frozen before the first monthly livestock (day % 30 === 18) and
   // domain/standing-host (day % 30 === 20) ticks fire, leaving all herds at 0 and W.armies empty.
-  // Execute those genuine Castle & Commons monthly handlers cleanly through Day 21 on wake.
+  // Delegate to upstream `settleFoundingMonth()` (BOARD_UPSTREAM_PENDING 'settle-founding-month')
+  // when present; otherwise mirror it cleanly through Day 21 on wake.
   async function ensureFoundingMonthSettled() {
+    if (typeof settleFoundingMonth === 'function') return settleFoundingMonth();
     if (!W || !W.clock || !Array.isArray(W.settlements) || !W.settlements.length) return;
     if (day() >= 21) return;
     const hasHerds = W.settlements.some((s) => Boolean(s?.hm));
@@ -2138,7 +2174,9 @@ globalThis.BOARD_MODEL = (() => {
   // How a building stands: whole, a roofless ruin, alight, or a heap.
   const STANDINGS = ['sound', 'ruin', 'burning', 'rubble'];
 
+  // Delegate to upstream `herdTotals(s)` (BOARD_UPSTREAM_PENDING 'settlement-herd-totals') when present.
   function settlementHerds(s) {
+    if (typeof herdTotals === 'function') return herdTotals(s);
     const out = { sheep: 0, cattle: 0, horses: 0, swine: 0 };
     if (!s) return out;
     const st = s.stores || {};

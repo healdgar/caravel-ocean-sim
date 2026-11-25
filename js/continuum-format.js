@@ -130,6 +130,9 @@ export const CONTINUUM_CLUSTER_ENTRY = 1, CONTINUUM_FAR_ENTRY = 2, CONTINUUM_SPL
 export const CONTINUUM_SURFEL_HEADER_WORDS = 4;
 export const CONTINUUM_SURFEL_WORDS = 2;
 export const CONTINUUM_SURFEL_SCALE_MAX = 4.0;
+// Bit 31 of surfel header word 1 (count) enables rotated organic leaf/strand aspect; bits 0..23 hold surfel count.
+export const CONTINUUM_SURFEL_ORGANIC_FLAG = 0x80000000;
+export const CONTINUUM_SURFEL_COUNT_MASK = 0x00ffffff;
 
 const continuumUnit16 = (v) => Math.max(0, Math.min(65535, Math.round(v * 65535)));
 const continuumBits = new Float32Array(1), continuumBitsWord = new Uint32Array(continuumBits.buffer);
@@ -370,7 +373,7 @@ export function checkContinuumAtlas(words, label = 'continuum') {
 // A family's baked atlas, fetched, unpacked, checked against its manifest's receipt and checked as an atlas. `assets`
 // names its 'manifest.json' and 'atlas.bin.gz'; `validate` checks its manifest. Resolves to { manifest, words }.
 // Streams decompressed bytes directly into a single exact-sized Uint8Array so large atlases never double-buffer on CPU.
-export async function loadContinuumAtlas({ assets, validate, label, fetchAsset = fetch, verifySha256 = false }) {
+export async function loadContinuumAtlas({ assets, validate, label, fetchAsset = fetch, verifySha256 = true }) {
   const get = async (path) => {
     const response = await fetchAsset(path);
     if (!response.ok) throw Error(`The ${label} continuum is unavailable (${response.status}): ${path}`);
@@ -406,7 +409,8 @@ export async function loadContinuumAtlas({ assets, validate, label, fetchAsset =
     bytes = new Uint8Array(bytesBuf);
     if (bytes.byteLength !== expectedBytes) throw Error(`The ${label} continuum atlas has the wrong size`);
   }
-  const wantVerify = verifySha256 || (typeof location !== 'undefined' && new URLSearchParams(location.search).get('verifyAssets') === '1');
+  const verifyParam = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('verifyAssets') : null;
+  const wantVerify = verifyParam === '0' ? false : verifyParam === '1' ? true : Boolean(verifySha256);
   if (wantVerify) {
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
     if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== manifest.atlas.sha256) throw Error(`The ${label} continuum atlas failed verification`);
@@ -550,12 +554,79 @@ function reverseBits32(v) {
   x = ((x >>> 8) & 0x00ff00ff) | ((x & 0x00ff00ff) << 8);
   return (((x >>> 16) | (x << 16)) >>> 0);
 }
+// Computes exact tight bounding spheres [cx, cy, cz, r] per type from Level-0 vertices (and optional above-ground
+// spheres clipping buried underground footings below `clipBelowY` metres) before raw CPU vertex arrays are released.
+export function computeContinuumTightSpheres(words, { clipBelowY = null } = {}) {
+  const H = CONTINUUM_HEADER, T = CONTINUUM_TYPE;
+  const typeCount = words[H.typeCount];
+  const spheres = new Float32Array(typeCount * 4);
+  if (!typeCount) return spheres;
+  const typesAt = words[H.typesAt], clustersAt = words[H.clustersAt];
+  const verticesAt = words[H.verticesAt], indicesAt = words[H.indicesAt];
+  const f32 = new Float32Array(words.buffer, words.byteOffset, words.length);
+  for (let ty = 0; ty < typeCount; ty++) {
+    const tb = typesAt + ty * CONTINUUM_TYPE_WORDS;
+    const rawX = f32[tb + T.sphere], rawY = f32[tb + T.sphere + 1], rawZ = f32[tb + T.sphere + 2], rawR = f32[tb + T.sphere + 3];
+    const lx = f32[tb + T.low], ly = f32[tb + T.low + 1], lz = f32[tb + T.low + 2];
+    const span = f32[tb + T.span];
+    const first = words[tb + T.clusterFirst], cnt = words[tb + T.clusterCount];
+    if (!(span > 0) || !cnt || verticesAt >= words.length) {
+      spheres.set([rawX, rawY, rawZ, rawR], ty * 4);
+      continue;
+    }
+    const q = span / 65535;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let found = false;
+    const scan = (useClip) => {
+      minX = minY = minZ = Infinity;
+      maxX = maxY = maxZ = -Infinity;
+      found = false;
+      for (let i = 0; i < cnt; i++) {
+        const cb = clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS;
+        const pk = words[cb + 15];
+        if (((pk >>> 8) & 255) !== 0) continue;
+        const tris = pk & 255;
+        const iFirst = indicesAt + words[cb + 14];
+        const step = tris > 64 ? 3 : 1;
+        for (let t = 0; t < tris; t += step) {
+          const i0 = iFirst + t * 3;
+          for (let c = 0; c < 3; c++) {
+            const va = verticesAt + words[i0 + c] * CONTINUUM_VERTEX_WORDS;
+            const w0 = words[va], w1 = words[va + 1];
+            const x = lx + (w0 & 65535) * q;
+            const y = ly + (w0 >>> 16) * q;
+            const z = lz + (w1 & 65535) * q;
+            if (useClip && y < clipBelowY) continue;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+            if (z < minZ) minZ = z;
+            if (z > maxZ) maxZ = z;
+            found = true;
+          }
+        }
+      }
+    };
+    scan(clipBelowY != null);
+    if (!found && clipBelowY != null) scan(false);
+    if (!found) {
+      spheres.set([rawX, rawY, rawZ, rawR], ty * 4);
+      continue;
+    }
+    const cx = 0.5 * (minX + maxX), cy = 0.5 * (minY + maxY), cz = 0.5 * (minZ + maxZ);
+    const r = Math.min(rawR, Math.max(0.5 * Math.hypot(maxX - minX, maxY - minY, maxZ - minZ), 1e-3));
+    spheres.set([cx, cy, cz, r], ty * 4);
+  }
+  return spheres;
+}
 // Builds a universal blue-noise Morton-bit-reversed prefix micro-surfel stream directly from every type's Level-0
 // physical clusters (zero offline rebake). Each surfel references an exact Level-0 atlas vertex (preserving every
 // material attribute, UV, skin joint, wind bone, and part ID) so ANY 3D model family can seamlessly transition from
-// crisp Level-0 clusters into pixel-perfect ~1.6-2.2 px micro-surfels before coarse inflated polygons ever appear.
+// crisp Level-0 clusters into pixel-perfect ~1.1-1.5 px micro-surfels before coarse inflated polygons ever appear.
 // Returns { words: Uint32Array, counts: Uint32Array } where `counts[t]` is the surfel count for type t.
-export function buildContinuumSurfels(words, { maxSurfels = 16384, minLevel0Tris = 512, foliage = false } = {}) {
+export function buildContinuumSurfels(words, { maxSurfels = 8192, minLevel0Tris = 128, foliage = false, organic = foliage } = {}) {
   const H = CONTINUUM_HEADER, T = CONTINUUM_TYPE;
   const typeCount = words[H.typeCount];
   const counts = new Uint32Array(typeCount);
@@ -690,9 +761,15 @@ export function buildContinuumSurfels(words, { maxSurfels = 16384, minLevel0Tris
     lv0PErrs.sort((a, b) => a - b);
     const p75 = lv0PErrs.length ? lv0PErrs[Math.min(lv0PErrs.length - 1, Math.floor(lv0PErrs.length * 0.75))] : 0;
     const dTri = Math.sqrt(rawEffArea / Math.max(lv0Tris, 1));
+    const farFirst = words[tb + T.farFirst], stepsAt = words[tb + T.steps];
+    const farErr = stepsAt > 0 ? f32[stepsAt + farFirst * CONTINUUM_STEP_WORDS + 1] : 0;
+    // Porous foliage/canopies switch right past Level 0 (eliminating inflated banana leaves); solid manifolds
+    // keep connected cluster DAG levels through mid-range and hand off to Level-0 micro-surfels before coarse far wraps.
     let handoffError = foliage
       ? Math.max(p75 * 0.92, dTri * 0.85, 0.012)
-      : Math.max(p75 * 1.10, dTri * 0.85, 0.006);
+      : farErr > 1e-4
+        ? Math.max(farErr * 0.88, p75 * 1.10, dTri * 0.85, 0.008)
+        : Math.max(p75 * 1.10, dTri * 0.85, 0.008);
 
     const nNeeded = Math.ceil((areaRadius / Math.max(handoffError * 1.05, 0.008)) ** 2);
     const targetCount = Math.max(256, Math.min(maxSurfels, lv0Tris, nNeeded));
@@ -738,12 +815,13 @@ export function buildContinuumSurfels(words, { maxSurfels = 16384, minLevel0Tris
   const dirWords = typeCount * CONTINUUM_SURFEL_HEADER_WORDS;
   const out = new Uint32Array(dirWords + totalSurfels * CONTINUUM_SURFEL_WORDS);
   const outF32 = new Float32Array(out.buffer);
+  const organicBit = organic ? CONTINUUM_SURFEL_ORGANIC_FLAG : 0;
   for (let ty = 0; ty < typeCount; ty++) {
     const info = perType[ty];
     if (!info) continue;
     const hAt = ty * CONTINUUM_SURFEL_HEADER_WORDS;
     out[hAt] = info.first;
-    out[hAt + 1] = info.count;
+    out[hAt + 1] = ((info.count & CONTINUUM_SURFEL_COUNT_MASK) | organicBit) >>> 0;
     outF32[hAt + 2] = info.areaRadius;
     outF32[hAt + 3] = info.handoffError;
     out.set(info.packed, dirWords + info.first * CONTINUUM_SURFEL_WORDS);

@@ -1,8 +1,8 @@
 {
-  "version": "1.0.967",
-  "build": 967,
-  "commit": "56c2d5d",
+  "version": "1.0.968",
+  "build": 968,
+  "commit": "1def4ff",
   "branch": "career-foundation",
-  "dirty": false,
-  "builtAt": "2026-11-24T05:49:40.519Z"
+  "dirty": true,
+  "builtAt": "2026-11-25T01:31:35.368Z"
 }

@@ -18,6 +18,51 @@ const MAX_ARMY_SOLDIERS = 256;
 const MAX_ARMY_COMMANDERS = 24;
 const MAX_SOLDIERS_PER_HOST = 36;
 const ARMY_SIGHT_M = 2800;
+const BOARD_ARMY_SEED_FLOATS = 12;
+
+// GPU compute pass advancing marching formation stride, sloped ground footing, actor transforms, and clip frames
+// directly in GPU storage buffers with zero per-frame JS soldier loops (AGENTS.md rule 2).
+const BOARD_ARMY_STEP_WGSL = /* wgsl */`
+struct BoardArmySeed {
+  basePosYaw: vec4f, // x: baseX, y: baseY, z: baseZ, w: yaw
+  motion: vec4f,     // x: scale, y: isMarching (0/1), z: timeOffset, w: walkOffset
+  slope: vec4f,      // x: dydx, y: dydz, z: walkWeight, w: pad
+};
+@group(0) @binding(0) var<uniform> armyCfg: vec4f;     // x: simTime, y: idleRate, z: walkRate, w: count
+@group(0) @binding(1) var<uniform> armyClipDur: vec4f; // x: idleFrames, y: walkFrames, z: 0, w: 0
+@group(0) @binding(2) var<storage, read> armySeeds: array<BoardArmySeed>;
+@group(0) @binding(3) var<storage, read_write> armyActors: array<vec4f>;
+@group(0) @binding(4) var<storage, read_write> armyClipStates: array<vec4f>;
+
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x;
+  let count = u32(armyCfg.w);
+  if (i >= count || i >= arrayLength(&armySeeds)) { return; }
+  let s = armySeeds[i];
+  let t = armyCfg.x + s.motion.z;
+  let walkT = armyCfg.x * s.slope.z + s.motion.w;
+  let yaw = s.basePosYaw.w;
+  let scale = s.motion.x;
+  let cy = cos(yaw);
+  let sy = sin(yaw);
+  let stepOff = select(0.0, sin(t * 0.15) * 1.5, s.motion.y > 0.5);
+  let dx = sy * stepOff;
+  let dz = cy * stepOff;
+  let px = s.basePosYaw.x + dx;
+  let pz = s.basePosYaw.z + dz;
+  let py = s.basePosYaw.y + dx * s.slope.x + dz * s.slope.y;
+  let aBase = i * 9u;
+  armyActors[aBase + 0u] = vec4f(cy * scale, 0.0, -sy * scale, 0.0);
+  armyActors[aBase + 1u] = vec4f(0.0, scale, 0.0, 0.0);
+  armyActors[aBase + 2u] = vec4f(sy * scale, 0.0, cy * scale, 0.0);
+  armyActors[aBase + 3u] = vec4f(px, py, pz, 1.0);
+  let idleFrames = max(armyClipDur.x, 1.0);
+  let walkFrames = max(armyClipDur.y, 1.0);
+  let idleF = fract(t * armyCfg.y / idleFrames) * idleFrames;
+  let walkF = fract(walkT * armyCfg.z / walkFrames) * walkFrames;
+  armyClipStates[i] = vec4f(idleF, walkF, s.slope.z, 1.0);
+}
+`;
 
 const BOARD_ARMY_SKIN_TONES = Object.freeze([
   [0.76, 0.45, 0.29], [0.68, 0.38, 0.22], [0.58, 0.30, 0.16], [0.42, 0.19, 0.10], [0.72, 0.41, 0.25],
@@ -122,23 +167,52 @@ export async function createBoardArmies({
   hullData.set([3.6, 12, 1, 1], 12);
   const hullUBO = mkBuf('board armies world hull', hullData, B.UNIFORM);
   const dryMoisture = mkBuf('board armies dry moisture', new Float32Array(16), B.STORAGE);
-  const clipPipeline = shared?.clipPipeline ?? await createCrewClipPipeline(device, shader);
+  const [clipPipeline, stepPipeline] = await Promise.all([
+    shared?.clipPipeline ?? createCrewClipPipeline(device, shader),
+    shader(BOARD_ARMY_STEP_WGSL, 'board armies gpu step').then((module) => device.createComputePipelineAsync({
+      label: 'board armies gpu step', layout: 'auto', compute: { module, entryPoint: 'main' },
+    })),
+  ]);
 
   const makeBatch = (label, body, capacity) => {
     const poses = new Float32Array(capacity * CREW_JOINT_COUNT * 16);
     const actors = new Float32Array(capacity * CREW_ACTOR_FLOATS);
+    const seeds = new Float32Array(capacity * BOARD_ARMY_SEED_FLOATS);
+    const orderWords = new Uint32Array(Math.max(4, capacity));
     const bones = mkBuf(`${label} joints`, poses, B.STORAGE);
     const actor = mkBuf(`${label} actors`, actors, B.STORAGE);
+    const seedBuf = mkBuf(`${label} seeds`, seeds, B.STORAGE);
+    const countedBuf = mkBuf(`${label} counted`, new Uint32Array([0, 1, 1, 0]), B.STORAGE | B.INDIRECT);
+    const stepCfgBuf = mkBuf(`${label} step cfg`, new Float32Array(4), B.UNIFORM);
+    const clip = createCrewClipBatch(device, clipPipeline, body.standIn, bones, capacity, true);
+    const idleClip = clip.clips[0], walkClip = clip.clips[1];
+    const idleRate = idleClip.frames / Math.max(idleClip.duration, 1e-3);
+    const walkRate = walkClip.frames / Math.max(walkClip.duration, 1e-3);
+    const clipDurBuf = mkBuf(`${label} clip dur`, new Float32Array([idleClip.frames, walkClip.frames, 0, 0]), B.UNIFORM);
     const main = [
       { buffer: frameUBO }, { buffer: hullUBO }, { buffer: bones }, { buffer: actor },
       transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoisture }, skyView,
       { binding: 13, resource: captainTexView }, { binding: 14, resource: captainSampler },
     ];
-    const clip = createCrewClipBatch(device, clipPipeline, body.standIn, bones, capacity, true);
     const cut = createCrewContinuumBatch({
-      device, pipelines, body, capacity, samples, frame: frameUBO, hull: hullUBO, bones, actor, main, shadows, ground: true,
+      device, pipelines, body, capacity, samples, frame: frameUBO, hull: hullUBO, bones, actor, main, shadows,
+      counted: { buffer: countedBuf, offset: 0 }, ground: true,
     });
-    return { body, capacity, actors, bones, actor, clip, cut, people: [], dirty: false };
+    const stepGroup = device.createBindGroup({
+      label: `${label} step`,
+      layout: stepPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: stepCfgBuf } },
+        { binding: 1, resource: { buffer: clipDurBuf } },
+        { binding: 2, resource: { buffer: seedBuf } },
+        { binding: 3, resource: { buffer: actor } },
+        { binding: 4, resource: { buffer: clip.stateBuffer } },
+      ],
+    });
+    return {
+      body, capacity, actors, seeds, orderWords, bones, actor, seedBuf, countedBuf, stepCfgBuf, clipDurBuf,
+      stepGroup, stepCfg: new Float32Array(4), idleRate, walkRate, clip, cut, people: [], activeCount: 0, dirty: false,
+    };
   };
 
   const soldierBatch = makeBatch('board armies soldiers', soldierBody, MAX_ARMY_SOLDIERS);
@@ -148,6 +222,7 @@ export async function createBoardArmies({
   let summary = { day: 0, war: false, armiesCount: 0, totalStrength: 0, hosts: [] };
   let simOrigin = { x: 0, z: 0 };
   let worldOffsetX = 0, worldOffsetZ = 0;
+  let simTime = 0;
   let groundSampler = null;
   let drawEnabled = false;
   let destroyed = false;
@@ -461,60 +536,63 @@ export async function createBoardArmies({
       batch.actors[off + 33] = p.face[1];
       batch.actors[off + 34] = p.face[2];
       batch.actors[off + 35] = packCrewFaceW(p.face[3], 0, false);
+
+      // Upload immutable GPU seed record once per formation rebuild (slope pre-sampled for exact stride footing).
+      const sOff = i * BOARD_ARMY_SEED_FLOATS;
+      const dydx = p.isMarching ? (sampleGround(p.baseX + 1.0, p.baseZ) - sampleGround(p.baseX - 1.0, p.baseZ)) * 0.5 : 0;
+      const dydz = p.isMarching ? (sampleGround(p.baseX, p.baseZ + 1.0) - sampleGround(p.baseX, p.baseZ - 1.0)) * 0.5 : 0;
+      batch.seeds[sOff + 0] = p.baseX;
+      batch.seeds[sOff + 1] = p.y;
+      batch.seeds[sOff + 2] = p.baseZ;
+      batch.seeds[sOff + 3] = p.yaw;
+      batch.seeds[sOff + 4] = p.scale;
+      batch.seeds[sOff + 5] = p.isMarching ? 1 : 0;
+      batch.seeds[sOff + 6] = p.time;
+      batch.seeds[sOff + 7] = p.walkTime;
+      batch.seeds[sOff + 8] = dydx;
+      batch.seeds[sOff + 9] = dydz;
+      batch.seeds[sOff + 10] = p.walk;
+      batch.seeds[sOff + 11] = 0;
+      batch.orderWords[i] = (((p.identity + 1) << CREW_CONTINUUM_IDENTITY_SHIFT)
+        | ((p.age & 127) << CREW_CONTINUUM_AGE_SHIFT)
+        | (p.hostId === 0 ? CREW_CONTINUUM_ORDER_IMPORTANT : 0)) >>> 0;
     }
     if (n > 0) {
       device.queue.writeBuffer(batch.actor, 0, batch.actors, 0, n * CREW_ACTOR_FLOATS);
+      device.queue.writeBuffer(batch.seedBuf, 0, batch.seeds, 0, n * BOARD_ARMY_SEED_FLOATS);
+      device.queue.writeBuffer(batch.cut.orders, 0, batch.orderWords, 0, Math.max(4, n));
     }
+    device.queue.writeBuffer(batch.countedBuf, 0, new Uint32Array([n, 1, 1, 0]));
     batch.dirty = false;
   }
 
-  function stepBatch(batch, dt, camera) {
+  function stepBatch(batch, anyInRange) {
     const n = batch.people.length;
-    if (!n) {
-      batch.cut.update(0, () => 0, false);
+    if (!n || !anyInRange) {
+      batch.activeCount = 0;
+      batch.clip.setGpuDriven(0);
+      batch.cut.update(0, undefined, false);
       return false;
     }
-    let anyInRange = false;
-    let moved = false;
-    for (let i = 0; i < n; i++) {
-      const p = batch.people[i];
-      p.time += dt;
-      if (p.isMarching) {
-        p.walkTime += dt;
-        // Gentle local march-in-column stride oscillation between sim day updates
-        const stepOff = Math.sin(p.time * 0.15) * 1.5;
-        p.x = p.baseX + Math.sin(p.yaw) * stepOff;
-        p.z = p.baseZ + Math.cos(p.yaw) * stepOff;
-        p.y = sampleGround(p.x, p.z);
-        p.position[0] = p.x; p.position[1] = p.y; p.position[2] = p.z;
-        moved = true;
-      }
-      if (camera && Number.isFinite(camera.x)) {
-        const d = Math.hypot(p.x + worldOffsetX - camera.x, p.z + worldOffsetZ - camera.z);
-        if (d <= ARMY_SIGHT_M) anyInRange = true;
-      } else {
-        anyInRange = true;
-      }
-    }
-    if (!anyInRange) {
-      batch.cut.update(0, () => 0, false);
-      return false;
-    }
-    if (batch.dirty || moved) uploadActors(batch);
-
-    batch.clip.begin(n);
-    for (let i = 0; i < n; i++) {
-      const p = batch.people[i];
-      batch.clip.set(i, p.time, p.walkTime, p.walk);
-    }
-    batch.clip.upload();
-
-    batch.cut.update(
-      batch.people,
-      (p) => (((p.identity + 1) << CREW_CONTINUUM_IDENTITY_SHIFT) | ((p.age & 127) << CREW_CONTINUUM_AGE_SHIFT) | (p.hostId === 0 ? CREW_CONTINUUM_ORDER_IMPORTANT : 0)) >>> 0,
-      true,
-    );
+    if (batch.dirty) uploadActors(batch);
+    batch.activeCount = n;
+    batch.stepCfg[0] = simTime;
+    batch.stepCfg[1] = batch.idleRate;
+    batch.stepCfg[2] = batch.walkRate;
+    batch.stepCfg[3] = n;
+    device.queue.writeBuffer(batch.stepCfgBuf, 0, batch.stepCfg);
+    batch.clip.setGpuDriven(n);
+    batch.cut.update(n, undefined, true);
     return true;
+  }
+
+  function hostsInRange(camera) {
+    if (!camera || !Number.isFinite(camera.x)) return true;
+    for (let i = 0; i < hostRecords.length; i++) {
+      const h = hostRecords[i];
+      if (Math.hypot(h.x + worldOffsetX - camera.x, h.z + worldOffsetZ - camera.z) <= ARMY_SIGHT_M + 40) return true;
+    }
+    return false;
   }
 
   return {
@@ -526,6 +604,7 @@ export async function createBoardArmies({
     },
     update(dt, camera = null, worldOffset = null) {
       if (destroyed) return;
+      if (Number.isFinite(dt) && dt > 0) simTime += dt;
       if (worldOffset) {
         const nx = worldOffset.x ?? 0, nz = worldOffset.z ?? 0;
         if (nx !== worldOffsetX || nz !== worldOffsetZ) {
@@ -534,14 +613,24 @@ export async function createBoardArmies({
           device.queue.writeBuffer(hullUBO, 0, hullData);
         }
       }
-      const a = stepBatch(soldierBatch, dt, camera);
-      const b = stepBatch(captainBatch, dt, camera);
+      const inRange = hostsInRange(camera);
+      const a = stepBatch(soldierBatch, inRange);
+      const b = stepBatch(captainBatch, inRange);
       drawEnabled = a || b;
     },
     encodePose(pass) {
       if (destroyed || !drawEnabled) return;
-      if (soldierBatch.people.length) soldierBatch.clip.encode(pass);
-      if (captainBatch.people.length) captainBatch.clip.encode(pass);
+      pass.setPipeline(stepPipeline);
+      if (soldierBatch.activeCount) {
+        pass.setBindGroup(0, soldierBatch.stepGroup);
+        pass.dispatchWorkgroups(Math.ceil(soldierBatch.activeCount / 64));
+      }
+      if (captainBatch.activeCount) {
+        pass.setBindGroup(0, captainBatch.stepGroup);
+        pass.dispatchWorkgroups(Math.ceil(captainBatch.activeCount / 64));
+      }
+      if (soldierBatch.activeCount) soldierBatch.clip.encode(pass);
+      if (captainBatch.activeCount) captainBatch.clip.encode(pass);
       soldierBatch.cut.encodeSelect(pass);
       captainBatch.cut.encodeSelect(pass);
     },
@@ -565,7 +654,17 @@ export async function createBoardArmies({
       return [...soldierBatch.cut.continuumDraws(), ...captainBatch.cut.continuumDraws()];
     },
     locate() {
-      return [...captainBatch.people, ...soldierBatch.people];
+      const liveOf = (p) => {
+        if (!p.isMarching) return p;
+        const stepOff = Math.sin((simTime + p.time) * 0.15) * 1.5;
+        const x = p.baseX + Math.sin(p.yaw) * stepOff;
+        const z = p.baseZ + Math.cos(p.yaw) * stepOff;
+        const y = sampleGround(x, z);
+        p.x = x; p.y = y; p.z = z;
+        p.position[0] = x; p.position[1] = y; p.position[2] = z;
+        return p;
+      };
+      return [...captainBatch.people.map(liveOf), ...soldierBatch.people.map(liveOf)];
     },
     destroy() {
       destroyed = true;
@@ -578,6 +677,10 @@ export async function createBoardArmies({
         b.cut.destroy();
         b.bones.destroy();
         b.actor.destroy();
+        b.seedBuf.destroy();
+        b.countedBuf.destroy();
+        b.stepCfgBuf.destroy();
+        b.clipDurBuf.destroy();
       }
     },
   };
