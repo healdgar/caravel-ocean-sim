@@ -2,7 +2,7 @@
 // End-to-end verification of:
 // 1. Ship quality parity across all playable ships and trade-vessel archetypes
 // 2. Road-aligned bridges, level multi-arch STONE_BRIDGE_SPAN decks, approach paving & street parapet/portal rules
-// 3. Meadow grass on the one continuum (4 m patches cut by projected error, a 4–6 triangle core, terrain bindings)
+// 3. Meadow grass as blades made on the GPU each frame (no atlas, wind, shot and terrain bindings)
 // 4. Lightweight physical GPU mocked space: a neighbour section stays a mock shell until it is entered
 
 import assert from 'node:assert/strict';
@@ -15,9 +15,8 @@ import {
   buildMockCoastalSection,
   generateProceduralCoastalPack,
 } from '../js/coastal-world.js';
-import { MEADOW_CONTINUUM_SPEC, meadowContinuumStandWGSL } from '../js/wgsl/meadow-continuum.js';
-import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
-import { MEADOW_CONTINUUM_LEVELS, validateMeadowGrass } from '../js/meadow-continuum.js';
+import { MEADOW_SPECIES_MOST, MEADOW_SWARD_BYTES, meadowBladesComputeWGSL, meadowBladesDrawWGSL } from '../js/wgsl/meadow-blades.js';
+import { MEADOW_SWARDS, packMeadowSward } from '../js/meadow-grass.js';
 import { OLD_WORLD_LAND, registerBakedBoard } from '../js/old-world.js';
 import {
   BOARD_ROAD_BRIDGE,
@@ -176,36 +175,34 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, and stamp 
   assert.match(fs.readFileSync('js/forest-groves.js', 'utf8'), /export function forestGroveStamp[\s\S]*?region\.size/, 'a grove is planted again when its section is resized');
 });
 
-test('meadow grass is one continuum atlas cut on the GPU: clusters, the box of its square as its core, ballistic wakes and terrain bindings', () => {
-  const manifest = validateMeadowGrass(JSON.parse(fs.readFileSync('assets/ground-cover/portugal/meadows-gpu/manifest.json', 'utf8')));
-  assert.equal(manifest.patchMetres, 4);
-  assert.equal(manifest.levels, MEADOW_CONTINUUM_LEVELS);
-  assert.equal(manifest.types.length, 12);
-  for (const variant of manifest.types) {
-    // A sward keeps only the levels whose error lies below the far body's first step, so no level is drawn past the handoff.
-    assert.ok(variant.levels.length >= 2 && variant.levels.length <= MEADOW_CONTINUUM_LEVELS, `variant ${variant.id} has ${variant.levels.length} levels`);
-    assert.ok(variant.levels.every((l) => l.error < manifest.farError), `variant ${variant.id} keeps a level past the far body's start`);
-    // A patch tiles, so its body ends in the 12-triangle box of its square's eight fixed corners.
-    assert.equal(variant.chain.coreTriangles, 12, `variant ${variant.id} must end in the box of its square, got ${variant.chain.coreTriangles}`);
-    assert.ok(variant.clusters > 0 && variant.chain.baseTriangles > variant.chain.coreTriangles);
-    // Each variant's share of the ground its sward hides, which the error counts when it is lost.
-    assert.ok(variant.coverage > 0 && variant.coverage <= 1);
+test('meadow grass is blades made on the GPU each frame: no atlas, every pass compute, discard-free, wind, shot and terrain bound', () => {
+  for (const [name, sward] of Object.entries(MEADOW_SWARDS)) {
+    assert.equal(sward.mixes.length, 3, `${name} has a mix for each role`);
+    assert.ok(sward.mixes.reduce((n, m) => n + m.species.length, 0) <= MEADOW_SPECIES_MOST, `${name} fits the sward uniform`);
+    for (const mix of sward.mixes) assert.ok(Math.abs(mix.species.reduce((sum, sp) => sum + sp.share, 0) - 1) < 1e-6, `${name}: a mix's shares make the whole`);
+    const { data, means } = packMeadowSward(sward);
+    assert.equal(data.byteLength, MEADOW_SWARD_BYTES);
+    assert.equal(means.length, 3);
   }
-  // The one cut reads the scene's pixel error and the continuum's core; the stand pass never clips at a fixed range.
-  const stand = meadowContinuumStandWGSL();
-  const view = continuumModuleWGSL({ pass: 'view', material: MEADOW_CONTINUUM_SPEC });
-  assert.equal(stand.includes('280.0'), false, 'the meadow stand pass must not keep a hard 280 m clip');
-  assert.equal(/\bdiscard\b/.test(stand), false);
-  assert.equal(/\bdiscard\b/.test(view), false, 'the meadow view must remain discard-free (MSAA sample_mask)');
-  for (const [binding, name] of [[13, 'ballistic wakes'], [14, 'landCraterLookup'], [15, 'terrain landLight'], [16, 'meadowCover'], [17, 'terrain landAlbedo'], [18, 'terrain landSampler'], [22, 'landCraterField']]) {
-    assert.ok(view.includes(`@group(0) @binding(${binding})`), `the meadow view is missing ${name} @binding(${binding})`);
+  const sow = meadowBladesComputeWGSL(), view = meadowBladesDrawWGSL();
+  assert.equal(/\bdiscard\b/.test(sow), false);
+  assert.equal(/\bdiscard\b/.test(view), false, 'the blades are drawn without discard');
+  for (const entry of ['meadowBladeReset', 'meadowBladeCells', 'meadowBladeArgs', 'meadowBladeSow', 'meadowBladeFinish']) assert.match(sow, new RegExp(`fn ${entry}\\(`));
+  assert.match(sow, /fn meadowWindField\(/, 'the blades lean in the meadow wind field');
+  assert.match(sow, /meadowEvalBallistics\(/, 'shot, blast rings and craters part and bury the blades');
+  // The far list never drops whole cells: when it fills, the finish pass broadens the next frame's short blades.
+  assert.match(sow, /atomicStore\(&bladeDraws\[15\]/);
+  for (const [binding, name] of [[4, 'meadowCover'], [9, 'ballistic wakes'], [10, 'landCraterLookup'], [11, 'landCraterField']]) {
+    assert.ok(sow.includes(`@group(0) @binding(${binding})`), `the sow pass is missing ${name} @binding(${binding})`);
   }
-  assert.match(stand, /fn meadowWindField\(/, 'the meadow stand pass is missing the wind field grassWindWave keeps time with');
-
+  for (const [binding, name] of [[15, 'terrain landLight'], [16, 'meadowCover'], [18, 'terrain landSampler'], [20, 'land shadow']]) {
+    assert.ok(view.includes(`@group(0) @binding(${binding})`), `the blade view is missing ${name} @binding(${binding})`);
+  }
   const meadowSrc = fs.readFileSync('js/meadow-grass.js', 'utf8');
-  const reqBlock = meadowSrc.slice(meadowSrc.indexOf('export function requestMeadowStand'), meadowSrc.indexOf('const MEADOW_STAND_BINDINGS'));
-  assert.ok(reqBlock.includes('createComputePipelineAsync'));
-  assert.equal(reqBlock.includes('Promise.all'), false, 'requestMeadowStand must compile pipelines sequentially to avoid D3D12 PSO OOM');
+  assert.doesNotMatch(meadowSrc, /\bfetch\(|atlas\.bin/, 'the meadow loads nothing');
+  const reqBlock = meadowSrc.slice(meadowSrc.indexOf('export function requestMeadowBladePrograms'), meadowSrc.indexOf('export async function createMeadowGrass'));
+  assert.ok(reqBlock.includes('createComputePipelineAsync') && reqBlock.includes('createRenderPipelineAsync'));
+  assert.equal(reqBlock.includes('Promise.all'), false, 'requestMeadowBladePrograms must compile pipelines sequentially to avoid D3D12 PSO OOM');
 });
 
 test('neighbour sections stay mocked until player entry, as light physical GPU shells', () => {

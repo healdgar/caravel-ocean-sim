@@ -29,7 +29,7 @@ import {
   CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES, CONTINUUM_VIEW_LISTS, CONTINUUM_CAPTURE_LISTS,
   CONTINUUM_TYPE_PIECES, CONTINUUM_TYPE_DETAIL_SHIFT, CONTINUUM_KIND, CONTINUUM_KIND_SHIFT, CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_BROKEN, CONTINUUM_EXACT, CONTINUUM_SEA,
   CONTINUUM_IMPORTANT_FLAG, CONTINUUM_SHATTERED, CONTINUUM_DAMAGED, CONTINUUM_STRETCHED, CONTINUUM_STREAMS, CONTINUUM_SURFACE_RANGE,
-  CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY, CONTINUUM_SURFEL_ENTRY,
+  CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY, CONTINUUM_SURFEL_ENTRY, CONTINUUM_CARD_ENTRY, CONTINUUM_CARD_LIST, CONTINUUM_CARD_LEVELS,
   CONTINUUM_SURFEL_HEADER_WORDS, CONTINUUM_SURFEL_WORDS, CONTINUUM_SURFEL_SCALE_MAX,
   CONTINUUM_SURFEL_ORGANIC_FLAG, CONTINUUM_SURFEL_COUNT_MASK,
 } from '../continuum-format.js';
@@ -45,7 +45,7 @@ export const CONTINUUM_ENTRY_VERTICES = Object.freeze(CONTINUUM_ENTRY_TRIANGLES.
 export const CONTINUUM_DRAW_WORDS = CONTINUUM_LISTS.length * 4;
 export const CONTINUUM_LIVE_WORD = CONTINUUM_DRAW_WORDS + CONTINUUM_VIEW_LISTS;
 export const CONTINUUM_DRAWS_BYTES = (CONTINUUM_LIVE_WORD + 1) * 4;
-export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 64;
+export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 96;
 // The select's workgroups each cut this many instances, and are laid in rows of CONTINUUM_ROW.
 export const CONTINUUM_BATCH = 8;
 export const CONTINUUM_ROW = 8192;
@@ -120,7 +120,9 @@ struct ContinuumView {
   aim:vec4f,                // where the player's guns would fall, in the scene's frame, and how far about it (0: none)
   curve:vec4f,              // symmetric family profile: errorScale, invTaperMetres, splatScale, taperPower
   limits:vec4f,             // symmetric family profile: minPixels, maxDistance, shadowMinError, shadowMaxDistance
-  sea:vec4f                 // how far above its datum, and below, the sea now runs (js/continuum-core.js continuumSeaReach)
+  sea:vec4f,                // how far above its datum, and below, the sea now runs (js/continuum-core.js continuumSeaReach)
+  cards:vec4f,              // its types' card grid (js/continuum-format.js computeContinuumCardGrid): levels (0: none), then each level's cells a side
+  cardErrors:vec4f          // what a card of each level can be in error, in its type's metres
 };
 struct ContinuumPoint { position:vec3f, normal:vec3f, high:u32, word:u32 };
 // A point as its kind poses it, in its type's own metres; wear (0 to ${CONTINUUM_SURFACE_RANGE}) how worn it is.
@@ -135,6 +137,7 @@ const CONTINUUM_CLUSTER_ENTRY:u32=${CONTINUUM_CLUSTER_ENTRY}u;
 const CONTINUUM_FAR_ENTRY:u32=${CONTINUUM_FAR_ENTRY}u;
 const CONTINUUM_SPLAT_ENTRY:u32=${CONTINUUM_SPLAT_ENTRY}u;
 const CONTINUUM_SURFEL_ENTRY:u32=${CONTINUUM_SURFEL_ENTRY}u;
+const CONTINUUM_CARD_ENTRY:u32=${CONTINUUM_CARD_ENTRY}u;
 fn continuumSurfelHeader(model:u32)->vec4u {
   let base=continuumAtlas[${CONTINUUM_HEADER.surfels}u];
   if(base==0u){return vec4u(0u);}
@@ -286,6 +289,12 @@ fn continuumDetailCluster(model:u32,cluster:u32)->bool {
 // ground lift << 16 (two f16); then the far body's share of its shadow.
 fn continuumState(instance:u32)->vec4u { let a=continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u];let b=continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+1u];return vec4u(a.x,a.y,b.x,b.y); }
 fn continuumShadowShare(instance:u32)->u32 { return continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+2u].x; }
+// Its cell cards (a scene whose types have a card grid; 0 for the rest): the share of a pixel's samples its cards and
+// all past them take from its clusters | the share its cards' next level takes from the level entered << 8 | that
+// level << 16.
+fn continuumCardState(instance:u32)->u32 { return continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+2u].y; }
+// The share of a pixel's samples a cluster entry yields: its far body's, or its cell cards' where they stand nearer.
+fn continuumClusterYield(instance:u32,state:u32)->u32 { return (state&0xff00u)|max(state&255u,continuumCardState(instance)&255u); }
 // How far a GROUNDED instance is raised to the ground the land draws: by the view's cut, or (coarse) the captures'.
 fn continuumLift(state:vec4u,coarse:bool)->vec3f { return vec3f(0.0,select(unpack2x16float(state.x>>16u).x,unpack2x16float(state.w).y,coarse),0.0); }
 fn continuumShift()->vec3f { return vec3f(continuumView.scene.y,0.0,continuumView.scene.z); }
@@ -378,6 +387,7 @@ var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // r
 var<workgroup> continuumFrustum:array<vec4f,5>;         // unit-normal frustum planes, computed once per workgroup
 var<workgroup> continuumCardWant:array<u32,${B}>;       // 1 if slot wants a list-3 splat/card entry (batched once per workgroup)
 var<workgroup> continuumCardBase:u32;                   // reserved list-3 base entry for this workgroup
+var<workgroup> continuumSlotCells:array<vec4u,${B}>;    // its cell cards: where they go, how many of the level entered, of the next, and that level
 fn continuumOutsideFast(at:vec3f,reach:f32)->bool {
   if(dot(at,at)<=reach*reach){return false;}
   let p=vec4f(at,1.0);
@@ -503,7 +513,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
   if(lane<CONTINUUM_BATCH){
     let instance=batch+lane;
     var tries=vec4u(0u);var cut=vec4f(1.0,1.0,1.0,0.0);var far=vec4u(CONTINUUM_FULL,0u,CONTINUUM_FULL,0u);var lift=vec2f(0.0);
-    var wantCard=0u;
+    var wantCard=0u;var cells=vec4u(CONTINUUM_FULL,0u,0u,0u);var cardState=0u;
     var wet=vec4u(CONTINUUM_FULL,CONTINUUM_FULL,CONTINUUM_FULL,0u);
     var record:ContinuumRecord;
     if(instance<atomicLoad(&continuumDraws[CONTINUUM_LIVE])){
@@ -659,8 +669,36 @@ fn continuumTry(slot:u32,i:u32)->u32 {
                 }
               }
             }
+            // Its cell cards (a scene whose types have a card grid): each cell of its square a picture of its true
+            // clusters, standing in for them from where a texel of the picture is within the error allowed (the
+            // scene's own, without its kind's foreshortening: a picture's texel is as wide from above as from the
+            // side) to where its far body takes over. Seen so steeply that the far body would begin before the cards
+            // do, it has none, and they fade as that nears. Each level hands over to the next across the same band.
+            var cardShare=0u;
+            let cardLevels=u32(continuumView.cards.x);
+            if(cardLevels>0u&&rangeKept&&!alone&&pixels>0.0&&!continuumFlagged(record,CONTINUUM_STRUCK)){
+              let per=scale*focal/max(pixels*perspectiveFactor,1e-4);
+              let cardStart=continuumView.cardErrors.x*per;
+              let farStart=farError*scale*focal/max(pixels,1e-4);
+              cardShare=u32(round(continuumHandoff(away,cardStart)*smoothstep(1.0,1.0+CONTINUUM_HANDOFF_BAND,farStart/max(cardStart,1e-3))*255.0));
+              if(cardShare>share){
+                var level=0u;var blend=0.0;
+                for(var l=1u;l<cardLevels;l++){
+                  let t=continuumHandoff(away,continuumView.cardErrors[l]*per);
+                  if(t>=1.0){level=l;blend=0.0;}else if(t>0.0){blend=t;break;}else{break;}
+                }
+                let side=u32(continuumView.cards[1u+level]);
+                let next=select(0u,u32(continuumView.cards[1u+min(level+1u,${CONTINUUM_CARD_LEVELS - 1}u)]),blend>0.0);
+                let at=continuumReserve(${CONTINUUM_CARD_LIST}u,side*side+next*next);
+                if(at!=CONTINUUM_FULL){
+                  cells=vec4u(at,side*side,next*next,level);
+                  cardState=cardShare|(u32(round(blend*255.0))<<8u)|(level<<16u);
+                  atomicAdd(&continuumCounted[3],2u*(side*side+next*next));
+                }
+              }
+            }
             // The clusters that can be drawn at its nearest point (the eye's own nearest, when it stands inside).
-            if(share<255u){
+            if(max(share,cardState&255u)<255u){
               tries.x=continuumPrefix(first,clusterCount,pixels*max(away-reach,CONTINUUM_NEAREST)/(focal*scale));
             }
           }
@@ -668,11 +706,11 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       }
       continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u]=vec2u(share|(splatShare<<8u)|(pack2x16float(vec2f(lift.x,0.0))<<16u),step|(shadowStep<<16u));
       continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+1u]=vec2u(bitcast<u32>(morph),pack2x16float(vec2f(splatScale,lift.y)));
-      continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+2u]=vec2u(shadowShare,0u);
+      continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+2u]=vec2u(shadowShare,cardState);
     }
     if(wet.w!=0u&&far.x!=CONTINUUM_FULL){wet.z=continuumReserve(${CONTINUUM_CAPTURE_LISTS[2]}u,far.y&0x7fffffffu);}
     continuumSlotWet[lane]=wet;
-    continuumSlotRecord[lane]=record;continuumSlotCut[lane]=cut;continuumSlotTries[lane]=tries;continuumSlotFar[lane]=far;continuumSlotLift[lane]=lift.x;continuumCardWant[lane]=wantCard;
+    continuumSlotRecord[lane]=record;continuumSlotCut[lane]=cut;continuumSlotTries[lane]=tries;continuumSlotFar[lane]=far;continuumSlotLift[lane]=lift.x;continuumCardWant[lane]=wantCard;continuumSlotCells[lane]=cells;
   }
   workgroupBarrier();
   if(lane==0u){
@@ -816,6 +854,14 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       }
     }
     if(far.z!=CONTINUUM_FULL){for(var c=lane;c<far.w;c+=${W}u){continuumLists[far.z+c]=vec2u(batch+k,c|(CONTINUUM_FAR_ENTRY<<28u));}}
+    // Its cell cards: every cell of the level entered, then of the next, each its cell | its level << 16.
+    let cells=continuumSlotCells[k];
+    if(cells.x!=CONTINUUM_FULL){
+      for(var c=lane;c<cells.y+cells.z;c+=${W}u){
+        let later=c>=cells.y;
+        continuumLists[cells.x+c]=vec2u(batch+k,select(c,c-cells.y,later)|((cells.w+select(0u,1u,later))<<16u)|(CONTINUUM_CARD_ENTRY<<28u));
+      }
+    }
   }
   // The real triangles the scene's error asked of this workgroup, for the census: once a workgroup.
   workgroupBarrier();
@@ -1085,7 +1131,7 @@ fn continuumVertex(vertex:u32,listed:ContinuumEntry,coarse:bool)->ContinuumVaryi
   out.normal=s.normal;out.optics=s.optics;
   out.surfel=select(vec2f(0.0),s.corner,what==CONTINUUM_SURFEL_ENTRY);
   out.position=continuumClipPulled(out.world,pull);
-  out.coverage=vec4u(what,state.x&65535u,record.tag.z,continuumView.counts.y);
+  out.coverage=vec4u(what,select(state.x&65535u,continuumClusterYield(instance,state.x&65535u),what==CONTINUUM_CLUSTER_ENTRY&&!coarse),record.tag.z,continuumView.counts.y);
   ${material.name}Varying(s,&out);
   return out;
 }
@@ -1166,7 +1212,7 @@ struct ContinuumVisibilityVarying {
     s.local=splat.local;s.world=splat.world+lift;s.normal=splat.toward;s.corner=splat.corner;pull=splat.pull;
   }else if(!continuumSurfaceOf(&s,record,what,item,vertex,state.y&65535u,bitcast<f32>(state.z),lift)){out.position=CONTINUUM_HIDDEN;return out;}
   out.position=continuumClipPulled(s.world+vec3f(touched),pull);
-  out.coverage=vec4u(what,state.x&65535u,record.tag.z,continuumView.counts.y);
+  out.coverage=vec4u(what,select(state.x&65535u,continuumClusterYield(instance,state.x&65535u),what==CONTINUUM_CLUSTER_ENTRY),record.tag.z,continuumView.counts.y);
   out.surfel=select(vec2f(0.0),s.corner,what==CONTINUUM_SURFEL_ENTRY);
   return out;
 }
@@ -1214,11 +1260,13 @@ ${hook.wgsl()}
   let record=continuumRecords[recordIdx];
   let corner=continuumClusterCorner(record,item,vertex);
   if(!corner.shown){out.position=CONTINUUM_HIDDEN;return out;}
-  let R=max(view.sphere.w,1e-4);
-  let rel=(corner.posed.position-view.sphere.xyz)/R;
-  let px=dot(rel,view.right.xyz);
-  let py=dot(rel,view.up.xyz);
-  let pz=dot(rel,view.dir.xyz);
+  // A view frames its type's sphere, or (a cell card's, js/continuum-cards.js) its card's box as that view sees it:
+  // one over its half-width, half-height and half-depth ride its three axes.
+  let inverse=select(vec3f(1.0/max(view.sphere.w,1e-4)),vec3f(view.right.w,view.up.w,view.dir.w),view.right.w>0.0);
+  let rel=corner.posed.position-view.sphere.xyz;
+  let px=dot(rel,view.right.xyz)*inverse.x;
+  let py=dot(rel,view.up.xyz)*inverse.y;
+  let pz=dot(rel,view.dir.xyz)*inverse.z;
   out.position=vec4f(px+touched,py,clamp(0.5-0.5*pz,0.0,1.0),1.0);
   out.local=corner.posed.position;
   out.normal=normalize(corner.posed.normal+vec3f(0.0,1e-6,0.0));
@@ -1244,6 +1292,14 @@ ${hook.wgsl()}
   return ContinuumCardBakeOut(vec4f(clamp(sample.albedo,vec3f(0.0),vec3f(4.0)),1.0),vec4f(nx,ny,depth01,clamp(sample.matFlag,0.0,1.0)),mask);
 }
 `;
+}
+
+// A material's own WGSL with all it draws by: its prelude, the core, the scene's data, the kinds, the surface and
+// varying it writes, and its two functions. Its view and capture are composed on it, and so are its cell cards
+// (js/wgsl/continuum-cards.js continuumCellCardWGSL), which it shades as it shades its clusters.
+export function continuumMaterialWGSL(material, pass, paging, air = !material.air ? '' : 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { return surfaceAir(colour,world); }\n') {
+  return material.prelude(pass) + (material.core ? '' : CONTINUUM_CORE_WGSL) + continuumDataWGSL(material.data.group, material.data.binding, 'read', paging)
+    + continuumCommonWGSL(paging) + continuumKindsWGSL() + continuumTouchWGSL(paging) + CONTINUUM_SPLAT + CONTINUUM_SURFACE + continuumVaryingWGSL(material) + air + material.wgsl();
 }
 
 // Every program of the one family, composed: the select ('select'), the shadow map's ('shadow': the kernel's, or a
@@ -1284,8 +1340,7 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
     ? 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { return surfaceAir(colour,world); }\n'
     // Under water the water's surface applies the air once; the call is kept so that every binding stays reachable.
     : 'fn continuumAir(colour:vec3f,world:vec3f)->vec3f { if(F.screen.x>=0.0&&captureMode.x<.5){return colour;} return surfaceAir(colour,world); }\n';
-  const body = material.prelude(pass) + (material.core ? '' : CONTINUUM_CORE_WGSL) + continuumDataWGSL(material.data.group, material.data.binding, 'read', paging)
-    + continuumCommonWGSL(paging) + continuumKindsWGSL() + continuumTouchWGSL(paging) + CONTINUUM_SPLAT + CONTINUUM_SURFACE + continuumVaryingWGSL(material) + air + material.wgsl();
+  const body = continuumMaterialWGSL(material, pass, paging, air);
   // The samples a fragment keeps: its share of the handoff (and circular surfel disc), plus the material's mask and coverage.
   const mask = `continuumSurfelMask(v.coverage,v.surfel,v.position.xy,${material.salt}u)${material.mask ? `&${material.name}Mask(v,front)` : ''}${material.coverage ? `&${material.name}Coverage(v,front)` : ''}`;
   if (pass === 'view') {

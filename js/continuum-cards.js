@@ -13,9 +13,9 @@ import {
   CONTINUUM_ENTRY_LAYOUT, CONTINUUM_ENTRY_VERTICES, CONTINUUM_VIEW_BYTES, continuumModuleWGSL,
 } from './wgsl/continuum-cut.js';
 import {
-  CONTINUUM_CARD_GRID, CONTINUUM_CARD_VIEWS, CONTINUUM_CARD_PAD,
+  CONTINUUM_CARD_GRID, CONTINUUM_CARD_VIEWS, CONTINUUM_CARD_PAD, CONTINUUM_CARD_ELEV_BIAS,
   continuumCardDirJS, continuumCardBasisJS,
-  CONTINUUM_CARD_DILATE_WGSL, CONTINUUM_CARD_MIP_WGSL, continuumCardViewWGSL,
+  CONTINUUM_CARD_DILATE_WGSL, CONTINUUM_CARD_MIP_WGSL, continuumCardViewWGSL, continuumCellCardWGSL,
 } from './wgsl/continuum-cards.js';
 
 const CONTINUUM_CARD_SCENE_IDS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 19, 20, 21, 24]);
@@ -134,20 +134,26 @@ export function bakeContinuumCardAtlas(options) {
   return enqueueContinuumCardBake(options.device, () => runContinuumCardBake(options));
 }
 
+// `cards` (a type's cells' cards: [{ type, clusters, centre, half }], each a box of its type's metres and the clusters
+// that stand in it) bakes a sheet a card in place of a sheet a type: every view frames the card's box as it sees it, a
+// view's cell `cell` texels across and up, the grid's lowest views at the elevation whose sine is `elevBias`. It
+// returns the atlas alone ({ albedoTex, geoTex, layers, ... }), for its material's own card program to bind.
 async function runContinuumCardBake({
   device, shader, renderer, atlas, words = atlas.words, material, typeIds,
   bakeGroup0Entries = null, cellSize = 64, gridSize = CONTINUUM_CARD_GRID, tintMode = 0, salt = 0, neutralSpareX = 0,
   aboveGround = false, batchSize = 2, isCancelled = null, label = 'continuum cards',
+  cards = null, cell = null, elevBias = CONTINUUM_CARD_ELEV_BIAS,
 }) {
-  if (!words || !atlas?.pages?.length) throw Error(`Cannot bake ${label}: atlas words/pages missing`);
+  if (!atlas?.pages?.length || (!cards && !words)) throw Error(`Cannot bake ${label}: atlas words/pages missing`);
   const maxLayers = Math.min(256, device.limits?.maxTextureArrayLayers ?? 256);
   const maxTexDim = device.limits?.maxTextureDimension2D ?? 8192;
-  const totalTypes = atlas.types.length;
+  const totalTypes = cards ? cards.length : atlas.types.length;
   const grid = Math.max(2, gridSize | 0);
-  const tileDim = grid * cellSize;
+  const cellW = cell ? cell[0] | 0 : cellSize, cellH = cell ? cell[1] | 0 : cellSize;
+  const tileW = grid * cellW, tileH = grid * cellH;
   const seen = new Set();
   const uniqueIds = [];
-  for (const rawId of typeIds) {
+  for (const rawId of cards ? cards.keys() : typeIds) {
     const id = rawId | 0;
     if (id < 0 || id >= totalTypes || seen.has(id)) continue;
     seen.add(id);
@@ -157,7 +163,7 @@ async function runContinuumCardBake({
 
   // Choose smallest power-of-two T x T tiling per array layer so EVERY requested type fits within device layer limits.
   let tilesPerSide = 1;
-  while (Math.ceil(uniqueIds.length / (tilesPerSide * tilesPerSide)) > maxLayers && tilesPerSide * 2 * tileDim <= maxTexDim && tilesPerSide < 16) {
+  while (Math.ceil(uniqueIds.length / (tilesPerSide * tilesPerSide)) > maxLayers && tilesPerSide * 2 * Math.max(tileW, tileH) <= maxTexDim && tilesPerSide < 16) {
     tilesPerSide *= 2;
   }
   const tilesPerLayer = tilesPerSide * tilesPerSide;
@@ -172,27 +178,27 @@ async function runContinuumCardBake({
   if (isCancelled?.()) return null;
 
   const viewsPerType = grid * grid;
-  const atlasDim = tileDim * tilesPerSide;
-  const mipLevels = Math.round(Math.log2(cellSize)) + 1;
+  const atlasW = tileW * tilesPerSide, atlasH = tileH * tilesPerSide;
+  const mipLevels = Math.round(Math.log2(Math.min(cellW, cellH))) + 1;
   const bakedCount = uniqueIds.length;
   const layerCount = Math.ceil(bakedCount / tilesPerLayer);
   const B = GPUBufferUsage, T = GPUTextureUsage;
 
   const cardAlbedoTex = device.createTexture({
-    label: `${label} albedo`, size: [atlasDim, atlasDim, layerCount], mipLevelCount: mipLevels,
+    label: `${label} albedo`, size: [atlasW, atlasH, layerCount], mipLevelCount: mipLevels,
     format: 'rgba8unorm', usage: T.TEXTURE_BINDING | T.STORAGE_BINDING,
   });
   const cardGeoTex = device.createTexture({
-    label: `${label} geo`, size: [atlasDim, atlasDim, layerCount], mipLevelCount: mipLevels,
+    label: `${label} geo`, size: [atlasW, atlasH, layerCount], mipLevelCount: mipLevels,
     format: 'rgba8unorm', usage: T.TEXTURE_BINDING | T.STORAGE_BINDING,
   });
 
-  // Reusable single-type 4x MSAA scratch targets (sized to one tileDim x tileDim type sheet, never tiled atlasDim).
-  const msaaAlbedo = device.createTexture({ label: `${label} msaa albedo`, size: [tileDim, tileDim], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
-  const msaaGeo = device.createTexture({ label: `${label} msaa geo`, size: [tileDim, tileDim], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
-  const msaaDepth = device.createTexture({ label: `${label} msaa depth`, size: [tileDim, tileDim], sampleCount: 4, format: 'depth32float', usage: T.RENDER_ATTACHMENT });
-  const resAlbedo = device.createTexture({ label: `${label} res albedo`, size: [tileDim, tileDim], format: 'rgba16float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
-  const resGeo = device.createTexture({ label: `${label} res geo`, size: [tileDim, tileDim], format: 'rgba16float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
+  // Reusable single-type 4x MSAA scratch targets (sized to one type's or card's sheet, never the tiled atlas).
+  const msaaAlbedo = device.createTexture({ label: `${label} msaa albedo`, size: [tileW, tileH], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
+  const msaaGeo = device.createTexture({ label: `${label} msaa geo`, size: [tileW, tileH], sampleCount: 4, format: 'rgba16float', usage: T.RENDER_ATTACHMENT });
+  const msaaDepth = device.createTexture({ label: `${label} msaa depth`, size: [tileW, tileH], sampleCount: 4, format: 'depth32float', usage: T.RENDER_ATTACHMENT });
+  const resAlbedo = device.createTexture({ label: `${label} res albedo`, size: [tileW, tileH], format: 'rgba16float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
+  const resGeo = device.createTexture({ label: `${label} res geo`, size: [tileW, tileH], format: 'rgba16float', usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING });
 
   const msaaAlbedoView = msaaAlbedo.createView(), msaaGeoView = msaaGeo.createView(), msaaDepthView = msaaDepth.createView();
   const resAlbedoView = resAlbedo.createView(), resGeoView = resGeo.createView();
@@ -209,7 +215,7 @@ async function runContinuumCardBake({
   const viewDirs = [], viewBases = [];
   for (let iy = 0; iy < grid; iy++) {
     for (let ix = 0; ix < grid; ix++) {
-      const dir = continuumCardDirJS(ix, iy, grid);
+      const dir = continuumCardDirJS(ix, iy, grid, elevBias);
       viewDirs.push(dir);
       viewBases.push(continuumCardBasisJS(dir));
     }
@@ -227,28 +233,34 @@ async function runContinuumCardBake({
   const typeClusters = new Array(bakedCount);
 
   for (let r = 0; r < bakedCount; r++) {
-    const typeId = uniqueIds[r];
+    const card = cards ? cards[uniqueIds[r]] : null;
+    const typeId = card ? card.type : uniqueIds[r];
     writeContinuumRecord(recWords, recFloats, r, {
       position: [0, 0, 0], scale: 1, yaw: 0, type: typeId, kind: CONTINUUM_KIND.RIGID,
       flags: 0, pose: 0, seed: (r + 1) * 2654435761, reach: 0, identity: 0,
     });
     // Set neutral spare.x word directly (e.g. packed neutral tint for forest, neutral f32 for city).
     recWords[r * CONTINUUM_RECORD_WORDS + 12] = neutralSpareX >>> 0;
-    const tightSp = srcSpheres && (typeId * 4 + 3) < srcSpheres.length
+    const tightSp = !card && srcSpheres && (typeId * 4 + 3) < srcSpheres.length
       ? [srcSpheres[typeId * 4], srcSpheres[typeId * 4 + 1], srcSpheres[typeId * 4 + 2], srcSpheres[typeId * 4 + 3]]
       : null;
-    const info = collectContinuumLevel0Clusters(words, typeId, cellSize, tightSp);
+    const info = card
+      ? { clusters: card.clusters, sphere: [card.centre[0], card.centre[1], card.centre[2], Math.hypot(card.half[0], card.half[1], card.half[2])] }
+      : collectContinuumLevel0Clusters(words, typeId, cellSize, tightSp);
     typeClusters[r] = info.clusters;
     const [cx, cy, cz, rawR] = info.sphere;
-    sphereTable.set([cx, cy, cz, rawR], typeId * 4);
+    if (!card) sphereTable.set([cx, cy, cz, rawR], typeId * 4);
     const R = Math.max(rawR, 1e-4) * CONTINUUM_CARD_PAD;
     for (let v = 0; v < viewsPerType; v++) {
       const at = (r * viewsPerType + v) * 20;
       const d = viewDirs[v], { right, up } = viewBases[v];
+      // A card's view frames its box as it sees it: one over its half-width, half-height and half-depth ride its axes
+      // (js/wgsl/continuum-cut.js continuumCardBakeVS; js/wgsl/continuum-cards.js continuumCellViewOf reads the same).
+      const over = (axis) => (card ? 1 / Math.max(Math.abs(axis[0]) * card.half[0] + Math.abs(axis[1]) * card.half[1] + Math.abs(axis[2]) * card.half[2], 1e-4) : 0);
       viewFloats[at] = cx; viewFloats[at + 1] = cy; viewFloats[at + 2] = cz; viewFloats[at + 3] = R;
-      viewFloats[at + 4] = right[0]; viewFloats[at + 5] = right[1]; viewFloats[at + 6] = right[2]; viewFloats[at + 7] = 0;
-      viewFloats[at + 8] = up[0]; viewFloats[at + 9] = up[1]; viewFloats[at + 10] = up[2]; viewFloats[at + 11] = 0;
-      viewFloats[at + 12] = d[0]; viewFloats[at + 13] = d[1]; viewFloats[at + 14] = d[2]; viewFloats[at + 15] = 0;
+      viewFloats[at + 4] = right[0]; viewFloats[at + 5] = right[1]; viewFloats[at + 6] = right[2]; viewFloats[at + 7] = over(right);
+      viewFloats[at + 8] = up[0]; viewFloats[at + 9] = up[1]; viewFloats[at + 10] = up[2]; viewFloats[at + 11] = over(up);
+      viewFloats[at + 12] = d[0]; viewFloats[at + 13] = d[1]; viewFloats[at + 14] = d[2]; viewFloats[at + 15] = over(d);
       viewU32[at + 16] = r; viewU32[at + 17] = typeId; viewU32[at + 18] = v; viewU32[at + 19] = 0;
     }
   }
@@ -260,12 +272,11 @@ async function runContinuumCardBake({
   const bakeViewsBuf = makeBuf(viewFloats, B.STORAGE, 'bake views');
   const packParamsBufs = Array.from({ length: tilesPerLayer }, (_, slot) => {
     const tx = slot % tilesPerSide, ty = Math.floor(slot / tilesPerSide);
-    return makeBuf(new Uint32Array([cellSize, grid, tx * tileDim, ty * tileDim]), B.UNIFORM, `pack params ${slot}`);
+    return makeBuf(new Uint32Array([cellW === cellH ? cellW : (cellW | (cellH << 16)) >>> 0, grid, tx * tileW, ty * tileH]), B.UNIFORM, `pack params ${slot}`);
   });
 
-  const bakeGroup0 = bakeGroup0Entries?.length
-    ? device.createBindGroup({ label: `${label} bake g0`, layout: bakePipeline.getBindGroupLayout(0), entries: bakeGroup0Entries })
-    : null;
+  // A material that bakes from its vertices alone binds nothing of its own: its group is the empty one.
+  const bakeGroup0 = device.createBindGroup({ label: `${label} bake g0`, layout: bakePipeline.getBindGroupLayout(0), entries: bakeGroup0Entries ?? [] });
   const bakeDataEntries = [
     { binding: 0, resource: { buffer: atlas.pages[0] } },
     { binding: 1, resource: { buffer: bakeRecordsBuf } },
@@ -355,14 +366,14 @@ async function runContinuumCardBake({
             depthStencilAttachment: { view: msaaDepthView, depthClearValue: 1.0, depthLoadOp: 'clear', depthStoreOp: 'discard' },
           });
           rpass.setPipeline(bakePipeline);
-          if (bakeGroup0) rpass.setBindGroup(0, bakeGroup0);
+          rpass.setBindGroup(0, bakeGroup0);
           rpass.setBindGroup(1, bakeGroup1);
           rpass.setVertexBuffer(0, entriesBuf);
           for (let iy = 0; iy < grid; iy++) {
             for (let ix = 0; ix < grid; ix++) {
               const v = iy * grid + ix;
-              rpass.setViewport(ix * cellSize, iy * cellSize, cellSize, cellSize, 0, 1);
-              rpass.setScissorRect(ix * cellSize, iy * cellSize, cellSize, cellSize);
+              rpass.setViewport(ix * cellW, iy * cellH, cellW, cellH, 0, 1);
+              rpass.setScissorRect(ix * cellW, iy * cellH, cellW, cellH);
               rpass.draw(CONTINUUM_ENTRY_VERTICES[0], info.perView, 0, info.first + v * info.perView);
             }
           }
@@ -381,14 +392,14 @@ async function runContinuumCardBake({
           });
           dpass.setPipeline(renderer.dilatePipeline);
           dpass.setBindGroup(0, dilateBG);
-          dpass.dispatchWorkgroups(Math.ceil(tileDim / 8), Math.ceil(tileDim / 8));
+          dpass.dispatchWorkgroups(Math.ceil(tileW / 8), Math.ceil(tileH / 8));
           dpass.end();
         }
         if (!anyTile) continue;
         const mpass = encoder.beginComputePass();
         mpass.setPipeline(renderer.mipPipeline);
         for (let m = 1; m < mipLevels; m++) {
-          const dimM = atlasDim >> m;
+          const wideM = atlasW >> m, tallM = atlasH >> m;
           const srcA = cardAlbedoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: m - 1, mipLevelCount: 1 });
           const srcG = cardGeoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: m - 1, mipLevelCount: 1 });
           const dstA = cardAlbedoTex.createView({ dimension: '2d', baseArrayLayer: layerIdx, arrayLayerCount: 1, baseMipLevel: m, mipLevelCount: 1 });
@@ -403,7 +414,7 @@ async function runContinuumCardBake({
             ],
           });
           mpass.setBindGroup(0, mipBG);
-          mpass.dispatchWorkgroups(Math.ceil(dimM / 8), Math.ceil(dimM / 8));
+          mpass.dispatchWorkgroups(Math.ceil(wideM / 8), Math.ceil(tallM / 8));
         }
         mpass.end();
       }
@@ -428,6 +439,13 @@ async function runContinuumCardBake({
     const slot = i % tilesPerLayer;
     const tx = slot % tilesPerSide, ty = Math.floor(slot / tilesPerSide);
     layerTable[uniqueIds[i]] = ((layerIdx << 8) | (ty << 4) | tx) >>> 0;
+  }
+  if (cards) {
+    let freed = false;
+    return {
+      albedoTex: cardAlbedoTex, geoTex: cardGeoTex, layers: layerTable, layerCount, cardCount: bakedCount, tilesPerSide, grid, cell: [cellW, cellH], elevBias,
+      destroy() { if (!freed) { freed = true; cardAlbedoTex.destroy(); cardGeoTex.destroy(); } },
+    };
   }
   const layerBuf = device.createBuffer({ label: `${label} layers`, size: layerTable.byteLength, usage: B.STORAGE | B.COPY_DST });
   device.queue.writeBuffer(layerBuf, 0, layerTable);
@@ -472,5 +490,70 @@ async function runContinuumCardBake({
       sphereBuf.destroy();
       paramsBuf.destroy();
     },
+  };
+}
+
+// ------------------------------------------------------------------------------------------------ cell cards
+// A material's cell-card program (js/wgsl/continuum-cards.js continuumCellCardWGSL): its cards drawn in its view's
+// pass as its clusters are (depth laid and compared as theirs, cut by the sample mask), one a device, material,
+// target format, sample count and atlas paging.
+export async function requestContinuumCellCardPipeline({ device, shader, material, format, samples, pages = 1 }) {
+  const paging = continuumAtlasPaging(device, await pages);
+  return requestOnce(device, `continuum cell cards ${material.name} ${format} ${samples}${paging.pages > 1 ? ` ${paging.pages} pages` : ''}`, async () => {
+    const module = await shader(continuumCellCardWGSL(material, paging), `${material.name} cell cards`);
+    return device.createRenderPipelineAsync({
+      label: `${material.name} cell cards`, layout: 'auto',
+      vertex: { module, entryPoint: 'continuumCellVS', buffers: CONTINUUM_ENTRY_LAYOUT },
+      fragment: { module, entryPoint: 'continuumCellFS', targets: [{ format }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+      multisample: { count: samples },
+    });
+  });
+}
+
+// An atlas's card grid (js/continuum-format.js computeContinuumCardGrid, measured at its upload) baked: every card's
+// clusters drawn from `views` x `views` directions (the zenith down to the horizon) into a sheet of its own, `cell`
+// texels a view. Returns { albedoTex, geoTex, frames, uniform, entries(binding), destroy() }: `entries` its material's
+// card program's bindings from `binding` (js/wgsl/continuum-cards.js continuumCellCardWGSL), or null when cancelled.
+export async function bakeContinuumCellCards({ device, shader, renderer, atlas, material, cell, views = 3, elevBias = 0, batchSize = 2, isCancelled = null, label = 'cell cards' }) {
+  const grid = atlas.cardGrid;
+  if (!grid) throw Error(`Cannot bake ${label}: its atlas has no card grid`);
+  const F = 8, total = grid.clusters.length;
+  // Empty cards (no cluster stands in their cell) are baked as nothing and drawn as nothing.
+  const cards = [], index = new Int32Array(total).fill(-1);
+  for (let i = 0; i < total; i++) {
+    if (!grid.clusters[i].length) continue;
+    index[i] = cards.length;
+    cards.push({ type: Math.floor(i / grid.perType), clusters: grid.clusters[i], centre: grid.frames.subarray(i * F, i * F + 3), half: grid.frames.subarray(i * F + 4, i * F + 7) });
+  }
+  if (!cards.length) return null;
+  const baked = await bakeContinuumCardAtlas({ device, shader, renderer, atlas, material, cards, cell, gridSize: views, elevBias, batchSize, isCancelled, label });
+  if (!baked) return null;
+  // A card's frame as its program reads it: its box's centre and its top's sway weight; its half-extents (none: no
+  // card) and its layer's bits.
+  const frames = new Float32Array(total * F), bits = new Uint32Array(frames.buffer);
+  for (let i = 0; i < total; i++) {
+    if (index[i] < 0) continue;
+    frames.set(grid.frames.subarray(i * F, i * F + 7), i * F);
+    bits[i * F + 7] = baked.layers[index[i]];
+  }
+  const B = GPUBufferUsage;
+  const frameBuf = device.createBuffer({ label: `${label} frames`, size: frames.byteLength, usage: B.STORAGE | B.COPY_DST });
+  device.queue.writeBuffer(frameBuf, 0, frames);
+  const uniform = new ArrayBuffer(48), u32 = new Uint32Array(uniform), f32 = new Float32Array(uniform);
+  u32.set([baked.grid, baked.tilesPerSide, baked.cell[0], baked.cell[1], grid.perType, grid.offsets[0] ?? 0, grid.offsets[1] ?? 0, grid.offsets[2] ?? 0]);
+  f32[8] = baked.elevBias;
+  const uniformBuf = device.createBuffer({ label: `${label} layout`, size: 48, usage: B.UNIFORM | B.COPY_DST });
+  device.queue.writeBuffer(uniformBuf, 0, uniform);
+  const albedoView = baked.albedoTex.createView({ dimension: '2d-array' }), geoView = baked.geoTex.createView({ dimension: '2d-array' });
+  let freed = false;
+  return {
+    albedoTex: baked.albedoTex, geoTex: baked.geoTex, frames: frameBuf, uniform: uniformBuf, cardCount: baked.cardCount, layerCount: baked.layerCount,
+    entries: (binding = 0) => [
+      { binding, resource: albedoView }, { binding: binding + 1, resource: geoView }, { binding: binding + 2, resource: renderer.sampler },
+      { binding: binding + 3, resource: { buffer: frameBuf } }, { binding: binding + 4, resource: { buffer: uniformBuf } },
+    ],
+    destroy() { if (!freed) { freed = true; baked.destroy(); frameBuf.destroy(); uniformBuf.destroy(); } },
   };
 }

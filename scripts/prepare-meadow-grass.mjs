@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Bakes the meadow continuum (js/meadow-continuum.js; AGENTS.md rule 3) from a pack of meadow groves: twelve 4 m
-// tiles (three mixes, four variants each) drawn plant by plant at full resolution, kept out of git in
-// assets/ground-cover/<pack>/meadows/ (the Portuguese from forestmodeler, the tropical from
-// scripts/prepare-tropical-sward.mjs). Usage: node scripts/prepare-meadow-grass.mjs [portugal] [tropical] [--check]
+// tiles (three mixes, four variants each) of closed sward grown tuft by tuft at full resolution, kept out of git in
+// assets/ground-cover/<pack>/meadows/ (scripts/prepare-sward.mjs grows every pack's). Usage:
+// node scripts/prepare-meadow-grass.mjs [portugal] [tropical] [--check]
 // (both when none is named; --check reads the baked atlas back and checks it, baking nothing). Each tile becomes one
 // type of an atlas of the one format (js/continuum-format.js), drawn by the one cut:
 //   - a cluster hierarchy of up to ten levels, cells 16 to a side halving to one by the fifth. A level keeps half the
@@ -17,6 +17,11 @@
 //     each level's kept organs are their own vertices, widened as that level draws them. As the forest's leaves, a
 //     cell's error is a share of the width its kept organs are grown to (and, should no widening restore the cover,
 //     the height of what is lost), never less than its children's.
+//   - its thatch (a grove's 'thatch': the mat of dead leaf at the turf's foot): a sheet over the ground at its
+//     height, every level's cells each laying their own square of it, so the sheet is whole at every cut and is never
+//     widened. What shows between a sward's blades is then its own shaded floor, and its cover from above is whole:
+//     neither its far body nor its cards let the land's soil through. Its vertices have no stiffness, which the
+//     shading reads as the floor (js/wgsl/meadow-continuum.js).
 //   - a closed canopy body: the sward as the eye sees it from above (its highest surface over every 4 mm of ground,
 //     or the ground itself where the sward leaves a gap), as a slab over the patch whose top stands where half of
 //     that view lies below, its error where nine tenths of it lie within. The share of ground the sward hides rides
@@ -67,6 +72,8 @@ const RASTER = 1024, SIDE_LOW = -0.2, SIDE_HEIGHT = 2, SIDE_CELLS = 512;
 // The canopy body: a slab of 8 x 8 cells; its top where this share of the sward seen from above lies below, each
 // vertex judged over the metre round it; its floor this far under the ground, never seen.
 const BODY_CELLS = 8, BODY_QUANTILE = 0.5, BODY_FLOOR = MEADOW_BODY_FLOOR;
+// The least height of the body's top: a slab much thinner over its 4 m folds as it collapses, before it is its box.
+const BODY_LEAST_TOP = 0.03;
 // The body's error: how far from its top this share of the sward seen from above lies, ground in its gaps included.
 const BODY_ERROR_QUANTILE = 0.9;
 // A coarser level's error: this share of the mean width its kept organs are grown to, as the forest's leaves
@@ -160,37 +167,70 @@ function organsOf(variant, V, I) {
       let r = 0, low = 0;
       o.vertices.forEach((v, j) => { r = Math.max(r, Math.hypot(V[v * STRIDE] - c[0], V[v * STRIDE + 1] - c[1], V[v * STRIDE + 2] - c[2])); if (V[v * STRIDE + 1] < V[o.vertices[low] * STRIDE + 1]) low = j; });
       const base = o.vertices[low];
-      return { ...o, plant, clumpRand, stays, centre: c, radius: r, root: [V[base * STRIDE], V[base * STRIDE + 2]], order: hash01(0x6f726761, ...where, millimetres(c[0]), millimetres(c[1]), millimetres(c[2])) };
+      let area = 0;
+      for (let t = 0; t < o.triangles.length; t += 3) {
+        const [a, b, d] = [0, 1, 2].map((k) => o.triangles[t + k] * STRIDE), e = [0, 1, 2].map((k) => V[b + k] - V[a + k]), f = [0, 1, 2].map((k) => V[d + k] - V[a + k]);
+        area += Math.hypot(e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]) / 2;
+      }
+      const order = hash01(0x6f726761, ...where, millimetres(c[0]), millimetres(c[1]), millimetres(c[2]));
+      return { ...o, plant, clumpRand, stays, centre: c, radius: r, root: [V[base * STRIDE], V[base * STRIDE + 2]], order, keep: area * (0.6 + 0.8 * order) };
     });
-    plantOrgans.sort((a, b) => a.order - b.order);
+    // Its largest organs first, a little shuffled: a coarser level keeps a plant's leaves and drops its spikelets and
+    // awns, which are many and small, before it widens what it keeps (grown about their centres, a few kept
+    // spikelets would swell into blobs the plant never bore).
+    plantOrgans.sort((a, b) => b.keep - a.keep);
     plantOrgans.forEach((o, rank) => { o.rank = rank; o.siblings = plantOrgans.length; organs.push(o); });
   });
   return organs;
 }
-// Whether an organ is kept at a level: the first half of its plant's organs, by a hash of where they stand, at each;
+// Whether an organ is kept at a level: the first half of its plant's organs, largest first (organsOf), at each;
 // and of a plant with less than one organ left to keep, its first organ, should the plant itself be kept: that share
 // of such plants, by a hash of where each stands (the same in every variant for a plant on a tile's edge band). What
 // a level keeps the level below keeps too.
 const keptAt = (organ, level) => {
+  if (organ.floor !== undefined) return organ.floor === level;
   const share = organ.siblings / 2 ** level;
   return share >= 1 ? organ.rank < Math.ceil(share) : organ.rank === 0 && organ.stays < share;
 };
 
-// How each vertex moves when its organ is widened by g: offset * (g - 1). A leaf or culm is rows of three vertices
-// round its midrib (and a tip), and widens about each row's middle; a floret or a single scale grows about its centre.
+// How each vertex moves when its organ is widened by g: offset * (g - 1); V reads a float of the sward's vertices. A leaf, shoot or culm is rows of three
+// vertices round its midrib and a tip (4, 7, 10 ... vertices; or rows alone, 6, 9 ...), and widens about each row's
+// middle; a spikelet or a single scale (5 vertices, or any other count) grows about its centre; the thatch never.
 function wideningOf(organ, V) {
   const n = organ.vertices.length, offsets = new Map();
-  if (n >= 6 && n % 3 !== 2) {
+  if (organ.floor !== undefined) {
+    for (const v of organ.vertices) offsets.set(v, [0, 0, 0]);
+  } else if (n === 4 || (n >= 6 && n % 3 !== 2)) {
     const rows = Math.floor(n / 3);
     for (let r = 0; r < rows; r++) {
-      const vs = organ.vertices.slice(r * 3, r * 3 + 3), c = [0, 1, 2].map((k) => vs.reduce((s, v) => s + V[v * STRIDE + k], 0) / 3);
-      for (const v of vs) offsets.set(v, [0, 1, 2].map((k) => V[v * STRIDE + k] - c[k]));
+      const vs = organ.vertices.slice(r * 3, r * 3 + 3), c = [0, 1, 2].map((k) => vs.reduce((s, v) => s + V(v * STRIDE + k), 0) / 3);
+      for (const v of vs) offsets.set(v, [0, 1, 2].map((k) => V(v * STRIDE + k) - c[k]));
     }
     if (n % 3 === 1) offsets.set(organ.vertices[n - 1], [0, 0, 0]);
   } else {
-    for (const v of organ.vertices) offsets.set(v, [0, 1, 2].map((k) => (V[v * STRIDE + k] - organ.centre[k]) * 0.5));
+    for (const v of organ.vertices) offsets.set(v, [0, 1, 2].map((k) => (V(v * STRIDE + k) - organ.centre[k]) * 0.5));
   }
   return offsets;
+}
+
+// The sward's thatch as organs of its own (a grove's 'thatch': its colour, as a leaf's reflectance, and its height):
+// one square a cell at every level, their vertices numbered on from the groves' ('grown' of them) and held in 'data'
+// as the groves hold theirs, with no stiffness and no height along a stalk.
+function thatchOrgans(thatch, grown) {
+  const organs = [], data = [];
+  if (!thatch) return { organs, data: new Float32Array(0) };
+  for (let level = 0; level < LEVELS; level++) {
+    const n = meadowContinuumCellsAt(level), s = P / n;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const first = grown + data.length / STRIDE, centre = [(i + 0.5) * s, thatch.height, (j + 0.5) * s];
+      for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) data.push((i + a) * s, thatch.height, (j + b) * s, 0, 1, 0, ...thatch.colour, 0, 0, 0);
+      organs.push({
+        floor: level, vertices: [first, first + 1, first + 2, first + 3], triangles: [first, first + 2, first + 1, first + 1, first + 2, first + 3],
+        plant: -1, clumpRand: 0, stays: 1, centre, radius: s * Math.SQRT1_2, root: [centre[0], centre[2]], order: 0, rank: 0, siblings: 1,
+      });
+    }
+  }
+  return { organs, data: Float32Array.from(data) };
 }
 
 // The cells of one view a set of triangles covers, their corners at base + offset * grow: `across` and `up` are the
@@ -257,8 +297,11 @@ function rasterAbove(base, corners, triangleCount) {
 // One variant's sward: its organs, the growth of each level, its welded vertices (every level's kept organs their own,
 // widened as that level draws them) with their material words and wind, its clusters and their indices, and what it
 // shows from above, from which the main thread builds its body. Run in a worker.
-function bakeSward({ V, I, variant }) {
-  const organs = organsOf(variant, V, I);
+function bakeSward({ V: grove, I, variant, thatch }) {
+  const grown = grove.length / STRIDE, floor = thatchOrgans(thatch, grown), thatchHeight = thatch?.height ?? 0;
+  // The groves' vertices and the thatch's, read as one.
+  const V = (at) => (at < grove.length ? grove[at] : floor.data[at - grove.length]);
+  const organs = [...organsOf(variant, grove, I), ...floor.organs], blades = organs.filter((o) => o.floor === undefined);
   // Vertices numbered in the order of their organs' roots along a Morton curve, so a cluster's organs lie near one
   // another in the atlas.
   organs.sort((a, b) => morton(...a.root) - morton(...b.root) || a.plant - b.plant || a.rank - b.rank);
@@ -266,7 +309,7 @@ function bakeSward({ V, I, variant }) {
   for (const o of organs) { o.start = sources.length; for (const v of o.vertices) { local.set(v, sources.length); sources.push(v); clumps.push(o.clumpRand); } }
   const count = sources.length;
   const base = new Float64Array(count * 3), offset = new Float64Array(count * 3), normal = new Float64Array(count * 3);
-  sources.forEach((v, i) => { for (let k = 0; k < 3; k++) { base[i * 3 + k] = V[v * STRIDE + k]; normal[i * 3 + k] = V[v * STRIDE + 3 + k]; } });
+  sources.forEach((v, i) => { for (let k = 0; k < 3; k++) { base[i * 3 + k] = V(v * STRIDE + k); normal[i * 3 + k] = V(v * STRIDE + 3 + k); } });
   for (const o of organs) {
     o.local = o.triangles.map((v) => local.get(v));
     o.width = 0;
@@ -277,25 +320,28 @@ function bakeSward({ V, I, variant }) {
     }
   }
   const corners = Int32Array.from(organs.flatMap((o) => o.local)), triangleCount = corners.length / 3;
+  // Which triangles are the floor's: seen from above it is covered ground, but not the height the sward stands to.
+  const floorTriangle = new Uint8Array(triangleCount);
   let t0 = 0;
-  for (const o of organs) { o.firstTriangle = t0; t0 += o.local.length / 3; }
+  for (const o of organs) { o.firstTriangle = t0; t0 += o.local.length / 3; if (o.floor !== undefined) floorTriangle.fill(1, o.firstTriangle, t0); }
   const trianglesOf = (list) => {
     const out = new Int32Array(list.reduce((n, o) => n + o.local.length / 3, 0));
     let at = 0;
     for (const o of list) for (let k = 0; k < o.local.length / 3; k++) out[at++] = o.firstTriangle + k;
     return out;
   };
-  const colourOf = (i) => [0, 1, 2].map((k) => V[sources[i] * STRIDE + 6 + k] * ALBEDO_SCALE);
+  const colourOf = (i) => [0, 1, 2].map((k) => V(sources[i] * STRIDE + 6 + k) * ALBEDO_SCALE);
 
   // Each level's growth: the least widening at which its kept organs cover, from above and from two sides, what all
   // of them did; and, should none, the share of that cover lost.
   const marks = [new Uint8Array(RASTER * RASTER), new Uint8Array(RASTER * SIDE_CELLS), new Uint8Array(RASTER * SIDE_CELLS)];
   const covered = (grow, triangles) => rasterCount(marks[0], 0, 2, true, base, offset, grow, corners, triangles)
     + rasterCount(marks[1], 0, 1, false, base, offset, grow, corners, triangles) + rasterCount(marks[2], 2, 1, false, base, offset, grow, corners, triangles);
-  const wanted = covered(0, trianglesOf(organs));
+  // The blades' cover: the thatch covers the ground whole from above at every level, and would hide what they lose.
+  const wanted = covered(0, trianglesOf(blades));
   const growth = [1], shortfall = [0];
   for (let level = 1; level < LEVELS; level++) {
-    const kept = trianglesOf(organs.filter((o) => keptAt(o, level)));
+    const kept = trianglesOf(blades.filter((o) => keptAt(o, level)));
     let lo = growth[level - 1], hi = Math.max(lo * 2, 2) * 3;
     const widest = covered(hi - 1, kept);
     if (widest < wanted) { growth.push(hi); shortfall.push(1 - widest / wanted); continue; }
@@ -321,7 +367,7 @@ function bakeSward({ V, I, variant }) {
   // What height along their stalks the organs seen from above show, as the shading reads it: the shader warms a
   // blade's head from along 0.76 to 0.94 (meadowShade), so the mean of that warming over what is seen, and the along
   // that gives it.
-  const alongOf = (i) => V[sources[i] * STRIDE + 9];
+  const alongOf = (i) => V(sources[i] * STRIDE + 9);
   const ramp = (x) => { const t = Math.min(1, Math.max(0, (x - 0.76) / 0.18)); return t * t * (3 - 2 * t); };
   let headShare = 0;
   for (let i = 0; i < RASTER * RASTER; i++) {
@@ -342,18 +388,19 @@ function bakeSward({ V, I, variant }) {
   }
   const mean = (sum, fallback) => (sum[3] > 0 ? sum.slice(0, 3).map((v) => v / sum[3]) : fallback);
   // The body's grid: at each vertex (wrapped, as the tiles repeat), over the metre round it, the height half the
-  // covered sward seen from above lies below, the share of ground it covers and the colour it shows.
+  // blades seen from above lie below (the floor's own where none is), the share of ground the sward covers and the
+  // colour it shows.
   const G = BODY_CELLS, window = RASTER / G, gridHeight = new Float32Array(G * G), gridCover = new Float32Array(G * G), gridColour = new Float32Array(G * G * 3);
   const heights = new Float32Array(window * window * 4);
   for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
-    let n = 0, hidden = 0;
+    let n = 0, hidden = 0, bladeCells = 0;
     const colour = [0, 0, 0];
     for (let y = j * window - window; y < j * window + window; y++) for (let x = i * window - window; x < i * window + window; x++) {
       const at = (((y % RASTER) + RASTER) % RASTER) * RASTER + (((x % RASTER) + RASTER) % RASTER);
       n++;
-      if (above.owner[at] >= 0) { heights[hidden++] = visible[at]; for (let k = 0; k < 3; k++) colour[k] += seen[at * 3 + k]; }
+      if (above.owner[at] >= 0) { hidden++; if (!floorTriangle[above.owner[at]]) heights[bladeCells++] = visible[at]; for (let k = 0; k < 3; k++) colour[k] += seen[at * 3 + k]; }
     }
-    gridHeight[j * G + i] = hidden ? quantileOf(heights.subarray(0, hidden), BODY_QUANTILE) : 0;
+    gridHeight[j * G + i] = bladeCells ? quantileOf(heights.subarray(0, bladeCells), BODY_QUANTILE) : hidden ? thatchHeight : 0;
     gridCover[j * G + i] = hidden / n;
     for (let k = 0; k < 3; k++) gridColour[(j * G + i) * 3 + k] = hidden ? colour[k] / hidden : topColour[k];
   }
@@ -380,7 +427,7 @@ function bakeSward({ V, I, variant }) {
     const position = widened(growth[level]);
     // As the forest's leaves: a share of the mean width its kept organs are grown to; and the height of any cover lost.
     const widths = Array.from({ length: n * n }, () => [0, 0]);
-    if (level > 0) for (const o of kept) { const w = widths[cellOf(o, level)]; w[0] += o.width * growth[level]; w[1]++; }
+    if (level > 0) for (const o of kept) if (o.floor === undefined) { const w = widths[cellOf(o, level)]; w[0] += o.width * growth[level]; w[1]++; }
     const own = widths.map(([sum, k]) => (k ? (sum / k) * ORGAN_ERROR_SHARE : 0) + shortfall[level] * visibleMean);
     // Each cell's LOD sphere holds what it draws and its children's spheres.
     const points = Array.from({ length: n * n }, () => []);
@@ -410,7 +457,7 @@ function bakeSward({ V, I, variant }) {
   const raw = new Float64Array(count), phase = new Float64Array(count), highOf = new Uint32Array(count), wordOf = new Uint32Array(count);
   let sway = 0;
   for (const o of organs) for (let k = 0; k < o.vertices.length; k++) {
-    const i = o.start + k, src = sources[i], along = V[src * STRIDE + 9], stiffness = V[src * STRIDE + 10];
+    const i = o.start + k, src = sources[i], along = V(src * STRIDE + 9), stiffness = V(src * STRIDE + 10);
     const flex = Math.min(1.12, Math.max(0, along * 1.26));
     raw[i] = Math.max(0, base[i * 3 + 1]) * flex ** 1.65 * (9.5 / (Math.min(22, Math.max(3, stiffness)) + 4.5));
     sway = Math.max(sway, raw[i]); phase[i] = o.order;
@@ -509,7 +556,7 @@ function bakeBody(sward, rim) {
   // along the stalk, so a wall is shaded as the edge it stands under and no seam shows.
   const slabPosition = [], slabNormal = [], slabColour = [], slabAlong = [], slabCover = [], slabIndex = [];
   for (const layer of [0, 1]) for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) {
-    slabPosition.push(i * step, layer ? 0 : Math.max(heightAt(i, j), 0.01), j * step);
+    slabPosition.push(i * step, layer ? 0 : Math.max(heightAt(i, j), BODY_LEAST_TOP), j * step);
     if (layer) { slabNormal.push(0, -1, 0); slabColour.push(rim.colour); slabAlong.push(sward.seenAlong); slabCover.push(rim.cover); continue; }
     if (isRim(i, j)) slabNormal.push(0, 1, 0);
     else {
@@ -652,10 +699,10 @@ function farSteps(body, farError) {
 // The worker: one variant's sward at a time, the groves shared.
 if (!isMainThread) {
   const V = new Float32Array(workerData.vertices), I = new Uint32Array(workerData.indices);
-  parentPort.on('message', ({ id, variant, levels }) => {
+  parentPort.on('message', ({ id, variant, levels, thatch }) => {
     try {
       LEVELS = levels;
-      const s = bakeSward({ V, I, variant });
+      const s = bakeSward({ V, I, variant, thatch });
       parentPort.postMessage({ id, sward: s }, [s.indices.buffer, s.position.buffer, s.normal.buffer, s.high.buffer, s.word.buffer, s.wind.buffer, s.visible.buffer]);
     } catch (error) { parentPort.postMessage({ id, error: String(error?.stack ?? error) }); }
   });
@@ -683,7 +730,7 @@ async function bakePack(name) {
     if (!list.length) { resolve(); return; }
     let next = 0, done = 0;
     const workers = Array.from({ length: Math.min(threads, list.length) }, () => new Worker(new URL(import.meta.url), { workerData: { vertices, indices } }));
-    const feed = (worker) => { if (next < list.length) { const job = jobs[list[next++]]; worker.postMessage({ id: job.id, variant: job.variant, levels: levelsOf(job.id) }); } };
+    const feed = (worker) => { if (next < list.length) { const job = jobs[list[next++]]; worker.postMessage({ id: job.id, variant: job.variant, levels: levelsOf(job.id), thatch: groves.groves[job.mix].thatch ?? null }); } };
     for (const worker of workers) {
       worker.on('message', ({ id, sward, error }) => {
         if (error) { workers.forEach((w) => w.terminate()); reject(Error(`${name} ${jobs[id].mix} ${jobs[id].variantIndex}: ${error}`)); return; }
@@ -697,7 +744,7 @@ async function bakePack(name) {
   await bakeSwards(jobs.map((job) => job.id), () => MEADOW_CONTINUUM_LEVELS);
 
   const rim = commonRim(swards);
-  const bodies = swards.map((s) => bakeBody(s, rim));
+  const bodies = swards.map((s, id) => { try { return bakeBody(s, rim); } catch (error) { throw Error(`${name} ${jobs[id].mix} ${jobs[id].variantIndex}: ${error.message}`); } });
   // A sward's hierarchy is carried on only as far as it is drawn: through the levels finer than what every variant's
   // far body begins at (the far body hands over at one error for them all, so no level coarser than that is ever
   // cut). A tall sward needs every level to come down to about its far body's weight; a short one, whose far body is

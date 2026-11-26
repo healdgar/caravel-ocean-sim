@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Meadow grass in the one continuum (AGENTS.md rule 3). Each 4 m sward of a pack of meadow groves (the Portuguese:
-// forestmodeler's cocksfoot, wild oat, ripgut brome and ribwort plantain; the tropical: native Caribbean grasses from
-// scripts/prepare-tropical-sward.mjs; plant by plant at full resolution) is baked by scripts/prepare-meadow-grass.mjs
+// Meadow grass in the one continuum (AGENTS.md rule 3). Each 4 m sward of a pack of meadow groves (closed turf grown
+// tuft by tuft at full resolution by scripts/prepare-sward.mjs: the Portuguese a ryegrass, bent and fescue turf with
+// cocksfoot, wild oat, brome and ribwort; the tropical native Caribbean grasses) is baked by scripts/prepare-meadow-grass.mjs
 // into one type of an atlas of the one format (js/continuum-format.js): a cluster hierarchy cut by projected error,
 // whose coarser levels keep fewer organs of every plant and widen the kept ones to cover what the whole plant did; a
 // closed canopy body over the patch, carrying the share of ground the sward lets the eye see, that collapses one
 // half-edge at a time down to a few triangles; and a single splat. A meadow is these patches laid edge to edge on the
 // ground, each a record of the one cut, draped over the ground and swayed by the WIND kind (js/wgsl/continuum-wind.js);
 // js/wgsl/meadow-continuum.js stands them and wears them. This is what a patch puts in the atlas:
-//   a vertex   high: how far along its stalk it stands (8 bits) | its stiffness (4 bits, MEADOW_CONTINUUM_STIFFNESS_UNIT) |
+//   a vertex   high: how far along its stalk it stands (8 bits) | its stiffness (4 bits, MEADOW_CONTINUUM_STIFFNESS_UNIT;
+//              0 only for the sward's floor, the mat of low leaves and thatch the bake lays at its foot) |
 //              its clump's hash (4 bits); word: its colour (each channel's square root, 8 bits); the wind stream its
 //              sway weight and its clump's phase.
 //   a far vertex    the wind stream: the sway weight of the sward at its height, and a phase by where it lies.

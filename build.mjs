@@ -96,7 +96,7 @@ order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herd
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/continuum-cards.js','js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
 wgslModules.push('js/wgsl/continuum-cards.js','js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/shallow-water.js','js/meadow-continuum.js','js/wgsl/meadow-continuum.js','js/meadow-grass.js','js/trade-vessels.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/shallow-water.js','js/meadow-continuum.js','js/wgsl/meadow-continuum.js','js/wgsl/meadow-blades.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // Ships in the one continuum: the bodies' format and loading, ahead of the families that draw them (their kinds,
 // js/wgsl/ship-kinds.js, stand beside the kernel's).
@@ -306,7 +306,7 @@ write('ocean.html', page.replace(SCRIPT_TAG, () => `${buildBootstrap}\n<script t
 // WGSL has no string literals, so comments and whitespace can be removed safely. Spaces are
 // kept around + - / so that e.g. "a - -b" or "x / *p" never fuse into other tokens.
 const TIGHT_WGSL_RELS = new Set([
-  'js/trade-vessels.js', 'js/meadow-grass.js', 'js/wgsl/meadow-continuum.js', 'js/wgsl/boulder-continuum.js',
+  'js/trade-vessels.js', 'js/meadow-grass.js', 'js/wgsl/meadow-continuum.js', 'js/wgsl/meadow-blades.js', 'js/wgsl/boulder-continuum.js',
   'js/wgsl/herds.js', 'js/wgsl/townsfolk.js', 'js/wgsl/gunnery.js',
   'js/wgsl/crew-solve.js', 'js/wgsl/inland-water.js', 'js/wgsl/shallow-water.js', 'js/wgsl/surf-spray.js', 'js/wgsl/hull-flood.js',
   'js/wgsl/land-craters.js', 'js/wgsl/part-assembly.js',

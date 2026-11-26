@@ -1,41 +1,135 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Meadow grass, drawn through the one continuum alone (AGENTS.md rule 3; js/meadow-continuum.js for the atlas,
-// scripts/prepare-meadow-grass.mjs for its bake, js/wgsl/meadow-continuum.js for its stand pass and material). A
-// meadow is 4 m patches of the groves' full-resolution sward laid edge to edge on a world grid wherever the cover map
-// (below) says grass grows. Every frame the meadow's stand pass writes each patch in view, or in the shadow map's box,
-// as a record of the one format, draped over the ground the land draws and swayed by the WIND kind; the one cut
-// (js/continuum-scene.js) cuts each at the scene's one pixel error, draws it with the meadow's material, casts its
-// shadow and draws it under water. Nothing here selects, lists or draws a patch of its own.
+// Meadow grass: blades made on the GPU each frame from where they stand in the world (js/wgsl/meadow-blades.js for
+// the passes and the blades' look). No tile, patch or atlas: the cover map below says where grass grows, how lush and
+// which of a pack's three mixes, and each blade is sown, kept or thinned, leaned by the wind and drawn on the GPU;
+// the CPU writes the cover map when the land changes and a few uniforms a frame. A blade near is a curved strip that
+// turns about its stem to face the eye; far off, or seen end on from above, a splat of the sward's own colour at its
+// tip; between, as few as hide the ground, widened to keep it hidden.
 // Grass is never a target: shot passes through it. Craters bury it, and passing shot and blast rings part it, from
 // the land's own crater field and the frame's ballistic wakes.
 import { requestOnce } from './gpu-program-cache.js';
-import { continuumPixelError } from './continuum-core.js';
+import { continuumPixelError, CONTINUUM_BASE_PIXEL_ERROR, CONTINUUM_MIN_PIXELS, CONTINUUM_SPLAT_PIXELS } from './continuum-core.js';
 import { continuumProfile } from './continuum-profiles.js';
-import { CONTINUUM_HEADER, CONTINUUM_TYPE_WORDS, continuumRoom } from './continuum-format.js';
-import { CONTINUUM_ROW } from './wgsl/continuum-cut.js';
-import { createContinuumScene, requestContinuumAtlas, requestContinuumPrograms, requestContinuumView, continuumAtlasPages } from './continuum-scene.js';
 import { continuumGroundView } from './continuum-ground.js';
-import { continuumHiZView, continuumHiZUniform } from './continuum-hiz.js';
 import { LAND_SHADOW_FORMAT } from './shadows.js';
 import { terrainSurfaceSample } from './terrain-model.js';
 import { CITY_BLOCK_FLOATS, CITY_GROUND } from './old-world-city.js';
 import { INLAND_WATER_FLOATS } from './wgsl/inland-water.js';
 import { LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
 import { streetEdgeAt, unpackRouteHalfWidthSlope } from './town-streets.js';
-import { MEADOW_PATCH_METRES, MEADOW_MIX_ROLES, MEADOW_CONTINUUM_MATERIAL } from './meadow-continuum.js';
+import { MEADOW_MIX_ROLES } from './meadow-continuum.js';
+import { MEADOW_MAX_SHOT_WAKES, MEADOW_MAX_BLAST_RINGS, MEADOW_WAKE_BUFFER_BYTES, MEADOW_CONTINUUM_CFG_BYTES, MEADOW_GUST_WAVE } from './wgsl/meadow-continuum.js';
 import {
-  MEADOW_MAX_SHOT_WAKES, MEADOW_MAX_BLAST_RINGS, MEADOW_WAKE_BUFFER_BYTES, MEADOW_BLOCK_PATCHES, MEADOW_WORK_HEADER, MEADOW_CONTINUUM_POSE,
-  MEADOW_CONTINUUM_CFG_BYTES, MEADOW_CONTINUUM_STOOD_BYTES, MEADOW_GUST_WAVE, MEADOW_CONTINUUM_SPEC, MEADOW_GRAIN_BITS, meadowContinuumStandWGSL,
-} from './wgsl/meadow-continuum.js';
+  MEADOW_BLADE_LEVELS, MEADOW_BLADE_GRID, MEADOW_BLADE_REACH, MEADOW_BLADE_DEPTH, MEADOW_BLADE_SEGMENTS, MEADOW_BLADE_RECORD_BYTES,
+  MEADOW_BLADE_CELL_HEADER, MEADOW_BLADE_DRAW_WORDS, MEADOW_SPECIES_MOST, MEADOW_SWARD_BYTES, MEADOW_BLADE_FRAME_BYTES,
+  meadowBladesComputeWGSL, meadowBladesDrawWGSL,
+} from './wgsl/meadow-blades.js';
 
 const MEADOW_COVER_DESKTOP = 2048; // 4.0 m/texel across 8192 m region with bilinear SDF filtering
 const MEADOW_COVER_MOBILE = 1024;
-// The most records the stand pass may write a frame (the patches in view and in the shadow map's box), held further
-// to what the device lets one buffer bind. Because meadowStandBudget coarsens blocks beyond 64 m (grain 2..16),
-// even an 8 km hillside fits in ~3k-8k records, so 1<<18 desktop / 1<<16 mobile gives >30x headroom with ~8x less VRAM.
-const MEADOW_CONTINUUM_CAPACITY = 1 << 18, MEADOW_CONTINUUM_MOBILE_CAPACITY = 1 << 16, MEADOW_CONTINUUM_SECONDARY_CAPACITY = 1 << 16;
 // The ground meadows stop at.
 const MEADOW_WATERLINE = 0.75;
+// The blades each list holds (near, middle, far) and the cells the cells pass may list: the primary section's on a
+// desktop, a neighbouring section's, and a phone's.
+const MEADOW_BLADE_ROOM = Object.freeze({
+  primary: Object.freeze([196608, 524288, 1048576, 131072]),
+  secondary: Object.freeze([49152, 131072, 262144, 65536]),
+  mobile: Object.freeze([32768, 131072, 262144, 65536]),
+});
+// A phone draws its narrowest blades this much wider, and so fewer of them.
+const MEADOW_BLADE_MOBILE_COARSER = 1.25;
+
+// Each coast's sward, by its climate: three mixes in the roles of MEADOW_MIX_ROLES, each of species with their share
+// of the mix, their colour at the foot and the tip (linear), height and width (m), how far they droop at rest, how
+// stiff they stand, and the shares bearing a head (its colour and length along the blade), dry and in flower. A mix
+// grows as densely as its density says, of the fullest sward (js/wgsl/meadow-blades.js MEADOW_BLADE_DENSITY).
+const meadowSpecies = (share, height, width, foot, tip, droop, stiffness, { head = 0, headColour = [0.13, 0.12, 0.06], headLength = 0.2, dry = 0, flower = 0 } = {}) =>
+  Object.freeze({ share, height, width, foot, tip, droop, stiffness, head, headColour, headLength, dry, flower });
+export const MEADOW_SWARDS = Object.freeze({
+  portugal: Object.freeze({
+    flower: [0.62, 0.62, 0.55],
+    mixes: [
+      // Hay meadow: rye-grass, fescue, bent, timothy, clover and ox-eye daisies, knee high and more by early summer.
+      { density: 1.0, species: [
+        meadowSpecies(0.30, 0.70, 0.0045, [0.025, 0.088, 0.012], [0.049, 0.172, 0.018], 0.55, 8, { head: 0.08, dry: 0.02 }),
+        meadowSpecies(0.20, 0.85, 0.0050, [0.029, 0.085, 0.015], [0.056, 0.160, 0.022], 0.50, 9, { head: 0.10, headColour: [0.14, 0.12, 0.07], headLength: 0.18, dry: 0.03 }),
+        meadowSpecies(0.22, 0.48, 0.0030, [0.024, 0.086, 0.012], [0.044, 0.165, 0.018], 0.62, 6, { head: 0.06, headColour: [0.12, 0.10, 0.08], headLength: 0.22, dry: 0.03 }),
+        meadowSpecies(0.10, 1.05, 0.0035, [0.031, 0.084, 0.017], [0.060, 0.150, 0.026], 0.22, 12, { head: 0.55, headColour: [0.12, 0.11, 0.07], headLength: 0.14, dry: 0.04 }),
+        meadowSpecies(0.12, 0.25, 0.0110, [0.020, 0.075, 0.012], [0.039, 0.140, 0.019], 0.70, 5, { flower: 0.10 }),
+        meadowSpecies(0.06, 0.60, 0.0030, [0.027, 0.080, 0.015], [0.048, 0.135, 0.021], 0.12, 10, { flower: 0.5 }),
+      ] },
+      // Hill pasture: red fescue, cocksfoot, bent, thyme and wild oat, shorter and greyer.
+      { density: 0.9, species: [
+        meadowSpecies(0.35, 0.40, 0.0025, [0.032, 0.080, 0.017], [0.061, 0.142, 0.028], 0.58, 7, { head: 0.10, headColour: [0.16, 0.12, 0.08], dry: 0.08 }),
+        meadowSpecies(0.22, 0.70, 0.0060, [0.031, 0.082, 0.019], [0.058, 0.145, 0.028], 0.45, 10, { head: 0.25, headColour: [0.15, 0.13, 0.08], dry: 0.06 }),
+        meadowSpecies(0.25, 0.36, 0.0030, [0.027, 0.084, 0.015], [0.053, 0.150, 0.024], 0.62, 6, { head: 0.10, headColour: [0.14, 0.11, 0.09], headLength: 0.25, dry: 0.05 }),
+        meadowSpecies(0.10, 0.18, 0.0080, [0.029, 0.066, 0.019], [0.053, 0.105, 0.033], 0.60, 5, { dry: 0.04, flower: 0.12 }),
+        meadowSpecies(0.08, 0.85, 0.0060, [0.039, 0.086, 0.022], [0.076, 0.138, 0.038], 0.30, 9, { head: 0.60, headColour: [0.20, 0.17, 0.08], headLength: 0.25, dry: 0.20 }),
+      ] },
+      // Field and road margins: wild oat, brome, cocksfoot, ribwort and poppies, tall and seeding.
+      { density: 0.85, species: [
+        meadowSpecies(0.30, 0.95, 0.0070, [0.039, 0.090, 0.022], [0.081, 0.148, 0.038], 0.35, 10, { head: 0.55, headColour: [0.21, 0.17, 0.08], headLength: 0.25, dry: 0.25 }),
+        meadowSpecies(0.25, 0.75, 0.0050, [0.034, 0.088, 0.019], [0.068, 0.145, 0.032], 0.48, 8, { head: 0.45, headColour: [0.17, 0.12, 0.09], headLength: 0.25, dry: 0.20 }),
+        meadowSpecies(0.20, 0.75, 0.0060, [0.031, 0.086, 0.019], [0.058, 0.150, 0.028], 0.45, 10, { head: 0.25, headColour: [0.15, 0.13, 0.08], dry: 0.12 }),
+        meadowSpecies(0.10, 0.45, 0.0040, [0.027, 0.078, 0.019], [0.051, 0.125, 0.030], 0.12, 12, { head: 0.70, headColour: [0.09, 0.08, 0.05], headLength: 0.12, dry: 0.05 }),
+        meadowSpecies(0.15, 0.50, 0.0040, [0.031, 0.088, 0.019], [0.053, 0.135, 0.027], 0.22, 9, { head: 0.10, headColour: [0.35, 0.03, 0.02], headLength: 0.10, flower: 0.10 }),
+      ] },
+    ],
+  }),
+  tropical: Object.freeze({
+    flower: [0.52, 0.50, 0.30],
+    mixes: [
+      { density: 1.0, species: [
+        meadowSpecies(0.40, 0.25, 0.0060, [0.035, 0.100, 0.018], [0.065, 0.180, 0.030], 0.55, 7, { head: 0.06, headColour: [0.12, 0.12, 0.05], headLength: 0.18, dry: 0.03 }),
+        meadowSpecies(0.25, 0.55, 0.0070, [0.040, 0.100, 0.022], [0.070, 0.160, 0.035], 0.45, 9, { head: 0.20, headColour: [0.12, 0.10, 0.06], dry: 0.06 }),
+        meadowSpecies(0.20, 0.38, 0.0050, [0.040, 0.110, 0.022], [0.070, 0.170, 0.035], 0.30, 10, { head: 0.20, headColour: [0.13, 0.09, 0.05], headLength: 0.10, dry: 0.04 }),
+        meadowSpecies(0.15, 0.20, 0.0120, [0.030, 0.090, 0.020], [0.050, 0.140, 0.030], 0.60, 5, { flower: 0.10 }),
+      ] },
+      { density: 0.8, species: [
+        meadowSpecies(0.45, 0.85, 0.0040, [0.080, 0.075, 0.035], [0.170, 0.120, 0.060], 0.25, 10, { head: 0.20, headColour: [0.20, 0.16, 0.10], headLength: 0.25, dry: 0.45 }),
+        meadowSpecies(0.30, 0.50, 0.0030, [0.050, 0.080, 0.030], [0.100, 0.120, 0.050], 0.50, 7, { head: 0.30, headColour: [0.16, 0.12, 0.09], headLength: 0.30, dry: 0.40 }),
+        meadowSpecies(0.25, 0.45, 0.0070, [0.045, 0.090, 0.028], [0.080, 0.140, 0.040], 0.45, 9, { head: 0.15, headColour: [0.12, 0.10, 0.06], dry: 0.20 }),
+      ] },
+      { density: 0.4, species: [
+        meadowSpecies(0.60, 0.22, 0.0040, [0.040, 0.095, 0.030], [0.070, 0.150, 0.045], 0.50, 8, { head: 0.10, headColour: [0.13, 0.11, 0.06], dry: 0.15 }),
+        meadowSpecies(0.40, 0.30, 0.0040, [0.070, 0.080, 0.035], [0.130, 0.120, 0.060], 0.35, 8, { head: 0.30, headColour: [0.18, 0.15, 0.08], headLength: 0.15, dry: 0.40 }),
+      ] },
+    ],
+  }),
+});
+// The straw a dry blade turns to, foot and tip (js/wgsl/meadow-blades.js MEADOW_STRAW_FOOT and _TIP).
+const MEADOW_STRAW = Object.freeze([[0.092, 0.078, 0.036], [0.215, 0.178, 0.084]]);
+
+// A sward as the GPU reads it (MeadowSward), and each mix's mean colour as seen from above, the share of each kind
+// of blade weighed in (MeadowCfg's mixes: the sward far off, where a pixel holds many blades).
+export function packMeadowSward(sward) {
+  const data = new ArrayBuffer(MEADOW_SWARD_BYTES), f = new Float32Array(data), u = new Uint32Array(data);
+  const means = [];
+  let next = 0;
+  sward.mixes.forEach((mix, m) => {
+    const total = mix.species.reduce((n, s) => n + s.share, 0);
+    if (next + mix.species.length > MEADOW_SPECIES_MOST) throw Error(`A meadow sward holds at most ${MEADOW_SPECIES_MOST} species`);
+    u.set([next, mix.species.length, 0, 0], m * 4);
+    f[12 + m] = mix.density;
+    let ends = 0;
+    const mean = [0, 0, 0];
+    for (const s of mix.species) {
+      ends += s.share / total;
+      const at = (12 + 8) + next * 20;
+      f.set([...s.foot, s.height, ...s.tip, s.width, ends, s.droop, s.stiffness, s.head, s.dry, s.flower, 0, 0, ...s.headColour, s.headLength], at);
+      for (let k = 0; k < 3; k++) {
+        const green = s.foot[k] + (s.tip[k] - s.foot[k]) * 0.775, straw = MEADOW_STRAW[0][k] + (MEADOW_STRAW[1][k] - MEADOW_STRAW[0][k]) * 0.775;
+        const blade = green * (1 - s.dry) + straw * s.dry;
+        const look = blade * (1 - s.flower * 0.6 - s.head * 0.5) + sward.flower[k] * s.flower * 0.6 + s.headColour[k] * s.head * 0.5;
+        mean[k] += look * s.share / total;
+      }
+      next++;
+    }
+    means.push(mean);
+  });
+  f.set([...sward.flower, 0], 16);
+  return { data, means };
+}
 
 function hash2D(ix, iz) {
   let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263)) | 0;
@@ -542,112 +636,68 @@ export function buildMeadowCoverMap({
   return cover;
 }
 
-
-// The blocks of `region` on the world's grid of blocks, and for each the most grass the cover map grows on or beside
-// it and the lowest and highest ground under that grass: what the stand pass's first pass reads.
-export function meadowBlocksOf({ cover, size, region, heights }) {
-  const side = MEADOW_PATCH_METRES * MEADOW_BLOCK_PATCHES, span = region.span;
-  const x0 = region.x - span * 0.5, z0 = region.z - span * 0.5, step = span / size;
-  const first = [Math.floor(x0 / side), Math.floor(z0 / side)];
-  const across = [Math.ceil((x0 + span) / side) - first[0], Math.ceil((z0 + span) / side) - first[1]];
-  const data = new Float32Array(across[0] * across[1] * 4);
-  for (let b = 0; b < across[0] * across[1]; b++) data.set([0, Infinity, -Infinity, 0], b * 4);
-  const n = region.size || Math.round(Math.sqrt(heights?.length || 0));
-  const hasHeights = n >= 2 && heights?.length >= n * n;
-  // A patch reads the cover map bilinearly at its middle and its corners: a texel touches the blocks within a texel
-  // and half a patch of it.
-  const reach = step + MEADOW_PATCH_METRES * 0.5;
-  // Which patches could stand at all: those with a point the stand pass reads (a patch's middle and corners, or a
-  // coarse patch's lattice, all on its patches' edges) within a texel of grass.
-  const P = MEADOW_PATCH_METRES, cellsX = across[0] * MEADOW_BLOCK_PATCHES, cellsZ = across[1] * MEADOW_BLOCK_PATCHES;
-  const cellX0 = first[0] * MEADOW_BLOCK_PATCHES, cellZ0 = first[1] * MEADOW_BLOCK_PATCHES, cells = new Uint8Array(cellsX * cellsZ);
-  let texels = 0;
-  for (let j = 0; j < size; j++) {
-    const wz = z0 + (j + 0.5) * step, v = (j + 0.5) / size;
-    for (let i = 0; i < size; i++) {
-      const r = cover[(j * size + i) * 4];
-      if (r >= 32) texels++;
-      if (r < 5) continue;
-      const wx = x0 + (i + 0.5) * step, u = (i + 0.5) / size;
-      const y = hasHeights ? sampleGridBilinear(heights, n, u, v) : 0;
-      const bi0 = Math.max(0, Math.floor((wx - reach) / side) - first[0]), bi1 = Math.min(across[0] - 1, Math.floor((wx + reach) / side) - first[0]);
-      const bj0 = Math.max(0, Math.floor((wz - reach) / side) - first[1]), bj1 = Math.min(across[1] - 1, Math.floor((wz + reach) / side) - first[1]);
-      for (let bj = bj0; bj <= bj1; bj++) for (let bi = bi0; bi <= bi1; bi++) {
-        const at = (bj * across[0] + bi) * 4;
-        data[at] = Math.max(data[at], r / 255);
-        data[at + 1] = Math.min(data[at + 1], y);
-        data[at + 2] = Math.max(data[at + 2], y);
-      }
-      const ci0 = Math.max(0, Math.ceil((wx - step) / P) - 1 - cellX0), ci1 = Math.min(cellsX - 1, Math.floor((wx + step) / P) - cellX0);
-      const cj0 = Math.max(0, Math.ceil((wz - step) / P) - 1 - cellZ0), cj1 = Math.min(cellsZ - 1, Math.floor((wz + step) / P) - cellZ0);
-      for (let cj = cj0; cj <= cj1; cj++) if (ci0 <= ci1) cells.fill(1, cj * cellsX + ci0, cj * cellsX + ci1 + 1);
-    }
-  }
-  for (let b = 0; b < across[0] * across[1]; b++) if (!(data[b * 4] > 0)) data.set([0, 0, 0, 0], b * 4);
-  // Each block's most records at each grain (js/wgsl/meadow-continuum.js meadowStandBudget): its patches that could
-  // stand, and its squares of 2, 4, 8 and 16 patches holding any.
-  const grains = new Uint32Array(data.buffer, data.byteOffset, data.length), B = MEADOW_BLOCK_PATCHES;
-  for (let bj = 0; bj < across[1]; bj++) for (let bi = 0; bi < across[0]; bi++) {
-    const at = (bj * across[0] + bi) * 4;
-    if (!(data[at] > 0)) continue;
-    let word = 0;
-    MEADOW_GRAIN_BITS.forEach(([shift], level) => {
-      const g = 1 << level, side = B >> level;
-      let n = 0;
-      for (let gz = 0; gz < side; gz++) for (let gx = 0; gx < side; gx++) {
-        let any = false;
-        for (let z = 0; z < g && !any; z++) {
-          const row = (bj * B + gz * g + z) * cellsX + bi * B + gx * g;
-          for (let x = 0; x < g; x++) if (cells[row + x]) { any = true; break; }
-        }
-        if (any) n++;
-      }
-      word |= n << shift;
-    });
-    grains[at + 3] = word >>> 0;
-  }
-  return { first, across, count: across[0] * across[1], data, texels };
-}
-
-// The stand pass's five programs, each with its own bind group layout, so the blocks-in-view list is written by one
-// pass and read, and dispatched from, by the next. One set a device, compiled one after another (D3D12 runs out of
-// pipeline state memory compiling them at once).
-export function requestMeadowStand(device, shader) {
-  return requestOnce(device, 'meadow continuum stand', async () => {
-    const C = GPUShaderStage.COMPUTE;
-    const buffer = (binding, type) => ({ binding, visibility: C, buffer: { type } });
-    const texture = (binding, sampleType, viewDimension = '2d') => ({ binding, visibility: C, texture: { sampleType, viewDimension } });
-    const uniforms = [buffer(0, 'uniform'), buffer(1, 'uniform'), buffer(2, 'uniform')];
-    const entries = {
-      reset: [buffer(9, 'storage'), buffer(10, 'storage')],
-      blocks: [...uniforms, buffer(6, 'read-only-storage'), buffer(10, 'storage'), buffer(12, 'uniform'), texture(18, 'unfilterable-float'), buffer(19, 'uniform')],
-      budget: [buffer(0, 'uniform'), buffer(1, 'uniform'), buffer(10, 'storage')],
-      patches: [...uniforms, texture(3, 'unfilterable-float'), texture(4, 'float'), buffer(5, 'read-only-storage'), buffer(7, 'storage'), buffer(8, 'storage'), buffer(9, 'storage'),
-        buffer(11, 'read-only-storage'), buffer(12, 'uniform'), buffer(13, 'uniform'), texture(14, 'sint'), texture(15, 'float', '2d-array'),
-        { binding: 16, visibility: C, sampler: { type: 'filtering' } }, texture(17, 'unfilterable-float', '2d-array')],
-      finish: [buffer(1, 'uniform'), buffer(7, 'storage'), buffer(9, 'storage')],
+// The blade field's programs, one set a device, colour format and sample count: the five compute passes, each with
+// its own bind group layout (a buffer one pass writes is read, and dispatched from, by the next), and the three
+// draws, one a list, differing only in their blades' segments. Compiled one after another (D3D12 runs out of pipeline
+// state memory compiling them at once).
+const MEADOW_BLADE_PASSES = Object.freeze({
+  reset: Object.freeze([7, 8]),
+  cells: Object.freeze([0, 1, 2, 3, 8, 14]),
+  args: Object.freeze([7, 8, 14]),
+  sow: Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17]),
+  finish: Object.freeze([7, 14]),
+});
+const MEADOW_BLADE_ENTRY_POINTS = Object.freeze({ reset: 'meadowBladeReset', cells: 'meadowBladeCells', args: 'meadowBladeArgs', sow: 'meadowBladeSow', finish: 'meadowBladeFinish' });
+// What the draws bind in group 0, beside the land's own (the frame, the sky's light, the land's light and shadow map).
+const MEADOW_BLADE_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 18, 19, 20, 21, 24]);
+export function requestMeadowBladePrograms(device, shader, format, samples) {
+  return requestOnce(device, `meadow blades ${format} ${samples}`, async () => {
+    const C = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+    const buffer = (binding, type, visibility = C) => ({ binding, visibility, buffer: { type } });
+    const texture = (binding, sampleType, viewDimension = '2d', visibility = C) => ({ binding, visibility, texture: { sampleType, viewDimension } });
+    const sampler = (binding, type, visibility = C) => ({ binding, visibility, sampler: { type } });
+    const computeEntries = {
+      0: buffer(0, 'uniform'), 1: buffer(1, 'uniform'), 2: buffer(2, 'uniform'), 3: texture(3, 'unfilterable-float'), 4: texture(4, 'float'),
+      5: buffer(5, 'uniform'), 6: buffer(6, 'storage'), 7: buffer(7, 'storage'), 8: buffer(8, 'storage'), 9: buffer(9, 'uniform'),
+      10: texture(10, 'sint'), 11: texture(11, 'float', '2d-array'), 12: sampler(12, 'filtering'), 13: texture(13, 'unfilterable-float', '2d-array'),
+      14: buffer(14, 'uniform'), 15: buffer(15, 'read-only-storage'), 16: buffer(16, 'storage'), 17: buffer(17, 'storage'),
     };
-    const points = { reset: 'meadowStandReset', blocks: 'meadowBlocksInView', budget: 'meadowStandBudget', patches: 'meadowStandPatches', finish: 'meadowStandFinish' };
-    const module = await shader(meadowContinuumStandWGSL(), 'meadow stand');
-    const layouts = {}, pipelines = {};
-    const names = Object.keys(entries);
-    for (const name of names) {
-      layouts[name] = device.createBindGroupLayout({ label: `meadow stand ${name}`, entries: entries[name] });
+    const computeModule = await shader(meadowBladesComputeWGSL(), 'meadow blades sow');
+    const layouts = {}, passes = {};
+    for (const [name, ids] of Object.entries(MEADOW_BLADE_PASSES)) {
+      layouts[name] = device.createBindGroupLayout({ label: `meadow blades ${name}`, entries: ids.map((id) => computeEntries[id]) });
     }
-    // One at a time: five pipeline states compiled at once have run D3D12 out of memory.
-    for (const name of names) {
-      pipelines[name] = await device.createComputePipelineAsync({
-        label: `meadow stand ${name}`, layout: device.createPipelineLayout({ label: `meadow stand ${name}`, bindGroupLayouts: [layouts[name]] }),
-        compute: { module, entryPoint: points[name] },
+    for (const name of Object.keys(MEADOW_BLADE_PASSES)) {
+      passes[name] = await device.createComputePipelineAsync({
+        label: `meadow blades ${name}`, layout: device.createPipelineLayout({ label: `meadow blades ${name}`, bindGroupLayouts: [layouts[name]] }),
+        compute: { module: computeModule, entryPoint: MEADOW_BLADE_ENTRY_POINTS[name] },
       });
     }
-    return { layouts, pipelines };
+    const view = device.createBindGroupLayout({ label: 'meadow blades view', entries: [
+      buffer(0, 'uniform', VF), texture(1, 'float', '2d', VF), texture(2, 'float', '2d', VF), sampler(3, 'filtering', VF), texture(4, 'float', 'cube', VF),
+      buffer(5, 'uniform', VF), buffer(6, 'uniform', VF), buffer(7, 'uniform', VF), buffer(8, 'read-only-storage', VF), buffer(9, 'uniform', VF),
+      texture(15, 'float', '2d', VF), texture(16, 'float', '2d', VF), sampler(18, 'filtering', VF), buffer(19, 'uniform', VF),
+      texture(20, 'depth', '2d', VF), sampler(21, 'comparison', VF), buffer(24, 'read-only-storage', VF),
+    ] });
+    const clouds = device.createBindGroupLayout({ label: 'meadow blades clouds', entries: [
+      buffer(0, 'uniform', VF), texture(5, 'float', '2d', VF), sampler(6, 'filtering', VF),
+    ] });
+    const layout = device.createPipelineLayout({ label: 'meadow blades view', bindGroupLayouts: [view, clouds] });
+    const drawModule = await shader(meadowBladesDrawWGSL(), 'meadow blades view');
+    const draws = [];
+    for (const segments of MEADOW_BLADE_SEGMENTS) {
+      draws.push(await device.createRenderPipelineAsync({
+        label: `meadow blades ${segments}`, layout,
+        vertex: { module: drawModule, entryPoint: 'meadowBladeVS', constants: { MEADOW_BLADE_SEGMENTS_DRAWN: segments } },
+        fragment: { module: drawModule, entryPoint: 'meadowBladeFS', targets: [{ format }] },
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+        multisample: { count: samples },
+      }));
+    }
+    return { layouts, passes, view, draws };
   });
 }
-// What each stand pass binds.
-const MEADOW_STAND_BINDINGS = Object.freeze({ reset: [9, 10], blocks: [0, 1, 2, 6, 10, 12, 18, 19], budget: [0, 1, 10], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17], finish: [1, 7, 9] });
-// What the material's view, and its capture under water, bind in group 0.
-const MEADOW_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24]);
 
 export async function createMeadowGrass({
   device,
@@ -676,70 +726,45 @@ export async function createMeadowGrass({
   capacityLimit = null,
   worldOffset = null,
 }) {
-  if (!(pack?.words?.length > 0) || !pack.manifest) return null;
-  const packManifest = pack.manifest;
+  const swardName = pack?.sward;
+  const sward = MEADOW_SWARDS[swardName];
+  if (!sward) return null;
+  void shadowFormat; void waterOptics; void capacityLimit; void worldOffset;
   const B = GPUBufferUsage;
   const land0 = new Map(resources);
-  const frame = land0.get(0)?.buffer, shadowUniform = land0.get(19)?.buffer;
-  if (!frame || !shadowUniform) throw Error('The meadow is cut and lit by the land\'s frame and shadow map, and there are none');
-  // The atlas, the one cut's programs, the meadow's view and its stand pass, asked for at once, the programs binding as
-  // many pages as the atlas takes. Meadow grass only grows above MEADOW_WATERLINE (0.75 m), so it never draws into the
-  // underwater submerged-geometry capture pass.
-  const pages = continuumAtlasPages(device, pack.words);
-  let packRef = pack;
-  pack = null; // Release parameter slot so returned closures never retain the full raw CPU meadow words buffer.
-  const [atlas, programs, view, stand] = await Promise.all([
-    requestContinuumAtlas(device, `meadow ${packManifest.pack}`, async () => { const p = packRef; packRef = null; return p; }, { surfels: false }),
-    requestContinuumPrograms({ device, shader, shadowFormat, pages }),
-    requestContinuumView({ device, shader, material: MEADOW_CONTINUUM_SPEC, format, samples, pages }),
-    requestMeadowStand(device, shader),
-  ]);
-  packRef = null;
-  if (atlas.types.length !== packManifest.types.length) throw Error(`The meadow continuum atlas holds ${atlas.types.length} types, its manifest ${packManifest.types.length}: rebake it`);
-  // The pack's mixes in their roles: a strand for a margin sows it behind the beaches.
-  const coast = (packManifest.mixes ?? [])[MEADOW_MIX_ROLES.indexOf('margin')] === 'strand';
+  const frame = land0.get(0)?.buffer;
+  if (!frame) throw Error('The meadow is lit by the land\'s frame, and there is none');
+  const programs = await requestMeadowBladePrograms(device, shader, format, samples);
+  // A strand for a margin sows it behind the beaches.
+  const coast = swardName === 'tropical';
   const mkBuf = (label, size, usage, data = null) => {
     const buf = device.createBuffer({ label, size: Math.max(16, size), usage });
     if (data?.byteLength) device.queue.writeBuffer(buf, 0, data);
     return buf;
   };
+  const room = isMobile ? MEADOW_BLADE_ROOM.mobile : isSecondary ? MEADOW_BLADE_ROOM.secondary : MEADOW_BLADE_ROOM.primary;
+  const label = isSecondary ? 'meadow secondary' : 'meadow';
+  const lists = room.slice(0, 3).map((n, k) => mkBuf(`${label} blades ${MEADOW_BLADE_SEGMENTS[k]}`, n * MEADOW_BLADE_RECORD_BYTES, B.STORAGE));
+  const cells = mkBuf(`${label} blade cells`, (MEADOW_BLADE_CELL_HEADER + 2 * room[3]) * 4, B.STORAGE | B.INDIRECT | B.COPY_SRC);
+  const draws = mkBuf(`${label} blade draws`, MEADOW_BLADE_DRAW_WORDS * 4, B.STORAGE | B.INDIRECT | B.COPY_SRC);
 
-  // One scene of every patch the stand pass may write a frame, as many as the device binds in one buffer (a patch's
-  // pose data is its largest share), its room split evenly over the variants. Secondary coastal sections share the
-  // exact same GPU atlas & compiled pipelines with compact cover/capacity so neighbor tiles add minimal VRAM.
-  const defaultCapacity = isSecondary
-    ? (isMobile ? (1 << 16) : MEADOW_CONTINUUM_SECONDARY_CAPACITY)
-    : (isMobile ? MEADOW_CONTINUUM_MOBILE_CAPACITY : MEADOW_CONTINUUM_CAPACITY);
-  const wanted = Number.isFinite(capacityLimit) && capacityLimit > 0 ? Math.floor(capacityLimit) : defaultCapacity;
-  const most = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / (MEADOW_CONTINUUM_POSE * 16));
-  const perType = Math.floor(Math.min(wanted, most) / atlas.types.length);
-  const { capacity, room } = continuumRoom(atlas.types, atlas.types.map(() => perType));
-  const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: isSecondary ? 'meadow secondary' : 'meadow', written: true, profile: 'meadow' });
-  scene.setCount(capacity);
-  scene.setWorldOffset(worldOffset?.x ?? 0, worldOffset?.z ?? 0);
-  const stood = mkBuf('meadow stood', MEADOW_CONTINUUM_STOOD_BYTES, B.STORAGE | B.INDIRECT);
-  let blockWork = null, blocksBuf = null, blockCount = 0;
-
-  // The uniform the stand pass and the material read: MeadowCfg.
+  // The sward, and each mix's mean colour far off.
+  const packed = packMeadowSward(sward);
+  const swardBuf = mkBuf(`${label} sward`, MEADOW_SWARD_BYTES, B.UNIFORM | B.COPY_DST, new Uint8Array(packed.data));
+  // The uniform the passes and the draws read: MeadowCfg.
   const cfgData = new ArrayBuffer(MEADOW_CONTINUUM_CFG_BYTES);
-  const cfgF = new Float32Array(cfgData), cfgU = new Uint32Array(cfgData), cfgI = new Int32Array(cfgData);
-  const cfgBuf = mkBuf('meadow continuum cfg', MEADOW_CONTINUUM_CFG_BYTES, B.UNIFORM | B.COPY_DST);
-  cfgU.set([samples, coverSize, capacity, 1], 4);
+  const cfgF = new Float32Array(cfgData), cfgU = new Uint32Array(cfgData);
+  const cfgBuf = mkBuf(`${label} cfg`, MEADOW_CONTINUUM_CFG_BYTES, B.UNIFORM | B.COPY_DST);
+  cfgU.set([samples, coverSize, room[2], 1], 4);
   cfgF.set([continuumPixelError(), MEADOW_GUST_WAVE, 0, 0], 16);
   cfgU[22] = isSecondary ? 0 : 1; // cfg.more.z: 1 when primary section (landLight valid), 0 for secondary sections
-  // Each mix's colour and cover from above, the mean of its variants (meadowMixMean): a colour word holds three
-  // square roots of a linear colour. Read from atlas.words (compact metadata prefix), never pinning full raw pack words.
-  const words = atlas.words, floats = new Float32Array(words.buffer, words.byteOffset, words.length), M = MEADOW_CONTINUUM_MATERIAL;
-  const mixCounts = [0, 0, 0];
-  for (let t = 0; t < atlas.types.length; t++) {
-    const at = words[CONTINUUM_HEADER.typesAt] + t * CONTINUUM_TYPE_WORDS, mix = words[at + M.mix], top = words[at + M.top];
-    if (!(mix < 3)) continue;
-    for (let k = 0; k < 3; k++) cfgF[24 + mix * 4 + k] += ((top >>> (8 * k)) & 255) ** 2 / 65025;
-    cfgF[24 + mix * 4 + 3] += floats[at + M.coverage];
-    mixCounts[mix]++;
-  }
-  for (let mix = 0; mix < 3; mix++) for (let k = 0; k < 4; k++) cfgF[24 + mix * 4 + k] /= Math.max(1, mixCounts[mix]);
+  packed.means.forEach((mean, m) => cfgF.set([...mean, 1], 24 + m * 4));
   let cfgDirty = true;
+  // The per-frame uniform: MeadowBladeFrame.
+  const frameData = new ArrayBuffer(MEADOW_BLADE_FRAME_BYTES);
+  const frameF = new Float32Array(frameData), frameU = new Uint32Array(frameData);
+  const frameBuf = mkBuf(`${label} blade frame`, MEADOW_BLADE_FRAME_BYTES, B.UNIFORM | B.COPY_DST);
+  frameU.set(room, 8);
 
   let boundCraters = null;
   let unsubscribeCraters = null;
@@ -756,7 +781,7 @@ export async function createMeadowGrass({
   const wakeData = new ArrayBuffer(MEADOW_WAKE_BUFFER_BYTES);
   const wakeU32 = new Uint32Array(wakeData);
   const wakeF32 = new Float32Array(wakeData);
-  const wakeBuf = mkBuf('meadow ballistic wakes', MEADOW_WAKE_BUFFER_BYTES, B.UNIFORM | B.COPY_DST, new Uint8Array(wakeData));
+  const wakeBuf = mkBuf(`${label} ballistic wakes`, MEADOW_WAKE_BUFFER_BYTES, B.UNIFORM | B.COPY_DST, new Uint8Array(wakeData));
   let wakesWereEmpty = true;
 
   // 1x1 crater textures while no craters are bound, or before the first impact allocates the field
@@ -776,7 +801,7 @@ export async function createMeadowGrass({
   device.queue.writeTexture({ texture: fallbackCraterField }, new Uint16Array(4), { offset: 0 }, [1, 1, 1]);
 
   const coverTexture = device.createTexture({
-    label: isSecondary ? 'meadow secondary cover' : 'meadow cover',
+    label: `${label} cover`,
     size: [coverSize, coverSize],
     format: 'rgba8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
@@ -794,7 +819,7 @@ export async function createMeadowGrass({
       ownedElevation?.destroy();
       ownedElevSize = nextSize;
       ownedElevation = device.createTexture({
-        label: isSecondary ? 'meadow secondary elevation' : 'meadow elevation',
+        label: `${label} elevation`,
         size: [nextSize, nextSize],
         format: 'r32float',
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
@@ -807,33 +832,34 @@ export async function createMeadowGrass({
     return resized;
   };
 
-  // The stand pass's bind groups, one a pass, and the view's group: rebuilt when the region's blocks,
-  // the land's resources or the craters change.
+  // The passes' bind groups, one a pass, and the draws', one a list: rebuilt when the land's resources or the
+  // craters change.
   let activeResources = resources;
-  let standGroups = null, viewGroup = null;
-  const cloudGroup = clouds.bindVolume(view.pipeline, 'shadow');
+  let passGroups = null, viewGroups = null;
+  const cloudGroup = clouds.bindVolume(programs.draws[0], 'shadow');
   function buildGroups() {
     if (!elevationView) return;
     const land = new Map(activeResources);
     const craterLookupView = (boundCraters?.lookupTexture ?? fallbackCraterLookup).createView();
     const craterFieldView = (boundCraters?.fieldTexture ?? fallbackCraterField).createView({ dimension: '2d-array' });
-    if (blocksBuf) {
-      const resource = {
-        0: land.get(0), 1: { buffer: cfgBuf }, 2: { buffer: nearDomain }, 3: elevationView, 4: coverView, 5: { buffer: atlas.buffer },
-        6: { buffer: blocksBuf }, 7: { buffer: scene.records }, 8: { buffer: scene.poses }, 9: { buffer: stood }, 10: { buffer: blockWork }, 11: { buffer: blockWork },
-        12: land.get(19), 13: { buffer: wakeBuf }, 14: craterLookupView, 15: craterFieldView, 16: land.get(8), 17: continuumGroundView(device),
-        18: continuumHiZView(device), 19: { buffer: continuumHiZUniform(device) },
-      };
-      standGroups = Object.fromEntries(Object.entries(MEADOW_STAND_BINDINGS).map(([name, ids]) => [name, device.createBindGroup({
-        label: `meadow stand ${name}`, layout: stand.layouts[name], entries: ids.map((binding) => ({ binding, resource: resource[binding] })),
-      })]));
-    }
-    const own = new Map([
-      [5, { buffer: cfgBuf }], [6, elevationView], [13, { buffer: wakeBuf }], [14, craterLookupView], [15, land.get(5)], [16, coverView],
-      [17, land.get(7)], [18, land.get(8)], [22, craterFieldView],
-    ]);
-    const entries = MEADOW_VIEW_BINDINGS.map((binding) => ({ binding, resource: own.get(binding) ?? land.get(binding) }));
-    viewGroup = device.createBindGroup({ label: 'meadow view', layout: view.pipeline.getBindGroupLayout(0), entries });
+    const resource = {
+      0: land.get(0), 1: { buffer: cfgBuf }, 2: { buffer: nearDomain }, 3: elevationView, 4: coverView, 5: { buffer: swardBuf },
+      6: { buffer: lists[0] }, 7: { buffer: draws }, 8: { buffer: cells }, 9: { buffer: wakeBuf }, 10: craterLookupView, 11: craterFieldView,
+      12: land.get(8), 13: continuumGroundView(device), 14: { buffer: frameBuf }, 15: { buffer: cells }, 16: { buffer: lists[1] }, 17: { buffer: lists[2] },
+    };
+    passGroups = Object.fromEntries(Object.entries(MEADOW_BLADE_PASSES).map(([name, ids]) => [name, device.createBindGroup({
+      label: `${label} blades ${name}`, layout: programs.layouts[name], entries: ids.map((binding) => ({ binding, resource: resource[binding] })),
+    })]));
+    viewGroups = lists.map((list, k) => {
+      const own = new Map([
+        [5, { buffer: cfgBuf }], [6, { buffer: swardBuf }], [7, { buffer: frameBuf }], [8, { buffer: list }], [9, { buffer: nearDomain }],
+        [15, land.get(5)], [16, coverView], [18, land.get(8)],
+      ]);
+      return device.createBindGroup({
+        label: `${label} blades view ${MEADOW_BLADE_SEGMENTS[k]}`, layout: programs.view,
+        entries: MEADOW_BLADE_VIEW_BINDINGS.map((binding) => ({ binding, resource: own.get(binding) ?? land.get(binding) })),
+      });
+    });
   }
 
   let curRegion = region;
@@ -871,21 +897,12 @@ export async function createMeadowGrass({
       coast,
     });
     device.queue.writeTexture({ texture: coverTexture }, map, { bytesPerRow: coverSize * 4 }, [coverSize, coverSize]);
-    const blocks = meadowBlocksOf({ cover: map, size: coverSize, region: curRegion, heights: curHeights });
-    coverTexels = blocks.texels;
-    const grown = blocks.count !== blockCount;
-    if (grown) {
-      blocksBuf?.destroy(); blockWork?.destroy();
-      blockCount = blocks.count;
-      blocksBuf = mkBuf('meadow continuum blocks', blockCount * 16, B.STORAGE | B.COPY_DST | B.COPY_SRC);
-      blockWork = mkBuf('meadow continuum blocks in view', (MEADOW_WORK_HEADER + blockCount) * 4, B.STORAGE | B.INDIRECT | B.COPY_SRC);
-    }
-    device.queue.writeBuffer(blocksBuf, 0, blocks.data);
+    let texels = 0;
+    for (let i = 0; i < map.length; i += 4) if (map[i] >= 32) texels++;
+    coverTexels = texels;
     cfgF.set([curRegion.x, curRegion.z, curRegion.span, MEADOW_WATERLINE], 0);
-    cfgI.set([blocks.first[0], blocks.first[1], blocks.across[0], blocks.across[1]], 12);
-    cfgU[21] = blockCount;
     syncCraterCfg(curRegion);
-    if (grown || elevResized) buildGroups();
+    if (elevResized || !passGroups) buildGroups();
   }
 
   function bindCraters(nextCraters = null) {
@@ -992,30 +1009,23 @@ export async function createMeadowGrass({
   if (craters) bindCraters(craters);
   else buildGroups();
 
-  const manifestTypes = packManifest.types ?? [];
+  const cellGroups = Math.ceil(MEADOW_BLADE_GRID * MEADOW_BLADE_GRID / 64);
   return {
     stats: {
       loaded: true,
-      backend: 'continuum',
-      style: packManifest.format,
-      pack: packManifest.pack,
-      mixes: packManifest.mixes,
-      variants: manifestTypes.length,
-      clusters: manifestTypes.reduce((n, v) => n + v.clusters, 0),
-      sourceTriangles: manifestTypes.reduce((n, v) => n + v.sourceTriangles, 0),
-      farError: packManifest.farError,
-      atlasBytes: atlas.atlasBytes ?? words.byteLength,
-      patchMetres: MEADOW_PATCH_METRES,
+      backend: 'blades',
+      pack: swardName,
+      mixes: MEADOW_MIX_ROLES.slice(),
+      species: sward.mixes.reduce((n, m) => n + m.species.length, 0),
       coverSize,
       coast,
       isSecondary: Boolean(isSecondary),
       submerged: false,
-      capacity,
-      room,
+      capacity: room.slice(0, 3).reduce((n, k) => n + k, 0),
+      room: room.slice(),
+      bufferBytes: room.slice(0, 3).reduce((n, k) => n + k * MEADOW_BLADE_RECORD_BYTES, 0) + (MEADOW_BLADE_CELL_HEADER + 2 * room[3]) * 4,
       get coveredTexels() { return coverTexels; },
-      get blocks() { return blockCount; },
     },
-    scene,
     sync,
     bindCraters,
     setBallisticWakes,
@@ -1023,51 +1033,69 @@ export async function createMeadowGrass({
       activeResources = nextResources;
       buildGroups();
     },
-    // Where the scene's frame lies in the world's (js/terrain.js setWorldOffset); the stand pass reads it from the
-    // land's near domain.
-    setWorldOffset(x = 0, z = 0) {
-      if (!destroyed) scene.setWorldOffset(x, z);
-    },
-    // In the frame's compute pass: every patch of grass in view or in the sun's box stood, the far ones coarser if the
-    // view asks more than the scene holds, then the one cut over them.
+    // The passes read where the frame lies in the world from the land's near domain.
+    setWorldOffset() {},
+    // In the frame's compute pass: the cells in view listed, their blades sown, kept and leaned, and each list's draw
+    // written.
     encode(pass) {
-      active = !destroyed && coverTexels > 0 && standGroups !== null;
+      active = !destroyed && coverTexels > 0 && passGroups !== null;
       if (!active) return;
-      const pixels = continuumPixelError(), mp = continuumProfile('meadow');
-      if (cfgF[16] !== Math.fround(pixels) || cfgF[18] !== Math.fround(mp.maxDistance) || cfgF[19] !== Math.fround(mp.shadowMaxDistance)) {
-        cfgF[16] = pixels; cfgF[18] = mp.maxDistance; cfgF[19] = mp.shadowMaxDistance; cfgDirty = true;
+      const scale = continuumPixelError() / CONTINUUM_BASE_PIXEL_ERROR, mp = continuumProfile('meadow');
+      const least = CONTINUUM_MIN_PIXELS * scale * (isMobile ? MEADOW_BLADE_MOBILE_COARSER : 1);
+      const shot = cfgF[11] > 0.5 || !wakesWereEmpty ? 1 : 0;
+      if (frameF[0] !== Math.fround(least) || frameF[1] !== Math.fround(CONTINUUM_SPLAT_PIXELS * scale) || frameF[4] !== Math.fround(mp.maxDistance) || frameU[12] !== shot || frameF[2] !== Math.fround(MEADOW_BLADE_DEPTH)) {
+        frameF.set([least, CONTINUUM_SPLAT_PIXELS * scale, MEADOW_BLADE_DEPTH, MEADOW_BLADE_REACH, mp.maxDistance, 0, 0, 0], 0);
+        frameU[12] = shot;
+        device.queue.writeBuffer(frameBuf, 0, frameData);
       }
       if (cfgDirty) { device.queue.writeBuffer(cfgBuf, 0, cfgData); cfgDirty = false; }
-      const P = stand.pipelines;
+      const P = programs.passes;
       pass.setPipeline(P.reset);
-      pass.setBindGroup(0, standGroups.reset);
+      pass.setBindGroup(0, passGroups.reset);
       pass.dispatchWorkgroups(1);
-      pass.setPipeline(P.blocks);
-      pass.setBindGroup(0, standGroups.blocks);
-      pass.dispatchWorkgroups(Math.ceil(blockCount / 64));
-      pass.setPipeline(P.budget);
-      pass.setBindGroup(0, standGroups.budget);
+      pass.setPipeline(P.cells);
+      pass.setBindGroup(0, passGroups.cells);
+      pass.dispatchWorkgroups(cellGroups, MEADOW_BLADE_LEVELS);
+      pass.setPipeline(P.args);
+      pass.setBindGroup(0, passGroups.args);
       pass.dispatchWorkgroups(1);
-      pass.setPipeline(P.patches);
-      pass.setBindGroup(0, standGroups.patches);
-      pass.dispatchWorkgroupsIndirect(blockWork, 0);
+      pass.setPipeline(P.sow);
+      pass.setBindGroup(0, passGroups.sow);
+      pass.dispatchWorkgroupsIndirect(cells, 4);
       pass.setPipeline(P.finish);
-      pass.setBindGroup(0, standGroups.finish);
-      pass.dispatchWorkgroups(CONTINUUM_ROW / 64);
-      scene.encode(pass, { buffer: stood });
+      pass.setBindGroup(0, passGroups.finish);
+      pass.dispatchWorkgroups(1);
     },
     draw(pass) {
-      if (active && !destroyed) scene.draw(pass, viewGroup, cloudGroup);
+      if (!active || destroyed) return;
+      for (let k = 0; k < 3; k++) {
+        pass.setPipeline(programs.draws[k]);
+        pass.setBindGroup(0, viewGroups[k]);
+        pass.setBindGroup(1, cloudGroup);
+        pass.drawIndirect(draws, k * 16);
+      }
     },
-    // The one cut's shadow of the patches, cast into the land's shadow map.
-    drawShadow(pass) {
-      if (active && !destroyed) scene.drawShadow(pass);
-    },
+    // Blades cast no shadow of their own into the land's map: the sward shades itself, darker toward its foot.
+    drawShadow(_pass) {},
     // Meadow grass only grows above MEADOW_WATERLINE (0.75 m); no-op so submerged capture never redraws dry-land grass.
     drawSubmerged(_pass, _above = false) {},
+    // For tests and diagnosis only, never a frame: the blades each list was given (and room for), the splats'
+    // breadth and the cells listed.
+    async readCounts() {
+      const read = device.createBuffer({ label: `${label} counts read`, size: 96, usage: B.MAP_READ | B.COPY_DST });
+      const encoder = device.createCommandEncoder({ label: `${label} counts read` });
+      encoder.copyBufferToBuffer(draws, 0, read, 0, 64);
+      encoder.copyBufferToBuffer(cells, 0, read, 64, 32);
+      device.queue.submit([encoder.finish()]);
+      await read.mapAsync(GPUMapMode.READ);
+      const words = new Uint32Array(read.getMappedRange().slice(0));
+      read.unmap();
+      read.destroy();
+      return { near: words[12], middle: words[13], far: words[14], breadth: new Float32Array(words.buffer)[15], cells: words[16], room: room.slice() };
+    },
     // The indirect draws the view submits, for the continuum census (js/continuum-census.js).
     continuumDraws() {
-      return active && !destroyed ? scene.continuumDraws() : [];
+      return active && !destroyed ? [{ buffer: draws, offset: 0, records: 3, stride: 4 }] : [];
     },
     destroy() {
       destroyed = true;
@@ -1075,8 +1103,7 @@ export async function createMeadowGrass({
       unsubscribeCraters?.();
       unsubscribeCraters = null;
       boundCraters = null;
-      scene.destroy();
-      for (const buf of [stood, blockWork, blocksBuf, cfgBuf, wakeBuf]) buf?.destroy();
+      for (const buf of [...lists, cells, draws, swardBuf, cfgBuf, frameBuf, wakeBuf]) buf?.destroy();
       fallbackCraterLookup.destroy();
       fallbackCraterField.destroy();
       coverTexture.destroy();
@@ -1086,9 +1113,7 @@ export async function createMeadowGrass({
   };
 }
 
-// Lightweight helper for attaching real procedural meadow grass to a loaded neighbor coastal section.
-// Shares the already-uploaded GPU meadow atlas and compiled pipelines via requestContinuumAtlas,
-// using compact 1024 cover & 1<<17 capacity and returning null immediately for pure-ocean tiles.
+// The meadow of a neighbouring coastal section: its own cover map and blades, the same programs, less room.
 export async function createSectionMeadowGrass(section, ctx) {
   if (!section?.region || !section?.heights?.length || !section?.resources || !ctx?.pack) return null;
   const h = section.heights;

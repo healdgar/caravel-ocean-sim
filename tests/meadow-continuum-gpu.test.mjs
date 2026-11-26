@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Meadow grass on the one continuum (AGENTS.md rule 3): every patch in view is stood each frame as a record of the one
-// format by the meadow's stand pass, and the one cut (js/continuum-scene.js) draws it: near, its sward's clusters;
-// across the handoff its clusters and body both; farther its body alone, collapsing with distance; at a few pixels
-// its splat, thinned below a pixel. Nothing selects, lists or draws grass but the one cut, which the census counts.
+// Meadow grass as blades made on the GPU each frame (js/wgsl/meadow-blades.js): five compute passes list the cells in
+// view, sow, keep and lean their blades, and write three indirect draws by length on screen (6, 3 and 1 segments); the
+// census counts them. Nothing is loaded: no atlas, no patch.
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { test, before, after } from 'node:test';
@@ -17,9 +16,9 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.closeAllConnections?.(); server?.close(); });
 
-// What the meadow's view of the one cut really drew, list by list, read back from its indirect arguments
-// (js/continuum-scene.js draw: one drawIndirect a list, at the list's index times 16 bytes), and every pipeline made.
-const LISTS = ['clusters', 'small clusters', 'far body', 'splat'];
+// What the meadow's blades really drew, list by list, read back from their indirect arguments (js/meadow-grass.js
+// draw: one drawIndirect a list, at the list's index times 16 bytes), and every pipeline made.
+const LISTS = ['near', 'middle', 'far'];
 const instrument = () => {
   const r = window.meadowAudit = { device: null, draws: [], capture: false, pipelines: [], errors: [] };
   const request = GPUAdapter.prototype.requestDevice;
@@ -30,7 +29,7 @@ const instrument = () => {
   }
   const pass = GPURenderPassEncoder.prototype, pipelines = new WeakMap();
   const setPipeline = pass.setPipeline; pass.setPipeline = function (p) { pipelines.set(this, p.label || ''); return setPipeline.call(this, p); };
-  const indirect = pass.drawIndirect; pass.drawIndirect = function (b, o) { if (r.capture && pipelines.get(this) === 'meadowContinuum view') r.draws.push({ buffer: b, offset: o }); return indirect.call(this, b, o); };
+  const indirect = pass.drawIndirect; pass.drawIndirect = function (b, o) { if (r.capture && /^meadow blades \d$/.test(pipelines.get(this))) r.draws.push({ buffer: b, offset: o }); return indirect.call(this, b, o); };
 };
 const drawn = (page) => page.evaluate(async (lists) => {
   const r = window.meadowAudit; r.draws.length = 0; r.capture = true;
@@ -45,28 +44,28 @@ const drawn = (page) => page.evaluate(async (lists) => {
   return { totals, pipelines: r.pipelines, errors: r.errors, census: window.oceanContinuumCensus?.latest ?? null };
 }, LISTS);
 
-test('Lisbon\'s grass is stood by the meadow and cut, near to the horizon, by the one continuum alone', { timeout: 360000 }, async () => {
+test('Lisbon\'s grass is blades made on the GPU, near to far, with nothing loaded', { timeout: 360000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } }), errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { const text = m.text(); if ((m.type() === 'error' && !/404|favicon/.test(text)) || (m.type() === 'warning' && /\[Invalid |validation|exceeds|GPU error|While (calling|validating|encoding)/.test(text))) errors.push(text); });
   const requested = []; page.on('request', (r) => requested.push(new URL(r.url()).pathname));
   try {
     await page.addInitScript(instrument);
-    await page.goto(`${base}?region=lisbon&landfall=harbor&follower=0`);
+    // Standing in the meadow on the hill above Lisbon's waterfront, looking along it.
+    await page.goto(`${base}?region=lisbon&lat=38.707&lon=-9.136&year=1650&landfall=dock&view=free&boat=1&follower=0&weather=clear&windSpeed=5&cam=-70%2C32%2C-6250%2C0%2C-6`);
     await page.waitForFunction(() => window.oceanStartup?.state === 'ready' || window.oceanStartup?.state === 'failed', undefined, { timeout: 200000, polling: 250 });
     assert.equal(await page.evaluate(() => window.oceanStartup.state), 'ready');
-    for (let waited = 0; waited < 120000 && !requested.some((path) => path.includes('/meadows-gpu/atlas.bin')); waited += 500) await page.waitForTimeout(500);
-    assert.ok(requested.some((path) => /\/portugal\/meadows-gpu\/atlas\.bin/.test(path)), 'Lisbon draws the Portugal sward\'s own atlas');
     await page.waitForTimeout(9000);
+    assert.ok(!requested.some((path) => /meadows-gpu|portugal-meadow|tropical-meadow/.test(path)), 'no meadow atlas is fetched');
     const result = await drawn(page);
     const { totals } = result;
-    assert.ok(totals.clusters + totals['small clusters'] > 0, `near grass draws as its clusters: ${JSON.stringify(totals)}`);
-    assert.ok(totals['far body'] + totals.splat > 0, `far grass draws as its body and splats: ${JSON.stringify(totals)}`);
-    // Grass has one path: the meadow's stand pass and the one cut's programs. The meadow's own cut, its lists, its
-    // tiers and its pipelines are gone, as are the ground cover's grass and its cull.
+    assert.ok(totals.near + totals.middle > 0, `near grass draws as blades: ${JSON.stringify(totals)}`);
+    assert.ok(totals.far > 0, `far grass draws as short blades and splats: ${JSON.stringify(totals)}`);
+    // Grass has one path: the blades' five passes and three draws. The patch stand, its cut and the ground cover's
+    // grass are gone.
     const grassy = [...new Set(result.pipelines.filter((label) => /meadow|ground cover|grass/i.test(label)))].sort();
-    assert.deepEqual(grassy, ['meadow stand blocks', 'meadow stand finish', 'meadow stand patches', 'meadow stand reset', 'meadowContinuum view']);
-    // The census counts the meadow from the one cut's own records.
+    assert.deepEqual(grassy, ['meadow blades 1', 'meadow blades 3', 'meadow blades 6', 'meadow blades args', 'meadow blades cells', 'meadow blades finish', 'meadow blades reset', 'meadow blades sow']);
+    // The census counts the meadow from its own indirect records.
     assert.ok(result.census?.families?.meadow > 0, 'the meadow reaches the continuum census');
     assert.ok(!('ground' in (result.census?.families ?? {})), 'no ground-cover grass in the census');
     assert.deepEqual(result.errors, []);

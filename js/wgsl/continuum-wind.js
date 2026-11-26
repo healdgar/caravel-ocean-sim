@@ -158,27 +158,30 @@ fn continuumWindCurl(at:vec2f,downwind:vec2f,speed:f32)->f32 {
 // A point of a draped sward: stood as tall as its plants stand where the cover thins, its supple tops pressed down a
 // little as the gust packet passes, quivering briskly blade-by-blade in light air and leaning into sweeping travelling
 // gust waves as the wind freshens, dropped along an arc so blades never stretch, and lifted onto the ground under it.
-fn continuumWindSward(record:ContinuumRecord,data:u32,vertex:u32,word:u32,p:ContinuumPosed)->ContinuumPosed {
-  var out=p;
+// How a point of a sward stands and leans in the wind: 'position' its type's metres at rest, 'along' how far along its
+// stalk it stands (0: a top, bending as the tops do), 'sway' its weight (0 to 1 of the sward's full sway) and 'plant'
+// its plant's phase. stand and press scale its height; moved is how far it leans (its patch's frame), drop how far its
+// point comes down as it bends. A sward's vertices are posed by it, and so is every texel of its cell cards
+// (js/wgsl/continuum-cards.js), which carry no vertex: one wind bends both.
+struct ContinuumWindLean { moved:vec3f, drop:f32, stand:f32, press:f32 };
+fn continuumWindLean(record:ContinuumRecord,data:u32,along:f32,sway:f32,plant:f32,position:vec3f)->ContinuumWindLean {
+  var out:ContinuumWindLean;
+  out.moved=vec3f(0.0);out.drop=0.0;
   let gust=continuumPoses[data];let push=continuumPoses[data+2u];
-  let across=continuumWindAcross(record,p.position.xz);
+  let across=continuumWindAcross(record,position.xz);
   let stand=mix(0.4,1.0,continuumWindCorners(continuumPoses[data+3u],across));
-  // How far along its stalk a point stands; a far body's points carry none and bend as the tops they stand for.
-  var along=0.0;
-  if(vertex!=CONTINUUM_NO_VERTEX){along=f32(continuumPointAt(continuumTypeOf(record),vertex).high&255u)/255.0;}
   let flexAlong=select(clamp(along*1.26,0.0,1.12),1.0,along==0.0);
   let rawSpeed=max(F.windP[0].z,0.0);
   let gustCalm=smoothstep(0.6,9.5,rawSpeed);
   let press=1.0-0.14*gust.z*gustCalm*smoothstep(0.15,0.80,flexAlong);
-  let height=max(p.position.y,0.0)*stand*press;
-  out.position.y=p.position.y*stand*press;
-  let weight=f32(word&65535u)/65535.0*stand;
+  out.stand=stand;out.press=press;
+  let height=max(position.y,0.0)*stand*press;
+  let weight=sway*stand;
   if(weight>0.0){
-    let plant=f32(word>>16u)/65535.0*6.2831853;
     let t=F.camPos.w;
     let downwind=select(vec2f(0.82,0.57),normalize(F.windP[0].xy),dot(F.windP[0].xy,F.windP[0].xy)>0.0004);
     let sideDir=vec2f(-downwind.y,downwind.x);
-    let at=continuumPlace(record,p.position).xz;
+    let at=continuumPlace(record,position).xz;
     let front=gust.x-push.w*dot(at,downwind);
     let stretch=continuumStretch(record);
     let qScale=1.0/max(stretch.x,1.0);
@@ -195,12 +198,23 @@ fn continuumWindSward(record:ContinuumRecord,data:u32,vertex:u32,word:u32,p:Cont
     let toward=continuumQuat(vec4f(-record.turn.xyz,record.turn.w),vec3f(leanVec.x,0.0,leanVec.y));
     let flex=select(smoothstep(0.04,0.75,along),1.0,along==0.0);
     let moved=toward*weight+push.xyz*weight*flex;
-    out.position+=vec3f(moved.x,0.0,moved.z);
+    out.moved=vec3f(moved.x,0.0,moved.z);
     // The blade bends along an arc: as far as it leans, its point comes down (its lean and height scaled by the
     // patch's stretch, which the kind's points are posed before).
     let leaning=clamp(length(moved.xz*stretch.xz)/max(height*stretch.y,0.055),0.0,0.78);
-    out.position.y-=height*(1.0-sqrt(max(0.25,1.0-leaning*leaning)))*smoothstep(0.08,0.65,flexAlong);
+    out.drop=height*(1.0-sqrt(max(0.25,1.0-leaning*leaning)))*smoothstep(0.08,0.65,flexAlong);
   }
+  return out;
+}
+fn continuumWindSward(record:ContinuumRecord,data:u32,vertex:u32,word:u32,p:ContinuumPosed)->ContinuumPosed {
+  var out=p;
+  // How far along its stalk a point stands; a far body's points carry none and bend as the tops they stand for.
+  var along=0.0;
+  if(vertex!=CONTINUUM_NO_VERTEX){along=f32(continuumPointAt(continuumTypeOf(record),vertex).high&255u)/255.0;}
+  let lean=continuumWindLean(record,data,along,f32(word&65535u)/65535.0,f32(word>>16u)/65535.0*6.2831853,p.position);
+  out.position.y=p.position.y*lean.stand*lean.press;
+  out.position+=lean.moved;
+  out.position.y-=lean.drop;
   out.position.y+=continuumWindDrape(record,data,p.position.xz);
   return out;
 }

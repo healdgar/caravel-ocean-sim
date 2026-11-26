@@ -33,14 +33,10 @@ test('getWaterworldBuild and formatBuildLabel format stamped build metadata clea
   }
 });
 
-test('createMeadowGrass never dereferences pack after clearing pack = null', () => {
-  const src = fs.readFileSync(new URL('../js/meadow-grass.js', import.meta.url), 'utf8');
-  const start = src.indexOf('export async function createMeadowGrass');
-  const clearAt = src.indexOf('pack = null;', start);
-  const end = src.indexOf('export async function createSectionMeadowGrass', clearAt);
-  assert.ok(start >= 0 && clearAt > start && end > clearAt, 'found createMeadowGrass bounds');
-  const afterClear = src.slice(clearAt + 'pack = null;'.length, end);
-  assert.doesNotMatch(afterClear, /\bpack\./, 'pack.* must not be referenced after pack = null');
+test('the meadow loads nothing: the terrain names its sward and the GPU makes the blades', () => {
+  const terrainSrc = fs.readFileSync(new URL('../js/terrain.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(terrainSrc, /loadMeadowGrass|MEADOW_GRASS_(?:MOBILE_)?ASSETS/, 'no meadow atlas is fetched');
+  assert.match(terrainSrc, /startMeadowLoad=\(\)=>Promise\.resolve\(\{sward:tropicalSward\?'tropical':'portugal'\}\)/);
 });
 
 test('inland-water WGSL avoids world-coordinate lever-arm phase moire with rotating flow/shore vectors', () => {
@@ -78,12 +74,12 @@ test('tree vs grass wind physics: calm wood branches, twisting leaves, quivering
 
 test('forest/meadow continuum performance without visual degradation: GPU block/Hi-Z culling, race-free wind owners, unified profiles & overflow-safe meadow', async () => {
   const { forestContinuumBlocksWGSL, forestContinuumStandWGSL } = await import('../js/wgsl/forest-continuum.js');
-  const { meadowContinuumStandWGSL } = await import('../js/wgsl/meadow-continuum.js');
+  const { meadowBladesComputeWGSL } = await import('../js/wgsl/meadow-blades.js');
   const { CONTINUUM_FAMILY_DEFAULTS } = await import('../js/continuum-profiles.js');
 
   const blocksWgsl = forestContinuumBlocksWGSL();
   const standWgsl = forestContinuumStandWGSL();
-  const meadowStandWgsl = meadowContinuumStandWGSL();
+  const meadowSowWgsl = meadowBladesComputeWGSL();
   const terrainSrc = fs.readFileSync(new URL('../js/wgsl/terrain.js', import.meta.url), 'utf8');
   const forestSrc = fs.readFileSync(new URL('../js/wgsl/forest-continuum.js', import.meta.url), 'utf8');
 
@@ -98,8 +94,8 @@ test('forest/meadow continuum performance without visual degradation: GPU block/
   assert.match(standWgsl, /atomicOr\(&forestWindOwners\[at\],0x80000000u\)/, 'forestStandOwn uses race-free bit-31 atomicOr lock without atomicCompareExchangeWeak');
   assert.doesNotMatch(standWgsl, /atomicMax\(&forestWindOwners/, 'forestStandOwn never uses destructive atomicMax owner overwrite');
   assert.doesNotMatch(standWgsl, /inShadowRange/, 'forestStandRoots uses shadow-map frustum without hard per-family shadowMaxDistance cutoff');
-  assert.match(meadowStandWgsl, /continuumHiZOccluded\(/, 'meadowBlocksInView tests conservative Hi-Z occlusion');
-  assert.match(meadowStandWgsl, /minS\s*=\s*-i32\(MEADOW_GRAINS\)\s*\*\s*3/, 'meadowStandBudget coarsens down to grain 16 on overflow so patches are never dropped');
+  assert.match(meadowSowWgsl, /fn meadowBladeInView\(/, 'meadow cells and blades are culled to the view on the GPU');
+  assert.match(meadowSowWgsl, /atomicStore\(&bladeDraws\[15\]/, 'meadowBladeFinish broadens short blades when the far list fills, so cells are never dropped');
   assert.match(terrainSrc, /if\(reflStrength>0\.001\)/, 'landFinishShadowed skips dead envCube specular fetch when reflStrength <= 0.001');
   assert.match(forestSrc, /fn forestLeafShadowVis\(/, 'forest leaves use 1-tap hardware-PCF shadow lookup');
 
@@ -209,7 +205,7 @@ test('universal One-Continuum prefix micro-surfels, tiled 563-type cards, unifie
   const selectWgsl = continuumModuleWGSL({ pass: 'select' });
   const visWgsl = continuumModuleWGSL({ pass: 'visibility' });
   const cardWgsl = continuumCardViewWGSL();
-  const meadowSrc = fs.readFileSync(new URL('../js/wgsl/meadow-continuum.js', import.meta.url), 'utf8');
+  const meadowSrc = fs.readFileSync(new URL('../js/wgsl/meadow-blades.js', import.meta.url), 'utf8');
   const forestSrc = fs.readFileSync(new URL('../js/wgsl/forest-continuum.js', import.meta.url), 'utf8');
   const tradeSrc = fs.readFileSync(new URL('../js/trade-vessels.js', import.meta.url), 'utf8');
 
@@ -225,6 +221,6 @@ test('universal One-Continuum prefix micro-surfels, tiled 563-type cards, unifie
   assert.match(tradeSrc, /maxPush\s*=\s*TRADE_VESSEL_SEPARATION_DRIFT_MPS\s*\*\s*simDt/, 'trade vessel separation is limited to a drift speed times the step, so it is a motion at any step length');
   assert.doesNotMatch(tradeSrc, /maxPush\s*=\s*4\.5\s*\*\s*Math\.min\(1,\s*simDt\s*\*\s*6\)/, 'no fixed-distance shove that lets a hull jump metres in one order step');
   assert.match(forestSrc, /CONTINUUM_SURFEL_ENTRY/, 'forest material shades micro-surfels without FS leaf texture fetches');
-  assert.match(meadowSrc, /blIntercept\s*=\s*1\.0\s*-\s*\(cV\s*\/\s*2\.2\)/, 'meadowParallaxSward uses Beer-Lambert grazing canopy interception');
+  assert.match(meadowSrc, /fn meadowBladeFieldTop\(/, 'a blade drawn larger than it is shows the sward under each of its pixels');
   assert.match(meadowSrc, /if\s*\(dist\s*<\s*220\.0\)/, 'meadow receives tree/building shadows across full shadow frustum');
 });

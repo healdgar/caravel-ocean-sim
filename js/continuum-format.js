@@ -126,15 +126,23 @@ export const CONTINUUM_STRETCHED = 1 << 28;
 // The lists an instance can be entered in, each with its own indirect draw, the vertices of one entry, and the
 // triangles one full entry submits. The view's lists come first, then the shadow map's, then the water captures':
 // the view's own clusters and far body over again, of those instances alone that the sea as it now runs can reach
-// (js/wgsl/continuum-cut.js), so a capture draws no vertex of what stands clear of the water. An entry is
-// (instance, item | what << 28): a cluster, a far-body chunk, or a splat.
-export const CONTINUUM_LISTS = Object.freeze(['clusters', 'small clusters', 'far body', 'splat', 'shadow far body', 'shadow clusters', 'capture clusters', 'capture small clusters', 'capture far body']);
+// (js/wgsl/continuum-cut.js), so a capture draws no vertex of what stands clear of the water; last the view's cell
+// cards (CONTINUUM_CARD_LIST), which only a type with a card grid enters. An entry is (instance, item | what << 28):
+// a cluster, a far-body chunk, a splat, or a cell card (item: its cell | its grid level << 16).
+export const CONTINUUM_LISTS = Object.freeze(['clusters', 'small clusters', 'far body', 'splat', 'shadow far body', 'shadow clusters', 'capture clusters', 'capture small clusters', 'capture far body', 'cell cards']);
 export const CONTINUUM_VIEW_LISTS = 4;
 export const CONTINUUM_SHADOW_LISTS = Object.freeze([4, 5]);
 // The captures' lists, in the order of the view's lists they repeat (clusters, small clusters, far body).
 export const CONTINUUM_CAPTURE_LISTS = Object.freeze([6, 7, 8]);
-export const CONTINUUM_ENTRY_TRIANGLES = Object.freeze([CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES, 1, CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES]);
-export const CONTINUUM_CLUSTER_ENTRY = 1, CONTINUUM_FAR_ENTRY = 2, CONTINUUM_SPLAT_ENTRY = 3, CONTINUUM_SURFEL_ENTRY = 4;
+// The view's cell cards: a card a cell of a type's card grid (computeContinuumCardGrid), two triangles each.
+export const CONTINUUM_CARD_LIST = 9;
+export const CONTINUUM_ENTRY_TRIANGLES = Object.freeze([CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES, 1, CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES, 2]);
+export const CONTINUUM_CLUSTER_ENTRY = 1, CONTINUUM_FAR_ENTRY = 2, CONTINUUM_SPLAT_ENTRY = 3, CONTINUUM_SURFEL_ENTRY = 4, CONTINUUM_CARD_ENTRY = 5;
+// A card grid has at most this many levels (each a grid of cells over its type's square, the finest first), and a
+// card's frame is CONTINUUM_CARD_FRAME_WORDS f32: its box's centre and the sway weight of its top, then its box's
+// half-extents and a spare.
+export const CONTINUUM_CARD_LEVELS = 3;
+export const CONTINUUM_CARD_FRAME_WORDS = 8;
 // Universal prefix micro-surfel stream layout (header slot CONTINUUM_HEADER.surfels):
 //   directory: typeCount * CONTINUUM_SURFEL_HEADER_WORDS ([firstSurfel, surfelCount, f32(areaRadius), f32(handoffError)])
 //   payload:   CONTINUUM_SURFEL_WORDS per surfel ([vertexIdx, relRadiusUnorm16 | (part16 << 16)])
@@ -697,6 +705,62 @@ export function computeContinuumTightSpheres(words, { clipBelowY = null } = {}) 
   }
   return spheres;
 }
+// A card grid: every type's square (`size` metres a side on x and z, from the type's origin) cut into cells at each of
+// `levels` ({ cells: cells a side, level: the hierarchy level whose clusters are drawn into its cards }, the finest
+// first), each cell a card of the clusters of that level whose own sphere's centre stands in it, so the cards of a
+// level between them hold every cluster of it once. A card's frame is the box of the vertices it holds, measured here
+// from the atlas before its vertices leave the CPU, and the sway weight of its top: the slope of its vertices' wind
+// weights over their heights (0 where the atlas carries no wind stream), which bends its picture as its sward bends.
+// Returns { levels, perType (cards a type), offsets (each level's first card of a type), cellError (each level's
+// widest cell texel at `texels` a card's side, in metres: what a card of it can be in error), frames (Float32Array,
+// CONTINUUM_CARD_FRAME_WORDS a card, a type's cards together), clusters (each card's cluster indices) }.
+export function computeContinuumCardGrid(words, { size, levels, texels = 64, pad = 1.03 }) {
+  if (!(size > 0) || !levels?.length || levels.length > CONTINUUM_CARD_LEVELS) throw Error(`A card grid needs a square and 1 to ${CONTINUUM_CARD_LEVELS} levels`);
+  const H = CONTINUUM_HEADER, T = CONTINUUM_TYPE;
+  const typeCount = words[H.typeCount], typesAt = words[H.typesAt], clustersAt = words[H.clustersAt], verticesAt = words[H.verticesAt], indicesAt = words[H.indicesAt];
+  const f32 = new Float32Array(words.buffer, words.byteOffset, words.length);
+  const windAt = (words[H.streams] & 8) !== 0 ? words[H.wind] : 0;
+  const offsets = [];
+  let perType = 0;
+  for (const { cells } of levels) { offsets.push(perType); perType += cells * cells; }
+  const frames = new Float32Array(typeCount * perType * CONTINUUM_CARD_FRAME_WORDS), clusters = Array.from({ length: typeCount * perType }, () => []);
+  const cellError = levels.map(() => 0);
+  for (let ty = 0; ty < typeCount; ty++) {
+    const tb = typesAt + ty * CONTINUUM_TYPE_WORDS;
+    const lx = f32[tb + T.low], ly = f32[tb + T.low + 1], lz = f32[tb + T.low + 2], q = f32[tb + T.span] / 65535;
+    const first = words[tb + T.clusterFirst], count = words[tb + T.clusterCount];
+    levels.forEach(({ cells, level }, l) => {
+      const side = size / cells, base = ty * perType + offsets[l];
+      const box = new Float64Array(cells * cells * 6), sway = new Float64Array(cells * cells * 2);
+      for (let c = 0; c < cells * cells; c++) { box.fill(Infinity, c * 6, c * 6 + 3); box.fill(-Infinity, c * 6 + 3, c * 6 + 6); }
+      for (let i = 0; i < count; i++) {
+        const cb = clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS, packed = words[cb + 15];
+        if (((packed >>> 8) & 255) !== level) continue;
+        const cx = Math.max(0, Math.min(cells - 1, Math.floor(f32[cb + 8] / side))), cz = Math.max(0, Math.min(cells - 1, Math.floor(f32[cb + 10] / side)));
+        const cell = cz * cells + cx, b = cell * 6, at = indicesAt + words[cb + 14];
+        clusters[base + cell].push(first + i);
+        for (let k = 0, n = (packed & 255) * 3; k < n; k++) {
+          const vertex = words[at + k], va = verticesAt + vertex * CONTINUUM_VERTEX_WORDS, w0 = words[va];
+          const x = lx + (w0 & 65535) * q, y = ly + (w0 >>> 16) * q, z = lz + (words[va + 1] & 65535) * q;
+          if (x < box[b]) box[b] = x; if (y < box[b + 1]) box[b + 1] = y; if (z < box[b + 2]) box[b + 2] = z;
+          if (x > box[b + 3]) box[b + 3] = x; if (y > box[b + 4]) box[b + 4] = y; if (z > box[b + 5]) box[b + 5] = z;
+          if (windAt) { const weight = (words[windAt + vertex] & 65535) / 65535, tall = Math.max(y, 0); sway[cell * 2] += weight * tall; sway[cell * 2 + 1] += tall * tall; }
+        }
+      }
+      for (let cell = 0; cell < cells * cells; cell++) {
+        const b = cell * 6, at = (base + cell) * CONTINUUM_CARD_FRAME_WORDS;
+        if (!clusters[base + cell].length) continue;
+        const half = [0, 1, 2].map((k) => Math.max(0.5 * (box[b + 3 + k] - box[b + k]) * pad, 1e-3));
+        // The slope of weight over height through the ground, at its top: what a straight lean from the ground gives.
+        const top = sway[cell * 2 + 1] > 0 ? Math.min(1, (sway[cell * 2] / sway[cell * 2 + 1]) * Math.max(box[b + 4], 0)) : 0;
+        frames.set([0.5 * (box[b] + box[b + 3]), 0.5 * (box[b + 1] + box[b + 4]), 0.5 * (box[b + 2] + box[b + 5]), top, half[0], half[1], half[2], 0], at);
+        // A card's texel at its widest: its box seen across its diagonal on the ground.
+        cellError[l] = Math.max(cellError[l], (2 * Math.hypot(half[0], half[2])) / texels);
+      }
+    });
+  }
+  return { levels: levels.map((l) => ({ ...l })), size, perType, offsets, cellError, frames, clusters, texels };
+}
 // Builds a universal blue-noise Morton-bit-reversed prefix micro-surfel stream directly from every type's Level-0
 // physical clusters (zero offline rebake). Each surfel references an exact Level-0 atlas vertex (preserving every
 // material attribute, UV, skin joint, wind bone, and part ID) so ANY 3D model family can seamlessly transition from
@@ -924,10 +988,13 @@ export const CONTINUUM_ENTRY_FILL = 0.25;
 // to a coarser cut that fits, the census counts what was asked, and the budget's governor coarsens the one scalar
 // (js/wgsl/continuum-cut.js). `types` as continuumAtlasTypes gives them, `counts` how many instances of each type a
 // scene may hold. Returns the scene's capacity and each list's room.
-export function continuumRoom(types, counts) {
+// `cards`: the room of the cell cards' list, for a scene whose types have a card grid (what its instances in the
+// cards' range can enter at once: a level's cells and the next's across a crossfade); none otherwise. Full, an
+// instance keeps its clusters.
+export function continuumRoom(types, counts, { cards = 0 } = {}) {
   let clusters = 0, far = 0, capacity = 0;
   counts.forEach((n, t) => { if (!n) return; capacity += n; clusters += n * types[t].clusters; far += n * types[t].farChunks; });
-  const room = [clusters, clusters, far, capacity, far, clusters, clusters, clusters, far].map((n, list) => Math.max(1, Math.min(n, Math.ceil(CONTINUUM_TRIANGLE_BUDGET / (CONTINUUM_ENTRY_TRIANGLES[list] * CONTINUUM_ENTRY_FILL)))));
+  const room = [clusters, clusters, far, capacity, far, clusters, clusters, clusters, far, cards].map((n, list) => Math.max(1, Math.min(n, Math.ceil(CONTINUUM_TRIANGLE_BUDGET / (CONTINUUM_ENTRY_TRIANGLES[list] * CONTINUUM_ENTRY_FILL)))));
   return { capacity, room };
 }
 

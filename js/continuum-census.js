@@ -13,7 +13,7 @@
 // fixed-size entries hide degenerate triangles (the one cut, js/wgsl/continuum-cut.js) counts its real triangles as it
 // lists them and offers those words, stride 1. Every family is counted from its draws: nothing is sized on the CPU.
 import { CONTINUUM_TRIANGLE_BUDGET, continuumPixelError } from './continuum-core.js';
-import { CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_SHADOW_LISTS, CONTINUUM_ENTRY_TRIANGLES } from './continuum-format.js';
+import { CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_SHADOW_LISTS, CONTINUUM_CARD_LIST, CONTINUUM_ENTRY_TRIANGLES } from './continuum-format.js';
 
 const CONTINUUM_CENSUS_WGSL = /* wgsl */`
 struct CensusRegion { first: u32, records: u32, stride: u32, family: u32 }
@@ -169,7 +169,7 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
             const tris = count * CONTINUUM_ENTRY_TRIANGLES[list];
             b.entries[list] += count;
             b.room[list] += room;
-            if (list < CONTINUUM_VIEW_LISTS) b.submitted += tris;
+            if (list < CONTINUUM_VIEW_LISTS || list === CONTINUUM_CARD_LIST) b.submitted += tris;
             else if (CONTINUUM_SHADOW_LISTS.includes(list)) b.shadowSubmitted += tris;
             else b.captureSubmitted += tris;
             if (room > 0) {

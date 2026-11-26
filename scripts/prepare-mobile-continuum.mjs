@@ -48,7 +48,7 @@ const JOBS = [
     kind: 'meadow',
     srcDir: 'assets/ground-cover/portugal/meadows-gpu',
     outDir: 'assets/mobile-continuum/portugal-meadow',
-    minLevel: 5,
+    minLevel: 4,
     validate: validateMeadowGrass,
   },
   {
@@ -56,7 +56,7 @@ const JOBS = [
     kind: 'meadow',
     srcDir: 'assets/ground-cover/tropical/meadows-gpu',
     outDir: 'assets/mobile-continuum/tropical-meadow',
-    minLevel: 5,
+    minLevel: 4,
     validate: validateMeadowGrass,
   },
   ...CREW_CONTINUUM_BODIES.map(({ id }) => ({

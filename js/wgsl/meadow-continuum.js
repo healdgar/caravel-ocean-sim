@@ -60,7 +60,7 @@ const MEADOW_REACH_UP = 2.0, MEADOW_OVERHANG = 1.0, MEADOW_GROUND_SLACK = 2.0;
 
 // What the stand pass and the material both know: the hash, the ground, the shared uniform, the mixes, the wind and
 // what shot does to grass.
-const MEADOW_COMMON_WGSL = LAND_CRATER_SAMPLE_WGSL + /* wgsl */ `
+export const MEADOW_COMMON_WGSL = LAND_CRATER_SAMPLE_WGSL + /* wgsl */ `
 const MEADOW_PATCH: f32 = ${MEADOW_PATCH_METRES.toFixed(4)};
 const MEADOW_BLOCK: i32 = ${MEADOW_BLOCK_PATCHES};
 struct MeadowNearDomain {
@@ -778,7 +778,8 @@ fn meadowColourOf(word: u32) -> vec3f { let root = unpack4x8unorm(word).rgb; ret
 //           ground its sward hides from the eye (1 for the sward's own organs)
 //   flow    where it stands (the frame's world, unshifted), how far off the eye is, and the share of it the cover
 //           map, the water and the craters keep
-//   harm    how singed it is, how far the wind bends it, and its clump's threshold (-1 for a far body or splat)
+//   harm    how singed it is, how far the wind bends it, its clump's threshold (-1 for a far body, splat or floor),
+//           and 1 for the sward's floor (the mat of low leaves and thatch at its foot: a vertex with no stiffness)
 fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>) {
   let seed = s.record.tag.z;
   let splat = s.what == CONTINUUM_SPLAT_ENTRY;
@@ -814,6 +815,7 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   var along = continuumTypeF(s.model, ${M.seenAlong}u);
   var stiff = 9.0;
   var clump = -1.0;
+  var floor = 0.0;
   var colour = vec3f(0.0);
   var hides = 1.0;
   var rest = vec3f(0.0, 1.0, 0.0);
@@ -821,6 +823,8 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
     along = f32(s.high & 255u) / 255.0;
     stiff = max(f32((s.high >> 8u) & 15u) * ${MEADOW_CONTINUUM_STIFFNESS_UNIT.toFixed(4)}, 0.8);
     clump = clamp(fract((f32(s.high >> 12u) + 0.5) / 16.0 * 1.07 + f32((seed >> 8u) & 255u) / 256.0), 0.04, 0.96);
+    // The floor thins evenly where the cover map thins, as a far body does: its squares never go whole.
+    if (((s.high >> 8u) & 15u) == 0u) { floor = 1.0; clump = -1.0; }
     colour = meadowColourOf(s.word);
     rest = s.normal;
   } else if (s.what == CONTINUUM_FAR_ENTRY) {
@@ -879,7 +883,7 @@ fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying
   // What the cover map keeps of it here, none on water, none where a crater has buried it.
   let keep = smoothstep(0.06, 0.55, cover.r) * step(cfg.domain.w, groundY) * (1.0 - ballistics.buryDepth);
   (*v).flow = vec4f(s.world.xz, dist, keep);
-  (*v).harm = vec4f(ballistics.hotSinge, bendSlope, clump, 0.0);
+  (*v).harm = vec4f(ballistics.hotSinge, bendSlope, clump, floor);
 }
 
 // The samples of a pixel the sward keeps (rule 2: a cut by the sample mask, never a killed fragment): the sward's clumps each
@@ -899,6 +903,12 @@ fn meadowContinuumCoverage(v: ContinuumVarying, front: bool) -> u32 {
 }
 
 fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
+  // A pixel's steps across the ground (derivatives computed in strictly uniform control flow).
+  return meadowContinuumShadeAt(v, frontFacing, dpdx(v.world.xz), dpdy(v.world.xz));
+}
+// A fragment shaded, a pixel's steps across the ground (dxW, dyW) given: a cluster's, a far body's and a splat's
+// corner, and the point a cell card's fragment finds (meadowContinuumCardShade), by the one shading.
+fn meadowContinuumShadeAt(v: ContinuumVarying, frontFacing: bool, dxW: vec2f, dyW: vec2f) -> vec4f {
   let windDir = meadowWindDirection();
   let acrossDir = vec2f(-windDir.y, windDir.x);
   let world = v.world + continuumShift();
@@ -913,11 +923,9 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   let unshiftedWorldXZ = v.world.xz;
   let fCov = meadowCoverAt(unshiftedWorldXZ);
   let marginFade = smoothstep(0.06, 0.55, fCov.r);
-  // Screen-space world footprint (derivatives computed in strictly uniform control flow):
+  // Screen-space world footprint:
   // Preserve grazing-angle anisotropy so tufts looking up 30..180 m hillsides keep horizontal resolution near isoFoot
   // while still band-limiting cleanly before Nyquist with zero shimmer.
-  let dxW = dpdx(unshiftedWorldXZ);
-  let dyW = dpdy(unshiftedWorldXZ);
   let isoFoot = dist * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0);
   let minorFoot = min(length(dxW), length(dyW));
   let majorFoot = min(max(length(dxW), length(dyW)), isoFoot * 1.65);
@@ -983,24 +991,29 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
   var grassPigment = mix(v.colour * 1.06, patchGreen * tussockLum, 0.44);
   // Crisp golden oat seed-heads on tall tips (matching CLUSTER smoothstep(0.76, 0.94, along)) and Beer-Lambert
   // grazing expectation past tuft resolution so standing grazing views stay warm wheat while steep hills/flyover stay green.
+  // A far body or splat warms only as much as its sward bears heads: the share the bake measured from above (its
+  // 'along' is the type's seen along, whose head ramp is that share), several times over seen from the side.
   let farTipBase = 0.08 + 0.07 * smoothstep(0.38, 0.72, hitH);
   let farTipAvg = (1.0 - para.detailEnergy) * mix(farTipBase, 0.48, para.grazeIntercept);
+  let swardHeads = clamp(smoothstep(0.76, 0.94, along) * 12.0, 0.0, 1.0);
   let oatHeadT = select(
     smoothstep(0.76, 0.94, along),
-    clamp(smoothstep(0.76, 0.94, hitH) + farTipAvg, 0.0, 0.92),
+    clamp((smoothstep(0.76, 0.94, hitH) + farTipAvg) * swardHeads, 0.0, 0.92),
     isContinuum
   );
   grassPigment = mix(grassPigment, goldenOatTip, oatHeadT * 0.82);
-  // Warm soil/thatch root grounding inside deep root cavities
-  let warmSoil = mix(groundCol, vec3f(0.072, 0.066, 0.034), 0.45);
-  grassPigment = mix(
+  // Deep in the sward its blades darken toward its own floor (the low leaves and thatch at its foot), never toward
+  // the land's soil, which the sward hides; the floor itself keeps its own colour.
+  let isFloor = v.harm.w > 0.5;
+  let swardFloor = vec3f(0.034, 0.042, 0.017);
+  grassPigment = select(mix(
     grassPigment,
-    warmSoil,
+    swardFloor,
     select(0.20 * (1.0 - smoothstep(0.0, 0.18, effAlong)), 0.28 * (1.0 - smoothstep(0.12, 0.34, hitH)), isContinuum)
-  );
+  ), v.colour, isFloor);
 
   let organCol = mix(grassPigment, v.colour * 1.06, isFlower);
-  let clusterAO = mix(0.46, 1.0, smoothstep(0.0, 0.55, along));
+  let clusterAO = select(mix(0.46, 1.0, smoothstep(0.0, 0.55, along)), 0.62, isFloor);
   let paraAO = mix(0.48, 1.0, smoothstep(0.24, 0.86, hitH))
              * (1.0 - para.cavityOcc * mix(0.14, 0.28, para.grazeIntercept));
   let ao = select(clusterAO, clamp(paraAO, 0.46, 1.0), isContinuum);
@@ -1120,6 +1133,50 @@ fn meadowContinuumShade(v: ContinuumVarying, frontFacing: bool) -> vec4f {
 `;
 };
 
+// The sward's cell cards (js/wgsl/continuum-cards.js; AGENTS.md rule 3): between its blades and its far body a patch
+// stands as its cells' cards, each the cell's true sward drawn at load from the horizon round and from overhead. A
+// card's texel holds its blade's own colour, normal and depth and how far along its stalk it stands, so the wind
+// field bends the picture as it bends the blades and the blades' shading lights it.
+const MEADOW_CONTINUUM_CARD_BAKE = Object.freeze({
+  varyings: [['look', 'vec4f']],
+  wgsl: () => /* wgsl */ `
+fn meadowContinuumCardBakeVarying(s: ContinuumSurface, v: ptr<function, ContinuumCardBakeVarying>) {
+  let root = unpack4x8unorm(s.word).rgb;
+  (*v).look = vec4f(root * root, f32(s.high & 255u) / 255.0);
+}
+fn meadowContinuumCardBake(v: ContinuumCardBakeVarying, front: bool) -> ContinuumCardSample {
+  return ContinuumCardSample(v.look.rgb, 1.0, normalize(v.normal + vec3f(0.0, 1e-6, 0.0)), v.look.a);
+}
+`,
+});
+const MEADOW_CONTINUUM_CARDS = Object.freeze({
+  group: 3, binding: 0,
+  wgsl: () => /* wgsl */ `
+// How far the wind has moved the sward's point at 'rest', 'along' its stalk: what its kind's pose gives a blade's
+// vertex there (js/meadow-continuum.js weighs a vertex by its height and how far along its stalk it stands; a card's
+// blades are weighed as of a body's stiffness, and their plants' phases run smoothly over the ground).
+fn meadowContinuumCardSway(record: ContinuumRecord, rest: vec3f, along: f32) -> vec3f {
+  let sway = max(continuumTypeF(continuumTypeOf(record), ${MEADOW_CONTINUUM_MATERIAL.sway}u), 1e-3);
+  let stalk = max(along, 0.004);
+  let weight = clamp(max(rest.y, 0.0) * pow(clamp(stalk * 1.26, 0.0, 1.12), 1.65) * ${(9.5 / 13.5).toFixed(4)} / sway, 0.0, 1.0);
+  let plant = 1.55 + 0.9 * sin(rest.x * 7.3 + rest.z * 4.1) + 0.6 * sin(rest.x * 3.1 - rest.z * 9.7);
+  let lean = continuumWindLean(record, continuumKindData(record), stalk, weight, plant, rest);
+  // Its drop is of the stood and pressed sward; a card's picture is of the sward at rest, which its frame stands.
+  return vec3f(lean.moved.x, -lean.drop / max(lean.stand * lean.press, 0.2), lean.moved.z);
+}
+// The varyings of the point a card's fragment found: a blade's, 'along' its stalk and of a body's stiffness, its
+// colour the picture's; the cover map thins it evenly, as it thins a far body.
+fn meadowContinuumCardVarying(s: ContinuumSurface, along: f32, v: ptr<function, ContinuumVarying>) {
+  var blade = s;
+  blade.high = u32(round(clamp(along, 0.0, 1.0) * 255.0)) | (6u << 8u);
+  meadowContinuumVarying(blade, v);
+  (*v).colour = s.albedo.rgb;
+  (*v).harm.z = -1.0;
+}
+fn meadowContinuumCardShade(v: ContinuumVarying, dxW: vec2f, dyW: vec2f) -> vec4f { return meadowContinuumShadeAt(v, true, dxW, dyW); }
+`,
+});
+
 // The meadow's material (js/wgsl/continuum-cut.js). Its blades are open shells, seen from both sides; grass only grows
 // above MEADOW_WATERLINE (0.75 m), so it skips the underwater capture pass.
 export const MEADOW_CONTINUUM_SPEC = Object.freeze({
@@ -1127,4 +1184,5 @@ export const MEADOW_CONTINUUM_SPEC = Object.freeze({
   varyings: [['colour', 'vec3f'], ['blade', 'vec4f'], ['flow', 'vec4f'], ['harm', 'vec4f']],
   wgsl: meadowContinuumMaterialWGSL, salt: 5,
   cullMode: 'none', air: true, capture: false, coverage: true,
+  cardBake: MEADOW_CONTINUUM_CARD_BAKE, cards: MEADOW_CONTINUUM_CARDS,
 });

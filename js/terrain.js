@@ -20,8 +20,6 @@ import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
 import {createLivestockHerds} from './herds.js';
 import {createMeadowGrass,createSectionMeadowGrass} from './meadow-grass.js';
-import {PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS,TROPICAL_MEADOW_GRASS_MOBILE_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
-import {continuumAtlasMetaWords} from './continuum-format.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_TYPED_FLOATS,CITY_TYPES_WATERSIDE,compileCityBuildingType} from './old-world-buildings.js';
@@ -1144,10 +1142,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // subtropical (Saba's among them), the Portuguese elsewhere. There is no cold-temperate or boreal sward or forest
   // yet, so Québec, New England and the north take the Portuguese.
   const tropicalSward=forestMixParam?useSubtropicalForest:activeClimate.forestPackKind==='subtropical';
-  const meadowAssets=useCompactScenery
-    ?(tropicalSward?TROPICAL_MEADOW_GRASS_MOBILE_ASSETS:PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS)
-    :(tropicalSward?TROPICAL_MEADOW_GRASS_ASSETS:PORTUGAL_MEADOW_GRASS_ASSETS);
-  const startMeadowLoad=()=>loadMeadowGrass({assets:meadowAssets}).catch(error=>{meadowFailure=error.message;return null;});
+  // The sward is a table of species (js/meadow-grass.js MEADOW_SWARDS): its blades are made on the GPU, nothing loaded.
+  const startMeadowLoad=()=>Promise.resolve({sward:tropicalSward?'tropical':'portugal'});
   // On desktop, prefetch forest/groves/meadow in parallel with city/land for minimal latency.
   // On mobile, serialize heavy continuum atlas decompressions (city -> forest -> meadow) to prevent Jetsam OOM spikes.
   const forestPromise=isMobile?null:startForestLoad();
@@ -1199,7 +1195,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   let activeRegion=proceduralPack?proceduralPack.region:ISLAND;
   // For tools and tests: the land as it was made. scripts/bake-board.mjs reads a port's ground from here.
-  if(typeof window!=='undefined')window.oceanLand={get region(){return activeRegion;},get pack(){return proceduralPack;}};
+  if(typeof window!=='undefined')window.oceanLand={get region(){return activeRegion;},get pack(){return proceduralPack;},get meadow(){return meadowGrass;}};
   const craterCoast=activeRegion.id??'saba',craterLedger=createLandCraterLedger(portDamage?.openGround(craterCoast),activeRegion);
   let craters=null;
   let heights,biome,nearTile=null,nearFailure=null,albedoImage=null;
@@ -1816,7 +1812,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   ]);
   boulderContinuum=boulderRes;
   let inlandWater=inlandWaterRes;
-  // Stream the 186 MiB meadow grass atlas asynchronously so Frame 0 never stalls waiting for grass tufts.
   let meadowGrass=null,loadedMeadowPack=null;
   const meadowGrassStats={loaded:false,error:meadowFailure};
   const attachSectionMeadow=(rec)=>{
@@ -1841,9 +1836,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(!meadowPack||terrainDisposed)return null;
     try{
       const made=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset});
-      // Release the full raw CPU meadow words once uploaded to the GPU; secondary sections reuse the cached GPU atlas
-      // and only read type-header metadata from the compact prefix.
-      loadedMeadowPack={manifest:meadowPack.manifest,words:continuumAtlasMetaWords(meadowPack.words)};
+      loadedMeadowPack=meadowPack;
       if(terrainDisposed){made?.destroy?.();return null;}
       meadowGrass=made;
       if(craters)meadowGrass.bindCraters?.(craters);

@@ -12,8 +12,8 @@ import { continuumProfile } from './continuum-profiles.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { continuumHiZView, continuumHiZUniform, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from './continuum-hiz.js';
 import {
-  CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_SHADOW_LISTS, CONTINUUM_CAPTURE_LISTS, CONTINUUM_CHUNK_TRIANGLES,
-  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, buildContinuumSurfels, computeContinuumTightSpheres,
+  CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_SHADOW_LISTS, CONTINUUM_CAPTURE_LISTS, CONTINUUM_CARD_LIST, CONTINUUM_CARD_LEVELS, CONTINUUM_CHUNK_TRIANGLES,
+  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, buildContinuumSurfels, computeContinuumTightSpheres, computeContinuumCardGrid,
 } from './continuum-format.js';
 import {
   CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_BATCH, CONTINUUM_STATE_ENTRIES,
@@ -200,7 +200,9 @@ function makeAtlasDestroy(pages) {
 // types can enter in the lists (continuumAtlasTypes): { pages, buffer (the first page, which holds its header and
 // types), types, destroy() }. Every scene of the one cut binds its atlas so, with programs of as many pages.
 // Appends per-cluster normal cones and optional universal prefix micro-surfels directly into GPU upload pages.
-export function uploadContinuumAtlas(device, words, label, { surfels = true } = {}) {
+// `cardGrid` (js/continuum-format.js computeContinuumCardGrid's options): its types' card grid, measured here while
+// the atlas's vertices are still on the CPU, as `cardGrid` of what is returned.
+export function uploadContinuumAtlas(device, words, label, { surfels = true, cardGrid = null } = {}) {
   const needCones = words[CONTINUUM_HEADER.cones] === 0 && words[CONTINUUM_HEADER.clusterCount] > 0;
   const cones = needCones ? buildContinuumClusterCones(words) : null;
   const conesAt = cones ? words.length : words[CONTINUUM_HEADER.cones];
@@ -243,7 +245,7 @@ export function uploadContinuumAtlas(device, words, label, { surfels = true } = 
       if (sc > 0) types[t].farChunks = Math.max(types[t].farChunks, Math.ceil(sc / CONTINUUM_CHUNK_TRIANGLES));
     }
   }
-  return { pages, buffer: pages[0], types, tightSpheres, aboveGroundSpheres, destroy: makeAtlasDestroy(pages) };
+  return { pages, buffer: pages[0], types, tightSpheres, aboveGroundSpheres, cardGrid: cardGrid ? computeContinuumCardGrid(words, cardGrid) : null, destroy: makeAtlasDestroy(pages) };
 }
 
 // Where a scene of `capacity` instances keeps its lists in its one list buffer: CONTINUUM_STATE_ENTRIES entries an
@@ -287,7 +289,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
   viewWords.set([0, samples, 1, (((view?.material?.salt ?? 0) & 0x7fffffff) | singleSided) >>> 0], 0);
   lists.forEach(([at, n], i) => viewWords.set([at, n, 0, 0], 8 + i * 4));
   const aimAt = 8 + CONTINUUM_LISTS.length * 4;
-  const curveAt = aimAt + 4, seaAt = curveAt + 8;
+  const curveAt = aimAt + 4, seaAt = curveAt + 8, cardsAt = seaAt + 4;
   const profileScratch = new Float32Array(8);
   let profileSpec = profile;
   let viewChanged = true;
@@ -343,7 +345,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     pass.setVertexBuffer(0, list, at * 8, n * 8);
     pass.drawIndirect(draws, index * 16);
   };
-  let count = 0, destroyed = false, cards = null;
+  let count = 0, destroyed = false, cards = null, cellCards = null;
   const drawCards = (pass) => {
     if (!cards) return;
     pass.setPipeline(cards.renderer.pipeline);
@@ -352,6 +354,14 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     pass.setBindGroup(2, cards.dataGroup);
     pass.setBindGroup(3, cards.atlas.bindGroup);
     drawList(pass, CONTINUUM_VIEW_LISTS - 1);
+  };
+  // The view's cell cards, by their material's own card program and its groups.
+  const drawCellCards = (pass) => {
+    if (!cellCards) return;
+    pass.setPipeline(cellCards.pipeline);
+    cellCards.groups.forEach((bound, index) => { if (bound) pass.setBindGroup(index, bound); });
+    pass.setBindGroup(view.material.data.group, cellCards.dataGroup);
+    drawList(pass, CONTINUUM_CARD_LIST);
   };
   const scene = {
     capacity, lists, list, draws, records, words, floats, poses: poses ?? ownPoses, paging,
@@ -371,6 +381,18 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       cards = { atlas: cardAtlas, renderer: cardRenderer, bindings: cardBindings, dataGroup };
       setFloat(7, Math.max(cardAtlas.cellSize || 64, 1));
     },
+    // Its types' cell cards (js/continuum-cards.js bakeContinuumCellCards), or none: `grid` the atlas's card grid,
+    // `errors` what a card of each level can be in error (metres), `pipeline` its material's card program and `groups`
+    // that program's bind groups by index (the scene binds its own data at the material's data group). With them the
+    // cut enters every instance's cells in the cell cards' list between its clusters and its far body.
+    setCellCards(next) {
+      if (destroyed) return;
+      cellCards = next ? { pipeline: next.pipeline, groups: next.groups, dataGroup: dataGroupFor(next.pipeline, view.material) } : null;
+      const levels = next ? next.grid.levels : [];
+      setFloat(cardsAt, levels.length);
+      for (let l = 0; l < CONTINUUM_CARD_LEVELS; l++) { setFloat(cardsAt + 1 + l, levels[l]?.cells ?? 0); setFloat(cardsAt + 4 + l, next?.errors[l] ?? 0); }
+    },
+    get hasCellCards() { return Boolean(cellCards); },
     // Instance `index`'s record (js/continuum-format.js writeContinuumRecord), on the CPU until sent.
     place(index, record) { onCPU(); writeContinuumRecord(words, floats, index, record); },
     // Instances `first`..`first + n` sent as they now stand.
@@ -447,6 +469,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       const limit = cards ? CONTINUUM_VIEW_LISTS - 1 : CONTINUUM_VIEW_LISTS;
       for (let index = 0; index < limit; index++) drawList(pass, index);
       drawCards(pass);
+      drawCellCards(pass);
     },
     // The view's four lists, one pipeline (with in-pass visibility first when the material is pure visibility-equal,
     // and the shared octahedral card pipeline for list 3 when cards are attached).
@@ -459,6 +482,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       const limit = cards ? CONTINUUM_VIEW_LISTS - 1 : CONTINUUM_VIEW_LISTS;
       for (let index = 0; index < limit; index++) drawList(pass, index);
       drawCards(pass);
+      drawCellCards(pass);
     },
     // Its coarse cut into a shadow map: `part` 'whole' (every surface), or into a ship's own maps 'solid' or 'canvas'
     // (js/shadows.js createVesselShadows). Its material's own shadow program casts it where it has one, its `own`

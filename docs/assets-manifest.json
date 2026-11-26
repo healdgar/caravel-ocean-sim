@@ -935,24 +935,24 @@
     "sha256": "35b8384c68958f3e951fed3392ecf18a8dfca67d45994c7e4a74f20e707496c3"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.7b40c77832ed7e03.gz",
-    "bytes": 193656747,
-    "sha256": "7b40c77832ed7e032796927a7563963526df7ba70d9ebca335eaebc33d9f5317"
+    "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.dae944c2ea35de54.gz",
+    "bytes": 299002902,
+    "sha256": "dae944c2ea35de5447a3a77ab82e8f5fd7a8097d37da801d68cf13a297b62635"
   },
   "assets/ground-cover/tropical/meadows-gpu/atlas.bin.gz": {
-    "url": "assets/ground-cover/tropical/meadows-gpu/atlas.bin.43fe5f577d6314a8.gz",
-    "bytes": 146903448,
-    "sha256": "43fe5f577d6314a823ebf00f2ac83aa13e34eaca4aaaee947d8b010f798bf2ca"
+    "url": "assets/ground-cover/tropical/meadows-gpu/atlas.bin.03724620a05634c3.gz",
+    "bytes": 229294439,
+    "sha256": "03724620a05634c3954da5e47b699ba37d79b77888bade68c04d5fc4fc6ff1a8"
   },
   "assets/mobile-continuum/portugal-meadow/atlas.bin.gz": {
-    "url": "assets/mobile-continuum/portugal-meadow/atlas.bin.40ecca199293a204.gz",
-    "bytes": 6453844,
-    "sha256": "40ecca199293a204c4cf8ba1ddd880e9c7e32ef2d01c0107f5be2f69bcffb7ff"
+    "url": "assets/mobile-continuum/portugal-meadow/atlas.bin.b940403f0be2d41c.gz",
+    "bytes": 24049787,
+    "sha256": "b940403f0be2d41c330c2b55a546db661e01059487a1f769181cace8562b8c99"
   },
   "assets/mobile-continuum/tropical-meadow/atlas.bin.gz": {
-    "url": "assets/mobile-continuum/tropical-meadow/atlas.bin.87c986bb7679b96d.gz",
-    "bytes": 5059814,
-    "sha256": "87c986bb7679b96d4cc78dbc3e874e37d3eeb2151d68d6bb7ffaaf98aad94605"
+    "url": "assets/mobile-continuum/tropical-meadow/atlas.bin.fe757eb93d73b65b.gz",
+    "bytes": 16306692,
+    "sha256": "fe757eb93d73b65bfc0645e75dc9afd96b9652a654612bd91c025b82ddb95ea9"
   },
   "assets/world/hyg-stars.bin": {
     "url": "assets/world/hyg-stars.e648341c03cb753b.bin",
@@ -2295,9 +2295,9 @@
     "sha256": "40250fb88f9c43af3049ff419bbf636ab5f088afc3126de2d675b93fdd4f7313"
   },
   "assets/continuum/bake-worker.js": {
-    "url": "assets/continuum/bake-worker.e00ec082a0c0f17e.js",
-    "bytes": 177087,
-    "sha256": "e00ec082a0c0f17ea972d4443212d6f41b54638db294be05cf6fb5408762e7b1"
+    "url": "assets/continuum/bake-worker.cf95dcd737503436.js",
+    "bytes": 177106,
+    "sha256": "cf95dcd737503436445043f85d0805afdd14240d2203231666fe7df3d40f3aa3"
   },
   "assets/ports/1550/land-materials-pbr.png": {
     "url": "assets/ports/1550/land-materials-pbr.1d2651bbbcdd39c4.png",
@@ -2305,24 +2305,24 @@
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.7b13f48147cef0cd.json",
-    "bytes": 22051,
-    "sha256": "7b13f48147cef0cd437330af170fb4e66b4db05ef7fd34cd8b0b25653b3093f3"
+    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.384bc4860ebff944.json",
+    "bytes": 19001,
+    "sha256": "384bc4860ebff94404d5d515925166b2b651824f485cf6d61cb8a2ee8bd4e3ad"
   },
   "assets/ground-cover/tropical/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/tropical/meadows-gpu/manifest.aac76b2db7596477.json",
-    "bytes": 20795,
-    "sha256": "aac76b2db7596477aed787f9d2b78e302d1f586fabb96bb692e6f4346a7a2d1a"
+    "url": "assets/ground-cover/tropical/meadows-gpu/manifest.21bbc212f0c0d74c.json",
+    "bytes": 18995,
+    "sha256": "21bbc212f0c0d74c0f34bfd99ed435681dfbe98234ec47d529e0edc212b5c139"
   },
   "assets/mobile-continuum/portugal-meadow/manifest.json": {
-    "url": "assets/mobile-continuum/portugal-meadow/manifest.d25df4f545f88ec8.json",
-    "bytes": 27458,
-    "sha256": "d25df4f545f88ec8df045b613bacce79157c8c1d8d692d82f2ce53e7c961528b"
+    "url": "assets/mobile-continuum/portugal-meadow/manifest.70d19eb3cbea4585.json",
+    "bytes": 23589,
+    "sha256": "70d19eb3cbea4585bc3c42c00f3084ae51572540091595f9aa9302f55ab38601"
   },
   "assets/mobile-continuum/tropical-meadow/manifest.json": {
-    "url": "assets/mobile-continuum/tropical-meadow/manifest.1851c6a3e6c4dfc4.json",
-    "bytes": 25866,
-    "sha256": "1851c6a3e6c4dfc4887319ab1b48ef65f5c03886698cd48f0358a5b42db3ad7c"
+    "url": "assets/mobile-continuum/tropical-meadow/manifest.bb14577fd16efe32.json",
+    "bytes": 23586,
+    "sha256": "bb14577fd16efe32d08d9d5b01eac221ca56f3552a0b65ab1884452cbd050eca"
   },
   "assets/ships/continuum/trade-cog-underway/manifest.json": {
     "url": "assets/ships/continuum/trade-cog-underway/manifest.d48de66d0f072323.json",
