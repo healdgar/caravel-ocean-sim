@@ -4,7 +4,7 @@ Built on [Noniv/web-ocean](https://github.com/Noniv/web-ocean).
 
 A real-time WebGPU sailing game with wind, oar and paddle propulsion, crew, impact spray, deck wash, whitecaps, volumetric weather and marine encounters. The published game includes **nine vessel models**, independently selectable AI fleets, and an astronomical Sun, Moon and starry night. Boat, free-flight and exterior cameras share the same sea. Conditions, fleet choices and astronomical settings can be saved in a link.
 
-[Open Ocean Sailing Simulator](https://healdgar.github.io/caravel-ocean-sim/).
+[Open Ocean Sailing Simulator](https://www.sixcailloux.com/waterworld/).
 
 **Current runtime:** nine vessel choices, independently controlled fleets, source-derived
 forest canopy and distance-based tree detail. Startup reuses identical GPU programs,
@@ -34,7 +34,7 @@ Project code is **MIT licensed**, copyright © 2026 **Six Cailloux, LLC**, with
 the original author's notice retained. See [LICENSE](LICENSE) and
 [third-party asset/code notices](THIRD_PARTY_NOTICES.md).
 
-[Try the Saba landfall MVP](https://healdgar.github.io/caravel-ocean-sim/?landfall=approach&boat=1).
+[Try the Saba landfall MVP](https://www.sixcailloux.com/waterworld/?landfall=approach&boat=1).
 Open **Landfall** to choose Horizon, Approach or Wells Bay approach, and compare clear air,
 sunset, backlighting and sea mist. The world overview locates Saba; only this island
 currently renders in 3D. Real LiDAR relief and aerial imagery now seed its terrain
@@ -93,7 +93,7 @@ npm install
 npm start        # serves http://localhost:8080/
 ```
 
-After editing anything under `js/`, run `npm run build` to regenerate `ocean.html`, `ocean.min.html`, and `docs/index.html`. The minified build strips WGSL comments and whitespace and minifies the JavaScript with esbuild. Building locally does not publish the changes; see [GitHub Pages build](#github-pages-build).
+After editing anything under `js/`, run `npm run build` to regenerate `ocean.html`, `ocean.min.html`, and `docs/index.html`. The minified build strips WGSL comments and whitespace and minifies the JavaScript with esbuild. Building locally does not publish the changes; see [Publishing](#publishing).
 
 ### Graphics architecture
 
@@ -140,7 +140,7 @@ your Mac account, so subsequent asset generation needs no 1Password prompt.
 Local Node authoring commands can load it with `--env-file=.env.local`.
 
 `.env.local` is ignored by Git, blocked by the development server, and excluded
-from the explicit file list used to build the standalone pages and GitHub Pages.
+from the explicit file list used to build the standalone pages and the website.
 Restart any development server started before this protection was added.
 Only generated audio belongs in the game; never import credentials into `js/`
 or copy them into `assets/` or `docs/`.
@@ -241,7 +241,7 @@ suspend sound and discard pending events rather than replaying a backlog.
 `node scripts/audio-promote.mjs` reproduces the selected edits locally, encodes
 gapless-tagged MP3s into `assets/audio/`, writes their checksums/provenance, and
 regenerates `js/audio-assets.js`. Rejected takes remain excluded. `npm run build`
-embeds the twelve files in both downloadable ocean pages; GitHub Pages serves
+embeds the twelve files in both downloadable ocean pages; the website serves
 the same bytes as versioned files fetched only after sound is enabled.
 Credentials, request records and audition pages are excluded. The compressed
 audio totals about 2.1 MB, decoded only after sound is enabled. Gains and ranges
@@ -378,7 +378,7 @@ The [ship-model foundation](SHIP_MODELS.md) separates immutable model definition
 named attachment points, semantic mesh groups and cached geometry from each
 vessel's live state. The first four models are **Niña, Pinta, Santa María
 and HMS Victory (1805)**; the five later vessels are described below. Choose
-**Ship settings → Vessel**, or [sail Victory](https://healdgar.github.io/caravel-ocean-sim/?ship=victory&boat=1&view=ship).
+**Ship settings → Vessel**, or [sail Victory](https://www.sixcailloux.com/waterworld/?ship=victory&boat=1&view=ship).
 Victory has her own 56.69 × 15.85 m hull, three gun decks with an open waist,
 104 represented guns, stern galleries, wheel, boats, stepped masts and fighting
 tops. Eight square sails, three headsails and a gaff spanker use shared posed
@@ -680,7 +680,7 @@ you copy it manually. Each copy captures your latest settings.
 
 For crossing storm seas, select **Hella rough** in Sea settings: 28 m/s wind,
 8 m swell, and extra foam. The sliders allow up to 32 m/s wind and 10 m swell.
-[Try rough seas](https://healdgar.github.io/caravel-ocean-sim/?boat=1&windSpeed=28&windDir=123&fetchKm=300&swellHs=8&swellLength=95&swellDir=236&choppy=1.6&foam=1.7).
+[Try rough seas](https://www.sixcailloux.com/waterworld/?boat=1&windSpeed=28&windDir=123&fetchKm=300&swellHs=8&swellLength=95&swellDir=236&choppy=1.6&foam=1.7).
 Links share the configuration; they do not freeze an animation frame or the
 boat's travelled position.
 
@@ -832,7 +832,7 @@ model yet. The future target remains 15–20 minutes of offshore passage.
 The source packs, licenses, checksums and rebuild instructions live in
 [`assets/world/README.md`](assets/world/README.md). Both downloadable ocean pages
 embed the island's height, imagery and vegetation mask plus the world chart.
-GitHub Pages loads terrain and foliage for land scenes, and the world chart on demand.
+The website loads terrain and foliage for land scenes, and the world chart on demand.
 The regular ocean scene does not allocate terrain GPU
 resources. The automatic resolution target is now 60 FPS; combined
 land/ocean performance still needs a physical iPhone measurement.
@@ -1169,7 +1169,7 @@ Values are GPU **spans**, not exclusive costs: render stages can overlap or wait
 
 `WEBGPU_BACKEND=metal CHROMIUM_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node scripts/benchmark-bloom.mjs` alternates the original and folded kernels in one live scene/context at fixed 1206 × 1998 and 3840 × 2160 pixels. The October22Mac capture measured median isolated chain times of 0.169→0.152ms and 0.296→0.258ms, respectively. This is a small bloom-only improvement (about13% at4K), not a whole-game FPS gain or a physical-iPhone result. The reported iPhone120ms window still requires isolated measurement on that device. Native regression covers final-colour rounding, exact reference fallback, air/water source selection, and the phone-sized diagnostic UI.
 
-For a reproducible local capture, use `?view=ship&profile=1&w=1280&h=720&shot=gpu-check.png&frames=600&sunElev=35&sunAzim=30&boatSpeed=6`. The development server saves the image and `shots/gpu-check.json`, containing scene parameters, per-pass samples, median and p95 frame spans. Samples start at frame 120 and retain at most 512 entries. Screenshot runs use a fixed simulation timestep; asynchronous hull readback can still produce slight pose differences between runs. Close other active GPU scenes before comparing. These diagnostics remain local; GitHub Pages cannot save captures.
+For a reproducible local capture, use `?view=ship&profile=1&w=1280&h=720&shot=gpu-check.png&frames=600&sunElev=35&sunAzim=30&boatSpeed=6`. The development server saves the image and `shots/gpu-check.json`, containing scene parameters, per-pass samples, median and p95 frame spans. Samples start at frame 120 and retain at most 512 entries. Screenshot runs use a fixed simulation timestep; asynchronous hull readback can still produce slight pose differences between runs. Close other active GPU scenes before comparing. These diagnostics remain local; the published website cannot save captures.
 
 The initial October 2026 Mac comparison reported roughly 12 ms compute-to-composite endpoint intervals, incorrectly labelled whole-frame spans. Those figures are not comparable to the corrected sampled GPU window (capture format version 2). No sustained FPS improvement has been established. Confirmed benefits are reductions in buffer storage and scheduled GPU work. Waves, cloud quality, shadows, HDR, and antialiasing settings remain unchanged.
 
@@ -1395,8 +1395,8 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `assets/` | Neutral oak texture, optimized WebP, and generation prompt |
 | `js/wgsl/` | Shaders as JavaScript modules, including waves/foam, atmosphere, ocean, timber, and post-processing |
 | `server.mjs` | Tiny static server for development |
-| `build.mjs` | Builds two standalone downloads and the cached-asset Pages site; retains third-party notices |
-| `docs/` | Generated GitHub Pages demo, `.nojekyll`, and README images |
+| `build.mjs` | Builds two standalone downloads and the cached-asset website; retains third-party notices |
+| `docs/` | Generated website (published by `npm run deploy`) and README images |
 | `tests/` | Boat math, geometry, sharing, GPU behavior, and standalone startup checks |
 | `THIRD_PARTY_NOTICES.md` | Cloud/ephemeris code licenses, HYG catalogue and terrain/media provenance |
 | `BREAKING_WAVES.md` | Primary breaking-water research, current limits and proposed shared lifecycle |
@@ -1806,10 +1806,10 @@ three sail panels, mast height, tiller/rudder alignment, crew grip clearance and
 anchor. The independent camera and hull wave probes let Free camera remain
 level while the vessel continues floating and steering.
 
-## GitHub Pages build
+## Publishing
 
-[Open the live sailing demo](https://healdgar.github.io/caravel-ocean-sim/).
-Source and the published build now live together in the public
+[Open the live sailing demo](https://www.sixcailloux.com/waterworld/).
+Source lives in the public
 [`healdgar/caravel-ocean-sim`](https://github.com/healdgar/caravel-ocean-sim) repository.
 
 `node build.mjs` also generates `docs/index.html`, a minified website with
@@ -1821,7 +1821,6 @@ downloads embed sailing assets and forest atlases; full-detail mature forest
 buffers are optional versioned network assets.
 Older hashed assets are retained for cached HTML; the build copies only its
 explicit runtime asset list. The site defaults to Boat camera and preserves
-explicit camera links. GitHub Pages serves the `main` branch's `/docs` folder, committed alongside the
-source. The game's main release is `npm run deploy`, which publishes the same site
-and the single-file downloads to sixcailloux.com/waterworld.
-The `.nojekyll` file preserves the generated static page without a Jekyll build.
+explicit camera links. `npm run deploy` publishes the site and the single-file downloads
+to the test site, sixcailloux.com/waterworld-test; `npm run deploy:prod` publishes them
+to sixcailloux.com/waterworld. GitHub Pages is off.
