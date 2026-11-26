@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import { CASCADES } from './wgsl/common.js';
+import { setContinuumSeaReach } from './continuum-core.js';
 import {surfaceWaveSource} from './wgsl/surface-coupling.js';
 
 // Capture the real material and posed geometry. Refraction, extinction and air
@@ -16,8 +17,10 @@ function opticsMatching(source,start,open,close){
 // `land` marks ground, which is captured up to WATER_CAPTURE_LAND_MARGIN above the surface so a shore seen
 // through a wave has ground behind it; everything else stops at the surface.
 export const WATER_CAPTURE_LAND_MARGIN=0.45,WATER_CAPTURE_MARGIN=0.08;
-// No sea stands higher than this above its datum, or lower below: past it a capture keeps nothing, so a fragment
-// leaves before the surface is found, and a whole instance past it places no vertex (js/wgsl/continuum-cut.js).
+// No sea ever stands higher than this above its datum, or lower below. The sea as it runs now stands lower still:
+// the game tells the captures its highest crest (setSeaCrest, `captureMode.y`, the land’s margin with it), and past
+// that a capture keeps nothing, so a fragment leaves before the surface is found, and a whole instance past it places
+// no vertex (js/wgsl/continuum-cut.js). A crew on a deck above the crests is thus not drawn again for the water.
 export const WATER_CAPTURE_CEILING=14.0;
 export function createSubmergedShader(source,entry='fs',world='v.world',surfaceWaves=false,land=false){
   // Explicit vessel-material opt-in. Do not guess by material number, rename
@@ -85,7 +88,7 @@ fn captureHeight(p:vec2f,footprint:f32)->f32{
 ${fragment}{
   // Most of a ship is on the wrong side of the surface here. Leave before lighting any of it.
   let captureWorld=${world};
-  if(select((captureWorld.y > ${WATER_CAPTURE_CEILING.toFixed(1)}), (captureWorld.y < -${WATER_CAPTURE_CEILING.toFixed(1)}), (captureMode.x > 0.5))){discard;return vec4f(0);}
+  if(select((captureWorld.y > captureMode.y), (captureWorld.y < -captureMode.y), (captureMode.x > 0.5))){discard;return vec4f(0);}
   let eyeDist=length(captureWorld-F.camPos.xyz);
   let pxSpan=max(length(F.camRight.xyz)/max(F.screen.x,1.0),length(F.camUp.xyz)/max(F.screen.y,1.0));
   let footprint=2.0*eyeDist*pxSpan*4.0;
@@ -117,9 +120,10 @@ export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba
   const usage=(globalThis.GPUBufferUsage?.UNIFORM??64)|(globalThis.GPUBufferUsage?.COPY_DST??8);
   const modeBuffers=[0,1].map(above=>{
     const b=device.createBuffer({size:16,usage});
-    device.queue.writeBuffer(b,0,new Float32Array([above,0,0,0]));
+    device.queue.writeBuffer(b,0,new Float32Array([above,WATER_CAPTURE_CEILING,0,0]));
     return b;
   });
+  let seaReach=WATER_CAPTURE_CEILING;
   // One capture pipeline a module, with its groups: `code` the module's whole source, `needsWaves` whether its tail
   // reads the surface's waves (group 3 then binds them too).
   function build({key,vertex,groups,needsWaves,code}){
@@ -158,6 +162,16 @@ export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba
   return {
     // The device the captures are made on (js/continuum-scene.js reads how it binds an atlas).
     device,
+    // The highest crest the sea can raise as it runs now, in metres above its datum: every capture keeps nothing
+    // farther than that (and the margin ground is kept by) from the datum. Written only when it changes.
+    setSeaCrest(crest){
+      const reach=Math.fround(Math.min(WATER_CAPTURE_CEILING,Math.max(0,Number(crest)||0)+WATER_CAPTURE_LAND_MARGIN));
+      // The one cut enters in the captures' lists only what that reach can touch (js/wgsl/continuum-cut.js).
+      setContinuumSeaReach(reach);
+      if(reach===seaReach)return;
+      seaReach=reach;
+      modeBuffers.forEach((b,above)=>device.queue.writeBuffer(b,0,new Float32Array([above,reach,0,0])));
+    },
     // A material's capture, made from its view's source (createSubmergedShader).
     capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1,land=false}){
       return build({key:['rewritten',source,entry,world,land],vertex,groups,needsWaves:!!surfaceWaves&&!/\bfn\s+surfaceWaveAt\s*\(/.test(source),

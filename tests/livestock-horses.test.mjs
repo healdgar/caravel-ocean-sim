@@ -117,7 +117,8 @@ test('Tripo H3.1 4K livestock bodies bake whole into the one continuum: RGB555 c
   assert.match(view, /@group\(2\)\s*@binding\(0\)\s*var<storage,\s*read>\s*continuumAtlas/);
   assert.match(HERDS_STEP_WGSL, /@group\(0\)\s*@binding\(6\)\s*var<storage,\s*read_write>\s*herdRecords:\s*array<ContinuumRecord>/);
   assert.match(HERDS_STEP_WGSL, /@group\(0\)\s*@binding\(7\)\s*var<storage,\s*read_write>\s*skinnedPoses/);
-  assert.match(view, /@fragment\s+fn\s+continuumFS\s*\([^)]*\)\s*->\s*ContinuumCoverage/, 'one fragment entry, with the sample-mask handoff');
+  assert.match(view, /@fragment\s+fn\s+continuumFS\s*\(v:ContinuumVarying[^{]*->\s*ContinuumCoverage/, 'one fragment entry, with the sample-mask handoff');
+  assert.equal(view.match(/@fragment\s+fn\s+continuumFS\b/g).length, 1, 'one fragment entry');
 
   const expectedHeights = [0.82, 1.52, 0.66, 1.84];
   const triRanges = [[3300, 3500], [3700, 3900], [2900, 3100], [5800, 6400]];
@@ -577,7 +578,7 @@ test('mounted street riders lock < 1 mm on sloped banks, draw only through the c
   herds.draw(makePass());
   herds.drawShadow(makePass());
   assert.ok(!writes.includes('livestock continuum draws') && !writes.includes('livestock continuum lists'), 'the GPU resets the lists and draws without writeBuffer');
-  assert.deepEqual(dispatches.map((d) => d.pipe), ['livestock herds seen', 'livestock herds step', 'animal continuum reset', 'animal continuum cut']);
+  assert.deepEqual(dispatches.map((d) => d.pipe), ['livestock herds seen', 'livestock herds step', 'continuum reset', 'continuum cut']);
   assert.equal(dispatches[0].n, dispatches[1].n, 'the copy covers every beast the step places');
   assert.equal(indexedDraws.length, 0, 'herds draw no indexed meshes');
   assert.deepEqual(indirectDraws.filter((d) => d.pipe === 'livestock herds').map((d) => d.off), [0, 16, 32, 48], 'the view draws the four continuum lists');

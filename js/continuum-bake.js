@@ -143,12 +143,16 @@ export function posedMeasure(posed, nearest = 16) {
 // there, at rest and in every pose (posedMeasure). It is the error the cut projects: how far the drawn surface moves.
 // The simplifier's own figure is not part of it, for that counts a turned normal or a slid UV as metres, which on a
 // scanned body is many times how far anything moves. `seen`, if given, is told each group's level, the simplifier's
-// figure, and the distances measured at rest and posed.
+// figure, and the distances measured at rest and posed. Parts joined for good (`welded.joined`, bakeClusters) are one
+// surface in every pose and are measured as one: a seam that coarsens hands a sliver of one part's ground to the
+// other, which still covers it, and measured part by part that sliver would be charged its distance to the nearest
+// triangle its own part kept, centimetres along the seam.
 export function posedGroupError(welded, posed, { nearest = 16, seen = null } = {}) {
   const kept = new Int32Array(welded.count).fill(-1), met = new Int32Array(welded.count).fill(-1), gap = posedMeasure(posed, nearest), P = welded.position;
+  const partOf = welded.joined === true ? () => 0 : (v) => welded.part[v];
   const byPart = (corners) => {
     const lists = new Map();
-    for (let t = 0; t < corners.length / 3; t++) { const part = welded.part[corners[t * 3]]; let list = lists.get(part); if (!list) lists.set(part, (list = [])); list.push(t); }
+    for (let t = 0; t < corners.length / 3; t++) { const part = partOf(corners[t * 3]); let list = lists.get(part); if (!list) lists.set(part, (list = [])); list.push(t); }
     return lists;
   };
   let stamp = 0;
@@ -164,12 +168,12 @@ export function posedGroupError(welded, posed, { nearest = 16, seen = null } = {
     for (const v of children) {
       if (kept[v] === stamp || met[v] === stamp) continue;
       met[v] = stamp;
-      const list = keptLists.get(welded.part[v]) ?? everyKept;
+      const list = keptLists.get(partOf(v)) ?? everyKept;
       worst = Math.max(worst, gap(P[v * 3], P[v * 3 + 1], P[v * 3 + 2], v, v, v, 1, 0, 0, list, keptMesh, spheresOf(keptMesh, list)));
       rest = Math.max(rest, gap.rest);
     }
     for (let t = 0; t < simplified.length / 3; t++) {
-      const a = simplified[t * 3], b = simplified[t * 3 + 1], c = simplified[t * 3 + 2], list = wasLists.get(welded.part[a]);
+      const a = simplified[t * 3], b = simplified[t * 3 + 1], c = simplified[t * 3 + 2], list = wasLists.get(partOf(a));
       if (!list) continue;
       worst = Math.max(worst, gap((P[a * 3] + P[b * 3] + P[c * 3]) / 3, (P[a * 3 + 1] + P[b * 3 + 1] + P[c * 3 + 1]) / 3, (P[a * 3 + 2] + P[b * 3 + 2] + P[c * 3 + 2]) / 3, a, b, c, 1 / 3, 1 / 3, 1 / 3, list, wasMesh, spheresOf(wasMesh, list)));
       rest = Math.max(rest, gap.rest);
@@ -783,12 +787,14 @@ function weldDrawn(type) {
 // `leafVertices` holds them (position, normal, uv, and the card vertex each was made from), welded vertex
 // count + i being leaf vertex i, so a packer reads them past the welded mesh's own. `groupError`, if given, measures a
 // group's error in place of the builder (a skinned body's, in every pose its rig takes: (children, simplified, error)
-// => metres).
+// => metres). `w.joined`: the body's parts never come apart (the pieces of a skin), so their boundaries coarsen with
+// the surface about them; a body whose parts can part (a ship, a struck building) leaves it unset and keeps every
+// boundary at every level.
 async function bakeClusters(w, { uv = w.kind, leaves = null, groupError = null } = {}) {
   const dag = await buildDag({
     id: 0, bark: { pos: w.position, nrm: w.normal, uv, idx: w.index },
     leaves: leaves ? { pos: leaves.pos, nrm: leaves.nrm, uv: leaves.uv, vpl: leaves.vpl } : { pos: new Float32Array(0), nrm: new Float32Array(0), uv: new Float32Array(0), vpl: 8 },
-    ...(leaves ? { leafErr: leaves.error, leafMask: leaves.mask ?? undefined } : {}), barkParts: w.part,
+    ...(leaves ? { leafErr: leaves.error, leafMask: leaves.mask ?? undefined } : {}), barkParts: w.part, barkJoined: w.joined === true,
     ...(groupError ? { barkGroupError: groupError } : {}),
   });
   const count = dag.meta.length / 4, records = [];
@@ -807,6 +813,28 @@ async function bakeClusters(w, { uv = w.kind, leaves = null, groupError = null }
       cluster: c, lod: Array.from(r.subarray(0, 4)), parentLod: Array.from(r.subarray(parent >= 0 ? 4 : 0, parent >= 0 ? 8 : 4)), cull: Array.from(r.subarray(8, 12)),
       error: r[12], parentError: parent >= 0 ? r[13] : Infinity, first, triangles: dag.meta[c * 4 + 1], level: dag.meta[c * 4 + 2], part: w.part[dag.idx[first]],
     });
+  }
+  // Joined parts: a group spans parts, and one of them poses its sphere for every cluster that reads it: the part
+  // holding most of the triangles the group took in (the lowest such part where two hold as many). A cluster carries
+  // the part of the group that made it (`lodPart`) and of the group that took it in (`parentPart`), and both groups
+  // (`group`, `parentGroup`), for a family that must bound a group's sphere under its part's pose.
+  if (w.joined === true) {
+    const tally = new Map();
+    for (const record of records) {
+      if (dag.meta[record.cluster * 4 + 3] === 1) continue;
+      record.group = dag.groups[record.cluster * 2]; record.parentGroup = dag.groups[record.cluster * 2 + 1];
+      if (record.parentGroup < 0) continue;
+      let parts = tally.get(record.parentGroup);
+      if (!parts) tally.set(record.parentGroup, (parts = new Map()));
+      parts.set(record.part, (parts.get(record.part) ?? 0) + record.triangles);
+    }
+    const lead = new Map();
+    for (const [group, parts] of tally) lead.set(group, [...parts].sort((p, q) => q[1] - p[1] || p[0] - q[0])[0][0]);
+    for (const record of records) {
+      if (record.group === undefined) continue;
+      record.lodPart = lead.get(record.group) ?? record.part;
+      record.parentPart = lead.get(record.parentGroup) ?? record.part;
+    }
   }
   // Coarsest parent first: what a building can draw at its nearest point is then a prefix.
   records.sort((p, q) => q.parentError - p.parentError || q.error - p.error || p.cluster - q.cluster);

@@ -13,6 +13,8 @@
 //   add "gunsWait":9000 to start measuring that many milliseconds after the order instead
 //   rows with {"ablaze":"1"} set two fires on her deck and measure while they burn
 //   rows with {"js":"folder"} load the game's scripts from that folder: an older copy of js/, to compare with
+//   rows with {"assets":"folder"} take any asset the folder holds from it (an older bake of some bodies, laid out as
+//   assets/ is) and the rest as they stand, so a rebake is compared in one run with what it replaced
 //   npm run perf -- --tris                           also count triangles per pipeline
 //   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
 //   npm run perf -- --profile                        JavaScript time per function
@@ -144,7 +146,7 @@ console.log(`GPU busy before loading: ${mean(idle).toFixed(0)}% (other work on t
 console.log('scene'.padEnd(20),'frame p50/p95   fps  | JS ms mean/p95 | CPU cores main+gpu | GPU busy frag vert | limit');
 for(const [label,extra,edits] of rows){
   const region=process.env.PERF_REGION||'lisbon',url=region==='saba'?landfallStageURL(base,'coast','clear'):coastalRegionStageURL(base,region,'dock','clear',1650);
-  const {battle,fort,city,guns,gunsWait,ablaze,js,...parameters}=extra;
+  const {battle,fort,city,guns,gunsWait,ablaze,js,assets,...parameters}=extra;
   for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...(city?{view:'free',cam:`${CITY_EYE.join(',')},0,${CITY_PITCH}`}:{}),...parameters}))url.searchParams.set(key,String(value));
   const page=await browser.newPage({viewport:{width:1728,height:1117}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
@@ -152,6 +154,11 @@ for(const [label,extra,edits] of rows){
     const file=normalize(decodeURIComponent(new URL(route.request().url()).pathname).replace(/^\/js\//,''));
     if(file.startsWith('..'))return route.abort();
     try{route.fulfill({contentType:'text/javascript',body:await readFile(join(js,file))});}catch{route.fulfill({status:404,body:'not found'});}
+  });
+  if(assets)await page.route('**/assets/**',async route=>{
+    const file=normalize(decodeURIComponent(new URL(route.request().url()).pathname).replace(/^\/assets\//,''));
+    if(file.startsWith('..'))return route.abort();
+    try{route.fulfill({contentType:'application/octet-stream',body:await readFile(join(assets,file))});}catch{route.fallback();}
   });
   const byFile=new Map();for(const [file,find,replace] of edits??[])byFile.set(file,[...(byFile.get(file)??[]),[find,replace]]);
   for(const [file,changes] of byFile)await page.route('**/js/'+file,async route=>{const response=await route.fetch();let text=await response.text();for(const [find,replace] of changes){if(!text.includes(find))console.log('EDIT NOT FOUND',find);text=text.split(find).join(replace);}route.fulfill({response,body:text});});

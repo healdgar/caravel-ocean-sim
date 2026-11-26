@@ -36,7 +36,7 @@ import {
   CREW_CONTINUUM_STREAMS, validateCrewContinuumManifest,
 } from '../js/crew-continuum.js';
 import { CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
-import { CONTINUUM_HEADER_WORDS, assembleContinuumAtlas, checkContinuumAtlas, packContinuumBody, packContinuumUV } from '../js/continuum-format.js';
+import { CONTINUUM_HEADER_WORDS, CONTINUUM_GROUP_WHOLE, assembleContinuumAtlas, checkContinuumAtlas, packContinuumBody, packContinuumUV } from '../js/continuum-format.js';
 import { bakeContinuumBody, closest, triangleSpheres, triangleGrid, outline, posedGroupError, posedMeasure } from '../js/continuum-bake.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,6 +45,8 @@ const option = (name, fallback) => args.find((a) => a.startsWith(`--${name}=`))?
 const FITS = path.resolve(ROOT, option('fits', '.tripo/1550-hd/fit-regions'));
 const OUT = path.resolve(ROOT, option('out', 'assets/crew/continuum'));
 const ONLY = option('only', null);
+// `--seams=held` keeps every piece's boundary at every level, as a body whose parts can part does (bakeClusters).
+const SEAMS = option('seams', 'coarsen');
 const TEXTURE_SIZE = Number(option('texture', 4096));
 const SAMPLE_SIZE = Math.min(2048, TEXTURE_SIZE);
 // The far source the far body is wrapped round, and the light mesh body.glb carries, in triangles.
@@ -116,6 +118,78 @@ function strongest(fit, v) {
   let best = 0;
   for (let k = 1; k < 4; k++) if (fit.weights[v * 4 + k] > fit.weights[v * 4 + best]) best = k;
   return fit.joints[v * 4 + best];
+}
+
+// ------------------------------------------------------------------------------------------------ skin
+// The fit keeps each point's four heaviest joints. Where a fourth and a fifth tie, one point keeps one and its
+// neighbour the other, and their weights jump: posed, such a point stands millimetres to centimetres off the surface
+// its neighbours make (sailor-male: 3,199 points over 10 mm, the worst 44 mm, about the pelvis, chest and neck), which
+// no coarser body can follow, so every level's posed error carried it. The weights are made continuous here, before
+// anything is measured or written, in SKIN_PASSES passes. A pass spreads each joint's weight over the surface for
+// SKIN_ROUNDS rounds (half a point's own, half its neighbours' mean; points welded by place, so a seam's copies
+// agree), which hands a dropped joint back from the neighbours that kept it, then keeps the four heaviest less the
+// fifth's weight, so a joint leaves a point's four at no weight and not at a tie. One pass leaves a crease where the
+// fifth was heavy (a hip under two spine joints, the pelvis and both thighs); each later pass spreads that crease and
+// has a lighter fifth to take off. The body drawn wears these weights too.
+const SKIN_ROUNDS = 8, SKIN_PASSES = 8;
+function continuousSkin(fit, rounds = SKIN_ROUNDS, passes = SKIN_PASSES) {
+  const count = fit.position.length / 3, remap = MeshoptSimplifier.generatePositionRemap(fit.position, 3), start = new Uint32Array(count + 1);
+  const edges = (each) => {
+    for (let t = 0; t < fit.index.length; t += 3) for (let k = 0; k < 3; k++) {
+      const a = remap[fit.index[t + k]], b = remap[fit.index[t + (k + 1) % 3]];
+      if (a !== b) each(a, b);
+    }
+  };
+  edges((a, b) => { start[a + 1]++; start[b + 1]++; });
+  for (let v = 0; v < count; v++) start[v + 1] += start[v];
+  const fill = start.slice(0, count), near = new Uint32Array(start[count]);
+  edges((a, b) => { near[fill[a]++] = b; near[fill[b]++] = a; });
+  const field = new Float32Array(count), next = new Float32Array(count), mark = new Uint32Array(count);
+  const heaviest = new Float32Array(count * 5), heaviestJoint = new Uint8Array(count * 5);
+  for (let pass = 0; pass < passes; pass++) {
+    const holders = Array.from({ length: CREW_JOINT_COUNT }, () => []);
+    for (let v = 0; v < count; v++) if (remap[v] === v) for (let k = 0; k < 4; k++) if (fit.weights[v * 4 + k] > 0) holders[fit.joints[v * 4 + k]].push(v * 4 + k);
+    heaviest.fill(0);
+    mark.fill(0);
+    // A joint's weight reaches `rounds` rings past the points that hold it, and is worked only there.
+    for (let j = 0; j < CREW_JOINT_COUNT; j++) {
+      if (!holders[j].length) continue;
+      const reach = [];
+      for (const slot of holders[j]) { const v = slot >> 2; field[v] += fit.weights[slot]; if (mark[v] !== j + 1) { mark[v] = j + 1; reach.push(v); } }
+      for (let r = 0, from = 0; r < rounds; r++) {
+        const to = reach.length;
+        for (let i = from; i < to; i++) for (let e = start[reach[i]]; e < start[reach[i] + 1]; e++) if (mark[near[e]] !== j + 1) { mark[near[e]] = j + 1; reach.push(near[e]); }
+        from = to;
+      }
+      for (let r = 0; r < rounds; r++) {
+        for (const v of reach) {
+          let sum = 0;
+          for (let e = start[v]; e < start[v + 1]; e++) sum += field[near[e]];
+          next[v] = start[v + 1] > start[v] ? 0.5 * field[v] + 0.5 * sum / (start[v + 1] - start[v]) : field[v];
+        }
+        for (const v of reach) field[v] = next[v];
+      }
+      for (const v of reach) {
+        const w = field[v];
+        field[v] = 0;
+        if (!(w > heaviest[v * 5 + 4])) continue;
+        let k = 4;
+        for (; k > 0 && heaviest[v * 5 + k - 1] < w; k--) { heaviest[v * 5 + k] = heaviest[v * 5 + k - 1]; heaviestJoint[v * 5 + k] = heaviestJoint[v * 5 + k - 1]; }
+        heaviest[v * 5 + k] = w; heaviestJoint[v * 5 + k] = j;
+      }
+    }
+    for (let v = 0; v < count; v++) {
+      const r = remap[v] * 5, fifth = heaviest[r + 4];
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += Math.max(0, heaviest[r + k] - fifth);
+      if (!(sum > 1e-6)) throw Error(`vertex ${v} holds five joints alike`);
+      for (let k = 0; k < 4; k++) {
+        const w = Math.max(0, heaviest[r + k] - fifth) / sum;
+        fit.joints[v * 4 + k] = w > 0 ? heaviestJoint[r + k] : heaviestJoint[r];
+        fit.weights[v * 4 + k] = w;
+      }
+    }
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ pieces
@@ -507,6 +581,7 @@ async function bake(entry) {
   const file = path.join(FITS, `${entry.id}.glb`), fit = readFit(file), work = fs.mkdtempSync(path.join(os.tmpdir(), `crew-continuum-${entry.id}-`));
   const fitCount = fit.position.length / 3;
   console.log(`${entry.id}: ${fitCount} vertices, ${fit.index.length / 3} triangles`);
+  continuousSkin(fit);
   try {
     const dir = path.join(OUT, entry.id);
     const palettes = samplePoses(fit.animator), body = splitPieces(fit), posed = palettes.map((palette) => posedPositions(palette, body));
@@ -517,7 +592,8 @@ async function bake(entry) {
     lap('far source');
 
     // The one bake: the pieces clustered with their error measured posed, and the far body wrapped round the far source.
-    const welded = { position: body.position, normal: body.normal, kind: body.uv, part: body.piece, index: body.index, count: body.count, corner: null };
+    // The pieces are one skin and never part, so their seams coarsen with the surface about them (bakeClusters).
+    const welded = { position: body.position, normal: body.normal, kind: body.uv, part: body.piece, index: body.index, count: body.count, corner: null, joined: SEAMS === 'coarsen' };
     const baked = await bakeContinuumBody({ name: entry.id, welded, groupError: () => posedGroupError(welded, posed), far: far.type });
     const { clusters, far: farBody } = baked;
     lap('one bake');
@@ -526,7 +602,7 @@ async function bake(entry) {
     const weigh = CREW_CONTINUUM_PIECES.map(() => new Float64Array(CREW_JOINT_COUNT));
     for (let v = 0; v < body.count; v++) for (let k = 0; k < 4; k++) weigh[body.piece[v]][body.joints[v * 4 + k]] += body.weights[v * 4 + k];
     const leadOf = weigh.map((tally) => tally.reduce((best, w, j) => (w > tally[best] ? j : best), 0));
-    for (const record of clusters.records) record.part = leadOf[record.part];
+    for (const record of clusters.records) { record.part = leadOf[record.part]; record.lodPart = leadOf[record.lodPart]; record.parentPart = leadOf[record.parentPart]; }
 
     // Each far point wears the skin of the far source's point nearest it.
     const V = farBody.position.length / 3, farSkin = new Uint32Array(V), toSource = triangleGrid(fit.position, far.corners, 0.1);
@@ -612,6 +688,62 @@ async function bake(entry) {
     eachMember((j, P, v) => { radii[j] = Math.max(radii[j], Math.hypot(P[v * 3] - centres[j][0], P[v * 3 + 1] - centres[j][1], P[v * 3 + 2] - centres[j][2])); });
     const spheres = centres.map((c, j) => (radii[j] < 0 ? [0, 0, 0, -1] : [...c.map((x) => +x.toFixed(5)), +(radii[j] + farBody.stats.inflateMax + SPHERE_MARGIN).toFixed(5)]));
 
+    // Groups that span pieces. Such a group's sphere is posed, for every cluster that reads it, by one piece's joint:
+    // the piece holding most of what the group took in (bakeClusters). Under that joint its sphere must hold, in every
+    // pose, each point the group took in (within the slack the stand adds to every sphere), and the posed sphere of
+    // each group below it: were a finer group's sphere to reach nearer the eye than a coarser one's, a cluster and
+    // the coarser one made of it could both be drawn. The sphere is grown until it does. One grown out of its joint's
+    // own sphere is posed as the whole body instead (the body's bound is made of the joints' spheres, and the cut
+    // tries no cluster whose sphere reaches nearer than that bound), and so is every group above it.
+    const groups = new Map();
+    for (const record of clusters.records) {
+      if (!(record.parentGroup >= 0)) continue;
+      let g = groups.get(record.parentGroup);
+      if (!g) groups.set(record.parentGroup, (g = { took: [], lead: record.parentPart, sphere: record.parentLod.slice(), below: new Set(), level: 0, plain: true, whole: false }));
+      g.took.push(record);
+      g.level = Math.max(g.level, record.level + 1);
+      if (record.part !== g.lead) g.plain = false;
+      if (record.group >= 0) g.below.add(record.group);
+    }
+    const stamp = new Int32Array(body.count).fill(-1), posedCentre = [0, 0, 0], posedBelow = [0, 0, 0];
+    const spanning = { count: groups.size, spanning: 0, byJoint: 0, whole: 0, grown: 0, growthMax: 0, byLevel: [] };
+    for (const id of [...groups.keys()].sort((a, b) => a - b)) {
+      const g = groups.get(id), below = [...g.below].map((h) => groups.get(h)), tally = (spanning.byLevel[g.level] ??= [0, 0, 0]);
+      if (below.some((h) => !h.plain)) g.plain = false;
+      if (g.plain) { tally[0]++; continue; }
+      spanning.spanning++;
+      if (below.some((h) => h.whole)) g.whole = true;
+      else {
+        const points = [];
+        for (const record of g.took) for (let i = 0; i < record.triangles * 3; i++) {
+          const v = clusters.order[clusters.indices[record.first + i]];
+          if (stamp[v] !== id) { stamp[v] = id; points.push(v); }
+        }
+        let radius = g.sphere[3];
+        palettes.forEach((palette, k) => {
+          const X = posed[k];
+          jointPoint(palette, g.lead, g.sphere[0], g.sphere[1], g.sphere[2], posedCentre);
+          for (const v of points) radius = Math.max(radius, Math.hypot(X[v * 3] - posedCentre[0], X[v * 3 + 1] - posedCentre[1], X[v * 3 + 2] - posedCentre[2]) - slack);
+          for (const h of below) {
+            jointPoint(palette, h.lead, h.sphere[0], h.sphere[1], h.sphere[2], posedBelow);
+            radius = Math.max(radius, Math.hypot(posedBelow[0] - posedCentre[0], posedBelow[1] - posedCentre[1], posedBelow[2] - posedCentre[2]) + h.sphere[3]);
+          }
+        });
+        const joint = spheres[g.lead];
+        if (Math.hypot(g.sphere[0] - joint[0], g.sphere[1] - joint[1], g.sphere[2] - joint[2]) + radius > joint[3]) g.whole = true;
+        else if (radius > g.sphere[3] + 1e-5) { spanning.grown++; spanning.growthMax = Math.max(spanning.growthMax, radius - g.sphere[3]); g.sphere[3] = radius; }
+      }
+      if (g.whole) { spanning.whole++; tally[2]++; } else { spanning.byJoint++; tally[1]++; }
+    }
+    for (const record of clusters.records) {
+      const made = groups.get(record.group), took = groups.get(record.parentGroup);
+      if (made && !made.plain) { record.lodPart = made.whole ? CONTINUUM_GROUP_WHOLE : made.lead; record.lod[3] = made.sphere[3]; }
+      if (took && !took.plain) { record.parentPart = took.whole ? CONTINUUM_GROUP_WHOLE : took.lead; record.parentLod[3] = took.sphere[3]; }
+    }
+    spanning.growthMax = +spanning.growthMax.toFixed(4);
+    spanning.byLevel = Array.from(spanning.byLevel, (t) => t ?? [0, 0, 0]).slice(1);
+    lap(`groups ${spanning.count}: ${spanning.spanning} span pieces, ${spanning.byJoint} posed by a joint (${spanning.grown} grown, at most ${spanning.growthMax} m), ${spanning.whole} as the whole`);
+
     // The splat's regions: each one's share of the far body's outline, front and side, and its mean colour.
     const regionOf = (t) => Math.round(farBody.kinds[t * 2 + 1] / KIND_WORD);
     const low = [0, 1, 2].map((k) => Math.min(...Array.from({ length: V }, (_, i) => farBody.position[i * 3 + k]))), high = [0, 1, 2].map((k) => Math.max(...Array.from({ length: V }, (_, i) => farBody.position[i * 3 + k])));
@@ -659,7 +791,7 @@ async function bake(entry) {
       atlas: { words: atlas.length, headerWords: CONTINUUM_HEADER_WORDS, bytes: atlas.byteLength, sha256: files['atlas.bin'].sha256, gzip: files['atlas.bin'].gzip },
       pieces: CREW_CONTINUUM_PIECES, regions: CREW_CONTINUUM_REGIONS, regionMedians: surface.medians,
       rig: { joints: CREW_JOINT_COUNT, slack: +slack.toFixed(5), pieceSlack: Object.fromEntries(CREW_CONTINUUM_PIECES.map((name, p) => [name, +pieceSlack[p].toFixed(4)])), leads: leadOf.map((j) => CREW_JOINT_NAMES[j]), spheres },
-      clusters: { count: clusters.count, levels: clusters.levels, roots: clusters.roots, finestTriangles: clusters.finestTriangles, rootError: +clusters.rootError.toFixed(4), pieceCopies: body.copies },
+      clusters: { count: clusters.count, levels: clusters.levels, roots: clusters.roots, finestTriangles: clusters.finestTriangles, rootError: +clusters.rootError.toFixed(4), pieceCopies: body.copies, groups: spanning },
       chain: { ...farBody.stats, farSourceTriangles: far.triangles, posedError: +posedError.toFixed(4), posedInward: +inward.toFixed(4), posedOutward: +outward.toFixed(4), farSourceBack: +sourceBack.toFixed(4) },
       splat,
       texture: { width: texture.levels.width, height: texture.levels.height, coverage: texture.levels.coverage, delightVersion: texture.delightVersion, levels: texture.levels.levels },

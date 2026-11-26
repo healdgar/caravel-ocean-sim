@@ -52,6 +52,13 @@ let continuumScenePixelError = CONTINUUM_BASE_PIXEL_ERROR, continuumScenePixelAi
 // The scene's one pixel-error scalar. Every family's cut reads it each frame; only a frame-time or budget governor
 // moves it, and it is the only thing a governor may move.
 export function continuumPixelError() { return continuumScenePixelError; }
+
+// How far above its datum (and below) the sea now runs, with the margin the captures keep (js/water-optics.js
+// setSeaCrest tells it): every scene's cut enters in the captures' lists only what that can reach. Until the water
+// says, everything.
+let continuumSeaReachNow = 1e9;
+export function setContinuumSeaReach(reach) { continuumSeaReachNow = Number.isFinite(reach) && reach >= 0 ? reach : 1e9; }
+export function continuumSeaReach() { return continuumSeaReachNow; }
 // The error the scalar is gliding toward.
 export function continuumAimedPixelError() { return continuumScenePixelAim; }
 // How much coarser than its own base each family's cut is drawn: 1 at the base error, 2 when it has doubled.

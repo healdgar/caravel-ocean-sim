@@ -1252,13 +1252,18 @@ function herdTotals(s){ // standing beasts in a place: s.stores with per-owner s
     const tryDispatchRoute = (mode, oi, di, poly, len, frac, preferCoachGood = false) => {
       if (!Array.isArray(poly) || poly.length < 2 || !(len > 20)) return false;
       const o = S[oi], d = S[di];
-      if (!o || !d) return false;
+      if (!o || !d || !o.stores || typeof ladeOut !== 'function') return false;
       const baseSpeed = mode === 'sea' ? (typeof COG_MPD === 'number' ? COG_MPD : 2400) : mode === 'river' ? (typeof BARGE_MPD === 'number' ? BARGE_MPD : 1100) : (typeof CART_MPD === 'number' ? CART_MPD : 520);
       const goods = rankGoodsForPair(oi, di, mode !== 'cart', preferCoachGood);
       for (const item of goods) {
         const g = item.g;
         const minQty = preferCoachGood ? 3 : 5;
-        const qty = Math.min(mode === 'cart' ? 24 : 36, Math.max(minQty, Math.round(item.onSale * 0.28)));
+        // Beasts, and any good of a place with no storehouse, leave the raw stores here, as the program's own trade
+        // takes them before it asks ladeOut: so a load is never more than the stores hold.
+        const needsRawDecrement = !o.storage || (typeof BEASTS !== 'undefined' && BEASTS.includes(g));
+        const wanted = Math.min(mode === 'cart' ? 24 : 36, Math.max(minQty, Math.round(item.onSale * 0.28)));
+        const qty = needsRawDecrement ? Math.min(wanted, Math.max(0, Number(o.stores[g]) || 0)) : wanted;
+        if (qty < minQty) continue;
         const span = Math.max(4.5, len / Math.max(240, baseSpeed));
         const departDay = now - frac * span;
         const arriveDay = Math.max(now + 2.8, departDay + span);
@@ -1278,15 +1283,16 @@ function herdTotals(s){ // standing beasts in a place: s.stores with per-owner s
           unit: Math.max(0.02, item.margin),
           master: nextShipMaster(),
         };
-        const needsRawDecrement = !o.storage || (typeof BEASTS !== 'undefined' && BEASTS.includes(g));
-        if (needsRawDecrement) o.stores[g] = Math.max(0, (o.stores[g] || 0) - qty);
-        if (typeof ladeOut === 'function' && ladeOut(c, o, true)) {
+        // ladeOut gives back to the stores whatever of the load does not go (no dealer, no driver, nothing for sale
+        // at the price, a purse too light for all of it), so nothing is put back here: a second return minted the
+        // load on every refusal.
+        if (needsRawDecrement) o.stores[g] -= qty;
+        if (ladeOut(c, o, true)) {
           if (c.arriveDay < now + 2.8) c.arriveDay = now + 2.8;
           staffRiverVessel(c, oi, di, mode);
           W.caravans.push(c);
           return true;
         }
-        if (needsRawDecrement) o.stores[g] = (o.stores[g] || 0) + qty;
       }
       return false;
     };

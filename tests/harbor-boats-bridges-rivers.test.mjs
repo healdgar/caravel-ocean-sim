@@ -42,7 +42,7 @@ import {
   sampleTradeVesselState,
   stepTradeVesselAutopilot,
 } from '../js/trade-vessels.js';
-import { CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS } from '../js/continuum-format.js';
+import { CONTINUUM_CAPTURE_LISTS, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS } from '../js/continuum-format.js';
 import { CONTINUUM_DRAW_WORDS, continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
 import { WATER_CAPTURE_DIRECTIVE, waterCaptureWGSL } from '../js/water-optics.js';
 
@@ -1030,9 +1030,9 @@ test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact
   const submergedArgs = [];
   tv.drawSubmerged(subPass, false);
   assert.equal(capturedSubmergedBound, 1, 'drawSubmerged binds waterOptics submerged capture pipeline');
-  const coarse = CONTINUUM_LISTS.slice(CONTINUUM_VIEW_LISTS).map((_, k) => ['trade vessel continuum draws', (CONTINUUM_VIEW_LISTS + k) * 16]);
-  assert.equal(submergedDraws, coarse.length, 'drawSubmerged draws the scene\'s coarse lists once each');
-  assert.deepEqual(submergedArgs, coarse, 'the capture draws the shadow map\'s lists: the coarse cut');
+  const captured = CONTINUUM_CAPTURE_LISTS.map((index) => ['trade vessel continuum draws', index * 16]);
+  assert.equal(submergedDraws, captured.length, 'drawSubmerged draws the scene\'s capture lists once each');
+  assert.deepEqual(submergedArgs, captured, 'the capture draws its own lists: the view\'s cut of what the sea can reach');
 
   // Verify getWakeSources() returns compact moving-vessel descriptors sorted by distance
   const wakes = tv.getWakeSources({ x: region.x, z: region.z }, 24);

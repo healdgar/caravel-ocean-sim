@@ -25,8 +25,8 @@ import { FRAME_WGSL } from './common.js';
 import { SHADOW_FRAME } from './shadows.js';
 import { CONTINUUM_CORE_WGSL, CONTINUUM_STEP_WORDS, CONTINUUM_HOPS, CONTINUUM_OPTICS_WORDS, continuumClusterPrefixWGSL, continuumMorphStepWGSL } from '../continuum-core.js';
 import {
-  CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_CLUSTER_WORDS, CONTINUUM_VERTEX_WORDS, CONTINUUM_TRIANGLE_WORDS, CONTINUUM_NEVER,
-  CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES, CONTINUUM_VIEW_LISTS,
+  CONTINUUM_HEADER, CONTINUUM_GROUP_WHOLE, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_CLUSTER_WORDS, CONTINUUM_VERTEX_WORDS, CONTINUUM_TRIANGLE_WORDS, CONTINUUM_NEVER,
+  CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES, CONTINUUM_VIEW_LISTS, CONTINUUM_CAPTURE_LISTS,
   CONTINUUM_TYPE_PIECES, CONTINUUM_TYPE_DETAIL_SHIFT, CONTINUUM_KIND, CONTINUUM_KIND_SHIFT, CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_BROKEN, CONTINUUM_EXACT, CONTINUUM_SEA,
   CONTINUUM_IMPORTANT_FLAG, CONTINUUM_SHATTERED, CONTINUUM_DAMAGED, CONTINUUM_STRETCHED, CONTINUUM_STREAMS, CONTINUUM_SURFACE_RANGE,
   CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY, CONTINUUM_SURFEL_ENTRY,
@@ -36,7 +36,6 @@ import {
 import { continuumKindsWGSL } from './continuum-kinds.js';
 import { CONTINUUM_GROUNDED, continuumGroundWGSL } from '../continuum-ground.js';
 import { CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING, continuumHiZWGSL } from '../continuum-hiz.js';
-import { WATER_CAPTURE_CEILING } from '../water-optics.js';
 
 // The vertices of one entry of each list.
 export const CONTINUUM_ENTRY_VERTICES = Object.freeze(CONTINUUM_ENTRY_TRIANGLES.map((n) => 3 * n));
@@ -46,7 +45,7 @@ export const CONTINUUM_ENTRY_VERTICES = Object.freeze(CONTINUUM_ENTRY_TRIANGLES.
 export const CONTINUUM_DRAW_WORDS = CONTINUUM_LISTS.length * 4;
 export const CONTINUUM_LIVE_WORD = CONTINUUM_DRAW_WORDS + CONTINUUM_VIEW_LISTS;
 export const CONTINUUM_DRAWS_BYTES = (CONTINUUM_LIVE_WORD + 1) * 4;
-export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 48;
+export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 64;
 // The select's workgroups each cut this many instances, and are laid in rows of CONTINUUM_ROW.
 export const CONTINUUM_BATCH = 8;
 export const CONTINUUM_ROW = 8192;
@@ -120,7 +119,8 @@ struct ContinuumView {
   lists:array<vec4u,${CONTINUUM_LISTS.length}>,     // each list's first entry and room
   aim:vec4f,                // where the player's guns would fall, in the scene's frame, and how far about it (0: none)
   curve:vec4f,              // symmetric family profile: errorScale, invTaperMetres, splatScale, taperPower
-  limits:vec4f              // symmetric family profile: minPixels, maxDistance, shadowMinError, shadowMaxDistance
+  limits:vec4f,             // symmetric family profile: minPixels, maxDistance, shadowMinError, shadowMaxDistance
+  sea:vec4f                 // how far above its datum, and below, the sea now runs (js/continuum-core.js continuumSeaReach)
 };
 struct ContinuumPoint { position:vec3f, normal:vec3f, high:u32, word:u32 };
 // A point as its kind poses it, in its type's own metres; wear (0 to ${CONTINUUM_SURFACE_RANGE}) how worn it is.
@@ -357,7 +357,7 @@ fn continuumFocal()->f32 { return F.screen.y/max(2.0*length(F.camUp.xyz),1e-4); 
 fn continuumLevel(j:u32)->f32 { return f32(1u<<j); }
 // Each list empty, its draw's vertex count set, the triangles asked cleared, and the instances cut set to the scene's
 // count (a family's own pass may set them anew: continuumBatchArgs).
-@compute @workgroup_size(32) fn continuumReset(@builtin(local_invocation_index) i:u32){
+@compute @workgroup_size(64) fn continuumReset(@builtin(local_invocation_index) i:u32){
   let vertices=array<u32,${CONTINUUM_LISTS.length}>(${CONTINUUM_ENTRY_VERTICES.map((n) => `${n}u`).join(',')});
   if(i<CONTINUUM_LIVE){atomicStore(&continuumDraws[i],select(0u,vertices[min(i/4u,${CONTINUUM_LISTS.length - 1}u)],i%4u==0u&&i<${CONTINUUM_DRAW_WORDS}u));}
   if(i==CONTINUUM_LIVE){atomicStore(&continuumDraws[i],continuumView.counts.x);}
@@ -366,6 +366,7 @@ var<workgroup> continuumSlotRecord:array<ContinuumRecord,${B}>;
 var<workgroup> continuumSlotCut:array<vec4f,${B}>;      // focal, allowed pixels, scale, the shadow's allowed error (metres of the type)
 var<workgroup> continuumSlotTries:array<vec4u,${B}>;    // the view's clusters to try, the shadow's, its first cluster, its detail clusters
 var<workgroup> continuumSlotFar:array<vec4u,${B}>;      // where its far body's pieces go and how many; its shadow's
+var<workgroup> continuumSlotWet:array<vec4u,${B}>;      // where the captures' copies go: clusters, small clusters, far body; 1 if the sea can reach it
 var<workgroup> continuumSlotLift:array<f32,${B}>;       // how far it is raised to the view's drawn ground
 var<workgroup> continuumSlotStart:array<u32,${B + 1}>;  // where each instance's tries begin among the workgroup's
 var<workgroup> continuumWanted:array<atomic<u32>,${B * 3 * L}>; // each instance's clusters in each list (clusters, small, shadow) at each level
@@ -385,6 +386,13 @@ fn continuumOutsideFast(at:vec3f,reach:f32)->bool {
 }
 // The instance a workgroup's tried cluster belongs to.
 fn continuumSlotOf(f:u32)->u32 { var k=0u;for(var j=1u;j<CONTINUUM_BATCH;j++){if(f>=continuumSlotStart[j]){k=j;}} return k; }
+// A group's sphere where the part that leads the group has posed it; where that part is out of sight (a limb shot
+// away), where the cluster's own part has.
+fn continuumGroupSphere(record:ContinuumRecord,lead:u32,part:u32,sphere:vec4f)->vec4f {
+  let posed=continuumSphere(record,lead,sphere);
+  if(posed.w>=0.0||lead==part){return posed;}
+  return continuumSphere(record,part,sphere);
+}
 // One cluster of an instance tried at every level, by the core's own test, each sphere where its part's pose has it:
 // bit j whether the view lists it at level j, bit 4 + j the shadow map; bit 8 small; its triangles from bit 16. A part
 // posed out of sight takes its clusters with it. Evaluates cheapest bounds first so rejected clusters skip sphere/frustum reads.
@@ -392,6 +400,15 @@ fn continuumTry(slot:u32,i:u32)->u32 {
   let record=continuumSlotRecord[slot];let cut=continuumSlotCut[slot];let tries=continuumSlotTries[slot];
   let at=continuumAtlas[${CONTINUUM_HEADER.clustersAt}u]+(tries.z+i)*${CONTINUUM_CLUSTER_WORDS}u;
   let packed=continuumWord(at+15u);let part=packed>>16u;let triangles=packed&255u;
+  // The parts that pose its own group's sphere and its parent group's: its own part, unless the atlas carries group
+  // parts (a body whose parts are joined for good, whose groups span parts and must each be posed one way).
+  var lodPart=part;var parentPart=part;
+  let groupPartsAt=continuumAtlas[${CONTINUUM_HEADER.groupParts}u];
+  if(groupPartsAt!=0u){
+    let groupParts=continuumWord(groupPartsAt+tries.z+i);
+    lodPart=select(groupParts&65535u,CONTINUUM_WHOLE,(groupParts&65535u)==${CONTINUUM_GROUP_WHOLE}u);
+    parentPart=select((groupParts>>16u),CONTINUUM_WHOLE,(groupParts>>16u)==${CONTINUUM_GROUP_WHOLE}u);
+  }
   // A cluster of the finest level has nothing finer to hand over to: its own error (a skin's or a sway's pose slack)
   // never keeps it from being drawn once its parent is too coarse, so an eye however near, or inside, draws the finest.
   let ownError=select(bitcast<f32>(continuumWord(at+12u))*cut.z,0.0,((packed>>8u)&255u)==0u);
@@ -400,18 +417,19 @@ fn continuumTry(slot:u32,i:u32)->u32 {
   var checkedHide=false;
   if(i<tries.x){
     let shift=continuumShift()-F.camPos.xyz+vec3f(0.0,continuumSlotLift[slot],0.0);
-    let parent=continuumSphere(record,part,${atlasVec4('at+4u')});
-    checkedHide=true;
+    let parent=continuumGroupSphere(record,parentPart,part,${atlasVec4('at+4u')});
+    checkedHide=parentPart==part;
     if(parent.w<0.0){return 0u;}
     let above=continuumPlace(record,parent.xyz)+shift;
     let parentPx=continuumPixels(parentError,cut.x,max(length(above)-parent.w*cut.z,CONTINUUM_NEAREST));
     if(parentPx>cut.y){
-      let lod=continuumSphere(record,part,${atlasVec4('at')});
+      let lod=continuumGroupSphere(record,lodPart,part,${atlasVec4('at')});
       if(lod.w<0.0){return 0u;}
       let own=continuumPlace(record,lod.xyz)+shift;
       let ownPx=continuumPixels(ownError,cut.x,max(length(own)-lod.w*cut.z,CONTINUUM_NEAREST));
       if(ownPx*0.42<=cut.y*continuumLevel(CONTINUUM_LEVELS-1u)){
         let cull=continuumSphere(record,part,${atlasVec4('at+8u')});
+        if(cull.w<0.0){return 0u;}
         let cullWorld=continuumPlace(record,cull.xyz)+vec3f(0.0,continuumSlotLift[slot],0.0);
         let cullAt=cullWorld+continuumShift()-F.camPos.xyz;
         let sea=continuumFlagged(record,CONTINUUM_SEA);
@@ -486,6 +504,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     let instance=batch+lane;
     var tries=vec4u(0u);var cut=vec4f(1.0,1.0,1.0,0.0);var far=vec4u(CONTINUUM_FULL,0u,CONTINUUM_FULL,0u);var lift=vec2f(0.0);
     var wantCard=0u;
+    var wet=vec4u(CONTINUUM_FULL,CONTINUUM_FULL,CONTINUUM_FULL,0u);
     var record:ContinuumRecord;
     if(instance<atomicLoad(&continuumDraws[CONTINUUM_LIVE])){
       record=continuumRecords[instance];
@@ -506,6 +525,11 @@ fn continuumTry(slot:u32,i:u32)->u32 {
         let world=continuumPlace(record,bound.xyz)+vec3f(0.0,lift.x,0.0);
         // Its reach takes in whatever of it its kind carries past its type's sphere (pieces in the air, a limb).
         let reach=bound.w*scale+bitcast<f32>(record.tag.w);
+        // What the water's captures draw (js/water-optics.js): what lies under the sea, and, the eye down at the
+        // water, what stands over it. One whose whole sphere stands clear of the sea as it now runs is in neither, and
+        // is entered in no capture list: the captures then run no vertex of a crew on a deck or a town on its hill.
+        let seaLow=world.y-lift.x+min(min(lift.x,lift.y),0.0)-reach;let seaHigh=world.y-lift.x+max(max(lift.x,lift.y),0.0)+reach;
+        if(seaLow<=continuumView.sea.x||(F.camPos.y<continuumView.sea.x+1.5&&seaHigh>= -continuumView.sea.x)){wet.w=1u;}
         let relative=world+continuumShift()-F.camPos.xyz;
         let away=max(length(relative),1e-3);
         let nearDist=max(away-reach,0.0);
@@ -646,6 +670,8 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+1u]=vec2u(bitcast<u32>(morph),pack2x16float(vec2f(splatScale,lift.y)));
       continuumLists[instance*${CONTINUUM_STATE_ENTRIES}u+2u]=vec2u(shadowShare,0u);
     }
+    if(wet.w!=0u&&far.x!=CONTINUUM_FULL){wet.z=continuumReserve(${CONTINUUM_CAPTURE_LISTS[2]}u,far.y&0x7fffffffu);}
+    continuumSlotWet[lane]=wet;
     continuumSlotRecord[lane]=record;continuumSlotCut[lane]=cut;continuumSlotTries[lane]=tries;continuumSlotFar[lane]=far;continuumSlotLift[lane]=lift.x;continuumCardWant[lane]=wantCard;
   }
   workgroupBarrier();
@@ -721,6 +747,12 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       }
       chosen.x=j;base.x=a;base.y=b;break;
     }
+    // The captures' copies of the clusters the view lists, where the sea can reach the instance.
+    if(continuumSlotWet[lane].w!=0u&&chosen.x<CONTINUUM_LEVELS){
+      let big=atomicLoad(&continuumWanted[(lane*3u)*CONTINUUM_LEVELS+chosen.x]);let small=atomicLoad(&continuumWanted[(lane*3u+1u)*CONTINUUM_LEVELS+chosen.x]);
+      if(big>0u){continuumSlotWet[lane].x=continuumReserve(${CONTINUUM_CAPTURE_LISTS[0]}u,big);}
+      if(small>0u){continuumSlotWet[lane].y=continuumReserve(${CONTINUUM_CAPTURE_LISTS[1]}u,small);}
+    }
     for(var j=0u;j<CONTINUUM_LEVELS;j++){
       let n=atomicLoad(&continuumWanted[(lane*3u+2u)*CONTINUUM_LEVELS+j]);
       if(n==0u){chosen.y=j;break;}
@@ -761,7 +793,10 @@ fn continuumTry(slot:u32,i:u32)->u32 {
           let at=continuumAtlas[${CONTINUUM_HEADER.clustersAt}u]+clusterIdx*${CONTINUUM_CLUSTER_WORDS}u;
           small=select(0u,1u,(continuumWord(at+15u)&255u)<=${CONTINUUM_SMALL_CLUSTER}u);
         }
-        continuumLists[select(base.x,base.y,small==1u)+atomicAdd(&continuumCursor[slot*3u+small],1u)]=entry;
+        let listed=atomicAdd(&continuumCursor[slot*3u+small],1u);
+        continuumLists[select(base.x,base.y,small==1u)+listed]=entry;
+        let wetAt=select(continuumSlotWet[slot].x,continuumSlotWet[slot].y,small==1u);
+        if(wetAt!=CONTINUUM_FULL){continuumLists[wetAt+listed]=entry;}
       }
       if(wantShd){
         continuumLists[base.z+atomicAdd(&continuumCursor[slot*3u+2u],1u)]=entry;
@@ -773,7 +808,13 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     let far=continuumSlotFar[k];
     let farCount=far.y&0x7fffffffu;
     let farTag=select(CONTINUUM_FAR_ENTRY,CONTINUUM_SURFEL_ENTRY,(far.y&0x80000000u)!=0u);
-    if(far.x!=CONTINUUM_FULL){for(var c=lane;c<farCount;c+=${W}u){continuumLists[far.x+c]=vec2u(batch+k,c|(farTag<<28u));}}
+    let wetFar=continuumSlotWet[k].z;
+    if(far.x!=CONTINUUM_FULL){
+      for(var c=lane;c<farCount;c+=${W}u){
+        continuumLists[far.x+c]=vec2u(batch+k,c|(farTag<<28u));
+        if(wetFar!=CONTINUUM_FULL){continuumLists[wetFar+c]=vec2u(batch+k,c|(farTag<<28u));}
+      }
+    }
     if(far.z!=CONTINUUM_FULL){for(var c=lane;c<far.w;c+=${W}u){continuumLists[far.z+c]=vec2u(batch+k,c|(CONTINUUM_FAR_ENTRY<<28u));}}
   }
   // The real triangles the scene's error asked of this workgroup, for the census: once a workgroup.
@@ -1262,11 +1303,12 @@ export function continuumModuleWGSL({ pass, material = null, capture = null, pag
 `;
   }
   // A capture keeps only what lies on its side of the sea. An instance whose whole sphere stands clear of the highest
-  // (or lowest) the sea is cut at places no vertex: every family's, by its own bound, as its fragments would all leave.
+  // (or lowest) the sea now runs (`captureMode.y`, js/water-optics.js setSeaCrest) places no vertex: every family's, by
+  // its own bound, as its fragments would all leave.
   const captureSphere = `vec4f(continuumTypeF(m,${CONTINUUM_TYPE.sphere}u),continuumTypeF(m,${CONTINUUM_TYPE.sphere + 1}u),continuumTypeF(m,${CONTINUUM_TYPE.sphere + 2}u),continuumTypeF(m,${CONTINUUM_TYPE.sphere + 3}u))`;
   const skipHigh = `if(listed.entry.x<continuumView.counts.x){let r=continuumRecords[listed.entry.x];let m=continuumTypeOf(r);let b=continuumSphere(r,CONTINUUM_WHOLE,${captureSphere});`
     + `let y=continuumPlace(r,b.xyz).y;let reach=b.w*continuumScale(r)+bitcast<f32>(r.tag.w);`
-    + `if(b.w>=0.0&&select((y-reach>${WATER_CAPTURE_CEILING.toFixed(1)}),(y+reach< -${WATER_CAPTURE_CEILING.toFixed(1)}),(captureMode.x>0.5))){var h:ContinuumVarying;h.position=CONTINUUM_HIDDEN;return h;}}`;
+    + `if(b.w>=0.0&&select((y-reach>captureMode.y),(y+reach< -captureMode.y),(captureMode.x>0.5))){var h:ContinuumVarying;h.position=CONTINUUM_HIDDEN;return h;}}`;
   return capture.directive + body + /* wgsl */`
 @vertex fn continuumCaptureVS(@builtin(vertex_index) vertex:u32,listed:ContinuumEntry)->ContinuumVarying { ${skipHigh}var out=continuumVertex(vertex,listed,false);out.coverage.w=1u;return out; }
 fn waterCaptureMaterial(v:ContinuumVarying,front:bool)->vec4f { return ${material.name}Shade(v,front); }

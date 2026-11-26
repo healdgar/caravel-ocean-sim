@@ -7,12 +7,12 @@
 // by the same select and cast by the same shadow program (or its material's part of it); each family's material has
 // its view (and, if it is seen under water, its capture) composed by the one composer.
 import { requestOnce } from './gpu-program-cache.js';
-import { continuumPixelError, packContinuumProfile } from './continuum-core.js';
+import { continuumPixelError, continuumSeaReach, packContinuumProfile } from './continuum-core.js';
 import { continuumProfile } from './continuum-profiles.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { continuumHiZView, continuumHiZUniform, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from './continuum-hiz.js';
 import {
-  CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_CHUNK_TRIANGLES,
+  CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_SHADOW_LISTS, CONTINUUM_CAPTURE_LISTS, CONTINUUM_CHUNK_TRIANGLES,
   writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, buildContinuumSurfels, computeContinuumTightSpheres,
 } from './continuum-format.js';
 import {
@@ -287,7 +287,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
   viewWords.set([0, samples, 1, (((view?.material?.salt ?? 0) & 0x7fffffff) | singleSided) >>> 0], 0);
   lists.forEach(([at, n], i) => viewWords.set([at, n, 0, 0], 8 + i * 4));
   const aimAt = 8 + CONTINUUM_LISTS.length * 4;
-  const curveAt = aimAt + 4;
+  const curveAt = aimAt + 4, seaAt = curveAt + 8;
   const profileScratch = new Float32Array(8);
   let profileSpec = profile;
   let viewChanged = true;
@@ -411,6 +411,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     encode(pass, indirect = null) {
       if (destroyed) return;
       setFloat(4, continuumPixelError());
+      setFloat(seaAt, continuumSeaReach());
       syncProfile();
       if (viewChanged) { device.queue.writeBuffer(viewBuffer, 0, viewWords); viewChanged = false; }
       pass.setBindGroup(0, cut);
@@ -476,13 +477,14 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     // The shadow map's lists, the coarse cut it casts, by whatever pipeline and groups are bound.
     drawCoarse(pass) {
       if (destroyed || !count) return;
-      for (let index = CONTINUUM_VIEW_LISTS; index < CONTINUUM_LISTS.length; index++) drawList(pass, index);
+      for (const index of CONTINUUM_SHADOW_LISTS) drawList(pass, index);
     },
-    // The camera view's body lists (clusters + far body, omitting horizon splats) for underwater/above-water refraction
-    // capture so floating/submerged bodies are never culled by a shadow frustum or nighttime shadow disable.
+    // The captures' lists: the view's own clusters and far body (no horizon splats), of the instances the sea as it
+    // now runs can reach, so floating and sunken bodies are cut as the view cuts them and nothing clear of the water
+    // costs a capture a vertex.
     drawCaptureLists(pass) {
       if (destroyed || !count) return;
-      for (let index = 0; index < CONTINUUM_VIEW_LISTS - 1; index++) drawList(pass, index);
+      for (const index of CONTINUUM_CAPTURE_LISTS) drawList(pass, index);
     },
     dataGroup: dataGroupFor,
     // For the continuum census (js/continuum-census.js): the real triangles the scene's error asked of the view,

@@ -37,6 +37,12 @@ export interface DagRequest {
    */
   barkParts?: ArrayLike<number>;
   /**
+   * The parts never come apart (the pieces of one skin): cluster groups then span them, so a boundary between two
+   * coarsens level by level like the surface about it. Without it a part is grouped alone and its boundary is held at
+   * every level.
+   */
+  barkJoined?: boolean;
+  /**
    * A bark group's own error, measured by the caller from the group's merged child triangles and their
    * simplification (global vertex indices) and the simplifier's own error; the larger of the two is kept.
    */

@@ -32,6 +32,12 @@
 //           (the posed vertex it rides), wind (the family's sway word) and surface (raw | scorch << 8, unorm over
 //           CONTINUUM_SURFACE_RANGE: how much a face is raw stone or timber, where a cut opened it, and how burnt).
 //           A type without a stream the atlas carries reads zeros.
+//   group parts  optional (header slot CONTINUUM_HEADER.groupParts, 0 when absent): a word a cluster, in the clusters'
+//           own order, lodPart | parentPart << 16: the part whose pose carries the LOD sphere of the group that made
+//           the cluster, and the part whose pose carries its parent group's. A body whose parts are joined for good
+//           (js/continuum-bake.js bakeClusters, `joined`) has groups that span parts, and every cluster of a group
+//           must pose the group's sphere alike or neighbours across a part's seam would be cut at different
+//           distances. Absent, each sphere rides the cluster's own part, which is all a group holds.
 //
 // THE RECORD. CONTINUUM_RECORD_WORDS words an instance, written on the CPU when an instance is placed, struck or
 // moved, or by a family's own compute pass (a pose pass that stands its records each frame):
@@ -48,7 +54,7 @@ export const CONTINUUM_HEADER_WORDS = 32;
 export const CONTINUUM_HEADER = Object.freeze({
   magic: 0, version: 1, typeCount: 2, typesAt: 3, clustersAt: 4, clusterCount: 5, verticesAt: 6, vertexCount: 7, indicesAt: 8, indexCount: 9,
   chainsAt: 10, words: 11, hops: 12, chunkTriangles: 13, clusterTriangles: 14, streams: 15, skin: 16, uv: 17, rider: 18, wind: 19, surface: 20,
-  cones: 21, surfels: 22,
+  cones: 21, surfels: 22, groupParts: 23,
 });
 export const CONTINUUM_TYPE_WORDS = 32;
 export const CONTINUUM_TYPE = Object.freeze({
@@ -118,11 +124,16 @@ export const CONTINUUM_DAMAGED = 1 << 27;
 export const CONTINUUM_STRETCHED = 1 << 28;
 
 // The lists an instance can be entered in, each with its own indirect draw, the vertices of one entry, and the
-// triangles one full entry submits. The view's lists come first; the shadow map's (and an under-water capture's) are
-// the rest. An entry is (instance, item | what << 28): a cluster, a far-body chunk, or a splat.
-export const CONTINUUM_LISTS = Object.freeze(['clusters', 'small clusters', 'far body', 'splat', 'shadow far body', 'shadow clusters']);
+// triangles one full entry submits. The view's lists come first, then the shadow map's, then the water captures':
+// the view's own clusters and far body over again, of those instances alone that the sea as it now runs can reach
+// (js/wgsl/continuum-cut.js), so a capture draws no vertex of what stands clear of the water. An entry is
+// (instance, item | what << 28): a cluster, a far-body chunk, or a splat.
+export const CONTINUUM_LISTS = Object.freeze(['clusters', 'small clusters', 'far body', 'splat', 'shadow far body', 'shadow clusters', 'capture clusters', 'capture small clusters', 'capture far body']);
 export const CONTINUUM_VIEW_LISTS = 4;
-export const CONTINUUM_ENTRY_TRIANGLES = Object.freeze([CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES, 1, CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES]);
+export const CONTINUUM_SHADOW_LISTS = Object.freeze([4, 5]);
+// The captures' lists, in the order of the view's lists they repeat (clusters, small clusters, far body).
+export const CONTINUUM_CAPTURE_LISTS = Object.freeze([6, 7, 8]);
+export const CONTINUUM_ENTRY_TRIANGLES = Object.freeze([CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES, 1, CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES]);
 export const CONTINUUM_CLUSTER_ENTRY = 1, CONTINUUM_FAR_ENTRY = 2, CONTINUUM_SPLAT_ENTRY = 3, CONTINUUM_SURFEL_ENTRY = 4;
 // Universal prefix micro-surfel stream layout (header slot CONTINUUM_HEADER.surfels):
 //   directory: typeCount * CONTINUUM_SURFEL_HEADER_WORDS ([firstSurfel, surfelCount, f32(areaRadius), f32(handoffError)])
@@ -187,6 +198,15 @@ export function packContinuumCluster({ lod, parentLod, cull, error, parentError,
   return u;
 }
 
+// A cluster's group parts (CONTINUUM_HEADER.groupParts): the part that poses its own group's LOD sphere, and its
+// parent group's. CONTINUUM_GROUP_WHOLE in either: that group's sphere is the whole instance's bound (a group too
+// widely spread over parts for any one part's pose to carry its sphere).
+export const CONTINUUM_GROUP_WHOLE = 65535;
+export function continuumGroupPartsWord(lodPart, parentPart) {
+  if (!(lodPart >= 0 && lodPart <= 65535 && parentPart >= 0 && parentPart <= 65535)) throw Error(`A continuum cluster's group parts are out of range: ${lodPart}, ${parentPart}`);
+  return (lodPart | (parentPart << 16)) >>> 0;
+}
+
 // ------------------------------------------------------------------------------------------------ a body
 // One baked body (js/continuum-bake.js bakeContinuumBody) as the words it adds to an atlas: a head, its type record,
 // its clusters, its vertices (clusters' then far body's), its indices, its far body and its side streams; every place
@@ -225,9 +245,12 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
   const chainWords = V + T * CONTINUUM_TRIANGLE_WORDS + far.steps.length + (V ? optics.length : 0);
   const typeAt = CONTINUUM_BODY_HEAD, clustersAt = typeAt + CONTINUUM_TYPE_WORDS, verticesAt = clustersAt + clusters.count * CONTINUUM_CLUSTER_WORDS;
   const indicesAt = verticesAt + vertices * CONTINUUM_VERTEX_WORDS, chainAt = indicesAt + clusters.indices.length, streamsAt = chainAt + chainWords;
-  const words = new Uint32Array(streamsAt + streamWords), floats = new Float32Array(words.buffer);
-  words.set([CONTINUUM_BODY_MAGIC, CONTINUUM_ATLAS_VERSION, clusters.count, vertices, clusters.indices.length, chainWords, triangles, carried.reduce((m, s) => m | s.bit, 0), ownVertices, streamWords], 0);
+  // Its group parts, where any cluster's group is posed by a part other than the cluster's own.
+  const groupWords = clusters.records.some((r) => (r.lodPart ?? r.part) !== r.part || (r.parentPart ?? r.part) !== r.part) ? clusters.count : 0;
+  const words = new Uint32Array(streamsAt + streamWords + groupWords), floats = new Float32Array(words.buffer);
+  words.set([CONTINUUM_BODY_MAGIC, CONTINUUM_ATLAS_VERSION, clusters.count, vertices, clusters.indices.length, chainWords, triangles, carried.reduce((m, s) => m | s.bit, 0), ownVertices, streamWords, groupWords], 0);
   clusters.records.forEach((record, k) => words.set(packContinuumCluster(record), clustersAt + k * CONTINUUM_CLUSTER_WORDS));
+  if (groupWords) clusters.records.forEach((record, k) => { words[streamsAt + streamWords + k] = continuumGroupPartsWord(record.lodPart ?? record.part, record.parentPart ?? record.part); });
   clusters.order.forEach((v, i) => words.set(packContinuumVertex({ position: welded.position.subarray(v * 3, v * 3 + 3), normal: welded.normal.subarray(v * 3, v * 3 + 3), ...vertex(v) }, quant), verticesAt + i * CONTINUUM_VERTEX_WORDS));
   for (let i = 0; i < V; i++) words.set(packContinuumVertex({ position: far.position.subarray(i * 3, i * 3 + 3), normal: far.normal.subarray(i * 3, i * 3 + 3) }, quant), verticesAt + (ownVertices + i) * CONTINUUM_VERTEX_WORDS);
   words.set(clusters.indices, indicesAt);
@@ -309,10 +332,10 @@ export function continuumFinestClusters(welded) {
 // The parts of a packed body, checked.
 export function continuumBodyParts(words) {
   if (words[0] !== CONTINUUM_BODY_MAGIC || words[1] !== CONTINUUM_ATLAS_VERSION) throw Error('A continuum body of another format');
-  const [clusters, vertices, indices, chain, sourceTriangles, streams, ownVertices, streamWords] = words.subarray(2, 10), typeAt = CONTINUUM_BODY_HEAD, clustersAt = typeAt + CONTINUUM_TYPE_WORDS;
+  const [clusters, vertices, indices, chain, sourceTriangles, streams, ownVertices, streamWords, groupWords] = words.subarray(2, 11), typeAt = CONTINUUM_BODY_HEAD, clustersAt = typeAt + CONTINUUM_TYPE_WORDS;
   const verticesAt = clustersAt + clusters * CONTINUUM_CLUSTER_WORDS, indicesAt = verticesAt + vertices * CONTINUUM_VERTEX_WORDS, chainAt = indicesAt + indices, streamsAt = chainAt + chain;
-  if (streamsAt + streamWords !== words.length) throw Error('A continuum body does not add up');
-  return { clusters, vertices, indices, chain, sourceTriangles, streams, ownVertices, typeAt, clustersAt, verticesAt, indicesAt, chainAt, streamsAt };
+  if ((groupWords !== 0 && groupWords !== clusters) || streamsAt + streamWords + groupWords !== words.length) throw Error('A continuum body does not add up');
+  return { clusters, vertices, indices, chain, sourceTriangles, streams, ownVertices, typeAt, clustersAt, verticesAt, indicesAt, chainAt, streamsAt, groupPartsAt: groupWords ? streamsAt + streamWords : 0 };
 }
 // An atlas of packed bodies, type i being bodies[i]: header, type records, every body's clusters, vertices and
 // indices, every far body, then each stream any body carries; each body's places moved to where it now lies.
@@ -322,12 +345,15 @@ export function assembleContinuumAtlas(bodies) {
   const verticesAt = clustersAt + totalClusters * CONTINUUM_CLUSTER_WORDS, totalVertices = sum('vertices'), indicesAt = verticesAt + totalVertices * CONTINUUM_VERTEX_WORDS;
   const totalIndices = sum('indices'), chainsAt = indicesAt + totalIndices, streamsAt = chainsAt + sum('chain');
   const mask = parts.reduce((m, p) => m | p.streams, 0), carried = CONTINUUM_STREAMS.filter((s) => mask & s.bit);
-  const words = streamsAt + carried.reduce((n, s) => n + s.words * totalVertices, 0);
+  // The group parts, a word a cluster, where any body carries them; a body without reads its clusters' own parts.
+  const groupPartsAt = parts.some((p) => p.groupPartsAt) ? streamsAt + carried.reduce((n, s) => n + s.words * totalVertices, 0) : 0;
+  const words = streamsAt + carried.reduce((n, s) => n + s.words * totalVertices, 0) + (groupPartsAt ? totalClusters : 0);
   const atlas = new Uint32Array(words);
   atlas.set([CONTINUUM_ATLAS_MAGIC, CONTINUUM_ATLAS_VERSION, bodies.length, typesAt, clustersAt, totalClusters, verticesAt, totalVertices, indicesAt, totalIndices, chainsAt, words, CONTINUUM_HOPS, CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, mask], 0);
   const streamAt = {};
   let at = streamsAt;
   for (const s of carried) { streamAt[s.name] = at; atlas[H[s.name]] = at; at += s.words * totalVertices; }
+  if (groupPartsAt) { atlas[H.groupParts] = groupPartsAt; at += totalClusters; }
   let clusterAt = 0, vertexAt = 0, indexAt = 0, chainAt = chainsAt;
   bodies.forEach((body, id) => {
     const p = parts[id], typeAt = typesAt + id * CONTINUUM_TYPE_WORDS;
@@ -339,6 +365,10 @@ export function assembleContinuumAtlas(bodies) {
     const clusterWords = clustersAt + clusterAt * CONTINUUM_CLUSTER_WORDS;
     atlas.set(body.subarray(p.clustersAt, p.verticesAt), clusterWords);
     for (let k = 0; k < p.clusters; k++) atlas[clusterWords + k * CONTINUUM_CLUSTER_WORDS + 14] += indexAt;
+    if (groupPartsAt) for (let k = 0; k < p.clusters; k++) {
+      const own = atlas[clusterWords + k * CONTINUUM_CLUSTER_WORDS + 15] >>> 16;
+      atlas[groupPartsAt + clusterAt + k] = p.groupPartsAt ? body[p.groupPartsAt + k] : continuumGroupPartsWord(own, own);
+    }
     atlas.set(body.subarray(p.verticesAt, p.indicesAt), verticesAt + vertexAt * CONTINUUM_VERTEX_WORDS);
     for (let i = 0; i < p.indices; i++) atlas[indicesAt + indexAt + i] = body[p.indicesAt + i] + vertexAt;
     atlas.set(body.subarray(p.chainAt, p.streamsAt), chainAt);
@@ -897,7 +927,7 @@ export const CONTINUUM_ENTRY_FILL = 0.25;
 export function continuumRoom(types, counts) {
   let clusters = 0, far = 0, capacity = 0;
   counts.forEach((n, t) => { if (!n) return; capacity += n; clusters += n * types[t].clusters; far += n * types[t].farChunks; });
-  const room = [clusters, clusters, far, capacity, far, clusters].map((n, list) => Math.max(1, Math.min(n, Math.ceil(CONTINUUM_TRIANGLE_BUDGET / (CONTINUUM_ENTRY_TRIANGLES[list] * CONTINUUM_ENTRY_FILL)))));
+  const room = [clusters, clusters, far, capacity, far, clusters, clusters, clusters, far].map((n, list) => Math.max(1, Math.min(n, Math.ceil(CONTINUUM_TRIANGLE_BUDGET / (CONTINUUM_ENTRY_TRIANGLES[list] * CONTINUUM_ENTRY_FILL)))));
   return { capacity, room };
 }
 

@@ -164,7 +164,7 @@ test('all three 1550 road vehicles are closed outward CCW manifolds on spoked wh
   assert.match(HERDS_STEP_WGSL, /isHitch/);
   assert.match(HERDS_STEP_WGSL, /useHitchMid/);
   assert.match(HERDS_STEP_WGSL, /herdStand\(idx,[^;]*thinSeed/);
-  assert.match(continuumSelectWGSL(), /continuumThin\(span, ?record\.tag\.z/);
+  assert.match(continuumSelectWGSL(), /let seed=record\.tag\.z[^;]*;[\s\S]*splatScale=continuumProfileThin\(span,[^;]*seed\)/);
   assert.match(view, /@builtin\(sample_mask\)/);
   assert.match(view, /fn\s+herdContinuumVarying\b/);
   assert.match(view, /fn\s+herdContinuumShade\b/);

@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { CREW_JOINT_NAMES, CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 import { CONTINUUM_HOPS, CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
 import {
-  CONTINUUM_CLUSTER_WORDS, CONTINUUM_HEADER, CONTINUUM_NEVER, CONTINUUM_STREAMS, CONTINUUM_TYPE, CONTINUUM_TRIANGLE_WORDS,
+  CONTINUUM_CLUSTER_WORDS, CONTINUUM_GROUP_WHOLE, CONTINUUM_HEADER, CONTINUUM_NEVER, CONTINUUM_STREAMS, CONTINUUM_TYPE, CONTINUUM_TRIANGLE_WORDS,
   checkContinuumAtlas,
 } from '../js/continuum-format.js';
 import {
@@ -114,6 +114,26 @@ for (const { id } of CREW_CONTINUUM_BODIES) {
     }
     assert.equal(finest, manifest.source.triangles, `${id} the finest cut is the whole fitted body`);
     assert.equal(roots, manifest.clusters.roots);
+    // Group parts: a body whose pieces' seams coarsen has groups that span pieces, and every cluster that reads a
+    // group's sphere (the clusters it made, as their LOD sphere; the clusters it took in, as their parent's) poses it
+    // by the same part, a piece's lead joint or the whole body: or two neighbours across a seam are cut apart.
+    const groupPartsAt = words[H.groupParts];
+    if (manifest.clusters.groups?.spanning) assert.ok(groupPartsAt > 0, `${id} carries its group parts`);
+    if (groupPartsAt) {
+      const posedBy = new Map();
+      for (let k = 0; k < C; k++) {
+        const c = words[type + T.clusterFirst] + k, o = words[H.clustersAt] + c * CONTINUUM_CLUSTER_WORDS, level = (words[o + 15] >>> 8) & 255, part = words[o + 15] >>> 16;
+        const lodPart = words[groupPartsAt + c] & 65535, parentPart = words[groupPartsAt + c] >>> 16;
+        if (level === 0) assert.equal(lodPart, part, `${id} cluster ${k}: a finest cluster's sphere is its own`);
+        for (const [sphere, errorAt, lead] of [[o, o + 12, lodPart], [o + 4, o + 13, parentPart]]) {
+          if ((sphere === o && level === 0) || (sphere !== o && floats[o + 13] >= 1e30)) continue;
+          assert.ok(lead === CONTINUUM_GROUP_WHOLE || leads.has(lead), `${id} cluster ${k}: group part ${lead}`);
+          const key = `${words[sphere]},${words[sphere + 1]},${words[sphere + 2]},${words[sphere + 3]},${words[errorAt]}`, was = posedBy.get(key);
+          if (was === undefined) posedBy.set(key, lead);
+          else assert.equal(lead, was, `${id} cluster ${k}: its group's sphere is posed by ${lead} here and ${was} elsewhere`);
+        }
+      }
+    }
   });
 
   test(`${id}: the far body collapses as a prefix to its core, and its steps rise`, { skip: !ready && 'streams not baked here' }, () => {

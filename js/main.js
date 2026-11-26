@@ -6264,6 +6264,8 @@ async function main() {
     // current GPU eye-height probe, so crests switch the interface without a
     // CPU readback delay. High aerial and deck views pay no additional render pass.
     const maxWaveCrest=1.35*P.swellHs+0.018*P.windSpeed*P.windSpeed+0.85;
+    // The same crest bounds what the water's captures draw: nothing wholly above it is under the sea.
+    waterOptics?.setSeaCrest?.(maxWaveCrest);
     const cameraMediumBand=cam.y<waterH+maxWaveCrest;
     if (nodeCount) device.queue.writeBuffer(instBuf, 0, instData, 0, nodeCount * 4);
 

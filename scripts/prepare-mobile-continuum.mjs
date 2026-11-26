@@ -87,9 +87,11 @@ function pruneContinuumAtlas(srcWords, minLevel, label, { keepRootsBelow = false
   const chainsAt = srcWords[H.chainsAt];
   const streamsMask = srcWords[H.streams];
   const activeStreams = CONTINUUM_STREAMS.filter((s) => (streamsMask & s.bit) !== 0);
+  // The group parts (a word a cluster, after the streams), where the atlas carries them.
+  const srcGroupPartsAt = srcWords[H.groupParts];
   const firstStreamAt = activeStreams.length
     ? Math.min(...activeStreams.map((s) => srcWords[H[s.name]]))
-    : srcWords[H.words];
+    : srcGroupPartsAt || srcWords[H.words];
 
   // Pass 1: per-type kept clusters, watertight check, compacted vertex maps, and far-body spans.
   const perType = [];
@@ -155,7 +157,7 @@ function pruneContinuumAtlas(srcWords, minLevel, label, { keepRootsBelow = false
         }
         remappedIndices[k] = localV;
       }
-      keptClusters.push({ cb, packed, tris, newLvl, ownErr: newLvl === 0 ? 0 : ownErr, remappedIndices });
+      keptClusters.push({ cb, cIdx, packed, tris, newLvl, ownErr: newLvl === 0 ? 0 : ownErr, remappedIndices });
     }
 
     // Watertight check: every kept L1 cluster with non-zero error must match a kept L0 parentError.
@@ -211,7 +213,8 @@ function pruneContinuumAtlas(srcWords, minLevel, label, { keepRootsBelow = false
     streamOffsets.set(s.name, outStreamsAt + totalStreamWords);
     totalStreamWords += totalVertices * s.words;
   }
-  const outTotalWords = outStreamsAt + totalStreamWords;
+  const outGroupPartsAt = srcGroupPartsAt ? outStreamsAt + totalStreamWords : 0;
+  const outTotalWords = outStreamsAt + totalStreamWords + (srcGroupPartsAt ? totalClusters : 0);
 
   const out = new Uint32Array(outTotalWords);
   const outF = new Float32Array(out.buffer);
@@ -228,6 +231,7 @@ function pruneContinuumAtlas(srcWords, minLevel, label, { keepRootsBelow = false
   out[H.chainsAt] = outChainsAt;
   out[H.words] = outTotalWords;
   out[H.cones] = 0;
+  out[H.groupParts] = outGroupPartsAt;
   for (const s of CONTINUUM_STREAMS) {
     out[H[s.name]] = streamOffsets.get(s.name) ?? 0;
   }
@@ -254,6 +258,7 @@ function pruneContinuumAtlas(srcWords, minLevel, label, { keepRootsBelow = false
       outF[dstCb + 12] = kc.ownErr;
       out[dstCb + 14] = idxCursor;
       out[dstCb + 15] = ((kc.packed & 0xffff00ff) | ((kc.newLvl & 255) << 8)) >>> 0;
+      if (outGroupPartsAt) out[outGroupPartsAt + pt.typeClusterFirst + i] = srcWords[srcGroupPartsAt + kc.cIdx];
       for (let k = 0; k < kc.remappedIndices.length; k++) {
         out[outIndicesAt + idxCursor + k] = pt.typeClusterVertStart + kc.remappedIndices[k];
       }

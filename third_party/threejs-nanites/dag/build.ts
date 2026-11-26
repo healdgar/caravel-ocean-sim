@@ -97,11 +97,16 @@ function partClusters(idx: Uint32Array, pos: Float32Array, parts: ArrayLike<numb
 
 interface BarkHooks {
   parts?: ArrayLike<number>;
+  joined?: boolean;
   groupError?: (children: Uint32Array, simplified: Uint32Array, error: number, level: number) => number;
 }
 
-function groupClusters(clusters: Cluster[], remap: Uint32Array, parts: ArrayLike<number> | undefined): Cluster[][] {
-  if (!parts) return groupByAdjacency(clusters, remap);
+// Parts that can come apart (a ship's timbers, a building's pieces) are grouped each alone, so no boundary between two
+// is ever simplified. Parts joined for good (DagRequest.barkJoined: the pieces of one skin) are grouped across their
+// boundaries: a boundary's copies then fall inside one group, where the simplifier coarsens both sides of the seam in
+// step, and a level later inside another, as any group border does. A cluster holds one part either way.
+function groupClusters(clusters: Cluster[], remap: Uint32Array, parts: ArrayLike<number> | undefined, joined = false): Cluster[][] {
+  if (!parts || joined) return groupByAdjacency(clusters, remap);
   const byPart = new Map<number, Cluster[]>();
   for (const c of clusters) {
     const part = parts[c.idx[0]];
@@ -124,7 +129,7 @@ function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out:
   const shared = new Uint8Array(nv);
   while (current.length > 1 && level < 32) {
     level++;
-    const groups = groupClusters(current, remap, hooks.parts);
+    const groups = groupClusters(current, remap, hooks.parts, hooks.joined);
     owner.fill(-1);
     shared.fill(0);
     groups.forEach((g, gi) => {
@@ -195,7 +200,7 @@ function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out:
 
 /** The DAG of one mesh (bark + leaves; `leaves.pos` empty for a plain model), packed for the renderer. */
 export async function buildDag(req: DagRequest): Promise<DagResult> {
-  const { id, bark, leaves, leafErr, leafMask, barkAttr, barkErr, barkParts, barkGroupError } = req;
+  const { id, bark, leaves, leafErr, leafMask, barkAttr, barkErr, barkParts, barkJoined, barkGroupError } = req;
   {
     await MeshoptClusterizer.ready;
     await MeshoptSimplifier.ready;
@@ -208,7 +213,7 @@ export async function buildDag(req: DagRequest): Promise<DagResult> {
       battr.set(bark.nrm.subarray(i * 3, i * 3 + 3), i * 5);
       battr.set(bark.uv.subarray(i * 2, i * 2 + 2), i * 5 + 3);
     }
-    const barkLevels = buildBark(bark.pos, battr, bark.idx, barkClusters, barkAttr, barkErr, { parts: barkParts, groupError: barkGroupError });
+    const barkLevels = buildBark(bark.pos, battr, bark.idx, barkClusters, barkAttr, barkErr, { parts: barkParts, joined: barkJoined, groupError: barkGroupError });
 
     // leaves (vertex arrays grow as reduced leaves are appended)
     const lv: LeafVerts = { pos: Array.from(leaves.pos), nrm: Array.from(leaves.nrm), uv: Array.from(leaves.uv), src: Array.from({ length: leaves.pos.length / 3 }, (_, i) => i) };

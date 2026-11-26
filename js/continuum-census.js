@@ -13,7 +13,7 @@
 // fixed-size entries hide degenerate triangles (the one cut, js/wgsl/continuum-cut.js) counts its real triangles as it
 // lists them and offers those words, stride 1. Every family is counted from its draws: nothing is sized on the CPU.
 import { CONTINUUM_TRIANGLE_BUDGET, continuumPixelError } from './continuum-core.js';
-import { CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES } from './continuum-format.js';
+import { CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_SHADOW_LISTS, CONTINUUM_ENTRY_TRIANGLES } from './continuum-format.js';
 
 const CONTINUUM_CENSUS_WGSL = /* wgsl */`
 struct CensusRegion { first: u32, records: u32, stride: u32, family: u32 }
@@ -140,15 +140,20 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
             demanded,
             submitted: demanded,
             shadowSubmitted: 0,
+            captureSubmitted: 0,
             liveInstances: 0,
             capacity: 0,
             scenes: 0,
-            entries: [0, 0, 0, 0, 0, 0],
-            room: [0, 0, 0, 0, 0, 0],
+            entries: CONTINUUM_LISTS.map(() => 0),
+            room: CONTINUUM_LISTS.map(() => 0),
             maxFill: 0,
             clamped: [],
           };
         });
+        // Where a scene's draws buffer holds how many instances its select cut (js/wgsl/continuum-cut.js
+        // CONTINUUM_LIVE_WORD): past each list's four draw words and the view lists' counts. Read here, not as the
+        // bundle loads: the format's constants load after this module.
+        const CONTINUUM_CENSUS_LIVE_WORD = CONTINUUM_LISTS.length * 4 + CONTINUUM_VIEW_LISTS;
         const hasScene = new Set(scenesSnap.map((s) => s.name));
         for (const name of hasScene) if (breakdown[name]) breakdown[name].submitted = 0;
         for (const sc of scenesSnap) {
@@ -157,15 +162,16 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
           const base = maxFamilies + sc.wordOffset;
           b.scenes++;
           b.capacity += sc.capacity;
-          if (sc.words > 28) b.liveInstances += words[base + 28];
+          if (sc.words > CONTINUUM_CENSUS_LIVE_WORD) b.liveInstances += words[base + CONTINUUM_CENSUS_LIVE_WORD];
           for (let list = 0; list < CONTINUUM_LISTS.length; list++) {
             const count = words[base + list * 4 + 1] ?? 0;
             const room = sc.lists?.[list]?.[1] ?? 0;
             const tris = count * CONTINUUM_ENTRY_TRIANGLES[list];
             b.entries[list] += count;
             b.room[list] += room;
-            if (list < 4) b.submitted += tris;
-            else b.shadowSubmitted += tris;
+            if (list < CONTINUUM_VIEW_LISTS) b.submitted += tris;
+            else if (CONTINUUM_SHADOW_LISTS.includes(list)) b.shadowSubmitted += tris;
+            else b.captureSubmitted += tris;
             if (room > 0) {
               const fill = count / room;
               if (fill > b.maxFill) b.maxFill = fill;
