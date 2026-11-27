@@ -71,7 +71,7 @@ test('roots out of their species, their coverage or the ground are rejected befo
   }
 });
 test('invalid species, bounds, partitions, root receipts and invented error certification are rejected',()=>{
-  for(const edit of [m=>m.appearanceErrorSupported=true,m=>m.prototypes[0].species='fir',m=>m.rootStride=32,m=>m.prototypes[0].radius=.1,
+  for(const edit of [m=>m.appearanceErrorSupported=true,m=>m.prototypes[0].species='spruce',m=>m.rootStride=32,m=>m.prototypes[0].radius=.1,
     m=>m.prototypes[0].leaf.firstIndex=0,m=>m.prototypes[0].firstRoot=1,m=>m.coverage.cells.push(0),m=>m.files['roots.bin'].bytes=0]){
     const {manifest}=fixture();edit(manifest);assert.throws(()=>validateForestScenery(manifest));
   }
@@ -152,11 +152,14 @@ test('forest rendering cannot fall back to the legacy generic mask or threshold 
 });
 test('the stand lists each tree in view or in the light box once, and sorts nothing by distance',()=>{
   const stand=forestContinuumStandWGSL();
-  assert.equal(stand.split('atomicAdd(&forestStood[3],1u)').length-1,1);
+  // Each kept tree takes one slot in its workgroup's run, and the workgroup takes its run from the scene's list at once.
+  assert.equal(stand.split('atomicAdd(&forestStandCount,1u)').length-1,1);
+  assert.equal(stand.split('atomicAdd(&forestStood[3],n)').length-1,1);
   assert.match(stand,/if\(slot>=forestStand\.counts\.y\)\{return;\}/,'never past the scene\'s capacity');
-  // Past 65,535 workgroups the roots spread over a second dimension, and their count is read exactly, not as a float.
-  assert.equal(stand.split('let i=id.x+id.y*groups.x*64u;').length-1,1);
-  assert.equal(stand.split('if(i>=forestStand.counts.x){return;}').length-1,1);
+  // Each lane stands one root of a block that passed the block cull, its index read exactly from the block list, not as a
+  // float, and a root past the pack's count is never read.
+  assert.equal(stand.split('if(visIdx<forestBlockList[0]){i=(forestBlockList[1u+visIdx]<<8u)|(sub<<6u)|localIdx;}').length-1,1);
+  assert.equal(stand.split('if(i<forestStand.counts.x){').length-1,1);
   assert.doesNotMatch(stand,/nearLod|midLod|farLod|previousLod|commands|atlasThreshold|sort/);
 });
 test('a procedural landfall skips the pack\'s roots, and a device with prebuilt surfaces its maps',async()=>{

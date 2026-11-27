@@ -10,14 +10,14 @@ import { FOREST_TRUNK_SHAPES } from '../js/forest-trunk-shapes.js';
 import { FOREST_LONG_FALLEN, buildForestTrunkGrid, foreshorePalmPlacement, forestStrikeKey, forestStrikesFromSave, forestStrikesToSave, forestTrunkShape, prepareForestTrunkGridSteps, reapplyForestStrikes, strikeForestRoot, strikeForestTree, sweepForestTrunks } from '../js/forest-trunks.js';
 import { createPortDamageStore } from '../js/port-damage.js';
 import { auditForestTrees, loadAuditModules } from '../scripts/model-audit.mjs';
-import { FOREST_PACK_SETS, measureTrunkShape, readForestPack } from '../scripts/prepare-forest-trunks.mjs';
+import { TRUNK_STEM_MIN_RADIUS_M, forestTrunkPrototypes, measureTrunkShape } from '../scripts/prepare-forest-trunks.mjs';
 
 const root = (x, y, z, scale, yaw, prototype = 0) => [x, y, z, scale, yaw, 1, 1, 1, prototype, 0, -2, 0];
 const gridOf = (species, ...roots) => buildForestTrunkGrid(new Float32Array(roots.flat()), roots.length, species);
 
 test('every species: lines through a drawn trunk stop on it, and no ball stops in air', { timeout: 300000 }, async () => {
   const rows = auditForestTrees(await loadAuditModules(), { bearings: 6, columns: 16, rows: 24 });
-  assert.equal(rows.length, 12, 'nine species and three foreshore palms');
+  assert.equal(rows.length, 14, 'eleven species and three foreshore palms');
   for (const t of rows) {
     const name = `${t.set}/${t.species}`;
     assert.ok(t.trunkLines > 100, `${name}: ${t.trunkLines} lines cross its trunk`);
@@ -29,13 +29,11 @@ test('every species: lines through a drawn trunk stop on it, and no ball stops i
 });
 
 test('the table is what the meshes measure', { timeout: 300000 }, () => {
-  for (const set of FOREST_PACK_SETS) {
-    const { manifest, vertices, indices } = readForestPack(set);
-    for (const prototype of manifest.prototypes) {
-      const { species, height, trunks, limbs } = measureTrunkShape(prototype, vertices, indices);
-      assert.deepEqual({ height, trunks, limbs }, FOREST_TRUNK_SHAPES[species], `${species}: rerun scripts/prepare-forest-trunks.mjs`);
-      assert.ok(trunks.length > 0, `${species} has a trunk`);
-    }
+  for (const { prototype, vertices, indices } of forestTrunkPrototypes()) {
+    const { species, height, trunks, limbs } = measureTrunkShape(prototype, vertices, indices);
+    assert.deepEqual({ height, trunks, limbs }, FOREST_TRUNK_SHAPES[species], `${species}: rerun scripts/prepare-forest-trunks.mjs`);
+    // A shrub's stems are all thinner than a ball's reach to stop it; every tree has a trunk.
+    assert.ok(trunks.length > 0 || prototype.dbhCentimetres / 200 < TRUNK_STEM_MIN_RADIUS_M, `${species} has a trunk`);
   }
 });
 

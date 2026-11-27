@@ -72,6 +72,11 @@ test('the corn is sown in autumn, heads in spring, ripens and is reaped in summe
   const oak = (day) => meadowLitterMixes(day)[MEADOW_LITTER.oak];
   assert.ok(oak(320).species[0].share > oak(200).species[0].share, 'fresh leaves in autumn');
   assert.ok(oak(320).species.every((s) => s.shape >= MEADOW_SHAPE.OVAL), 'litter lies on the ground');
+  // Conifers drop needles: a fir's the year round, a tamarack's gold in the autumn.
+  const fir = (day) => meadowLitterMixes(day)[MEADOW_LITTER.fir], larch = (day) => meadowLitterMixes(day)[MEADOW_LITTER.larch];
+  assert.equal(fir(320).species[0].shape, MEADOW_SHAPE.NEEDLE);
+  assert.equal(fir(320).species[0].share, fir(150).species[0].share, 'a fir sheds the year round');
+  assert.ok(larch(320).species[0].share > larch(150).species[0].share, 'a tamarack sheds in the autumn');
   assert.equal(meadowGrowthDay(Date.UTC(1550, 3, 1), 38.7), 90);
   assert.equal(meadowGrowthDay(Date.UTC(1550, 3, 1), -20), 272, 'south of the line the year turns half round');
 });

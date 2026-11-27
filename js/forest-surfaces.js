@@ -37,6 +37,17 @@ export const PORTUGAL_FOREST_SURFACE_ASSETS=Object.freeze({
   'family-1-albedo.astc.bin.gz':'assets/forest-scenery/portugal/surfaces/family-1-albedo.astc.bin.gz',
   'family-1-detail.astc.bin.gz':'assets/forest-scenery/portugal/surfaces/family-1-detail.astc.bin.gz',
 });
+export const NORTHERN_FOREST_SURFACE_ASSETS=Object.freeze({
+  'manifest.json':'assets/forest-scenery/northern/surfaces/manifest.json',
+  'family-0-albedo.bc7.bin.gz':'assets/forest-scenery/northern/surfaces/family-0-albedo.bc7.bin.gz',
+  'family-0-detail.bc7.bin.gz':'assets/forest-scenery/northern/surfaces/family-0-detail.bc7.bin.gz',
+  'family-1-albedo.bc7.bin.gz':'assets/forest-scenery/northern/surfaces/family-1-albedo.bc7.bin.gz',
+  'family-1-detail.bc7.bin.gz':'assets/forest-scenery/northern/surfaces/family-1-detail.bc7.bin.gz',
+  'family-0-albedo.astc.bin.gz':'assets/forest-scenery/northern/surfaces/family-0-albedo.astc.bin.gz',
+  'family-0-detail.astc.bin.gz':'assets/forest-scenery/northern/surfaces/family-0-detail.astc.bin.gz',
+  'family-1-albedo.astc.bin.gz':'assets/forest-scenery/northern/surfaces/family-1-albedo.astc.bin.gz',
+  'family-1-detail.astc.bin.gz':'assets/forest-scenery/northern/surfaces/family-1-detail.astc.bin.gz',
+});
 export const FOREST_SURFACE_CODECS=Object.freeze({
   bc7:Object.freeze({feature:'texture-compression-bc',albedo:'bc7-rgba-unorm-srgb',detail:'bc7-rgba-unorm'}),
   astc:Object.freeze({feature:'texture-compression-astc',albedo:'astc-4x4-unorm-srgb',detail:'astc-4x4-unorm'}),

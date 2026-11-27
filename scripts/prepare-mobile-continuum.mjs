@@ -36,6 +36,14 @@ const JOBS = [
     validate: validateForestContinuumManifest,
   },
   {
+    name: 'northern-forest',
+    kind: 'forest',
+    srcDir: 'assets/forest-scenery/northern/continuum',
+    outDir: 'assets/mobile-continuum/northern-forest',
+    minLevel: 5,
+    validate: validateForestContinuumManifest,
+  },
+  {
     name: 'saba-forest',
     kind: 'forest',
     srcDir: 'assets/forest-scenery/saba/continuum',

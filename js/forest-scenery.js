@@ -14,10 +14,10 @@ import {CONTINUUM_WIND_BONES,CONTINUUM_WIND_POSE,CONTINUUM_WIND_SKELETON} from '
 import {createContinuumScene,requestContinuumAtlas,requestContinuumPrograms,requestContinuumView} from './continuum-scene.js';
 import {CONTINUUM_CARD_TINT_FOREST} from './wgsl/continuum-cards.js';
 import {requestContinuumCardRenderer,createContinuumCardSceneBindings,bakeContinuumCardAtlas} from './continuum-cards.js';
-import {loadForestContinuum,forestContinuumAssetsFor} from './forest-continuum.js';
+import {loadForestContinuum,forestContinuumAssetsFor,forestPackKindOf} from './forest-continuum.js';
 import {FOREST_BLOCK_ROOTS,FOREST_BLOCK_ROW,FOREST_CONTINUUM_STAND_BYTES,FOREST_CONTINUUM_STOOD_BYTES,FOREST_WIND_BASIS,FOREST_WIND_BYTES,FOREST_WIND_CAPSULES,FOREST_WIND_CAPSULE_AT,FOREST_WIND_EVENT,FOREST_WIND_FORCES,FOREST_WIND_FORCE_AT,FOREST_WIND_LANES,FOREST_WIND_OWN,forestContinuumBlocksWGSL,forestContinuumMaterial,forestContinuumStandWGSL,forestWindSkeletons,forestWindStateBytes,forestWindStepWGSL} from './wgsl/forest-continuum.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,TREE_STRIKE_REACH_M,blastForestRoot,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,nearestForestRoot,reapplyForestStrikes,strikeForestTree} from './forest-trunks.js';
-import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
+import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,NORTHERN_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 
 // What the game fetches of a pack: its manifest, its roots, and the maps a device without block compression
 // builds its surfaces from. The pack's own vertex and index streams are the bake source of its continuum atlas
@@ -214,7 +214,83 @@ export const PORTUGAL_FOREST_ASSETS=Object.freeze({
   'blueberry-veteran-foliage-2-albedo.png':'assets/forest-scenery/portugal/blueberry-veteran-foliage-2-albedo.png',
   'blueberry-veteran-foliage-2-normal.png':'assets/forest-scenery/portugal/blueberry-veteran-foliage-2-normal.png',
 });
-export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut','palm','royal_palm','ceiba','mangrove','blueberry']);
+export const NORTHERN_FOREST_ASSETS=Object.freeze({
+  'manifest.json':'assets/forest-scenery/northern/manifest.json',
+  'roots.bin':'assets/forest-scenery/northern/roots.bin.gz',
+  'fir-veteran-bark-albedo.png':'assets/forest-scenery/northern/fir-veteran-bark-albedo.png',
+  'fir-veteran-bark-normal.png':'assets/forest-scenery/northern/fir-veteran-bark-normal.png',
+  'fir-veteran-bark-roughness.png':'assets/forest-scenery/northern/fir-veteran-bark-roughness.png',
+  'fir-veteran-wounds-albedo.png':'assets/forest-scenery/northern/fir-veteran-wounds-albedo.png',
+  'fir-veteran-wounds-normal.png':'assets/forest-scenery/northern/fir-veteran-wounds-normal.png',
+  'fir-veteran-wounds-roughness.png':'assets/forest-scenery/northern/fir-veteran-wounds-roughness.png',
+  'fir-veteran-foliage-0-albedo.png':'assets/forest-scenery/northern/fir-veteran-foliage-0-albedo.png',
+  'fir-veteran-foliage-0-normal.png':'assets/forest-scenery/northern/fir-veteran-foliage-0-normal.png',
+  'fir-veteran-foliage-1-albedo.png':'assets/forest-scenery/northern/fir-veteran-foliage-1-albedo.png',
+  'fir-veteran-foliage-1-normal.png':'assets/forest-scenery/northern/fir-veteran-foliage-1-normal.png',
+  'fir-veteran-foliage-2-albedo.png':'assets/forest-scenery/northern/fir-veteran-foliage-2-albedo.png',
+  'fir-veteran-foliage-2-normal.png':'assets/forest-scenery/northern/fir-veteran-foliage-2-normal.png',
+  'maple-veteran-bark-albedo.png':'assets/forest-scenery/northern/maple-veteran-bark-albedo.png',
+  'maple-veteran-bark-normal.png':'assets/forest-scenery/northern/maple-veteran-bark-normal.png',
+  'maple-veteran-bark-roughness.png':'assets/forest-scenery/northern/maple-veteran-bark-roughness.png',
+  'maple-veteran-wounds-albedo.png':'assets/forest-scenery/northern/maple-veteran-wounds-albedo.png',
+  'maple-veteran-wounds-normal.png':'assets/forest-scenery/northern/maple-veteran-wounds-normal.png',
+  'maple-veteran-wounds-roughness.png':'assets/forest-scenery/northern/maple-veteran-wounds-roughness.png',
+  'maple-veteran-foliage-0-albedo.png':'assets/forest-scenery/northern/maple-veteran-foliage-0-albedo.png',
+  'maple-veteran-foliage-0-normal.png':'assets/forest-scenery/northern/maple-veteran-foliage-0-normal.png',
+  'maple-veteran-foliage-1-albedo.png':'assets/forest-scenery/northern/maple-veteran-foliage-1-albedo.png',
+  'maple-veteran-foliage-1-normal.png':'assets/forest-scenery/northern/maple-veteran-foliage-1-normal.png',
+  'maple-veteran-foliage-2-albedo.png':'assets/forest-scenery/northern/maple-veteran-foliage-2-albedo.png',
+  'maple-veteran-foliage-2-normal.png':'assets/forest-scenery/northern/maple-veteran-foliage-2-normal.png',
+  'oak-veteran-bark-albedo.png':'assets/forest-scenery/northern/oak-veteran-bark-albedo.png',
+  'oak-veteran-bark-normal.png':'assets/forest-scenery/northern/oak-veteran-bark-normal.png',
+  'oak-veteran-bark-roughness.png':'assets/forest-scenery/northern/oak-veteran-bark-roughness.png',
+  'oak-veteran-wounds-albedo.png':'assets/forest-scenery/northern/oak-veteran-wounds-albedo.png',
+  'oak-veteran-wounds-normal.png':'assets/forest-scenery/northern/oak-veteran-wounds-normal.png',
+  'oak-veteran-wounds-roughness.png':'assets/forest-scenery/northern/oak-veteran-wounds-roughness.png',
+  'oak-veteran-foliage-0-albedo.png':'assets/forest-scenery/northern/oak-veteran-foliage-0-albedo.png',
+  'oak-veteran-foliage-0-normal.png':'assets/forest-scenery/northern/oak-veteran-foliage-0-normal.png',
+  'oak-veteran-foliage-1-albedo.png':'assets/forest-scenery/northern/oak-veteran-foliage-1-albedo.png',
+  'oak-veteran-foliage-1-normal.png':'assets/forest-scenery/northern/oak-veteran-foliage-1-normal.png',
+  'oak-veteran-foliage-2-albedo.png':'assets/forest-scenery/northern/oak-veteran-foliage-2-albedo.png',
+  'oak-veteran-foliage-2-normal.png':'assets/forest-scenery/northern/oak-veteran-foliage-2-normal.png',
+  'larch-veteran-bark-albedo.png':'assets/forest-scenery/northern/larch-veteran-bark-albedo.png',
+  'larch-veteran-bark-normal.png':'assets/forest-scenery/northern/larch-veteran-bark-normal.png',
+  'larch-veteran-bark-roughness.png':'assets/forest-scenery/northern/larch-veteran-bark-roughness.png',
+  'larch-veteran-wounds-albedo.png':'assets/forest-scenery/northern/larch-veteran-wounds-albedo.png',
+  'larch-veteran-wounds-normal.png':'assets/forest-scenery/northern/larch-veteran-wounds-normal.png',
+  'larch-veteran-wounds-roughness.png':'assets/forest-scenery/northern/larch-veteran-wounds-roughness.png',
+  'larch-veteran-foliage-0-albedo.png':'assets/forest-scenery/northern/larch-veteran-foliage-0-albedo.png',
+  'larch-veteran-foliage-0-normal.png':'assets/forest-scenery/northern/larch-veteran-foliage-0-normal.png',
+  'larch-veteran-foliage-1-albedo.png':'assets/forest-scenery/northern/larch-veteran-foliage-1-albedo.png',
+  'larch-veteran-foliage-1-normal.png':'assets/forest-scenery/northern/larch-veteran-foliage-1-normal.png',
+  'larch-veteran-foliage-2-albedo.png':'assets/forest-scenery/northern/larch-veteran-foliage-2-albedo.png',
+  'larch-veteran-foliage-2-normal.png':'assets/forest-scenery/northern/larch-veteran-foliage-2-normal.png',
+  'birch-veteran-bark-albedo.png':'assets/forest-scenery/northern/birch-veteran-bark-albedo.png',
+  'birch-veteran-bark-normal.png':'assets/forest-scenery/northern/birch-veteran-bark-normal.png',
+  'birch-veteran-bark-roughness.png':'assets/forest-scenery/northern/birch-veteran-bark-roughness.png',
+  'birch-veteran-wounds-albedo.png':'assets/forest-scenery/northern/birch-veteran-wounds-albedo.png',
+  'birch-veteran-wounds-normal.png':'assets/forest-scenery/northern/birch-veteran-wounds-normal.png',
+  'birch-veteran-wounds-roughness.png':'assets/forest-scenery/northern/birch-veteran-wounds-roughness.png',
+  'birch-veteran-foliage-0-albedo.png':'assets/forest-scenery/northern/birch-veteran-foliage-0-albedo.png',
+  'birch-veteran-foliage-0-normal.png':'assets/forest-scenery/northern/birch-veteran-foliage-0-normal.png',
+  'birch-veteran-foliage-1-albedo.png':'assets/forest-scenery/northern/birch-veteran-foliage-1-albedo.png',
+  'birch-veteran-foliage-1-normal.png':'assets/forest-scenery/northern/birch-veteran-foliage-1-normal.png',
+  'birch-veteran-foliage-2-albedo.png':'assets/forest-scenery/northern/birch-veteran-foliage-2-albedo.png',
+  'birch-veteran-foliage-2-normal.png':'assets/forest-scenery/northern/birch-veteran-foliage-2-normal.png',
+  'blueberry-veteran-bark-albedo.png':'assets/forest-scenery/northern/blueberry-veteran-bark-albedo.png',
+  'blueberry-veteran-bark-normal.png':'assets/forest-scenery/northern/blueberry-veteran-bark-normal.png',
+  'blueberry-veteran-bark-roughness.png':'assets/forest-scenery/northern/blueberry-veteran-bark-roughness.png',
+  'blueberry-veteran-wounds-albedo.png':'assets/forest-scenery/northern/blueberry-veteran-wounds-albedo.png',
+  'blueberry-veteran-wounds-normal.png':'assets/forest-scenery/northern/blueberry-veteran-wounds-normal.png',
+  'blueberry-veteran-wounds-roughness.png':'assets/forest-scenery/northern/blueberry-veteran-wounds-roughness.png',
+  'blueberry-veteran-foliage-0-albedo.png':'assets/forest-scenery/northern/blueberry-veteran-foliage-0-albedo.png',
+  'blueberry-veteran-foliage-0-normal.png':'assets/forest-scenery/northern/blueberry-veteran-foliage-0-normal.png',
+  'blueberry-veteran-foliage-1-albedo.png':'assets/forest-scenery/northern/blueberry-veteran-foliage-1-albedo.png',
+  'blueberry-veteran-foliage-1-normal.png':'assets/forest-scenery/northern/blueberry-veteran-foliage-1-normal.png',
+  'blueberry-veteran-foliage-2-albedo.png':'assets/forest-scenery/northern/blueberry-veteran-foliage-2-albedo.png',
+  'blueberry-veteran-foliage-2-normal.png':'assets/forest-scenery/northern/blueberry-veteran-foliage-2-normal.png',
+});
+export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut','palm','royal_palm','ceiba','mangrove','blueberry','fir','larch']);
 export const FOREST_ROOT_FLOATS=12;
 const finite=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(Number.isFinite);
 const uint=n=>Number.isSafeInteger(n)&&n>=0;
@@ -520,8 +596,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
   // The GPU lets a buffer go once the work already given it is done.
   const retire=items=>{const drop=()=>{for(const b of items)b?.destroy();};if(typeof device.queue?.onSubmittedWorkDone==='function')device.queue.onSubmittedWorkDone().then(drop,drop);else drop();};
   try{
-    const isSubtropicalPack=m.prototypes.some(p=>p.species==='royal_palm'||p.species==='ceiba'||p.species==='mangrove');
-    const isCohortPack=m.prototypes.some(p=>Boolean(p.cohort));
+    const surfaceAssets={subtropical:SUBTROPICAL_FOREST_SURFACE_ASSETS,northern:NORTHERN_FOREST_SURFACE_ASSETS,portugal:PORTUGAL_FOREST_SURFACE_ASSETS}[forestPackKindOf(m)]??FOREST_SURFACE_ASSETS;
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
@@ -737,7 +812,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       stats.surfaces={codec:null,downloadBytes:0,error:null};
       if(!codec)return null;
       let set;
-      try{set=await loadForestSurfaceSet({assets:isSubtropicalPack?SUBTROPICAL_FOREST_SURFACE_ASSETS:isCohortPack?PORTUGAL_FOREST_SURFACE_ASSETS:FOREST_SURFACE_ASSETS,materials,codec,signal:abort.signal});}
+      try{set=await loadForestSurfaceSet({assets:surfaceAssets,materials,codec,signal:abort.signal});}
       catch(error){if(abort.signal.aborted)throw error;stats.surfaces.error=error.message;return null;}
       if(!set){stats.surfaces.error='Prebuilt surfaces do not match this pack\'s maps; rebake with scripts/prepare-forest-surfaces.py';return null;}
       device.pushErrorScope('validation');

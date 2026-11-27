@@ -12,7 +12,20 @@ import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 const root = new URL('../', import.meta.url);
-export const FOREST_PACK_SETS = Object.freeze(['subtropical', 'saba']);
+// A species is measured once, from the first pack that grows it: a later pack's tree of that kind is drawn at its own size
+// (forestTrunkShape), not measured again.
+export const FOREST_PACK_SETS = Object.freeze(['subtropical', 'saba', 'northern']);
+export function* forestTrunkPrototypes() {
+  const seen = new Set();
+  for (const set of FOREST_PACK_SETS) {
+    const pack = readForestPack(set);
+    for (const [index, prototype] of pack.manifest.prototypes.entries()) {
+      if (seen.has(prototype.species)) continue;
+      seen.add(prototype.species);
+      yield { set, index, prototype, ...pack };
+    }
+  }
+}
 // A ball goes through wood thinner than itself. 24-pounder shot is 7.3 cm in radius; trees stand at scale one or more.
 export const TRUNK_SHAPE_MIN_RADIUS_M = 0.06;
 export const TRUNK_STEM_MIN_RADIUS_M = 0.015;
@@ -68,6 +81,8 @@ const meanRadius = (group, c, positions) => {
 // Where a tube's wave of rings starts: the lowest open end of its thickest, or else its lowest point.
 function ringSource(component, wood) {
   const { positions, neighbours, open } = wood;
+  let lowest = component[0];
+  for (const v of component) if (positions[v * 3 + 1] < positions[lowest * 3 + 1]) lowest = v;
   const edges = component.filter((v) => open.has(v)), seen = new Set(), loops = [];
   for (const start of edges) {
     if (seen.has(start)) continue;
@@ -80,20 +95,26 @@ function ringSource(component, wood) {
     }
     loops.push(loop);
   }
-  let lowest = component[0];
-  for (const v of component) if (positions[v * 3 + 1] < positions[lowest * 3 + 1]) lowest = v;
+  // An open end counts only at the tube's foot: a fir's capped stem has open branch stubs up its length, and a wave
+  // from one crosses the stem aslant, where no ring is round.
+  const foot = positions[lowest * 3 + 1];
   let best = null, bestScore = -Infinity;
   for (const loop of loops) {
     const c = centroidOf(loop, positions), r = meanRadius(loop, c, positions);
-    if (loop.length < 5 || r > 1.5) continue;
+    if (loop.length < 5 || r > 1.5 || c[1] - foot > Math.max(0.05, 2 * r)) continue;
     const score = r - c[1] * 0.02;
     if (score > bestScore) { bestScore = score; best = loop; }
   }
   if (best && meanRadius(best, centroidOf(best, positions), positions) > 0.03) return best;
   // A tube closed at its foot starts from the ring standing at its foot: level if it stands upright, else square to
   // the way the tube runs.
+  // A cap's own middle is no part of the ring round it.
   const level = component.filter((v) => positions[v * 3 + 1] <= positions[lowest * 3 + 1] + 0.012);
-  if (level.length >= 4) return level;
+  if (level.length >= 4) {
+    const c = centroidOf(level, positions), r = meanRadius(level, c, positions);
+    const rim = level.filter((v) => Math.hypot(positions[v * 3] - c[0], positions[v * 3 + 1] - c[1], positions[v * 3 + 2] - c[2]) >= r * 0.5);
+    return rim.length >= 4 ? rim : level;
+  }
   const middle = centroidOf(component, positions), axis = [0, 1, 2].map((k) => middle[k] - positions[lowest * 3 + k]), length = Math.hypot(...axis) || 1;
   let nearest = Infinity;
   for (const n of neighbours[lowest]) nearest = Math.min(nearest, Math.hypot(positions[n * 3] - positions[lowest * 3], positions[n * 3 + 1] - positions[lowest * 3 + 1], positions[n * 3 + 2] - positions[lowest * 3 + 2]));
@@ -241,14 +262,11 @@ export function writeForestTrunkShapes(shapes) {
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const shapes = [];
-  for (const set of FOREST_PACK_SETS) {
-    const { manifest, vertices, indices } = readForestPack(set);
-    for (const prototype of manifest.prototypes) {
-      const shape = measureTrunkShape(prototype, vertices, indices);
-      shapes.push(shape);
-      const nodes = (chains) => chains.reduce((n, chain) => n + chain.length / 4, 0);
-      console.log(`${shape.species}: ${shape.trunks.length} trunk chains, ${nodes(shape.trunks)} rings; ${shape.limbs.length} limb chains, ${nodes(shape.limbs)} rings`);
-    }
+  for (const { prototype, vertices, indices } of forestTrunkPrototypes()) {
+    const shape = measureTrunkShape(prototype, vertices, indices);
+    shapes.push(shape);
+    const nodes = (chains) => chains.reduce((n, chain) => n + chain.length / 4, 0);
+    console.log(`${shape.species}: ${shape.trunks.length} trunk chains, ${nodes(shape.trunks)} rings; ${shape.limbs.length} limb chains, ${nodes(shape.limbs)} rings`);
   }
   writeForestTrunkShapes(shapes);
 }

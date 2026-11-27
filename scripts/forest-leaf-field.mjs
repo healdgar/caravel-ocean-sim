@@ -10,6 +10,8 @@ import zlib from 'node:zlib';
 
 // How far a far leaf card was grown, and its coverage raised, when the stands were first spaced: kept so they space alike.
 export const FAR_INFLATE_BROADLEAF = 0.48, FAR_INFLATE_OTHER = 0.18, FAR_COVERAGE_GAIN = 2.25;
+// Kinds whose leaves are needle sprays (scripts/bake-forest-mature-pack.py), however their pack groups them.
+const FOREST_CONIFERS = new Set(['fir', 'larch']);
 // A ray through leaves at every angle meets about half their area.
 export const PROJECTED_SHARE = 0.5;
 
@@ -77,7 +79,7 @@ export function openForestLeaves(dir) {
   }
   // Every leaf as points over its far, pushed-out card: where, how opaque, and what a viewer sees there.
   function leafSamples(p, cell) {
-    const broadleaf = Boolean(p.cohort) || p.species === 'ceiba' || p.species === 'mangrove';
+    const broadleaf = (Boolean(p.cohort) && !FOREST_CONIFERS.has(p.species)) || p.species === 'ceiba' || p.species === 'mangrove';
     const inflate = broadleaf ? FAR_INFLATE_BROADLEAF : FAR_INFLATE_OTHER;
     const triangles = leafTriangles(p);
     // Each leaf corner pushed out along its card from the card's middle, as far as a far card grew.

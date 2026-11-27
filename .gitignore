@@ -35,7 +35,7 @@ docs/assets/crew/continuum/
 # The ships' continuum is committed whole (no ship draws without it); the build's published copies are not.
 docs/assets/ships/
 assets/ground-cover/tropical/meadows/
-# Saba's and Portugal's forest continuum atlases (and Portugal's offline raw vertex/index streams)
+# Saba's, Portugal's and the northern forest continuum atlases (and the cohort packs' offline raw vertex/index streams)
 # are past GitHub's 100 MB a file: npm run deploy chunks and publishes them, while scripts/bake-forest-mature-pack.py
 # and scripts/prepare-forest-continuum.mjs bake them (manifests with SHA-256 digests stay tracked).
 assets/forest-scenery/saba/continuum/atlas.bin.gz
@@ -44,6 +44,10 @@ assets/forest-scenery/portugal/continuum/atlas.bin.gz
 docs/assets/forest-scenery/portugal/continuum/atlas.bin.*gz
 assets/forest-scenery/portugal/vertices.bin.gz
 assets/forest-scenery/portugal/indices.bin.gz
+assets/forest-scenery/northern/continuum/atlas.bin.gz
+docs/assets/forest-scenery/northern/continuum/atlas.bin.*gz
+assets/forest-scenery/northern/vertices.bin.gz
+assets/forest-scenery/northern/indices.bin.gz
 # The meadow continuum's atlases are past GitHub's 100 MB a file: npm run deploy publishes them,
 # scripts/prepare-meadow-grass.mjs bakes them (their manifests, with each atlas's digest, are tracked).
 assets/ground-cover/*/meadows-gpu/atlas.bin.gz

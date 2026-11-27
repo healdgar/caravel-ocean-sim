@@ -5,7 +5,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-import {FOREST_GROVE_VARIANTS,FOREST_GROVE_TREE_FLOATS,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS,
+import {FOREST_GROVE_VARIANTS,FOREST_GROVE_TREE_FLOATS,PORTUGAL_FOREST_GROVE_ASSETS,NORTHERN_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS,
   validateForestGroves,loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp} from '../js/forest-groves.js';
 import {generateProceduralCoastalPack,portClearanceEnvelope,PLANT_STREET_GAP_M,terrainSurfaceSample} from '../js/coastal-world.js';
 import {CITY_BLOCK_FLOATS} from '../js/old-world-city.js';
@@ -14,7 +14,7 @@ import {retargetForestPackToProcedural} from '../js/terrain.js';
 import {forestRootCapacity,forestPackRoots} from '../js/forest-scenery.js';
 import {forestTrunkShape,buildForestTrunkGrid,sweepForestTrunks,strikeForestRoot,forestStrikesToSave,forestStrikesFromSave,reapplyForestStrikes,FOREST_LONG_FALLEN} from '../js/forest-trunks.js';
 
-const PACKS={portugal:PORTUGAL_FOREST_GROVE_ASSETS,subtropical:SUBTROPICAL_FOREST_GROVE_ASSETS};
+const PACKS={portugal:PORTUGAL_FOREST_GROVE_ASSETS,northern:NORTHERN_FOREST_GROVE_ASSETS,subtropical:SUBTROPICAL_FOREST_GROVE_ASSETS};
 const serve=(change=bytes=>bytes)=>async path=>{
   const bytes=change(fs.readFileSync(path),path);
   return {ok:true,status:200,json:async()=>JSON.parse(bytes.toString()),body:new Blob([bytes]).stream()};
@@ -237,9 +237,12 @@ test('the roots are as many as the device holds, and only its limits bound them'
   // The passes over the roots spread their workgroups over a second dimension, so a dispatch bounds nothing.
   assert.equal(forestRootCapacity({limits:{maxStorageBufferBindingSize:256*1024*1024,maxBufferSize:512*1024*1024,maxComputeWorkgroupsPerDimension:65535}}),Math.floor(256*1024*1024/48));
   const scenery=fs.readFileSync('js/forest-scenery.js','utf8'),terrain=fs.readFileSync('js/terrain.js','utf8');
-  // A coast with more trees takes larger buffers, packed anew on the GPU, and the wind and the clusters are bound to them.
+  // A coast with more trees takes larger buffers, packed anew on the GPU; each tree claims its wind anew, and the stand,
+  // blocks and wind are bound to the new roots when the scene is made again.
   assert.match(scenery,/encoder\.copyBufferToBuffer\(roots,slab\.start\*48,next,at\*48,slab\.count\*48\)/);
-  assert.match(scenery,/wind\?\.reroot\(roots,rootCapacity\);\s*clusters\?\.reroot\(roots,visible,wind,speciesRoots\);/);
+  assert.match(scenery,/encoder\.clearBuffer\(windOwners\);[\s\S]*?if\(atlas\)makeScene\(\);/);
+  assert.match(scenery,/standGroup=standBindGroup\(\);blockGroup=blockBindGroup\(\);windGroup=windBindGroup\(\);/);
+  assert.match(scenery,/\[frameUBO,shadowUniform,roots,atlas\.buffer/);
   // The grove is planted on every section of the stream, and nothing draws it but the forest.
   assert.ok(!/FOREST_GROVE_WGSL|createForestGroves|groves\?\.encode|groves\?\.draw/.test(terrain));
   assert.match(terrain,/stand:grovePack,rootCapacity/);

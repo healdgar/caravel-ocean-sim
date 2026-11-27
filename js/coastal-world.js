@@ -1442,7 +1442,10 @@ export function classifyKoppenClimateFromNormals({
     (climateZone === 'tropical' ||
       climateZone === 'subtropical' ||
       (climateZone === 'arid' && meanAnnualTempC >= 18.0));
-  const forestPackKind = isTropicalOrSubtropical ? 'subtropical' : 'temperate';
+  // Coasts whose winters freeze hard (a coldest month under -2 °C: Québec, Acadia, Newfoundland, the Baltic and the
+  // north) grow the northern wood of balsam fir and tamarack among maple and birch; milder ones the temperate oak and
+  // chestnut wood.
+  const forestPackKind = isTropicalOrSubtropical ? 'subtropical' : coldestMonthTempC < -2.0 || climateZone === 'boreal' ? 'northern' : 'temperate';
 
   const moistureNorm = Math.max(0, Math.min(1.5, annualPrecipMm / 1800));
   const humidityNorm = Math.max(0, Math.min(1.2, (effectiveHumidityPct - 45) / 45));
@@ -1504,8 +1507,21 @@ export function classifyKoppenClimateFromNormals({
         : koppenCode === 'Aw' || climateZone === 'arid'
           ? [0.88, 1.06, 0.70]
           : [0.80, 1.11, 0.68];
+  } else if (forestPackKind === 'northern') {
+    // Balsam fir rules the cold wood, gray birch and tamarack take the burns and gaps, red maple and red oak the
+    // warmer slopes; the boreal coasts are nearly all fir, birch and larch. Tamarack fills the bogs and wet hollows
+    // with red maple and highbush blueberry.
+    const boreal = climateZone === 'boreal';
+    const warmth = Math.max(0, Math.min(1, (coldestMonthTempC + 12) / 10));
+    const fir = boreal ? 0.36 : 0.30, larch = boreal ? 0.18 : 0.10, birch = boreal ? 0.28 : 0.18;
+    const maple = boreal ? 0.08 : 0.14 + 0.10 * warmth, oak = boreal ? 0.02 : 0.04 + 0.12 * warmth, blueberry = 0.05;
+    uplandForestWeights = normalizeSpeciesWeights({ fir, larch, birch, maple, oak, blueberry });
+    coastalStrandWeights = normalizeSpeciesWeights({ fir: fir * 1.1, birch: birch * 1.2, larch: larch * 0.8, maple: maple * 0.8, oak: oak * 0.9, blueberry: blueberry * 1.4 });
+    lagoonMangroveWeights = normalizeSpeciesWeights({ larch: 0.40, birch: 0.20, fir: 0.14, maple: 0.16, blueberry: 0.10 });
+    canopyDensityMultiplier = Math.max(0.92, Math.min(1.22, 0.98 + 0.20 * moistureNorm));
+    foliageTint = [0.88, 1.0, 0.86];
   } else {
-    // Temperate / Mediterranean / Boreal broadleaf & mixed stand modulation
+    // Temperate / Mediterranean broadleaf & mixed stand modulation
     const oakShare =
       climateZone === 'mediterranean'
         ? 0.44
@@ -1716,7 +1732,7 @@ export async function fetchPublicClimateProfile(
   if (CLIMATE_PROFILE_CACHE.has(cacheKey)) {
     return CLIMATE_PROFILE_CACHE.get(cacheKey);
   }
-  const storageKey = `waterworld_climate_v1_${cacheKey}`;
+  const storageKey = `waterworld_climate_v2_${cacheKey}`;
   try {
     if (typeof localStorage !== 'undefined') {
       const raw = localStorage.getItem(storageKey);

@@ -1,0 +1,42 @@
+{
+ "format": "waterworld.forest-groves",
+ "version": 2,
+ "tileMetres": 128,
+ "variants": 4,
+ "maxTrees": 254,
+ "treeFloats": 8,
+ "harbourHeight": 0.94,
+ "files": {
+  "trees.bin": {
+   "bytes": 32512,
+   "sha256": "0b6e2288f46314ed24f4012ab943dee6e93ea2a57d628a2907af4c9386121557",
+   "gzip": {
+    "file": "trees.bin.gz",
+    "bytes": 19027,
+    "sha256": "c3523593b13a8472f1853c139dec9b26e68de9e48965c70830b3aad5e49a8d28"
+   }
+  }
+ },
+ "groves": [
+  {
+   "trees": 246,
+   "tall": 127,
+   "shared": 65
+  },
+  {
+   "trees": 246,
+   "tall": 127,
+   "shared": 65
+  },
+  {
+   "trees": 253,
+   "tall": 118,
+   "shared": 65
+  },
+  {
+   "trees": 246,
+   "tall": 127,
+   "shared": 65
+  }
+ ]
+}

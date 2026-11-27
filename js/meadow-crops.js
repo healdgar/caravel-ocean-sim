@@ -24,9 +24,9 @@ export const MEADOW_GROUND_MIX = 2;
 export const MEADOW_GROUND_CROPS = 8;
 // The litters (r's high four bits), by the species of tree (js/forest-scenery.js prototypes); each is mix
 // MEADOW_LITTER_MIX + its slot.
-export const MEADOW_LITTER = Object.freeze({ oak: 0, chestnut: 1, maple: 2, elm: 3, birch: 4, blueberry: 5, palm: 6, royal_palm: 6, ceiba: 7, mangrove: 8, pine: 9, olive: 10, broadleaf: 11 });
+export const MEADOW_LITTER = Object.freeze({ oak: 0, chestnut: 1, maple: 2, elm: 3, birch: 4, blueberry: 5, palm: 6, royal_palm: 6, ceiba: 7, mangrove: 8, pine: 9, olive: 10, broadleaf: 11, fir: 12, larch: 13 });
 export const MEADOW_LITTER_MIX = MEADOW_GROUND_MIX + MEADOW_GROUND_CROPS + 1;
-export const MEADOW_LITTERS = 12;
+export const MEADOW_LITTERS = 14;
 // The metres a step of the ground map's distance inside a furlong.
 export const MEADOW_GROUND_EDGE_STEP = 0.05;
 
@@ -208,6 +208,12 @@ const MEADOW_LITTER_KINDS = Object.freeze([
   { leaf: [0.15, 0.0016, MEADOW_SHAPE.NEEDLE], fresh: [[0.16, 0.075, 0.03], [0.22, 0.105, 0.04]], old: [[0.08, 0.055, 0.035], [0.11, 0.075, 0.045]], curl: 0.1, deciduous: false },
   { leaf: [0.06, 0.012, MEADOW_SHAPE.LANCE], fresh: [[0.08, 0.08, 0.05], [0.11, 0.11, 0.07]], old: [[0.06, 0.05, 0.035], [0.09, 0.075, 0.05]], curl: 0.3, deciduous: false, thin: 0.7 },
   { leaf: [0.09, 0.050, MEADOW_SHAPE.OVAL], fresh: [[0.16, 0.10, 0.04], [0.24, 0.15, 0.055]], old: [[0.07, 0.05, 0.03], [0.10, 0.07, 0.04]], curl: 0.45, deciduous: true },
+  // Balsam fir: flat needles two centimetres long, kept eight years or so and shed the year round, rust-brown
+  // when they fall and dark as they rot, a deep mat with its twigs.
+  { leaf: [0.022, 0.0019, MEADOW_SHAPE.NEEDLE], fresh: [[0.15, 0.065, 0.025], [0.21, 0.095, 0.035]], old: [[0.06, 0.04, 0.025], [0.085, 0.055, 0.032]], curl: 0.08, deciduous: false },
+  // Tamarack: soft needles in tufts, two and a half centimetres, gold in October and all down by November, then
+  // tawny through the winter.
+  { leaf: [0.026, 0.0009, MEADOW_SHAPE.NEEDLE], fresh: [[0.36, 0.22, 0.045], [0.48, 0.31, 0.06]], old: [[0.11, 0.065, 0.032], [0.15, 0.09, 0.042]], curl: 0.12, deciduous: true },
 ]);
 if (MEADOW_LITTER_KINDS.length !== MEADOW_LITTERS) throw Error('A litter for every slot');
 

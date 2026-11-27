@@ -35,6 +35,10 @@ export const PORTUGAL_FOREST_GROVE_ASSETS = Object.freeze({
   'manifest.json': 'assets/forest-scenery/portugal/groves/manifest.json',
   'trees.bin.gz': 'assets/forest-scenery/portugal/groves/trees.bin.gz',
 });
+export const NORTHERN_FOREST_GROVE_ASSETS = Object.freeze({
+  'manifest.json': 'assets/forest-scenery/northern/groves/manifest.json',
+  'trees.bin.gz': 'assets/forest-scenery/northern/groves/trees.bin.gz',
+});
 export const SUBTROPICAL_FOREST_GROVE_ASSETS = Object.freeze({
   'manifest.json': 'assets/forest-scenery/subtropical/groves/manifest.json',
   'trees.bin.gz': 'assets/forest-scenery/subtropical/groves/trees.bin.gz',

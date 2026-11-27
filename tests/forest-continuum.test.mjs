@@ -4,11 +4,11 @@ import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import {CONTINUUM_CLUSTER_TRIANGLES,CONTINUUM_CLUSTER_WORDS,CONTINUUM_HEADER,CONTINUUM_TYPE,CONTINUUM_TYPE_WORDS,checkContinuumAtlas} from '../js/continuum-format.js';
-import {FOREST_CONTINUUM_ASSETS,SUBTROPICAL_FOREST_CONTINUUM_ASSETS,PORTUGAL_FOREST_CONTINUUM_ASSETS,validateForestContinuumManifest} from '../js/forest-continuum.js';
+import {FOREST_CONTINUUM_ASSETS,SUBTROPICAL_FOREST_CONTINUUM_ASSETS,PORTUGAL_FOREST_CONTINUUM_ASSETS,NORTHERN_FOREST_CONTINUUM_ASSETS,validateForestContinuumManifest} from '../js/forest-continuum.js';
 import {reapplyForestStrikes,strikeForestRoot} from '../js/forest-trunks.js';
 
-const ASSETS={saba:FOREST_CONTINUUM_ASSETS,subtropical:SUBTROPICAL_FOREST_CONTINUUM_ASSETS,portugal:PORTUGAL_FOREST_CONTINUUM_ASSETS};
-// The saba atlas is over GitHub's file limit and is baked locally (scripts/prepare-forest-continuum.mjs saba).
+const ASSETS={saba:FOREST_CONTINUUM_ASSETS,subtropical:SUBTROPICAL_FOREST_CONTINUUM_ASSETS,portugal:PORTUGAL_FOREST_CONTINUUM_ASSETS,northern:NORTHERN_FOREST_CONTINUUM_ASSETS};
+// The saba, portugal and northern atlases are over GitHub's file limit and are baked locally (scripts/prepare-forest-continuum.mjs <pack>).
 const present=pack=>fs.existsSync(ASSETS[pack]['atlas.bin.gz']);
 function loadPack(pack){
   const manifest=validateForestContinuumManifest(JSON.parse(fs.readFileSync(ASSETS[pack]['manifest.json'],'utf8')));
@@ -105,9 +105,10 @@ test('continuum assets are written as literal paths, so the build publishes them
   assert.match(build,/FOREST_CONTINUUM_ASSETS/);
   assert.match(build,/SUBTROPICAL_FOREST_CONTINUUM_ASSETS/);
   assert.match(build,/PORTUGAL_FOREST_CONTINUUM_ASSETS/);
+  assert.match(build,/NORTHERN_FOREST_CONTINUUM_ASSETS/);
   for(const file of Object.values(ASSETS).flatMap(Object.values)){
     assert.ok(source.includes(`'${file}'`),`${file} must appear literally`);
-    if(!file.includes('/saba/continuum/atlas'))assert.ok(fs.existsSync(file),`${file} must exist`);
+    if(!file.includes('/continuum/atlas'))assert.ok(fs.existsSync(file),`${file} must exist`);
   }
 });
 

@@ -250,7 +250,7 @@ def receipt(raw):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('pack', choices=['saba', 'subtropical', 'portugal'])
+    parser.add_argument('pack', choices=['saba', 'subtropical', 'portugal', 'northern'])
     parser.add_argument('--builtin', action='store_true', help='Encode with sips and scripts/forest_bc7.py in place of astcenc and bc7enc')
     parser.add_argument('--reuse', help='A pack whose baked blocks are copied for surfaces baked from the same maps')
     parser.add_argument('--bc7enc', default=os.environ.get('FOREST_BC7ENC', 'bc7enc'))

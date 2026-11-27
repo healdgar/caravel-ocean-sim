@@ -38,6 +38,14 @@ const STANDS = {
     tall: { cohort: 'canopy', mix: { oak: 0.3, chestnut: 0.22, maple: 0.18, elm: 0.18, birch: 0.12 }, scale: () => (fullGrown ? [1.06, 1.24] : [2.5, 3.19]), apart: 1.25 },
     fill: { cohort: 'canopy', mix: { oak: 0.24, chestnut: 0.18, maple: 0.20, elm: 0.16, birch: 0.22 }, scale: () => (fullGrown ? [0.88, 1.08] : [2.0, 2.64]) },
   },
+  // A hard-winter coast's wood: balsam fir and tamarack under a scatter of maple, oak and birch, as the
+  // Acadian forest stood; the gaps between them go to birch and tamarack, the pioneers of cleared ground.
+  northern: {
+    tileMetres: 128,
+    harbourHeight: fullGrown ? 0.94 : undefined,
+    tall: { cohort: 'canopy', mix: { fir: 0.4, maple: 0.2, oak: 0.12, larch: 0.16, birch: 0.12 }, scale: () => (fullGrown ? [1.06, 1.24] : [2.5, 3.19]), apart: 1.25 },
+    fill: { cohort: 'canopy', mix: { fir: 0.32, maple: 0.14, oak: 0.06, larch: 0.22, birch: 0.26 }, scale: () => (fullGrown ? [0.88, 1.08] : [2.0, 2.64]) },
+  },
   // A ceiba's crown is sixty metres across, so its grove is twice the size.
   subtropical: {
     tileMetres: 256,
@@ -119,7 +127,7 @@ function plant(trees, group, tall, shared, random) {
   }
   if (fullGrown && !tall) plantBare(trees, group, shared, random);
 }
-const random = seeded(packName === 'portugal' ? 0x9e3779b1 : 0x85ebca6b);
+const random = seeded({ portugal: 0x9e3779b1, northern: 0xc2b2ae35 }[packName] ?? 0x85ebca6b);
 const sharedTrees = [];
 plant(sharedTrees, stand.tall, true, true, random);
 plant(sharedTrees, stand.fill, false, true, random);

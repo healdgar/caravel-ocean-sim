@@ -6,8 +6,8 @@ import { createCoastalField } from './coastal-field.js';
 import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
 import {loadTerrainNear,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
-import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
-import {loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
+import {loadForestScenery,createForestRenderer,forestRootCapacity,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS,NORTHERN_FOREST_ASSETS} from './forest-scenery.js';
+import {loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTrees,forestGroveStamp,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS,NORTHERN_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {createPortFractures} from './building-fracture.js';
 import {bridgeDeckYAt,bridgeSurfaceAt,layTownStreets,paveCityStreets,streetEdgeAt,waterfrontDeckYAt} from './town-streets.js';
@@ -1069,9 +1069,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const useSubtropicalForest=forestMixParam
     ?(forestMixParam==='subtropical'||forestMixParam==='tropical')
     :(useProcedural&&activeClimate.forestPackKind==='subtropical');
+  // Hard-wintered coasts (Québec, Acadia, Newfoundland, the Baltic and the north) grow the northern wood of balsam fir
+  // and tamarack (js/coastal-world.js forestPackKind); the rest of the temperate world the Portugal pack's oak and
+  // chestnut.
+  const useNorthernForest=forestMixParam
+    ?(forestMixParam==='northern'||forestMixParam==='boreal')
+    :(useProcedural&&activeClimate.forestPackKind==='northern');
   const usePortugalForest=forestMixParam
     ?(forestMixParam==='portugal'||forestMixParam==='temperate')
-    :(useProcedural&&!useSubtropicalForest);
+    :(useProcedural&&!useSubtropicalForest&&!useNorthernForest);
   const isMobile=typeof navigator!=='undefined'&&(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1));
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
   // Start shader compilation, foliage fetch, and forest downloads immediately in parallel with DEM/terrain loading
@@ -1128,14 +1134,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const useCompactScenery=isMobile||(device.limits?.maxStorageBufferBindingSize??Infinity)<256*1024*1024;
   let forestFailure=null;
   const startForestLoad=()=>canopyMode==='off'?Promise.resolve(null):loadForestScenery({
-    assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
+    assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:useNorthernForest?NORTHERN_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
     skipRoots:useProcedural,
     deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
   }).catch(error=>{forestFailure=error.message;return null;});
   // A grove is the wood of a generated coast beyond its planted trees, planted as roots of the forest pack
   // (js/forest-groves.js). A coast that cannot load its grove keeps its planted trees alone, and says why.
   let groveFailure=null;
-  const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
+  const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:useNorthernForest?NORTHERN_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
   const startGroveLoad=()=>canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
   let meadowFailure=null;
   // Every coast grows the grass of its climate, as its forest does: the tropical sward where the place's climate is
@@ -2498,7 +2504,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     stats:preloaded1550?.upgradedPack?.territory1550||null,
     upgradedPack:preloaded1550?.upgradedPack||null,
     climate:activeClimate,
-    forestPackKind:useSubtropicalForest?'subtropical':'temperate',
+    forestPackKind:useSubtropicalForest?'subtropical':useNorthernForest?'northern':'temperate',
     subscribe(fn){
       discoveryListeners.add(fn);
       fn(discovery);

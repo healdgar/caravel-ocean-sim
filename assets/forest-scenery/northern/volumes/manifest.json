@@ -1,0 +1,624 @@
+{
+  "format": "waterworld.forest-volumes",
+  "version": 1,
+  "units": "metres",
+  "upAxis": "Y",
+  "sourceManifest": {
+    "file": "../manifest.json",
+    "rootsSha256": "23a20ced1e16ed6caeba004f068e37b28abbe538ba1ad6f28082673e38878b57"
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "fir",
+      "cohort": "veteran",
+      "age": 60.0,
+      "heightMetres": 14.718,
+      "crownRadiusMetres": 3.631,
+      "crownBaseMetres": 2.208,
+      "originXYZ": [
+        -7.199999999999999,
+        -3.5999999999999996,
+        -7.199999999999999
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        24,
+        37,
+        24
+      ],
+      "low": [
+        -7.499999999999999,
+        -3.8999999999999995,
+        -7.499999999999999
+      ],
+      "high": [
+        6.9,
+        18.299999999999997,
+        6.9
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 170496,
+          "sha256": "7378ef4759c1c7bb1ee8446a2dd1b7b5d03bc040d00f7f3f67ef514affed8576",
+          "gzip": {
+            "file": "prototype-0-fir-veteran/field.rgba16f.bin.gz",
+            "bytes": 32450,
+            "sha256": "9b1568a1fab592e20ab85e88938ad36a5cd83149402611679c964d9eba527ad9"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 21312,
+          "sha256": "0b13dced91751e3e8ce7557d82285c9b3737f846aaabef054e5ca2c6cd51e42c",
+          "gzip": {
+            "file": "prototype-0-fir-veteran/exposure.r8.bin.gz",
+            "bytes": 4738,
+            "sha256": "eaeead2a722d474fa61e39f91fe64cbef144272ad2f35ef3151d66ef85f5611e"
+          }
+        }
+      }
+    },
+    {
+      "id": 1,
+      "species": "maple",
+      "cohort": "veteran",
+      "age": 48.0,
+      "heightMetres": 18.881,
+      "crownRadiusMetres": 9.054,
+      "crownBaseMetres": 3.512,
+      "originXYZ": [
+        -10.2,
+        -3.5999999999999996,
+        -10.799999999999999
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        37,
+        44,
+        39
+      ],
+      "low": [
+        -10.5,
+        -3.8999999999999995,
+        -11.1
+      ],
+      "high": [
+        11.7,
+        22.5,
+        12.299999999999999
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 507936,
+          "sha256": "f4af27e858810e4134977c060aee0acae6b4facfb846e30a0d5122454db3c78e",
+          "gzip": {
+            "file": "prototype-1-maple-veteran/field.rgba16f.bin.gz",
+            "bytes": 100231,
+            "sha256": "ee927315bf85f6bd36d5925da4a56e38b6f3873b35f1c189e753f30be6d1a70a"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 63492,
+          "sha256": "4356defac250ac43ffeed1a8223eef4f6fec408f3d7c82eb11e204c5ca61a17f",
+          "gzip": {
+            "file": "prototype-1-maple-veteran/exposure.r8.bin.gz",
+            "bytes": 13719,
+            "sha256": "92551223660141bbfbc6d3858532f9dc87d692b7b372b7af0beda359b9dc6779"
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "species": "oak",
+      "cohort": "veteran",
+      "age": 60.0,
+      "heightMetres": 18.619,
+      "crownRadiusMetres": 9.763,
+      "crownBaseMetres": 5.54,
+      "originXYZ": [
+        -12.6,
+        -3.0,
+        -10.799999999999999
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        42,
+        44,
+        38
+      ],
+      "low": [
+        -12.9,
+        -3.3,
+        -11.1
+      ],
+      "high": [
+        12.299999999999999,
+        23.099999999999998,
+        11.700000000000001
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 561792,
+          "sha256": "d2ee91aaed17f8554a2aaf8d5ac56d5dd84c6da74c90e7dfe82c22d4c01f51f1",
+          "gzip": {
+            "file": "prototype-2-oak-veteran/field.rgba16f.bin.gz",
+            "bytes": 140403,
+            "sha256": "075e13317a6ed3b052e9b2bf702d6e643189da52f7bc612e498f46e1c1642cdb"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 70224,
+          "sha256": "a3bfe040ffe543832856c9d34afc1d7657c0af4a085150b3e51a566f990f0fc2",
+          "gzip": {
+            "file": "prototype-2-oak-veteran/exposure.r8.bin.gz",
+            "bytes": 18335,
+            "sha256": "73b1818ffea1e680f7bef99575607daf764351385f5c502fe0d1a4aeddb4be6e"
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "species": "larch",
+      "cohort": "veteran",
+      "age": 50.0,
+      "heightMetres": 14.86,
+      "crownRadiusMetres": 3.165,
+      "crownBaseMetres": 2.431,
+      "originXYZ": [
+        -6.6,
+        -3.5999999999999996,
+        -6.6
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        23,
+        38,
+        23
+      ],
+      "low": [
+        -6.8999999999999995,
+        -3.8999999999999995,
+        -6.8999999999999995
+      ],
+      "high": [
+        6.9,
+        18.9,
+        6.9
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 160816,
+          "sha256": "948edb3a90c5c928a7d1f65987217b7186b045aa6daac7a155f43325f6365ec6",
+          "gzip": {
+            "file": "prototype-3-larch-veteran/field.rgba16f.bin.gz",
+            "bytes": 30886,
+            "sha256": "eaf250644b3685c787a18b7e681df0a65fbd05adc85182d742a40f0fc5d1a8e8"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 20102,
+          "sha256": "ee6b644b79f71fd2e402c45d75e4dcdd4c6811eb783aba20f2bc20d659baba76",
+          "gzip": {
+            "file": "prototype-3-larch-veteran/exposure.r8.bin.gz",
+            "bytes": 4205,
+            "sha256": "b1f0cbc02c57efe44e3a8a5306be62e0a26fb0175bc4bab809402ba18f9cf645"
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "species": "birch",
+      "cohort": "veteran",
+      "age": 34.0,
+      "heightMetres": 10.124,
+      "crownRadiusMetres": 4.719,
+      "crownBaseMetres": 2.994,
+      "originXYZ": [
+        -7.199999999999999,
+        -3.5999999999999996,
+        -7.199999999999999
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        22,
+        30,
+        24
+      ],
+      "low": [
+        -7.499999999999999,
+        -3.8999999999999995,
+        -7.499999999999999
+      ],
+      "high": [
+        5.700000000000001,
+        14.1,
+        6.9
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 126720,
+          "sha256": "618eb35d0a4329c98114c7aae1cc7de67e3ea8ef0dded0fe75dbe77d24687acc",
+          "gzip": {
+            "file": "prototype-4-birch-veteran/field.rgba16f.bin.gz",
+            "bytes": 20842,
+            "sha256": "703a9b3263ac56c3238f3e166f92a45912b235066317a56d7a82e9edb8484809"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 15840,
+          "sha256": "fd744f7ed3b9edc30702c0071a061738196ea5f029aed617535a9f44e5010a25",
+          "gzip": {
+            "file": "prototype-4-birch-veteran/exposure.r8.bin.gz",
+            "bytes": 3217,
+            "sha256": "7e131dfa18c682de1a83d810abe4b1585f66115d223cc6acd00270567448c4b5"
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "species": "blueberry",
+      "cohort": "veteran",
+      "age": 25.0,
+      "heightMetres": 2.1,
+      "crownRadiusMetres": 0.74,
+      "crownBaseMetres": 0.328,
+      "originXYZ": [
+        -4.2,
+        -3.5999999999999996,
+        -3.5999999999999996
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        14,
+        16,
+        13
+      ],
+      "low": [
+        -4.5,
+        -3.8999999999999995,
+        -3.8999999999999995
+      ],
+      "high": [
+        3.8999999999999995,
+        5.699999999999999,
+        3.9000000000000004
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 23296,
+          "sha256": "8f568c400bab185ad6e5180f62e3cff007eb71cf07d801e72235b56070a26c81",
+          "gzip": {
+            "file": "prototype-5-blueberry-veteran/field.rgba16f.bin.gz",
+            "bytes": 2693,
+            "sha256": "bb9b7e7a45e5a3c27c8e764d75fee879732ac8fab511207c1b42a8ed1f376ebd"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 2912,
+          "sha256": "f874747af7529bb3a0956797f778fa6ac44813e6f6cfa0c91a411593bd002313",
+          "gzip": {
+            "file": "prototype-5-blueberry-veteran/exposure.r8.bin.gz",
+            "bytes": 323,
+            "sha256": "62aaa660b198d1c362cd836c26d4aae4df94f3833ce23042a9541420bb9671dc"
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "species": "fir",
+      "cohort": "canopy",
+      "age": 60.0,
+      "heightMetres": 13.905,
+      "crownRadiusMetres": 3.448,
+      "crownBaseMetres": 2.669,
+      "originXYZ": [
+        -6.6,
+        -3.0,
+        -6.6
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        23,
+        35,
+        23
+      ],
+      "low": [
+        -6.8999999999999995,
+        -3.3,
+        -6.8999999999999995
+      ],
+      "high": [
+        6.9,
+        17.7,
+        6.9
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 148120,
+          "sha256": "56bf873009b0aa8bfd1ff96cfdf3ee1edd08664ba3b5e67948adfea03d8cfb60",
+          "gzip": {
+            "file": "prototype-6-fir-canopy/field.rgba16f.bin.gz",
+            "bytes": 29334,
+            "sha256": "f0ee31d48d0269245e392535b78c74c433722fb23828aeaa2a5f38c536989418"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 18515,
+          "sha256": "67b1829ddf7f86fbbc12116753bfd6771ae77e6bc161fc562ad958c3a7630a78",
+          "gzip": {
+            "file": "prototype-6-fir-canopy/exposure.r8.bin.gz",
+            "bytes": 4252,
+            "sha256": "283ec81886a7f63115c984e0402e1fa4534fc3433bdebd8c419ce38d8cb054ad"
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "species": "maple",
+      "cohort": "canopy",
+      "age": 60.0,
+      "heightMetres": 15.101,
+      "crownRadiusMetres": 5.659,
+      "crownBaseMetres": 2.233,
+      "originXYZ": [
+        -7.8,
+        -3.0,
+        -7.8
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        26,
+        37,
+        29
+      ],
+      "low": [
+        -8.1,
+        -3.3,
+        -8.1
+      ],
+      "high": [
+        7.499999999999999,
+        18.9,
+        9.299999999999997
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 223184,
+          "sha256": "99fe4032f0f5cabc591da2b1e5789ff37bcd1f2020660755957200e1441c6bf8",
+          "gzip": {
+            "file": "prototype-7-maple-canopy/field.rgba16f.bin.gz",
+            "bytes": 46069,
+            "sha256": "b2704047c5d6db0c029343c426904a9f37980652f4c261a24645cf6638ff7e78"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 27898,
+          "sha256": "6a6c712054fbbe50581e5b714b9b361f2e322f33918758521f518b1a0838d36d",
+          "gzip": {
+            "file": "prototype-7-maple-canopy/exposure.r8.bin.gz",
+            "bytes": 7313,
+            "sha256": "69371e30a57e9cf24205db7301d07e99fe56d171de786a3823044b52abef562a"
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "species": "oak",
+      "cohort": "canopy",
+      "age": 60.0,
+      "heightMetres": 17.441,
+      "crownRadiusMetres": 6.104,
+      "crownBaseMetres": 5.326,
+      "originXYZ": [
+        -9.0,
+        -3.0,
+        -7.8
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        32,
+        41,
+        28
+      ],
+      "low": [
+        -9.3,
+        -3.3,
+        -8.1
+      ],
+      "high": [
+        9.899999999999999,
+        21.3,
+        8.7
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 293888,
+          "sha256": "703df735b4a5d8ac9101d3031f06c5fc94d56432c9a3f255f3e3c49824fb6b6c",
+          "gzip": {
+            "file": "prototype-8-oak-canopy/field.rgba16f.bin.gz",
+            "bytes": 60559,
+            "sha256": "d2df26258e44095988ce36255198f5a3b153ddb44cc2613c9aa264a33938daee"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 36736,
+          "sha256": "6a4b708e416ff26dd39af1b6ae773a03a89be75c72dafbf3bcea34e4ea1e592f",
+          "gzip": {
+            "file": "prototype-8-oak-canopy/exposure.r8.bin.gz",
+            "bytes": 9673,
+            "sha256": "e93a9a62bb2cb36d613ae1b0ef91ada642fbeb6aabf28fe878d490146ffe6f1d"
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "species": "larch",
+      "cohort": "canopy",
+      "age": 40.0,
+      "heightMetres": 13.612,
+      "crownRadiusMetres": 3.023,
+      "crownBaseMetres": 2.736,
+      "originXYZ": [
+        -6.6,
+        -3.5999999999999996,
+        -6.6
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        22,
+        35,
+        23
+      ],
+      "low": [
+        -6.8999999999999995,
+        -3.8999999999999995,
+        -6.8999999999999995
+      ],
+      "high": [
+        6.300000000000001,
+        17.1,
+        6.9
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 141680,
+          "sha256": "e7bfa2227a3dd7c2ffd2a1a7614ebe827c9e488a1cf425c223b9f59e75ae8b35",
+          "gzip": {
+            "file": "prototype-9-larch-canopy/field.rgba16f.bin.gz",
+            "bytes": 25846,
+            "sha256": "441de4697d4f73d22cf5f78094383a78d925e31c34b9820f5f4c2e6e0b940fb6"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 17710,
+          "sha256": "4678deeb58d5879b5395a70757fd303ca2183f0edcc78cd17e54817d52738fb3",
+          "gzip": {
+            "file": "prototype-9-larch-canopy/exposure.r8.bin.gz",
+            "bytes": 3374,
+            "sha256": "55d451ac1e84f4d82e08f67dd80aee9b58d277c569653f7462c9768a97596788"
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "species": "birch",
+      "cohort": "canopy",
+      "age": 28.0,
+      "heightMetres": 8.925,
+      "crownRadiusMetres": 3.791,
+      "crownBaseMetres": 2.146,
+      "originXYZ": [
+        -5.3999999999999995,
+        -3.5999999999999996,
+        -4.8
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        19,
+        27,
+        20
+      ],
+      "low": [
+        -5.699999999999999,
+        -3.8999999999999995,
+        -5.1
+      ],
+      "high": [
+        5.7,
+        12.299999999999999,
+        6.8999999999999995
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 82080,
+          "sha256": "c7238cf69d29e8283f95f5e880d89b56c136bdab6820625d990fa95cbc9f166b",
+          "gzip": {
+            "file": "prototype-10-birch-canopy/field.rgba16f.bin.gz",
+            "bytes": 11912,
+            "sha256": "ddd7797ec0db683b1e2805aca3318ba3c290026810a4ea628b859c7658524cdb"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 10260,
+          "sha256": "6a6715262cff84d845e7a2167cdbcfd5a5be24fe7fe25987f0ef4593f381b38c",
+          "gzip": {
+            "file": "prototype-10-birch-canopy/exposure.r8.bin.gz",
+            "bytes": 2020,
+            "sha256": "a0a15efef75bbffda5fce5aa5dc6dc98b1eeeaeff0adcc9a84107fd9160162e2"
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "species": "blueberry",
+      "cohort": "canopy",
+      "age": 22.0,
+      "heightMetres": 1.112,
+      "crownRadiusMetres": 0.594,
+      "crownBaseMetres": 0.213,
+      "originXYZ": [
+        -3.5999999999999996,
+        -3.5999999999999996,
+        -3.5999999999999996
+      ],
+      "cellMetres": 0.6,
+      "dimensionsXYZ": [
+        13,
+        14,
+        13
+      ],
+      "low": [
+        -3.8999999999999995,
+        -3.8999999999999995,
+        -3.8999999999999995
+      ],
+      "high": [
+        3.9000000000000004,
+        4.5,
+        3.9000000000000004
+      ],
+      "samplingFootprintMetres": 1.0392304845413263,
+      "files": {
+        "field.rgba16f.bin": {
+          "bytes": 18928,
+          "sha256": "87353fa5addcc8252a2b1ee0e845bcb8abb4432a743255ccd380d1c261a18aa2",
+          "gzip": {
+            "file": "prototype-11-blueberry-canopy/field.rgba16f.bin.gz",
+            "bytes": 1967,
+            "sha256": "32eb442492f7196835a24e05eb55e5963ccae5fa383305ea7011bec50f7b0afe"
+          }
+        },
+        "exposure.r8.bin": {
+          "bytes": 2366,
+          "sha256": "ca016d749e2f3cf5bb8caa1704a09259be79d2da06899bd669bae2f5c255dc8a",
+          "gzip": {
+            "file": "prototype-11-blueberry-canopy/exposure.r8.bin.gz",
+            "bytes": 234,
+            "sha256": "cc650f14688c5403c0d71debbc225107cfe1db9f68e86fdd3e7b59bf2621d2d7"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -743,6 +743,19 @@ test('subtropical forest scenery pack, public NASA POWER climate lookup, and cli
   assert.equal(cfb.forestPackKind, 'temperate');
   assert.ok(cfb.uplandForestWeights.oak > 0.25);
 
+  // Québec's hard winters grow the northern wood: balsam fir first, tamarack in the bogs.
+  const dfb = classifyKoppenClimateFromNormals({
+    latitude: 46.8,
+    longitude: -71.2,
+    monthlyTempC: [-12.4, -10.6, -4.4, 3.4, 11.2, 16.6, 19.3, 18.0, 12.7, 6.2, -0.7, -8.6],
+    monthlyPrecipMm: [87, 70, 78, 82, 104, 114, 118, 105, 112, 96, 99, 98],
+    meanRelHumidityPct: 74,
+  });
+  assert.equal(dfb.forestPackKind, 'northern');
+  assert.ok(Object.entries(dfb.uplandForestWeights).every(([species, w]) => species === 'fir' || w < dfb.uplandForestWeights.fir), 'fir leads the wood');
+  assert.ok(dfb.lagoonMangroveWeights.larch > 0.3, 'tamarack fills the bogs');
+  assert.ok(!('chestnut' in dfb.uplandForestWeights) && !('elm' in dfb.uplandForestWeights));
+
   // 2. Verify fetchPublicClimateProfile parses NASA POWER 30-year climatology JSON and falls back cleanly offline
   const mockNasaPowerResponse = {
     properties: {

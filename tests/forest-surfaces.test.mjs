@@ -7,9 +7,9 @@ import {readFile} from 'node:fs/promises';
 import {gunzipSync} from 'node:zlib';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
-import {FOREST_SURFACE_ASSETS,FOREST_SURFACE_CODECS,PORTUGAL_FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestSurfaceFeatures,loadForestSurfaceSet} from '../js/forest-surfaces.js';
+import {FOREST_SURFACE_ASSETS,FOREST_SURFACE_CODECS,PORTUGAL_FOREST_SURFACE_ASSETS,NORTHERN_FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestSurfaceFeatures,loadForestSurfaceSet} from '../js/forest-surfaces.js';
 
-const PACKS=[['saba',FOREST_SURFACE_ASSETS],['subtropical',SUBTROPICAL_FOREST_SURFACE_ASSETS],['portugal',PORTUGAL_FOREST_SURFACE_ASSETS]];
+const PACKS=[['saba',FOREST_SURFACE_ASSETS],['subtropical',SUBTROPICAL_FOREST_SURFACE_ASSETS],['portugal',PORTUGAL_FOREST_SURFACE_ASSETS],['northern',NORTHERN_FOREST_SURFACE_ASSETS]];
 const root=new URL('../',import.meta.url);
 const json=async file=>JSON.parse(await readFile(new URL(file,root),'utf8'));
 const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');

@@ -12,11 +12,11 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { FOREST_ASSETS, SUBTROPICAL_FOREST_ASSETS, PORTUGAL_FOREST_ASSETS } from './js/forest-scenery.js';
-import { FOREST_CONTINUUM_ASSETS, SUBTROPICAL_FOREST_CONTINUUM_ASSETS, PORTUGAL_FOREST_CONTINUUM_ASSETS, FOREST_CONTINUUM_MOBILE_ASSETS, PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS } from './js/forest-continuum.js';
-import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
+import { FOREST_ASSETS, SUBTROPICAL_FOREST_ASSETS, PORTUGAL_FOREST_ASSETS, NORTHERN_FOREST_ASSETS } from './js/forest-scenery.js';
+import { FOREST_CONTINUUM_ASSETS, SUBTROPICAL_FOREST_CONTINUUM_ASSETS, PORTUGAL_FOREST_CONTINUUM_ASSETS, NORTHERN_FOREST_CONTINUUM_ASSETS, FOREST_CONTINUUM_MOBILE_ASSETS, PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS, NORTHERN_FOREST_CONTINUUM_MOBILE_ASSETS } from './js/forest-continuum.js';
+import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS, NORTHERN_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
 import { PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS, PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS, TROPICAL_MEADOW_GRASS_MOBILE_ASSETS } from './js/meadow-continuum.js';
-import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
+import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS, NORTHERN_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 import { CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_MOBILE_ASSETS, crewContinuumMissingMessage } from './js/crew-continuum.js';
 import { HAIR_CONTINUUM_ASSETS } from './js/hair-continuum.js';
 import { CLOTHING_CONTINUUM_ASSETS } from './js/clothing-continuum.js';
@@ -182,6 +182,11 @@ if(fs.existsSync(path.join(root,'assets/forest-scenery/portugal/manifest.json'))
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
+if(fs.existsSync(path.join(root,'assets/forest-scenery/northern/manifest.json'))){
+  for(const file of [...Object.values(NORTHERN_FOREST_SURFACE_ASSETS),...Object.values(NORTHERN_FOREST_CONTINUUM_ASSETS),...Object.values(NORTHERN_FOREST_CONTINUUM_MOBILE_ASSETS),...Object.values(NORTHERN_FOREST_GROVE_ASSETS),...Object.values(NORTHERN_FOREST_ASSETS)]){
+    if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
+  }
+}
 // The meadow continuum's packs (scripts/prepare-meadow-grass.mjs & prepare-mobile-continuum.mjs): every coast's sward.
 for(const assets of [PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS,TROPICAL_MEADOW_GRASS_MOBILE_ASSETS]){
   for(const file of Object.values(assets)){
@@ -232,9 +237,9 @@ const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 // Keep core sailing and the forest maps embedded in downloads. The forest's continuum
 // atlases alone exceed 100 MB after base64 encoding; downloads load those from the
 // same versioned public asset instead.
-const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/boards/partner-ports-1550.json','assets/board/game.js','assets/board/runtime.js', ...[FOREST_CONTINUUM_ASSETS,SUBTROPICAL_FOREST_CONTINUUM_ASSETS,PORTUGAL_FOREST_CONTINUUM_ASSETS,FOREST_CONTINUUM_MOBILE_ASSETS,PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS].flatMap(assets=>Object.values(assets)).filter(f=>f.endsWith('.gz')), ...[PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS,TROPICAL_MEADOW_GRASS_MOBILE_ASSETS].flatMap(assets=>Object.values(assets)).filter(f=>f.endsWith('.gz'))]);
+const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/boards/partner-ports-1550.json','assets/board/game.js','assets/board/runtime.js', ...[FOREST_CONTINUUM_ASSETS,SUBTROPICAL_FOREST_CONTINUUM_ASSETS,PORTUGAL_FOREST_CONTINUUM_ASSETS,NORTHERN_FOREST_CONTINUUM_ASSETS,FOREST_CONTINUUM_MOBILE_ASSETS,PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS,NORTHERN_FOREST_CONTINUUM_MOBILE_ASSETS].flatMap(assets=>Object.values(assets)).filter(f=>f.endsWith('.gz')), ...[PORTUGAL_MEADOW_GRASS_ASSETS,TROPICAL_MEADOW_GRASS_ASSETS,PORTUGAL_MEADOW_GRASS_MOBILE_ASSETS,TROPICAL_MEADOW_GRASS_MOBILE_ASSETS].flatMap(assets=>Object.values(assets)).filter(f=>f.endsWith('.gz'))]);
 // Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
-for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
+for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS),...Object.values(NORTHERN_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 // The people continuum's bodies (hundreds of MB) stay out of the downloads, which fetch the published copies.
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))externalDownloadGeometry.add(file);
 for(const files of Object.values(CREW_CONTINUUM_MOBILE_ASSETS))for(const file of Object.values(files))externalDownloadGeometry.add(file);

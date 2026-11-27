@@ -9,6 +9,7 @@ import { gunzipSync } from 'node:zlib';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import * as A from './model-audit-lib.mjs';
+import { forestTrunkPrototypes } from './prepare-forest-trunks.mjs';
 
 const root = new URL('../', import.meta.url);
 const flag = (name) => process.argv.includes('--' + name);
@@ -119,11 +120,10 @@ export function compareLiveToRest(ship, live) {
 
 export function auditForestTrees(lib, fan = {}) {
   const rows = [];
-  for (const set of ['subtropical', 'saba']) {
-    const dir = new URL(`assets/forest-scenery/${set}/`, root), manifest = JSON.parse(readFileSync(new URL('manifest.json', dir)));
-    const vb = gunzipSync(readFileSync(new URL('vertices.bin.gz', dir))), ib = gunzipSync(readFileSync(new URL('indices.bin.gz', dir)));
-    const vertices = new Float32Array(vb.buffer, vb.byteOffset, vb.byteLength / 4), indices = new Uint32Array(ib.buffer, ib.byteOffset, ib.byteLength / 4);
-    for (const [i, p] of manifest.prototypes.entries()) {
+  // Every species the trunk table measures, from the pack it was measured in; a shrub with no wood to stop a ball has none.
+  for (const { set, index: i, prototype: p, manifest, vertices, indices } of forestTrunkPrototypes()) {
+    if (!lib.forestTrunkShape(p.species)) continue;
+    {
       const standing = (scale, yaw, x, y, z) => lib.buildForestTrunkGrid(new Float32Array([x, y, z, scale, yaw, 1, 1, 1, 0, 0, -2, 0]), 1, [p.species]);
       const drawn = A.forestPrototypeIndex(manifest, vertices, indices, i, { scale: 1.1, origin: [0, 5, 0] });
       // What a live forest offers a ball: its own roots.

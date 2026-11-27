@@ -48,6 +48,10 @@ export const PORTUGAL_FOREST_CONTINUUM_ASSETS = Object.freeze({
   'manifest.json': 'assets/forest-scenery/portugal/continuum/manifest.json',
   'atlas.bin.gz': 'assets/forest-scenery/portugal/continuum/atlas.bin.gz',
 });
+export const NORTHERN_FOREST_CONTINUUM_ASSETS = Object.freeze({
+  'manifest.json': 'assets/forest-scenery/northern/continuum/manifest.json',
+  'atlas.bin.gz': 'assets/forest-scenery/northern/continuum/atlas.bin.gz',
+});
 // Compact mobile continuum packs (scripts/prepare-mobile-continuum.mjs): same physical 3D tree clusters, wind bones,
 // and far-body morphs with sub-centimetre finest levels pruned so mobile & 128 MiB GPUs stay inside one page and VRAM budget.
 export const FOREST_CONTINUUM_MOBILE_ASSETS = Object.freeze({
@@ -57,6 +61,10 @@ export const FOREST_CONTINUUM_MOBILE_ASSETS = Object.freeze({
 export const PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS = Object.freeze({
   'manifest.json': 'assets/mobile-continuum/portugal-forest/manifest.json',
   'atlas.bin.gz': 'assets/mobile-continuum/portugal-forest/atlas.bin.gz',
+});
+export const NORTHERN_FOREST_CONTINUUM_MOBILE_ASSETS = Object.freeze({
+  'manifest.json': 'assets/mobile-continuum/northern-forest/manifest.json',
+  'atlas.bin.gz': 'assets/mobile-continuum/northern-forest/atlas.bin.gz',
 });
 
 // A surface's layer among its prototype's materials, or FOREST_CONTINUUM_UNTEXTURED for one the pack colours alone (its
@@ -117,9 +125,18 @@ export function loadForestContinuum({ assets, fetchAsset = fetch }) {
 }
 // The atlas of the pack a manifest describes, and its prototypes' fingerprint: a pack's continuum is its own.
 export function forestContinuumAssetsFor(manifest, { mobile = false } = {}) {
+  const kind = forestPackKindOf(manifest);
+  if (kind === 'subtropical') return SUBTROPICAL_FOREST_CONTINUUM_ASSETS;
+  if (kind === 'northern') return mobile ? NORTHERN_FOREST_CONTINUUM_MOBILE_ASSETS : NORTHERN_FOREST_CONTINUUM_ASSETS;
+  if (kind === 'portugal') return mobile ? PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS : PORTUGAL_FOREST_CONTINUUM_ASSETS;
+  return mobile ? FOREST_CONTINUUM_MOBILE_ASSETS : FOREST_CONTINUUM_ASSETS;
+}
+// Which pack a manifest is (saba, subtropical, portugal or northern): its bake names it
+// (scripts/bake-forest-mature-pack.py), and a pack baked before bakes did is told by its trees.
+export function forestPackKindOf(manifest) {
+  if (manifest?.bake?.pack) return manifest.bake.pack;
   const species = new Set(manifest.prototypes.map((p) => p.species));
-  if (species.has('royal_palm') || species.has('ceiba') || species.has('mangrove')) return SUBTROPICAL_FOREST_CONTINUUM_ASSETS;
-  const isPortugal = manifest.prototypes.some((p) => Boolean(p.cohort));
-  if (mobile) return isPortugal ? PORTUGAL_FOREST_CONTINUUM_MOBILE_ASSETS : FOREST_CONTINUUM_MOBILE_ASSETS;
-  return isPortugal ? PORTUGAL_FOREST_CONTINUUM_ASSETS : FOREST_CONTINUUM_ASSETS;
+  if (species.has('royal_palm') || species.has('ceiba') || species.has('mangrove')) return 'subtropical';
+  if (species.has('fir') || species.has('larch')) return 'northern';
+  return manifest.prototypes.some((p) => Boolean(p.cohort)) ? 'portugal' : 'saba';
 }

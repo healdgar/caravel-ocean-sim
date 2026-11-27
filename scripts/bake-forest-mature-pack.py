@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-"""Bakes the Portugal forest pack directly from forestmodeler's native grower and hero meshes.
+"""Bakes a temperate forest pack (Portugal's, or the northern one) directly from forestmodeler's native grower and hero meshes.
 
 Run from the repository root with forestmodeler's own Python:
 
-    <forestmodeler>/.venv/bin/python scripts/bake-forest-mature-pack.py \\
+    <forestmodeler>/.venv/bin/python scripts/bake-forest-mature-pack.py [--name portugal|northern] \\
         --forestmodeler <a forestmodeler checkout> --work <an empty folder for the baker's own output>
 
-Every prototype is grown by forestmodeler's ColonizingGrower at Lisbon's latitude and meshed directly
+Every prototype is grown by forestmodeler's ColonizingGrower at its pack's latitude (PACKS) and meshed directly
 with forestmodeler's own hero wood (`plant_meshes_fast(..., lod='hero')`) and native leaf placement
 (`place_leaves` + `_build_tier0_blade_meshes`) — no synthetic pruning, no glued twigs, and no fake
 leaf scaling. Decimation happens ONLY afterward in `scripts/prepare-forest-continuum.mjs`.
 
 After this, bake the derived continuum atlas:
 
-    node scripts/prepare-forest-continuum.mjs portugal
+    node scripts/prepare-forest-continuum.mjs <name>
 """
 import argparse
 import concurrent.futures
+import copy
 import dataclasses
 import gzip
 import hashlib
@@ -35,21 +36,63 @@ import time
 #   * `canopy` (6..11): competitive intermixed grove/copse stand (grown together in lockstep sharing one
 #     SiteShadowGrid + SiteSoilField with `share_light=True` at res=1.0 so mixed species genuinely compete for light
 #     and soil, self-pruning shaded lower limbs into real woodland trunks).
-SPECIES_SPECS = (
-    ('oak', 101, 60, 60),
-    ('chestnut', 101, 68, 65),
-    ('maple', 101, 48, 48),
-    ('elm', 303, 62, 60),
-    ('birch', 202, 34, 28),
-    ('blueberry', 303, 25, 18),
-)
-SPECIES_SEEDS = tuple((sp, seed) for sp, seed, _, _ in SPECIES_SPECS)
-PROTOTYPE_ORDER = (
-    tuple((sp, 'veteran', seed) for sp, seed in SPECIES_SEEDS)
-    + tuple((sp, 'canopy', seed) for sp, seed in SPECIES_SEEDS)
-)
+# Each pack's species and where its canopy cohort grows: the shade-tolerant trees close a grove in a ring, and the
+# pioneers grow in a sunlit gap (`gap`: tag, species, seed, age, place; a member whose tag is one of the pack's
+# species is kept, and the rest are its neighbours there).
+PACKS = {
+    'portugal': {
+        'latitude': 39.0,
+        'species': (
+            ('oak', 101, 60, 60),
+            ('chestnut', 101, 68, 65),
+            ('maple', 101, 48, 48),
+            ('elm', 303, 62, 60),
+            ('birch', 202, 34, 28),
+            ('blueberry', 303, 25, 18),
+        ),
+        'sprays': {},
+        'cooked': (),
+        'materials': None,
+        'gap': (
+            ('birch_nb', 'birch', 611, 28, (0.0, 0.0)),
+            ('birch', 'birch', 719, 28, (3.2, 0.0)),
+            ('oak_nb', 'oak', 821, 28, (-2.8, 2.4)),
+            ('blueberry', 'blueberry', 712, 22, (1.4, -2.2)),
+        ),
+    },
+    # Québec and New England, about 45° north (forestmodeler's northeastern_us_temperate): balsam fir, red maple and
+    # red oak close the wood; tamarack and gray birch take the gaps and the bogs' edges, highbush blueberry beneath.
+    'northern': {
+        'latitude': 45.0,
+        'species': (
+            ('fir', 101, 60, 60),
+            # Red maple bears shade and rises with the fir: planted with it, not twelve years after, or the grove's
+            # fir and oak close over it and leave a pole.
+            ('maple', 101, 48, 60),
+            ('oak', 101, 60, 60),
+            ('larch', 404, 50, 40),
+            ('birch', 202, 34, 28),
+            ('blueberry', 303, 25, 18),
+        ),
+        # A conifer's needles are drawn as sprays (spray_meshes); its bark and needles are forestmodeler's
+        # MaterialCraft maps, and the broadleaves wear the Portugal pack's own, being the same genomes.
+        'sprays': {'fir': 'ranked', 'larch': 'tufted'},
+        'cooked': ('fir', 'larch'),
+        'materials': 'portugal',
+        'gap': (
+            ('larch', 'larch', 731, 40, (0.0, 0.0)),
+            ('birch', 'birch', 719, 28, (3.4, 0.6)),
+            ('fir_nb', 'fir', 823, 30, (-3.0, 2.2)),
+            ('blueberry', 'blueberry', 712, 22, (1.2, -2.4)),
+        ),
+    },
+}
 
-LATITUDE = 39.0
+
+def prototype_order(specs):
+    seeds = tuple((sp, seed) for sp, seed, _, _ in specs)
+    return tuple((sp, 'veteran', seed) for sp, seed in seeds) + tuple((sp, 'canopy', seed) for sp, seed in seeds)
+
 GROVE_SPACING_METRES = 5.4
 FIELD_CELL_METRES = 0.6
 MIDDLE_CELLS_IN_HEIGHT = 40
@@ -87,8 +130,8 @@ def _grow_open_specimen(job):
     return (species, seed, age_yr, plan, grower, (h, cr, dbh, basal), dt)
 
 
-def _grow_gap_pioneer_stand(source_str, latitude):
-    """Grow shade-intolerant pioneer birch & understory blueberry in a sunlit gap competing side-by-side at res=1.0."""
+def _grow_gap_pioneer_stand(source_str, latitude, members, kept):
+    """Grow the shade-intolerant pioneers & understory shrub in a sunlit gap competing side-by-side at res=1.0."""
     if source_str not in sys.path:
         sys.path.insert(0, source_str)
     import numpy as np
@@ -103,12 +146,6 @@ def _grow_gap_pioneer_stand(source_str, latitude):
     t0 = time.perf_counter()
     sky = SkyModel(latitude=latitude)
     sh, cl, so = SiteShadowGrid(), {}, SiteSoilField()
-    members = [
-        ('birch_nb', 'birch', 611, 28, (0.0, 0.0)),
-        ('birch', 'birch', 719, 28, (3.2, 0.0)),
-        ('oak_nb', 'oak', 821, 28, (-2.8, 2.4)),
-        ('blueberry', 'blueberry', 712, 22, (1.4, -2.2)),
-    ]
     k_ext = float(np.mean([SPECIES[sp](1).light_extinction for _, sp, _, _, _ in members]))
     entries = []
     for tag, sp, sd, age, pos in members:
@@ -120,7 +157,7 @@ def _grow_gap_pioneer_stand(source_str, latitude):
         g = ColonizingGrower(plan, env, checkpoints=(float(age),), steps_per_cycle=2, resolution=1.0, origin=pos, share_light=True)
         entries.append((tag, sp, sd, age, plan, g, g.steps()))
     done = [False] * len(entries)
-    for _yr in range(28):
+    for _yr in range(max(age for _, _, _, age, _ in members)):
         for i, e in enumerate(entries):
             if done[i]:
                 continue
@@ -141,7 +178,7 @@ def _grow_gap_pioneer_stand(source_str, latitude):
     for tag, sp, sd, age, plan, g, it in entries:
         for _ in it:
             pass
-        if tag in ('birch', 'blueberry'):
+        if tag in kept:
             tf._recenter_grower_to_local_origin(g)
             h, cr, dbh, basal = _measure_grown(g, float(age))
             out[sp] = (sd, age, plan, g, (h, cr, dbh, basal))
@@ -149,8 +186,8 @@ def _grow_gap_pioneer_stand(source_str, latitude):
     return out
 
 
-def _grow_competitive_grove(source_str, specs, latitude):
-    """Grow Portugal canopy species in lockstep inside one shared SiteShadowGrid + SiteSoilField at resolution=1.0."""
+def _grow_competitive_grove(source_str, specs, gap, latitude):
+    """Grow a pack's canopy species in lockstep inside one shared SiteShadowGrid + SiteSoilField at resolution=1.0."""
     if source_str not in sys.path:
         sys.path.insert(0, source_str)
     import math
@@ -165,14 +202,15 @@ def _grow_competitive_grove(source_str, specs, latitude):
 
     t0 = time.perf_counter()
     sky_model = SkyModel(latitude=latitude)
-    canopy_specs = [s for s in specs if s[0] not in ('birch', 'blueberry')]
+    kept = {tag for tag, *_ in gap if tag in {s[0] for s in specs}}
+    canopy_specs = [s for s in specs if s[0] not in kept]
     k_ext = float(np.mean([SPECIES[sp](1).light_extinction for sp, _, _, _ in canopy_specs]))
     shared_shadow = SiteShadowGrid()
     shared_claims = {}
     shared_soil = SiteSoilField()
 
-    # Arrange the 4 canopy trees on a tight intermixed competitive ring (GROVE_SPACING_METRES apart)
-    # so oak, chestnut, maple, and elm genuinely compete for sky and soil.
+    # Arrange the canopy trees on a tight intermixed competitive ring (GROVE_SPACING_METRES apart)
+    # so they genuinely compete for sky and soil.
     n_can = len(canopy_specs)
     r_can = GROVE_SPACING_METRES / (2.0 * math.sin(math.pi / max(n_can, 2)))
     places = {}
@@ -237,9 +275,184 @@ def _grow_competitive_grove(source_str, specs, latitude):
         h, cr, dbh, basal = _measure_grown(g, float(grove_age))
         out[sp] = (g_seed, grove_age, plan, g, (h, cr, dbh, basal))
     print(f'  competitive canopy grove finished in {time.perf_counter() - t0:.1f} s', flush=True)
-    # Pioneer birch & understory blueberry grow in a sunlit competitive gap rather than deep 37yr closed oak shade.
-    out.update(_grow_gap_pioneer_stand(source_str, latitude))
+    # Pioneers & the understory shrub grow in a sunlit competitive gap rather than deep closed shade.
+    out.update(_grow_gap_pioneer_stand(source_str, latitude, gap, kept))
     return out
+
+
+# A conifer bears its needles by the million (a sixty-year balsam fir sixteen million, each 2.4 cm), and drawn one
+# by one they would be eighty times an oak's leaves. So a shoot's needles are drawn as sprays: each leafy shoot is
+# cut, in order along it, into pieces about as long as its needles reach across (SPRAY_SQUARE times their length,
+# so the spray's picture keeps its proportions), and each piece is one sheet folded along its twig, as long as the
+# piece and its needles' forward reach and as wide as they spread from it, lying in the plane they spread in, upper
+# side to the sky their own blades face. Its picture is the species' spray (a fir's two ranks of needles, a
+# tamarack's tufts along a long shoot), so the sheet is six vertices and four triangles in the same layout as a
+# broadleaf's folded blade, and every needle the genome placed is in some spray.
+SPRAY_SQUARE = 2.0
+SPRAY_FOLD = [[0, 3, 4], [0, 4, 1], [1, 4, 5], [1, 5, 2]]
+
+
+def spray_meshes(organs, plan, Mesh):
+    import numpy as np
+    n = len(organs.position)
+    if n == 0:
+        return {}
+    P = organs.position.astype(np.float64)
+    F = organs.normal.astype(np.float64)
+    F /= np.maximum(np.linalg.norm(F, axis=1, keepdims=True), 1e-12)
+    B = organs.binormal.astype(np.float64)
+    up = np.cross(F, B)
+    up /= np.maximum(np.linalg.norm(up, axis=1, keepdims=True), 1e-12)
+    length = np.array([a.length for a in plan.leaves])[organs.archetype] * organs.scale.astype(np.float64)
+
+    def sums(group, k, values):
+        return np.stack([np.bincount(group, values[:, j], k) for j in range(values.shape[1])], 1)
+
+    def scatter(group, k, values):
+        out = np.zeros((k, 3, 3))
+        for i in range(3):
+            for j in range(i, 3):
+                out[:, i, j] = out[:, j, i] = np.bincount(group, values[:, i] * values[:, j], k)
+        return out
+
+    # Each shoot's axis: the line its needles stand along, pointing the way they lean (to its tip). A shoot whose
+    # needles rise from one point (a spur's tuft, a whorl) has no such line, and takes their own mean direction.
+    _, g = np.unique(organs.node_index, return_inverse=True)
+    G = int(g.max()) + 1
+    count = np.bincount(g, minlength=G).astype(np.float64)
+    centre = sums(g, G, P) / count[:, None]
+    spread, vectors = np.linalg.eigh(scatter(g, G, P - centre[g]) / count[:, None, None])
+    axis = vectors[:, :, 2].copy()
+    lean = sums(g, G, F)
+    leaning = lean / np.maximum(np.linalg.norm(lean, axis=1, keepdims=True), 1e-12)
+    point = np.sqrt(np.maximum(spread[:, 2], 0.0)) < 0.25 * np.bincount(g, length, G) / count
+    axis[point] = leaning[point]
+    axis[np.einsum('ij,ij->i', axis, lean) < 0] *= -1
+
+    # Long shoots are cut in order along themselves into sprays about as long as they are wide.
+    along = np.einsum('ij,ij->i', P - centre[g], axis[g])
+    first, last = np.full(G, np.inf), np.full(G, -np.inf)
+    np.minimum.at(first, g, along)
+    np.maximum.at(last, g, along)
+    needle = np.bincount(g, length, G) / count
+    order = np.lexsort((along, g))
+    first_of = np.r_[0, np.cumsum(count.astype(np.int64))[:-1]]
+    rank = np.empty(n, np.int64)
+    rank[order] = np.arange(n) - first_of[g[order]]
+    pieces = np.minimum(np.maximum(1, np.round((last - first) / (SPRAY_SQUARE * needle))), count).astype(np.int64)
+    card = np.r_[0, np.cumsum(pieces)[:-1]][g] + rank * pieces[g] // count.astype(np.int64)[g]
+    C = int(card.max()) + 1
+    shoot = np.repeat(np.arange(G), pieces)
+    held = np.bincount(card, minlength=C).astype(np.float64)
+    mid = sums(card, C, P) / held[:, None]
+    a = axis[shoot]
+
+    # The sheet lies in the plane its needles spread in from the twig, its upper face where their blades face.
+    forward = np.einsum('ij,ij->i', F, a[card])
+    across = F - forward[:, None] * a[card]
+    _, vectors = np.linalg.eigh(scatter(card, C, across))
+    w = vectors[:, :, 2] - np.einsum('ij,ij->i', vectors[:, :, 2], a)[:, None] * a
+    lost = np.linalg.norm(w, axis=1) < 1e-6
+    w[lost] = np.cross(a[lost], np.where(np.abs(a[lost, 1:2]) < 0.9, [[0.0, 1.0, 0.0]], [[1.0, 0.0, 0.0]]))
+    w /= np.maximum(np.linalg.norm(w, axis=1, keepdims=True), 1e-12)
+    normal = np.cross(a, w)
+    turn = np.einsum('ij,ij->i', normal, sums(card, C, up)) < 0
+    w[turn] *= -1
+    normal[turn] *= -1
+
+    # As long as the piece of shoot and its needles' forward reach; as wide as they reach from the twig.
+    t = np.einsum('ij,ij->i', P - mid[card], a[card])
+    low = np.full(C, np.inf)
+    high = np.full(C, -np.inf)
+    np.minimum.at(low, card, t)
+    np.maximum.at(high, card, t)
+    reach = np.bincount(card, length * np.clip(forward, 0.0, None), C) / held
+    half = 1.35 * np.bincount(card, length * np.abs(np.einsum('ij,ij->i', across, w[card])), C) / held + 0.002
+    x0, x1 = low - 0.003, high + reach + 0.003
+
+    lx = np.repeat(np.stack([x0, x1], 1), 3, axis=1)
+    ly = np.tile(np.stack([-half, np.zeros(C), half], 1), (1, 2))
+    lz = np.abs(ly) * 0.16
+    position = mid[:, None, :] + lx[..., None] * a[:, None, :] + ly[..., None] * w[:, None, :] + lz[..., None] * normal[:, None, :]
+    fold = np.array(SPRAY_FOLD)
+    face = np.cross(position[:, fold[:, 1]] - position[:, fold[:, 0]], position[:, fold[:, 2]] - position[:, fold[:, 0]])
+    vertex_normal = np.zeros_like(position)
+    for f in range(len(fold)):
+        for corner in fold[f]:
+            vertex_normal[:, corner] += face[:, f]
+    vertex_normal /= np.maximum(np.linalg.norm(vertex_normal, axis=2, keepdims=True), 1e-12)
+    uv = np.stack(((lx - x0[:, None]) / (x1 - x0)[:, None], (ly + half[:, None]) / (2.0 * half)[:, None]), axis=2)
+
+    kind = np.zeros(C, np.int64)
+    kind[card] = organs.archetype
+    meshes = {}
+    for i in range(len(plan.leaves)):
+        sel = np.flatnonzero(kind == i)
+        if not len(sel):
+            continue
+        k = len(sel)
+        meshes[f'foliage_{i}'] = Mesh(
+            position[sel].reshape(-1, 3).astype(np.float32), vertex_normal[sel].reshape(-1, 3).astype(np.float32),
+            uv[sel].reshape(-1, 2).astype(np.float32), (fold[None] + 6 * np.arange(k)[:, None, None]).reshape(-1, 3).astype(np.int32),
+            np.zeros(4 * k, np.uint8), np.ones(4 * k, np.uint8),
+        )
+    print(f'  {plan.name if hasattr(plan, "name") else "conifer"}: {n:,} needles on {G:,} shoots drawn as {C:,} sprays', flush=True)
+    return meshes
+
+
+def stretch_bark(maps):
+    """A square MaterialCraft bark tile, twice down the stem and at the 512 x 1024 of the pack's other barks."""
+    import numpy as np
+    from PIL import Image
+    out = {}
+    for key, picture in maps.items():
+        tall = np.concatenate([picture, picture], axis=0)
+        out[key] = np.asarray(Image.fromarray(tall).resize((512, 1024), Image.Resampling.LANCZOS))
+    return out
+
+
+def tufted_spray(maps, size=256):
+    """A tamarack's long shoot: its tuft (the MaterialCraft picture, rising from its spur at the left) set along a
+    twig, turned out to either side and one at the tip, their normals turned with them."""
+    import numpy as np
+    from PIL import Image
+    tuft_albedo = Image.fromarray(maps['albedo']).convert('RGBA')
+    tuft_normal = np.asarray(Image.fromarray(maps['normal']).convert('RGBA')).astype(np.float64)
+    n = tuft_albedo.width
+    alpha = np.asarray(tuft_albedo)[..., 3]
+    opaque = np.argwhere(alpha > 128)
+    base = (int(opaque[:, 1].min()) + 2, int(np.median(opaque[opaque[:, 1] < opaque[:, 1].min() + n // 16][:, 0])))
+    spur = np.asarray(tuft_albedo)[..., :3][alpha > 128][(opaque[:, 1] < base[0] + n // 14)].mean(axis=0)
+    big = 2 * size
+    albedo = Image.new('RGBA', (big, big), (0, 0, 0, 0))
+    normal = Image.new('RGBA', (big, big), (128, 128, 255, 255))
+    twig = Image.new('RGBA', (big, big), (0, 0, 0, 0))
+    from PIL import ImageDraw
+    ImageDraw.Draw(twig).rectangle([0, big // 2 - big // 90, big, big // 2 + big // 90], fill=(*[int(c) for c in spur], 255))
+    albedo.alpha_composite(twig)
+    tufts = [(0.08 + 0.12 * k, (40.0 + 12.0 * (k % 3)) * (1 if k % 2 else -1)) for k in range(6)] + [(0.78, 0.0)]
+    for u, angle in tufts:
+        scale = 0.5 * big / (n - base[0])
+        pad = Image.new('RGBA', (2 * n, 2 * n), (0, 0, 0, 0))
+        pad.paste(tuft_albedo, (n - base[0], n - base[1]))
+        c, s = np.cos(np.radians(angle)), np.sin(np.radians(angle))
+        nx, ny = tuft_normal[..., 0] / 127.5 - 1.0, -(tuft_normal[..., 1] / 127.5 - 1.0)
+        turned = tuft_normal.copy()
+        turned[..., 0] = (c * nx - s * ny + 1.0) * 127.5
+        turned[..., 1] = (-(s * nx + c * ny) + 1.0) * 127.5
+        turned[..., 3] = alpha
+        pad_normal = Image.new('RGBA', (2 * n, 2 * n), (128, 128, 255, 0))
+        pad_normal.paste(Image.fromarray(np.clip(turned, 0, 255).astype(np.uint8)), (n - base[0], n - base[1]))
+        side = max(2, int(2 * n * scale))
+        at = (int(u * big) - side // 2, big // 2 - side // 2)
+        for layer, target in ((pad, albedo), (pad_normal, normal)):
+            placed = layer.rotate(angle, resample=Image.Resampling.BICUBIC, center=(n, n)).resize((side, side), Image.Resampling.LANCZOS)
+            sheet = Image.new('RGBA', (big, big), (0, 0, 0, 0))
+            sheet.paste(placed, at)
+            target.alpha_composite(sheet)
+    albedo = albedo.resize((size, size), Image.Resampling.LANCZOS)
+    normal = normal.resize((size, size), Image.Resampling.LANCZOS)
+    return {'albedo': np.asarray(albedo), 'normal': np.asarray(normal)}
 
 
 def sha256(raw):
@@ -261,12 +474,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--forestmodeler', required=True, help='a forestmodeler checkout; only read')
     parser.add_argument('--work', required=True, help="a folder for the baker's own output")
-    parser.add_argument('--pack', default='assets/forest-scenery/portugal', help='the pack to rewrite; its pictures and materials are kept')
+    parser.add_argument('--name', default='portugal', choices=sorted(PACKS), help='which pack to grow (PACKS)')
+    parser.add_argument('--pack', help='the pack folder to rewrite (default assets/forest-scenery/<name>); its pictures and materials are kept')
     parser.add_argument('--revision', help='the forestmodeler commit, when the checkout is a copy without its history')
     args = parser.parse_args()
     source = pathlib.Path(args.forestmodeler).resolve()
     work = pathlib.Path(args.work).resolve()
-    pack = pathlib.Path(args.pack).resolve()
+    pack = pathlib.Path(args.pack or f'assets/forest-scenery/{args.name}').resolve()
+    SPECIES_SPECS, GAP, LATITUDE = PACKS[args.name]['species'], PACKS[args.name]['gap'], PACKS[args.name]['latitude']
+    PROTOTYPE_ORDER = prototype_order(SPECIES_SPECS)
     sys.path.insert(0, str(source))
     sys.path.insert(0, str(source / 'scripts'))
 
@@ -284,16 +500,23 @@ def main():
     from native_tree_render import blade_meshes as native_blade_meshes
     from scripts import bake_tiered_forest as baker_cli
 
-    before = json.loads((pack / 'manifest.json').read_text())
-    if [(p['species'], p['cohort']) for p in before['prototypes']] != [(s[0], s[1]) for s in PROTOTYPE_ORDER]:
+    # A pack being rewritten keeps its pictures and materials; a new one takes them from forestmodeler's bake, and its
+    # broadleaves wear those of the pack it names (PACKS[...]['materials']), being the same genomes.
+    SPRAYS, COOKED, BORROWED = PACKS[args.name]['sprays'], PACKS[args.name]['cooked'], PACKS[args.name]['materials']
+    before = json.loads((pack / 'manifest.json').read_text()) if (pack / 'manifest.json').exists() else None
+    if before and [(p['species'], p['cohort']) for p in before['prototypes']] != [(s[0], s[1]) for s in PROTOTYPE_ORDER]:
         raise SystemExit('The pack does not hold these prototypes in this order')
+    lender = pack.parent / BORROWED if BORROWED else None
+    lent = {(p['species'], p['cohort']): p['nativeMaterials'] for p in json.loads((lender / 'manifest.json').read_text())['prototypes']} if lender else {}
 
     work.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
 
     # Grow Track A (6 open-grown stand-alone trees in parallel at res=1.0, spc=2) AND Track B (1 competitive
     # intermixed 6-species grove sharing SiteShadowGrid + SiteSoilField at res=1.0, spc=2) concurrently!
-    cache_pkl = work / 'grown_res1_open_and_grove.pkl'
+    # Named for what was grown, so a changed species, age, seed or gap grows afresh instead of reading a stale grove.
+    grown_key = hashlib.sha256(repr((SPECIES_SPECS, GAP, LATITUDE)).encode()).hexdigest()[:12]
+    cache_pkl = work / f'grown_res1_open_and_grove_{grown_key}.pkl'
     open_by_species, grove_by_species = {}, {}
     if cache_pkl.exists():
         open_by_species, grove_by_species = pickle.loads(cache_pkl.read_bytes())
@@ -301,7 +524,7 @@ def main():
     else:
         open_jobs = [(str(source), sp, seed, open_age, LATITUDE) for sp, seed, open_age, _ in SPECIES_SPECS]
         with concurrent.futures.ProcessPoolExecutor(max_workers=len(open_jobs) + 1) as pool:
-            grove_fut = pool.submit(_grow_competitive_grove, str(source), SPECIES_SPECS, LATITUDE)
+            grove_fut = pool.submit(_grow_competitive_grove, str(source), SPECIES_SPECS, GAP, LATITUDE)
             open_futs = [pool.submit(_grow_open_specimen, job) for job in open_jobs]
             for fut in open_futs:
                 species, seed, age_yr, plan, grower, (h, cr, dbh, basal), dt = fut.result()
@@ -365,7 +588,12 @@ def main():
     # Use forestmodeler's REAL native_tree_render.blade_meshes at 1:1 native single-leaf scale (cluster=1.0):
     # each veteran oak/chestnut/elm already carries 200k–408k real individual folded leaves (~12.3M total verts
     # across all 12 prototypes, safely within the continuum's 16.77M float-indexable vertex address space).
+    species_of_plan = {id(plan): species for _, species, _, _, plan, _ in grown}
+    from gardenplans.mesh import Mesh
+
     def native_hero_blades(organs, plan, cluster, **_):
+        if species_of_plan.get(id(plan)) in SPRAYS:
+            return spray_meshes(organs, plan, Mesh)
         meshes, _audit = native_blade_meshes(
             organs, plan, 1.0, max_triangles=20_000_000, individual_cutout=True, lod_tier='hero'
         )
@@ -395,12 +623,25 @@ def main():
     setattr(meshes_module, meshes_name, native_hero_meshes)
     tf.place_leaves = native_env_leaves
     tf._build_tier0_blade_meshes = native_hero_blades
-    tf._load_cooked_species_maps = lambda species: (None, None)
+    cooked_maps = tf._load_cooked_species_maps
+
+    def pack_cooked_maps(species):
+        if species not in COOKED:
+            return None, None
+        bark, foliage = cooked_maps(species)
+        if bark is not None:
+            bark = stretch_bark(bark)
+        if foliage is not None and SPRAYS.get(species) == 'tufted':
+            foliage = tufted_spray(foliage)
+        return bark, foliage
+
+    tf._load_cooked_species_maps = pack_cooked_maps
     tf.write_glb = lambda layers, path, **_: pathlib.Path(path)
 
     clock = time.perf_counter()
     result = tf.bake_tiered_forest(
-        baker_cli._build_subtropical_island_field(), work, stand='portugal', stem='portugal_forest', n_stems=24, seed=42,
+        baker_cli._build_subtropical_island_field(), work, stem=f'{args.name}_forest', n_stems=24, seed=42,
+        **({'stand': 'portugal'} if args.name == 'portugal' else {'species_weights': {sp: 1.0 for sp, *_ in SPECIES_SPECS}}),
         prototype_age=60.0, veteran_age=65.0, growth_mode='dense_interspecies', cohorts=('veteran', 'canopy'), resolution=1.0,
         field_cell_m=FIELD_CELL_METRES, latitude=LATITUDE,
     )
@@ -409,7 +650,27 @@ def main():
     baked = result['forest_instances_manifest']
     fold = np.array([0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2], dtype=np.uint32)
     vertices, indices, prototypes, vertex_at, index_at = [], [], [], 0, 0
-    for entry, made, was, spec in zip(baked['prototypes'], result['prototypes'], before['prototypes'], record):
+    def materials_of(entry):
+        species, cohort = entry['species'], entry['cohort']
+        if (species, cohort) in lent:
+            chosen, folder = lent[(species, cohort)], lender
+        else:
+            # A canopy tree wears its veteran's pictures, as the Portugal pack's do.
+            chosen = copy.deepcopy(next(e for e in baked['prototypes'] if e['species'] == species and e['cohort'] == 'veteran')['nativeMaterials'])
+            folder = work
+            if species in SPRAYS:
+                for material in chosen:
+                    if material['name'].startswith('foliage'):
+                        material['opacityThreshold'] = 0.35
+        for material in chosen:
+            for key in ('albedo', 'normal', 'roughnessMap'):
+                if isinstance(material.get(key), dict) and not (pack / material[key]['file']).exists():
+                    shutil.copyfile(folder / material[key]['file'], pack / material[key]['file'])
+        return chosen
+
+    pack.mkdir(parents=True, exist_ok=True)
+    for entry, made, spec in zip(baked['prototypes'], result['prototypes'], record):
+        was = before['prototypes'][entry['id']] if before else {'nativeMaterials': materials_of(entry)}
         leaves = made['leaf_verts_56'].reshape(-1, 6, 14)
         folded = made['leaf_indices_local'].reshape(-1, 12)
         if not np.array_equal(folded, fold[None, :] + (np.arange(len(leaves), dtype=np.uint32) * 6)[:, None]):
@@ -492,6 +753,7 @@ def main():
         'middle': receipts['middle'],
         'bake': {
             'script': 'scripts/bake-forest-mature-pack.py',
+            'pack': args.name,
             'forestmodeler': revision,
             'growth': 'native forestmodeler ColonizingGrower at resolution=1.0, steps_per_cycle=2: open-grown stand-alone trees (veteran) + lockstep intermixed competitive stand sharing SiteShadowGrid & SiteSoilField (canopy) + hero wood + native_tree_render.blade_meshes',
             'latitudeDegrees': LATITUDE,

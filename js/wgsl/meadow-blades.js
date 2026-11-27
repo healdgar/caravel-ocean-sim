@@ -69,7 +69,7 @@ export const MEADOW_BLADE_DRAW_WORDS = 16;
 // A pack's sward (js/meadow-grass.js packMeadowSward): its mixes (the meadow's three roles, the crops of worked
 // ground and the litters under trees, js/meadow-crops.js) of at most MEADOW_SPECIES_MOST species in all.
 export const MEADOW_MIXES = MEADOW_LITTER_MIX + MEADOW_LITTERS;
-export const MEADOW_SPECIES_MOST = 80;
+export const MEADOW_SPECIES_MOST = 96;
 export const MEADOW_MIX_BYTES = 64, MEADOW_SPECIES_BYTES = 96;
 export const MEADOW_SWARD_BYTES = MEADOW_MIXES * MEADOW_MIX_BYTES + 16 + MEADOW_SPECIES_MOST * MEADOW_SPECIES_BYTES;
 // Litter is sown no farther than this (m): farther, it is the ground's own colour, and under the crowns unseen.

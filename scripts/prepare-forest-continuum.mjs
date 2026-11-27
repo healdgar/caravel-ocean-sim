@@ -20,14 +20,14 @@ import { weldDrawn, bakeClusters, bakeFar, continuumFarFirst, triangleGrid, clos
 import { CONTINUUM_WIND_BONES, packContinuumWindBones } from '../js/wgsl/continuum-wind.js';
 import {
   FOREST_CONTINUUM_FORMAT, FOREST_CONTINUUM_VERSION, FOREST_CONTINUUM_MATERIAL, FOREST_CONTINUUM_BARK, FOREST_CONTINUUM_LEAF,
-  FOREST_CONTINUUM_ASSETS, SUBTROPICAL_FOREST_CONTINUUM_ASSETS, PORTUGAL_FOREST_CONTINUUM_ASSETS, packForestContinuumBody, validateForestContinuumManifest,
+  FOREST_CONTINUUM_ASSETS, SUBTROPICAL_FOREST_CONTINUUM_ASSETS, PORTUGAL_FOREST_CONTINUUM_ASSETS, NORTHERN_FOREST_CONTINUUM_ASSETS, packForestContinuumBody, validateForestContinuumManifest,
 } from '../js/forest-continuum.js';
 
 const args = process.argv.slice(2);
 const packName = args.find((a) => !a.startsWith('--')) ?? 'portugal';
 const only = args.find((a) => a.startsWith('--only='))?.slice(7);
 const checkOnly = args.includes('--check');
-const ASSETS = { saba: FOREST_CONTINUUM_ASSETS, subtropical: SUBTROPICAL_FOREST_CONTINUUM_ASSETS, portugal: PORTUGAL_FOREST_CONTINUUM_ASSETS }[packName];
+const ASSETS = { saba: FOREST_CONTINUUM_ASSETS, subtropical: SUBTROPICAL_FOREST_CONTINUUM_ASSETS, portugal: PORTUGAL_FOREST_CONTINUUM_ASSETS, northern: NORTHERN_FOREST_CONTINUUM_ASSETS }[packName];
 if (!ASSETS) throw Error(`No forest pack ${packName}`);
 const dir = path.join('assets/forest-scenery', packName), OUT = path.dirname(ASSETS['manifest.json']);
 const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
