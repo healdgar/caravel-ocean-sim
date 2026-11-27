@@ -12,24 +12,24 @@
   },
   "files": {
     "middle-vertices.bin": {
-      "bytes": 876148,
-      "sha256": "a32a056146e301ce10dca2616e1ad8a05d17f6e7587e45475172447e54a906b2",
+      "bytes": 877084,
+      "sha256": "db4d1c5b72af3729f936c7a37f322147a3f547ae3b97a134e76456ef54d1ff79",
       "gzip": {
         "file": "middle-vertices.bin.gz",
-        "bytes": 536785,
-        "sha256": "3cd85b5f67c98a474f03222875edc72ad16b2357f346e062a52d8130a7a632c6"
+        "bytes": 521641,
+        "sha256": "b3bbd5a8b3c2da5bcde8f7a40ef1866166968a60dc58d98632ae89f654ad8c31"
       },
-      "vertexCount": 16849
+      "vertexCount": 16867
     },
     "middle-indices.bin": {
-      "bytes": 210036,
-      "sha256": "69f581b7047294f753d52be0eb560b3995a3f92d26f6db1990fc725e75d20b01",
+      "bytes": 210564,
+      "sha256": "5db2bab3e88537183f7d6d0441b50e8fde2a5d8592cf6d77f25f6c17c321dcb8",
       "gzip": {
         "file": "middle-indices.bin.gz",
-        "bytes": 72832,
-        "sha256": "e435397db735385e3364eb2b4b43af68ad14be46f8de3b6aa70e8962831b24b8"
+        "bytes": 73020,
+        "sha256": "a4901c3b8ef516103a16ef4c3800cd98dde9aeb4259c7b75afe3c89d12cbe284"
       },
-      "indexCount": 52509
+      "indexCount": 52641
     }
   },
   "prototypes": [
@@ -49,11 +49,11 @@
       },
       "shell": {
         "firstIndex": 6507,
-        "indexCount": 1452,
-        "triangles": 484,
-        "sourceProxyAreaSquareMetres": 146.52
+        "indexCount": 1476,
+        "triangles": 492,
+        "sourceProxyAreaSquareMetres": 699.34
       },
-      "geometryErrorMetres": 9.9389
+      "geometryErrorMetres": 9.8463
     },
     {
       "id": 1,
@@ -64,13 +64,13 @@
       "crownRadiusMetres": 9.054,
       "crownBaseMetres": 3.512,
       "wood": {
-        "firstIndex": 7959,
+        "firstIndex": 7983,
         "indexCount": 4641,
         "triangles": 1547,
         "sourceTriangles": 468792
       },
       "shell": {
-        "firstIndex": 12600,
+        "firstIndex": 12624,
         "indexCount": 4044,
         "triangles": 1348,
         "sourceProxyAreaSquareMetres": 3062.53
@@ -86,13 +86,13 @@
       "crownRadiusMetres": 9.763,
       "crownBaseMetres": 5.54,
       "wood": {
-        "firstIndex": 16644,
+        "firstIndex": 16668,
         "indexCount": 5955,
         "triangles": 1985,
         "sourceTriangles": 381112
       },
       "shell": {
-        "firstIndex": 22599,
+        "firstIndex": 22623,
         "indexCount": 4434,
         "triangles": 1478,
         "sourceProxyAreaSquareMetres": 3237.14
@@ -108,18 +108,18 @@
       "crownRadiusMetres": 3.165,
       "crownBaseMetres": 2.431,
       "wood": {
-        "firstIndex": 27033,
+        "firstIndex": 27057,
         "indexCount": 3573,
         "triangles": 1191,
         "sourceTriangles": 212361
       },
       "shell": {
-        "firstIndex": 30606,
+        "firstIndex": 30630,
         "indexCount": 1404,
         "triangles": 468,
-        "sourceProxyAreaSquareMetres": 97.05
+        "sourceProxyAreaSquareMetres": 623.83
       },
-      "geometryErrorMetres": 9.5911
+      "geometryErrorMetres": 9.5744
     },
     {
       "id": 4,
@@ -130,13 +130,13 @@
       "crownRadiusMetres": 4.719,
       "crownBaseMetres": 2.994,
       "wood": {
-        "firstIndex": 32010,
+        "firstIndex": 32034,
         "indexCount": 1692,
         "triangles": 564,
         "sourceTriangles": 80140
       },
       "shell": {
-        "firstIndex": 33702,
+        "firstIndex": 33726,
         "indexCount": 708,
         "triangles": 236,
         "sourceProxyAreaSquareMetres": 341.91
@@ -152,13 +152,13 @@
       "crownRadiusMetres": 0.74,
       "crownBaseMetres": 0.328,
       "wood": {
-        "firstIndex": 34410,
+        "firstIndex": 34434,
         "indexCount": 117,
         "triangles": 39,
         "sourceTriangles": 17402
       },
       "shell": {
-        "firstIndex": 34527,
+        "firstIndex": 34551,
         "indexCount": 288,
         "triangles": 96,
         "sourceProxyAreaSquareMetres": 4.23
@@ -174,16 +174,16 @@
       "crownRadiusMetres": 3.448,
       "crownBaseMetres": 2.669,
       "wood": {
-        "firstIndex": 34815,
+        "firstIndex": 34839,
         "indexCount": 4254,
         "triangles": 1418,
         "sourceTriangles": 175189
       },
       "shell": {
-        "firstIndex": 39069,
-        "indexCount": 1014,
-        "triangles": 338,
-        "sourceProxyAreaSquareMetres": 111.71
+        "firstIndex": 39093,
+        "indexCount": 1086,
+        "triangles": 362,
+        "sourceProxyAreaSquareMetres": 531.57
       },
       "geometryErrorMetres": 8.7305
     },
@@ -196,13 +196,13 @@
       "crownRadiusMetres": 5.659,
       "crownBaseMetres": 2.233,
       "wood": {
-        "firstIndex": 40083,
+        "firstIndex": 40179,
         "indexCount": 2013,
         "triangles": 671,
         "sourceTriangles": 197854
       },
       "shell": {
-        "firstIndex": 42096,
+        "firstIndex": 42192,
         "indexCount": 1080,
         "triangles": 360,
         "sourceProxyAreaSquareMetres": 619.09
@@ -218,13 +218,13 @@
       "crownRadiusMetres": 6.104,
       "crownBaseMetres": 5.326,
       "wood": {
-        "firstIndex": 43176,
+        "firstIndex": 43272,
         "indexCount": 3120,
         "triangles": 1040,
         "sourceTriangles": 254969
       },
       "shell": {
-        "firstIndex": 46296,
+        "firstIndex": 46392,
         "indexCount": 1854,
         "triangles": 618,
         "sourceProxyAreaSquareMetres": 1163.41
@@ -240,18 +240,18 @@
       "crownRadiusMetres": 3.023,
       "crownBaseMetres": 2.736,
       "wood": {
-        "firstIndex": 48150,
+        "firstIndex": 48246,
         "indexCount": 2652,
         "triangles": 884,
         "sourceTriangles": 137612
       },
       "shell": {
-        "firstIndex": 50802,
-        "indexCount": 990,
-        "triangles": 330,
-        "sourceProxyAreaSquareMetres": 66.92
+        "firstIndex": 50898,
+        "indexCount": 1026,
+        "triangles": 342,
+        "sourceProxyAreaSquareMetres": 432.29
       },
-      "geometryErrorMetres": 8.6264
+      "geometryErrorMetres": 8.63
     },
     {
       "id": 10,
@@ -262,13 +262,13 @@
       "crownRadiusMetres": 3.791,
       "crownBaseMetres": 2.146,
       "wood": {
-        "firstIndex": 51792,
+        "firstIndex": 51924,
         "indexCount": 270,
         "triangles": 90,
         "sourceTriangles": 12926
       },
       "shell": {
-        "firstIndex": 52062,
+        "firstIndex": 52194,
         "indexCount": 132,
         "triangles": 44,
         "sourceProxyAreaSquareMetres": 50.1
@@ -284,13 +284,13 @@
       "crownRadiusMetres": 0.594,
       "crownBaseMetres": 0.213,
       "wood": {
-        "firstIndex": 52194,
+        "firstIndex": 52326,
         "indexCount": 87,
         "triangles": 29,
         "sourceTriangles": 5002
       },
       "shell": {
-        "firstIndex": 52281,
+        "firstIndex": 52413,
         "indexCount": 228,
         "triangles": 76,
         "sourceProxyAreaSquareMetres": 1.06

@@ -3,39 +3,39 @@
  "version": 2,
  "tileMetres": 128,
  "variants": 4,
- "maxTrees": 254,
+ "maxTrees": 243,
  "treeFloats": 8,
  "harbourHeight": 0.94,
  "files": {
   "trees.bin": {
-   "bytes": 32512,
-   "sha256": "0b6e2288f46314ed24f4012ab943dee6e93ea2a57d628a2907af4c9386121557",
+   "bytes": 31104,
+   "sha256": "bc3382a269fbbd30319194fa9e5a4098ce993c41bc67141dca2578bdcedff5e0",
    "gzip": {
     "file": "trees.bin.gz",
-    "bytes": 19027,
-    "sha256": "c3523593b13a8472f1853c139dec9b26e68de9e48965c70830b3aad5e49a8d28"
+    "bytes": 17112,
+    "sha256": "9918d15c376a1764cae426caf82c49d6797bedaecf1341f0e51c2c2a45e516a4"
    }
   }
  },
  "groves": [
   {
-   "trees": 246,
+   "trees": 229,
    "tall": 127,
    "shared": 65
   },
   {
-   "trees": 246,
-   "tall": 127,
-   "shared": 65
-  },
-  {
-   "trees": 253,
+   "trees": 220,
    "tall": 118,
    "shared": 65
   },
   {
-   "trees": 246,
-   "tall": 127,
+   "trees": 242,
+   "tall": 123,
+   "shared": 65
+  },
+  {
+   "trees": 220,
+   "tall": 118,
    "shared": 65
   }
  ]

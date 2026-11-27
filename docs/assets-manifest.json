@@ -965,9 +965,9 @@
     "sha256": "895b0d80074131c7ac3759ae65fd5e267eee864f1bc135c4e9d567aa0ce764ca"
   },
   "assets/forest-scenery/northern/continuum/atlas.bin.gz": {
-    "url": "assets/forest-scenery/northern/continuum/atlas.bin.a0c0bca4e7997627.gz",
-    "bytes": 224013963,
-    "sha256": "a0c0bca4e7997627b971f76c1340dacc0fb037fa2863c679610332bf1a5365b2"
+    "url": "assets/forest-scenery/northern/continuum/atlas.bin.96d8f79bf0f6d5ea.gz",
+    "bytes": 340221166,
+    "sha256": "96d8f79bf0f6d5eaca3469568b8d661e8b1d2c9715f96bd4dbb1956419716548"
   },
   "assets/mobile-continuum/saba-forest/atlas.bin.gz": {
     "url": "assets/mobile-continuum/saba-forest/atlas.bin.21311f446ca6f168.gz",
@@ -980,9 +980,9 @@
     "sha256": "35b8384c68958f3e951fed3392ecf18a8dfca67d45994c7e4a74f20e707496c3"
   },
   "assets/mobile-continuum/northern-forest/atlas.bin.gz": {
-    "url": "assets/mobile-continuum/northern-forest/atlas.bin.5e3362b816af0cb8.gz",
-    "bytes": 7831127,
-    "sha256": "5e3362b816af0cb81974d77faa156215ad141f4876e35e24571ac6801d85e023"
+    "url": "assets/mobile-continuum/northern-forest/atlas.bin.4f28d1d7f9e914ff.gz",
+    "bytes": 11837957,
+    "sha256": "4f28d1d7f9e914ffd977928df7dfc3d249b9300162e5f82458d698baf4141964"
   },
   "assets/ground-cover/portugal/meadows-gpu/atlas.bin.gz": {
     "url": "assets/ground-cover/portugal/meadows-gpu/atlas.bin.dae944c2ea35de54.gz",
@@ -1405,9 +1405,9 @@
     "sha256": "71564486f344ac222b81321543d9c2f22e513cb2408698c2c635b738b39863f5"
   },
   "assets/forest-scenery/northern/continuum/manifest.json": {
-    "url": "assets/forest-scenery/northern/continuum/manifest.8c117de42b93c540.json",
-    "bytes": 109347,
-    "sha256": "8c117de42b93c54074b8298cabc8a6612f44a70cba3f6a7f91f15efb6895a5e7"
+    "url": "assets/forest-scenery/northern/continuum/manifest.5e44eae6cff809dd.json",
+    "bytes": 109379,
+    "sha256": "5e44eae6cff809dddce0c1c9d849e585670319f5ccefde8b594b5035714d81c1"
   },
   "assets/mobile-continuum/saba-forest/manifest.json": {
     "url": "assets/mobile-continuum/saba-forest/manifest.9a1b529407787ba0.json",
@@ -1420,9 +1420,9 @@
     "sha256": "e1f82efad47c67ff488a5c659117d58b6a4dc87ab712cb43bebe827d7ee09abd"
   },
   "assets/mobile-continuum/northern-forest/manifest.json": {
-    "url": "assets/mobile-continuum/northern-forest/manifest.a543a210ad4c7c5b.json",
-    "bytes": 144458,
-    "sha256": "a543a210ad4c7c5bdf1f5f38a67c4f12cebd695528c8367464668ea6d5a70cbc"
+    "url": "assets/mobile-continuum/northern-forest/manifest.3cd93d69a7e7d454.json",
+    "bytes": 144486,
+    "sha256": "3cd93d69a7e7d454d15247625e4eeef91a428e22571c4d20fb5b0dfb97e8a35e"
   },
   "assets/forest-scenery/saba/manifest.json": {
     "url": "assets/forest-scenery/saba/manifest.c0605e02c0bf4a37.json",
@@ -2340,9 +2340,9 @@
     "sha256": "655ebefdf1e5a1ab1ef2bd7bbc59319f08d39537e1cab6c796c1d54b31b78329"
   },
   "assets/forest-scenery/northern/manifest.json": {
-    "url": "assets/forest-scenery/northern/manifest.94b6921ae93d9671.json",
-    "bytes": 74406,
-    "sha256": "94b6921ae93d9671d8f32e7897851704fffc3f09a32eb8d226e795e34fc351bb"
+    "url": "assets/forest-scenery/northern/manifest.a9986d23f1a76fc1.json",
+    "bytes": 74417,
+    "sha256": "a9986d23f1a76fc1508307ee9d83ae04d687d58eb85494c6a1e58bb0fc9625f2"
   },
   "assets/forest-scenery/northern/roots.bin.gz": {
     "url": "assets/forest-scenery/northern/roots.bin.cd8f64987474e738.gz",
@@ -2720,14 +2720,14 @@
     "sha256": "69506a8e90070f3bab6b9ab1940538217fbb5aebadcadf97410361d09f7f8ffd"
   },
   "assets/forest-scenery/northern/groves/manifest.json": {
-    "url": "assets/forest-scenery/northern/groves/manifest.6b3015290bcffbf9.json",
+    "url": "assets/forest-scenery/northern/groves/manifest.c1385590fbdb26b7.json",
     "bytes": 684,
-    "sha256": "6b3015290bcffbf9c31388a2ca01d33b4dcf2380facab94fb3a65b63b4869b64"
+    "sha256": "c1385590fbdb26b70c965ab01b57493db29543ac50bd2680029996e889d768fe"
   },
   "assets/forest-scenery/northern/groves/trees.bin.gz": {
-    "url": "assets/forest-scenery/northern/groves/trees.bin.c3523593b13a8472.gz",
-    "bytes": 19027,
-    "sha256": "c3523593b13a8472f1853c139dec9b26e68de9e48965c70830b3aad5e49a8d28"
+    "url": "assets/forest-scenery/northern/groves/trees.bin.9918d15c376a1764.gz",
+    "bytes": 17112,
+    "sha256": "9918d15c376a1764cae426caf82c49d6797bedaecf1341f0e51c2c2a45e516a4"
   },
   "assets/forest-scenery/subtropical/groves/manifest.json": {
     "url": "assets/forest-scenery/subtropical/groves/manifest.85615c46ef0d8e34.json",

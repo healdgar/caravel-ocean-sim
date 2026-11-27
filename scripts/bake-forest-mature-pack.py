@@ -283,16 +283,20 @@ def _grow_competitive_grove(source_str, specs, gap, latitude):
 # A conifer bears its needles by the million (a sixty-year balsam fir sixteen million, each 2.4 cm), and drawn one
 # by one they would be eighty times an oak's leaves. So a shoot's needles are drawn as sprays: each leafy shoot is
 # cut, in order along it, into pieces about as long as its needles reach across (SPRAY_SQUARE times their length,
-# so the spray's picture keeps its proportions), and each piece is one sheet folded along its twig, as long as the
-# piece and its needles' forward reach and as wide as they spread from it, lying in the plane they spread in, upper
-# side to the sky their own blades face. Its picture is the species' spray (a fir's two ranks of needles, a
-# tamarack's tufts along a long shoot), so the sheet is six vertices and four triangles in the same layout as a
-# broadleaf's folded blade, and every needle the genome placed is in some spray.
+# so the spray's picture keeps its proportions), and each piece is drawn as sheets folded along its twig, as long as
+# the piece and its needles' forward reach and as wide as they spread from it, upper side to the sky their own blades
+# face. Its picture is the species' spray (a fir's two ranks of needles, a tamarack's tufts along a long shoot), so a
+# sheet is six vertices and four triangles in the same layout as a broadleaf's folded blade, and every needle the
+# genome placed is in some spray. A picture shows fewer needles than the piece holds, so the piece takes as many
+# sheets as its needles' area needs (at most SPRAY_LAYERS), fanned about the twig as far as they spread out of the
+# plane they lie in: the crown is as dense to the eye as the needles grown, and a radial shoot is seen edge on too.
 SPRAY_SQUARE = 2.0
+SPRAY_LAYERS = 4
 SPRAY_FOLD = [[0, 3, 4], [0, 4, 1], [1, 4, 5], [1, 5, 2]]
 
 
-def spray_meshes(organs, plan, Mesh):
+def spray_meshes(organs, plan, Mesh, cover):
+    """`cover`: the share of a sheet its picture covers (the mean of its opacity)."""
     import numpy as np
     n = len(organs.position)
     if n == 0:
@@ -347,10 +351,10 @@ def spray_meshes(organs, plan, Mesh):
     mid = sums(card, C, P) / held[:, None]
     a = axis[shoot]
 
-    # The sheet lies in the plane its needles spread in from the twig, its upper face where their blades face.
+    # The piece's plane is the one its needles spread in from the twig, its upper face where their blades face.
     forward = np.einsum('ij,ij->i', F, a[card])
     across = F - forward[:, None] * a[card]
-    _, vectors = np.linalg.eigh(scatter(card, C, across))
+    spread, vectors = np.linalg.eigh(scatter(card, C, across))
     w = vectors[:, :, 2] - np.einsum('ij,ij->i', vectors[:, :, 2], a)[:, None] * a
     lost = np.linalg.norm(w, axis=1) < 1e-6
     w[lost] = np.cross(a[lost], np.where(np.abs(a[lost, 1:2]) < 0.9, [[0.0, 1.0, 0.0]], [[1.0, 0.0, 0.0]]))
@@ -360,20 +364,48 @@ def spray_meshes(organs, plan, Mesh):
     w[turn] *= -1
     normal[turn] *= -1
 
-    # As long as the piece of shoot and its needles' forward reach; as wide as they reach from the twig.
+    # As long as the piece of shoot and its needles' forward reach; as wide as they reach from the twig. The picture
+    # thins to its ends (its first and last sixth), so a piece with a neighbour reaches a fifth of itself into it, or
+    # the shoot would be drawn as beads with gaps between them where its needles run on unbroken.
     t = np.einsum('ij,ij->i', P - mid[card], a[card])
     low = np.full(C, np.inf)
     high = np.full(C, -np.inf)
     np.minimum.at(low, card, t)
     np.maximum.at(high, card, t)
     reach = np.bincount(card, length * np.clip(forward, 0.0, None), C) / held
-    half = 1.35 * np.bincount(card, length * np.abs(np.einsum('ij,ij->i', across, w[card])), C) / held + 0.002
-    x0, x1 = low - 0.003, high + reach + 0.003
+    sideways = np.abs(np.einsum('ij,ij->i', across, w[card]))
+    half_c = 1.35 * np.bincount(card, length * sideways, C) / held + 0.002
+    piece = np.arange(C) - np.r_[0, np.cumsum(pieces)[:-1]][shoot]
+    span = ((last - first) / pieces)[shoot]
+    x0_c = low - 0.003 - np.where(piece > 0, 0.2 * span, 0.0)
+    x1_c = high + reach + 0.003 + np.where(piece < pieces[shoot] - 1, 0.2 * span, 0.0)
+
+    # Each sheet's two halves rise from the twig as far as the needles stand out of the piece's plane, measured: a
+    # fir's combed ranks lie nearly flat, a tamarack's tufts radiate.
+    rise_c = np.clip(np.bincount(card, length * np.abs(np.einsum('ij,ij->i', F, normal[card])), C)
+                     / np.maximum(np.bincount(card, length * sideways, C), 1e-9), 0.16, 1.0)
+
+    # As many sheets as the needles' area needs, fanned about the twig over the angle they spread out of the plane
+    # (a half turn where they radiate).
+    width = np.array([getattr(leaf, 'width', 0.0) or 0.0 for leaf in plan.leaves])[organs.archetype] * organs.scale.astype(np.float64)
+    width = np.where(width > 0, width, 0.07 * length)
+    needles_area = np.bincount(card, length * width, C)
+    sheet_area = (x1_c - x0_c) * 2.0 * half_c * cover
+    layers = np.clip(np.round(needles_area / np.maximum(sheet_area, 1e-12)), 1, SPRAY_LAYERS).astype(np.int64)
+    fan = np.pi * np.sqrt(np.clip(spread[:, 1] / np.maximum(spread[:, 2], 1e-18), 0.0, 1.0))
+    sheet = np.repeat(np.arange(C), layers)
+    K = len(sheet)
+    layer = np.arange(K) - np.r_[0, np.cumsum(layers)[:-1]][sheet]
+    angle = ((layer + 0.5) / layers[sheet] - 0.5) * fan[sheet]
+    sw = np.cos(angle)[:, None] * w[sheet] + np.sin(angle)[:, None] * normal[sheet]
+    sn = np.cos(angle)[:, None] * normal[sheet] - np.sin(angle)[:, None] * w[sheet]
+    x0, x1, half, rise = x0_c[sheet], x1_c[sheet], half_c[sheet], rise_c[sheet]
 
     lx = np.repeat(np.stack([x0, x1], 1), 3, axis=1)
-    ly = np.tile(np.stack([-half, np.zeros(C), half], 1), (1, 2))
-    lz = np.abs(ly) * 0.16
-    position = mid[:, None, :] + lx[..., None] * a[:, None, :] + ly[..., None] * w[:, None, :] + lz[..., None] * normal[:, None, :]
+    ly = np.tile(np.stack([-half, np.zeros(K), half], 1), (1, 2))
+    lz = np.abs(ly) * rise[:, None]
+    position = (mid[sheet][:, None, :] + lx[..., None] * a[sheet][:, None, :] + ly[..., None] * sw[:, None, :]
+                + lz[..., None] * sn[:, None, :])
     fold = np.array(SPRAY_FOLD)
     face = np.cross(position[:, fold[:, 1]] - position[:, fold[:, 0]], position[:, fold[:, 2]] - position[:, fold[:, 0]])
     vertex_normal = np.zeros_like(position)
@@ -385,6 +417,7 @@ def spray_meshes(organs, plan, Mesh):
 
     kind = np.zeros(C, np.int64)
     kind[card] = organs.archetype
+    kind = kind[sheet]
     meshes = {}
     for i in range(len(plan.leaves)):
         sel = np.flatnonzero(kind == i)
@@ -396,7 +429,8 @@ def spray_meshes(organs, plan, Mesh):
             uv[sel].reshape(-1, 2).astype(np.float32), (fold[None] + 6 * np.arange(k)[:, None, None]).reshape(-1, 3).astype(np.int32),
             np.zeros(4 * k, np.uint8), np.ones(4 * k, np.uint8),
         )
-    print(f'  {plan.name if hasattr(plan, "name") else "conifer"}: {n:,} needles on {G:,} shoots drawn as {C:,} sprays', flush=True)
+    print(f'  {plan.name if hasattr(plan, "name") else "conifer"}: {n:,} needles on {G:,} shoots in {C:,} pieces drawn as '
+          f'{K:,} sheets ({np.bincount(layers, minlength=SPRAY_LAYERS + 1)[1:].tolist()} pieces of 1..{SPRAY_LAYERS})', flush=True)
     return meshes
 
 
@@ -591,9 +625,14 @@ def main():
     species_of_plan = {id(plan): species for _, species, _, _, plan, _ in grown}
     from gardenplans.mesh import Mesh
 
+    covers = {}
+
     def native_hero_blades(organs, plan, cluster, **_):
-        if species_of_plan.get(id(plan)) in SPRAYS:
-            return spray_meshes(organs, plan, Mesh)
+        species = species_of_plan.get(id(plan))
+        if species in SPRAYS:
+            if species not in covers:
+                covers[species] = float((np.asarray(pack_cooked_maps(species)[1]['albedo'])[..., 3] / 255.0).mean())
+            return spray_meshes(organs, plan, Mesh, covers[species])
         meshes, _audit = native_blade_meshes(
             organs, plan, 1.0, max_triangles=20_000_000, individual_cutout=True, lod_tier='hero'
         )

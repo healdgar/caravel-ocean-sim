@@ -41,20 +41,20 @@
       "files": {
         "field.rgba16f.bin": {
           "bytes": 170496,
-          "sha256": "7378ef4759c1c7bb1ee8446a2dd1b7b5d03bc040d00f7f3f67ef514affed8576",
+          "sha256": "6b6c8358e71b03dd0f0bee2d6cfc422be92a673adf82a2b03f858e7d75576940",
           "gzip": {
             "file": "prototype-0-fir-veteran/field.rgba16f.bin.gz",
-            "bytes": 32450,
-            "sha256": "9b1568a1fab592e20ab85e88938ad36a5cd83149402611679c964d9eba527ad9"
+            "bytes": 35308,
+            "sha256": "28e170eb95fdfd637add982ce511e23577f997db414f76eda81c44d4eaa5b1a6"
           }
         },
         "exposure.r8.bin": {
           "bytes": 21312,
-          "sha256": "0b13dced91751e3e8ce7557d82285c9b3737f846aaabef054e5ca2c6cd51e42c",
+          "sha256": "9dedbdbe600848232dbaf3dd6ba932d320f762c3e461552fdf1543c00e504631",
           "gzip": {
             "file": "prototype-0-fir-veteran/exposure.r8.bin.gz",
-            "bytes": 4738,
-            "sha256": "eaeead2a722d474fa61e39f91fe64cbef144272ad2f35ef3151d66ef85f5611e"
+            "bytes": 4558,
+            "sha256": "4cf78b837332435bf19051fa4491b2c3a019fb963c94ee4cbab2b9a6c601095d"
           }
         }
       }
@@ -194,20 +194,20 @@
       "files": {
         "field.rgba16f.bin": {
           "bytes": 160816,
-          "sha256": "948edb3a90c5c928a7d1f65987217b7186b045aa6daac7a155f43325f6365ec6",
+          "sha256": "a3ea655291925c0a818b6b8c211dc5e35558f3e3c2f2e464e5237986496ceac6",
           "gzip": {
             "file": "prototype-3-larch-veteran/field.rgba16f.bin.gz",
-            "bytes": 30886,
-            "sha256": "eaf250644b3685c787a18b7e681df0a65fbd05adc85182d742a40f0fc5d1a8e8"
+            "bytes": 34048,
+            "sha256": "31f945eb002a4d4430276e6850b063e92d540a8f760248fed9b0552192b4d8cc"
           }
         },
         "exposure.r8.bin": {
           "bytes": 20102,
-          "sha256": "ee6b644b79f71fd2e402c45d75e4dcdd4c6811eb783aba20f2bc20d659baba76",
+          "sha256": "e69e842b14bd2ae2dacc046f9fdc66944cf856cd35a55c5332b4884663d72190",
           "gzip": {
             "file": "prototype-3-larch-veteran/exposure.r8.bin.gz",
-            "bytes": 4205,
-            "sha256": "b1f0cbc02c57efe44e3a8a5306be62e0a26fb0175bc4bab809402ba18f9cf645"
+            "bytes": 4332,
+            "sha256": "befe98bc9d879f8b67ba420cbd422925df808f3a08e2d30fda330470eb4dcd5a"
           }
         }
       }
@@ -347,20 +347,20 @@
       "files": {
         "field.rgba16f.bin": {
           "bytes": 148120,
-          "sha256": "56bf873009b0aa8bfd1ff96cfdf3ee1edd08664ba3b5e67948adfea03d8cfb60",
+          "sha256": "7dd16c500e8342f9506763652d48eaa09cff0ab6fd7e4a1c22507eb907cb8c48",
           "gzip": {
             "file": "prototype-6-fir-canopy/field.rgba16f.bin.gz",
-            "bytes": 29334,
-            "sha256": "f0ee31d48d0269245e392535b78c74c433722fb23828aeaa2a5f38c536989418"
+            "bytes": 32024,
+            "sha256": "3fa0ce316e1201f6eb03298be2d1cb4374e880b7eeb5080273362acad8889d15"
           }
         },
         "exposure.r8.bin": {
           "bytes": 18515,
-          "sha256": "67b1829ddf7f86fbbc12116753bfd6771ae77e6bc161fc562ad958c3a7630a78",
+          "sha256": "67953638caacfd379799ef2e01692da59f596c94d2737edf673885050b7c786f",
           "gzip": {
             "file": "prototype-6-fir-canopy/exposure.r8.bin.gz",
-            "bytes": 4252,
-            "sha256": "283ec81886a7f63115c984e0402e1fa4534fc3433bdebd8c419ce38d8cb054ad"
+            "bytes": 4275,
+            "sha256": "63d321993fd38fdec8aa338bece0358cc36265d529ea40da95779f3f6bce11b2"
           }
         }
       }
@@ -500,20 +500,20 @@
       "files": {
         "field.rgba16f.bin": {
           "bytes": 141680,
-          "sha256": "e7bfa2227a3dd7c2ffd2a1a7614ebe827c9e488a1cf425c223b9f59e75ae8b35",
+          "sha256": "c28b4b1563d88862edd59ea200bc81a483c202013a0a7495999b78c9d044d092",
           "gzip": {
             "file": "prototype-9-larch-canopy/field.rgba16f.bin.gz",
-            "bytes": 25846,
-            "sha256": "441de4697d4f73d22cf5f78094383a78d925e31c34b9820f5f4c2e6e0b940fb6"
+            "bytes": 28539,
+            "sha256": "dea9872ad00371499403167ab2422fed157d0f60c6f3045fca518dde8ed1e0ad"
           }
         },
         "exposure.r8.bin": {
           "bytes": 17710,
-          "sha256": "4678deeb58d5879b5395a70757fd303ca2183f0edcc78cd17e54817d52738fb3",
+          "sha256": "531a3aedb87bbb274def2627f63643edb2cdc6bc2dad940b02de94ffaafa09b9",
           "gzip": {
             "file": "prototype-9-larch-canopy/exposure.r8.bin.gz",
-            "bytes": 3374,
-            "sha256": "55d451ac1e84f4d82e08f67dd80aee9b58d277c569653f7462c9768a97596788"
+            "bytes": 3820,
+            "sha256": "74ad9f9ec7f7201be7dc7541bf7589486952b00dd456ae14f4645cb62076bd79"
           }
         }
       }
