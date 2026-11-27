@@ -22,6 +22,9 @@ import {
   FOREST_CONTINUUM_FORMAT, FOREST_CONTINUUM_VERSION, FOREST_CONTINUUM_MATERIAL, FOREST_CONTINUUM_BARK, FOREST_CONTINUUM_LEAF,
   FOREST_CONTINUUM_ASSETS, SUBTROPICAL_FOREST_CONTINUUM_ASSETS, PORTUGAL_FOREST_CONTINUUM_ASSETS, NORTHERN_FOREST_CONTINUUM_ASSETS, packForestContinuumBody, validateForestContinuumManifest,
 } from '../js/forest-continuum.js';
+import { roomyHeap } from './roomy-heap.mjs';
+
+roomyHeap();
 
 const args = process.argv.slice(2);
 const packName = args.find((a) => !a.startsWith('--')) ?? 'portugal';

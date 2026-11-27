@@ -21,6 +21,9 @@ import {
 import { validateForestContinuumManifest } from '../js/forest-continuum.js';
 import { validateMeadowGrass } from '../js/meadow-continuum.js';
 import { CREW_CONTINUUM_BODIES, validateCrewContinuumManifest } from '../js/crew-continuum.js';
+import { roomyHeap } from './roomy-heap.mjs';
+
+roomyHeap();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const onlyArg = process.argv.slice(2).find((a) => a.startsWith('--only='))?.slice(7) ?? null;

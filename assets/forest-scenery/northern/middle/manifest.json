@@ -7,29 +7,29 @@
   "source": {
     "forestManifest": {
       "file": "../manifest.json",
-      "rootsSha256": "23a20ced1e16ed6caeba004f068e37b28abbe538ba1ad6f28082673e38878b57"
+      "rootsSha256": "37efedb0963d4da17d5f1105544b0cfaf3071f1fcc4ebe2e5c93b792114a5266"
     }
   },
   "files": {
     "middle-vertices.bin": {
-      "bytes": 877084,
-      "sha256": "db4d1c5b72af3729f936c7a37f322147a3f547ae3b97a134e76456ef54d1ff79",
+      "bytes": 966368,
+      "sha256": "b12300ee208285ca7bc5959daa7ee6ac50c342efaa7bdc78b69a57efcbb525e9",
       "gzip": {
         "file": "middle-vertices.bin.gz",
-        "bytes": 521641,
-        "sha256": "b3bbd5a8b3c2da5bcde8f7a40ef1866166968a60dc58d98632ae89f654ad8c31"
+        "bytes": 571857,
+        "sha256": "a29c21ec11b610fe59379f5cc8f09c0df4bf53899bdad8dc51714e62ee3dee4c"
       },
-      "vertexCount": 16867
+      "vertexCount": 18584
     },
     "middle-indices.bin": {
-      "bytes": 210564,
-      "sha256": "5db2bab3e88537183f7d6d0441b50e8fde2a5d8592cf6d77f25f6c17c321dcb8",
+      "bytes": 234912,
+      "sha256": "68f7763a3aa2f0cadc9737db7f8c2038ad77b833723d4737f3139d5eef93ae69",
       "gzip": {
         "file": "middle-indices.bin.gz",
-        "bytes": 73020,
-        "sha256": "a4901c3b8ef516103a16ef4c3800cd98dde9aeb4259c7b75afe3c89d12cbe284"
+        "bytes": 83743,
+        "sha256": "4cba135f8371919184c044c442acd99e45a4ba62c6223fd4fdb1236040d94453"
       },
-      "indexCount": 52641
+      "indexCount": 58728
     }
   },
   "prototypes": [
@@ -38,22 +38,22 @@
       "species": "fir",
       "cohort": "veteran",
       "age": 60.0,
-      "heightMetres": 14.718,
-      "crownRadiusMetres": 3.631,
-      "crownBaseMetres": 2.208,
+      "heightMetres": 14.72,
+      "crownRadiusMetres": 3.819,
+      "crownBaseMetres": 2.246,
       "wood": {
         "firstIndex": 0,
-        "indexCount": 6507,
-        "triangles": 2169,
-        "sourceTriangles": 250290
+        "indexCount": 10632,
+        "triangles": 3544,
+        "sourceTriangles": 756154
       },
       "shell": {
-        "firstIndex": 6507,
+        "firstIndex": 10632,
         "indexCount": 1476,
         "triangles": 492,
-        "sourceProxyAreaSquareMetres": 699.34
+        "sourceProxyAreaSquareMetres": 1069.39
       },
-      "geometryErrorMetres": 9.8463
+      "geometryErrorMetres": 9.7891
     },
     {
       "id": 1,
@@ -64,13 +64,13 @@
       "crownRadiusMetres": 9.054,
       "crownBaseMetres": 3.512,
       "wood": {
-        "firstIndex": 7983,
+        "firstIndex": 12108,
         "indexCount": 4641,
         "triangles": 1547,
         "sourceTriangles": 468792
       },
       "shell": {
-        "firstIndex": 12624,
+        "firstIndex": 16749,
         "indexCount": 4044,
         "triangles": 1348,
         "sourceProxyAreaSquareMetres": 3062.53
@@ -86,13 +86,13 @@
       "crownRadiusMetres": 9.763,
       "crownBaseMetres": 5.54,
       "wood": {
-        "firstIndex": 16668,
+        "firstIndex": 20793,
         "indexCount": 5955,
         "triangles": 1985,
         "sourceTriangles": 381112
       },
       "shell": {
-        "firstIndex": 22623,
+        "firstIndex": 26748,
         "indexCount": 4434,
         "triangles": 1478,
         "sourceProxyAreaSquareMetres": 3237.14
@@ -108,16 +108,16 @@
       "crownRadiusMetres": 3.165,
       "crownBaseMetres": 2.431,
       "wood": {
-        "firstIndex": 27057,
+        "firstIndex": 31182,
         "indexCount": 3573,
         "triangles": 1191,
         "sourceTriangles": 212361
       },
       "shell": {
-        "firstIndex": 30630,
+        "firstIndex": 34755,
         "indexCount": 1404,
         "triangles": 468,
-        "sourceProxyAreaSquareMetres": 623.83
+        "sourceProxyAreaSquareMetres": 650.37
       },
       "geometryErrorMetres": 9.5744
     },
@@ -130,13 +130,13 @@
       "crownRadiusMetres": 4.719,
       "crownBaseMetres": 2.994,
       "wood": {
-        "firstIndex": 32034,
+        "firstIndex": 36159,
         "indexCount": 1692,
         "triangles": 564,
         "sourceTriangles": 80140
       },
       "shell": {
-        "firstIndex": 33726,
+        "firstIndex": 37851,
         "indexCount": 708,
         "triangles": 236,
         "sourceProxyAreaSquareMetres": 341.91
@@ -152,13 +152,13 @@
       "crownRadiusMetres": 0.74,
       "crownBaseMetres": 0.328,
       "wood": {
-        "firstIndex": 34434,
+        "firstIndex": 38559,
         "indexCount": 117,
         "triangles": 39,
         "sourceTriangles": 17402
       },
       "shell": {
-        "firstIndex": 34551,
+        "firstIndex": 38676,
         "indexCount": 288,
         "triangles": 96,
         "sourceProxyAreaSquareMetres": 4.23
@@ -170,66 +170,66 @@
       "species": "fir",
       "cohort": "canopy",
       "age": 60.0,
-      "heightMetres": 13.905,
-      "crownRadiusMetres": 3.448,
-      "crownBaseMetres": 2.669,
+      "heightMetres": 13.944,
+      "crownRadiusMetres": 3.465,
+      "crownBaseMetres": 1.375,
       "wood": {
-        "firstIndex": 34839,
-        "indexCount": 4254,
-        "triangles": 1418,
-        "sourceTriangles": 175189
+        "firstIndex": 38964,
+        "indexCount": 5283,
+        "triangles": 1761,
+        "sourceTriangles": 497249
       },
       "shell": {
-        "firstIndex": 39093,
-        "indexCount": 1086,
-        "triangles": 362,
-        "sourceProxyAreaSquareMetres": 531.57
+        "firstIndex": 44247,
+        "indexCount": 1260,
+        "triangles": 420,
+        "sourceProxyAreaSquareMetres": 820.05
       },
-      "geometryErrorMetres": 8.7305
+      "geometryErrorMetres": 8.7222
     },
     {
       "id": 7,
       "species": "maple",
       "cohort": "canopy",
       "age": 60.0,
-      "heightMetres": 15.101,
-      "crownRadiusMetres": 5.659,
-      "crownBaseMetres": 2.233,
+      "heightMetres": 14.014,
+      "crownRadiusMetres": 4.839,
+      "crownBaseMetres": 2.579,
       "wood": {
-        "firstIndex": 40179,
-        "indexCount": 2013,
-        "triangles": 671,
-        "sourceTriangles": 197854
+        "firstIndex": 45507,
+        "indexCount": 2253,
+        "triangles": 751,
+        "sourceTriangles": 195873
       },
       "shell": {
-        "firstIndex": 42192,
-        "indexCount": 1080,
-        "triangles": 360,
-        "sourceProxyAreaSquareMetres": 619.09
+        "firstIndex": 47760,
+        "indexCount": 1140,
+        "triangles": 380,
+        "sourceProxyAreaSquareMetres": 601.64
       },
-      "geometryErrorMetres": 10.6885
+      "geometryErrorMetres": 9.4342
     },
     {
       "id": 8,
       "species": "oak",
       "cohort": "canopy",
       "age": 60.0,
-      "heightMetres": 17.441,
-      "crownRadiusMetres": 6.104,
-      "crownBaseMetres": 5.326,
+      "heightMetres": 16.945,
+      "crownRadiusMetres": 6.823,
+      "crownBaseMetres": 5.081,
       "wood": {
-        "firstIndex": 43272,
-        "indexCount": 3120,
-        "triangles": 1040,
-        "sourceTriangles": 254969
+        "firstIndex": 48900,
+        "indexCount": 2925,
+        "triangles": 975,
+        "sourceTriangles": 232983
       },
       "shell": {
-        "firstIndex": 46392,
-        "indexCount": 1854,
-        "triangles": 618,
-        "sourceProxyAreaSquareMetres": 1163.41
+        "firstIndex": 51825,
+        "indexCount": 2094,
+        "triangles": 698,
+        "sourceProxyAreaSquareMetres": 1083.38
       },
-      "geometryErrorMetres": 11.1665
+      "geometryErrorMetres": 10.3862
     },
     {
       "id": 9,
@@ -237,65 +237,65 @@
       "cohort": "canopy",
       "age": 40.0,
       "heightMetres": 13.612,
-      "crownRadiusMetres": 3.023,
-      "crownBaseMetres": 2.736,
+      "crownRadiusMetres": 3.071,
+      "crownBaseMetres": 2.195,
       "wood": {
-        "firstIndex": 48246,
-        "indexCount": 2652,
-        "triangles": 884,
-        "sourceTriangles": 137612
+        "firstIndex": 53919,
+        "indexCount": 2895,
+        "triangles": 965,
+        "sourceTriangles": 150921
       },
       "shell": {
-        "firstIndex": 50898,
-        "indexCount": 1026,
-        "triangles": 342,
-        "sourceProxyAreaSquareMetres": 432.29
+        "firstIndex": 56814,
+        "indexCount": 1092,
+        "triangles": 364,
+        "sourceProxyAreaSquareMetres": 491.92
       },
-      "geometryErrorMetres": 8.63
+      "geometryErrorMetres": 8.7319
     },
     {
       "id": 10,
       "species": "birch",
       "cohort": "canopy",
       "age": 28.0,
-      "heightMetres": 8.925,
-      "crownRadiusMetres": 3.791,
-      "crownBaseMetres": 2.146,
+      "heightMetres": 8.686,
+      "crownRadiusMetres": 2.927,
+      "crownBaseMetres": 2.184,
       "wood": {
-        "firstIndex": 51924,
-        "indexCount": 270,
-        "triangles": 90,
-        "sourceTriangles": 12926
+        "firstIndex": 57906,
+        "indexCount": 366,
+        "triangles": 122,
+        "sourceTriangles": 15368
       },
       "shell": {
-        "firstIndex": 52194,
-        "indexCount": 132,
-        "triangles": 44,
-        "sourceProxyAreaSquareMetres": 50.1
+        "firstIndex": 58272,
+        "indexCount": 144,
+        "triangles": 48,
+        "sourceProxyAreaSquareMetres": 59.53
       },
-      "geometryErrorMetres": 6.3698
+      "geometryErrorMetres": 6.0074
     },
     {
       "id": 11,
       "species": "blueberry",
       "cohort": "canopy",
       "age": 22.0,
-      "heightMetres": 1.112,
-      "crownRadiusMetres": 0.594,
-      "crownBaseMetres": 0.213,
+      "heightMetres": 1.122,
+      "crownRadiusMetres": 0.593,
+      "crownBaseMetres": 0.235,
       "wood": {
-        "firstIndex": 52326,
-        "indexCount": 87,
-        "triangles": 29,
-        "sourceTriangles": 5002
+        "firstIndex": 58416,
+        "indexCount": 84,
+        "triangles": 28,
+        "sourceTriangles": 5228
       },
       "shell": {
-        "firstIndex": 52413,
+        "firstIndex": 58500,
         "indexCount": 228,
         "triangles": 76,
-        "sourceProxyAreaSquareMetres": 1.06
+        "sourceProxyAreaSquareMetres": 1.13
       },
-      "geometryErrorMetres": 1.1763
+      "geometryErrorMetres": 1.1467
     }
   ]
 }

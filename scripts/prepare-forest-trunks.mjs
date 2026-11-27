@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { roomyHeap } from './roomy-heap.mjs';
 
 const root = new URL('../', import.meta.url);
 // A species is measured once, from the first pack that grows it: a later pack's tree of that kind is drawn at its own size
@@ -261,6 +262,7 @@ export function writeForestTrunkShapes(shapes) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  roomyHeap();
   const shapes = [];
   for (const { prototype, vertices, indices } of forestTrunkPrototypes()) {
     const shape = measureTrunkShape(prototype, vertices, indices);

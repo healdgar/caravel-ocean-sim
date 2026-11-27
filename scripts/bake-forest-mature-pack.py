@@ -321,7 +321,11 @@ def spray_meshes(organs, plan, Mesh, cover):
 
     # Each shoot's axis: the line its needles stand along, pointing the way they lean (to its tip). A shoot whose
     # needles rise from one point (a spur's tuft, a whorl) has no such line, and takes their own mean direction.
-    _, g = np.unique(organs.node_index, return_inverse=True)
+    # A node bearing a frond (a rachis and its side shoots) is many shoots, so needles go by the shoot they sit on.
+    shoots = getattr(organs, 'shoot_index', None)
+    if shoots is None and float(getattr(plan, 'shoot_leaf_density', 0.0) or 0.0) > 0.0:
+        raise SystemExit('this forestmodeler lays fronds but does not say which shoot a needle sits on (Organs.shoot_index)')
+    _, g = np.unique(organs.node_index if shoots is None else shoots, return_inverse=True)
     G = int(g.max()) + 1
     count = np.bincount(g, minlength=G).astype(np.float64)
     centre = sums(g, G, P) / count[:, None]
@@ -513,6 +517,10 @@ def main():
     parser.add_argument('--revision', help='the forestmodeler commit, when the checkout is a copy without its history')
     args = parser.parse_args()
     source = pathlib.Path(args.forestmodeler).resolve()
+    revision = args.revision or subprocess.run(['git', '-C', str(source), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip() or None
+    unsaved = subprocess.run(['git', '-C', str(source), 'diff', 'HEAD'], capture_output=True).stdout
+    grower = (revision, hashlib.sha256(unsaved).hexdigest()) if revision else \
+        hashlib.sha256(b''.join(f.read_bytes() for f in sorted(source.rglob('*.py')))).hexdigest()
     work = pathlib.Path(args.work).resolve()
     pack = pathlib.Path(args.pack or f'assets/forest-scenery/{args.name}').resolve()
     SPECIES_SPECS, GAP, LATITUDE = PACKS[args.name]['species'], PACKS[args.name]['gap'], PACKS[args.name]['latitude']
@@ -548,8 +556,9 @@ def main():
 
     # Grow Track A (6 open-grown stand-alone trees in parallel at res=1.0, spc=2) AND Track B (1 competitive
     # intermixed 6-species grove sharing SiteShadowGrid + SiteSoilField at res=1.0, spc=2) concurrently!
-    # Named for what was grown, so a changed species, age, seed or gap grows afresh instead of reading a stale grove.
-    grown_key = hashlib.sha256(repr((SPECIES_SPECS, GAP, LATITUDE)).encode()).hexdigest()[:12]
+    # Named for what was grown and the forestmodeler that grew it (its commit and any change not yet committed), so a
+    # changed species, age, seed, gap or genome grows afresh instead of reading a stale grove.
+    grown_key = hashlib.sha256(repr((SPECIES_SPECS, GAP, LATITUDE, grower)).encode()).hexdigest()[:12]
     cache_pkl = work / f'grown_res1_open_and_grove_{grown_key}.pkl'
     open_by_species, grove_by_species = {}, {}
     if cache_pkl.exists():
@@ -782,7 +791,6 @@ def main():
         (pack / folder / 'manifest.json').write_bytes(raw)
         receipts[folder] = {'file': f'{folder}/manifest.json', 'bytes': len(raw), 'sha256': sha256(raw)}
 
-    revision = args.revision or subprocess.run(['git', '-C', str(source), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip() or None
     manifest = {
         **{key: baked[key] for key in ('format', 'version', 'materialContract', 'units', 'upAxis', 'vertexStride', 'rootStride', 'rootCount', 'appearanceErrorSupported', 'coverage')},
         'stature': 'full-grown',

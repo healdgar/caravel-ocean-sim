@@ -14,6 +14,9 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { FOREST_GROVE_TREE_FLOATS, FOREST_GROVE_VARIANTS } from '../js/forest-groves.js';
 import { openForestLeaves } from './forest-leaf-field.mjs';
+import { roomyHeap } from './roomy-heap.mjs';
+
+roomyHeap();
 
 const args = process.argv.slice(2);
 const packName = args.find((a) => !a.startsWith('--')) ?? 'portugal';
