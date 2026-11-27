@@ -30,6 +30,7 @@ import { CLOUD_SHADOW_BINDINGS } from './clouds.js';
 import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
 import { continuumGroundWGSL } from '../continuum-ground.js';
 import { MEADOW_COMMON_WGSL } from './meadow-continuum.js';
+import { MEADOW_GROUND_MIX, MEADOW_LITTER_MIX, MEADOW_LITTERS, MEADOW_GROUND_EDGE_STEP, MEADOW_SHAPE } from '../meadow-crops.js';
 
 // Levels of the blades' hierarchy, blades a cell, the side of a finest cell (metres), and how many cells across each
 // level's square about the eye.
@@ -65,9 +66,16 @@ export const MEADOW_BLADE_RECORD_BYTES = 32;
 export const MEADOW_BLADE_CELL_HEADER = 8;
 // The sow pass's buffer: each list's drawIndirect record (4 words), then each list's count of blades it was given.
 export const MEADOW_BLADE_DRAW_WORDS = 16;
-// A pack's sward (js/meadow-grass.js MEADOW_SWARDS): three mixes of at most MEADOW_SPECIES_MOST species in all.
-export const MEADOW_SPECIES_MOST = 18;
-export const MEADOW_SWARD_BYTES = 3 * 16 + 16 + 16 + MEADOW_SPECIES_MOST * 5 * 16;
+// A pack's sward (js/meadow-grass.js packMeadowSward): its mixes (the meadow's three roles, the crops of worked
+// ground and the litters under trees, js/meadow-crops.js) of at most MEADOW_SPECIES_MOST species in all.
+export const MEADOW_MIXES = MEADOW_LITTER_MIX + MEADOW_LITTERS;
+export const MEADOW_SPECIES_MOST = 80;
+export const MEADOW_MIX_BYTES = 64, MEADOW_SPECIES_BYTES = 96;
+export const MEADOW_SWARD_BYTES = MEADOW_MIXES * MEADOW_MIX_BYTES + 16 + MEADOW_SPECIES_MOST * MEADOW_SPECIES_BYTES;
+// Litter is sown no farther than this (m): farther, it is the ground's own colour, and under the crowns unseen.
+export const MEADOW_LITTER_REACH = 260;
+// The optical depth litter is kept to, of the sward's: lying flat, a few layers hide the ground.
+export const MEADOW_LITTER_DEPTH = 0.6;
 // The per-frame uniform, MeadowBladeFrame: 4 vec4.
 export const MEADOW_BLADE_FRAME_BYTES = 64;
 
@@ -83,21 +91,49 @@ const MEADOW_BLADE_BROADEST: f32 = ${MEADOW_BLADE_BROADEST.toFixed(3)};
 const MEADOW_BLADE_SPLAT_WIDE: f32 = ${MEADOW_BLADE_SPLAT_WIDE.toFixed(3)};
 const MEADOW_BLADE_SPLAT_BROADEST: f32 = ${MEADOW_BLADE_SPLAT_BROADEST.toFixed(3)};
 const MEADOW_BLADE_CELL_HEADER: u32 = ${MEADOW_BLADE_CELL_HEADER}u;
+const MEADOW_GROUND_MIX: u32 = ${MEADOW_GROUND_MIX}u;
+const MEADOW_LITTER_MIX: u32 = ${MEADOW_LITTER_MIX}u;
+const MEADOW_GROUND_EDGE_STEP: f32 = ${MEADOW_GROUND_EDGE_STEP.toFixed(4)};
+const MEADOW_LITTER_REACH: f32 = ${MEADOW_LITTER_REACH.toFixed(1)};
+const MEADOW_LITTER_DEPTH: f32 = ${MEADOW_LITTER_DEPTH.toFixed(3)};
+const MEADOW_NO_MIX: u32 = 0xffffu;
+// The shapes (js/meadow-crops.js MEADOW_SHAPE): from the oval on, a piece lies on the ground; a needle and a twig
+// are round, the rest flat.
+const MEADOW_SHAPE_LEAF: u32 = ${MEADOW_SHAPE.LEAF}u;
+const MEADOW_SHAPE_OVAL: u32 = ${MEADOW_SHAPE.OVAL}u;
+const MEADOW_SHAPE_LOBED: u32 = ${MEADOW_SHAPE.LOBED}u;
+const MEADOW_SHAPE_PALMATE: u32 = ${MEADOW_SHAPE.PALMATE}u;
+const MEADOW_SHAPE_LANCE: u32 = ${MEADOW_SHAPE.LANCE}u;
+const MEADOW_SHAPE_NEEDLE: u32 = ${MEADOW_SHAPE.NEEDLE}u;
+const MEADOW_SHAPE_TWIG: u32 = ${MEADOW_SHAPE.TWIG}u;
+const MEADOW_SHAPE_STRAP: u32 = ${MEADOW_SHAPE.STRAP}u;
 // A species: its colour at the foot (linear) and height (m); at the tip and width (m); its habit: where its share of
 // its mix ends (the shares summed), how far it droops at rest (0 upright, 1 laid over), how stiff it is, the share
-// bearing a head; then the shares dry and in flower; and its head's colour and length (a share of the blade).
+// bearing a head; then the shares dry and in flower; its head's colour and length (a share of the blade); and its
+// form: how much its height varies from plant to plant, its shape, how far it curls or cups, how far up its stalk a
+// broad leaf begins.
 struct MeadowSpecies {
   foot: vec4f,
   tip: vec4f,
   habit: vec4f,
   extra: vec4f,
-  head: vec4f
+  head: vec4f,
+  form: vec4f
 };
-// The pack's sward: each mix's first species and how many; how dense each mix grows (a share of the fullest); the
-// colour of its flowers; its species.
+// A mix: its first species, how many, the mix between its rows (MEADOW_NO_MIX for bare ground); its mean colour from
+// above (linear) and how dense it grows (a share of the fullest); its rows (how far apart, m, 0 for none; the share
+// of a row planted; a ploughed strip's width, m, 0 for none; the bare furrow between strips, m); its plants along a
+// row (how far apart, m, 0 for none; the share planted).
+struct MeadowMix {
+  span: vec4u,
+  look: vec4f,
+  rows: vec4f,
+  plants: vec4f
+};
+// The pack's sward: its mixes (the meadow's three roles, the crops by MEADOW_GROUND_MIX + their code, the litters by
+// MEADOW_LITTER_MIX + their kind), the colour of its flowers, its species.
 struct MeadowSward {
-  mixes: array<vec4u, 3>,
-  density: vec4f,
+  mixes: array<MeadowMix, ${MEADOW_MIXES}>,
   flower: vec4f,
   species: array<MeadowSpecies, ${MEADOW_SPECIES_MOST}>
 };
@@ -134,6 +170,61 @@ fn meadowBladeDrift(p: vec2f) -> f32 {
   let sum = meadowBladeNoise(p * (1.0 / 11.0)) * 0.65 + meadowBladeNoise(p * (2.7 / 11.0) + vec2f(17.3, 5.1)) * 0.35;
   return smoothstep(0.58, 0.86, sum) * 2.4;
 }
+// The ground map at a point (local metres, js/meadow-crops.js): its furlong's crop and the kind of its litter, at the
+// nearest texel; how far inside its furlong it lies (m), read smoothly, so that a crop ends where its furlong does;
+// the way its strips run; how thick its litter lies, read smoothly.
+struct MeadowGround {
+  code: u32,
+  slot: u32,
+  edge: f32,
+  heading: f32,
+  litter: f32
+};
+fn meadowGroundAt(at: vec2f) -> MeadowGround {
+  let size = textureDimensions(meadowGround);
+  let uv = meadowDomainUV(at);
+  let nearest = textureLoad(meadowGround, min(vec2u(uv * vec2f(size)), size - 1u), 0);
+  let soft = textureSampleLevel(meadowGround, landSampler, uv, 0.0);
+  let r = u32(round(nearest.r * 255.0));
+  return MeadowGround(r & 15u, r >> 4u, soft.g * 255.0 * MEADOW_GROUND_EDGE_STEP, nearest.b * 3.14159265, soft.a);
+}
+// What grows at a point: the mix a blade there is of (picked by its two hashes) and how much of the fullest sward
+// grows there in all. Litter lies over whatever grows. A furlong's crop grows where the cover lets the ground be
+// sown (not on the roads and yards carved from it), the margin's grasses on its headland, a ploughed strip's furrow
+// bare, between its rows and plants its 'between'; elsewhere the meadow's mixes by the cover's role.
+struct MeadowChoice {
+  mix: u32,
+  amount: f32
+};
+fn meadowBladeChoose(at: vec2f, cover: vec4f, ground: MeadowGround, pickLitter: f32, pickMix: f32) -> MeadowChoice {
+  let worked = ground.code != 0u;
+  let open = select(smoothstep(0.06, 0.55, cover.r), smoothstep(0.02, 0.2, cover.r), worked);
+  let amount = min(1.0, open * (1.0 - 0.7 * ground.litter) + ground.litter);
+  if (amount <= 0.0) { return MeadowChoice(0u, 0.0); }
+  if (pickLitter * amount < ground.litter) { return MeadowChoice(MEADOW_LITTER_MIX + ground.slot, amount); }
+  if (!worked) {
+    let w = meadowMixWeights(cover.g, at);
+    return MeadowChoice(select(select(2u, 1u, (pickMix < w.x + w.y)), 0u, (pickMix < w.x)), amount);
+  }
+  let texel = cfg.domain.z / f32(textureDimensions(meadowGround).x);
+  if (ground.edge < 0.71 * texel + 0.6) { return MeadowChoice(2u, amount); }
+  var mixAt = MEADOW_GROUND_MIX + ground.code;
+  let m = sward.mixes[mixAt];
+  let along = vec2f(cos(ground.heading), sin(ground.heading));
+  let across = dot(at, vec2f(-along.y, along.x));
+  if (m.rows.z > 0.0 && fract(across / m.rows.z) * m.rows.z < m.rows.w) { return MeadowChoice(0u, 0.0); }
+  if (m.rows.x > 0.0) {
+    let inRow = abs(fract(across / m.rows.x) - 0.5) * 2.0 < m.rows.y;
+    let onPlant = (m.plants.x <= 0.0) || (abs(fract(dot(at, along) / m.plants.x) - 0.5) * 2.0 < m.plants.y);
+    if (!(inRow && onPlant)) {
+      if (m.span.z == MEADOW_NO_MIX) { return MeadowChoice(0u, 0.0); }
+      mixAt = MEADOW_GROUND_MIX + m.span.z;
+    }
+  }
+  return MeadowChoice(mixAt, amount);
+}
+// A species' shape: from the oval on it lies on the ground; a needle and a twig are round.
+fn meadowShapeOf(sp: MeadowSpecies) -> u32 { return u32(sp.form.y + 0.5); }
 `;
 
 // ------------------------------------------------------------------------------------------------- sow
@@ -156,6 +247,7 @@ export function meadowBladesComputeWGSL() {
 @group(0) @binding(15) var<storage, read> bladeCellsRead: array<u32>;
 @group(0) @binding(16) var<storage, read_write> bladesMiddle: array<vec4u>;
 @group(0) @binding(17) var<storage, read_write> bladesFar: array<vec4u>;
+@group(0) @binding(18) var meadowGround: texture_2d<f32>;
 ` + MEADOW_BLADE_TYPES_WGSL + /* wgsl */ `
 fn meadowBladeSegments(list: u32) -> u32 { return select(select(${MEADOW_BLADE_SEGMENTS[2]}u, ${MEADOW_BLADE_SEGMENTS[1]}u, (list == 1u)), ${MEADOW_BLADE_SEGMENTS[0]}u, (list == 0u)); }
 fn meadowBladeEye() -> vec3f { return F.camPos.xyz - meadowBladeShift(); }
@@ -240,38 +332,49 @@ fn meadowBladeSowOne(cell: vec2i, level: u32, lane: u32) {
   let uv = (at - cfg.domain.xy) / cfg.domain.z + 0.5;
   if (any((uv < vec2f(0.0))) || any((uv > vec2f(1.0)))) { return; }
   let cover = meadowCoverAt(at + meadowBladeWarp(at));
-  let amount = smoothstep(0.06, 0.55, cover.r);
-  if (rank >= cap * amount) { return; }
-  // Its mix, by what grows here, and its species, by the mix's shares.
-  let weights = meadowMixWeights(cover.g, at);
+  // Its mix, by what grows here (the meadow, a furlong's crop or the litter under a tree), and its species, by the
+  // mix's shares.
+  let lies = meadowGroundAt(at);
   h = continuumHash(h + 0x2f1c3a7bu); let pickMix = meadowBladeUnit(h);
-  let mixAt = select(select(2u, 1u, (pickMix < weights.x + weights.y)), 0u, (pickMix < weights.x));
-  let grows = amount * sward.density[mixAt];
+  h = continuumHash(h + 0x51ed270bu); let pickLitter = meadowBladeUnit(h);
+  let choice = meadowBladeChoose(at, cover, lies, pickLitter, pickMix);
+  if (rank >= cap * choice.amount) { return; }
+  let mixAt = choice.mix;
+  let mixOf = sward.mixes[mixAt];
+  let litter = mixAt >= MEADOW_LITTER_MIX;
+  var grows = choice.amount * mixOf.look.w;
+  if (litter) { grows *= 1.0 - smoothstep(0.55 * MEADOW_LITTER_REACH, MEADOW_LITTER_REACH, distance(at, eye.xz)); }
   if (rank >= cap * grows) { return; }
   h = continuumHash(h + 0x7a2e91c5u); let pickSpecies = meadowBladeUnit(h);
-  let span = sward.mixes[mixAt];
+  let span = mixOf.span;
   var species = span.x;
   for (var k = 0u; k + 1u < span.y; k++) {
     if (pickSpecies < sward.species[span.x + k].habit.x) { break; }
     species = span.x + k + 1u;
   }
   let sp = sward.species[species];
-  let ground = meadowGroundY(at, cfg.domain, elevation) + continuumGroundLift(at + meadowBladeShift().xz);
+  let shape = meadowShapeOf(sp);
+  let lying = shape >= MEADOW_SHAPE_OVAL;
+  var ground = meadowGroundY(at, cfg.domain, elevation) + continuumGroundLift(at + meadowBladeShift().xz);
   if (ground < cfg.domain.w) { return; }
   h = continuumHash(h + 0x4c8a5f13u); let tall = meadowBladeUnit(h);
   h = continuumHash(h + 0x93d1e8b7u); let broad = meadowBladeUnit(h);
   h = continuumHash(h + 0x5e0f6a21u); let turn = meadowBladeUnit(h) * 6.2831853;
   h = continuumHash(h + 0xa7c34d09u); let droopShare = meadowBladeUnit(h);
-  var height = sp.foot.w * (0.62 + 0.55 * cover.b) * meadowWorldBillow(at).x * (0.72 + 0.56 * tall);
+  var height = sp.foot.w * (1.0 - sp.form.x + 2.0 * sp.form.x * tall);
+  if (!lying) { height *= meadowWorldBillow(at).x; }
+  if (mixAt < MEADOW_GROUND_MIX + 1u) { height *= 0.62 + 0.55 * cover.b; }
   let width = sp.tip.w * (0.78 + 0.44 * broad);
-  // At rest it droops toward its own side.
+  // At rest it droops toward its own side; a leaf, a needle or a twig lies on the litter under it, turned its own
+  // way.
   let droop = vec2f(cos(turn), sin(turn)) * (sp.habit.y * 0.42 * (0.6 + 0.8 * droopShare));
+  if (lying) { ground += 0.004 + 0.022 * droopShare; }
 
   // Kept or not, at rest: as long as the blades about it, drawn as they are drawn, lay no more than the depth kept.
   let shift = meadowBladeShift();
   let restLean = droop * height;
   let restRise = sqrt(max(height * height - dot(restLean, restLean), 0.04 * height * height));
-  let restStem = vec3f(restLean.x, restRise, restLean.y);
+  let restStem = select(vec3f(restLean.x, restRise, restLean.y), vec3f(cos(turn), 0.0, sin(turn)) * height, lying);
   let root = vec3f(at.x, ground, at.y) + shift;
   let toMid = root + restStem * 0.5 - F.camPos.xyz;
   let dist = max(length(toMid), CONTINUUM_NEAREST);
@@ -279,7 +382,11 @@ fn meadowBladeSowOne(cell: vec2i, level: u32, lane: u32) {
   let view = toMid / dist;
   let perMetre = meadowBladeFocal() / dist;
   let lenPx = length(restStem - view * dot(restStem, view)) * perMetre;
-  let widthPx = width * perMetre;
+  // A flat piece on the ground shows the eye its area foreshortened by the slant it is seen at: drawn as long as it
+  // shows, as broad as makes that area. A round one, and a standing blade, is as broad as it is from every side.
+  let flatShape = lying && shape != MEADOW_SHAPE_NEEDLE && shape != MEADOW_SHAPE_TWIG;
+  var widthPx = width * perMetre;
+  if (flatShape) { widthPx = min(widthPx, width * height * abs(view.y) * perMetre * perMetre / max(lenPx, 1e-4)); }
   let least = bladeFrame.sizes.x;
   let splat = bladeFrame.sizes.y;
   var drawnLen = max(lenPx, splat);
@@ -291,8 +398,11 @@ fn meadowBladeSowOne(cell: vec2i, level: u32, lane: u32) {
   // The blades a pixel's ground holds, the ground seen at a slant, and the depth they lay drawn so.
   let slant = max(abs(view.y), 0.03);
   let perPixel = MEADOW_BLADE_DENSITY * grows / (perMetre * perMetre * slant);
-  let laid = perPixel * drawnLen * drawnWidth * 0.55;
-  var keep = min(1.0, bladeFrame.sizes.z / max(laid, 1e-6));
+  // A broad leaf on its stalk hides the ground only with its leaf.
+  let leafy = select(0.55, 0.62 * (1.0 - sp.form.w) + 0.08 * sp.form.w, shape == MEADOW_SHAPE_LEAF);
+  let laid = perPixel * drawnLen * drawnWidth * leafy;
+  let depth = bladeFrame.sizes.z * select(1.0, MEADOW_LITTER_DEPTH, lying);
+  var keep = min(1.0, depth / max(laid, 1e-6));
   if (keep > cap) {
     // More are wanted than the levels hold this far out: the kept are drawn the larger, no taller than they stand
     // upright (a blade never rises above the sward), the rest of it in breadth.
@@ -312,7 +422,11 @@ fn meadowBladeSowOne(cell: vec2i, level: u32, lane: u32) {
   // Near its rank's limit a blade narrows to nothing.
   drawnWidth *= clamp((limit - rank) / (0.2 * limit), 0.0, 1.0);
 
-  // The wind: a lean downwind as the gusts roll over it, and a flutter of its own.
+  // The wind: a lean downwind as the gusts roll over it, and a flutter of its own. What lies on the ground lies still.
+  var bend = 0.0;
+  var lean = vec2f(0.0);
+  var singe = 0.0;
+  if (!lying) {
   let time = F.camPos.w;
   let wind = meadowWindField(at, time, F.windP[0]);
   let windDir = meadowWindDirection();
@@ -330,21 +444,23 @@ fn meadowBladeSowOne(cell: vec2i, level: u32, lane: u32) {
   h = continuumHash(h + 0x3b9ac5f1u); let phase = meadowBladeUnit(h) * 6.2831853;
   let rate = 5.2 + 3.8 * meadowBladeUnit(continuumHash(h + 0x11u)) + min(speed, 16.0) * 0.22;
   let flutter = (sin(time * rate + phase + dot(at, windDir) * 2.9) * 0.09 + cos(time * rate * 1.37 + phase * 1.7) * 0.05) * quiver;
-  let bend = clamp((0.02 * quiver + (0.12 + 0.58 * band) * speedShare + flutter) * stiffness, 0.0, 0.85);
+  bend = clamp((0.02 * quiver + (0.12 + 0.58 * band) * speedShare + flutter) * stiffness, 0.0, 0.85);
   let bendDir = normalize(windDir + crossWind * (curl * (0.10 + 0.22 * band)));
-  var lean = droop * height * (1.0 - 0.6 * bend) + bendDir * (bend * height * 0.78);
-  var singe = 0.0;
+  lean = droop * height * (1.0 - 0.6 * bend) + bendDir * (bend * height * 0.78);
+  }
   if (bladeFrame.more.x != 0u && dist < 90.0) {
     let shot = meadowEvalBallistics(at, ground, seed);
     if (shot.buryDepth > 0.92) { return; }
-    height *= (1.0 - 0.85 * shot.buryDepth) * (1.0 - 0.55 * shot.pressDown);
-    lean += shot.pushXZ * height * 1.6;
+    if (!lying) {
+      height *= (1.0 - 0.85 * shot.buryDepth) * (1.0 - 0.55 * shot.pressDown);
+      lean += shot.pushXZ * height * 1.6;
+    }
     singe = shot.hotSinge;
   }
   let leanLen = length(lean);
   if (leanLen > 0.95 * height) { lean *= 0.95 * height / leanLen; }
   let rise = sqrt(max(height * height - dot(lean, lean), 0.0025 * height * height));
-  let stem = vec3f(lean.x, rise, lean.y);
+  let stem = select(vec3f(lean.x, rise, lean.y), restStem, lying);
 
   // Drawn: seen end on, or far, it is drawn from near its tip as a splat; drawn out across the eye's line to the
   // length kept.
@@ -355,12 +471,23 @@ fn meadowBladeSowOne(cell: vec2i, level: u32, lane: u32) {
   let acrossLen = length(reachAcross);
   let wantLen = drawnLen / perMetre;
   if (acrossLen < wantLen) {
-    let up = F.camUp.xyz - view * dot(F.camUp.xyz, view);
-    let along = select(normalize(up), reachAcross / max(acrossLen, 1e-6), acrossLen > 1e-5);
-    reach += along * (wantLen - acrossLen);
+    if (lying && acrossLen > 1e-5) {
+      // Lying, it is drawn longer along the ground.
+      reach *= wantLen / acrossLen;
+    } else {
+      // Standing, upward; lying end on, across the eye along the ground.
+      let toward = select(F.camUp.xyz, F.camRight.xyz, lying);
+      let up = toward - view * dot(toward, view);
+      let along = select(normalize(up), reachAcross / max(acrossLen, 1e-6), acrossLen > 1e-5);
+      reach += along * (wantLen - acrossLen);
+    }
   }
   let list = select(select(2u, 1u, drawnLen > ${MEADOW_BLADE_LIST_PIXELS[1].toFixed(1)}), 0u, drawnLen > ${MEADOW_BLADE_LIST_PIXELS[0].toFixed(1)});
   let inflate = clamp((drawnWidth * drawnLen) / max(widthPx * max(lenPx, 0.05), 1e-4), 1.0, 60000.0);
+  // A flat piece drawn near as large as it is lies flat on the ground, as broad as it is; drawn larger, it turns to
+  // the eye as a blade does.
+  let flat = flatShape && inflate <= 1.5;
+  let drawnBreadth = select(drawnWidth / perMetre, width * drawnWidth / max(widthPx, 1e-6), flat);
   // Its look: species, whether it bears a head, a flower or is dry, how singed it is and how tall beside its kind.
   h = continuumHash(h + 0x6d2b79f5u);
   let headed = meadowBladeUnit(h) < sp.habit.w;
@@ -368,11 +495,11 @@ fn meadowBladeSowOne(cell: vec2i, level: u32, lane: u32) {
   let flowering = meadowBladeUnit(h) < sp.extra.y * meadowBladeDrift(at);
   h = continuumHash(h + 0x9e3779b9u);
   let dry = meadowBladeUnit(h) < sp.extra.x;
-  let flags = select(0u, 1u, headed) | select(0u, 2u, flowering) | select(0u, 4u, dry);
+  let flags = select(0u, 1u, headed) | select(0u, 2u, flowering) | select(0u, 4u, dry) | select(0u, 8u, flat);
   let stature = u32(clamp(tall, 0.0, 1.0) * 255.0);
   let look = species | (flags << 8u) | (u32(clamp(singe, 0.0, 1.0) * 255.0) << 16u) | (stature << 24u);
   let first = vec4u(bitcast<u32>(foot.x), bitcast<u32>(foot.y), bitcast<u32>(foot.z), pack2x16float(reach.xy));
-  let second = vec4u(pack2x16float(vec2f(reach.z, drawnWidth / perMetre)), pack2x16float(vec2f(inflate, bend)), seed, look);
+  let second = vec4u(pack2x16float(vec2f(reach.z, drawnBreadth)), pack2x16float(vec2f(inflate, bend)), seed, look);
   let slot = atomicAdd(&bladeDraws[12u + list], 1u);
   if (slot >= bladeFrame.room[list]) { return; }
   if (list == 0u) { bladesNear[2u * slot] = first; bladesNear[2u * slot + 1u] = second; }
@@ -426,6 +553,7 @@ export function meadowBladesDrawWGSL() {
 @group(0) @binding(12) var landCraterField: texture_2d_array<f32>;
 @group(0) @binding(15) var landLight: texture_2d<f32>;
 @group(0) @binding(16) var meadowCover: texture_2d<f32>;
+@group(0) @binding(17) var meadowGround: texture_2d<f32>;
 @group(0) @binding(18) var landSampler: sampler;
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
@@ -443,8 +571,25 @@ struct MeadowBladeVarying {
   @location(3) @interpolate(flat) foot: vec3f,  // its colour at the foot and the tip (linear)
   @location(4) @interpolate(flat) tip: vec3f,
   @location(5) @interpolate(flat) info: vec4f,  // how much larger it is drawn than it is, its bend, its singe, its stature
-  @location(6) @interpolate(flat) look: vec4u   // its species, its flags (1 head, 2 flower, 4 dry), its seed
+  @location(6) @interpolate(flat) look: vec4u   // its species, its flags (1 head, 2 flower, 4 dry, 8 flat), its seed, its shape
 };
+
+// A piece's breadth along it (0 at its foot, 1 at its tip), by its shape: a blade tapering to its point; a leaf on
+// its stalk; an oval, an oak's lobes, a maple's broad palm, a willow's lance; a needle and a twig, near even; a
+// palm's strap.
+fn meadowBladeOutline(shape: u32, t: f32, stalk: f32) -> f32 {
+  let leaf = pow(max(sin(3.14159265 * t), 0.0), 0.6);
+  switch (shape) {
+    case MEADOW_SHAPE_LEAF: { return max(0.08, pow(max(sin(3.14159265 * clamp((t - stalk) / max(1.0 - stalk, 0.05), 0.0, 1.0)), 0.0), 0.6)); }
+    case MEADOW_SHAPE_OVAL: { return max(0.12, leaf); }
+    case MEADOW_SHAPE_LOBED: { return max(0.1, leaf * (0.78 + 0.22 * cos(t * 6.2831853 * 3.5))); }
+    case MEADOW_SHAPE_PALMATE: { return max(0.1, pow(max(sin(3.14159265 * pow(t, 0.8)), 0.0), 0.45) * (0.85 + 0.15 * cos(t * 6.2831853 * 2.5))); }
+    case MEADOW_SHAPE_LANCE: { return 0.06 + max(sin(3.14159265 * t), 0.0) * (1.0 - 0.35 * t); }
+    case MEADOW_SHAPE_NEEDLE, MEADOW_SHAPE_TWIG: { return 1.0 - 0.35 * t; }
+    case MEADOW_SHAPE_STRAP: { return 1.0 - 0.5 * t * t; }
+    default: { return sqrt(max(1.0 - t * t * t, 0.0)); }
+  }
+}
 
 fn meadowShadowVis(world: vec3f, normal: vec3f) -> vec3f {
   if (landSH.origin.w < 0.5) { return vec3f(1.0); }
@@ -490,28 +635,57 @@ fn meadowShadowVis(world: vec3f, normal: vec3f) -> vec3f {
     across = select(select(-1.0, 1.0, corner == 1u), 0.0, corner == 2u);
   }
   let t = f32(row) / f32(S);
-  // Its stem: rising, then arching over toward its tip.
-  let tipAt = foot + reach;
-  let lift = max(reach.y, 0.0) * 0.78 + length(reach.xz) * 0.32;
-  let control = foot + vec3f(reach.x * 0.18, lift, reach.z * 0.18);
-  let s = 1.0 - t;
-  let p = s * s * foot + 2.0 * s * t * control + t * t * tipAt;
-  var tangent = 2.0 * s * (control - foot) + 2.0 * t * (tipAt - control);
-  tangent = select(vec3f(0.0, 1.0, 0.0), normalize(tangent), dot(tangent, tangent) > 1e-12);
-  // Turned about its stem to face the eye.
-  let toward = p - F.camPos.xyz;
-  var sideways = cross(tangent, toward);
-  sideways = select(normalize(F.camRight.xyz), normalize(sideways), dot(sideways, sideways) > 1e-12 * dot(toward, toward));
+  let sp = sward.species[look & 255u];
+  let kind = meadowShapeOf(sp);
+  let lying = kind >= MEADOW_SHAPE_OVAL;
   let flags = (look >> 8u) & 255u;
-  var shape = sqrt(max(1.0 - t * t * t, 0.0));
-  if ((flags & 2u) != 0u && S >= 6u) { shape *= 1.0 + 4.5 * smoothstep(0.7, 0.86, t); }
-  let at = p + sideways * (across * 0.5 * width * shape);
-  // The leaf's own facing: turned the way its seed turns it, square to its stem, cupped across.
+  let flat = (flags & 8u) != 0u;
+  let curl = sp.form.z;
+  var p = vec3f(0.0);
+  var tangent = vec3f(0.0, 1.0, 0.0);
+  if (lying) {
+    // Lying on the ground, arched a little along it, its tip curling up as it dries.
+    let len = length(reach);
+    p = foot + reach * t + vec3f(0.0, curl * len * (0.10 * t * t + 0.05 * sin(3.14159265 * t)), 0.0);
+    tangent = reach + vec3f(0.0, curl * len * (0.2 * t + 0.05 * 3.14159265 * cos(3.14159265 * t)), 0.0);
+  } else {
+    // Its stem: rising, then arching over toward its tip.
+    let tipAt = foot + reach;
+    let lift = max(reach.y, 0.0) * 0.78 + length(reach.xz) * 0.32;
+    let control = foot + vec3f(reach.x * 0.18, lift, reach.z * 0.18);
+    let s = 1.0 - t;
+    p = s * s * foot + 2.0 * s * t * control + t * t * tipAt;
+    tangent = 2.0 * s * (control - foot) + 2.0 * t * (tipAt - control);
+  }
+  tangent = select(vec3f(0.0, 1.0, 0.0), normalize(tangent), dot(tangent, tangent) > 1e-12);
+  // Turned about its stem to face the eye; a flat piece on the ground lies flat, square to its stem along the ground;
+  // a broad leaf on its stalk faces its own way, the way its seed turns it.
   let turn = f32(seed & 1023u) * (6.2831853 / 1024.0);
   let facing = vec3f(cos(turn), 0.22, sin(turn));
+  let toward = p - F.camPos.xyz;
+  var sideways = cross(tangent, toward);
+  if (flat) { sideways = cross(vec3f(0.0, 1.0, 0.0), tangent); }
+  if (kind == MEADOW_SHAPE_LEAF && drawn.x <= 1.5) { sideways = cross(tangent, facing); }
+  sideways = select(normalize(F.camRight.xyz), normalize(sideways), dot(sideways, sideways) > 1e-12 * max(dot(toward, toward), 1.0));
+  var shape = meadowBladeOutline(kind, t, sp.form.w);
+  if (!lying && S >= 3u) {
+    // A head is a little broader than its blade; a flower opens wide.
+    if ((flags & 1u) != 0u) { shape *= 1.0 + 0.45 * smoothstep(1.0 - sp.head.w - 0.04, 1.0 - sp.head.w, t); }
+    if ((flags & 2u) != 0u && S >= 6u) { shape *= 1.0 + 4.5 * smoothstep(0.7, 0.86, t); }
+  }
+  var at = p + sideways * (across * 0.5 * width * shape);
+  // The leaf's own facing: turned the way its seed turns it, square to its stem, cupped across. A leaf on the ground
+  // faces up, its edges curled up as it dries; a needle or a twig is lit as the ground it lies on.
   var n = normalize(facing - tangent * dot(facing, tangent) + sideways * (across * 0.35));
+  if (lying) {
+    if (flat) {
+      at.y += across * across * curl * 0.3 * width * shape;
+      n = normalize(vec3f(0.0, 1.0, 0.0) - sideways * (across * curl * 1.2));
+    } else {
+      n = normalize(vec3f(0.0, 1.0, 0.0) + facing * 0.3);
+    }
+  }
   // Its colours: its species', a little lighter or darker as its seed has it; straw if dry.
-  let sp = sward.species[look & 255u];
   let vary = 0.84 + 0.32 * f32((seed >> 10u) & 255u) / 255.0;
   let green = 0.94 + 0.12 * f32((seed >> 18u) & 255u) / 255.0;
   var footColour = sp.foot.rgb * vary;
@@ -528,7 +702,7 @@ fn meadowShadowVis(world: vec3f, normal: vec3f) -> vec3f {
   out.foot = footColour;
   out.tip = tipColour;
   out.info = vec4f(drawn.x, drawn.y, f32((look >> 16u) & 255u) / 255.0, f32(look >> 24u) / 255.0);
-  out.look = vec4u(look & 255u, flags, seed, 0u);
+  out.look = vec4u(look & 255u, flags, seed, kind);
   return out;
 }
 
@@ -542,15 +716,18 @@ fn meadowBladeFieldTop(at: vec2f, foot: f32, up: f32) -> vec4f {
   let lean = meadowWindDirection() * (0.05 + 0.20 * wind.x * smoothstep(0.5, 9.0, speed));
   let p = at - lean;
   let cover = meadowCoverAt(at + meadowBladeWarp(at));
+  let lies = meadowGroundAt(at);
+  // The mean of what grows here: the meadow's mixes by the cover's role, or the furlong's crop; the litter over it.
   let weights = meadowMixWeights(cover.g, at);
-  let mean = weights.x * cfg.mixes[0].rgb + weights.y * cfg.mixes[1].rgb + weights.z * cfg.mixes[2].rgb;
+  var mean = weights.x * sward.mixes[0].look.rgb + weights.y * sward.mixes[1].look.rgb + weights.z * sward.mixes[2].look.rgb;
+  if (lies.code != 0u) { mean = sward.mixes[MEADOW_GROUND_MIX + lies.code].look.rgb; }
   let spacing = inverseSqrt(MEADOW_BLADE_DENSITY);
   let grain = max(foot, spacing);
   let cell = vec2i(floor(p / grain));
   let h0 = continuumHash((bitcast<u32>(cell.x) * 0x8da6b343u) ^ continuumHash(bitcast<u32>(cell.y) * 0xd8163841u + 0x5bd1e995u));
-  let pickMix = meadowBladeUnit(h0);
-  let mixAt = select(select(2u, 1u, (pickMix < weights.x + weights.y)), 0u, (pickMix < weights.x));
-  let span = sward.mixes[mixAt];
+  let choice = meadowBladeChoose(at, cover, lies, meadowBladeUnit(continuumHash(h0 + 0x51ed270bu)), meadowBladeUnit(h0));
+  if (choice.amount > 0.0) { mean = mix(mean, sward.mixes[MEADOW_LITTER_MIX + lies.slot].look.rgb, clamp(lies.litter / choice.amount, 0.0, 1.0)); }
+  let span = sward.mixes[choice.mix].span;
   let h1 = continuumHash(h0 + 0x7a2e91c5u);
   let pickSpecies = meadowBladeUnit(h1);
   var species = span.x;
@@ -560,8 +737,9 @@ fn meadowBladeFieldTop(at: vec2f, foot: f32, up: f32) -> vec4f {
   }
   let sp = sward.species[species];
   let h2 = continuumHash(h1 + 0x4c8a5f13u);
-  // Looking down into the sward, between the tips: its shaded depth.
-  let deep = meadowBladeUnit(continuumHash(h2 + 0x68e31da4u)) < 0.5 * smoothstep(0.2, 0.9, up);
+  // Looking down into the sward, between the tips: its shaded depth. Litter has none.
+  let lying = meadowShapeOf(sp) >= MEADOW_SHAPE_OVAL;
+  let deep = !lying && (meadowBladeUnit(continuumHash(h2 + 0x68e31da4u)) < 0.5 * smoothstep(0.2, 0.9, up));
   let along = select(0.55 + 0.45 * meadowBladeUnit(h2), 0.12 + 0.3 * meadowBladeUnit(h2), deep);
   var colour = mix(sp.foot.rgb, sp.tip.rgb, along) * (0.84 + 0.32 * meadowBladeUnit(continuumHash(h2 + 1u)));
   let h3 = continuumHash(h2 + 0x2545f491u);
@@ -573,7 +751,7 @@ fn meadowBladeFieldTop(at: vec2f, foot: f32, up: f32) -> vec4f {
   }
   // Many blades to a pixel: the mean, the more so the more there are.
   let single = clamp(spacing * 1.6 / max(foot, 1e-4), 0.0, 1.0);
-  let lit = select(0.62 + 0.38 * along, 0.22 + 0.4 * along, deep);
+  let lit = select(select(0.62 + 0.38 * along, 0.22 + 0.4 * along, deep), 0.7 + 0.2 * along, lying);
   return vec4f(mix(mean, colour, single), mix(mix(0.78, 0.52, smoothstep(0.2, 0.9, up)), lit, single));
 }
 
@@ -586,11 +764,13 @@ fn meadowBladeFieldTop(at: vec2f, foot: f32, up: f32) -> vec4f {
   let t = clamp(v.blade.x, 0.0, 1.0);
   let flags = v.look.y;
   let sp = sward.species[v.look.x];
+  let lying = v.look.w >= MEADOW_SHAPE_OVAL;
   var albedo = mix(v.foot, v.tip, smoothstep(0.04, 0.96, t));
   if ((flags & 1u) != 0u) { albedo = mix(albedo, sp.head.rgb, smoothstep(1.0 - sp.head.w - 0.04, 1.0 - sp.head.w, t)); }
   if ((flags & 2u) != 0u) { albedo = mix(albedo, sward.flower.rgb, smoothstep(0.74, 0.82, t)); }
   // Deep in the sward a blade sees less of the sky and the sun: darker toward its foot, the more for a short one.
-  var shade = mix(0.1, 1.0, pow(t, 0.85)) * mix(0.75, 1.0, v.info.w);
+  // Litter lies under what stands over it, some pieces deeper in it than others.
+  var shade = select(mix(0.1, 1.0, pow(t, 0.85)) * mix(0.75, 1.0, v.info.w), mix(0.5, 0.92, v.info.w), lying);
   var n = normalize(v.normal);
   // Drawn larger than it is, a blade shows the sward where it is drawn: the tips over each pixel, leaned by the wind.
   let field = smoothstep(1.8, 5.0, v.info.x);
@@ -605,7 +785,7 @@ fn meadowBladeFieldTop(at: vec2f, foot: f32, up: f32) -> vec4f {
   }
   // A gust lays the blades over, and their faces catch the sky: the wind's bands across the meadow.
   let crest = smoothstep(0.05, 0.34, v.info.y);
-  albedo *= mix(0.84, 1.16, crest);
+  if (!lying) { albedo *= mix(0.84, 1.16, crest); }
   let singe = v.info.z * smoothstep(0.35, 0.92, t);
   if (singe > 0.001) { albedo = mix(albedo, mix(vec3f(0.022, 0.016, 0.011), vec3f(0.11, 0.048, 0.014), smoothstep(0.7, 0.98, t)), singe * 0.88); }
   // Lit on the face the eye sees.
@@ -625,14 +805,15 @@ fn meadowBladeFieldTop(at: vec2f, foot: f32, up: f32) -> vec4f {
   // The sun through the leaf: from behind it, and most looking toward the sun.
   let behind = max(-nDotL, 0.0);
   let forward = pow(max(dot(-view, L), 0.0), 3.0);
-  let through = (behind * 0.55 + forward * 0.9) * sunDeep;
+  // A dead leaf lets little through.
+  let through = (behind * 0.55 + forward * 0.9) * sunDeep * select(1.0, 0.25, lying);
   let throughColour = mix(albedo * vec3f(1.25, 1.45, 0.55), albedo * 1.2, f32((flags & 4u) != 0u));
   // The gloss of its cuticle.
   let halfway = normalize(view + L);
   let gloss = pow(max(dot(n, halfway), 0.0), 24.0) * (0.012 + 0.03 * pow(1.0 - max(dot(n, view), 0.0), 4.0));
   let skyLight = textureSampleLevel(envCube, sampC, normalize(vec3f(n.x * 0.6, max(n.y, 0.15), n.z * 0.6)), 6.0).rgb;
   // Under the tips the sky is seen through blades: the light there greener, the deeper the more.
-  let canopy = mix(vec3f(1.0), vec3f(0.7, 1.0, 0.5), 0.3 + 0.5 * (1.0 - t));
+  let canopy = select(mix(vec3f(1.0), vec3f(0.7, 1.0, 0.5), 0.3 + 0.5 * (1.0 - t)), vec3f(1.0), lying);
   let ambient = skyLight * canopy * mix(0.55, 1.0, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * shade;
   // Laid over by a gust, a blade's upper face mirrors the sky: the sheen of the wind's bands.
   let sheen = skyLight * (crest * 0.05 * pow(1.0 - max(dot(n, view), 0.0), 2.0) + crest * 0.012) * shade;

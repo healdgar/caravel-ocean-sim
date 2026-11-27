@@ -15,7 +15,7 @@ import {
   buildMockCoastalSection,
   generateProceduralCoastalPack,
 } from '../js/coastal-world.js';
-import { MEADOW_SPECIES_MOST, MEADOW_SWARD_BYTES, meadowBladesComputeWGSL, meadowBladesDrawWGSL } from '../js/wgsl/meadow-blades.js';
+import { MEADOW_MIXES, MEADOW_SPECIES_MOST, MEADOW_SWARD_BYTES, meadowBladesComputeWGSL, meadowBladesDrawWGSL } from '../js/wgsl/meadow-blades.js';
 import { MEADOW_SWARDS, packMeadowSward } from '../js/meadow-grass.js';
 import { OLD_WORLD_LAND, registerBakedBoard } from '../js/old-world.js';
 import {
@@ -180,9 +180,13 @@ test('meadow grass is blades made on the GPU each frame: no atlas, every pass co
     assert.equal(sward.mixes.length, 3, `${name} has a mix for each role`);
     assert.ok(sward.mixes.reduce((n, m) => n + m.species.length, 0) <= MEADOW_SPECIES_MOST, `${name} fits the sward uniform`);
     for (const mix of sward.mixes) assert.ok(Math.abs(mix.species.reduce((sum, sp) => sum + sp.share, 0) - 1) < 1e-6, `${name}: a mix's shares make the whole`);
-    const { data, means } = packMeadowSward(sward);
-    assert.equal(data.byteLength, MEADOW_SWARD_BYTES);
-    assert.equal(means.length, 3);
+    // Its meadow's three mixes, the crops of worked ground and the litters under trees, every day of the year.
+    for (let day = 0; day < 365; day += 7) {
+      const { data, means, species } = packMeadowSward(sward, day);
+      assert.equal(data.byteLength, MEADOW_SWARD_BYTES);
+      assert.equal(means.length, MEADOW_MIXES);
+      assert.ok(species <= MEADOW_SPECIES_MOST, `${name} on day ${day} fits the sward uniform`);
+    }
   }
   const sow = meadowBladesComputeWGSL(), view = meadowBladesDrawWGSL();
   assert.equal(/\bdiscard\b/.test(sow), false);
@@ -192,10 +196,10 @@ test('meadow grass is blades made on the GPU each frame: no atlas, every pass co
   assert.match(sow, /meadowEvalBallistics\(/, 'shot, blast rings and craters part and bury the blades');
   // The far list never drops whole cells: when it fills, the finish pass broadens the next frame's short blades.
   assert.match(sow, /atomicStore\(&bladeDraws\[15\]/);
-  for (const [binding, name] of [[4, 'meadowCover'], [9, 'ballistic wakes'], [10, 'landCraterLookup'], [11, 'landCraterField']]) {
+  for (const [binding, name] of [[4, 'meadowCover'], [9, 'ballistic wakes'], [10, 'landCraterLookup'], [11, 'landCraterField'], [18, 'meadowGround']]) {
     assert.ok(sow.includes(`@group(0) @binding(${binding})`), `the sow pass is missing ${name} @binding(${binding})`);
   }
-  for (const [binding, name] of [[15, 'terrain landLight'], [16, 'meadowCover'], [18, 'terrain landSampler'], [20, 'land shadow']]) {
+  for (const [binding, name] of [[15, 'terrain landLight'], [16, 'meadowCover'], [17, 'meadowGround'], [18, 'terrain landSampler'], [20, 'land shadow']]) {
     assert.ok(view.includes(`@group(0) @binding(${binding})`), `the blade view is missing ${name} @binding(${binding})`);
   }
   const meadowSrc = fs.readFileSync('js/meadow-grass.js', 'utf8');

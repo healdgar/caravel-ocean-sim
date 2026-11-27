@@ -1640,6 +1640,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const forestHeld=pack=>({roots:pack?.manifest?.rootCount??0,groveRoots:pack?.groveRoots??0,sections:pack?.sectionsResident??0,released:pack?.sectionsReleased??0});
   const forestStats={loaded:false,mode:canopyMode,error:forestFailure,groves:{loaded:false,error:groveFailure},coverage:null};
   const mobilePause=ms=>isMobile?new Promise(r=>setTimeout(r,ms)):Promise.resolve();
+  // The forest's trees as the meadow reads them, for the litter under them (js/meadow-crops.js), and the game's date
+  // for the season its crops and litter follow.
+  const meadowTreesOf=pack=>pack?.sections?{sections:pack.sections,prototypes:pack.manifest?.prototypes??[]}:null;
+  let meadowTrees=null,meadowDateMs=null;
   const forestReadyPromise=(async()=>{
     if(sceneryGate)await sceneryGate;
     if(terrainDisposed)return null;
@@ -1651,6 +1655,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const made=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource:TERRAIN_FINISH_ONLY,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),isMobile}).catch(error=>{forestFailure=error.message;console.error('forest continuum',error);return null;}):null;
     if(terrainDisposed){made?.destroy?.();return null;}
     forest=made;
+    if(forest)meadowTrees=meadowTreesOf(activeForestPack);
     if(forest?.stats)Object.assign(forestStats,forest.stats);
     forestStats.error=forestFailure;
     forestStats.groves=grovePack?{loaded:true,...forestHeld(activeForestPack),rootCapacity}:{loaded:false,error:groveFailure};
@@ -1821,7 +1826,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     rec._meadowPending=true;
     createSectionMeadowGrass(rec,{
       device,shader,pack:loadedMeadowPack,nearDomain,clouds,format,samples,
-      shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset,
+      shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset,trees:meadowTrees,dateMs:meadowDateMs,
     }).then(m=>{
       rec._meadowPending=false;
       if(terrainDisposed||loadedSections.get(rec.key)!==rec){m?.destroy?.();return;}
@@ -1835,7 +1840,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const meadowPack=await (meadowPromise??startMeadowLoad());
     if(!meadowPack||terrainDisposed)return null;
     try{
-      const made=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset});
+      const made=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset,trees:meadowTrees,dateMs:meadowDateMs});
       loadedMeadowPack=meadowPack;
       if(terrainDisposed){made?.destroy?.();return null;}
       meadowGrass=made;
@@ -1846,6 +1851,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }catch(error){meadowFailure=error.message;meadowGrassStats.error=meadowFailure;console.error('meadow continuum',error);return null;}
   })();
   const sceneryReady=Promise.all([forestReadyPromise,meadowReadyPromise]).then(async()=>{
+    // The forest and the meadow ready, whichever first: the litter under the trees.
+    if(!terrainDisposed&&meadowTrees){meadowGrass?.setTrees?.(meadowTrees);for(const sec of loadedSections.values())sec.meadowGrass?.setTrees?.(meadowTrees);}
     if(isMobile&&!terrainDisposed){
       await mobilePause(250);
       if(!terrainDisposed&&!herds)await startHerds();
@@ -2054,6 +2061,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}
       );
       forest.updatePack(nextForestPack);
+      meadowTrees=meadowTreesOf(nextForestPack);
+      meadowGrass?.setTrees?.(meadowTrees);
+      for(const sec of loadedSections.values())sec.meadowGrass?.setTrees?.(meadowTrees);
       if(grovePack)Object.assign(forestStats.groves,forestHeld(nextForestPack));
       forestSectionsReleased=nextForestPack.sectionsReleased??0;forestHeldAt=forestNear??activeRegion;
       lastCamera=null;
@@ -2874,6 +2884,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     get region(){return worldOffset.x||worldOffset.z?{...activeRegion,x:activeRegion.x+worldOffset.x,z:activeRegion.z+worldOffset.z}:activeRegion;},
     get baseRegion(){return activeRegion;},
+    // The game's date: the season the meadow's crops and litter stand in.
+    setCalendar(ms){
+      if(!Number.isFinite(ms))return;
+      meadowDateMs=ms;
+      meadowGrass?.setCalendar?.(ms);
+      for(const sec of loadedSections.values())sec.meadowGrass?.setCalendar?.(ms);
+    },
     get views(){return proceduralPack?.views??null;},get port(){return proceduralPack?.port??null;},
     get ports(){return getActivePorts();},
     // What a shot meets among the city's buildings, for js/gunnery-control.js.

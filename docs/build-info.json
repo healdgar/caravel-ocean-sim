@@ -1,8 +1,8 @@
 {
-  "version": "1.0.980",
-  "build": 980,
-  "commit": "dec7fed",
+  "version": "1.0.982",
+  "build": 982,
+  "commit": "aca4717",
   "branch": "career-foundation",
-  "dirty": false,
-  "builtAt": "2026-11-26T13:28:45.304Z"
+  "dirty": true,
+  "builtAt": "2026-11-27T01:08:44.093Z"
 }

@@ -305,7 +305,10 @@ fn continuumCardFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisib
   let bound=continuumSphere(record,CONTINUUM_WHOLE,cardSp);
   if(bound.w<=0.0){out.position=CONTINUUM_HIDDEN;return out;}
   let scale=continuumScale(record);
-  let baseR=bound.w*scale*CONTINUUM_CARD_PAD;
+  // The card's picture is baked of the body at rest and framed to its rest sphere, so the card is that size. The
+  // kind's bound is where the body may go (a tree's bones swaying, a pose's slack), not how big it is: sized by it, a
+  // tree is drawn the larger the harder the wind blows.
+  let baseR=cardSp.w*scale*CONTINUUM_CARD_PAD;
   let centre=continuumPlace(record,bound.xyz)+lift;
   let toEyeVec=(F.camPos.xyz-continuumShift())-centre;
   let dist=max(length(toEyeVec),1e-3);

@@ -96,7 +96,7 @@ order.splice(order.indexOf('js/coastal-world.js'),0,'js/river-water.js','js/herd
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/continuum-cards.js','js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
 wgslModules.push('js/wgsl/continuum-cards.js','js/wgsl/inland-water.js','js/wgsl/herds.js','js/wgsl/shallow-water.js','js/wgsl/surf-spray.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/shallow-water.js','js/meadow-continuum.js','js/wgsl/meadow-continuum.js','js/wgsl/meadow-blades.js','js/meadow-grass.js','js/trade-vessels.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/shallow-water.js','js/meadow-continuum.js','js/wgsl/meadow-continuum.js','js/meadow-crops.js','js/wgsl/meadow-blades.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // Ships in the one continuum: the bodies' format and loading, ahead of the families that draw them (their kinds,
 // js/wgsl/ship-kinds.js, stand beside the kernel's).

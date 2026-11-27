@@ -3170,8 +3170,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     landmarks,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each
     // furlong's use, and every way that runs across it.
+    // Each furlong's figure too (world metres, x and z in turn), so that what grows in it ends where it ends
+    // (js/meadow-crops.js), not at the index's cells.
     stamp: {
-      size, index, uses, roads, streets, squares, lots, town: urban, lanes: board.lanes, rivers: rivers.map((river) => river.points), bridges,
+      size, index, uses, figures, roads, streets, squares, lots, town: urban, lanes: board.lanes, rivers: rivers.map((river) => river.points), bridges,
       origin: { x: ox, z: oz }, span: region.span,
     },
   };

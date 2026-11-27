@@ -1,8 +1,10 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Meadow grass: blades made on the GPU each frame from where they stand in the world (js/wgsl/meadow-blades.js for
 // the passes and the blades' look). No tile, patch or atlas: the cover map below says where grass grows, how lush and
-// which of a pack's three mixes, and each blade is sown, kept or thinned, leaned by the wind and drawn on the GPU;
-// the CPU writes the cover map when the land changes and a few uniforms a frame. A blade near is a curved strip that
+// which of a pack's three mixes; the ground map (js/meadow-crops.js) what each worked furlong stands in and what
+// litter lies under the trees; and each blade, stalk, leaf and needle is sown, kept or thinned, leaned by the wind
+// and drawn on the GPU. The CPU writes the maps when the land or the trees change, the sward's mixes when the day
+// does, and a few uniforms a frame. A blade near is a curved strip that
 // turns about its stem to face the eye; far off, or seen end on from above, a splat of the sward's own colour at its
 // tip; between, as few as hide the ground, widened to keep it hidden.
 // Grass is never a target: shot passes through it. Craters bury it, and passing shot and blast rings part it, from
@@ -18,15 +20,23 @@ import { INLAND_WATER_FLOATS } from './wgsl/inland-water.js';
 import { LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
 import { streetEdgeAt, unpackRouteHalfWidthSlope } from './town-streets.js';
 import { MEADOW_MIX_ROLES } from './meadow-continuum.js';
+import {
+  meadowSpecies, MEADOW_SHAPE, meadowCropMixes, meadowLitterMixes, meadowGrowthDay, bakeMeadowGroundFields, layMeadowLitter, meadowTreesSignature,
+} from './meadow-crops.js';
 import { MEADOW_MAX_SHOT_WAKES, MEADOW_MAX_BLAST_RINGS, MEADOW_WAKE_BUFFER_BYTES, MEADOW_CONTINUUM_CFG_BYTES, MEADOW_GUST_WAVE } from './wgsl/meadow-continuum.js';
 import {
   MEADOW_BLADE_LEVELS, MEADOW_BLADE_GRID, MEADOW_BLADE_REACH, MEADOW_BLADE_DEPTH, MEADOW_BLADE_SEGMENTS, MEADOW_BLADE_RECORD_BYTES,
   MEADOW_BLADE_CELL_HEADER, MEADOW_BLADE_DRAW_WORDS, MEADOW_SPECIES_MOST, MEADOW_SWARD_BYTES, MEADOW_BLADE_FRAME_BYTES,
-  meadowBladesComputeWGSL, meadowBladesDrawWGSL,
+  MEADOW_MIXES, MEADOW_MIX_BYTES, MEADOW_SPECIES_BYTES, meadowBladesComputeWGSL, meadowBladesDrawWGSL,
 } from './wgsl/meadow-blades.js';
 
 const MEADOW_COVER_DESKTOP = 2048; // 4.0 m/texel across 8192 m region with bilinear SDF filtering
 const MEADOW_COVER_MOBILE = 1024;
+// The ground map's texels across the region: 2 m on a desktop's own coast, 4 m on a neighbouring one's or a phone's.
+const MEADOW_GROUND_DESKTOP = 4096;
+const MEADOW_GROUND_MOBILE = 2048;
+// The day of the year growth is seen at when no clock is given: the game's first, 1 April.
+const MEADOW_DEFAULT_DAY = 90;
 // The ground meadows stop at.
 const MEADOW_WATERLINE = 0.75;
 // The blades each list holds (near, middle, far) and the cells the cells pass may list: the primary section's on a
@@ -43,8 +53,6 @@ const MEADOW_BLADE_MOBILE_COARSER = 1.25;
 // of the mix, their colour at the foot and the tip (linear), height and width (m), how far they droop at rest, how
 // stiff they stand, and the shares bearing a head (its colour and length along the blade), dry and in flower. A mix
 // grows as densely as its density says, of the fullest sward (js/wgsl/meadow-blades.js MEADOW_BLADE_DENSITY).
-const meadowSpecies = (share, height, width, foot, tip, droop, stiffness, { head = 0, headColour = [0.13, 0.12, 0.06], headLength = 0.2, dry = 0, flower = 0 } = {}) =>
-  Object.freeze({ share, height, width, foot, tip, droop, stiffness, head, headColour, headLength, dry, flower });
 export const MEADOW_SWARDS = Object.freeze({
   portugal: Object.freeze({
     flower: [0.62, 0.62, 0.55],
@@ -100,35 +108,44 @@ export const MEADOW_SWARDS = Object.freeze({
 // The straw a dry blade turns to, foot and tip (js/wgsl/meadow-blades.js MEADOW_STRAW_FOOT and _TIP).
 const MEADOW_STRAW = Object.freeze([[0.092, 0.078, 0.036], [0.215, 0.178, 0.084]]);
 
-// A sward as the GPU reads it (MeadowSward), and each mix's mean colour as seen from above, the share of each kind
-// of blade weighed in (MeadowCfg's mixes: the sward far off, where a pixel holds many blades).
-export function packMeadowSward(sward) {
+// A sward as the GPU reads it (MeadowSward) on a day of the year: its meadow's three mixes, the crops of worked ground
+// and the litters under trees as they stand that day (js/meadow-crops.js); and each mix's mean colour as seen from
+// above, the share of each kind of blade weighed in (the sward far off, where a pixel holds many blades).
+export function packMeadowSward(sward, day = MEADOW_DEFAULT_DAY) {
   const data = new ArrayBuffer(MEADOW_SWARD_BYTES), f = new Float32Array(data), u = new Uint32Array(data);
+  const mixes = [...sward.mixes, ...meadowCropMixes(day), ...meadowLitterMixes(day)];
+  if (mixes.length !== MEADOW_MIXES) throw Error(`A meadow sward has ${MEADOW_MIXES} mixes`);
+  const mixFloats = MEADOW_MIX_BYTES / 4, speciesFloats = MEADOW_SPECIES_BYTES / 4, first = MEADOW_MIXES * mixFloats + 4;
   const means = [];
   let next = 0;
-  sward.mixes.forEach((mix, m) => {
-    const total = mix.species.reduce((n, s) => n + s.share, 0);
+  mixes.forEach((mix, m) => {
+    const total = mix.species.reduce((n, s) => n + s.share, 0) || 1;
     if (next + mix.species.length > MEADOW_SPECIES_MOST) throw Error(`A meadow sward holds at most ${MEADOW_SPECIES_MOST} species`);
-    u.set([next, mix.species.length, 0, 0], m * 4);
-    f[12 + m] = mix.density;
     let ends = 0;
     const mean = [0, 0, 0];
     for (const s of mix.species) {
       ends += s.share / total;
-      const at = (12 + 8) + next * 20;
-      f.set([...s.foot, s.height, ...s.tip, s.width, ends, s.droop, s.stiffness, s.head, s.dry, s.flower, 0, 0, ...s.headColour, s.headLength], at);
+      const lying = (s.shape ?? MEADOW_SHAPE.BLADE) >= MEADOW_SHAPE.OVAL;
+      f.set([...s.foot, s.height, ...s.tip, s.width, ends, s.droop, s.stiffness, s.head, s.dry, s.flower, 0, 0, ...s.headColour, s.headLength,
+        s.vary ?? 0.28, s.shape ?? MEADOW_SHAPE.BLADE, s.curl ?? 0, s.stalk ?? 0.3], first + next * speciesFloats);
       for (let k = 0; k < 3; k++) {
-        const green = s.foot[k] + (s.tip[k] - s.foot[k]) * 0.775, straw = MEADOW_STRAW[0][k] + (MEADOW_STRAW[1][k] - MEADOW_STRAW[0][k]) * 0.775;
+        const along = lying ? 0.5 : 0.775;
+        const green = s.foot[k] + (s.tip[k] - s.foot[k]) * along, straw = MEADOW_STRAW[0][k] + (MEADOW_STRAW[1][k] - MEADOW_STRAW[0][k]) * along;
         const blade = green * (1 - s.dry) + straw * s.dry;
         const look = blade * (1 - s.flower * 0.6 - s.head * 0.5) + sward.flower[k] * s.flower * 0.6 + s.headColour[k] * s.head * 0.5;
         mean[k] += look * s.share / total;
       }
       next++;
     }
+    const at = m * mixFloats;
+    u.set([next - mix.species.length, mix.species.length, mix.between >= 0 ? mix.between : 0xffff, 0], at);
+    f.set([...mean, mix.density], at + 4);
+    f.set(mix.rows ?? [0, 1, 0, 0], at + 8);
+    f.set([...(mix.plants ?? [0, 1]), 0, 0], at + 12);
     means.push(mean);
   });
-  f.set([...sward.flower, 0], 16);
-  return { data, means };
+  f.set([...sward.flower, 0], MEADOW_MIXES * mixFloats);
+  return { data, means, species: next };
 }
 
 function hash2D(ix, iz) {
@@ -644,12 +661,12 @@ const MEADOW_BLADE_PASSES = Object.freeze({
   reset: Object.freeze([7, 8]),
   cells: Object.freeze([0, 1, 2, 3, 8, 14]),
   args: Object.freeze([7, 8, 14]),
-  sow: Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17]),
+  sow: Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]),
   finish: Object.freeze([7, 14]),
 });
 const MEADOW_BLADE_ENTRY_POINTS = Object.freeze({ reset: 'meadowBladeReset', cells: 'meadowBladeCells', args: 'meadowBladeArgs', sow: 'meadowBladeSow', finish: 'meadowBladeFinish' });
 // What the draws bind in group 0, beside the land's own (the frame, the sky's light, the land's light and shadow map).
-const MEADOW_BLADE_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 18, 19, 20, 21, 24]);
+const MEADOW_BLADE_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 19, 20, 21, 24]);
 export function requestMeadowBladePrograms(device, shader, format, samples) {
   return requestOnce(device, `meadow blades ${format} ${samples}`, async () => {
     const C = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
@@ -660,7 +677,7 @@ export function requestMeadowBladePrograms(device, shader, format, samples) {
       0: buffer(0, 'uniform'), 1: buffer(1, 'uniform'), 2: buffer(2, 'uniform'), 3: texture(3, 'unfilterable-float'), 4: texture(4, 'float'),
       5: buffer(5, 'uniform'), 6: buffer(6, 'storage'), 7: buffer(7, 'storage'), 8: buffer(8, 'storage'), 9: buffer(9, 'uniform'),
       10: texture(10, 'sint'), 11: texture(11, 'float', '2d-array'), 12: sampler(12, 'filtering'), 13: texture(13, 'unfilterable-float', '2d-array'),
-      14: buffer(14, 'uniform'), 15: buffer(15, 'read-only-storage'), 16: buffer(16, 'storage'), 17: buffer(17, 'storage'),
+      14: buffer(14, 'uniform'), 15: buffer(15, 'read-only-storage'), 16: buffer(16, 'storage'), 17: buffer(17, 'storage'), 18: texture(18, 'float'),
     };
     const computeModule = await shader(meadowBladesComputeWGSL(), 'meadow blades sow');
     const layouts = {}, passes = {};
@@ -676,7 +693,7 @@ export function requestMeadowBladePrograms(device, shader, format, samples) {
     const view = device.createBindGroupLayout({ label: 'meadow blades view', entries: [
       buffer(0, 'uniform', VF), texture(1, 'float', '2d', VF), texture(2, 'float', '2d', VF), sampler(3, 'filtering', VF), texture(4, 'float', 'cube', VF),
       buffer(5, 'uniform', VF), buffer(6, 'uniform', VF), buffer(7, 'uniform', VF), buffer(8, 'read-only-storage', VF), buffer(9, 'uniform', VF),
-      texture(15, 'float', '2d', VF), texture(16, 'float', '2d', VF), sampler(18, 'filtering', VF), buffer(19, 'uniform', VF),
+      texture(15, 'float', '2d', VF), texture(16, 'float', '2d', VF), texture(17, 'float', '2d', VF), sampler(18, 'filtering', VF), buffer(19, 'uniform', VF),
       texture(20, 'depth', '2d', VF), sampler(21, 'comparison', VF), buffer(24, 'read-only-storage', VF),
     ] });
     const clouds = device.createBindGroupLayout({ label: 'meadow blades clouds', entries: [
@@ -723,8 +740,13 @@ export async function createMeadowGrass({
   isMobile = false,
   isSecondary = false,
   coverSize = (isMobile || isSecondary) ? MEADOW_COVER_MOBILE : MEADOW_COVER_DESKTOP,
+  groundSize = (isMobile || isSecondary) ? MEADOW_GROUND_MOBILE : MEADOW_GROUND_DESKTOP,
   capacityLimit = null,
   worldOffset = null,
+  // The forest's trees (its sections' roots and its prototypes), whose litter lies under them; the game's date, whose
+  // season the crops and the litter follow.
+  trees = null,
+  dateMs = null,
 }) {
   const swardName = pack?.sward;
   const sward = MEADOW_SWARDS[swardName];
@@ -748,8 +770,10 @@ export async function createMeadowGrass({
   const cells = mkBuf(`${label} blade cells`, (MEADOW_BLADE_CELL_HEADER + 2 * room[3]) * 4, B.STORAGE | B.INDIRECT | B.COPY_SRC);
   const draws = mkBuf(`${label} blade draws`, MEADOW_BLADE_DRAW_WORDS * 4, B.STORAGE | B.INDIRECT | B.COPY_SRC);
 
-  // The sward, and each mix's mean colour far off.
-  const packed = packMeadowSward(sward);
+  // The sward on the day, and each mix's mean colour far off.
+  const latitude = () => curRegion?.latitude ?? 40;
+  let day = meadowGrowthDay(dateMs, region?.latitude ?? 40) ?? MEADOW_DEFAULT_DAY;
+  let packed = packMeadowSward(sward, day);
   const swardBuf = mkBuf(`${label} sward`, MEADOW_SWARD_BYTES, B.UNIFORM | B.COPY_DST, new Uint8Array(packed.data));
   // The uniform the passes and the draws read: MeadowCfg.
   const cfgData = new ArrayBuffer(MEADOW_CONTINUUM_CFG_BYTES);
@@ -758,7 +782,7 @@ export async function createMeadowGrass({
   cfgU.set([samples, coverSize, room[2], 1], 4);
   cfgF.set([continuumPixelError(), MEADOW_GUST_WAVE, 0, 0], 16);
   cfgU[22] = isSecondary ? 0 : 1; // cfg.more.z: 1 when primary section (landLight valid), 0 for secondary sections
-  packed.means.forEach((mean, m) => cfgF.set([...mean, 1], 24 + m * 4));
+  packed.means.slice(0, 3).forEach((mean, m) => cfgF.set([...mean, 1], 24 + m * 4));
   let cfgDirty = true;
   // The per-frame uniform: MeadowBladeFrame.
   const frameData = new ArrayBuffer(MEADOW_BLADE_FRAME_BYTES);
@@ -806,6 +830,14 @@ export async function createMeadowGrass({
     format: 'rgba8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
+  // The ground map (js/meadow-crops.js): each worked furlong's crop and the litter under the trees.
+  const groundTexture = device.createTexture({
+    label: `${label} ground`,
+    size: [groundSize, groundSize],
+    format: 'rgba8unorm',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  const groundView = groundTexture.createView();
   let ownedElevation = null;
   let ownedElevSize = 0;
   let elevationView = elevation ? elevation.createView() : null;
@@ -846,6 +878,7 @@ export async function createMeadowGrass({
       0: land.get(0), 1: { buffer: cfgBuf }, 2: { buffer: nearDomain }, 3: elevationView, 4: coverView, 5: { buffer: swardBuf },
       6: { buffer: lists[0] }, 7: { buffer: draws }, 8: { buffer: cells }, 9: { buffer: wakeBuf }, 10: craterLookupView, 11: craterFieldView,
       12: land.get(8), 13: continuumGroundView(device), 14: { buffer: frameBuf }, 15: { buffer: cells }, 16: { buffer: lists[1] }, 17: { buffer: lists[2] },
+      18: groundView,
     };
     passGroups = Object.fromEntries(Object.entries(MEADOW_BLADE_PASSES).map(([name, ids]) => [name, device.createBindGroup({
       label: `${label} blades ${name}`, layout: programs.layouts[name], entries: ids.map((binding) => ({ binding, resource: resource[binding] })),
@@ -853,7 +886,7 @@ export async function createMeadowGrass({
     viewGroups = lists.map((list, k) => {
       const own = new Map([
         [5, { buffer: cfgBuf }], [6, { buffer: swardBuf }], [7, { buffer: frameBuf }], [8, { buffer: list }], [9, { buffer: nearDomain }],
-        [15, land.get(5)], [16, coverView], [18, land.get(8)],
+        [15, land.get(5)], [16, coverView], [17, groundView], [18, land.get(8)],
       ]);
       return device.createBindGroup({
         label: `${label} blades view ${MEADOW_BLADE_SEGMENTS[k]}`, layout: programs.view,
@@ -870,9 +903,29 @@ export async function createMeadowGrass({
   let curCity = city;
   let curBoard = board;
   let curInlandWater = inlandWater;
+  let curTrees = trees;
   let coverTexels = 0;
   let active = false;
   let destroyed = false;
+  // The furlongs' crops, set out once a board and region; the litter is laid over a copy whenever the trees change.
+  let fields = null, fieldsOf = null, treesOf = null, fieldTexels = 0, litterTexels = 0;
+  function layGround(force = false) {
+    const tropical = coast;
+    if (!fields || fieldsOf?.board !== curBoard || fieldsOf?.region !== curRegion) {
+      fields = bakeMeadowGroundFields({ region: curRegion, board: curBoard, size: groundSize, tropical });
+      fieldsOf = { board: curBoard, region: curRegion };
+      let n = 0;
+      for (let i = 0; i < fields.length; i += 4) if (fields[i] !== 0) n++;
+      fieldTexels = n;
+      force = true;
+    }
+    const signature = meadowTreesSignature(curRegion, curTrees);
+    if (!force && signature === treesOf) return;
+    treesOf = signature;
+    const map = fields.slice();
+    litterTexels = layMeadowLitter(map, { region: curRegion, size: groundSize, trees: curTrees });
+    device.queue.writeTexture({ texture: groundTexture }, map, { bytesPerRow: groundSize * 4 }, [groundSize, groundSize]);
+  }
 
   function sync(next = {}) {
     if (next.region !== undefined) curRegion = next.region;
@@ -883,6 +936,7 @@ export async function createMeadowGrass({
     if (next.city !== undefined) curCity = next.city;
     if (next.board !== undefined) curBoard = next.board;
     if (next.inlandWater !== undefined) curInlandWater = next.inlandWater;
+    if (next.trees !== undefined) curTrees = next.trees;
     const elevResized = syncOwnedElevation(curRegion, curHeights);
     const map = buildMeadowCoverMap({
       region: curRegion,
@@ -900,6 +954,7 @@ export async function createMeadowGrass({
     let texels = 0;
     for (let i = 0; i < map.length; i += 4) if (map[i] >= 32) texels++;
     coverTexels = texels;
+    layGround();
     cfgF.set([curRegion.x, curRegion.z, curRegion.span, MEADOW_WATERLINE], 0);
     syncCraterCfg(curRegion);
     if (elevResized || !passGroups) buildGroups();
@@ -1005,6 +1060,22 @@ export async function createMeadowGrass({
     wakesWereEmpty = false;
   }
 
+  // The trees whose litter lies under them, when they are planted or move.
+  function setTrees(nextTrees) {
+    curTrees = nextTrees;
+    if (!destroyed) layGround();
+  }
+  // The crops and the litter as they stand on the game's date.
+  function setCalendar(nextDateMs) {
+    const next = meadowGrowthDay(nextDateMs, latitude());
+    if (next === null || next === day || destroyed) return;
+    day = next;
+    packed = packMeadowSward(sward, day);
+    device.queue.writeBuffer(swardBuf, 0, packed.data);
+    packed.means.slice(0, 3).forEach((mean, m) => cfgF.set([...mean, 1], 24 + m * 4));
+    cfgDirty = true;
+  }
+
   sync({ region, heights, biome, beaches, port, city, board, inlandWater });
   if (craters) bindCraters(craters);
   else buildGroups();
@@ -1016,7 +1087,11 @@ export async function createMeadowGrass({
       backend: 'blades',
       pack: swardName,
       mixes: MEADOW_MIX_ROLES.slice(),
-      species: sward.mixes.reduce((n, m) => n + m.species.length, 0),
+      get species() { return packed.species; },
+      get day() { return day; },
+      groundSize,
+      get fieldTexels() { return fieldTexels; },
+      get litterTexels() { return litterTexels; },
       coverSize,
       coast,
       isSecondary: Boolean(isSecondary),
@@ -1027,6 +1102,8 @@ export async function createMeadowGrass({
       get coveredTexels() { return coverTexels; },
     },
     sync,
+    setTrees,
+    setCalendar,
     bindCraters,
     setBallisticWakes,
     rebind(nextResources) {
@@ -1038,7 +1115,7 @@ export async function createMeadowGrass({
     // In the frame's compute pass: the cells in view listed, their blades sown, kept and leaned, and each list's draw
     // written.
     encode(pass) {
-      active = !destroyed && coverTexels > 0 && passGroups !== null;
+      active = !destroyed && (coverTexels > 0 || fieldTexels > 0 || litterTexels > 0) && passGroups !== null;
       if (!active) return;
       const scale = continuumPixelError() / CONTINUUM_BASE_PIXEL_ERROR, mp = continuumProfile('meadow');
       const least = CONTINUUM_MIN_PIXELS * scale * (isMobile ? MEADOW_BLADE_MOBILE_COARSER : 1);
@@ -1107,6 +1184,8 @@ export async function createMeadowGrass({
       fallbackCraterLookup.destroy();
       fallbackCraterField.destroy();
       coverTexture.destroy();
+      groundTexture.destroy();
+      fields = null;
       ownedElevation?.destroy();
       ownedElevation = null;
     },
@@ -1133,6 +1212,7 @@ export async function createSectionMeadowGrass(section, ctx) {
     board: section.board ?? null,
     inlandWater: section.inlandWater ?? null,
     elevation: section.elevation ?? null,
+    trees: ctx.trees ?? null,
     resources: section.resources,
     isSecondary: true,
   });

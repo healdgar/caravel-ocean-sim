@@ -6334,6 +6334,8 @@ async function main() {
       const capSpd=ashore.on&&Number.isFinite(ashore.prevX)?Math.hypot(cam.x-ashore.prevX,cam.z-ashore.prevZ)/Math.max(dt,0.016):0;
       ashore.prevX=cam.x;ashore.prevZ=cam.z;
       worldBodies.setCaptain(ashore.on,cam.x,cam.y-ASHORE_EYE_M,cam.z,cam.yaw,capSpd);
+      // The meadow's crops and litter stand as the season of the game's date has them.
+      terrain.setCalendar?.(gameDateMs());
       splitComputePass?.('Continuum land');
       cp=terrain.encode(cp,skyChanged,frameF,splitComputePass)??cp;
     }else{
