@@ -32,9 +32,11 @@ test('GPU terrain occlusion preserves full close-forest, shore, horizon and unde
  try{
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
   const rows=[],scenes=[
-   // In still air: a crown's sway does not repeat from one load to the next, and among near trees it moves whole boughs.
-   {name:'reported-close-view',w:'1920',h:'1080',cam:'-979.830347,366.080607,-5519.26402,29.742625,1.101069',windSpeed:'0'},
-   {name:'reported-close-view-weak-device',w:'1920',h:'1080',cam:'-979.830347,366.080607,-5519.26402,29.742625,1.101069',windSpeed:'0',polygons:'0.25',budgetOnly:true},
+   // At 1280 x 720: at 1920 x 1080 the reported canopy asks some 16M triangles of the fixed 1.5 px, more than its lists
+   // hold (they are sized for the one 3M budget, whose governor polygons=fixed stills), and which of its instances then
+   // take a coarser cut is settled by the order the GPU reaches them in, so no two frames of it are drawn alike.
+   {name:'reported-close-view',w:'1280',h:'720',cam:'-979.830347,366.080607,-5519.26402,29.742625,1.101069'},
+   {name:'reported-close-view-weak-device',w:'1280',h:'720',cam:'-979.830347,366.080607,-5519.26402,29.742625,1.101069',polygons:'0.25',budgetOnly:true},
    {name:'shore',w:'640',h:'360',cam:'-1750,6,-7000,112,1'},
    {name:'horizon',w:'640',h:'360',cam:'-1800,6,10500,6.2,1'},
    {name:'underwater',w:'640',h:'360',cam:'-1800,-4,-7000,112,4'},
@@ -59,7 +61,9 @@ test('GPU terrain occlusion preserves full close-forest, shore, horizon and unde
       let image=null;
       for(const step of[0,50,100,150]){r.step(now+step);image=r.grab();await r.device.queue.onSubmittedWorkDone();await image;await new Promise(resolve=>setTimeout(resolve,0));}
       const source=r.indirect[0],read=r.device.createBuffer({size:source.size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),enc=r.device.createCommandEncoder();enc.copyBufferToBuffer(source,0,read,0,source.size);r.device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);const commands=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();read.destroy();
-      return {pixels:Array.from(await image),commands,errors:r.errors,lost:r.lost,occlusion:oceanHiZ.enabled,state:oceanStartup.state,frames};
+      // How full each family's fullest list stood (js/continuum-census.js), read a few frames late.
+      const census=oceanContinuumCensus.latest,fill=census?Object.fromEntries(Object.entries(census.breakdown).map(([name,b])=>[name,b.maxFill])):null;
+      return {pixels:Array.from(await image),commands,fill,errors:r.errors,lost:r.lost,occlusion:oceanHiZ.enabled,state:oceanStartup.state,frames};
      },WARM_FRAMES);
      assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);assert.equal(result.lost,undefined);assert.equal(result.state,'ready');assert.equal(result.occlusion,!reference);assert.equal(result.frames,WARM_FRAMES,'the coast was ready within the frames both runs draw');assert.ok(result.pixels.some((v,i)=>i%4!==3&&v>5));captures.push(result);
      if(output){const name=output+'/'+scene.name+(reference?'-reference':'-occlusion')+(captures.length===2&&reference?'-again':'');await page.screenshot({path:name+'.png'});await writeFile(name+`-${scene.w}x${scene.h}.rgba`,Buffer.from(result.pixels));}
@@ -72,10 +76,12 @@ test('GPU terrain occlusion preserves full close-forest, shore, horizon and unde
    const {differences,maxError}=[captures[0],...(scene.budgetOnly?[]:[captures[1]])].map(c=>compare(c.pixels,occluded.pixels)).sort((a,b)=>a.differences-b.differences)[0];
    const triangles=c=>[0,1,2,3].reduce((sum,list)=>sum+c[list*4]*c[list*4+1]/3,0),row={name:scene.name,channels:reference.pixels.length,differences,maxError,noise,referenceTriangles:triangles(reference.commands),occlusionTriangles:triangles(occluded.commands)};rows.push(row);t.diagnostic(JSON.stringify(row));
    if(output)await writeFile(output+'/receipt.json',JSON.stringify(rows,null,2));
-   // A frame is not repeated exactly from one load to the next on Metal (the close canopy's two references, in wind, have
-   // differed by more than 8/255 in some 300,000 of its 8.3M channels); SwiftShader repeats it exactly. Occlusion may differ from the
-   // reference no more than the reference differs from itself: a tree it wrongly hid would show past that.
-   // The quarter-budget scene exists to read its triangle count.
+   // A frame compared is one whose cut fits its lists: past them, which instances yield is a race, and two loads of one
+   // frame differ by whole crowns (some 300,000 of the 1920 x 1080 canopy's 8.3M channels) with or without occlusion.
+   if(!scene.budgetOnly)for(const capture of captures)assert.ok(capture.fill&&Object.values(capture.fill).every(fill=>fill<.9),scene.name+'\'s lists hold its cut: '+JSON.stringify(capture.fill));
+   // Within them a frame repeats from one load to the next to a few channels on Metal, and exactly on SwiftShader.
+   // Occlusion may differ from the reference no more than the reference differs from itself: a tree it wrongly hid
+   // would show past that. The quarter-budget scene exists to read its triangle count.
    if(!scene.budgetOnly)assert.ok(differences<=noise.differences*1.5+Math.ceil(row.channels*4e-5)&&maxError<=Math.max(noise.maxError+8,process.env.WEBGPU_BACKEND==='metal'?16:0),JSON.stringify(row));
   }
   // Checked once every scene has compared its pixels, so a budget miss cannot hide them.
