@@ -8,9 +8,10 @@ Run from the repository root with forestmodeler's own Python:
         --forestmodeler <a forestmodeler checkout> --work <an empty folder for the baker's own output>
 
 Every prototype is grown by forestmodeler's ColonizingGrower at its pack's latitude (PACKS) and meshed directly
-with forestmodeler's own hero wood (`plant_meshes_fast(..., lod='hero')`) and native leaf placement
-(`place_leaves` + `_build_tier0_blade_meshes`) — no synthetic pruning, no glued twigs, and no fake
-leaf scaling. Decimation happens ONLY afterward in `scripts/prepare-forest-continuum.mjs`.
+with forestmodeler's own wood at hero tessellation, every living twig through every node (`plant_meshes_fast`,
+no budget, straightening or pruning), the shoots its leaves are strung on (`shoot_meshes`), and native leaf
+placement (`place_leaves` + `_build_tier0_blade_meshes`) — no glued twigs and no fake leaf scaling. Decimation
+happens ONLY afterward in `scripts/prepare-forest-continuum.mjs`.
 
 After this, bake the derived continuum atlas:
 
@@ -438,6 +439,137 @@ def spray_meshes(organs, plan, Mesh, cover):
     return meshes
 
 
+# A broadleaf's leaves are strung along shoots (forestmodeler's place_leaves): a modelled node stands for the shoot
+# system round it, and each of its shoots leaves the node's internode once, at one point of its axis, in one
+# direction, `reach` long, its `per_shoot` leaves standing at (k + 1/2) of its spacing along it, each off it by its own
+# petiole. The skeleton holds no shoot, so the wood had none and the leaves hung beside their twigs, a median 9 cm and
+# as far as half a metre from any bark. Each is drawn here as the living tip it is: a tube from its internode's axis to
+# half a spacing past its last leaf, the genome's `tip_radius` where it leaves (a living tip's, never more than the
+# twig it leaves) and half that at its bud, with the sides the mesher gives the order past the finest and that radius,
+# closed at both ends. Where each runs is read back from its leaves exactly: a petiole's foot is the leaf less its
+# stand-off, two feet give the shoot's line and the first its base, and a lone leaf's shoot leaves the axis of its
+# internode at half a spacing from that foot.
+def shoot_meshes(organs, plan, skeleton, Mesh, tess):
+    """The shoots `organs`' leaves are strung on, as one bark Mesh (z up), or None for a species whose leaves are not
+    borne singly along shoots (a rosette, a fascicle, a frond: its sprays draw its shoots)."""
+    import numpy as np
+    import gardenplans.organs as organs_module
+    from gardenplans.phenology import PEAK_SEASON, foliage_fraction
+    if not isinstance(getattr(type(plan), 'branches_laterally', None), property):
+        raise SystemExit("this forestmodeler takes a zero branch probability for a palm (PlantPlan.branches_laterally)")
+    if not callable(getattr(organs_module, 'shoot_layout', None)):
+        raise SystemExit("this forestmodeler strings an opposite pair's leaves one by one (organs.shoot_layout)")
+    m = len(organs.position)
+    per_point = max(int(getattr(plan, 'leaf_cluster', 1)), 1)
+    frond = float(getattr(plan, 'shoot_leaf_density', 0.0) or 0.0) > 0.0
+    # The shoot's length, its leaves, and how many share each of its nodes (an opposite pair on the maple), as
+    # place_leaves lays them.
+    reach, per_shoot, paired = organs_module.shoot_layout(plan, float(getattr(skeleton, 'cluster', 1.0)))
+    if not m or per_point > 1 or frond or not plan.branches_laterally or reach <= 1e-6:
+        return None
+    spacing = reach / per_shoot
+    gap = paired * spacing
+    out = float(foliage_fraction(plan, PEAK_SEASON))
+    if out <= 0.0:
+        raise SystemExit('the leaves are placed bare, so their petioles cannot be measured')
+    petiole = np.array([a.petiole * a.length for a in plan.leaves])[organs.archetype] * (organs.scale.astype(np.float64) / out)
+    foot = organs.position.astype(np.float64) - organs.normal.astype(np.float64) * petiole[:, None]
+
+    # A twig node's leaves, in the order they were placed, are its shoots' in turn, `per_shoot` to a shoot.
+    node = np.asarray(organs.node_index, np.int64)
+    order = np.argsort(node, kind='stable')
+    fresh = np.r_[True, node[order][1:] != node[order][:-1]]
+    heads = np.flatnonzero(fresh)
+    within = np.arange(m) - np.repeat(heads, np.diff(np.r_[heads, m]))
+    shoot, along = np.empty(m, np.int64), np.empty(m, np.int64)
+    shoot[order] = np.cumsum(fresh | (within % per_shoot == 0)) - 1
+    along[order] = within % per_shoot
+    told = getattr(organs, 'shoot_index', None)
+    if told is not None and np.all(told >= 0):
+        pairs = np.unique(np.stack([shoot, told]), axis=1)
+        if len(np.unique(pairs[0])) != pairs.shape[1] or len(np.unique(pairs[1])) != pairs.shape[1]:
+            raise SystemExit("the leaves' shoots are not forestmodeler's own (Organs.shoot_index)")
+    G = int(shoot.max()) + 1
+    count = np.bincount(shoot, minlength=G)
+    first, last = np.empty(G, np.int64), np.empty(G, np.int64)
+    first[shoot[along == 0]] = np.flatnonzero(along == 0)
+    final = along == count[shoot] - 1
+    last[shoot[final]] = np.flatnonzero(final)
+
+    direction = foot[last] - foot[first]
+    many = count > paired
+    direction[many] /= np.linalg.norm(direction[many], axis=1, keepdims=True)
+    base = foot[first] - direction * (0.5 * gap)
+    # A shoot of one node: where the internode's axis lies half a node's spacing from its foot.
+    nodes = skeleton.nodes
+    lone = np.flatnonzero(~many)
+    if len(lone):
+        n = node[first[lone]]
+        parent = np.asarray(nodes.parent)[n]
+        b = np.asarray(nodes.position, np.float64)[n]
+        a = np.where((parent >= 0)[:, None], np.asarray(nodes.position, np.float64)[np.maximum(parent, 0)], b)
+        d, w = b - a, a - foot[first[lone]]
+        dd, wd, ww = (d * d).sum(1), (w * d).sum(1), (w * w).sum(1)
+        disc = wd * wd - dd * (ww - (0.5 * gap) ** 2)
+        root = np.sqrt(np.maximum(disc, 0.0))
+        safe = np.maximum(dd, 1e-18)
+        t_near, t_far = (-wd - root) / safe, (-wd + root) / safe
+        t = np.where((disc >= 0) & (t_near >= 0) & (t_near <= 1), t_near,
+                     np.where((disc >= 0) & (t_far >= 0) & (t_far <= 1), t_far, np.clip(-wd / safe, 0.0, 1.0)))
+        base[lone] = a + d * t[:, None]
+        toward = foot[first[lone]] - base[lone]
+        direction[lone] = toward / np.maximum(np.linalg.norm(toward, axis=1, keepdims=True), 1e-12)
+    strung = base[shoot] + direction[shoot] * ((along // paired + 0.5) * gap)[:, None]
+    astray = np.linalg.norm(strung - foot, axis=1)
+    if len(astray) and astray.max() > 1e-3:
+        raise SystemExit(f'leaves stand {astray.max() * 1000:.1f} mm off the shoots read back from them')
+    length = ((count - 1) // paired + 1) * gap
+    tip = base + direction * length[:, None]
+
+    # The tubes: a ring where each leaves its twig and one at its bud, a centre closing the first, a point the second.
+    r0 = float(plan.tip_radius)
+    r1 = 0.5 * r0
+    deepest = max(int(axis.order) for axis in skeleton.axes)
+    S = int(tess.radial_for(deepest, r0))
+    ref = np.where((np.abs(direction[:, 2]) > 0.9)[:, None], [[1.0, 0.0, 0.0]], [[0.0, 0.0, 1.0]])
+    e1 = np.cross(direction, ref)
+    e1 /= np.linalg.norm(e1, axis=1, keepdims=True)
+    e2 = np.cross(direction, e1)
+    phi = 2.0 * np.pi * np.arange(S + 1) / S
+    around = np.cos(phi)[None, :, None] * e1[:, None, :] + np.sin(phi)[None, :, None] * e2[:, None, :]
+    lean = ((r0 - r1) / length)[:, None, None] * direction[:, None, :]
+    side_normal = around + lean
+    side_normal /= np.linalg.norm(side_normal, axis=2, keepdims=True)
+    V = 2 * (S + 1) + 2
+    position = np.empty((G, V, 3))
+    normal = np.empty((G, V, 3))
+    uv = np.zeros((G, V, 2))
+    position[:, :S + 1] = base[:, None, :] + around * r0
+    position[:, S + 1:2 * S + 2] = tip[:, None, :] + around * r1
+    position[:, 2 * S + 2] = base
+    position[:, 2 * S + 3] = tip + direction * r1
+    normal[:, :S + 1] = side_normal
+    normal[:, S + 1:2 * S + 2] = side_normal
+    normal[:, 2 * S + 2] = -direction
+    normal[:, 2 * S + 3] = direction
+    uv[:, :2 * S + 2, 0] = np.tile(phi / (2.0 * np.pi) * tess.u_repeats_for(r0), 2)[None, :]
+    uv[:, S + 1:2 * S + 2, 1] = (length * tess.v_scale)[:, None]
+    uv[:, 2 * S + 3, 1] = length * tess.v_scale
+    i = np.arange(S)
+    faces = np.concatenate([
+        np.stack([i, i + 1, S + 1 + i], 1), np.stack([i + 1, S + 2 + i, S + 1 + i], 1),
+        np.stack([np.full(S, 2 * S + 2), i + 1, i], 1), np.stack([S + 1 + i, S + 2 + i, np.full(S, 2 * S + 3)], 1),
+    ])
+    F = len(faces)
+    print(f'  {G:,} shoots of {m:,} leaves ({int((~many).sum()):,} of one node), {per_shoot} a shoot, {paired} a node every {gap * 100:.1f} cm, '
+          f'{r0 * 1000:.1f} mm to {r1 * 1000:.1f} mm, {S} sides: {G * V:,} vertices, {G * F:,} triangles', flush=True)
+    return Mesh(
+        position.reshape(-1, 3).astype(np.float32), normal.reshape(-1, 3).astype(np.float32), uv.reshape(-1, 2).astype(np.float32),
+        (faces[None] + V * np.arange(G)[:, None, None]).reshape(-1, 3).astype(np.int32),
+        np.full(G * F, min(deepest + 1, 255), np.uint8), np.zeros(G * F, np.uint8),
+    )
+
+
 def stretch_bark(maps):
     """A square MaterialCraft bark tile, twice down the stem and at the 512 x 1024 of the pack's other barks."""
     import numpy as np
@@ -618,21 +750,38 @@ def main():
     accel = tf._get_bake_accel()
     real_meshes = accel.plant_meshes_fast if accel is not None else tf.plant_meshes
 
-    # Use forestmodeler's REAL hero wood mesher directly (only omitting underground ±30m subterranean root networks
-    # so prototype bounding spheres stay accurate to above-ground trunks and crowns).
-    def native_hero_meshes(grower, age, **options):
-        return real_meshes(grower, float(age), roots=False, leaves=False, lod='hero', separate_wounds=True)
+    # Pass grower.env into forestmodeler's real place_leaves so sun/shade leaf plasticity is active; placed once a
+    # tree, so its shoots (the wood's) and its blades are strung from the same leaves.
+    placed = {}
 
-    # Pass grower.env into forestmodeler's real place_leaves so sun/shade leaf plasticity is active.
     def native_env_leaves(skel, age, plan, **options):
-        g = grower_of_skel.get(id(skel))
-        return native_place_leaves(skel, float(age), plan, env=g.env if g is not None else options.get('env'))
+        key = (id(skel), float(age))
+        if key not in placed:
+            g = grower_of_skel.get(id(skel))
+            placed[key] = native_place_leaves(skel, float(age), plan, env=g.env if g is not None else options.get('env'))
+        return placed[key]
 
-    # Use forestmodeler's REAL native_tree_render.blade_meshes at 1:1 native single-leaf scale (cluster=1.0):
-    # each veteran oak/chestnut/elm already carries 200k–408k real individual folded leaves (~12.3M total verts
-    # across all 12 prototypes, safely within the continuum's 16.77M float-indexable vertex address space).
+    # forestmodeler's own wood mesher (omitting only the underground root networks, so a prototype's bound stays its
+    # trunk and crown), sweeping every living twig through every node: hero's tessellation and none of its economies.
+    # Its 450,000-triangle budget is met by straightening rings off the twigs until the tree fits, which took 21% of
+    # the veteran oak's internodes its shoots leave from as far as 13 cm off them, and its pruning drops leafless
+    # twigs under 5.6% of the trunk's radius. A cap on one tree's detail is no part of the continuum's source (its cut
+    # economises, AGENTS.md rule 3), and the finest cut is the physical truth. The shoots the leaves are strung on
+    # (shoot_meshes) are its finest bark.
+    from gardenplans.lod import HERO
+    from gardenplans.mesh import Mesh, concat
+    whole = dataclasses.replace(HERO, name='hero-whole', min_radius=0.0, straighten=0.0, budget=0)
+    plan_of_grower = {id(grower): plan for _, _, _, _, plan, grower in grown}
+
+    def native_hero_meshes(grower, age, **options):
+        shoot, *rest = real_meshes(grower, float(age), roots=False, leaves=False, lod=whole, separate_wounds=True)
+        plan = plan_of_grower[id(grower)]
+        tubes = shoot_meshes(native_env_leaves(grower.skeleton, age, plan), plan, grower.skeleton, Mesh, whole.tess)
+        return (shoot if tubes is None else concat(shoot, tubes), *rest)
+
+    # Use forestmodeler's REAL native_tree_render.blade_meshes at 1:1 native single-leaf scale (cluster=1.0): each
+    # veteran oak, chestnut or elm carries 200k–408k real individual folded leaves.
     species_of_plan = {id(plan): species for _, species, _, _, plan, _ in grown}
-    from gardenplans.mesh import Mesh
 
     covers = {}
 
@@ -802,7 +951,7 @@ def main():
             'script': 'scripts/bake-forest-mature-pack.py',
             'pack': args.name,
             'forestmodeler': revision,
-            'growth': 'native forestmodeler ColonizingGrower at resolution=1.0, steps_per_cycle=2: open-grown stand-alone trees (veteran) + lockstep intermixed competitive stand sharing SiteShadowGrid & SiteSoilField (canopy) + hero wood + native_tree_render.blade_meshes',
+            'growth': 'native forestmodeler ColonizingGrower at resolution=1.0, steps_per_cycle=2: open-grown stand-alone trees (veteran) + lockstep intermixed competitive stand sharing SiteShadowGrid & SiteSoilField (canopy) + whole hero wood (unpruned, unstraightened) + shoot tubes under every leaf + native_tree_render.blade_meshes',
             'latitudeDegrees': LATITUDE,
             'fieldCellMetres': FIELD_CELL_METRES,
             'middleCellsInHeight': MIDDLE_CELLS_IN_HEIGHT,

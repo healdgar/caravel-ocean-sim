@@ -1,0 +1,2559 @@
+{
+  "format": "waterworld.forest-instances",
+  "version": 2,
+  "materialContract": "gene-surfaces-v3",
+  "units": "metres",
+  "upAxis": "Y",
+  "vertexStride": 56,
+  "rootStride": 48,
+  "rootCount": 24,
+  "appearanceErrorSupported": false,
+  "coverage": {
+    "kind": "occupied-cells",
+    "originXZ": [
+      -64.371,
+      -78.794
+    ],
+    "cellMetres": 32.0,
+    "dimensions": [
+      4,
+      5
+    ],
+    "cells": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      17,
+      18,
+      19
+    ]
+  },
+  "stature": "full-grown",
+  "files": {
+    "vertices.bin": {
+      "bytes": 846173944,
+      "sha256": "307b14373bf0807dbc4c5f4646ae4229038ebf13044d5cfb39e6e76f1cbe42cd",
+      "gzip": {
+        "file": "vertices.bin.gz",
+        "bytes": 333503595,
+        "sha256": "6730d24f796ccd17bc7c5d4ed2b5b45b0a9dac7ba3280cd033c4365bccd1c541"
+      },
+      "vertexCount": 15110249
+    },
+    "indices.bin": {
+      "bytes": 181409748,
+      "sha256": "8bb23be2f682020e6061d8d03e82247a9a139988edb4b98e03a861735d63142a",
+      "gzip": {
+        "file": "indices.bin.gz",
+        "bytes": 46170464,
+        "sha256": "09a44363473460bdcf8f17011034fac5a8aa6d1e22b5afd640ab9d896a2a8eb9"
+      },
+      "indexCount": 45352437
+    },
+    "roots.bin": {
+      "bytes": 1152,
+      "sha256": "5a23a27b5f28b5910d0191f0f4d59c6ba65534f4741c1f6192d6f17fb91acd6d",
+      "gzip": {
+        "file": "roots.bin.gz",
+        "bytes": 1085,
+        "sha256": "9bdfebe54ce2ad1d862ecf23f07e1793999748dc6ee1291233f2d64a622183b9"
+      },
+      "rootCount": 24
+    }
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "oak",
+      "cohort": "veteran",
+      "age": 60.0,
+      "heightMetres": 18.052,
+      "crownRadiusMetres": 9.435,
+      "crownBaseMetres": 5.217,
+      "dbhCentimetres": 47.09,
+      "low": [
+        -8.6671,
+        -0.7951,
+        -8.9893
+      ],
+      "high": [
+        9.1584,
+        18.2254,
+        8.9722
+      ],
+      "centre": [
+        0.2457,
+        8.7151,
+        -0.0086
+      ],
+      "radius": 15.8293,
+      "firstRoot": 0,
+      "rootCount": 1,
+      "wood": {
+        "firstIndex": 0,
+        "indexCount": 5351796
+      },
+      "leaf": {
+        "firstIndex": 5351796,
+        "indexCount": 2467068
+      },
+      "far": {
+        "firstIndex": 7818864,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "oak-veteran-bark-albedo.png",
+            "bytes": 1253954,
+            "sha256": "bec57a5718ce313435a1ddf513c52a6f6b5c8bfc02ceffd063fbe7b5a5176a3a",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-bark-normal.png",
+            "bytes": 917393,
+            "sha256": "cd7bc1e843077f0042d97f8a79fa0fc6d39f9f16f45a94a5d66a5c7547364d7a",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "oak-veteran-bark-roughness.png",
+            "bytes": 207816,
+            "sha256": "9f06eca96cea5b90d1cb5059601cd03c7aedf09c1be67558f06ed757d1f9df94",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.032,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "oak-veteran-wounds-albedo.png",
+            "bytes": 42732,
+            "sha256": "afc6e47fec27ff045a02986deae43106e47802f958f3ae35826e3a4e48b0335d",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-wounds-normal.png",
+            "bytes": 113164,
+            "sha256": "8095960c672058b3f4ccdfb9d2481bb8c894163d58697174c5ac9cdcef8a59de",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "oak-veteran-wounds-roughness.png",
+            "bytes": 25339,
+            "sha256": "f1dab42bc4201fbe25d34ce3f031a790d55d9d206372c35aa7e241b0cbd03335",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "oak-veteran-foliage-0-albedo.png",
+            "bytes": 82783,
+            "sha256": "1866133bfb120c2262b4ac91760d068d717cc9c8f0acf08fbc3d73ce546af41f",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-foliage-0-normal.png",
+            "bytes": 75365,
+            "sha256": "bfae67cb771f2c0bd860b14c90edebb227da165db0d564fea8fcb8b39971190d",
+            "encoding": "linear"
+          },
+          "roughness": 0.94,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "oak-veteran-foliage-1-albedo.png",
+            "bytes": 82971,
+            "sha256": "0058b47d08ac8ae06ba4707202c3b23a449e2256fcdb289a3cb35c58297ebae7",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-foliage-1-normal.png",
+            "bytes": 74909,
+            "sha256": "fdac50bfe2bca0e744923e2a94a07efc5b5514273cd38884aec09c8e293073bd",
+            "encoding": "linear"
+          },
+          "roughness": 0.94,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "oak-veteran-foliage-2-albedo.png",
+            "bytes": 82686,
+            "sha256": "2205249ea46646f4338bb4f73627ce5ef15dc72656a73a99a4e5eec81702930a",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-foliage-2-normal.png",
+            "bytes": 75502,
+            "sha256": "14424ea53327ae74b0028e15464279e64df3888b5326c7a1aebb8d0dcf9cd174",
+            "encoding": "linear"
+          },
+          "roughness": 0.94,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 18.4745,
+      "crownRadius": 9.435,
+      "basalRadius": 0.3698
+    },
+    {
+      "id": 1,
+      "species": "chestnut",
+      "cohort": "veteran",
+      "age": 68.0,
+      "heightMetres": 22.581,
+      "crownRadiusMetres": 11.832,
+      "crownBaseMetres": 3.747,
+      "dbhCentimetres": 61.84,
+      "low": [
+        -7.9953,
+        -0.1785,
+        -11.3444
+      ],
+      "high": [
+        9.9892,
+        22.8894,
+        9.6028
+      ],
+      "centre": [
+        0.9969,
+        11.3555,
+        -0.8708
+      ],
+      "radius": 17.9896,
+      "firstRoot": 1,
+      "rootCount": 1,
+      "wood": {
+        "firstIndex": 7818996,
+        "indexCount": 4474134
+      },
+      "leaf": {
+        "firstIndex": 12293130,
+        "indexCount": 2639568
+      },
+      "far": {
+        "firstIndex": 14932698,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "chestnut-veteran-bark-albedo.png",
+            "bytes": 1256890,
+            "sha256": "e929ab50808b7e8907b46ddb517a14a2f65a2c4aad068a630a140380689005a4",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-bark-normal.png",
+            "bytes": 733884,
+            "sha256": "d2adb6cd10120ab817365303de805a025d0fa913f11761cbef9b3ee0926c9929",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "chestnut-veteran-bark-roughness.png",
+            "bytes": 161913,
+            "sha256": "a241a1d83a0b2e567f21548daed4f4c13de15d4109da96cf21d573964e0f1615",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.018,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "chestnut-veteran-wounds-albedo.png",
+            "bytes": 45084,
+            "sha256": "7c2b4e605b1eca03699784a32fddb5237f541e846829718c311392365c6cdb80",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-wounds-normal.png",
+            "bytes": 114046,
+            "sha256": "68f1754bd5b436493524ca7827879d1fa0cae06728eb78cab041196836b7b6d0",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "chestnut-veteran-wounds-roughness.png",
+            "bytes": 26028,
+            "sha256": "7d3a1dab828754d61037fa251ab4d8934cec4d5f237165d1e859bf626c91f8db",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "chestnut-veteran-foliage-0-albedo.png",
+            "bytes": 101040,
+            "sha256": "c5c81ac225c55e106d0e2b8106f4f07fabb6072fab392eb5b384b56b143d56fb",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-foliage-0-normal.png",
+            "bytes": 87840,
+            "sha256": "a899a618983a96e109b9c2dbef0a269f9211cc306f8efbf867e1b5ecd29528eb",
+            "encoding": "linear"
+          },
+          "roughness": 0.796,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "chestnut-veteran-foliage-1-albedo.png",
+            "bytes": 101862,
+            "sha256": "0a72637974c904f2d3decd098bcdeeff71b00ac69c76d5c2254da54a5ec14af8",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-foliage-1-normal.png",
+            "bytes": 87146,
+            "sha256": "539fd1bbbb3fd14948b3dcee37ab5fb9f28f656d5e0f384051579a9145183604",
+            "encoding": "linear"
+          },
+          "roughness": 0.796,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "chestnut-veteran-foliage-2-albedo.png",
+            "bytes": 101068,
+            "sha256": "cf33787428a63d8e8a42e6f3e37a1fb82bdb207ce185978a9fc0162fd3f6defa",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-foliage-2-normal.png",
+            "bytes": 88127,
+            "sha256": "4ce6f19201176077aef8dda8b3f77d50dd051c99c3775b0db29ad22bc3cd674b",
+            "encoding": "linear"
+          },
+          "roughness": 0.796,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 22.5,
+      "crownRadius": 11.832,
+      "basalRadius": 0.5425
+    },
+    {
+      "id": 2,
+      "species": "maple",
+      "cohort": "veteran",
+      "age": 48.0,
+      "heightMetres": 18.571,
+      "crownRadiusMetres": 9.22,
+      "crownBaseMetres": 3.984,
+      "dbhCentimetres": 27.94,
+      "low": [
+        -9.2958,
+        -0.15,
+        -8.4322
+      ],
+      "high": [
+        8.0616,
+        18.9603,
+        7.3832
+      ],
+      "centre": [
+        -0.6171,
+        9.4052,
+        -0.5245
+      ],
+      "radius": 15.1388,
+      "firstRoot": 2,
+      "rootCount": 1,
+      "wood": {
+        "firstIndex": 14932830,
+        "indexCount": 6736770
+      },
+      "leaf": {
+        "firstIndex": 21669600,
+        "indexCount": 3588264
+      },
+      "far": {
+        "firstIndex": 25257864,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "maple-veteran-bark-albedo.png",
+            "bytes": 1288176,
+            "sha256": "1a1400cdfae64c658c8afe9094bb55d5c47c63dcd69319194e0876ea0e379c2b",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-bark-normal.png",
+            "bytes": 894828,
+            "sha256": "a93d6da8ab2421aa3cfef4493746fce15992c478f5023075d3b5d848fac7c1cd",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "maple-veteran-bark-roughness.png",
+            "bytes": 208433,
+            "sha256": "93199e2847ced825726a77a00f88a221eb7f65ba1d2dafed4d8f7b206bad9604",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.04000000000000001,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "maple-veteran-wounds-albedo.png",
+            "bytes": 51410,
+            "sha256": "490ad92689896e07ef856a36e4285e874c176b25c3619e0d30ca10a8259bf55c",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-wounds-normal.png",
+            "bytes": 115590,
+            "sha256": "cccf45189d063016378e79c3e56c2ae16d16ff62cc74be3f387fb4c80487fa30",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "maple-veteran-wounds-roughness.png",
+            "bytes": 26183,
+            "sha256": "e3657cdcb15988362768fcb24f9aa10ef20f4aded5bfaf10ca49d4b8a506120e",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "maple-veteran-foliage-0-albedo.png",
+            "bytes": 81483,
+            "sha256": "afb4718aae43d488e7957cfa35d18187fe29f947cc50aac56f4d1b6e8838d51a",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-foliage-0-normal.png",
+            "bytes": 81000,
+            "sha256": "ab568b0f252b6d2ad273a04a541680547be80175554e1c41b233bfb8e5b8513e",
+            "encoding": "linear"
+          },
+          "roughness": 0.85,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "maple-veteran-foliage-1-albedo.png",
+            "bytes": 82077,
+            "sha256": "cfe97504caecd090e0a32df6446c52badf4896b146344f59d12f0a76e9e01641",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-foliage-1-normal.png",
+            "bytes": 80518,
+            "sha256": "f20684baa2126de025b14f53cef60723c4691dde2fa0687bf3a606661132d576",
+            "encoding": "linear"
+          },
+          "roughness": 0.85,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "maple-veteran-foliage-2-albedo.png",
+            "bytes": 81510,
+            "sha256": "07c4d229f73580f8c08a9cc5acd89fe0d704ce114489e769cb854c3c3c1b1774",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-foliage-2-normal.png",
+            "bytes": 81087,
+            "sha256": "ca8db0ca4f0d3642f7a90be924f3bafe9ac1f21b14ded0a1165f5379ed23d4b7",
+            "encoding": "linear"
+          },
+          "roughness": 0.85,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 17.8415,
+      "crownRadius": 9.22,
+      "basalRadius": 0.222
+    },
+    {
+      "id": 3,
+      "species": "elm",
+      "cohort": "veteran",
+      "age": 62.0,
+      "heightMetres": 20.103,
+      "crownRadiusMetres": 10.597,
+      "crownBaseMetres": 6.657,
+      "dbhCentimetres": 48.16,
+      "low": [
+        -7.776,
+        -0.15,
+        -7.3934
+      ],
+      "high": [
+        10.6096,
+        20.5356,
+        8.0548
+      ],
+      "centre": [
+        1.4168,
+        10.1928,
+        0.3307
+      ],
+      "radius": 15.8485,
+      "firstRoot": 3,
+      "rootCount": 1,
+      "wood": {
+        "firstIndex": 25257996,
+        "indexCount": 6152481
+      },
+      "leaf": {
+        "firstIndex": 31410477,
+        "indexCount": 4716900
+      },
+      "far": {
+        "firstIndex": 36127377,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "elm-veteran-bark-albedo.png",
+            "bytes": 1223233,
+            "sha256": "e43f4db9ebef374a41d894efb60543eb4968dc3708e9b239aaac90745cd454db",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-bark-normal.png",
+            "bytes": 887596,
+            "sha256": "1e38c26d933628f5ca223475a3643b7a1e5940dcb79a7f240019a339d358436a",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "elm-veteran-bark-roughness.png",
+            "bytes": 201999,
+            "sha256": "0ee21362f11201deaf1b6b316fdf8a17306d6565f88ad896924a2548f91c20b1",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.016,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "elm-veteran-wounds-albedo.png",
+            "bytes": 44973,
+            "sha256": "838c79f10bf97de05f916fa02192b9ceb8298e91a2a4931fcc6c4577ec4315bb",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-wounds-normal.png",
+            "bytes": 115490,
+            "sha256": "9ef150fa01e8957e7aa8c74f5801225f3f9ce1d8ce9838f3c411832171f317be",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "elm-veteran-wounds-roughness.png",
+            "bytes": 26517,
+            "sha256": "224a3abb564252eb1067582758b06b6beddd87e19d1419a2b6a3694258d75a6a",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "elm-veteran-foliage-0-albedo.png",
+            "bytes": 109292,
+            "sha256": "c1ead0e12030b2b0c34d7e2c2f09d1c326e8310b0738e9f22dd33a616c944835",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-foliage-0-normal.png",
+            "bytes": 98076,
+            "sha256": "f880395761f8a6a4595c49502fb3e8f24e35ac6ead244690ff67017306d2aff4",
+            "encoding": "linear"
+          },
+          "roughness": 0.868,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "elm-veteran-foliage-1-albedo.png",
+            "bytes": 109890,
+            "sha256": "c9d780d574a7ecc762bb724e47d40c1e97b4aa860d68383924c60987bd208252",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-foliage-1-normal.png",
+            "bytes": 97204,
+            "sha256": "c89810848605faac370f8abaa0bac2604c920ab1cbeb6baf6e9bbae771ee836a",
+            "encoding": "linear"
+          },
+          "roughness": 0.868,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "elm-veteran-foliage-2-albedo.png",
+            "bytes": 109462,
+            "sha256": "436b5161a538c55a12e625e737f8018fb7a1899ee4c48b0b329410dc0ec7af0b",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-foliage-2-normal.png",
+            "bytes": 97779,
+            "sha256": "1d0492e659dacfe2a74adf397154fc210e6db2d750f0cd4d30db4907670da47f",
+            "encoding": "linear"
+          },
+          "roughness": 0.868,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 18.6183,
+      "crownRadius": 10.597,
+      "basalRadius": 0.4347
+    },
+    {
+      "id": 4,
+      "species": "birch",
+      "cohort": "veteran",
+      "age": 34.0,
+      "heightMetres": 10.381,
+      "crownRadiusMetres": 4.722,
+      "crownBaseMetres": 2.719,
+      "dbhCentimetres": 8.51,
+      "low": [
+        -3.8736,
+        -0.15,
+        -4.2633
+      ],
+      "high": [
+        2.3593,
+        10.4351,
+        3.093
+      ],
+      "centre": [
+        -0.7572,
+        5.1425,
+        -0.5852
+      ],
+      "radius": 7.16,
+      "firstRoot": 4,
+      "rootCount": 1,
+      "wood": {
+        "firstIndex": 36127509,
+        "indexCount": 692064
+      },
+      "leaf": {
+        "firstIndex": 36819573,
+        "indexCount": 1007076
+      },
+      "far": {
+        "firstIndex": 37826649,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "birch-veteran-bark-albedo.png",
+            "bytes": 1134049,
+            "sha256": "92dbb6d852d8c62620fe1f9d306de78b0bc65933be4153d8fbd8c81485828304",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-bark-normal.png",
+            "bytes": 681078,
+            "sha256": "9e3697567d4139cef24c0a2263a3908e4a8ca0c5f176f44262ee3deb9a2bb290",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "birch-veteran-bark-roughness.png",
+            "bytes": 213767,
+            "sha256": "5677dbc160714b6bb0b3071be99e9fa55cca3df4dd9f8a338f48e2afa6f0d358",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.014000000000000002,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "birch-veteran-wounds-albedo.png",
+            "bytes": 62496,
+            "sha256": "8a2b89c738ae121dfa84bfef646290d51b60542ff358f66961514c3f8c81b67c",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-wounds-normal.png",
+            "bytes": 115224,
+            "sha256": "16be2581c0b2cafbab8322df16d58e2582e2b68204add7e0cef1c95c210b4084",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "birch-veteran-wounds-roughness.png",
+            "bytes": 26208,
+            "sha256": "c2493bd814b8e51b776977575567174e7ae0588a062632a14a22df665d905b48",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "birch-veteran-foliage-0-albedo.png",
+            "bytes": 84771,
+            "sha256": "5391c40fe83acfbddf5997fcfc3ba1a5821bf724cea5a3498ba8a050d8895be3",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-foliage-0-normal.png",
+            "bytes": 70653,
+            "sha256": "92237a56e5f75bbfc901701e277bb5259e5cd4a0849c433bcfa0497d48302343",
+            "encoding": "linear"
+          },
+          "roughness": 0.748,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "birch-veteran-foliage-1-albedo.png",
+            "bytes": 85086,
+            "sha256": "b03a6fe49e65557296cce9d63cad13797f8f2fd770b4b3331e8e3b54afaaa4e3",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-foliage-1-normal.png",
+            "bytes": 70383,
+            "sha256": "63ad2e87c98bdd25261a6ae522a82470b2a493a2b50a675f505a48844635e803",
+            "encoding": "linear"
+          },
+          "roughness": 0.748,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "birch-veteran-foliage-2-albedo.png",
+            "bytes": 84616,
+            "sha256": "3fdb3be03b6aa2a529484ec5491c0866a6df330b0efeb115da1628564e0d453c",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-foliage-2-normal.png",
+            "bytes": 69984,
+            "sha256": "7038d0005c04040e00ce1561a65529c05838982f372d370b8754f56c5793eea6",
+            "encoding": "linear"
+          },
+          "roughness": 0.748,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 8.4417,
+      "crownRadius": 4.722,
+      "basalRadius": 0.0635
+    },
+    {
+      "id": 5,
+      "species": "blueberry",
+      "cohort": "veteran",
+      "age": 25.0,
+      "heightMetres": 1.953,
+      "crownRadiusMetres": 0.547,
+      "crownBaseMetres": 0.327,
+      "dbhCentimetres": 1.01,
+      "low": [
+        -0.5554,
+        -0.15,
+        -0.5328
+      ],
+      "high": [
+        0.4752,
+        1.9792,
+        0.5
+      ],
+      "centre": [
+        -0.0401,
+        0.9146,
+        -0.0164
+      ],
+      "radius": 1.2916,
+      "firstRoot": 5,
+      "rootCount": 1,
+      "wood": {
+        "firstIndex": 37826781,
+        "indexCount": 160440
+      },
+      "leaf": {
+        "firstIndex": 37987221,
+        "indexCount": 31164
+      },
+      "far": {
+        "firstIndex": 38018385,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "blueberry-veteran-bark-albedo.png",
+            "bytes": 1234849,
+            "sha256": "1b4076a207774424b259dafecb88dd19d03b17e6b7def32b67a5b994cd875a4c",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-bark-normal.png",
+            "bytes": 825153,
+            "sha256": "0dcb73e70fabb5991d393d94cae09e6812ce30428f4685232e2f6d554247d8df",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "blueberry-veteran-bark-roughness.png",
+            "bytes": 183743,
+            "sha256": "24ef86b91c4ef60879167d4631ddf4ec0e868824ab1bafb745ab966aea82006d",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.028000000000000004,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "blueberry-veteran-wounds-albedo.png",
+            "bytes": 48085,
+            "sha256": "7210d79c3bec79dca23a33acda1039f4a4f8bca7ea326e989fb5aea71a5144e4",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-wounds-normal.png",
+            "bytes": 114614,
+            "sha256": "a53b786a4564f71d04516973747df6918ce144a6f195cfa4e50765e03a408f4f",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "blueberry-veteran-wounds-roughness.png",
+            "bytes": 26480,
+            "sha256": "992430197178d90cd3091bb5bb08d0a47f82668d2745b3791a48ff6d315d7cdb",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "blueberry-veteran-foliage-0-albedo.png",
+            "bytes": 118291,
+            "sha256": "e5e226fd3f02ee49b6313463b6800534adf3ccc694852ab9d3a9effd7a7067ea",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-foliage-0-normal.png",
+            "bytes": 107203,
+            "sha256": "ce3e618ddf3878dff9a09f7db5f6ded9ea9c59b807f6f54908d282bdaf3ccd07",
+            "encoding": "linear"
+          },
+          "roughness": 0.6699999999999999,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "blueberry-veteran-foliage-1-albedo.png",
+            "bytes": 119465,
+            "sha256": "d920a8865e37851515ca93a00953c47c55e30eab7561599ac0921a562b8407d8",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-foliage-1-normal.png",
+            "bytes": 106450,
+            "sha256": "0c8ea3e2cabf69a1224fd978080380db77db0f8f9344d3981a245920ae9ffb06",
+            "encoding": "linear"
+          },
+          "roughness": 0.6699999999999999,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "blueberry-veteran-foliage-2-albedo.png",
+            "bytes": 118616,
+            "sha256": "26536cc1d279ffe7d91745ed7f21f15c798f44cadda7f49a0f00c37162e1e9d9",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-foliage-2-normal.png",
+            "bytes": 107381,
+            "sha256": "655ebefdf1e5a1ab1ef2bd7bbc59319f08d39537e1cab6c796c1d54b31b78329",
+            "encoding": "linear"
+          },
+          "roughness": 0.6699999999999999,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 1.6077,
+      "crownRadius": 0.547,
+      "basalRadius": 0.0122
+    },
+    {
+      "id": 6,
+      "species": "oak",
+      "cohort": "canopy",
+      "age": 60.0,
+      "heightMetres": 14.759,
+      "crownRadiusMetres": 5.707,
+      "crownBaseMetres": 5.043,
+      "dbhCentimetres": 38.45,
+      "low": [
+        -5.3362,
+        -0.15,
+        -5.6865
+      ],
+      "high": [
+        6.3818,
+        15.3645,
+        5.1582
+      ],
+      "centre": [
+        0.5228,
+        7.6073,
+        -0.2642
+      ],
+      "radius": 11.1323,
+      "firstRoot": 6,
+      "rootCount": 6,
+      "wood": {
+        "firstIndex": 38018517,
+        "indexCount": 1155888
+      },
+      "leaf": {
+        "firstIndex": 39174405,
+        "indexCount": 499656
+      },
+      "far": {
+        "firstIndex": 39674061,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "oak-veteran-bark-albedo.png",
+            "bytes": 1253954,
+            "sha256": "bec57a5718ce313435a1ddf513c52a6f6b5c8bfc02ceffd063fbe7b5a5176a3a",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-bark-normal.png",
+            "bytes": 917393,
+            "sha256": "cd7bc1e843077f0042d97f8a79fa0fc6d39f9f16f45a94a5d66a5c7547364d7a",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "oak-veteran-bark-roughness.png",
+            "bytes": 207816,
+            "sha256": "9f06eca96cea5b90d1cb5059601cd03c7aedf09c1be67558f06ed757d1f9df94",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.032,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "oak-veteran-wounds-albedo.png",
+            "bytes": 42732,
+            "sha256": "afc6e47fec27ff045a02986deae43106e47802f958f3ae35826e3a4e48b0335d",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-wounds-normal.png",
+            "bytes": 113164,
+            "sha256": "8095960c672058b3f4ccdfb9d2481bb8c894163d58697174c5ac9cdcef8a59de",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "oak-veteran-wounds-roughness.png",
+            "bytes": 25339,
+            "sha256": "f1dab42bc4201fbe25d34ce3f031a790d55d9d206372c35aa7e241b0cbd03335",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "oak-veteran-foliage-0-albedo.png",
+            "bytes": 82783,
+            "sha256": "1866133bfb120c2262b4ac91760d068d717cc9c8f0acf08fbc3d73ce546af41f",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-foliage-0-normal.png",
+            "bytes": 75365,
+            "sha256": "bfae67cb771f2c0bd860b14c90edebb227da165db0d564fea8fcb8b39971190d",
+            "encoding": "linear"
+          },
+          "roughness": 0.94,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "oak-veteran-foliage-1-albedo.png",
+            "bytes": 82971,
+            "sha256": "0058b47d08ac8ae06ba4707202c3b23a449e2256fcdb289a3cb35c58297ebae7",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-foliage-1-normal.png",
+            "bytes": 74909,
+            "sha256": "fdac50bfe2bca0e744923e2a94a07efc5b5514273cd38884aec09c8e293073bd",
+            "encoding": "linear"
+          },
+          "roughness": 0.94,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "oak-veteran-foliage-2-albedo.png",
+            "bytes": 82686,
+            "sha256": "2205249ea46646f4338bb4f73627ce5ef15dc72656a73a99a4e5eec81702930a",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "oak-veteran-foliage-2-normal.png",
+            "bytes": 75502,
+            "sha256": "14424ea53327ae74b0028e15464279e64df3888b5326c7a1aebb8d0dcf9cd174",
+            "encoding": "linear"
+          },
+          "roughness": 0.94,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.3,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 12.4664,
+      "crownRadius": 5.707,
+      "basalRadius": 0.2928
+    },
+    {
+      "id": 7,
+      "species": "chestnut",
+      "cohort": "canopy",
+      "age": 65.0,
+      "heightMetres": 19.161,
+      "crownRadiusMetres": 5.169,
+      "crownBaseMetres": 5.85,
+      "dbhCentimetres": 47.14,
+      "low": [
+        -5.1459,
+        -0.15,
+        -5.0409
+      ],
+      "high": [
+        4.4107,
+        19.6719,
+        5.6561
+      ],
+      "centre": [
+        -0.3676,
+        9.761,
+        0.3076
+      ],
+      "radius": 12.2348,
+      "firstRoot": 12,
+      "rootCount": 5,
+      "wood": {
+        "firstIndex": 39674193,
+        "indexCount": 1307994
+      },
+      "leaf": {
+        "firstIndex": 40982187,
+        "indexCount": 693072
+      },
+      "far": {
+        "firstIndex": 41675259,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "chestnut-veteran-bark-albedo.png",
+            "bytes": 1256890,
+            "sha256": "e929ab50808b7e8907b46ddb517a14a2f65a2c4aad068a630a140380689005a4",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-bark-normal.png",
+            "bytes": 733884,
+            "sha256": "d2adb6cd10120ab817365303de805a025d0fa913f11761cbef9b3ee0926c9929",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "chestnut-veteran-bark-roughness.png",
+            "bytes": 161913,
+            "sha256": "a241a1d83a0b2e567f21548daed4f4c13de15d4109da96cf21d573964e0f1615",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.018,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "chestnut-veteran-wounds-albedo.png",
+            "bytes": 45084,
+            "sha256": "7c2b4e605b1eca03699784a32fddb5237f541e846829718c311392365c6cdb80",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-wounds-normal.png",
+            "bytes": 114046,
+            "sha256": "68f1754bd5b436493524ca7827879d1fa0cae06728eb78cab041196836b7b6d0",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "chestnut-veteran-wounds-roughness.png",
+            "bytes": 26028,
+            "sha256": "7d3a1dab828754d61037fa251ab4d8934cec4d5f237165d1e859bf626c91f8db",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "chestnut-veteran-foliage-0-albedo.png",
+            "bytes": 101040,
+            "sha256": "c5c81ac225c55e106d0e2b8106f4f07fabb6072fab392eb5b384b56b143d56fb",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-foliage-0-normal.png",
+            "bytes": 87840,
+            "sha256": "a899a618983a96e109b9c2dbef0a269f9211cc306f8efbf867e1b5ecd29528eb",
+            "encoding": "linear"
+          },
+          "roughness": 0.796,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "chestnut-veteran-foliage-1-albedo.png",
+            "bytes": 101862,
+            "sha256": "0a72637974c904f2d3decd098bcdeeff71b00ac69c76d5c2254da54a5ec14af8",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-foliage-1-normal.png",
+            "bytes": 87146,
+            "sha256": "539fd1bbbb3fd14948b3dcee37ab5fb9f28f656d5e0f384051579a9145183604",
+            "encoding": "linear"
+          },
+          "roughness": 0.796,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "chestnut-veteran-foliage-2-albedo.png",
+            "bytes": 101068,
+            "sha256": "cf33787428a63d8e8a42e6f3e37a1fb82bdb207ce185978a9fc0162fd3f6defa",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "chestnut-veteran-foliage-2-normal.png",
+            "bytes": 88127,
+            "sha256": "4ce6f19201176077aef8dda8b3f77d50dd051c99c3775b0db29ad22bc3cd674b",
+            "encoding": "linear"
+          },
+          "roughness": 0.796,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.42,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 15.2137,
+      "crownRadius": 5.169,
+      "basalRadius": 0.3972
+    },
+    {
+      "id": 8,
+      "species": "maple",
+      "cohort": "canopy",
+      "age": 48.0,
+      "heightMetres": 10.691,
+      "crownRadiusMetres": 3.992,
+      "crownBaseMetres": 1.574,
+      "dbhCentimetres": 10.43,
+      "low": [
+        -4.1264,
+        -0.15,
+        -3.1624
+      ],
+      "high": [
+        2.4987,
+        10.9216,
+        3.6635
+      ],
+      "centre": [
+        -0.8139,
+        5.3858,
+        0.2506
+      ],
+      "radius": 7.2994,
+      "firstRoot": 17,
+      "rootCount": 2,
+      "wood": {
+        "firstIndex": 41675391,
+        "indexCount": 250878
+      },
+      "leaf": {
+        "firstIndex": 41926269,
+        "indexCount": 135696
+      },
+      "far": {
+        "firstIndex": 42061965,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "maple-veteran-bark-albedo.png",
+            "bytes": 1288176,
+            "sha256": "1a1400cdfae64c658c8afe9094bb55d5c47c63dcd69319194e0876ea0e379c2b",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-bark-normal.png",
+            "bytes": 894828,
+            "sha256": "a93d6da8ab2421aa3cfef4493746fce15992c478f5023075d3b5d848fac7c1cd",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "maple-veteran-bark-roughness.png",
+            "bytes": 208433,
+            "sha256": "93199e2847ced825726a77a00f88a221eb7f65ba1d2dafed4d8f7b206bad9604",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.04000000000000001,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "maple-veteran-wounds-albedo.png",
+            "bytes": 51410,
+            "sha256": "490ad92689896e07ef856a36e4285e874c176b25c3619e0d30ca10a8259bf55c",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-wounds-normal.png",
+            "bytes": 115590,
+            "sha256": "cccf45189d063016378e79c3e56c2ae16d16ff62cc74be3f387fb4c80487fa30",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "maple-veteran-wounds-roughness.png",
+            "bytes": 26183,
+            "sha256": "e3657cdcb15988362768fcb24f9aa10ef20f4aded5bfaf10ca49d4b8a506120e",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "maple-veteran-foliage-0-albedo.png",
+            "bytes": 81483,
+            "sha256": "afb4718aae43d488e7957cfa35d18187fe29f947cc50aac56f4d1b6e8838d51a",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-foliage-0-normal.png",
+            "bytes": 81000,
+            "sha256": "ab568b0f252b6d2ad273a04a541680547be80175554e1c41b233bfb8e5b8513e",
+            "encoding": "linear"
+          },
+          "roughness": 0.85,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "maple-veteran-foliage-1-albedo.png",
+            "bytes": 82077,
+            "sha256": "cfe97504caecd090e0a32df6446c52badf4896b146344f59d12f0a76e9e01641",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-foliage-1-normal.png",
+            "bytes": 80518,
+            "sha256": "f20684baa2126de025b14f53cef60723c4691dde2fa0687bf3a606661132d576",
+            "encoding": "linear"
+          },
+          "roughness": 0.85,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "maple-veteran-foliage-2-albedo.png",
+            "bytes": 81510,
+            "sha256": "07c4d229f73580f8c08a9cc5acd89fe0d704ce114489e769cb854c3c3c1b1774",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "maple-veteran-foliage-2-normal.png",
+            "bytes": 81087,
+            "sha256": "ca8db0ca4f0d3642f7a90be924f3bafe9ac1f21b14ded0a1165f5379ed23d4b7",
+            "encoding": "linear"
+          },
+          "roughness": 0.85,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.55,
+          "transmission": 0.153201690575191,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 8.9266,
+      "crownRadius": 3.992,
+      "basalRadius": 0.0886
+    },
+    {
+      "id": 9,
+      "species": "elm",
+      "cohort": "canopy",
+      "age": 60.0,
+      "heightMetres": 18.427,
+      "crownRadiusMetres": 4.916,
+      "crownBaseMetres": 6.499,
+      "dbhCentimetres": 35.15,
+      "low": [
+        -4.3301,
+        -0.15,
+        -3.8189
+      ],
+      "high": [
+        4.6795,
+        18.6645,
+        4.5396
+      ],
+      "centre": [
+        0.1747,
+        9.2573,
+        0.3604
+      ],
+      "radius": 11.2374,
+      "firstRoot": 19,
+      "rootCount": 2,
+      "wood": {
+        "firstIndex": 42062097,
+        "indexCount": 1528728
+      },
+      "leaf": {
+        "firstIndex": 43590825,
+        "indexCount": 1075200
+      },
+      "far": {
+        "firstIndex": 44666025,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "elm-veteran-bark-albedo.png",
+            "bytes": 1223233,
+            "sha256": "e43f4db9ebef374a41d894efb60543eb4968dc3708e9b239aaac90745cd454db",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-bark-normal.png",
+            "bytes": 887596,
+            "sha256": "1e38c26d933628f5ca223475a3643b7a1e5940dcb79a7f240019a339d358436a",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "elm-veteran-bark-roughness.png",
+            "bytes": 201999,
+            "sha256": "0ee21362f11201deaf1b6b316fdf8a17306d6565f88ad896924a2548f91c20b1",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.016,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "elm-veteran-wounds-albedo.png",
+            "bytes": 44973,
+            "sha256": "838c79f10bf97de05f916fa02192b9ceb8298e91a2a4931fcc6c4577ec4315bb",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-wounds-normal.png",
+            "bytes": 115490,
+            "sha256": "9ef150fa01e8957e7aa8c74f5801225f3f9ce1d8ce9838f3c411832171f317be",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "elm-veteran-wounds-roughness.png",
+            "bytes": 26517,
+            "sha256": "224a3abb564252eb1067582758b06b6beddd87e19d1419a2b6a3694258d75a6a",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "elm-veteran-foliage-0-albedo.png",
+            "bytes": 109292,
+            "sha256": "c1ead0e12030b2b0c34d7e2c2f09d1c326e8310b0738e9f22dd33a616c944835",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-foliage-0-normal.png",
+            "bytes": 98076,
+            "sha256": "f880395761f8a6a4595c49502fb3e8f24e35ac6ead244690ff67017306d2aff4",
+            "encoding": "linear"
+          },
+          "roughness": 0.868,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "elm-veteran-foliage-1-albedo.png",
+            "bytes": 109890,
+            "sha256": "c9d780d574a7ecc762bb724e47d40c1e97b4aa860d68383924c60987bd208252",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-foliage-1-normal.png",
+            "bytes": 97204,
+            "sha256": "c89810848605faac370f8abaa0bac2604c920ab1cbeb6baf6e9bbae771ee836a",
+            "encoding": "linear"
+          },
+          "roughness": 0.868,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "elm-veteran-foliage-2-albedo.png",
+            "bytes": 109462,
+            "sha256": "436b5161a538c55a12e625e737f8018fb7a1899ee4c48b0b329410dc0ec7af0b",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "elm-veteran-foliage-2-normal.png",
+            "bytes": 97779,
+            "sha256": "1d0492e659dacfe2a74adf397154fc210e6db2d750f0cd4d30db4907670da47f",
+            "encoding": "linear"
+          },
+          "roughness": 0.868,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.45,
+          "transmission": 0.13296535767236065,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 14.8578,
+      "crownRadius": 4.916,
+      "basalRadius": 0.308
+    },
+    {
+      "id": 10,
+      "species": "birch",
+      "cohort": "canopy",
+      "age": 28.0,
+      "heightMetres": 9.26,
+      "crownRadiusMetres": 2.169,
+      "crownBaseMetres": 2.665,
+      "dbhCentimetres": 5.36,
+      "low": [
+        -1.9179,
+        -0.15,
+        -2.2725
+      ],
+      "high": [
+        1.792,
+        9.4842,
+        2.3592
+      ],
+      "centre": [
+        -0.063,
+        4.6671,
+        0.0434
+      ],
+      "radius": 5.6586,
+      "firstRoot": 21,
+      "rootCount": 1,
+      "wood": {
+        "firstIndex": 44666157,
+        "indexCount": 243456
+      },
+      "leaf": {
+        "firstIndex": 44909613,
+        "indexCount": 318420
+      },
+      "far": {
+        "firstIndex": 45228033,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "birch-veteran-bark-albedo.png",
+            "bytes": 1134049,
+            "sha256": "92dbb6d852d8c62620fe1f9d306de78b0bc65933be4153d8fbd8c81485828304",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-bark-normal.png",
+            "bytes": 681078,
+            "sha256": "9e3697567d4139cef24c0a2263a3908e4a8ca0c5f176f44262ee3deb9a2bb290",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "birch-veteran-bark-roughness.png",
+            "bytes": 213767,
+            "sha256": "5677dbc160714b6bb0b3071be99e9fa55cca3df4dd9f8a338f48e2afa6f0d358",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.014000000000000002,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "birch-veteran-wounds-albedo.png",
+            "bytes": 62496,
+            "sha256": "8a2b89c738ae121dfa84bfef646290d51b60542ff358f66961514c3f8c81b67c",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-wounds-normal.png",
+            "bytes": 115224,
+            "sha256": "16be2581c0b2cafbab8322df16d58e2582e2b68204add7e0cef1c95c210b4084",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "birch-veteran-wounds-roughness.png",
+            "bytes": 26208,
+            "sha256": "c2493bd814b8e51b776977575567174e7ae0588a062632a14a22df665d905b48",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "birch-veteran-foliage-0-albedo.png",
+            "bytes": 84771,
+            "sha256": "5391c40fe83acfbddf5997fcfc3ba1a5821bf724cea5a3498ba8a050d8895be3",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-foliage-0-normal.png",
+            "bytes": 70653,
+            "sha256": "92237a56e5f75bbfc901701e277bb5259e5cd4a0849c433bcfa0497d48302343",
+            "encoding": "linear"
+          },
+          "roughness": 0.748,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "birch-veteran-foliage-1-albedo.png",
+            "bytes": 85086,
+            "sha256": "b03a6fe49e65557296cce9d63cad13797f8f2fd770b4b3331e8e3b54afaaa4e3",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-foliage-1-normal.png",
+            "bytes": 70383,
+            "sha256": "63ad2e87c98bdd25261a6ae522a82470b2a493a2b50a675f505a48844635e803",
+            "encoding": "linear"
+          },
+          "roughness": 0.748,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "birch-veteran-foliage-2-albedo.png",
+            "bytes": 84616,
+            "sha256": "3fdb3be03b6aa2a529484ec5491c0866a6df330b0efeb115da1628564e0d453c",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "birch-veteran-foliage-2-normal.png",
+            "bytes": 69984,
+            "sha256": "7038d0005c04040e00ce1561a65529c05838982f372d370b8754f56c5793eea6",
+            "encoding": "linear"
+          },
+          "roughness": 0.748,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.38,
+          "transmission": 0.16105650921764147,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 6.3203,
+      "crownRadius": 2.169,
+      "basalRadius": 0.0389
+    },
+    {
+      "id": 11,
+      "species": "blueberry",
+      "cohort": "canopy",
+      "age": 22.0,
+      "heightMetres": 1.451,
+      "crownRadiusMetres": 0.564,
+      "crownBaseMetres": 0.269,
+      "dbhCentimetres": 0.58,
+      "low": [
+        -0.4738,
+        -0.15,
+        -0.4139
+      ],
+      "high": [
+        0.5893,
+        1.5577,
+        0.5824
+      ],
+      "centre": [
+        0.0578,
+        0.7038,
+        0.0842
+      ],
+      "radius": 1.1234,
+      "firstRoot": 22,
+      "rootCount": 2,
+      "wood": {
+        "firstIndex": 45228165,
+        "indexCount": 104820
+      },
+      "leaf": {
+        "firstIndex": 45332985,
+        "indexCount": 19320
+      },
+      "far": {
+        "firstIndex": 45352305,
+        "indexCount": 132
+      },
+      "nativeMaterials": [
+        {
+          "name": "bark",
+          "albedo": {
+            "file": "blueberry-veteran-bark-albedo.png",
+            "bytes": 1234849,
+            "sha256": "1b4076a207774424b259dafecb88dd19d03b17e6b7def32b67a5b994cd875a4c",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-bark-normal.png",
+            "bytes": 825153,
+            "sha256": "0dcb73e70fabb5991d393d94cae09e6812ce30428f4685232e2f6d554247d8df",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "blueberry-veteran-bark-roughness.png",
+            "bytes": 183743,
+            "sha256": "24ef86b91c4ef60879167d4631ddf4ec0e868824ab1bafb745ab966aea82006d",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0.028000000000000004,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "repeat"
+        },
+        {
+          "name": "wounds",
+          "albedo": {
+            "file": "blueberry-veteran-wounds-albedo.png",
+            "bytes": 48085,
+            "sha256": "7210d79c3bec79dca23a33acda1039f4a4f8bca7ea326e989fb5aea71a5144e4",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-wounds-normal.png",
+            "bytes": 114614,
+            "sha256": "a53b786a4564f71d04516973747df6918ce144a6f195cfa4e50765e03a408f4f",
+            "encoding": "linear"
+          },
+          "roughnessMap": {
+            "file": "blueberry-veteran-wounds-roughness.png",
+            "bytes": 26480,
+            "sha256": "992430197178d90cd3091bb5bb08d0a47f82668d2745b3791a48ff6d315d7cdb",
+            "encoding": "linear"
+          },
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
+          "undersideReference": [
+            1,
+            1,
+            1
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_0",
+          "albedo": {
+            "file": "blueberry-veteran-foliage-0-albedo.png",
+            "bytes": 118291,
+            "sha256": "e5e226fd3f02ee49b6313463b6800534adf3ccc694852ab9d3a9effd7a7067ea",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-foliage-0-normal.png",
+            "bytes": 107203,
+            "sha256": "ce3e618ddf3878dff9a09f7db5f6ded9ea9c59b807f6f54908d282bdaf3ccd07",
+            "encoding": "linear"
+          },
+          "roughness": 0.6699999999999999,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_1",
+          "albedo": {
+            "file": "blueberry-veteran-foliage-1-albedo.png",
+            "bytes": 119465,
+            "sha256": "d920a8865e37851515ca93a00953c47c55e30eab7561599ac0921a562b8407d8",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-foliage-1-normal.png",
+            "bytes": 106450,
+            "sha256": "0c8ea3e2cabf69a1224fd978080380db77db0f8f9344d3981a245920ae9ffb06",
+            "encoding": "linear"
+          },
+          "roughness": 0.6699999999999999,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        },
+        {
+          "name": "foliage_2",
+          "albedo": {
+            "file": "blueberry-veteran-foliage-2-albedo.png",
+            "bytes": 118616,
+            "sha256": "26536cc1d279ffe7d91745ed7f21f15c798f44cadda7f49a0f00c37162e1e9d9",
+            "encoding": "srgb"
+          },
+          "normal": {
+            "file": "blueberry-veteran-foliage-2-normal.png",
+            "bytes": 107381,
+            "sha256": "655ebefdf1e5a1ab1ef2bd7bbc59319f08d39537e1cab6c796c1d54b31b78329",
+            "encoding": "linear"
+          },
+          "roughness": 0.6699999999999999,
+          "clearcoat": 0,
+          "opacityThreshold": 0.35,
+          "underside": 0.48,
+          "transmission": 0.11931359658782183,
+          "undersideReference": [
+            0.62,
+            0.7,
+            0.58
+          ],
+          "wrap": "clamp"
+        }
+      ],
+      "geometryErrorSupported": false,
+      "unverifiedGeometryErrorMetres": 1.1041,
+      "crownRadius": 0.564,
+      "basalRadius": 0.0091
+    }
+  ],
+  "volume": {
+    "file": "volumes/manifest.json",
+    "bytes": 16916,
+    "sha256": "9d0f0723c0d595e87c30b9065d1832a7869ace08332469a2bf3c05c840a11d74"
+  },
+  "middle": {
+    "file": "middle/manifest.json",
+    "bytes": 7365,
+    "sha256": "11e7a514ae86b53c35793aaebbc2881a41710261ed18f9877dd27dc48d30f056"
+  },
+  "bake": {
+    "script": "scripts/bake-forest-mature-pack.py",
+    "pack": "portugal",
+    "forestmodeler": "690d21380294420860665d96c3c1cfd7e02830dc",
+    "growth": "native forestmodeler ColonizingGrower at resolution=1.0, steps_per_cycle=2: open-grown stand-alone trees (veteran) + lockstep intermixed competitive stand sharing SiteShadowGrid & SiteSoilField (canopy) + whole hero wood (unpruned, unstraightened) + shoot tubes under every leaf + native_tree_render.blade_meshes",
+    "latitudeDegrees": 39.0,
+    "fieldCellMetres": 0.6,
+    "middleCellsInHeight": 40,
+    "prototypes": [
+      {
+        "id": 0,
+        "species": "oak",
+        "cohort": "veteran",
+        "growthMode": "open-grown",
+        "age": 60,
+        "seed": 101,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.3698,
+        "heightMetres": 18.052,
+        "crownRadiusMetres": 9.435,
+        "crownBaseMetres": 5.217,
+        "dbhCentimetres": 47.09,
+        "woodTriangles": 1783932,
+        "leafTriangles": 822356
+      },
+      {
+        "id": 1,
+        "species": "chestnut",
+        "cohort": "veteran",
+        "growthMode": "open-grown",
+        "age": 68,
+        "seed": 101,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.5425,
+        "heightMetres": 22.581,
+        "crownRadiusMetres": 11.832,
+        "crownBaseMetres": 3.747,
+        "dbhCentimetres": 61.84,
+        "woodTriangles": 1491378,
+        "leafTriangles": 879856
+      },
+      {
+        "id": 2,
+        "species": "maple",
+        "cohort": "veteran",
+        "growthMode": "open-grown",
+        "age": 48,
+        "seed": 101,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.222,
+        "heightMetres": 18.571,
+        "crownRadiusMetres": 9.22,
+        "crownBaseMetres": 3.984,
+        "dbhCentimetres": 27.94,
+        "woodTriangles": 2245590,
+        "leafTriangles": 1196088
+      },
+      {
+        "id": 3,
+        "species": "elm",
+        "cohort": "veteran",
+        "growthMode": "open-grown",
+        "age": 62,
+        "seed": 303,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.4347,
+        "heightMetres": 20.103,
+        "crownRadiusMetres": 10.597,
+        "crownBaseMetres": 6.657,
+        "dbhCentimetres": 48.16,
+        "woodTriangles": 2050827,
+        "leafTriangles": 1572300
+      },
+      {
+        "id": 4,
+        "species": "birch",
+        "cohort": "veteran",
+        "growthMode": "open-grown",
+        "age": 34,
+        "seed": 202,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.0635,
+        "heightMetres": 10.381,
+        "crownRadiusMetres": 4.722,
+        "crownBaseMetres": 2.719,
+        "dbhCentimetres": 8.51,
+        "woodTriangles": 230688,
+        "leafTriangles": 335692
+      },
+      {
+        "id": 5,
+        "species": "blueberry",
+        "cohort": "veteran",
+        "growthMode": "open-grown",
+        "age": 25,
+        "seed": 303,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.0122,
+        "heightMetres": 1.953,
+        "crownRadiusMetres": 0.547,
+        "crownBaseMetres": 0.327,
+        "dbhCentimetres": 1.01,
+        "woodTriangles": 53480,
+        "leafTriangles": 10388
+      },
+      {
+        "id": 6,
+        "species": "oak",
+        "cohort": "canopy",
+        "growthMode": "competitive-grove",
+        "age": 60,
+        "seed": 510,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.2928,
+        "heightMetres": 14.759,
+        "crownRadiusMetres": 5.707,
+        "crownBaseMetres": 5.043,
+        "dbhCentimetres": 38.45,
+        "woodTriangles": 385296,
+        "leafTriangles": 166552
+      },
+      {
+        "id": 7,
+        "species": "chestnut",
+        "cohort": "canopy",
+        "growthMode": "competitive-grove",
+        "age": 65,
+        "seed": 510,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.3972,
+        "heightMetres": 19.161,
+        "crownRadiusMetres": 5.169,
+        "crownBaseMetres": 5.85,
+        "dbhCentimetres": 47.14,
+        "woodTriangles": 435998,
+        "leafTriangles": 231024
+      },
+      {
+        "id": 8,
+        "species": "maple",
+        "cohort": "canopy",
+        "growthMode": "competitive-grove",
+        "age": 48,
+        "seed": 510,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.0886,
+        "heightMetres": 10.691,
+        "crownRadiusMetres": 3.992,
+        "crownBaseMetres": 1.574,
+        "dbhCentimetres": 10.43,
+        "woodTriangles": 83626,
+        "leafTriangles": 45232
+      },
+      {
+        "id": 9,
+        "species": "elm",
+        "cohort": "canopy",
+        "growthMode": "competitive-grove",
+        "age": 60,
+        "seed": 712,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.308,
+        "heightMetres": 18.427,
+        "crownRadiusMetres": 4.916,
+        "crownBaseMetres": 6.499,
+        "dbhCentimetres": 35.15,
+        "woodTriangles": 509576,
+        "leafTriangles": 358400
+      },
+      {
+        "id": 10,
+        "species": "birch",
+        "cohort": "canopy",
+        "growthMode": "competitive-grove",
+        "age": 28,
+        "seed": 719,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.0389,
+        "heightMetres": 9.26,
+        "crownRadiusMetres": 2.169,
+        "crownBaseMetres": 2.665,
+        "dbhCentimetres": 5.36,
+        "woodTriangles": 81152,
+        "leafTriangles": 106140
+      },
+      {
+        "id": 11,
+        "species": "blueberry",
+        "cohort": "canopy",
+        "growthMode": "competitive-grove",
+        "age": 22,
+        "seed": 712,
+        "resolution": 1.0,
+        "stepsPerCycle": 2,
+        "basalRadius": 0.0091,
+        "heightMetres": 1.451,
+        "crownRadiusMetres": 0.564,
+        "crownBaseMetres": 0.269,
+        "dbhCentimetres": 0.58,
+        "woodTriangles": 34940,
+        "leafTriangles": 6440
+      }
+    ]
+  }
+}

@@ -521,16 +521,24 @@ function main(source, indices, canopy) {
     const t0 = Date.now();
     const foliage = p.nativeMaterials.find((m) => m.name.startsWith('foliage') || m.name.startsWith('leaf'));
     const leaf = leafSource(p);
+    // A corner names its source vertex from the prototype's first, in a float: a pack may hold more vertices than a
+    // float counts exactly (2^24), one prototype not.
+    let base = Infinity, top = -1;
+    for (const part of [p.wood, p.leaf, p.far]) {
+      for (let i = part.firstIndex; i < part.firstIndex + part.indexCount; i++) { base = Math.min(base, indices[i]); top = Math.max(top, indices[i]); }
+    }
+    if (top - base >= 1 << 24) throw Error(`${p.species}: a prototype this large cannot name its source vertices in a float`);
+    const own = (local) => local + base;
     // The wood, each corner with its source vertex in its kind, so corners weld only where the pack's mesh shares a
     // vertex; its foot flared into the ground.
     const woodIndex = indices.subarray(p.wood.firstIndex, p.wood.firstIndex + p.wood.indexCount), woodTriangles = woodIndex.length / 3;
     const leafTriangles = (leaf.map.length / 8) * 4, corners = new Float32Array((woodTriangles + leafTriangles) * 3 * 8);
-    woodIndex.forEach((v, k) => corners.set([...flareRoot(read(v, 0, 3)), ...read(v, 3, 3), FOREST_CONTINUUM_BARK, v], k * 8));
+    woodIndex.forEach((v, k) => corners.set([...flareRoot(read(v, 0, 3)), ...read(v, 3, 3), FOREST_CONTINUUM_BARK, v - base], k * 8));
     // The leaf cards, as triangles, for the far body's wrap.
     for (let card = 0, at = woodIndex.length; card < leaf.map.length / 8; card++) {
       for (const k of [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]) {
         const c = card * 8 + k;
-        corners.set([...leaf.leaves.pos.subarray(c * 3, c * 3 + 3), ...leaf.leaves.nrm.subarray(c * 3, c * 3 + 3), FOREST_CONTINUUM_LEAF, leaf.map[c]], at * 8);
+        corners.set([...leaf.leaves.pos.subarray(c * 3, c * 3 + 3), ...leaf.leaves.nrm.subarray(c * 3, c * 3 + 3), FOREST_CONTINUUM_LEAF, leaf.map[c] - base], at * 8);
         at++;
       }
     }
@@ -544,11 +552,11 @@ function main(source, indices, canopy) {
       name, vertices: corners, triangles: woodTriangles + leafTriangles, parts: new Uint32Array(woodTriangles + leafTriangles), snap: false,
       optics: {
         cover: (t) => (t < woodTriangles ? 1 : cardCover),
-        albedo: (t) => { const leafy = t >= woodTriangles, s = surfaceOf(corners[t * 24 + 7], leafy); return [...s.colour, leafy ? 1 : 0]; },
+        albedo: (t) => { const leafy = t >= woodTriangles, s = surfaceOf(own(corners[t * 24 + 7]), leafy); return [...s.colour, leafy ? 1 : 0]; },
       },
     };
     const welded = weldDrawn(wood), woodUV = new Float32Array(welded.count * 2);
-    for (let v = 0; v < welded.count; v++) woodUV.set(read(welded.kind[v * 2 + 1], 8, 2), v * 2);
+    for (let v = 0; v < welded.count; v++) woodUV.set(read(own(welded.kind[v * 2 + 1]), 8, 2), v * 2);
     const clusters = await bakeClusters(welded, {
       uv: woodUV, leaves: { ...leaf.leaves, mask: foliage ? leafMask(foliage.albedo.file) : null, error: LEAF_ERROR_SHARE, part: 0 },
     });
@@ -561,7 +569,7 @@ function main(source, indices, canopy) {
     position.set(welded.position); position.set(L.position, W * 3); normal.set(welded.normal); normal.set(L.normal, W * 3);
     tightenClusterSpheres(clusters, position, (r) => clusters.order[clusters.indices[r.first]] < W);
     continuumFarFirst(clusters, far);
-    const isLeaf = (v) => v >= W, sourceOf = (v) => (isLeaf(v) ? leaf.map[L.source[v - W]] : welded.kind[v * 2 + 1]);
+    const isLeaf = (v) => v >= W, sourceOf = (v) => (isLeaf(v) ? leaf.map[L.source[v - W]] : own(welded.kind[v * 2 + 1]));
     const uvOf = (v) => (isLeaf(v) ? [L.uv[(v - W) * 2], L.uv[(v - W) * 2 + 1]] : [woodUV[v * 2], woodUV[v * 2 + 1]]);
     const uvLow = [Infinity, Infinity], uvHigh = [-Infinity, -Infinity];
     for (const v of clusters.order) {
@@ -632,7 +640,7 @@ function main(source, indices, canopy) {
     const packed = packForestContinuumBody({
       triangles: woodTriangles + leafTriangles, surface: (v) => surfaceOf(sourceOf(v), isLeaf(v)), uv: uvOf,
       wind: windOf, farWind,
-      farSurface: (t) => surfaceOf(far.kinds[t * 2 + 1], far.kinds[t * 2] === FOREST_CONTINUUM_LEAF),
+      farSurface: (t) => surfaceOf(own(far.kinds[t * 2 + 1]), far.kinds[t * 2] === FOREST_CONTINUUM_LEAF),
       look, uvRange: [uvLow[0], uvLow[1], Math.max(uvHigh[0] - uvLow[0], 1e-3), Math.max(uvHigh[1] - uvLow[1], 1e-3)], firstLayer,
     }, { welded: { position, normal }, clusters, far });
     const ms = Date.now() - t0;
@@ -667,7 +675,6 @@ else {
   await MeshoptSimplifier.ready;
   const source = asFloats(gunzip('vertices.bin.gz')), indices = asWords(gunzip('indices.bin.gz'));
   const canopyFile = path.join(dir, 'canopy-shade.bin.gz'), canopy = fs.existsSync(canopyFile) ? zlib.gunzipSync(fs.readFileSync(canopyFile)) : null;
-  if (source.length / SOURCE_STRIDE >= 1 << 24) throw Error('A pack this large cannot name its source vertices in a float');
   const bakePrototype = main(source, indices, canopy), baked = [];
   let firstLayer = 0;
   for (const p of manifest.prototypes) {
