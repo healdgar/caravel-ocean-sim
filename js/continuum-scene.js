@@ -16,7 +16,7 @@ import {
   writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, buildContinuumSurfels, computeContinuumTightSpheres, computeContinuumCardGrid,
 } from './continuum-format.js';
 import {
-  CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_BATCH, CONTINUUM_STATE_ENTRIES,
+  CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_PLAN_WORD, CONTINUUM_PLAN_GROUPS, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_BATCH, CONTINUUM_STATE_ENTRIES,
   CONTINUUM_GROUND_BINDING, CONTINUUM_SELECT_PAGES_AT, CONTINUUM_SHADOW_CLOTH_FORMAT, continuumDataBindings, continuumModuleWGSL, continuumBatchArgsWGSL,
 } from './wgsl/continuum-cut.js';
 
@@ -71,7 +71,7 @@ export async function requestContinuumPrograms({ device, shader, shadowFormat, p
       requestContinuumShadow({ device, shader, shadowFormat, paging }),
     ]);
     const C = GPUShaderStage.COMPUTE, entry = (binding, buffer) => ({ binding, visibility: C, buffer: { type: buffer } });
-    // One layout for the reset and the cut, so one bind group serves both; the cut reads the land's ground field and Hi-Z pyramid.
+    // One layout for the reset (and plan) and the cut, so one bind group serves both; the cut reads the land's ground field and Hi-Z pyramid.
     const computeLayout = device.createBindGroupLayout({
       label: 'continuum cut', entries: [entry(0, 'uniform'), entry(1, 'uniform'), entry(2, 'read-only-storage'), entry(3, 'read-only-storage'), entry(4, 'storage'), entry(5, 'uniform'), entry(6, 'read-only-storage'), entry(7, 'storage'),
         { binding: CONTINUUM_GROUND_BINDING, visibility: C, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
@@ -425,8 +425,9 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       setFloat(aimAt, on ? fall.x : 0); setFloat(aimAt + 1, on ? fall.y : 0); setFloat(aimAt + 2, on ? fall.z : 0); setFloat(aimAt + 3, on ? fall.radius : 0);
     },
     setProfile(next) { profileSpec = next; syncProfile(); },
-    // In the frame's compute pass, before any pass draws: the lists emptied, then every instance cut at the scene's
-    // one pixel error (js/continuum-core.js), which only a governor moves, CONTINUUM_BATCH instances a workgroup.
+    // In the frame's compute pass, before any pass draws: the lists emptied and what the last frame's cut asked planned
+    // for this one's to yield by, nearest first; then every instance cut at the scene's one pixel error
+    // (js/continuum-core.js), which only a governor moves, CONTINUUM_BATCH instances a workgroup.
     // `indirect` ({ buffer }): a written scene's family stood its records this frame in its own pass and counted them
     // in that buffer's fourth word (its first three, its own workgroups, are not read); its count is then its capacity.
     encode(pass, indirect = null) {
@@ -437,7 +438,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
       if (viewChanged) { device.queue.writeBuffer(viewBuffer, 0, viewWords); viewChanged = false; }
       pass.setBindGroup(0, cut);
       pass.setPipeline(P.reset);
-      pass.dispatchWorkgroups(1);
+      pass.dispatchWorkgroups(CONTINUUM_PLAN_GROUPS);
       if (!count) return;
       if (indirect) {
         if (!batches) throw Error(`The ${label} scene's records are not written on the GPU`);
@@ -514,7 +515,7 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
     // alongside the draw/list buffer so diagnostics can also read submitted hardware triangles, shadow cuts, and list fill.
     continuumDraws() {
       return !destroyed && count
-        ? [{ buffer: draws, offset: CONTINUUM_DRAW_WORDS * 4, records: CONTINUUM_VIEW_LISTS, stride: 1, continuumScene: { buffer: draws, words: CONTINUUM_DRAWS_BYTES / 4, capacity, lists, label } }]
+        ? [{ buffer: draws, offset: CONTINUUM_DRAW_WORDS * 4, records: CONTINUUM_VIEW_LISTS, stride: 1, continuumScene: { buffer: draws, words: CONTINUUM_PLAN_WORD, capacity, lists, label } }]
         : [];
     },
     destroy() { destroyed = true; for (const resource of [records, ownPoses, list, draws, viewBuffer, batches]) resource?.destroy(); },

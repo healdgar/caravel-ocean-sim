@@ -984,10 +984,10 @@ export const CONTINUUM_ENTRY_FILL = 0.25;
 // The one room scheme every scene's lists are sized by, so that every family draws from one budget: each list holds
 // what its instances could enter at once (every cluster of each one's type, its far body at its heaviest step, one
 // splat), but never more than the whole scene's budget could need of it: CONTINUUM_TRIANGLE_BUDGET over the triangles
-// an entry submits at CONTINUUM_ENTRY_FILL. Within the budget nothing is refused; past it the cut yields each instance
-// to a coarser cut that fits, the census counts what was asked, and the budget's governor coarsens the one scalar
-// (js/wgsl/continuum-cut.js). `types` as continuumAtlasTypes gives them, `counts` how many instances of each type a
-// scene may hold. Returns the scene's capacity and each list's room.
+// an entry submits at CONTINUUM_ENTRY_FILL. Within the budget nothing is refused; past it the farther instances yield
+// to coarser cuts that fit, nearest last, the census counts what was asked, and the budget's governor coarsens the one
+// scalar (js/wgsl/continuum-cut.js continuumReset). `types` as continuumAtlasTypes gives them, `counts` how many
+// instances of each type a scene may hold. Returns the scene's capacity and each list's room.
 // `cards`: the room of the cell cards' list, for a scene whose types have a card grid (what its instances in the
 // cards' range can enter at once: a level's cells and the next's across a crossfade); none otherwise. Full, an
 // instance keeps its clusters.

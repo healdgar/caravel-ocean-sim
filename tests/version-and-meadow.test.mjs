@@ -185,7 +185,9 @@ test('universal One-Continuum prefix micro-surfels, tiled 563-type cards, unifie
     const writes = [];
     const device = { limits: {}, createBuffer: ({ size }) => ({ size, destroy() {} }), queue: { writeBuffer: (buffer, at, data) => writes.push([at, data]) } };
     const { pages } = uploadContinuumAtlas(device, atlas, 'test', options);
-    return { bytes: pages[0].size, surfelsAt: writes.find(([at, data]) => at === CONTINUUM_HEADER.surfels * 4 && data.length === 1)?.[1][0] ?? 0 };
+    // The header goes up once, its surfel slot set in it: the word of whichever write covers that slot.
+    const slot = CONTINUUM_HEADER.surfels * 4, [at, data] = writes.find(([at, data]) => at <= slot && slot < at + data.length * 4) ?? [0, []];
+    return { bytes: pages[0].size, surfelsAt: data[(slot - at) / 4] ?? 0 };
   };
   const withSurfels = uploaded(), withoutSurfels = uploaded({ surfels: false });
   assert.equal(atlas[CONTINUUM_HEADER.surfels], 0, 'the bake left the surfel slot empty');

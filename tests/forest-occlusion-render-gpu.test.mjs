@@ -33,8 +33,8 @@ test('GPU terrain occlusion preserves full close-forest, shore, horizon and unde
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
   const rows=[],scenes=[
    // At 1280 x 720: at 1920 x 1080 the reported canopy asks some 16M triangles of the fixed 1.5 px, more than its lists
-   // hold (they are sized for the one 3M budget, whose governor polygons=fixed stills), and which of its instances then
-   // take a coarser cut is settled by the order the GPU reaches them in, so no two frames of it are drawn alike.
+   // hold (they are sized for the one 3M budget, whose governor polygons=fixed stills), and there the room occlusion
+   // frees goes to the trees it leaves in view (js/wgsl/continuum-cut.js continuumReset): finer than the reference's.
    {name:'reported-close-view',w:'1280',h:'720',cam:'-979.830347,366.080607,-5519.26402,29.742625,1.101069'},
    {name:'reported-close-view-weak-device',w:'1280',h:'720',cam:'-979.830347,366.080607,-5519.26402,29.742625,1.101069',polygons:'0.25',budgetOnly:true},
    {name:'shore',w:'640',h:'360',cam:'-1750,6,-7000,112,1'},
@@ -76,8 +76,8 @@ test('GPU terrain occlusion preserves full close-forest, shore, horizon and unde
    const {differences,maxError}=[captures[0],...(scene.budgetOnly?[]:[captures[1]])].map(c=>compare(c.pixels,occluded.pixels)).sort((a,b)=>a.differences-b.differences)[0];
    const triangles=c=>[0,1,2,3].reduce((sum,list)=>sum+c[list*4]*c[list*4+1]/3,0),row={name:scene.name,channels:reference.pixels.length,differences,maxError,noise,referenceTriangles:triangles(reference.commands),occlusionTriangles:triangles(occluded.commands)};rows.push(row);t.diagnostic(JSON.stringify(row));
    if(output)await writeFile(output+'/receipt.json',JSON.stringify(rows,null,2));
-   // A frame compared is one whose cut fits its lists: past them, which instances yield is a race, and two loads of one
-   // frame differ by whole crowns (some 300,000 of the 1920 x 1080 canopy's 8.3M channels) with or without occlusion.
+   // A frame compared is one whose cut fits its lists: past them, occlusion rightly changes which trees yield, and how
+   // far (tests/continuum-plan-gpu.test.mjs).
    if(!scene.budgetOnly)for(const capture of captures)assert.ok(capture.fill&&Object.values(capture.fill).every(fill=>fill<.9),scene.name+'\'s lists hold its cut: '+JSON.stringify(capture.fill));
    // Within them a frame repeats from one load to the next to a few channels on Metal, and exactly on SwiftShader.
    // Occlusion may differ from the reference no more than the reference differs from itself: a tree it wrongly hid

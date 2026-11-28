@@ -14,10 +14,11 @@
 // pieces) is cut at the finest its error bound allows: a type's clusters are its parts' own, so no simplified surface
 // spans two parts, and each rides its part's pose. Every list entry is one instance of a fixed-size draw: a cluster
 // (384 vertices, or 96 for a small one), 32 far-body triangles (96), or a splat (3); the unused vertices are
-// degenerate. The lists are sized from the scene's one budget (js/continuum-format.js continuumRoom); an instance whose
-// cut no longer fits takes the finest of CONTINUUM_LEVELS coarser cuts that does, never a hole, and the select counts
-// the real triangles the scene's error asks for (js/continuum-census.js), so the budget's governor coarsens the one
-// scalar until every cut fits again.
+// degenerate. The lists are sized from the scene's one budget (js/continuum-format.js continuumRoom). Where the cuts no
+// longer fit, the nearest keep theirs and the farther yield, each to one of CONTINUUM_LEVELS coarser cuts, by a plan
+// made from what every instance asked a frame before (continuumReset), never by which the GPU reached first; and the
+// select counts the real triangles the scene's error asks for (js/continuum-census.js), so the budget's governor
+// coarsens the one scalar until every cut fits again.
 //
 // The atlas is read through one accessor (continuumWord) across as many pages as the device needs to bind it
 // (js/continuum-scene.js continuumAtlasPaging); its header and types always lie in the first.
@@ -39,18 +40,34 @@ import { CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING, continuum
 
 // The vertices of one entry of each list.
 export const CONTINUUM_ENTRY_VERTICES = Object.freeze(CONTINUUM_ENTRY_TRIANGLES.map((n) => 3 * n));
+// How many cuts an instance may take, each at twice the last's pixel error, when its finest no longer fits the lists.
+export const CONTINUUM_LEVELS = 4;
 // The draws buffer: each list's indirect draw (four words); the real triangles the scene's error asks of each of the
-// view's lists; then how many instances the select cuts this frame (the scene's count, or what its family's own pass
-// stood).
+// view's lists; how many instances the select cuts this frame (the scene's count, or what its family's own pass
+// stood); then the plan the cut yields by (continuumReset): the entries its instances ask of each list they yield in,
+// at every level, summed by a key of how near they stand (the important ahead of all), and the level each key is cut
+// from.
 export const CONTINUUM_DRAW_WORDS = CONTINUUM_LISTS.length * 4;
 export const CONTINUUM_LIVE_WORD = CONTINUUM_DRAW_WORDS + CONTINUUM_VIEW_LISTS;
-export const CONTINUUM_DRAWS_BYTES = (CONTINUUM_LIVE_WORD + 1) * 4;
+export const CONTINUUM_PLAN_WORD = CONTINUUM_LIVE_WORD + 1;
+// A key a quarter octave of distance and a slice of the instances' seeds' hash, so those as near as each other yield by
+// a draw that every frame makes alike.
+const CONTINUUM_PLAN_BUCKETS = 64;
+const CONTINUUM_PLAN_SLICES = 4;
+const CONTINUUM_PLAN_KEYS = CONTINUUM_PLAN_BUCKETS * CONTINUUM_PLAN_SLICES;
+// What is asked, a row each: the view's clusters, its small clusters, the far body, the shadow's far body, the
+// shadow's clusters. Planned, a group each: the view's clusters (both its lists at once), and each of the rest.
+const CONTINUUM_PLAN_ROWS = 5;
+export const CONTINUUM_PLAN_GROUPS = 4;
+const CONTINUUM_PLAN_ASKED = CONTINUUM_PLAN_ROWS * CONTINUUM_LEVELS * CONTINUUM_PLAN_KEYS;
+const CONTINUUM_PLAN_FLOORS = CONTINUUM_PLAN_WORD + CONTINUUM_PLAN_ASKED;
+export const CONTINUUM_DRAWS_BYTES = (CONTINUUM_PLAN_FLOORS + CONTINUUM_PLAN_GROUPS * CONTINUUM_PLAN_KEYS) * 4;
+// What of a list's room the plan fills: the rest takes what the view asks more of than it did a frame before.
+const CONTINUUM_PLAN_FILL = 0.9;
 export const CONTINUUM_VIEW_BYTES = 32 + CONTINUUM_LISTS.length * 16 + 96;
 // The select's workgroups each cut this many instances, and are laid in rows of CONTINUUM_ROW.
 export const CONTINUUM_BATCH = 8;
 export const CONTINUUM_ROW = 8192;
-// How many cuts an instance may take, each at twice the last's pixel error, when its finest no longer fits the lists.
-export const CONTINUUM_LEVELS = 4;
 // Workgroup lanes and packed 8-bit cluster-test cache (4 clusters per u32 -> 12,288 clusters cached in 12 KB).
 // Total workgroup storage stays strictly under WebGPU's 16 KB guaranteed limit (~14.2 KB).
 const CONTINUUM_WORKGROUP = 128;
@@ -364,12 +381,87 @@ fn continuumChunks(model:u32,step:u32)->u32 { return (continuumStepWord(model,st
 fn continuumFocal()->f32 { return F.screen.y/max(2.0*length(F.camUp.xyz),1e-4); }
 // The pixel error of an instance's cut at level j, as a multiple of its own.
 fn continuumLevel(j:u32)->f32 { return f32(1u<<j); }
-// Each list empty, its draw's vertex count set, the triangles asked cleared, and the instances cut set to the scene's
-// count (a family's own pass may set them anew: continuumBatchArgs).
-@compute @workgroup_size(64) fn continuumReset(@builtin(local_invocation_index) i:u32){
-  let vertices=array<u32,${CONTINUUM_LISTS.length}>(${CONTINUUM_ENTRY_VERTICES.map((n) => `${n}u`).join(',')});
-  if(i<CONTINUUM_LIVE){atomicStore(&continuumDraws[i],select(0u,vertices[min(i/4u,${CONTINUUM_LISTS.length - 1}u)],i%4u==0u&&i<${CONTINUUM_DRAW_WORDS}u));}
-  if(i==CONTINUUM_LIVE){atomicStore(&continuumDraws[i],continuumView.counts.x);}
+// How near an instance stands, for the plan: the important first, then the rest a quarter octave of distance from
+// its sphere's near side a bucket, and within one, a slice of its seed's hash.
+fn continuumPlanKey(nearDist:f32,important:bool,seed:u32)->u32 {
+  var bucket=0u;
+  if(!important){bucket=1u+min(u32(log2(max(nearDist,0.5)/0.5)*4.0),${CONTINUUM_PLAN_BUCKETS - 2}u);}
+  return bucket*${CONTINUUM_PLAN_SLICES}u+((seed*0x9e3779b9u)>>${32 - Math.log2(CONTINUUM_PLAN_SLICES)}u);
+}
+// What an instance asks of a row at a level, whether or not it is listed there.
+fn continuumAsk(row:u32,level:u32,key:u32,n:u32){
+  if(n>0u){atomicAdd(&continuumDraws[${CONTINUUM_PLAN_WORD}u+(row*CONTINUUM_LEVELS+level)*${CONTINUUM_PLAN_KEYS}u+key],n);}
+}
+// The finest level a group's key is listed at this frame (CONTINUUM_LEVELS: none).
+fn continuumFloor(group:u32,key:u32)->u32 { return min(atomicLoad(&continuumDraws[${CONTINUUM_PLAN_FLOORS}u+group*${CONTINUUM_PLAN_KEYS}u+key]),CONTINUUM_LEVELS); }
+var<workgroup> continuumPlanSumA:array<vec4u,${CONTINUUM_PLAN_KEYS}>;
+var<workgroup> continuumPlanSumB:array<vec4u,${CONTINUUM_PLAN_KEYS}>;
+var<workgroup> continuumPlanFirst:atomic<u32>;
+// What a row asked of a key at each level, taken (cleared for this frame's asking); nothing of a row past the last (a
+// group of one list).
+fn continuumPlanTake(row:u32,key:u32)->vec4u {
+  if(row>=${CONTINUUM_PLAN_ROWS}u){return vec4u(0u);}
+  var asked=vec4u(0u);
+  for(var j=0u;j<CONTINUUM_LEVELS;j++){asked[j]=atomicExchange(&continuumDraws[${CONTINUUM_PLAN_WORD}u+(row*CONTINUUM_LEVELS+j)*${CONTINUUM_PLAN_KEYS}u+key],0u);}
+  return asked;
+}
+// What the keys nearer than x asked of each list, at each level.
+fn continuumPlanBeforeA(x:u32)->vec4u { if(x==0u){return vec4u(0u);} return continuumPlanSumA[x-1u]; }
+fn continuumPlanBeforeB(x:u32)->vec4u { if(x==0u){return vec4u(0u);} return continuumPlanSumB[x-1u]; }
+// The first key from after on, short of limit, that fails (limit when none), as every lane of the plan finds at once.
+fn continuumPlanFirstFailing(key:u32,after:u32,limit:u32,fails:bool)->u32 {
+  if(key==0u){atomicStore(&continuumPlanFirst,limit);}
+  workgroupBarrier();
+  if(key>=after&&key<limit&&fails){atomicMin(&continuumPlanFirst,key);}
+  workgroupBarrier();
+  let first=atomicLoad(&continuumPlanFirst);
+  workgroupBarrier();
+  return first;
+}
+// Before each frame's cut: each list empty, its draw's vertex count set, the triangles asked cleared, and the
+// instances cut set to the scene's count (a family's own pass may set them anew: continuumBatchArgs); and the plan
+// this frame's cut yields by (AGENTS.md rule 3, item 5), made from what the last frame's asked, a workgroup a group
+// and a lane a key. The nearest keys whose coarsest cuts fit together are listed, the rest not; of those, the nearest
+// at the finest level that leaves the rest room for their coarsest, the next nearest at the next level that does,
+// and so on, so a nearer key is never cut coarser than a farther. Made from what was asked, which no reservation
+// changes, so a view is cut alike every frame whatever order the GPU reaches its instances in; the reservations' own
+// fallback, a level coarser at a time, takes only what the view asks more of than it did the frame before.
+@compute @workgroup_size(${CONTINUUM_PLAN_KEYS}) fn continuumReset(@builtin(workgroup_id) group:vec3u,@builtin(local_invocation_index) key:u32){
+  let g=group.x;
+  if(g==0u){
+    let vertices=array<u32,${CONTINUUM_LISTS.length}>(${CONTINUUM_ENTRY_VERTICES.map((n) => `${n}u`).join(',')});
+    if(key<CONTINUUM_LIVE){atomicStore(&continuumDraws[key],select(0u,vertices[min(key/4u,${CONTINUUM_LISTS.length - 1}u)],key%4u==0u&&key<${CONTINUUM_DRAW_WORDS}u));}
+    if(key==CONTINUUM_LIVE){atomicStore(&continuumDraws[key],continuumView.counts.x);}
+  }
+  let rows=array<vec2u,${CONTINUUM_PLAN_GROUPS}>(vec2u(0u,1u),vec2u(2u,${CONTINUUM_PLAN_ROWS}u),vec2u(3u,${CONTINUUM_PLAN_ROWS}u),vec2u(4u,${CONTINUUM_PLAN_ROWS}u));
+  let lists=array<vec2u,${CONTINUUM_PLAN_GROUPS}>(vec2u(0u,1u),vec2u(2u,2u),vec2u(4u,4u),vec2u(5u,5u));
+  let row=rows[g];let list=lists[g];
+  let room=vec2u(vec2f(f32(continuumView.lists[list.x].y),f32(continuumView.lists[list.y].y))*${CONTINUUM_PLAN_FILL});
+  // What this key and every nearer one asked, of each list at each level.
+  var sumA=continuumPlanTake(row.x,key);var sumB=continuumPlanTake(row.y,key);
+  for(var o=1u;o<${CONTINUUM_PLAN_KEYS}u;o<<=1u){
+    continuumPlanSumA[key]=sumA;continuumPlanSumB[key]=sumB;
+    workgroupBarrier();
+    if(key>=o){sumA+=continuumPlanSumA[key-o];sumB+=continuumPlanSumB[key-o];}
+    workgroupBarrier();
+  }
+  continuumPlanSumA[key]=sumA;continuumPlanSumB[key]=sumB;
+  workgroupBarrier();
+  // The keys listed: the nearest whose coarsest cuts fit together. What a key and its nearer ones leave the rest of
+  // those at their coarsest.
+  let listed=continuumPlanFirstFailing(key,0u,${CONTINUUM_PLAN_KEYS}u,any(vec2u(sumA.w,sumB.w)>room));
+  let rest=vec2u(continuumPlanBeforeA(listed).w,continuumPlanBeforeB(listed).w)-vec2u(sumA.w,sumB.w);
+  // The nearest at level 0, then the next at 1, then at 2: each as far out as the room left for the rest allows.
+  let at0=continuumPlanFirstFailing(key,0u,listed,any(vec2u(sumA.x,sumB.x)+rest>room));
+  let a0=continuumPlanBeforeA(at0);let b0=continuumPlanBeforeB(at0);
+  let taken0=vec2u(a0.x,b0.x);
+  let at1=continuumPlanFirstFailing(key,at0,listed,any(taken0+vec2u(sumA.y-a0.y,sumB.y-b0.y)+rest>room));
+  let a1=continuumPlanBeforeA(at1);let b1=continuumPlanBeforeB(at1);
+  let taken1=taken0+vec2u(a1.y-a0.y,b1.y-b0.y);
+  let at2=continuumPlanFirstFailing(key,at1,listed,any(taken1+vec2u(sumA.z-a1.z,sumB.z-b1.z)+rest>room));
+  var level=CONTINUUM_LEVELS;
+  if(key<at0){level=0u;}else if(key<at1){level=1u;}else if(key<at2){level=2u;}else if(key<listed){level=3u;}
+  atomicStore(&continuumDraws[${CONTINUUM_PLAN_FLOORS}u+g*${CONTINUUM_PLAN_KEYS}u+key],level);
 }
 var<workgroup> continuumSlotRecord:array<ContinuumRecord,${B}>;
 var<workgroup> continuumSlotCut:array<vec4f,${B}>;      // focal, allowed pixels, scale, the shadow's allowed error (metres of the type)
@@ -377,6 +469,7 @@ var<workgroup> continuumSlotTries:array<vec4u,${B}>;    // the view's clusters t
 var<workgroup> continuumSlotFar:array<vec4u,${B}>;      // where its far body's pieces go and how many; its shadow's
 var<workgroup> continuumSlotWet:array<vec4u,${B}>;      // where the captures' copies go: clusters, small clusters, far body; 1 if the sea can reach it
 var<workgroup> continuumSlotLift:array<f32,${B}>;       // how far it is raised to the view's drawn ground
+var<workgroup> continuumSlotKey:array<u32,${B}>;        // how near it stands, for the plan (continuumPlanKey)
 var<workgroup> continuumSlotStart:array<u32,${B + 1}>;  // where each instance's tries begin among the workgroup's
 var<workgroup> continuumWanted:array<atomic<u32>,${B * 3 * L}>; // each instance's clusters in each list (clusters, small, shadow) at each level
 var<workgroup> continuumChosen:array<vec4u,${B}>;       // the level its view's clusters and its shadow's are listed at
@@ -515,6 +608,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     var tries=vec4u(0u);var cut=vec4f(1.0,1.0,1.0,0.0);var far=vec4u(CONTINUUM_FULL,0u,CONTINUUM_FULL,0u);var lift=vec2f(0.0);
     var wantCard=0u;var cells=vec4u(CONTINUUM_FULL,0u,0u,0u);var cardState=0u;
     var wet=vec4u(CONTINUUM_FULL,CONTINUUM_FULL,CONTINUUM_FULL,0u);
+    var planKey=${CONTINUUM_PLAN_KEYS - 1}u;
     var record:ContinuumRecord;
     if(instance<atomicLoad(&continuumDraws[CONTINUUM_LIVE])){
       record=continuumRecords[instance];
@@ -550,6 +644,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
         let aim=continuumView.aim;
         let aimed=aim.w>0.0&&length(relative+F.camPos.xyz-aim.xyz)<=reach+aim.w;
         let isImportant=aimed||continuumFlagged(record,${important >>> 0}u);
+        planKey=continuumPlanKey(nearDist,isImportant,record.tag.z);
         if(maxDist<=0.0||nearDist<maxDist||isImportant){
           let perspectiveFactor=continuumErrorScale(record,-relative/away);
           let pixels=select(continuumProfilePixels(continuumView.scene.x,isImportant,away,continuumView.curve)/perspectiveFactor,0.0,continuumFlagged(record,CONTINUUM_EXACT));
@@ -579,11 +674,13 @@ fn continuumTry(slot:u32,i:u32)->u32 {
               let lightPerspective=continuumErrorScale(record,normalize(SH.sun.xyz+vec3f(0.0,1e-5,0.0)));
               let allowed=max(max(CONTINUUM_SHADOW_TEXELS*SH.texel.x/lightPerspective,shadowFloor),CONTINUUM_SHADOW_COARSER*pixels*away/focal)/scale;
               if(!alone){shadowShare=u32(round(continuumHandoff(allowed,farError)*255.0));}
+              // Every level is asked for the plan, and the finest the plan leaves it that fits is listed.
               if(shadowShare>0u){
+                let planned=continuumFloor(2u,planKey);
                 for(var j=0u;j<CONTINUUM_LEVELS;j++){
                   let s=max(farFirst,u32(continuumMorphStep(steps,allowed*continuumLevel(j)).x));
-                  let chunks=continuumChunks(model,s);let at=continuumReserve(4u,chunks);
-                  if(at!=CONTINUUM_FULL){shadowStep=s;far.z=at;far.w=chunks;break;}
+                  let chunks=continuumChunks(model,s);continuumAsk(3u,j,planKey,chunks);
+                  if(j>=planned&&far.z==CONTINUUM_FULL){let at=continuumReserve(4u,chunks);if(at!=CONTINUUM_FULL){shadowStep=s;far.z=at;far.w=chunks;}}
                 }
               }
               cut.w=allowed;
@@ -643,6 +740,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
                   wantCard=1u;
                 }
                 if(splatShare<255u){
+                  let planned=continuumFloor(1u,planKey);
                   if(hasSurfels){
                     let nominalPx=max(CONTINUUM_BASE_PIXEL_ERROR*max(continuumView.curve.x,0.05),0.25);
                     let targetPx=clamp(1.05*sqrt(max(pixels/nominalPx,0.5)),0.98,2.25);
@@ -652,9 +750,8 @@ fn continuumTry(slot:u32,i:u32)->u32 {
                       let nJ=max(32.0,baseN/f32(1u<<j));
                       let nCount=min(surfelCount,u32(ceil(nJ)));
                       if(j==0u){atomicAdd(&continuumCounted[2],nCount);}
-                      let chunks=(nCount+${CONTINUUM_CHUNK_TRIANGLES - 1}u)/${CONTINUUM_CHUNK_TRIANGLES}u;
-                      let at=continuumReserve(2u,chunks);
-                      if(at!=CONTINUUM_FULL){step=nCount;morph=nJ;far.x=at;far.y=chunks|0x80000000u;break;}
+                      let chunks=(nCount+${CONTINUUM_CHUNK_TRIANGLES - 1}u)/${CONTINUUM_CHUNK_TRIANGLES}u;continuumAsk(2u,j,planKey,chunks);
+                      if(j>=planned&&far.x==CONTINUUM_FULL){let at=continuumReserve(2u,chunks);if(at!=CONTINUUM_FULL){step=nCount;morph=nJ;far.x=at;far.y=chunks|0x80000000u;}}
                     }
                   }else{
                     for(var j=0u;j<CONTINUUM_LEVELS;j++){
@@ -662,8 +759,8 @@ fn continuumTry(slot:u32,i:u32)->u32 {
                       var s=u32(chosen.x);var m=chosen.y;
                       if(s<farFirst){s=farFirst;m=0.0;}
                       if(j==0u){atomicAdd(&continuumCounted[2],continuumStepWord(model,s,0u));}
-                      let chunks=continuumChunks(model,s);let at=continuumReserve(2u,chunks);
-                      if(at!=CONTINUUM_FULL){step=s;morph=m;far.x=at;far.y=chunks;break;}
+                      let chunks=continuumChunks(model,s);continuumAsk(2u,j,planKey,chunks);
+                      if(j>=planned&&far.x==CONTINUUM_FULL){let at=continuumReserve(2u,chunks);if(at!=CONTINUUM_FULL){step=s;morph=m;far.x=at;far.y=chunks;}}
                     }
                   }
                 }
@@ -710,7 +807,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     }
     if(wet.w!=0u&&far.x!=CONTINUUM_FULL){wet.z=continuumReserve(${CONTINUUM_CAPTURE_LISTS[2]}u,far.y&0x7fffffffu);}
     continuumSlotWet[lane]=wet;
-    continuumSlotRecord[lane]=record;continuumSlotCut[lane]=cut;continuumSlotTries[lane]=tries;continuumSlotFar[lane]=far;continuumSlotLift[lane]=lift.x;continuumCardWant[lane]=wantCard;continuumSlotCells[lane]=cells;
+    continuumSlotRecord[lane]=record;continuumSlotCut[lane]=cut;continuumSlotTries[lane]=tries;continuumSlotFar[lane]=far;continuumSlotLift[lane]=lift.x;continuumSlotKey[lane]=planKey;continuumCardWant[lane]=wantCard;continuumSlotCells[lane]=cells;
   }
   workgroupBarrier();
   if(lane==0u){
@@ -770,11 +867,16 @@ fn continuumTry(slot:u32,i:u32)->u32 {
     }
   }
   workgroupBarrier();
-  // Each instance's clusters are listed at the finest level the lists hold whole. Where its larger clusters found room
-  // and its small ones none, the room taken is left holding entries of nothing.
+  // Each instance's clusters are listed at the finest level the plan leaves it that the lists hold whole, after asking
+  // the plan for every level. Where its larger clusters found room and its small ones none, the room taken is left
+  // holding entries of nothing.
   if(total>0u&&lane<CONTINUUM_BATCH){
-    var chosen=vec4u(CONTINUUM_LEVELS,CONTINUUM_LEVELS,0u,0u);var base=vec4u(0u);
+    let planKey=continuumSlotKey[lane];
     for(var j=0u;j<CONTINUUM_LEVELS;j++){
+      for(var r=0u;r<3u;r++){continuumAsk(select(r,4u,r==2u),j,planKey,atomicLoad(&continuumWanted[(lane*3u+r)*CONTINUUM_LEVELS+j]));}
+    }
+    var chosen=vec4u(CONTINUUM_LEVELS,CONTINUUM_LEVELS,0u,0u);var base=vec4u(0u);
+    for(var j=continuumFloor(0u,planKey);j<CONTINUUM_LEVELS;j++){
       let big=atomicLoad(&continuumWanted[(lane*3u)*CONTINUUM_LEVELS+j]);let small=atomicLoad(&continuumWanted[(lane*3u+1u)*CONTINUUM_LEVELS+j]);
       if(big+small==0u){chosen.x=j;break;}
       var a=0u;var b=0u;
@@ -791,7 +893,7 @@ fn continuumTry(slot:u32,i:u32)->u32 {
       if(big>0u){continuumSlotWet[lane].x=continuumReserve(${CONTINUUM_CAPTURE_LISTS[0]}u,big);}
       if(small>0u){continuumSlotWet[lane].y=continuumReserve(${CONTINUUM_CAPTURE_LISTS[1]}u,small);}
     }
-    for(var j=0u;j<CONTINUUM_LEVELS;j++){
+    for(var j=continuumFloor(3u,planKey);j<CONTINUUM_LEVELS;j++){
       let n=atomicLoad(&continuumWanted[(lane*3u+2u)*CONTINUUM_LEVELS+j]);
       if(n==0u){chosen.y=j;break;}
       let a=continuumReserve(5u,n);
