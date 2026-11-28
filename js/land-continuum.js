@@ -166,7 +166,8 @@ export function bakeLandContinuumPiece(spec) {
     }
     return 0;
   };
-  points(0, (x, z) => { lattice[at(x, z) + 2] = waits(x, z); });
+  // Every point, the coarse lattice's as well as the window's: from level bs, the coarse lattice's finest, up.
+  points(bs, (x, z) => { lattice[at(x, z) + 2] = waits(x, z); });
   // Every lattice point within a world rectangle, by the float its record starts at.
   const forPoints = (rect, visit) => {
     const ux = (w) => ((w - grid.x0) / grid.g - spec.gx) / fine, uz = (w) => ((w - grid.z0) / grid.g - spec.gz) / fine;
