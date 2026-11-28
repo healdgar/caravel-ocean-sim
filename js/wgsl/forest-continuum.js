@@ -415,6 +415,14 @@ fn forestNativeAlbedoOnly(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f
  if(family==2u){return textureSampleGrad(forestNativeAlbedo2,forestNativeSampler,uv,layer,ux,uy);}
  return textureSampleGrad(forestNativeAlbedo3,forestNativeSampler,uv,layer,ux,uy);
 }
+// The texels of a leaf map one pixel spans, along its longer footprint: under one, the map is seen magnified.
+fn forestNativeTexels(material:ForestLeafMaterial,ux:vec2f,uy:vec2f)->f32{
+ let family=u32(material.coordinates.x);
+ var size=textureDimensions(forestNativeAlbedo3);
+ if(family==0u){size=textureDimensions(forestNativeAlbedo0);}else if(family==1u){size=textureDimensions(forestNativeAlbedo1);}
+ else if(family==2u){size=textureDimensions(forestNativeAlbedo2);}
+ return max(length(ux*vec2f(size)),length(uy*vec2f(size)));
+}
 // The samples of a pixel a leaf card covers: its coverage times the samples, rounded by a hash of the card and the
 // pixel and rotated by it, so cards seen through one another keep independent footprints.
 fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f,samples:u32)->u32{
@@ -691,14 +699,16 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
  }
  return n;
 }
-// Near, solidify BC7/ASTC-compressed leaf & twig interiors (rawAlpha >= 0.72 -> 1.0) so MSAA sample-masking never
-// punches salt-and-pepper stipple dots through solid leaves up close, while preserving smooth anti-aliased edges.
-fn forestBotanicalDetail(uv:vec2f,viewDist:f32,rawAlpha:f32)->vec4f{
- let detailW=1.-smoothstep(8.,22.,viewDist);
- if(detailW<=.001||rawAlpha<=.04){return vec4f(rawAlpha,0.,0.,0.);}
- let edgeSharp=smoothstep(.18,.72,rawAlpha);
- let crispAlpha=mix(rawAlpha,edgeSharp,detailW);
- return vec4f(crispAlpha,0.,0.,0.);
+// Near, a leaf map seen magnified (a texel wider than the pixel) is sharpened: its edges crisp, and its interiors,
+// which block compression leaves a little short of solid (rawAlpha >= 0.72 -> 1.0), whole, so MSAA sample-masking
+// never punches salt-and-pepper stipple through solid leaves up close. Seen minified, its alpha is the share of the
+// pixel its leaves cover (a needle a fifth of a pixel wide covers a fifth) and stays that share: sharpened, every
+// needle thinner than a pixel would be drawn thinner still, or not at all. Only a near-solid interior is closed there.
+fn forestBotanicalDetail(viewDist:f32,rawAlpha:f32,texels:f32)->vec4f{
+ let detailW=(1.-smoothstep(8.,22.,viewDist))*(1.-smoothstep(.7,1.4,texels));
+ let whole=select(rawAlpha,1.,rawAlpha>=.94);
+ if(detailW<=.001||rawAlpha<=.04){return vec4f(whole,0.,0.,0.);}
+ return vec4f(mix(whole,smoothstep(.18,.72,rawAlpha),detailW),0.,0.,0.);
 }
 // The colour light shining through a leaf takes on, as its blade passes the green and holds back the blue; a leaf
 // near and a crown far take on the same.
@@ -1004,7 +1014,7 @@ fn forestContinuumCoverage(v:ContinuumVarying,front:bool)->u32{
  let rawAlpha=pigment.a;
  var crisp=rawAlpha;
  if(viewDist<22.){
-  forestLastBot=forestBotanicalDetail(v.uv,viewDist,rawAlpha);
+  forestLastBot=forestBotanicalDetail(viewDist,rawAlpha,forestNativeTexels(forestNativeMaterials[layer],ux*near,uy*near));
   forestLastHasBot=true;
   crisp=forestLastBot.x;
  }
