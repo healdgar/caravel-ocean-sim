@@ -7,19 +7,19 @@
   "generator": "scripts/prepare-crew-continuum.mjs",
   "source": {
     "file": "caribbean-male.glb",
-    "sha256": "08e868bda2ce3eab3a1e8429306bae538f15bc01d833ddf0faafcb7d1fa1f3c2",
+    "sha256": "65e37ce0b72cf27bb39641f8fc741c010b10d1155da2a8ddbe33f58e09a798df",
     "vertices": 1033636,
     "triangles": 1994554
   },
   "atlas": {
-    "words": 427188,
+    "words": 429066,
     "headerWords": 32,
-    "bytes": 1708752,
-    "sha256": "fd5317a0438bfddefe10d9c86fa9dd530e49ea0103a41e6f57891d578c0305c4",
+    "bytes": 1716264,
+    "sha256": "e0eea54c1e14b1acb444a4f59ef93aadd5e09306688dfa87d4462439a2f8d89e",
     "gzip": {
       "file": "atlas.bin.gz",
-      "bytes": 789259,
-      "sha256": "806a3be1ee6d914293c96abf6a5cf8837d9fc3224b0655b3f7f0541988b0bee7"
+      "bytes": 788843,
+      "sha256": "f81ef399bbc9562f46b2092e24a42df6ca837325d9a55c4d16aa6b78ad3cfdb9"
     }
   },
   "pieces": [
@@ -51,30 +51,22 @@
   ],
   "regionMedians": [
     [
-      0.08608,
-      0.02519,
-      0.01296
+      0.30325,
+      0.02362,
+      0.01417
+    ],
+    null,
+    [
+      0.33094,
+      0.30054,
+      0.23429
     ],
     [
-      0.06211,
-      0.02264,
-      0.01348
+      0.07876,
+      0.02875,
+      0.01563
     ],
-    [
-      0.18593,
-      0.1066,
-      0.0737
-    ],
-    [
-      0.17956,
-      0.06844,
-      0.03698
-    ],
-    [
-      0.08869,
-      0.02772,
-      0.0093
-    ]
+    null
   ],
   "rig": {
     "joints": 93,
@@ -157,10 +149,10 @@
         0.47487
       ],
       [
-        -0.00976,
+        0.00066,
         1.34698,
         -0.01369,
-        0.51335
+        0.50659
       ],
       [
         -0.00582,
@@ -283,22 +275,22 @@
         0.41972
       ],
       [
-        0.50358,
+        0.51351,
         1.36428,
         -0.03369,
-        0.38567
+        0.39565
       ],
       [
         0.62506,
         1.36428,
         -0.01369,
-        0.37011
+        0.37825
       ],
       [
-        0.56398,
+        0.55609,
         1.36428,
         -0.03369,
-        0.33278
+        0.33895
       ],
       [
         0.67405,
@@ -382,7 +374,7 @@
         0.75736,
         1.34428,
         0.01097,
-        0.2939
+        0.28119
       ],
       [
         0.81544,
@@ -501,8 +493,8 @@
       [
         -0.81294,
         1.36428,
-        0.04812,
-        0.26759
+        0.06812,
+        0.2607
       ],
       [
         -0.86943,
@@ -513,8 +505,8 @@
       [
         -0.88412,
         1.34428,
-        0.10631,
-        0.26623
+        0.08631,
+        0.27894
       ],
       [
         -0.76578,
@@ -547,10 +539,10 @@
         0.28203
       ],
       [
-        -0.82995,
-        1.34428,
+        -0.82145,
+        1.33342,
         0.04631,
-        0.28112
+        0.27234
       ],
       [
         -0.86892,
@@ -584,9 +576,9 @@
       ],
       [
         0.03024,
-        0.77822,
+        0.77806,
         0.00631,
-        0.55917
+        0.55901
       ],
       [
         0.10032,
@@ -681,19 +673,19 @@
     ]
   },
   "clusters": {
-    "count": 833,
+    "count": 845,
     "levels": 7,
-    "roots": 44,
-    "finestTriangles": 32442,
-    "rootError": 0.1957,
+    "roots": 50,
+    "finestTriangles": 32617,
+    "rootError": 0.1146,
     "pieceCopies": 9800,
     "groups": {
-      "count": 4104,
-      "spanning": 1760,
-      "byJoint": 878,
-      "whole": 882,
-      "grown": 350,
-      "growthMax": 0.2706,
+      "count": 4100,
+      "spanning": 1754,
+      "byJoint": 869,
+      "whole": 885,
+      "grown": 360,
+      "growthMax": 0.2697,
       "byLevel": [
         [
           1659,
@@ -701,29 +693,29 @@
           5
         ],
         [
-          547,
-          384,
-          80
+          552,
+          382,
+          77
         ],
         [
-          121,
-          184,
-          223
+          118,
+          179,
+          231
         ],
         [
-          17,
-          23,
-          243
+          16,
+          22,
+          242
         ],
         [
-          0,
           1,
-          150
+          0,
+          149
         ],
         [
           0,
           0,
-          80
+          78
         ],
         [
           0,
@@ -743,19 +735,24 @@
         [
           0,
           0,
-          9
+          11
         ],
         [
           0,
           0,
-          5
+          7
         ],
         [
           0,
           0,
-          3
+          1
         ]
       ]
+    },
+    "posedShapes": {
+      "count": 24,
+      "weight": 10,
+      "share": 0.9992
     }
   },
   "chain": {
@@ -766,28 +763,28 @@
       20
     ],
     "wellComposedCells": 2,
-    "wrapTriangles": 4948,
-    "baseTriangles": 1638,
-    "baseVertices": 821,
+    "wrapTriangles": 4956,
+    "baseTriangles": 1642,
+    "baseVertices": 823,
     "baseError": 0.1588,
     "outward": 0.0861,
     "inward": 0.1588,
     "simplifyError": 0.0164,
-    "steps": 816,
+    "steps": 818,
     "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
       0.1588,
-      1.2824
+      1.0514
     ],
     "inflateMax": 0.1839,
-    "rootTriangles": 2602,
+    "rootTriangles": 2834,
     "farFirst": 0,
-    "farFirstTriangles": 1638,
+    "farFirstTriangles": 1642,
     "handoffError": 0.1588,
     "farSourceTriangles": 49998,
-    "posedError": 0.1667,
-    "posedInward": 0.1667,
+    "posedError": 0.1699,
+    "posedInward": 0.1699,
     "posedOutward": 0.0861,
     "farSourceBack": 0.0196
   },
@@ -797,53 +794,45 @@
       0.9043,
       0.0063
     ],
-    "rx": 0.2362,
+    "rx": 0.2358,
     "ry": 0.9,
     "regions": [
       {
         "name": "paint",
-        "share": 0.0657,
+        "share": 0.0026,
         "mean": [
-          0.14734,
-          0.0441,
-          0.02414
+          0.34076,
+          0.05268,
+          0.03237
         ]
       },
       {
         "name": "shirt",
-        "share": 0.3146,
-        "mean": [
-          0.14453,
-          0.08402,
-          0.06256
-        ]
+        "share": 0,
+        "mean": null
       },
       {
         "name": "trousers",
-        "share": 0.4338,
+        "share": 0.2685,
         "mean": [
-          0.27619,
-          0.23489,
-          0.18652
+          0.39468,
+          0.36121,
+          0.29156
         ]
       },
       {
         "name": "skin",
-        "share": 0.1859,
+        "share": 0.7289,
         "mean": [
-          0.22812,
-          0.09307,
-          0.05884
+          0.12912,
+          0.05116,
+          0.03133
         ]
       },
       {
         "name": "hair",
         "share": 0,
-        "mean": [
-          0.09612,
-          0.03031,
-          0.00975
-        ]
+        "mean": null
       }
     ]
   },
@@ -923,10 +912,10 @@
   },
   "body": {
     "file": "body.glb",
-    "bytes": 972880,
-    "sha256": "51616c238c1e9707029f477afbbb491c8982dfa53f5cd5fe2ed09ae66f5e34f1",
+    "bytes": 972940,
+    "sha256": "91f569c446318e8001f28695ed94c5d191afff1b6f84cee95ef59328de83883a",
     "triangles": 19998,
-    "vertices": 9973,
+    "vertices": 9974,
     "contactDrift": {
       "ankleAboveSole_l": -0.0001,
       "ankleAboveSole_r": 0,
@@ -936,12 +925,12 @@
   "poses": 27,
   "files": {
     "atlas.bin": {
-      "bytes": 1708752,
-      "sha256": "fd5317a0438bfddefe10d9c86fa9dd530e49ea0103a41e6f57891d578c0305c4",
+      "bytes": 1716264,
+      "sha256": "e0eea54c1e14b1acb444a4f59ef93aadd5e09306688dfa87d4462439a2f8d89e",
       "gzip": {
         "file": "atlas.bin.gz",
-        "bytes": 789259,
-        "sha256": "806a3be1ee6d914293c96abf6a5cf8837d9fc3224b0655b3f7f0541988b0bee7"
+        "bytes": 788843,
+        "sha256": "f81ef399bbc9562f46b2092e24a42df6ca837325d9a55c4d16aa6b78ad3cfdb9"
       }
     },
     "albedo.bc7.bin": {
@@ -963,6 +952,6 @@
       }
     }
   },
-  "bakeSeconds": 118,
+  "bakeSeconds": 154.2,
   "mobilePrunedFromLevel": 6
 }

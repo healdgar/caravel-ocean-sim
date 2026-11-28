@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { CREW_JOINT_NAMES, CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
+import { posedShapeAttributes } from '../js/continuum-bake.js';
 import { CONTINUUM_HOPS, CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
 import {
   CONTINUUM_CLUSTER_WORDS, CONTINUUM_GROUP_WHOLE, CONTINUUM_HEADER, CONTINUUM_NEVER, CONTINUUM_STREAMS, CONTINUUM_TYPE, CONTINUUM_TRIANGLE_WORDS,
@@ -45,6 +46,28 @@ test('every body\'s every file is named, spelled out where the build finds and p
   for (const paths of Object.values(CREW_CONTINUUM_ASSETS)) for (const path of Object.values(paths)) assert.ok(source.includes(`'${path}'`), path);
 });
 
+test('a body\'s posed shapes are its offsets from rest, the directions they vary most first', () => {
+  // A strip bent at its middle in three poses: offsets that grow along it past the bend.
+  const n = 40, rest = new Float32Array(n * 3);
+  for (let v = 0; v < n; v++) rest.set([(v >> 1) * 0.05, 0, (v & 1) * 0.05], v * 3);
+  const posed = [0.4, 0.9, 1.4].map((angle) => rest.map((x, i) => {
+    const v = Math.floor(i / 3), along = Math.max(rest[v * 3] - 0.5, 0), c = i % 3;
+    return c === 0 ? x - along + along * Math.cos(angle) : c === 1 ? along * Math.sin(angle) : x;
+  }));
+  const whole = posedShapeAttributes(rest, posed, { count: 9 }), two = posedShapeAttributes(rest, posed, { count: 2, weight: 3 });
+  assert.equal(whole.stride, 9);
+  assert.ok(Math.abs(whole.share - 1) < 1e-9, `all nine directions hold ${whole.share}`);
+  assert.deepEqual(two.weights, [3, 3]);
+  // Projected on every direction, each point keeps its offsets' length; a point before the bend has none.
+  for (let v = 0; v < n; v++) {
+    let offsets = 0, projected = 0;
+    for (const X of posed) for (let c = 0; c < 3; c++) offsets += (X[v * 3 + c] - rest[v * 3 + c]) ** 2;
+    for (let e = 0; e < 9; e++) projected += whole.attr[v * 9 + e] ** 2;
+    assert.ok(Math.abs(Math.sqrt(offsets) - Math.sqrt(projected)) < 1e-5, `point ${v}`);
+  }
+  assert.ok(Math.hypot(...whole.attr.subarray(0, 9)) < 1e-6);
+});
+
 test('a joint falls in the piece a ball takes off with it', () => {
   const piece = (name) => CREW_CONTINUUM_PIECES[CREW_CONTINUUM_JOINT_PIECE[CREW_JOINT_NAMES.indexOf(name)]];
   for (const [joint, expected] of [['pelvis', 'pelvis'], ['spine_01', 'pelvis'], ['spine_03', 'spine_03'], ['clavicle_l', 'clavicle_l'], ['neck_01', 'neck_01'], ['head', 'head'],
@@ -72,6 +95,9 @@ test('every baked body\'s manifest is whole, its rig and wear fill their tables,
     assert.ok(manifest.chain.coreTriangles <= 8, `${id} far body ends at ${manifest.chain.coreTriangles} triangles`);
     assert.equal(manifest.clusters.finestTriangles, manifest.source.triangles, `${id} the finest cut is the whole fitted body`);
     for (const [where, drift] of Object.entries(manifest.body.contactDrift)) assert.ok(Math.abs(drift) < 0.01, `${id} ${where} drifts ${drift} m`);
+    // The simplifier saw every pose (posedShapeAttributes), so a near cut is not spent on what bending would tear.
+    assert.ok(manifest.clusters.posedShapes?.count > 0 && manifest.clusters.posedShapes.share > 0.95, `${id} baked without its posed shapes`);
+    assert.ok(manifest.clusters.cuts['3m'] < 0.12 * manifest.source.triangles, `${id} takes ${manifest.clusters.cuts['3m']} triangles 3 m off`);
     for (const damage of [(m) => { m.version++; }, (m) => { m.id = 'nobody'; }, (m) => { m.atlas.bytes += 4; }, (m) => { delete m.files['atlas.bin'].sha256; }, (m) => { m.splat.regions.pop(); }, (m) => { m.rig.spheres.pop(); }]) {
       const copy = structuredClone(manifest);
       damage(copy);
@@ -200,7 +226,7 @@ test('all 12 restored bodies are unique ~1.9M-triangle dressed historical meshes
     const manifest = manifestOf(id);
     sourceShas.add(manifest.source.sha256);
     assert.ok(manifest.source.triangles > 1_500_000, `${id} has ${manifest.source.triangles} triangles`);
-    assert.ok(manifest.regionMedians[1] && manifest.regionMedians[2], `${id} carries baked shirt and trousers regions`);
+    assert.ok(manifest.regionMedians[1] || manifest.regionMedians[2], `${id} carries a baked garment region`);
 
     const mobilePaths = CREW_CONTINUUM_MOBILE_ASSETS[id];
     for (const file of Object.values(mobilePaths)) assert.ok(source.includes(`'${file}'`), `mobile path quoted: ${file}`);

@@ -117,8 +117,9 @@ function groupClusters(clusters: Cluster[], remap: Uint32Array, parts: ArrayLike
   return [...byPart.keys()].sort((a, b) => a - b).flatMap((part) => groupByAdjacency(byPart.get(part)!, remap));
 }
 
-function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out: Cluster[], [ns, us] = [1, 1], errMode: 'sum' | 'max' = 'max', hooks: BarkHooks = {}): number {
-  const weights = BARK_WEIGHTS.map((w, i) => w * (i < 3 ? ns : us));
+function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out: Cluster[], [ns, us] = [1, 1], errMode: 'sum' | 'max' = 'max', hooks: BarkHooks = {}, extraWeights: number[] = []): number {
+  const weights = [...BARK_WEIGHTS.map((w, i) => w * (i < 3 ? ns : us)), ...extraWeights];
+  const stride = weights.length;
   const nv = pos.length / 3;
   const remap = MeshoptSimplifier.generatePositionRemap(pos, 3);
   let current = partClusters(idx, pos, hooks.parts).map((ci) => makeCluster(ci, pos, 0, 0, null));
@@ -151,17 +152,17 @@ function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out:
       const tris = total / 3;
       const { local, verts } = compact(merged);
       const lpos = new Float32Array(verts.length * 3);
-      const lattr = new Float32Array(verts.length * 5);
+      const lattr = new Float32Array(verts.length * stride);
       const lock = new Uint8Array(verts.length);
       for (let i = 0; i < verts.length; i++) {
         const v = verts[i];
         lpos.set(pos.subarray(v * 3, v * 3 + 3), i * 3);
-        lattr.set(attr.subarray(v * 5, v * 5 + 5), i * 5);
+        lattr.set(attr.subarray(v * stride, v * stride + stride), i * stride);
         lock[i] = shared[remap[v]];
       }
       const target = Math.floor(tris / 2) * 3;
       const [res, err] = MeshoptSimplifier.simplifyWithAttributes(
-        local, lpos, 3, lattr, 5, weights, lock, target, 1e9, ['ErrorAbsolute'],
+        local, lpos, 3, lattr, stride, weights, lock, target, 1e9, ['ErrorAbsolute'],
       );
       if (res.length / 3 > tris * 0.85) {
         next.push(...g); // could not reduce enough: retry with different neighbours next level
@@ -200,7 +201,7 @@ function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out:
 
 /** The DAG of one mesh (bark + leaves; `leaves.pos` empty for a plain model), packed for the renderer. */
 export async function buildDag(req: DagRequest): Promise<DagResult> {
-  const { id, bark, leaves, leafErr, leafMask, barkAttr, barkErr, barkParts, barkJoined, barkGroupError } = req;
+  const { id, bark, leaves, leafErr, leafMask, barkAttr, barkErr, barkParts, barkJoined, barkGroupError, barkExtra } = req;
   {
     await MeshoptClusterizer.ready;
     await MeshoptSimplifier.ready;
@@ -208,12 +209,15 @@ export async function buildDag(req: DagRequest): Promise<DagResult> {
 
     // bark
     const barkClusters: Cluster[] = [];
-    const battr = new Float32Array((bark.pos.length / 3) * 5);
+    const more = barkExtra?.stride ?? 0, stride = 5 + more;
+    if (more > 27 || (barkExtra && barkExtra.weights.length !== more)) throw Error('At most 27 extra bark attributes, each weighed');
+    const battr = new Float32Array((bark.pos.length / 3) * stride);
     for (let i = 0; i < bark.pos.length / 3; i++) {
-      battr.set(bark.nrm.subarray(i * 3, i * 3 + 3), i * 5);
-      battr.set(bark.uv.subarray(i * 2, i * 2 + 2), i * 5 + 3);
+      battr.set(bark.nrm.subarray(i * 3, i * 3 + 3), i * stride);
+      battr.set(bark.uv.subarray(i * 2, i * 2 + 2), i * stride + 3);
+      if (more) battr.set(barkExtra!.attr.subarray(i * more, i * more + more), i * stride + 5);
     }
-    const barkLevels = buildBark(bark.pos, battr, bark.idx, barkClusters, barkAttr, barkErr, { parts: barkParts, joined: barkJoined, groupError: barkGroupError });
+    const barkLevels = buildBark(bark.pos, battr, bark.idx, barkClusters, barkAttr, barkErr, { parts: barkParts, joined: barkJoined, groupError: barkGroupError }, barkExtra?.weights ?? []);
 
     // leaves (vertex arrays grow as reduced leaves are appended)
     const lv: LeafVerts = { pos: Array.from(leaves.pos), nrm: Array.from(leaves.nrm), uv: Array.from(leaves.uv), src: Array.from({ length: leaves.pos.length / 3 }, (_, i) => i) };

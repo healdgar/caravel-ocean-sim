@@ -3,14 +3,16 @@
 // Bakes each high-detail crew body into the people continuum (AGENTS.md rule 3; js/crew-continuum.js) by the one bake
 // (js/continuum-bake.js bakeContinuumBody), each body an atlas of one type of the one format (js/continuum-format.js).
 //   node scripts/prepare-crew-continuum.mjs --fits=<absolute .tripo/1550-hd/fit-regions> [--only=sailor-male] [--out=assets/crew/continuum] [--texture=4096]
-// Each body comes from its fit (scripts/fit-crew-body.py --textured --full-texture, which tags each point's region),
+// Each body comes from its fit (scripts/fit-crew-body.py --textured --full-texture, whose points scripts/crew_regions.py labels by region),
 // every point skinned to up to four of the crew skeleton's joints:
 //   clusters   a cluster hierarchy cut on the GPU by projected error. Each piece of the body (CREW_CONTINUUM_PIECES: the
 //              trunk in two, the neck, the head, each limb by its segments) is clustered apart, its boundary a seam both
 //              sides coarsen together, and each piece's clusters ride the joint its points weigh on most. Each group's
 //              error is how far its surface moves, measured both ways at rest and in every pose of a set the body is
 //              held to (rest, its clips, each joint swung through its range; js/continuum-bake.js posedGroupError), so
-//              a cut keeps its bound while it moves.
+//              a cut keeps its bound while it moves. The simplifier is shown those poses too, as each point's offsets
+//              from rest along their 24 principal directions (posedShapeAttributes; --posed-shapes, --posed-weight),
+//              so it keeps the points a bend needs and the posed error stays near the rest error.
 //   far body   the one bake's, wrapped round a light even simplification of the fit (the far source) whose points wear
 //              the colour of the surface about them, and begun about as heavy as the clusters' coarsest cut. Each far
 //              point wears the skin of the far source's point nearest it; its error is measured posed, each way: the
@@ -37,7 +39,7 @@ import {
 } from '../js/crew-continuum.js';
 import { CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
 import { CONTINUUM_HEADER_WORDS, CONTINUUM_GROUP_WHOLE, assembleContinuumAtlas, checkContinuumAtlas, packContinuumBody, packContinuumUV } from '../js/continuum-format.js';
-import { bakeContinuumBody, closest, triangleSpheres, triangleGrid, outline, posedGroupError, posedMeasure } from '../js/continuum-bake.js';
+import { bakeContinuumBody, closest, triangleSpheres, triangleGrid, outline, posedGroupError, posedMeasure, posedShapeAttributes } from '../js/continuum-bake.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -48,6 +50,10 @@ const ONLY = option('only', null);
 // `--seams=held` keeps every piece's boundary at every level, as a body whose parts can part does (bakeClusters).
 const SEAMS = option('seams', 'coarsen');
 const TEXTURE_SIZE = Number(option('texture', 4096));
+// How many principal directions of the posed offsets the simplifier is shown beside the normals (posedShapeAttributes),
+// and what each weighs against them; `--posed-shapes=0` shows it the rest pose alone.
+const POSED_SHAPES = Number(option('posed-shapes', 24));
+const POSED_WEIGHT = Number(option('posed-weight', 10));
 const SAMPLE_SIZE = Math.min(2048, TEXTURE_SIZE);
 // The far source the far body is wrapped round, and the light mesh body.glb carries, in triangles.
 const FAR_SOURCE_TRIANGLES = Number(option('far', 50000));
@@ -594,9 +600,25 @@ async function bake(entry) {
     // The one bake: the pieces clustered with their error measured posed, and the far body wrapped round the far source.
     // The pieces are one skin and never part, so their seams coarsen with the surface about them (bakeClusters).
     const welded = { position: body.position, normal: body.normal, kind: body.uv, part: body.piece, index: body.index, count: body.count, corner: null, joined: SEAMS === 'coarsen' };
-    const baked = await bakeContinuumBody({ name: entry.id, welded, groupError: () => posedGroupError(welded, posed), far: far.type });
+    const shapes = POSED_SHAPES > 0 ? posedShapeAttributes(body.position, posed, { count: POSED_SHAPES, weight: POSED_WEIGHT }) : null;
+    const measured = new Map(), seen = (level, error, rest, worst) => {
+      let row = measured.get(level);
+      if (!row) measured.set(level, (row = { simplifier: [], rest: [], posed: [] }));
+      row.simplifier.push(error); row.rest.push(rest); row.posed.push(worst);
+    };
+    const baked = await bakeContinuumBody({ name: entry.id, welded, groupError: () => posedGroupError(welded, posed, { seen }), extra: () => shapes, far: far.type });
     const { clusters, far: farBody } = baked;
     lap('one bake');
+    // Each level's group errors, simplifier's own, at rest and posed (metres); and the triangles a cut takes at a few
+    // errors, a person 1.5 px sharp at 3, 10 and 30 m on a 1080-line, 60 degree view.
+    const median = (list) => { const sorted = Float64Array.from(list).sort(); return sorted[sorted.length >> 1] ?? 0; };
+    const levelErrors = [...measured].sort((a, b) => a[0] - b[0]).map(([level, row]) => ({
+      level, groups: row.posed.length, simplifier: +median(row.simplifier).toFixed(5), rest: +median(row.rest).toFixed(5), posed: +median(row.posed).toFixed(5), posedMax: +Math.max(...row.posed).toFixed(5),
+    }));
+    const cutAt = (error) => clusters.records.reduce((n, record) => n + (record.error <= error && error < record.parentError ? record.triangles : 0), 0);
+    const cuts = Object.fromEntries([3, 10, 30].map((metres) => [`${metres}m`, cutAt((1.5 * metres * 2 * Math.tan(Math.PI / 6)) / 1080)]));
+    console.log(`  posed shapes ${shapes ? `${shapes.stride} keep ${(shapes.share * 100).toFixed(1)}%` : 'none'}; cut ${JSON.stringify(cuts)}`);
+    for (const row of levelErrors) console.log(`    level ${row.level}: ${row.groups} groups, simplifier ${row.simplifier}, rest ${row.rest}, posed ${row.posed} (max ${row.posedMax})`);
 
     // Each piece's clusters ride its leading joint: the one its points weigh on most.
     const weigh = CREW_CONTINUUM_PIECES.map(() => new Float64Array(CREW_JOINT_COUNT));
@@ -791,7 +813,7 @@ async function bake(entry) {
       atlas: { words: atlas.length, headerWords: CONTINUUM_HEADER_WORDS, bytes: atlas.byteLength, sha256: files['atlas.bin'].sha256, gzip: files['atlas.bin'].gzip },
       pieces: CREW_CONTINUUM_PIECES, regions: CREW_CONTINUUM_REGIONS, regionMedians: surface.medians,
       rig: { joints: CREW_JOINT_COUNT, slack: +slack.toFixed(5), pieceSlack: Object.fromEntries(CREW_CONTINUUM_PIECES.map((name, p) => [name, +pieceSlack[p].toFixed(4)])), leads: leadOf.map((j) => CREW_JOINT_NAMES[j]), spheres },
-      clusters: { count: clusters.count, levels: clusters.levels, roots: clusters.roots, finestTriangles: clusters.finestTriangles, rootError: +clusters.rootError.toFixed(4), pieceCopies: body.copies, groups: spanning },
+      clusters: { count: clusters.count, levels: clusters.levels, roots: clusters.roots, finestTriangles: clusters.finestTriangles, rootError: +clusters.rootError.toFixed(4), pieceCopies: body.copies, groups: spanning, posedShapes: shapes ? { count: shapes.stride, weight: POSED_WEIGHT, share: +shapes.share.toFixed(4) } : null, levelErrors, cuts },
       chain: { ...farBody.stats, farSourceTriangles: far.triangles, posedError: +posedError.toFixed(4), posedInward: +inward.toFixed(4), posedOutward: +outward.toFixed(4), farSourceBack: +sourceBack.toFixed(4) },
       splat,
       texture: { width: texture.levels.width, height: texture.levels.height, coverage: texture.levels.coverage, delightVersion: texture.delightVersion, levels: texture.levels.levels },

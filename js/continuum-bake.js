@@ -182,6 +182,58 @@ export function posedGroupError(welded, posed, { nearest = 16, seen = null } = {
     return worst;
   };
 }
+// A skinned body's posed shapes, as attributes the simplifier keeps beside its normals (bakeClusters' `extra`): each
+// vertex's offsets from rest in every pose, along the `count` directions those offsets vary most (their principal
+// components, in metres). A collapse is then charged for how far it moves the surface in every pose at once, not at
+// rest alone, so a coarse level keeps the vertices a bend needs; a limb that only turns costs nothing, its offsets
+// being linear across it. `share`: how much of the offsets' energy the kept directions hold.
+export function posedShapeAttributes(rest, posed, { count = 24, weight = 1 } = {}) {
+  const n = rest.length / 3, D = 3 * posed.length, C = new Float64Array(D * D), d = new Float64Array(D);
+  const offsets = (v) => { for (let k = 0; k < posed.length; k++) for (let c = 0; c < 3; c++) d[k * 3 + c] = posed[k][v * 3 + c] - rest[v * 3 + c]; };
+  for (let v = 0; v < n; v++) {
+    offsets(v);
+    for (let i = 0; i < D; i++) { const di = d[i]; if (di === 0) continue; for (let j = i, row = i * D; j < D; j++) C[row + j] += di * d[j]; }
+  }
+  for (let i = 0; i < D; i++) for (let j = 0; j < i; j++) C[i * D + j] = C[j * D + i];
+  const { values, vectors } = symmetricEigen(C, D);
+  const order = Array.from(values.keys()).sort((a, b) => values[b] - values[a]).slice(0, Math.min(count, D)), m = order.length;
+  const attr = new Float32Array(n * m);
+  for (let v = 0; v < n; v++) {
+    offsets(v);
+    for (let e = 0; e < m; e++) { let sum = 0; for (let i = 0; i < D; i++) sum += d[i] * vectors[i * D + order[e]]; attr[v * m + e] = sum; }
+  }
+  const energy = values.reduce((a, x) => a + Math.max(x, 0), 0), kept = order.reduce((a, e) => a + Math.max(values[e], 0), 0);
+  return { attr, stride: m, weights: order.map(() => weight), share: energy > 0 ? kept / energy : 1 };
+}
+// The eigenvalues and eigenvectors (columns of `vectors`) of a symmetric D x D matrix, by cyclic Jacobi rotations.
+function symmetricEigen(matrix, D) {
+  const A = Float64Array.from(matrix), V = new Float64Array(D * D);
+  for (let i = 0; i < D; i++) V[i * D + i] = 1;
+  for (let sweep = 0; sweep < 64; sweep++) {
+    let off = 0, diag = 0;
+    for (let i = 0; i < D; i++) { diag += A[i * D + i] * A[i * D + i]; for (let j = i + 1; j < D; j++) off += A[i * D + j] * A[i * D + j]; }
+    if (off <= 1e-24 * Math.max(diag, 1e-300)) break;
+    for (let p = 0; p < D; p++) for (let q = p + 1; q < D; q++) {
+      const apq = A[p * D + q];
+      if (Math.abs(apq) < 1e-300) continue;
+      const theta = (A[q * D + q] - A[p * D + p]) / (2 * apq), t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+      const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+      for (let k = 0; k < D; k++) {
+        const akp = A[k * D + p], akq = A[k * D + q];
+        A[k * D + p] = c * akp - s * akq; A[k * D + q] = s * akp + c * akq;
+      }
+      for (let k = 0; k < D; k++) {
+        const apk = A[p * D + k], aqk = A[q * D + k];
+        A[p * D + k] = c * apk - s * aqk; A[q * D + k] = s * apk + c * aqk;
+      }
+      for (let k = 0; k < D; k++) {
+        const vkp = V[k * D + p], vkq = V[k * D + q];
+        V[k * D + p] = c * vkp - s * vkq; V[k * D + q] = s * vkp + c * vkq;
+      }
+    }
+  }
+  return { values: Array.from({ length: D }, (_, i) => A[i * D + i]), vectors: V };
+}
 // Nearest-triangle queries over a whole mesh, through a uniform grid of its triangles' bounds.
 export function triangleGrid(position, corners, cell) {
   const T = corners.length / 3, lo = [Infinity, Infinity, Infinity];
@@ -787,15 +839,17 @@ function weldDrawn(type) {
 // `leafVertices` holds them (position, normal, uv, and the card vertex each was made from), welded vertex
 // count + i being leaf vertex i, so a packer reads them past the welded mesh's own. `groupError`, if given, measures a
 // group's error in place of the builder (a skinned body's, in every pose its rig takes: (children, simplified, error)
-// => metres). `w.joined`: the body's parts never come apart (the pieces of a skin), so their boundaries coarsen with
+// => metres). `extra`: more attributes of each welded vertex for the simplifier to keep ({ attr, stride, weights }; a
+// skinned body's posed shapes, posedShapeAttributes). `w.joined`: the body's parts never come apart (the pieces of a skin), so their boundaries coarsen with
 // the surface about them; a body whose parts can part (a ship, a struck building) leaves it unset and keeps every
 // boundary at every level.
-async function bakeClusters(w, { uv = w.kind, leaves = null, groupError = null } = {}) {
+async function bakeClusters(w, { uv = w.kind, leaves = null, groupError = null, extra = null } = {}) {
   const dag = await buildDag({
     id: 0, bark: { pos: w.position, nrm: w.normal, uv, idx: w.index },
     leaves: leaves ? { pos: leaves.pos, nrm: leaves.nrm, uv: leaves.uv, vpl: leaves.vpl } : { pos: new Float32Array(0), nrm: new Float32Array(0), uv: new Float32Array(0), vpl: 8 },
     ...(leaves ? { leafErr: leaves.error, leafMask: leaves.mask ?? undefined } : {}), barkParts: w.part, barkJoined: w.joined === true,
     ...(groupError ? { barkGroupError: groupError } : {}),
+    ...(extra ? { barkExtra: extra } : {}),
   });
   const count = dag.meta.length / 4, records = [];
   for (let c = 0; c < count; c++) {
@@ -1593,7 +1647,7 @@ function bakeFar(type, welded, weight = 0) {
 // weldDrawn makes it; it must then bring `far`.
 export async function bakeContinuumBody(body) {
   await MeshoptSimplifier.ready;
-  const welded = body.welded ?? weldDrawn(body), clusters = await bakeClusters(welded, { uv: body.uv?.(welded) ?? welded.kind, groupError: body.groupError?.(welded) ?? null });
+  const welded = body.welded ?? weldDrawn(body), clusters = await bakeClusters(welded, { uv: body.uv?.(welded) ?? welded.kind, groupError: body.groupError?.(welded) ?? null, extra: body.extra?.(welded) ?? null });
   const weight = continuumRootTriangles(clusters), far = body.far ? bakeFar(body.far, weldDrawn(body.far), weight) : bakeFar(body, welded, weight);
   continuumFarFirst(clusters, far);
   return { welded, clusters, far };

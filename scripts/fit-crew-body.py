@@ -7,10 +7,8 @@ The crew skeleton (scripts/crew_skeleton.py) is Unreal 5's 80-joint body, the on
 positions (zero shoulder shear, zero pelvis/hip inversion, zero head-pitch tilt, zero limb-radius
 crushing) and its own skin weights, joint for joint; the face joints are placed on its face and
 take their share of the head's weight. Recomputes exact inverseBindMatrices, and retargets Idle,
-Walk, and Brace in model space with grounded soles. Segments skin, hair/beard, upper garment,
-lower garment, and untinted leather/trim using joint weights, anatomical coordinates,
-character-specific colour prototypes, and mesh-graph despeckling so facial features, beards, and
-hair render cleanly across all palettes.
+Walk, and Brace in model space with grounded soles. A textured body's points are labelled paint,
+shirt, trousers or skin by scripts/crew_regions.py, so each person can wear their own colours.
 
   python3 scripts/fit-crew-body.py [--textured] [--full-texture] rigged.glb assets/crew/sailor-classic.glb out.glb
 
@@ -23,6 +21,7 @@ from PIL import Image, ImageFilter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from crew_skeleton import JOINTS, FACE_JOINTS, INSERTED, face_landmarks  # noqa: E402
+import crew_regions  # noqa: E402
 
 
 def read_glb(path):
@@ -871,390 +870,395 @@ def main():
             out_w = np.asarray(w_list, dtype=out_w.dtype)
             I = np.asarray(new_tris, dtype=np.int64).ravel()
 
-    # Lightly smooth noisy 1px UV seam artifacts on garments while keeping sharp detail on facial features.
-    blurred = image.filter(ImageFilter.BoxBlur(0.65))
-    pixels_sharp = np.asarray(image, dtype=np.float32) / 255.0
-    pixels_smooth = np.asarray(blurred, dtype=np.float32) / 255.0
-    srgb_sharp = bilinear_sample(pixels_sharp, UV)
-    srgb_smooth = bilinear_sample(pixels_smooth, UV)
+    SHIRT, TROUSERS, SKIN, HAIR = crew_regions.SHIRT, crew_regions.TROUSERS, crew_regions.SKIN, crew_regions.HAIR
+    if textured:
+        # Each point's region, grown over the surface from its anatomy and the picture (scripts/crew_regions.py).
+        regions = crew_regions.label_regions(out_p, UV, I.reshape(-1, 3), out_j, out_w, slot_names, new_joint_pos, image, undressed=undressed)
+    else:
+        # Vertex-coloured bodies keep the older labelling, whose eye masks paint their eyes below.
+        # Lightly smooth noisy 1px UV seam artifacts on garments while keeping sharp detail on facial features.
+        blurred = image.filter(ImageFilter.BoxBlur(0.65))
+        pixels_sharp = np.asarray(image, dtype=np.float32) / 255.0
+        pixels_smooth = np.asarray(blurred, dtype=np.float32) / 255.0
+        srgb_sharp = bilinear_sample(pixels_sharp, UV)
+        srgb_smooth = bilinear_sample(pixels_smooth, UV)
 
-    w_head = group_weight(head_slots)
-    w_neck = group_weight(neck_slots)
-    w_hand = group_weight(hand_slots)
-    w_arm = group_weight(arm_slots)
-    w_torso = group_weight(torso_slots)
-    w_leg = group_weight(leg_slots)
-    w_foot = group_weight(foot_slots)
+        w_head = group_weight(head_slots)
+        w_neck = group_weight(neck_slots)
+        w_hand = group_weight(hand_slots)
+        w_arm = group_weight(arm_slots)
+        w_torso = group_weight(torso_slots)
+        w_leg = group_weight(leg_slots)
+        w_foot = group_weight(foot_slots)
 
-    srgb = np.where((w_head > 0.42)[:, None], 0.15 * srgb_smooth + 0.85 * srgb_sharp, 0.65 * srgb_smooth + 0.35 * srgb_sharp)
-    colors = srgb_to_linear(srgb)
-    lab = linear_to_oklab(colors)
-    lum = (colors @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)).astype(np.float32)
-    chroma = np.hypot(lab[:, 1], lab[:, 2])
+        srgb = np.where((w_head > 0.42)[:, None], 0.15 * srgb_smooth + 0.85 * srgb_sharp, 0.65 * srgb_smooth + 0.35 * srgb_sharp)
+        colors = srgb_to_linear(srgb)
+        lab = linear_to_oklab(colors)
+        lum = (colors @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)).astype(np.float32)
+        chroma = np.hypot(lab[:, 1], lab[:, 2])
 
-    head_verts = w_head > 0.45
-    head_top_y = float(out_p[head_verts, 1].max()) if head_verts.any() else head_pos[1] + 0.18
-    head_front_z = float(np.percentile(out_p[head_verts, 2], 95)) if head_verts.any() else head_pos[2] + 0.10
-    head_back_z = float(np.percentile(out_p[head_verts, 2], 8)) if head_verts.any() else head_pos[2] - 0.10
-    head_center_x = float(head_pos[0])
-    head_mid_z = 0.5 * (head_front_z + head_back_z)
-    eye_y = head_pos[1] + 0.48 * (head_top_y - head_pos[1])
-    nose_base_y = head_pos[1] + 0.24 * (head_top_y - head_pos[1])
+        head_verts = w_head > 0.45
+        head_top_y = float(out_p[head_verts, 1].max()) if head_verts.any() else head_pos[1] + 0.18
+        head_front_z = float(np.percentile(out_p[head_verts, 2], 95)) if head_verts.any() else head_pos[2] + 0.10
+        head_back_z = float(np.percentile(out_p[head_verts, 2], 8)) if head_verts.any() else head_pos[2] - 0.10
+        head_center_x = float(head_pos[0])
+        head_mid_z = 0.5 * (head_front_z + head_back_z)
+        eye_y = head_pos[1] + 0.48 * (head_top_y - head_pos[1])
+        nose_base_y = head_pos[1] + 0.24 * (head_top_y - head_pos[1])
 
-    # Character-specific skin prototype from central nose bridge & inner cheeks (guaranteed bare skin)
-    central_face = (
-        (w_head > 0.55)
-        & (np.abs(out_p[:, 0] - head_center_x) < 0.044)
-        & (out_p[:, 1] > nose_base_y + 0.006)
-        & (out_p[:, 1] < eye_y + 0.012)
-        & (out_p[:, 2] > head_mid_z + 0.032)
-    )
-    if central_face.sum() < 10:
+        # Character-specific skin prototype from central nose bridge & inner cheeks (guaranteed bare skin)
         central_face = (
-            (w_head > 0.50)
-            & (np.abs(out_p[:, 0] - head_center_x) < 0.052)
-            & (out_p[:, 1] > nose_base_y)
-            & (out_p[:, 1] < head_pos[1] + 0.65 * (head_top_y - head_pos[1]))
-            & (out_p[:, 2] > head_mid_z + 0.025)
+            (w_head > 0.55)
+            & (np.abs(out_p[:, 0] - head_center_x) < 0.044)
+            & (out_p[:, 1] > nose_base_y + 0.006)
+            & (out_p[:, 1] < eye_y + 0.012)
+            & (out_p[:, 2] > head_mid_z + 0.032)
         )
-    if central_face.sum() < 8:
-        central_face = (w_head > 0.5) & (out_p[:, 2] > head_mid_z + 0.02)
-    cf_lum = lum[central_face]
-    cf_keep = (cf_lum >= np.percentile(cf_lum, 22)) & (cf_lum <= np.percentile(cf_lum, 88))
-    skin_indices = np.nonzero(central_face)[0][cf_keep] if cf_keep.sum() >= 6 else np.nonzero(central_face)[0]
-    skin_proto_rgb = np.median(colors[skin_indices], axis=0)
-    skin_proto_lab = np.median(lab[skin_indices], axis=0)
-    skin_lum = float(np.median(lum[skin_indices]))
-
-    # Character-specific hair prototype from back & crown of cranium
-    back_scalp = (
-        (w_head > 0.55)
-        & ((out_p[:, 2] < head_mid_z - 0.015) | (out_p[:, 1] > head_pos[1] + 0.82 * (head_top_y - head_pos[1])))
-    )
-    if back_scalp.sum() >= 10:
-        hair_proto_lab = np.median(lab[back_scalp], axis=0)
-        hair_lum = float(np.median(lum[back_scalp]))
-    else:
-        hair_proto_lab = np.array([0.22, 0.02, 0.02], dtype=np.float32)
-        hair_lum = 0.025
-
-    dist_skin = np.linalg.norm((lab - skin_proto_lab) * np.array([0.85, 1.55, 1.55], dtype=np.float32), axis=1)
-    dist_hair = np.linalg.norm((lab - hair_proto_lab) * np.array([0.85, 1.55, 1.55], dtype=np.float32), axis=1)
-    warmth = colors[:, 0] / np.maximum(colors[:, 1], 1e-4)
-    is_skin_like = (dist_skin < 0.125) & (warmth > 1.18) & (lum > max(0.022, skin_lum * 0.28))
-
-    # Build welded 3D position adjacency graph upfront for coherent hair/beard growth & despeckling
-    pos_keys = np.round(out_p / 2e-4).astype(np.int64)
-    _, pos_first, pos_inv = np.unique(pos_keys, axis=0, return_index=True, return_inverse=True)
-    pos_inv = pos_inv.ravel()
-    num_pos = len(pos_first)
-    nbrs = [set() for _ in range(num_pos)]
-    tris_raw = I.reshape(-1, 3)
-    for t_a, t_b, t_c in tris_raw:
-        pa, pb, pc = int(pos_inv[t_a]), int(pos_inv[t_b]), int(pos_inv[t_c])
-        if pa != pb:
-            nbrs[pa].add(pb); nbrs[pb].add(pa)
-        if pb != pc:
-            nbrs[pb].add(pc); nbrs[pc].add(pb)
-        if pa != pc:
-            nbrs[pa].add(pc); nbrs[pc].add(pa)
-
-    SHIRT, TROUSERS, SKIN, HAIR = 1, 2, 3, 4
-    regions = np.zeros(len(colors), dtype=np.int64)
-
-    # A. Head & Face classification (NEVER assigns SHIRT on Head!)
-    on_head = w_head >= 0.42
-    regions[on_head] = SKIN
-
-    dx_h = np.abs(out_p[:, 0] - head_center_x)
-    dz_h = out_p[:, 2] - head_mid_z
-    dy_h = (out_p[:, 1] - head_pos[1]) / max(head_top_y - head_pos[1], 0.12)
-
-    # Eye socket box (protects sclera + iris/pupil from hair or skin recolouring across male & female proportions)
-    head_span = max(head_top_y - head_pos[1], 0.12)
-    eye_box = (
-        on_head
-        & (dx_h > 0.011) & (dx_h < 0.052)
-        & (out_p[:, 1] > head_pos[1] + 0.25 * head_span)
-        & (out_p[:, 1] < head_pos[1] + 0.62 * head_span)
-        & (dz_h > 0.020)
-    )
-    eye_sclera = eye_box & (chroma < 0.068) & (lum > max(0.10, skin_lum * 1.04))
-    iris_pupil = np.zeros(len(colors), dtype=bool)
-    pupil_core = np.zeros(len(colors), dtype=bool)
-    if eye_sclera.sum() >= 4:
-        eye_cx = float(np.clip(np.median(dx_h[eye_sclera]), 0.024, 0.038))
-        eye_cy = float(np.median(out_p[eye_sclera, 1]))
-    else:
-        eye_cx = 0.031
-        eye_cy = head_pos[1] + 0.42 * head_span
-    eye_rad = np.hypot(dx_h - eye_cx, (out_p[:, 1] - eye_cy) * 1.35)
-    iris_pupil = on_head & (dz_h > 0.024) & (eye_rad < 0.0056)
-    pupil_core = on_head & (dz_h > 0.024) & (eye_rad < 0.0027)
-    eye_sclera = eye_sclera & ~iris_pupil
-    eye_feature = iris_pupil | eye_sclera | (
-        eye_box
-        & (
-            (lum < skin_lum * 0.56)
-            | ((dist_skin > 0.11) & (lum < skin_lum * 0.76))
-        )
-    )
-
-    # Central mid-face guard (nose bridge & inner cheeks stay SKIN)
-    mid_face_skin_guard = (
-        on_head
-        & (dx_h < 0.046)
-        & (out_p[:, 1] > nose_base_y + 0.004)
-        & (out_p[:, 1] < eye_y + 0.016)
-        & (dz_h > 0.032)
-    )
-
-    # Back/top/temples scalp hair vs bald skull
-    hair_distinct_from_skin = float(np.linalg.norm(hair_proto_lab - skin_proto_lab)) > 0.055
-    is_bald_head = force_bald or (
-        (float(np.linalg.norm(hair_proto_lab - skin_proto_lab)) < 0.075)
-        and (abs(hair_lum - skin_lum) < max(0.035, skin_lum * 0.36))
-    )
-    if is_bald_head:
-        # Clean bald & clean-shaven head: keep entire cranium & face as SKIN, tagging only dark eyebrow/lash creases as HAIR
-        brow_band = (
-            on_head & ~eye_box
-            & (dx_h > 0.012) & (dx_h < 0.054)
-            & (out_p[:, 1] > eye_y + 0.008) & (out_p[:, 1] < eye_y + 0.030)
-            & (dz_h > 0.028)
-            & (lum < skin_lum * 0.68)
-        )
-        regions[brow_band] = HAIR
-    else:
-        is_scalp_zone = on_head & (
-            (dz_h < -0.008)
-            | (dy_h > 0.78)
-            | ((dx_h > 0.068) & (dy_h > 0.28) & (dz_h < 0.035))
-        )
-        scalp_is_skin = is_scalp_zone & (dist_skin + 0.035 < dist_hair) & (lum > skin_lum * 0.62) & (dz_h > -0.035) & (dy_h < 0.72)
-        regions[is_scalp_zone & ~scalp_is_skin] = HAIR
-
-        # Front bangs, side-locks, beard, mustache & sideburns on head
-        head_hair_candidate = on_head & ~eye_box & ~mid_face_skin_guard
-        if hair_distinct_from_skin:
-            direct_head_hair = head_hair_candidate & (
-                (dist_hair + 0.008 < dist_skin)
-                | ((dy_h > 0.52) & (dist_hair < dist_skin + 0.018))
-                | ((dy_h < 0.38) & (((warmth < 1.28) & (lum < skin_lum * 0.68)) | (lum < min(0.035, skin_lum * 0.38))))
+        if central_face.sum() < 10:
+            central_face = (
+                (w_head > 0.50)
+                & (np.abs(out_p[:, 0] - head_center_x) < 0.052)
+                & (out_p[:, 1] > nose_base_y)
+                & (out_p[:, 1] < head_pos[1] + 0.65 * (head_top_y - head_pos[1]))
+                & (out_p[:, 2] > head_mid_z + 0.025)
             )
+        if central_face.sum() < 8:
+            central_face = (w_head > 0.5) & (out_p[:, 2] > head_mid_z + 0.02)
+        cf_lum = lum[central_face]
+        cf_keep = (cf_lum >= np.percentile(cf_lum, 22)) & (cf_lum <= np.percentile(cf_lum, 88))
+        skin_indices = np.nonzero(central_face)[0][cf_keep] if cf_keep.sum() >= 6 else np.nonzero(central_face)[0]
+        skin_proto_rgb = np.median(colors[skin_indices], axis=0)
+        skin_proto_lab = np.median(lab[skin_indices], axis=0)
+        skin_lum = float(np.median(lum[skin_indices]))
+
+        # Character-specific hair prototype from back & crown of cranium
+        back_scalp = (
+            (w_head > 0.55)
+            & ((out_p[:, 2] < head_mid_z - 0.015) | (out_p[:, 1] > head_pos[1] + 0.82 * (head_top_y - head_pos[1])))
+        )
+        if back_scalp.sum() >= 10:
+            hair_proto_lab = np.median(lab[back_scalp], axis=0)
+            hair_lum = float(np.median(lum[back_scalp]))
         else:
-            direct_head_hair = head_hair_candidate & (
-                (lum < min(0.035, skin_lum * 0.38))
-                | ((dy_h > 0.60) & ((dx_h > 0.038) | (lum < skin_lum * 0.80)))
-                | ((dy_h < 0.36) & (lum < skin_lum * 0.62) & (warmth < 1.26))
+            hair_proto_lab = np.array([0.22, 0.02, 0.02], dtype=np.float32)
+            hair_lum = 0.025
+
+        dist_skin = np.linalg.norm((lab - skin_proto_lab) * np.array([0.85, 1.55, 1.55], dtype=np.float32), axis=1)
+        dist_hair = np.linalg.norm((lab - hair_proto_lab) * np.array([0.85, 1.55, 1.55], dtype=np.float32), axis=1)
+        warmth = colors[:, 0] / np.maximum(colors[:, 1], 1e-4)
+        is_skin_like = (dist_skin < 0.125) & (warmth > 1.18) & (lum > max(0.022, skin_lum * 0.28))
+
+        # Build welded 3D position adjacency graph upfront for coherent hair/beard growth & despeckling
+        pos_keys = np.round(out_p / 2e-4).astype(np.int64)
+        _, pos_first, pos_inv = np.unique(pos_keys, axis=0, return_index=True, return_inverse=True)
+        pos_inv = pos_inv.ravel()
+        num_pos = len(pos_first)
+        nbrs = [set() for _ in range(num_pos)]
+        tris_raw = I.reshape(-1, 3)
+        for t_a, t_b, t_c in tris_raw:
+            pa, pb, pc = int(pos_inv[t_a]), int(pos_inv[t_b]), int(pos_inv[t_c])
+            if pa != pb:
+                nbrs[pa].add(pb); nbrs[pb].add(pa)
+            if pb != pc:
+                nbrs[pb].add(pc); nbrs[pc].add(pb)
+            if pa != pc:
+                nbrs[pa].add(pc); nbrs[pc].add(pa)
+
+        SHIRT, TROUSERS, SKIN, HAIR = 1, 2, 3, 4
+        regions = np.zeros(len(colors), dtype=np.int64)
+
+        # A. Head & Face classification (NEVER assigns SHIRT on Head!)
+        on_head = w_head >= 0.42
+        regions[on_head] = SKIN
+
+        dx_h = np.abs(out_p[:, 0] - head_center_x)
+        dz_h = out_p[:, 2] - head_mid_z
+        dy_h = (out_p[:, 1] - head_pos[1]) / max(head_top_y - head_pos[1], 0.12)
+
+        # Eye socket box (protects sclera + iris/pupil from hair or skin recolouring across male & female proportions)
+        head_span = max(head_top_y - head_pos[1], 0.12)
+        eye_box = (
+            on_head
+            & (dx_h > 0.011) & (dx_h < 0.052)
+            & (out_p[:, 1] > head_pos[1] + 0.25 * head_span)
+            & (out_p[:, 1] < head_pos[1] + 0.62 * head_span)
+            & (dz_h > 0.020)
+        )
+        eye_sclera = eye_box & (chroma < 0.068) & (lum > max(0.10, skin_lum * 1.04))
+        iris_pupil = np.zeros(len(colors), dtype=bool)
+        pupil_core = np.zeros(len(colors), dtype=bool)
+        if eye_sclera.sum() >= 4:
+            eye_cx = float(np.clip(np.median(dx_h[eye_sclera]), 0.024, 0.038))
+            eye_cy = float(np.median(out_p[eye_sclera, 1]))
+        else:
+            eye_cx = 0.031
+            eye_cy = head_pos[1] + 0.42 * head_span
+        eye_rad = np.hypot(dx_h - eye_cx, (out_p[:, 1] - eye_cy) * 1.35)
+        iris_pupil = on_head & (dz_h > 0.024) & (eye_rad < 0.0056)
+        pupil_core = on_head & (dz_h > 0.024) & (eye_rad < 0.0027)
+        eye_sclera = eye_sclera & ~iris_pupil
+        eye_feature = iris_pupil | eye_sclera | (
+            eye_box
+            & (
+                (lum < skin_lum * 0.56)
+                | ((dist_skin > 0.11) & (lum < skin_lum * 0.76))
             )
-        regions[direct_head_hair] = HAIR
-
-        # Grow HAIR coherently across welded mesh edges into adjacent bangs/beard locks that match hair better than skin
-        pos_is_hair = np.zeros(num_pos, dtype=bool)
-        np.logical_or.at(pos_is_hair, pos_inv, regions == HAIR)
-        pos_can_grow_hair = np.zeros(num_pos, dtype=bool)
-        grow_elig = head_hair_candidate & (
-            (dist_hair < dist_skin + (0.026 if hair_distinct_from_skin else 0.012))
-            | ((dy_h > 0.54) & (lum < skin_lum * 0.86))
         )
-        np.logical_or.at(pos_can_grow_hair, pos_inv, grow_elig)
-        for _ in range(4):
-            added = False
-            for p_i in np.nonzero(pos_can_grow_hair & ~pos_is_hair)[0]:
-                if any(pos_is_hair[nb_j] for nb_j in nbrs[p_i]):
-                    pos_is_hair[p_i] = True
-                    added = True
-            if not added:
-                break
-        grown_hair = on_head & ~eye_box & ~mid_face_skin_guard & pos_is_hair[pos_inv]
-        regions[grown_hair] = HAIR
 
-    # Preserve crisp natural eye sclera + dark iris/pupil inside eye sockets
-    regions[eye_feature] = 0
-
-    # Decorative headband / feather / metal helmet / hat on head if bright non-skin/non-hair chroma
-    head_accessory = on_head & ~eye_feature & (dist_skin > 0.20) & (dist_hair > 0.18) & (chroma > 0.09)
-    regions[head_accessory] = 0
-
-    # B. Hands & Fingers: always SKIN unless dark leather gloves
-    on_hand = (w_hand >= 0.45) & ~on_head
-    gloved = on_hand & (dist_skin > 0.20) & (lum < min(0.035, skin_lum * 0.32))
-    regions[on_hand & ~gloved] = SKIN
-    regions[gloved] = 0
-
-    # C. Feet & Footwear (boots, shoes, moccasins, sandals, or barefoot)
-    shoe_top_y = 0.155
-    on_foot = ((w_foot >= 0.35) | (out_p[:, 1] < shoe_top_y)) & ~on_head & ~on_hand
-    foot_skin_cand = on_foot & (dist_skin < 0.085) & (warmth > 1.20) & (lum > skin_lum * 0.48)
-    if on_foot.any() and (foot_skin_cand.sum() / max(int(on_foot.sum()), 1)) > 0.45:
-        regions[foot_skin_cand] = SKIN
-        regions[on_foot & ~foot_skin_cand] = 0
-    else:
-        regions[on_foot] = 0  # shoes/boots/moccasins keep natural leather paint
-
-    # D. Torso, Neck & Arms (upper body)
-    remaining = ~on_head & ~on_hand & ~on_foot
-    upper_body = remaining & ((w_torso + w_arm + w_neck >= w_leg) & (out_p[:, 1] >= spine1_pos[1] - 0.06))
-    regions[upper_body] = SHIRT
-
-    # Long hair / braids / ponytails draped over neck & upper shoulders (never on bald base models)
-    if is_bald_head:
-        draped_hair = np.zeros(len(colors), dtype=bool)
-    else:
-        draped_hair = (
-            upper_body
-            & (out_p[:, 1] > spine3_pos[1] - 0.06)
-            & (dist_hair < 0.085)
-            & (lum < max(0.048, hair_lum * 1.38))
-            & (dist_hair + 0.035 < dist_skin)
-        )
-    regions[draped_hair] = HAIR
-
-    # Coherent bare neck, bare forearms (rolled sleeves / sleeveless), and bare chest/midriff (Indigenous attire)
-    neck_skin = (
-        upper_body & ~draped_hair & (w_neck > 0.18)
-        & (dist_skin < 0.150) & (warmth > 1.12) & (lum > max(0.018, skin_lum * 0.25))
-    )
-    regions[neck_skin] = SKIN
-
-    forearm_zone = upper_body & ~draped_hair & (w_arm > 0.32) & (np.abs(out_p[:, 0]) > 0.42)
-    forearm_skin_cand = forearm_zone & (dist_skin < 0.135) & (warmth > 1.12) & (lum > skin_lum * 0.30)
-    has_bare_forearms = forearm_zone.any() and (forearm_skin_cand.sum() / max(int(forearm_zone.sum()), 1)) > 0.35
-    if has_bare_forearms:
-        upperarm_zone = upper_body & ~draped_hair & (w_arm > 0.28) & (np.abs(out_p[:, 0]) > 0.22) & (np.abs(out_p[:, 0]) <= 0.42)
-        upperarm_skin_cand = upperarm_zone & (dist_skin < 0.125) & (warmth > 1.12) & (lum > skin_lum * 0.32)
-        is_sleeveless = upperarm_zone.any() and (upperarm_skin_cand.sum() / max(int(upperarm_zone.sum()), 1)) > 0.48
-        min_arm_x = 0.17 if is_sleeveless else 0.36
-        arm_skin = (
-            upper_body & ~draped_hair & (w_arm > 0.25) & (np.abs(out_p[:, 0]) > min_arm_x)
-            & (dist_skin < 0.155) & (warmth > 1.10) & (lum > skin_lum * 0.26)
-        )
-        regions[arm_skin] = SKIN
-    else:
-        is_sleeveless = False
-
-    torso_zone = upper_body & ~draped_hair & (w_torso > 0.35)
-    # Open V-neck / scoop-neck collar skin right below the throat
-    open_collar_skin = (
-        torso_zone
-        & (out_p[:, 1] > spine3_pos[1] - 0.025)
-        & (np.abs(out_p[:, 0]) < 0.115)
-        & (out_p[:, 2] > spine3_pos[2] - 0.01)
-        & (dist_skin < 0.135) & (warmth > 1.12) & (lum > skin_lum * 0.28)
-    )
-    regions[open_collar_skin] = SKIN
-    # Bare chest / bare shoulders / bare midriff ONLY on genuinely sleeveless models whose torso matches skin tightly
-    if is_sleeveless and torso_zone.any():
-        tight_torso_skin = torso_zone & (dist_skin < 0.068) & (warmth > 1.18) & (lum > skin_lum * 0.38) & (lum < skin_lum * 1.42)
-        if (tight_torso_skin.sum() / max(int(torso_zone.sum()), 1)) > 0.24:
-            broad_torso_skin = torso_zone & (dist_skin < 0.088) & (warmth > 1.16) & (lum > skin_lum * 0.32) & (lum < skin_lum * 1.48)
-            regions[broad_torso_skin] = SKIN
-
-    # Waist belt / dark leather strap at waist
-    waist_band = upper_body & (np.abs(out_p[:, 1] - (spine1_pos[1] + 0.01)) < 0.045) & (lum < 0.038) & (regions != SKIN)
-    regions[waist_band] = 0
-
-    # E. Legs / Breeches / Skirt / Loincloth / Stockings (lower body above footwear)
-    lower_body = remaining & ~upper_body
-    regions[lower_body] = TROUSERS
-    calf_zone = lower_body & (out_p[:, 1] > 0.17) & (out_p[:, 1] < 0.46)
-    ankle_zone = lower_body & (out_p[:, 1] > 0.155) & (out_p[:, 1] < 0.275)
-    thigh_zone = lower_body & (out_p[:, 1] >= 0.50)
-    calf_skin_cand = calf_zone & (dist_skin < 0.082) & (warmth > 1.20) & (lum > skin_lum * 0.48)
-    ankle_skin_cand = ankle_zone & (dist_skin < 0.095) & (warmth > 1.16) & (lum > skin_lum * 0.42)
-    if calf_zone.any() and (calf_skin_cand.sum() / max(int(calf_zone.sum()), 1)) > 0.52:
-        # Genuinely bare lower legs (rolled breeches, knee skirts, loincloths)
-        leg_skin = lower_body & (dist_skin < 0.098) & (warmth > 1.18) & (lum > skin_lum * 0.45)
-        regions[leg_skin] = SKIN
-    elif ankle_zone.any() and (ankle_skin_cand.sum() / max(int(ankle_zone.sum()), 1)) > 0.55:
-        # Calf-length skirt/dress with bare ankles above sandals/moccasins
-        leg_skin = lower_body & (out_p[:, 1] < 0.34) & (dist_skin < 0.105) & (warmth > 1.15) & (lum > skin_lum * 0.40)
-        regions[leg_skin] = SKIN
-    elif calf_zone.any() and thigh_zone.any():
-        # Check for neutral cream/grey knitted stockings below breeches (e.g. 1550 Venetian slops + wool hose)
-        calf_med_chroma = float(np.median(chroma[calf_zone]))
-        calf_med_lum = float(np.median(lum[calf_zone]))
-        thigh_med_lab = np.median(lab[thigh_zone], axis=0)
-        calf_med_lab = np.median(lab[calf_zone], axis=0)
-        if calf_med_chroma < 0.055 and calf_med_lum > 0.22 and float(np.linalg.norm(calf_med_lab - thigh_med_lab)) > 0.08:
-            stockings = lower_body & (out_p[:, 1] < 0.48) & (chroma < 0.065) & (lum > 0.16)
-            regions[stockings] = 0
-
-    # Preserve high-chroma decorative woven sashes, brocaded yokes, and geometric hem borders as untinted paint (0)
-    for g_reg in (SHIRT, TROUSERS):
-        g_at = regions == g_reg
-        if g_at.sum() >= 40:
-            g_med_lab = np.median(lab[g_at], axis=0)
-            g_dist = np.linalg.norm(lab - g_med_lab, axis=1)
-            trim_band = g_at & (chroma > 0.105) & (g_dist > 0.135) & (dist_skin > 0.140)
-            regions[trim_band] = 0
-
-    # F. Topological 2-pass despeckling over welded 3D positions so isolated shadow pits
-    # (nostrils, mouth corners, cloth creases) never become miscoloured 1-triangle islands.
-    pos_reg = np.zeros(num_pos, dtype=np.int64)
-    counts = np.zeros((num_pos, 5), dtype=np.int32)
-    np.add.at(counts, (pos_inv, regions), 1)
-    pos_reg = counts.argmax(axis=1)
-    pos_eye = np.zeros(num_pos, dtype=bool)
-    np.logical_or.at(pos_eye, pos_inv, eye_feature)
-
-    for _ in range(2):
-        nxt_reg = pos_reg.copy()
-        for p_i in range(num_pos):
-            if pos_eye[p_i] or not nbrs[p_i]:
-                continue
-            nb = list(nbrs[p_i])
-            nb_regs = pos_reg[nb]
-            vals, cnts = np.unique(nb_regs, return_counts=True)
-            best_r = int(vals[cnts.argmax()])
-            best_c = int(cnts.max())
-            # Despeckle if >= 70% of 1-ring neighbours agree on a different region
-            if best_r != pos_reg[p_i] and best_c >= max(2, math.ceil(0.70 * len(nb))):
-                nxt_reg[p_i] = best_r
-        pos_reg = nxt_reg
-    regions = pos_reg[pos_inv]
-
-    # Guarantee all 5 region tags [0, 1, 2, 3, 4] exist on vertex-coloured bodies (tests/crew.test.mjs invariant)
-    if not textured:
-        brow_fallback = (
-            on_head & ~eye_feature
-            & (dx_h > 0.016) & (dx_h < 0.046)
-            & (out_p[:, 1] > eye_y + 0.010) & (out_p[:, 1] < eye_y + 0.024)
+        # Central mid-face guard (nose bridge & inner cheeks stay SKIN)
+        mid_face_skin_guard = (
+            on_head
+            & (dx_h < 0.046)
+            & (out_p[:, 1] > nose_base_y + 0.004)
+            & (out_p[:, 1] < eye_y + 0.016)
             & (dz_h > 0.032)
         )
-        sole_fallback = out_p[:, 1] < 0.022
-        for req_k, fallback_mask in (
-            (0, sole_fallback if sole_fallback.any() else on_foot),
-            (SHIRT, upper_body),
-            (TROUSERS, lower_body),
-            (SKIN, on_head),
-            (HAIR, brow_fallback if brow_fallback.any() else on_head),
-        ):
-            if not (regions == req_k).any() and fallback_mask.any():
-                idx0 = np.nonzero(fallback_mask)[0][:8]
-                regions[idx0] = req_k
 
-    if undressed:
-        # Clean undressed anatomical base body: all body geometry is pure SKIN (3), eyes stay untinted (0),
-        # and eyebrows on the brow ridge keep HAIR (4) so every person's skin & brows tint with zero garment stains!
-        brow_band = (
-            on_head & ~eye_feature
-            & (dx_h > 0.012) & (dx_h < 0.052)
-            & (out_p[:, 1] > eye_y + 0.008) & (out_p[:, 1] < eye_y + 0.032)
-            & (dz_h > 0.025) & (regions == HAIR)
+        # Back/top/temples scalp hair vs bald skull
+        hair_distinct_from_skin = float(np.linalg.norm(hair_proto_lab - skin_proto_lab)) > 0.055
+        is_bald_head = force_bald or (
+            (float(np.linalg.norm(hair_proto_lab - skin_proto_lab)) < 0.075)
+            and (abs(hair_lum - skin_lum) < max(0.035, skin_lum * 0.36))
         )
-        regions[:] = SKIN
+        if is_bald_head:
+            # Clean bald & clean-shaven head: keep entire cranium & face as SKIN, tagging only dark eyebrow/lash creases as HAIR
+            brow_band = (
+                on_head & ~eye_box
+                & (dx_h > 0.012) & (dx_h < 0.054)
+                & (out_p[:, 1] > eye_y + 0.008) & (out_p[:, 1] < eye_y + 0.030)
+                & (dz_h > 0.028)
+                & (lum < skin_lum * 0.68)
+            )
+            regions[brow_band] = HAIR
+        else:
+            is_scalp_zone = on_head & (
+                (dz_h < -0.008)
+                | (dy_h > 0.78)
+                | ((dx_h > 0.068) & (dy_h > 0.28) & (dz_h < 0.035))
+            )
+            scalp_is_skin = is_scalp_zone & (dist_skin + 0.035 < dist_hair) & (lum > skin_lum * 0.62) & (dz_h > -0.035) & (dy_h < 0.72)
+            regions[is_scalp_zone & ~scalp_is_skin] = HAIR
+
+            # Front bangs, side-locks, beard, mustache & sideburns on head
+            head_hair_candidate = on_head & ~eye_box & ~mid_face_skin_guard
+            if hair_distinct_from_skin:
+                direct_head_hair = head_hair_candidate & (
+                    (dist_hair + 0.008 < dist_skin)
+                    | ((dy_h > 0.52) & (dist_hair < dist_skin + 0.018))
+                    | ((dy_h < 0.38) & (((warmth < 1.28) & (lum < skin_lum * 0.68)) | (lum < min(0.035, skin_lum * 0.38))))
+                )
+            else:
+                direct_head_hair = head_hair_candidate & (
+                    (lum < min(0.035, skin_lum * 0.38))
+                    | ((dy_h > 0.60) & ((dx_h > 0.038) | (lum < skin_lum * 0.80)))
+                    | ((dy_h < 0.36) & (lum < skin_lum * 0.62) & (warmth < 1.26))
+                )
+            regions[direct_head_hair] = HAIR
+
+            # Grow HAIR coherently across welded mesh edges into adjacent bangs/beard locks that match hair better than skin
+            pos_is_hair = np.zeros(num_pos, dtype=bool)
+            np.logical_or.at(pos_is_hair, pos_inv, regions == HAIR)
+            pos_can_grow_hair = np.zeros(num_pos, dtype=bool)
+            grow_elig = head_hair_candidate & (
+                (dist_hair < dist_skin + (0.026 if hair_distinct_from_skin else 0.012))
+                | ((dy_h > 0.54) & (lum < skin_lum * 0.86))
+            )
+            np.logical_or.at(pos_can_grow_hair, pos_inv, grow_elig)
+            for _ in range(4):
+                added = False
+                for p_i in np.nonzero(pos_can_grow_hair & ~pos_is_hair)[0]:
+                    if any(pos_is_hair[nb_j] for nb_j in nbrs[p_i]):
+                        pos_is_hair[p_i] = True
+                        added = True
+                if not added:
+                    break
+            grown_hair = on_head & ~eye_box & ~mid_face_skin_guard & pos_is_hair[pos_inv]
+            regions[grown_hair] = HAIR
+
+        # Preserve crisp natural eye sclera + dark iris/pupil inside eye sockets
         regions[eye_feature] = 0
-        regions[brow_band] = HAIR
-    print('regions:', {name: int((regions == k).sum()) for name, k in (('paint', 0), ('shirt', SHIRT), ('trousers', TROUSERS), ('skin', SKIN), ('hair', HAIR))})
+
+        # Decorative headband / feather / metal helmet / hat on head if bright non-skin/non-hair chroma
+        head_accessory = on_head & ~eye_feature & (dist_skin > 0.20) & (dist_hair > 0.18) & (chroma > 0.09)
+        regions[head_accessory] = 0
+
+        # B. Hands & Fingers: always SKIN unless dark leather gloves
+        on_hand = (w_hand >= 0.45) & ~on_head
+        gloved = on_hand & (dist_skin > 0.20) & (lum < min(0.035, skin_lum * 0.32))
+        regions[on_hand & ~gloved] = SKIN
+        regions[gloved] = 0
+
+        # C. Feet & Footwear (boots, shoes, moccasins, sandals, or barefoot)
+        shoe_top_y = 0.155
+        on_foot = ((w_foot >= 0.35) | (out_p[:, 1] < shoe_top_y)) & ~on_head & ~on_hand
+        foot_skin_cand = on_foot & (dist_skin < 0.085) & (warmth > 1.20) & (lum > skin_lum * 0.48)
+        if on_foot.any() and (foot_skin_cand.sum() / max(int(on_foot.sum()), 1)) > 0.45:
+            regions[foot_skin_cand] = SKIN
+            regions[on_foot & ~foot_skin_cand] = 0
+        else:
+            regions[on_foot] = 0  # shoes/boots/moccasins keep natural leather paint
+
+        # D. Torso, Neck & Arms (upper body)
+        remaining = ~on_head & ~on_hand & ~on_foot
+        upper_body = remaining & ((w_torso + w_arm + w_neck >= w_leg) & (out_p[:, 1] >= spine1_pos[1] - 0.06))
+        regions[upper_body] = SHIRT
+
+        # Long hair / braids / ponytails draped over neck & upper shoulders (never on bald base models)
+        if is_bald_head:
+            draped_hair = np.zeros(len(colors), dtype=bool)
+        else:
+            draped_hair = (
+                upper_body
+                & (out_p[:, 1] > spine3_pos[1] - 0.06)
+                & (dist_hair < 0.085)
+                & (lum < max(0.048, hair_lum * 1.38))
+                & (dist_hair + 0.035 < dist_skin)
+            )
+        regions[draped_hair] = HAIR
+
+        # Coherent bare neck, bare forearms (rolled sleeves / sleeveless), and bare chest/midriff (Indigenous attire)
+        neck_skin = (
+            upper_body & ~draped_hair & (w_neck > 0.18)
+            & (dist_skin < 0.150) & (warmth > 1.12) & (lum > max(0.018, skin_lum * 0.25))
+        )
+        regions[neck_skin] = SKIN
+
+        forearm_zone = upper_body & ~draped_hair & (w_arm > 0.32) & (np.abs(out_p[:, 0]) > 0.42)
+        forearm_skin_cand = forearm_zone & (dist_skin < 0.135) & (warmth > 1.12) & (lum > skin_lum * 0.30)
+        has_bare_forearms = forearm_zone.any() and (forearm_skin_cand.sum() / max(int(forearm_zone.sum()), 1)) > 0.35
+        if has_bare_forearms:
+            upperarm_zone = upper_body & ~draped_hair & (w_arm > 0.28) & (np.abs(out_p[:, 0]) > 0.22) & (np.abs(out_p[:, 0]) <= 0.42)
+            upperarm_skin_cand = upperarm_zone & (dist_skin < 0.125) & (warmth > 1.12) & (lum > skin_lum * 0.32)
+            is_sleeveless = upperarm_zone.any() and (upperarm_skin_cand.sum() / max(int(upperarm_zone.sum()), 1)) > 0.48
+            min_arm_x = 0.17 if is_sleeveless else 0.36
+            arm_skin = (
+                upper_body & ~draped_hair & (w_arm > 0.25) & (np.abs(out_p[:, 0]) > min_arm_x)
+                & (dist_skin < 0.155) & (warmth > 1.10) & (lum > skin_lum * 0.26)
+            )
+            regions[arm_skin] = SKIN
+        else:
+            is_sleeveless = False
+
+        torso_zone = upper_body & ~draped_hair & (w_torso > 0.35)
+        # Open V-neck / scoop-neck collar skin right below the throat
+        open_collar_skin = (
+            torso_zone
+            & (out_p[:, 1] > spine3_pos[1] - 0.025)
+            & (np.abs(out_p[:, 0]) < 0.115)
+            & (out_p[:, 2] > spine3_pos[2] - 0.01)
+            & (dist_skin < 0.135) & (warmth > 1.12) & (lum > skin_lum * 0.28)
+        )
+        regions[open_collar_skin] = SKIN
+        # Bare chest / bare shoulders / bare midriff ONLY on genuinely sleeveless models whose torso matches skin tightly
+        if is_sleeveless and torso_zone.any():
+            tight_torso_skin = torso_zone & (dist_skin < 0.068) & (warmth > 1.18) & (lum > skin_lum * 0.38) & (lum < skin_lum * 1.42)
+            if (tight_torso_skin.sum() / max(int(torso_zone.sum()), 1)) > 0.24:
+                broad_torso_skin = torso_zone & (dist_skin < 0.088) & (warmth > 1.16) & (lum > skin_lum * 0.32) & (lum < skin_lum * 1.48)
+                regions[broad_torso_skin] = SKIN
+
+        # Waist belt / dark leather strap at waist
+        waist_band = upper_body & (np.abs(out_p[:, 1] - (spine1_pos[1] + 0.01)) < 0.045) & (lum < 0.038) & (regions != SKIN)
+        regions[waist_band] = 0
+
+        # E. Legs / Breeches / Skirt / Loincloth / Stockings (lower body above footwear)
+        lower_body = remaining & ~upper_body
+        regions[lower_body] = TROUSERS
+        calf_zone = lower_body & (out_p[:, 1] > 0.17) & (out_p[:, 1] < 0.46)
+        ankle_zone = lower_body & (out_p[:, 1] > 0.155) & (out_p[:, 1] < 0.275)
+        thigh_zone = lower_body & (out_p[:, 1] >= 0.50)
+        calf_skin_cand = calf_zone & (dist_skin < 0.082) & (warmth > 1.20) & (lum > skin_lum * 0.48)
+        ankle_skin_cand = ankle_zone & (dist_skin < 0.095) & (warmth > 1.16) & (lum > skin_lum * 0.42)
+        if calf_zone.any() and (calf_skin_cand.sum() / max(int(calf_zone.sum()), 1)) > 0.52:
+            # Genuinely bare lower legs (rolled breeches, knee skirts, loincloths)
+            leg_skin = lower_body & (dist_skin < 0.098) & (warmth > 1.18) & (lum > skin_lum * 0.45)
+            regions[leg_skin] = SKIN
+        elif ankle_zone.any() and (ankle_skin_cand.sum() / max(int(ankle_zone.sum()), 1)) > 0.55:
+            # Calf-length skirt/dress with bare ankles above sandals/moccasins
+            leg_skin = lower_body & (out_p[:, 1] < 0.34) & (dist_skin < 0.105) & (warmth > 1.15) & (lum > skin_lum * 0.40)
+            regions[leg_skin] = SKIN
+        elif calf_zone.any() and thigh_zone.any():
+            # Check for neutral cream/grey knitted stockings below breeches (e.g. 1550 Venetian slops + wool hose)
+            calf_med_chroma = float(np.median(chroma[calf_zone]))
+            calf_med_lum = float(np.median(lum[calf_zone]))
+            thigh_med_lab = np.median(lab[thigh_zone], axis=0)
+            calf_med_lab = np.median(lab[calf_zone], axis=0)
+            if calf_med_chroma < 0.055 and calf_med_lum > 0.22 and float(np.linalg.norm(calf_med_lab - thigh_med_lab)) > 0.08:
+                stockings = lower_body & (out_p[:, 1] < 0.48) & (chroma < 0.065) & (lum > 0.16)
+                regions[stockings] = 0
+
+        # Preserve high-chroma decorative woven sashes, brocaded yokes, and geometric hem borders as untinted paint (0)
+        for g_reg in (SHIRT, TROUSERS):
+            g_at = regions == g_reg
+            if g_at.sum() >= 40:
+                g_med_lab = np.median(lab[g_at], axis=0)
+                g_dist = np.linalg.norm(lab - g_med_lab, axis=1)
+                trim_band = g_at & (chroma > 0.105) & (g_dist > 0.135) & (dist_skin > 0.140)
+                regions[trim_band] = 0
+
+        # F. Topological 2-pass despeckling over welded 3D positions so isolated shadow pits
+        # (nostrils, mouth corners, cloth creases) never become miscoloured 1-triangle islands.
+        pos_reg = np.zeros(num_pos, dtype=np.int64)
+        counts = np.zeros((num_pos, 5), dtype=np.int32)
+        np.add.at(counts, (pos_inv, regions), 1)
+        pos_reg = counts.argmax(axis=1)
+        pos_eye = np.zeros(num_pos, dtype=bool)
+        np.logical_or.at(pos_eye, pos_inv, eye_feature)
+
+        for _ in range(2):
+            nxt_reg = pos_reg.copy()
+            for p_i in range(num_pos):
+                if pos_eye[p_i] or not nbrs[p_i]:
+                    continue
+                nb = list(nbrs[p_i])
+                nb_regs = pos_reg[nb]
+                vals, cnts = np.unique(nb_regs, return_counts=True)
+                best_r = int(vals[cnts.argmax()])
+                best_c = int(cnts.max())
+                # Despeckle if >= 70% of 1-ring neighbours agree on a different region
+                if best_r != pos_reg[p_i] and best_c >= max(2, math.ceil(0.70 * len(nb))):
+                    nxt_reg[p_i] = best_r
+            pos_reg = nxt_reg
+        regions = pos_reg[pos_inv]
+
+        # Guarantee all 5 region tags [0, 1, 2, 3, 4] exist on vertex-coloured bodies (tests/crew.test.mjs invariant)
+        if not textured:
+            brow_fallback = (
+                on_head & ~eye_feature
+                & (dx_h > 0.016) & (dx_h < 0.046)
+                & (out_p[:, 1] > eye_y + 0.010) & (out_p[:, 1] < eye_y + 0.024)
+                & (dz_h > 0.032)
+            )
+            sole_fallback = out_p[:, 1] < 0.022
+            for req_k, fallback_mask in (
+                (0, sole_fallback if sole_fallback.any() else on_foot),
+                (SHIRT, upper_body),
+                (TROUSERS, lower_body),
+                (SKIN, on_head),
+                (HAIR, brow_fallback if brow_fallback.any() else on_head),
+            ):
+                if not (regions == req_k).any() and fallback_mask.any():
+                    idx0 = np.nonzero(fallback_mask)[0][:8]
+                    regions[idx0] = req_k
+
+        if undressed:
+            # Clean undressed anatomical base body: all body geometry is pure SKIN (3), eyes stay untinted (0),
+            # and eyebrows on the brow ridge keep HAIR (4) so every person's skin & brows tint with zero garment stains!
+            brow_band = (
+                on_head & ~eye_feature
+                & (dx_h > 0.012) & (dx_h < 0.052)
+                & (out_p[:, 1] > eye_y + 0.008) & (out_p[:, 1] < eye_y + 0.032)
+                & (dz_h > 0.025) & (regions == HAIR)
+            )
+            regions[:] = SKIN
+            regions[eye_feature] = 0
+            regions[brow_band] = HAIR
+        print('regions:', {name: int((regions == k).sum()) for name, k in (('paint', 0), ('shirt', SHIRT), ('trousers', TROUSERS), ('skin', SKIN), ('hair', HAIR))})
 
     # 7. Encode vertex colours without false channel-ratio hue blowups.
-    shaded = np.clip(colors.copy(), 0.0, 1.95)
     if textured:
         uv_mod = (UV % 1.0).astype(np.float32)
-        # Tag both SKIN and head HAIR/beard as -11.0 (v.skin=1.0) so procedural cloth-weave bump never ripples across faces or beards!
-        no_cloth_bump = (regions == SKIN) | ((regions == HAIR) & (w_head > 0.3))
+        # Tag SKIN as -11.0 (v.skin=1.0) so procedural cloth-weave bump never ripples across faces.
+        no_cloth_bump = regions == SKIN
         shaded = np.column_stack([uv_mod[:, 0], uv_mod[:, 1], np.where(no_cloth_bump, -11.0, -10.0).astype(np.float32)])
         keys = np.concatenate([
             np.round(out_p / 2e-4),
@@ -1265,6 +1269,7 @@ def main():
             no_cloth_bump[:, None],
         ], axis=1).astype(np.int64)
     else:
+        shaded = np.clip(colors.copy(), 0.0, 1.95)
         for k, (lo_s, hi_s, chroma_mix) in (
             (SHIRT, (0.20, 1.62, 0.28)),
             (TROUSERS, (0.20, 1.62, 0.28)),

@@ -27,8 +27,8 @@ export const CREW_CONTINUUM_JOINT_PIECE = Object.freeze(CREW_JOINT_NAMES.map((na
   }
   return 0;
 }));
-// What the fit says each point of a body is (`_REGION` in scripts/fit-crew-body.py). Paint is worn as it was made;
-// the rest take each person's own colours.
+// What the fit says each point of a body is (its `_REGION`, drawn from the picture by scripts/crew_regions.py). Paint
+// and skin are worn as they were made; cloth and hair take each person's own colours.
 export const CREW_CONTINUUM_REGIONS = Object.freeze(['paint', 'shirt', 'trousers', 'skin', 'hair']);
 
 // The twelve bodies, and who wears each.

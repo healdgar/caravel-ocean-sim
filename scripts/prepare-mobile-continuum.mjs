@@ -374,8 +374,10 @@ for (const job of JOBS) {
     });
   } else if (job.kind === 'crew') {
     const pt = perType[0];
+    // The desktop bake's per-level errors and cut sizes describe levels this pack prunes: they are not carried.
+    const { levelErrors, cuts, ...desktop } = nextManifest.clusters;
     nextManifest.clusters = {
-      ...nextManifest.clusters,
+      ...desktop,
       count: pt.keptClusters.length,
       levels: pt.levels,
       finestTriangles: pt.finestTriangles,

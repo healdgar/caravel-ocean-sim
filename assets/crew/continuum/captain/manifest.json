@@ -7,19 +7,19 @@
  "generator": "scripts/prepare-crew-continuum.mjs",
  "source": {
   "file": "captain.glb",
-  "sha256": "e636a2330d0c3b8af9a92a561c827753cf0763b7594605efcba20adbd8e5bc97",
+  "sha256": "336e9274da37cb807696d9a440d8073606c2893a78af36ce74c167ae6e95e8f7",
   "vertices": 994383,
   "triangles": 1927790
  },
  "atlas": {
-  "words": 19170524,
+  "words": 19168186,
   "headerWords": 32,
-  "bytes": 76682096,
-  "sha256": "677efc55aabbc976f8a2d2a780ce4efa60b89319521029e66cd890018e8244b7",
+  "bytes": 76672744,
+  "sha256": "0763ae732ffb16353f100e4bff5d298143df9d70232819170dcc744f93656928",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 35105335,
-   "sha256": "4412e0d889d35a564e3c63b94df727db19584ca9912b3c7d1fdf71b231261a44"
+   "bytes": 35209062,
+   "sha256": "57636c48e72523e3d286467ed83d8e006622ca120dd7b7978ce1c5db7ca422ea"
   }
  },
  "pieces": [
@@ -51,30 +51,26 @@
  ],
  "regionMedians": [
   [
-   0.02057,
-   0.01299,
-   0.01076
+   0.15309,
+   0.13576,
+   0.11442
   ],
   [
-   0.00718,
-   0.00785,
-   0.0079
+   0.00717,
+   0.0078,
+   0.00778
   ],
   [
-   0.00941,
-   0.00982,
-   0.01003
+   0.00777,
+   0.0082,
+   0.0082
   ],
   [
-   0.26954,
-   0.0909,
-   0.05709
+   0.43103,
+   0.20026,
+   0.12838
   ],
-  [
-   0.51569,
-   0.28082,
-   0.19388
-  ]
+  null
  ],
  "rig": {
   "joints": 93,
@@ -178,7 +174,7 @@
     -0.02191,
     1.64408,
     0.02048,
-    0.39871
+    0.3909
    ],
    [
     -0.00191,
@@ -202,13 +198,13 @@
     0.01598,
     1.54253,
     0.1125,
-    0.25837
+    0.25713
    ],
    [
-    -0.02209,
+    -0.02191,
     1.54172,
     0.11195,
-    0.2572
+    0.25725
    ],
    [
     0.03154,
@@ -423,8 +419,8 @@
    [
     -0.13237,
     1.42487,
-    0.02048,
-    0.54111
+    0.00048,
+    0.53427
    ],
    [
     -0.29133,
@@ -640,7 +636,7 @@
     -0.07784,
     0.69011,
     0.02046,
-    0.49806
+    0.50083
    ],
    [
     -0.14589,
@@ -681,19 +677,19 @@
   ]
  },
  "clusters": {
-  "count": 31575,
-  "levels": 14,
-  "roots": 39,
+  "count": 31594,
+  "levels": 13,
+  "roots": 40,
   "finestTriangles": 1927790,
-  "rootError": 0.1181,
+  "rootError": 0.1147,
   "pieceCopies": 9124,
   "groups": {
-   "count": 3948,
-   "spanning": 1653,
-   "byJoint": 831,
-   "whole": 822,
-   "grown": 347,
-   "growthMax": 0.2757,
+   "count": 3951,
+   "spanning": 1645,
+   "byJoint": 811,
+   "whole": 834,
+   "grown": 350,
+   "growthMax": 0.2978,
    "byLevel": [
     [
      1615,
@@ -701,29 +697,29 @@
      6
     ],
     [
-     553,
-     360,
-     64
+     552,
+     351,
+     74
     ],
     [
-     117,
-     184,
+     130,
+     174,
      208
     ],
     [
-     10,
-     23,
-     237
+     9,
+     22,
+     240
     ],
     [
      0,
      0,
-     143
+     141
     ],
     [
      0,
      0,
-     74
+     75
     ],
     [
      0,
@@ -738,12 +734,12 @@
     [
      0,
      0,
-     13
+     14
     ],
     [
      0,
      0,
-     7
+     8
     ],
     [
      0,
@@ -753,14 +749,117 @@
     [
      0,
      0,
-     2
-    ],
-    [
-     0,
-     0,
      1
     ]
    ]
+  },
+  "posedShapes": {
+   "count": 24,
+   "weight": 10,
+   "share": 0.9991
+  },
+  "levelErrors": [
+   {
+    "level": 1,
+    "groups": 1885,
+    "simplifier": 0.00011,
+    "rest": 0.00011,
+    "posed": 0.00061,
+    "posedMax": 0.00267
+   },
+   {
+    "level": 2,
+    "groups": 977,
+    "simplifier": 0.0003,
+    "rest": 0.00025,
+    "posed": 0.00096,
+    "posedMax": 0.00469
+   },
+   {
+    "level": 3,
+    "groups": 512,
+    "simplifier": 0.0008,
+    "rest": 0.00061,
+    "posed": 0.00167,
+    "posedMax": 0.00986
+   },
+   {
+    "level": 4,
+    "groups": 271,
+    "simplifier": 0.00193,
+    "rest": 0.00135,
+    "posed": 0.00281,
+    "posedMax": 0.00922
+   },
+   {
+    "level": 5,
+    "groups": 141,
+    "simplifier": 0.00436,
+    "rest": 0.0028,
+    "posed": 0.00478,
+    "posedMax": 0.02538
+   },
+   {
+    "level": 6,
+    "groups": 75,
+    "simplifier": 0.00923,
+    "rest": 0.00494,
+    "posed": 0.00826,
+    "posedMax": 0.07209
+   },
+   {
+    "level": 7,
+    "groups": 40,
+    "simplifier": 0.03357,
+    "rest": 0.00902,
+    "posed": 0.01394,
+    "posedMax": 0.03959
+   },
+   {
+    "level": 8,
+    "groups": 23,
+    "simplifier": 0.04568,
+    "rest": 0.01155,
+    "posed": 0.01767,
+    "posedMax": 0.06633
+   },
+   {
+    "level": 9,
+    "groups": 14,
+    "simplifier": 0.12715,
+    "rest": 0.03274,
+    "posed": 0.03813,
+    "posedMax": 0.05139
+   },
+   {
+    "level": 10,
+    "groups": 8,
+    "simplifier": 0.39733,
+    "rest": 0.04313,
+    "posed": 0.07468,
+    "posedMax": 0.09685
+   },
+   {
+    "level": 11,
+    "groups": 4,
+    "simplifier": 0.72335,
+    "rest": 0.09908,
+    "posed": 0.10066,
+    "posedMax": 0.11469
+   },
+   {
+    "level": 12,
+    "groups": 1,
+    "simplifier": 0.36657,
+    "rest": 0.042,
+    "posed": 0.05537,
+    "posedMax": 0.05537
+   }
+  ],
+  "cuts": {
+   "3m": 117700,
+   "10m": 32332,
+   "30m": 12496
   }
  },
  "chain": {
@@ -771,28 +870,28 @@
    21
   ],
   "wellComposedCells": 9,
-  "wrapTriangles": 5468,
-  "baseTriangles": 2694,
-  "baseVertices": 1349,
+  "wrapTriangles": 5472,
+  "baseTriangles": 2706,
+  "baseVertices": 1355,
   "baseError": 0.0819,
   "outward": 0.0819,
   "inward": 0.081,
   "simplifyError": 0.0084,
-  "steps": 1344,
+  "steps": 1350,
   "coreTriangles": 6,
-  "depth": 9,
+  "depth": 8,
   "errorRange": [
    0.0819,
-   1.1411
+   0.9227
   ],
   "inflateMax": 0.1799,
-  "rootTriangles": 1866,
-  "farFirst": 414,
-  "farFirstTriangles": 1866,
+  "rootTriangles": 1934,
+  "farFirst": 386,
+  "farFirstTriangles": 1934,
   "handoffError": 0.122,
-  "farSourceTriangles": 49996,
+  "farSourceTriangles": 49998,
   "posedError": 0.1033,
-  "posedInward": 0.0847,
+  "posedInward": 0.0842,
   "posedOutward": 0.0819,
   "farSourceBack": 0.0214
  },
@@ -802,53 +901,49 @@
    0.9041,
    0.0205
   ],
-  "rx": 0.255,
+  "rx": 0.2548,
   "ry": 0.9,
   "regions": [
    {
     "name": "paint",
-    "share": 0.0848,
+    "share": 0.1285,
     "mean": [
-     0.07347,
-     0.059,
-     0.04891
+     0.18401,
+     0.16041,
+     0.1343
     ]
    },
    {
     "name": "shirt",
-    "share": 0.388,
+    "share": 0.3851,
     "mean": [
-     0.01902,
-     0.01658,
-     0.0149
+     0.01525,
+     0.0148,
+     0.0139
     ]
    },
    {
     "name": "trousers",
-    "share": 0.4207,
+    "share": 0.3763,
     "mean": [
-     0.04971,
-     0.04534,
-     0.03857
+     0.01503,
+     0.01421,
+     0.01244
     ]
    },
    {
     "name": "skin",
-    "share": 0.0441,
+    "share": 0.1101,
     "mean": [
-     0.36577,
-     0.1383,
-     0.08329
+     0.4341,
+     0.1982,
+     0.12892
     ]
    },
    {
     "name": "hair",
-    "share": 0.0625,
-    "mean": [
-     0.54766,
-     0.28196,
-     0.19198
-    ]
+    "share": 0,
+    "mean": null
    }
   ]
  },
@@ -940,10 +1035,10 @@
  },
  "body": {
   "file": "body.glb",
-  "bytes": 973652,
-  "sha256": "11783d6963895471d4adcc09329fe221f41062188010727c742298a35f872a55",
-  "triangles": 19998,
-  "vertices": 9986,
+  "bytes": 973604,
+  "sha256": "0883ce23d06d6fd4d793599f4847c70827b947a32fbacf66387c099d25987511",
+  "triangles": 20000,
+  "vertices": 9985,
   "contactDrift": {
    "ankleAboveSole_l": 0,
    "ankleAboveSole_r": -0.0002,
@@ -953,12 +1048,12 @@
  "poses": 27,
  "files": {
   "atlas.bin": {
-   "bytes": 76682096,
-   "sha256": "677efc55aabbc976f8a2d2a780ce4efa60b89319521029e66cd890018e8244b7",
+   "bytes": 76672744,
+   "sha256": "0763ae732ffb16353f100e4bff5d298143df9d70232819170dcc744f93656928",
    "gzip": {
     "file": "atlas.bin.gz",
-    "bytes": 35105335,
-    "sha256": "4412e0d889d35a564e3c63b94df727db19584ca9912b3c7d1fdf71b231261a44"
+    "bytes": 35209062,
+    "sha256": "57636c48e72523e3d286467ed83d8e006622ca120dd7b7978ce1c5db7ca422ea"
    }
   },
   "albedo.bc7.bin": {
@@ -980,5 +1075,5 @@
    }
   }
  },
- "bakeSeconds": 122.1
+ "bakeSeconds": 145.8
 }

@@ -278,66 +278,12 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
   let picLuma=dot(picture,vec3f(0.299,0.587,0.114));
 
   if(hasBakedCloth){
-    // Dressed ~1.9M historical bodies (.tripo/1550-hd/fit-regions):
-    //   region 0 = paint (boots, leather belts, buckles, iron armor, trim, painted eyes — kept verbatim)
-    //   region 1 = shirt / doublet / tunic (dyed by actor.shirt.rgb relative to crewWear[1u])
-    //   region 2 = trousers / skirt / breechcloth (dyed by actor.trousers.rgb relative to crewWear[2u])
-    //   region 3 = skin (4K painted face/hands/limbs kept authentic with skin shading flag = 1.0)
-    //   region 4 = hair (baked crown/sideburns tinted cleanly toward actor.hair.rgb)
-    let bright=max(dot(picture,vec3f(0.3333)),1e-3);
-    let skinBright=max(dot(skin.xyz,vec3f(0.3333)),1e-3);
-    let neckLineY=select(1.475,1.425,female);
-    let neckRad=length(vec2f(bodyPos.x*1.02,bodyPos.z+select(0.010,0.036,female)));
-    let neckRIn=select(0.088,0.056,female);
-    let neckROut=select(0.118,0.072,female);
-    let neckSkinMask=select(0.0,
-      smoothstep(neckLineY-0.014,neckLineY+0.014,bodyPos.y)*(1.0-smoothstep(neckLineY+0.125,neckLineY+0.150,bodyPos.y))*(1.0-smoothstep(neckRIn,neckROut,neckRad)),
-      skin.w>0.5);
-
-    // Smooth torso/sleeve cleanup for European sailor/villager fits only (never override indigenous bare skin/ornaments).
-    let sleeveLimit=select(0.495,0.62,female);
-    let waistY=1.00;
-    let strayHairOnShirt=!indigenous&&((region==4u)||(region==0u&&bodyPos.y>1.095))&&bodyPos.y>waistY&&bodyPos.y<select(1.468,1.445,female)&&abs(bodyPos.x)<sleeveLimit;
-    let strayHairOnTrousers=!indigenous&&(region==4u||region==0u)&&bodyPos.y>=0.24&&bodyPos.y<=waistY;
-    let maleOpenVNeck=!female&&bodyPos.z>0.06&&abs(bodyPos.x)<0.050&&bodyPos.y>1.32&&bodyPos.y<1.46;
-    let torsoSkinOnShirt=!indigenous&&region==3u&&bodyPos.y>waistY&&abs(bodyPos.x)<sleeveLimit&&(
-      select(
-        bodyPos.y<1.465&&!(neckRad<0.105&&bodyPos.y>1.43)&&!maleOpenVNeck,
-        bodyPos.y<1.445&&(neckRad>=0.072||bodyPos.z<-0.045),
-        female
-      )
-    );
-    let strayClothOnForearm=!indigenous&&!female&&(region==1u||region==4u)&&bodyPos.y>1.00&&bodyPos.y<1.52&&abs(bodyPos.x)>=0.495;
-    var effRegion=region;
-    if(strayClothOnForearm){effRegion=3u;}
-    else if(strayHairOnShirt||torsoSkinOnShirt){effRegion=1u;}
-    else if(strayHairOnTrousers){effRegion=2u;}
-
-    let median=crewWear[min(effRegion,4u)];
-    // By its label (cloth dyed, hair tinted, paint and skin as painted), then by its place: cloth the colour of this
-    // body's skin on a neck, wrist or ankle border is worn as skin.
-    var baseOut=crewContinuumRegionWorn(effRegion,picture,actor);
-    if((effRegion==1u||effRegion==2u)&&median.w>=0.5&&skin.w>0.5){
-      let cuffX=select(0.495,0.62,female);
-      let atBorder=select((bodyPos.y<0.22),((bodyPos.y>neckLineY-0.025&&neckRad<neckROut+0.010)||abs(bodyPos.x)>cuffX),effRegion==1u);
-      if(atBorder){
-        let away=length(picture/bright-skin.xyz/skinBright)+abs(log2(bright/skinBright))*0.15;
-        let cloth=smoothstep(0.035,0.095,away);
-        baseOut=vec4f(mix(picture,baseOut.rgb,cloth),1.0-cloth);
-      }
-    }
-    let maxC=max(max(picture.r,picture.g),picture.b);
-    let minC=min(min(picture.r,picture.g),picture.b);
-    let whiteNeckBleed=!indigenous&&female&&effRegion==3u&&bright>0.28&&minC/max(maxC,1e-3)>0.68;
-    if(neckSkinMask>0.001&&(effRegion==1u||whiteNeckBleed)){
-      let neckRef=select(max(dot(median.xyz,vec3f(0.3333)),1e-3),skinBright,effRegion==3u);
-      let neckShade=clamp(bright/neckRef,0.72,1.06);
-      let cleanNeck=skin.xyz*(0.80*mix(1.0,neckShade,0.22));
-      baseOut=vec4f(mix(baseOut.rgb,cleanNeck,neckSkinMask),mix(baseOut.w,1.0,neckSkinMask));
-    }
+    // A dressed body (.tripo/1550-hd/fit-regions) wears each region by its label alone (crewContinuumRegionWorn): the
+    // labels are drawn whole from the picture by scripts/crew_regions.py, so no place on the body overrules them.
+    var baseOut=crewContinuumRegionWorn(region,picture,actor);
     // Fibrous hair-root scalp under-coat inside the hair-bearing cranium so bare scalp never flashes through locks.
     let crownY=select(select(1.768,1.769,indigenous),1.705,female);
-    if(bodyPos.y>crownY-0.185&&(effRegion==3u||effRegion==4u||effRegion==0u||effRegion==1u)){
+    if(bodyPos.y>crownY-0.185&&(region==3u||region==0u)){
       let midZ=select(select(0.021,-0.025,indigenous),-0.027,female);
       let ax=abs(bodyPos.x);
       let rz=bodyPos.z-midZ;
@@ -362,10 +308,6 @@ fn crewContinuumWorn(region:u32,picture:vec3f,actor:CrewActor,bodyPos:vec3f,scal
         let rootGrain=0.38+0.14*(0.5+0.5*fiberA)+0.08*(0.5+0.5*fiberB);
         let scalpTint=hairCol*rootGrain;
         baseOut=vec4f(mix(baseOut.rgb,scalpTint,scalpCov*0.92),mix(baseOut.w,0.0,scalpCov*0.92));
-      }else if((effRegion==4u||effRegion==1u)&&cranialMask>0.15&&skin.w>0.5&&(scalpMode<=0.5||(scalpMode>1.5&&tonsureKeep<0.5))){
-        let bareMask=cranialMask*select(1.0,1.0-tonsureKeep,scalpMode>1.5);
-        let bareSkin=skin.xyz*(0.84*clamp(bright/skinBright,0.75,1.08));
-        baseOut=vec4f(mix(baseOut.rgb,bareSkin,bareMask),mix(baseOut.w,1.0,bareMask));
       }
     }
     return baseOut;

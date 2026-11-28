@@ -47,6 +47,12 @@ export interface DagRequest {
    * simplification (global vertex indices) and the simplifier's own error; the larger of the two is kept.
    */
   barkGroupError?: (children: Uint32Array, simplified: Uint32Array, error: number) => number;
+  /**
+   * More attributes of each bark vertex that the simplifier keeps beside the normals and uv: `stride` floats a vertex
+   * (at most 27, meshoptimizer's 32 less the 5), each weighed by `weights`. A skinned body gives its posed shapes, so
+   * a coarser level keeps what bends.
+   */
+  barkExtra?: { attr: Float32Array; stride: number; weights: number[] };
 }
 
 /** A leaf texture's alpha as a coarse mask: `size` x `size`, 1 = opaque, rows from the image's top. */
