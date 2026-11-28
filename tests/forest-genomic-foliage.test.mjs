@@ -57,6 +57,50 @@ function pointTriangleDist2(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz) {
   return dx * dx + dy * dy + dz * dz;
 }
 
+// Leaves whose petiole feet lie within 0.1 mm stand at one node. Returns the most leaves at one node, the tree's
+// own node spacing (the median distance from a node to the nearest other) and the most other nodes any node has
+// within half that spacing.
+function leafPiling(feet, n) {
+  const C = 0.04, grid = new Map(), cell = (x) => Math.floor(x / C) + 4096;
+  const key = (x, y, z) => (x * 8192 + y) * 8192 + z;
+  for (let l = 0; l < n; l++) {
+    const k = key(cell(feet[l * 3]), cell(feet[l * 3 + 1]), cell(feet[l * 3 + 2]));
+    const list = grid.get(k);
+    if (list) list.push(l); else grid.set(k, [l]);
+  }
+  // Visit every leaf within the cells `rings` away (Chebyshev) from leaf l's cell.
+  const around = (l, rings, visit) => {
+    const gx = cell(feet[l * 3]), gy = cell(feet[l * 3 + 1]), gz = cell(feet[l * 3 + 2]);
+    for (let dx = -rings; dx <= rings; dx++) for (let dy = -rings; dy <= rings; dy++) for (let dz = -rings; dz <= rings; dz++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) !== rings) continue;
+      const list = grid.get(key(gx + dx, gy + dy, gz + dz));
+      if (list) for (const j of list) if (j !== l) visit(j, Math.hypot(feet[j * 3] - feet[l * 3], feet[j * 3 + 1] - feet[l * 3 + 1], feet[j * 3 + 2] - feet[l * 3 + 2]));
+    }
+  };
+  const head = new Uint8Array(n).fill(1), nearest = new Float64Array(n).fill(Infinity);
+  let mostAtOneNode = 1;
+  for (let l = 0; l < n; l++) {
+    let atNode = 1;
+    for (let r = 0; r <= 4 && !(nearest[l] <= (r - 1) * C); r++) {
+      around(l, r, (j, d) => {
+        if (d <= 1e-4) { atNode++; if (j < l) head[l] = 0; } else if (d < nearest[l]) nearest[l] = d;
+      });
+    }
+    mostAtOneNode = Math.max(mostAtOneNode, atNode);
+  }
+  const nodes = [];
+  for (let l = 0; l < n; l++) if (head[l]) nodes.push(l);
+  const spacing = Float64Array.from(nodes, (l) => nearest[l]).sort()[nodes.length >> 1];
+  const reach = Math.ceil((0.5 * spacing) / C);
+  let mostNearby = 0;
+  for (const l of nodes) {
+    let count = 0;
+    for (let r = 0; r <= reach; r++) around(l, r, (j, d) => { if (head[j] && d > 1e-4 && d < 0.5 * spacing) count++; });
+    mostNearby = Math.max(mostNearby, count);
+  }
+  return { mostAtOneNode, spacing, mostNearby };
+}
+
 function pngDimensions(filePath) {
   const buf = fs.readFileSync(filePath);
   assert.equal(buf.readUInt32BE(0), 0x89504e47, `${filePath} must be PNG`);
@@ -188,15 +232,22 @@ test('every Portugal tree places individual leaves along 3D meshed woody shoots 
     }
     assert.equal(detached, 0, `${p.species} ${p.cohort}: ${detached}/${tested} leaves detached > 2 cm (max ${(maxDist * 1000).toFixed(2)} mm)`);
 
-    // 2. Verify zero dense tufted piling: count petiole neighbors in 6 cm cells (previously up to 987 cards piled on 1 tip!).
-    const cell6cm = new Map();
+    // 2. No tuft: leaves stand at their shoots' nodes, never piled on a point (as many as 987 once sat on one tip).
+    // Judged against the tree's own spacing, not a count per cell: where twigs converge a 6 cm cell holds
+    // 25 birch leaves at the genome's 0.9 cm nodes, which is density, while a pile is leaves closer than any node.
+    const piling = leafPiling(petioles, leafCount);
+    const perNode = p.species === 'maple' ? 2 : 1; // maple bears an opposite pair at a node, the rest one leaf
+    assert.ok(piling.mostAtOneNode <= perNode, `${p.species} ${p.cohort} piles ${piling.mostAtOneNode} leaves on one point`);
+    const lengths = new Float64Array(leafCount);
     for (let l = 0; l < leafCount; l++) {
-      const key = `${Math.floor(petioles[l * 3] / 0.06)},${Math.floor(petioles[l * 3 + 1] / 0.06)},${Math.floor(petioles[l * 3 + 2] / 0.06)}`;
-      cell6cm.set(key, (cell6cm.get(key) ?? 0) + 1);
+      const v4 = indices[p.leaf.firstIndex + l * 12 + 2] * STRIDE;
+      lengths[l] = Math.hypot(verts[v4] - petioles[l * 3], verts[v4 + 1] - petioles[l * 3 + 1], verts[v4 + 2] - petioles[l * 3 + 2]);
     }
-    let maxIn6cm = 0;
-    for (const c of cell6cm.values()) if (c > maxIn6cm) maxIn6cm = c;
-    assert.ok(maxIn6cm <= 16, `${p.species} ${p.cohort} has dense tuft piling (${maxIn6cm} leaves in a single 6 cm cell)`);
+    const leafLength = lengths.sort()[leafCount >> 1];
+    assert.ok(piling.spacing >= leafLength / 20,
+      `${p.species} ${p.cohort}: nodes ${(piling.spacing * 1000).toFixed(1)} mm apart under ${(leafLength * 1000).toFixed(0)} mm leaves are a stack, not a shoot`);
+    assert.ok(piling.mostNearby <= 12,
+      `${p.species} ${p.cohort} piles ${piling.mostNearby} nodes within half its ${(piling.spacing * 1000).toFixed(1)} mm node spacing`);
 
     // 3. Verify species-specific genomic traits on veteran cohort.
     if (p.cohort === 'veteran') {
