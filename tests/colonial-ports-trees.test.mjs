@@ -68,13 +68,19 @@ test('Deliverable 1: every town Spain and Portugal planted by 1550 is a board fo
 test('Deliverable 2: WGSL root grounding plunges horizontal root webs smoothly downward with subRoot=0, pinned collar wind, and strict town/water tree clearance', async () => {
   // 1. Verify WGSL shader contracts
   // Each tree's foot is flared into its ground once, in its bake (scripts/prepare-forest-continuum.mjs flareRoot), and
-  // its wind weight pins the wood's collar; the one continuum then draws the tree as baked.
+  // its collar is pinned: the wood at its foot rides its first trunk bone alone, and that bone turns about the foot
+  // itself; the one continuum then draws the tree as baked.
   const sceneryJs = fs.readFileSync('js/forest-scenery.js', 'utf8');
   const prepareJs = fs.readFileSync('scripts/prepare-forest-continuum.mjs', 'utf8');
   assert.equal(/\?\s*256\s*:\s*0/.test(sceneryJs), false, 'subRoot = 256 removed from forest-scenery.js');
   assert.ok(prepareJs.includes('function flareRoot('), 'the bake flares each tree\'s foot into its ground');
   assert.ok(prepareJs.includes('const r = Math.hypot(x, z), envelope = 0.32 + 0.14 * Math.min(r, 4) - 0.46 * smooth(1.15, 2.6, r);'), 'by the buttress envelope verified below');
-  assert.ok(prepareJs.includes('(y - 0.22) / (1.05 - 0.22)'), 'the wind weight pins the wood collar at y <= 0.22');
+  assert.ok(prepareJs.includes('if (!leaf && y <= groundY + Math.min(0.32, 0.045 * H)) return { bone0: 0, bone1: 0, weight0: 1 };'), 'the wood at a tree\'s foot rides its first trunk bone alone');
+  for (const name of ['portugal', 'subtropical', 'northern', 'saba']) {
+    for (const type of JSON.parse(fs.readFileSync(`assets/forest-scenery/${name}/continuum/manifest.json`, 'utf8')).types) {
+      assert.equal(type.wind.bones[1], 0, `${name} ${type.name}: its first trunk bone turns about its foot`);
+    }
+  }
 
   // 2. Numerically verify forestGroundRoot law on extreme 15m..40.9m subterranean root webs (including ceiba & portugal maple)
   const smoothstep = (a, b, x) => {
@@ -159,7 +165,7 @@ test('Deliverable 3 & Terrain Interface Hooks: Forest Modeler visual parity, Por
 
   // 2. Wood canopy self-occlusion incorporates exposure when the canopy is open
   assert.ok(
-    forestWGSL.includes('let woodAO=min(canopy,select(1.0,mix(0.30,1.0,exposure),canopy>0.995&&exposure<0.995));'),
+    forestWGSL.includes('let woodAO=min(canopy,select(1.0,mix(0.30,1.0,exposure),canopy>0.995&&exposure<0.995))'),
     'the forest\'s material computes woodAO from exposure when the canopy is open'
   );
 
@@ -175,6 +181,6 @@ test('Deliverable 3 & Terrain Interface Hooks: Forest Modeler visual parity, Por
   const terrainSrc = fs.readFileSync('js/terrain.js', 'utf8');
   assert.ok(terrainSrc.includes('herdsWatch(from,to,best,projectile)'), 'createTerrain exposes herdsWatch');
   assert.ok(terrainSrc.includes('setStreetMounts(mountSeeds,routes)'), 'createTerrain exposes setStreetMounts');
-  assert.ok(terrainSrc.includes('async refreshBoardFabric(nextBoardJson)'), 'createTerrain exposes async refreshBoardFabric');
+  assert.ok(terrainSrc.includes('async function refreshBoardFabric(nextBoardJson)') && /\n\s+refreshBoardFabric,\n/.test(terrainSrc), 'createTerrain exposes async refreshBoardFabric');
   assert.equal(typeof refreshOldWorldBoardCountry, 'function', 'refreshOldWorldBoardCountry exported from js/old-world.js');
 });

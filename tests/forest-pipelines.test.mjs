@@ -6,23 +6,33 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const source=fs.readFileSync('js/forest-scenery.js','utf8');
+// The forest's own compute passes: its stand, root blocks and wind (js/wgsl/forest-continuum.js), and the native
+// surfaces' mipmaps (FOREST_SURFACE_MIPS_WGSL, in the renderer).
+const shaders=source+fs.readFileSync('js/wgsl/forest-continuum.js','utf8');
+
+// The renderer compiles its passes in one list: a name for each pipeline, and the entry points they are built from,
+// in the same order.
+function computeList(){
+  const at=source.search(/const \[(\w+(?:,\w+)*)\]=await Promise\.all\(\[\s*\.\.\.\['forest/);
+  assert.ok(at>0,'the renderer\'s pipeline list has moved; point this test at it');
+  const names=/const \[([\w,]+)\]/.exec(source.slice(at))[1].split(',');
+  const body=source.slice(at,source.indexOf(']);',at));
+  const entries=[...body.matchAll(/\.\.\.\[([^\]]+)\]\.map\(/g)].flatMap(m=>[...m[1].matchAll(/'(\w+)'/g)].map(e=>e[1]));
+  return {names,entries};
+}
 
 test('every compute pipeline the forest renderer creates is dispatched',()=>{
-  const lines=source.split('\n'),start=lines.findIndex(line=>/^\s*const \[reset,cull(?:,[\w,]+)?\]=await Promise\.all\(\[$/.test(line));
-  assert.ok(start>0,'the renderer\'s pipeline list has moved; point this test at it');
-  const names=/const \[([\w,]+)\]/.exec(lines[start])[1].split(','),indent=/^\s*/.exec(lines[start+1])[0],elements=[];
-  // One pipeline to a line at the list's own indent; deeper lines continue the one above.
-  for(let i=start+1;!/^\s*\]\);/.test(lines[i]);i++){
-    if(/^\s*/.exec(lines[i])[0]===indent)elements.push(lines[i]);else elements[elements.length-1]+=lines[i];
-  }
-  assert.equal(elements.length,names.length,'one pipeline to a name');
-  const compute=names.filter((name,i)=>elements[i].includes('createComputePipelineAsync'));
-  assert.deepEqual(compute,['reset','cull','listSpecies']);
-  for(const name of compute)assert.ok(source.includes(`pass.setPipeline(${name})`),`${name} is compiled and never dispatched`);
+  const {names,entries}=computeList();
+  assert.equal(entries.length,names.length,'one pipeline to a name');
+  assert.ok(names.length>=10,names.join());
+  for(const name of names)assert.ok(source.includes(`pass.setPipeline(${name})`),`${name} is compiled and never dispatched`);
+  // The surfaces' two passes are chosen by mip level.
+  assert.ok(source.includes('const pipeline=level?mip:init;pass.setPipeline(pipeline)'),'the native surfaces\' passes are compiled and never dispatched');
 });
 
-test('every compute entry point in the forest renderer\'s shader has a pipeline',()=>{
-  const entries=[...source.matchAll(/@compute\s*@workgroup_size\([^)]*\)\s*fn\s+(\w+)/g)].map(match=>match[1]);
-  assert.ok(entries.length>=2);
-  for(const entry of entries)assert.ok(source.includes(`entryPoint:'${entry}'`),`${entry} is shipped and never compiled`);
+test('every compute entry point in the forest renderer\'s shaders has a pipeline',()=>{
+  const entries=[...shaders.matchAll(/@compute\s*@workgroup_size\([^)]*\)\s*fn\s+(\w+)/g)].map(match=>match[1]);
+  assert.ok(entries.length>=12,entries.join());
+  const compiled=new Set([...computeList().entries,...[...source.matchAll(/entryPoint:'(\w+)'/g)].map(m=>m[1])]);
+  for(const entry of entries)assert.ok(compiled.has(entry),`${entry} is shipped and never compiled`);
 });

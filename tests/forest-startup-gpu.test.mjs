@@ -30,7 +30,10 @@ test('packaged island reaches a real rendered frame without per-batch timer stal
     await page.waitForFunction(()=>oceanStartup.state==='ready'||oceanStartup.state==='failed',undefined,{timeout:60000});
     const result=await page.evaluate(()=>({state:oceanStartup.state,error:document.querySelector('#err').textContent,ready:performance.getEntriesByName('ocean-startup-ready')[0]?.startTime,...forestStartupAudit}));
     t.diagnostic(JSON.stringify(result));
-    assert.equal(result.state,'ready',result.error);assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);assert.ok(result.frames>0);assert.ok(result.tasks>0);assert.ok(result.timers<100,'validation must not sleep after every small batch');
+    assert.equal(result.state,'ready',result.error);assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);assert.ok(result.frames>0);
+    // Without scheduler.yield, a long check pauses for the page by a message task (tests/task-yield.test.mjs); a load
+    // whose checks fit their budget, as the island's certified roots do, need not pause at all. Neither sleeps.
+    assert.ok(result.timers<100,'validation must not sleep after every small batch');
     // Every tree is one type of the one continuum: the pack's own vertex and index streams never reach the GPU.
     for(const label of ['forest immutable prototype vertices','forest immutable prototype indices'])assert.equal(result.buffers[label],undefined,label);
     assert.equal(result.pipelines.some(label=>label?.startsWith('instanced forest')||label?.startsWith('forest clusters')||label?.startsWith('forest crowns')),false,'no forest pipelines of its own');

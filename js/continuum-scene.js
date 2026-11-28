@@ -215,7 +215,12 @@ export function uploadContinuumAtlas(device, words, label, { surfels = true, car
   const tightSpheres = computeContinuumTightSpheres(words);
   const aboveGroundSpheres = computeContinuumTightSpheres(words, { clipBelowY: -2.2 });
   const count = continuumAtlasPages(device, totalWords), { pageWords } = continuumAtlasPaging(device, count);
-  const segments = [[0, words]];
+  // Where the cones and surfels built here lie is written into a copy of the header's first words, so every byte of
+  // the atlas goes to the GPU once.
+  const head = cones || surfelWords ? words.slice(0, Math.max(CONTINUUM_HEADER.cones, CONTINUUM_HEADER.surfels) + 1) : null;
+  if (cones) head[CONTINUUM_HEADER.cones] = conesAt;
+  if (surfelWords) head[CONTINUUM_HEADER.surfels] = surfelsAt;
+  const segments = head ? [[0, head], [head.length, words.subarray(head.length)]] : [[0, words]];
   if (cones) segments.push([words.length, cones]);
   if (surfelWords) segments.push([afterCones, surfelWords]);
   const pages = [];
@@ -229,12 +234,6 @@ export function uploadContinuumAtlas(device, words, label, { surfels = true, car
       if (s0 < s1) {
         writeBufferChunked(device, buffer, (s0 - pageStart) * 4, arr, s0 - segStart, s1 - segStart);
       }
-    }
-    if (p === 0 && cones) {
-      device.queue.writeBuffer(buffer, CONTINUUM_HEADER.cones * 4, new Uint32Array([conesAt]));
-    }
-    if (p === 0 && surfelWords) {
-      device.queue.writeBuffer(buffer, CONTINUUM_HEADER.surfels * 4, new Uint32Array([surfelsAt]));
     }
     pages.push(buffer);
   }

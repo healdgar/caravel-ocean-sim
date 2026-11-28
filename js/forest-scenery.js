@@ -570,6 +570,21 @@ export function forestPackSections(pack){
 }
 
 // Every root of a pack in one array, section after section: for tools and tests. The game never joins them.
+// The forest's three compute layouts, as its passes are bound: the stand, which lists each tree for the one cut; the
+// root blocks it culls by; and the wind, which steps the trees' skeletons. One description for the renderer and for
+// tests/forest-scenery-gpu.test.mjs, so a binding a pass's shader gains is a binding here or neither builds.
+export function createForestComputeLayouts(device){
+  const C=GPUShaderStage.COMPUTE,entry=(binding,type)=>({binding,visibility:C,buffer:{type}});
+  const shared=[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage')];
+  const hiz=[{binding:CONTINUUM_HIZ_TEXTURE_BINDING,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d'}},entry(CONTINUUM_HIZ_UNIFORM_BINDING,'uniform')];
+  return {
+    stand:device.createBindGroupLayout({label:'forest stand',entries:[...shared,entry(7,'uniform'),
+      {binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},entry(9,'uniform'),entry(10,'storage'),entry(11,'storage'),...hiz,entry(14,'read-only-storage')]}),
+    blocks:device.createBindGroupLayout({label:'forest blocks',entries:[...shared,entry(7,'uniform'),...hiz]}),
+    wind:device.createBindGroupLayout({label:'forest wind',entries:shared}),
+  };
+}
+
 export function forestPackRoots(pack){
   const parts=forestPackSections(pack).flatMap(section=>section.parts??[]);
   const out=new Float32Array(parts.reduce((sum,part)=>sum+part.length,0));
@@ -839,19 +854,13 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     const names=m.prototypes.map(p=>`${p.species}${p.cohort?`-${p.cohort}`:''}`),types=atlas.manifest.types;
     if(types.length!==P||types.some((type,id)=>type.name!==names[id]))throw Error(`The forest continuum atlas is not this pack's (${types.map(t=>t.name)} for ${names}): rebake it with scripts/prepare-forest-continuum.mjs`);
     const firstLayers=[];let layer=0;for(const p of m.prototypes){firstLayers.push(layer);layer+=p.nativeMaterials.length;}
-    const C=GPUShaderStage.COMPUTE,entry=(binding,type)=>({binding,visibility:C,buffer:{type}});
-    standLayout=device.createBindGroupLayout({label:'forest stand',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),
-      {binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},entry(9,'uniform'),entry(10,'storage'),entry(11,'storage'),
-      {binding:CONTINUUM_HIZ_TEXTURE_BINDING,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d'}},entry(CONTINUUM_HIZ_UNIFORM_BINDING,'uniform'),entry(14,'read-only-storage')]});
+    ({stand:standLayout,blocks:blockLayout,wind:windLayout}=createForestComputeLayouts(device));
     const standPipelineLayout=device.createPipelineLayout({label:'forest stand',bindGroupLayouts:[standLayout]});
-    blockLayout=device.createBindGroupLayout({label:'forest blocks',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),
-      {binding:CONTINUUM_HIZ_TEXTURE_BINDING,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d'}},entry(CONTINUUM_HIZ_UNIFORM_BINDING,'uniform')]});
     const blockPipelineLayout=device.createPipelineLayout({label:'forest blocks',bindGroupLayouts:[blockLayout]});
     // Every type's skeleton at rest, as the bake measured it from its wood and leaves (scripts/prepare-forest-continuum.mjs).
     const restWords=new Float32Array(P*CONTINUUM_WIND_BONES*16);
     types.forEach((type,id)=>restWords.set(type.wind.bones,id*CONTINUUM_WIND_BONES*16));
     windRest=make(restWords,B.STORAGE,'forest wind rest');
-    windLayout=device.createBindGroupLayout({label:'forest wind',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage')]});
     const windPipelineLayout=device.createPipelineLayout({label:'forest wind',bindGroupLayouts:[windLayout]});
     const compute=(layout,module,entryPoint)=>device.createComputePipelineAsync({label:`forest ${entryPoint}`,layout,compute:{module,entryPoint}});
     const [standReset,standRoots,standFinish,buildBlocks,blockReset,standBlocks,blockArgs,windHead,windLanes,windOwn]=await Promise.all([

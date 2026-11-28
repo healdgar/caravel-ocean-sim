@@ -38,35 +38,41 @@ async function open(region, params = {}, state = null) {
   return { page, errors };
 }
 
-// A tree of this species out in the open, away from any building, with a clear line to stand on. The forest's trees
-// lie in one grid a section's array of roots (forestTrunks.grids).
-const pickTree = (page, species, range) => page.evaluate(({ species, range }) => {
-  const t = oceanFleet.terrain, grids = t.forestTrunks.grids, names = grids[0].shapes.map((s) => s?.species);
+// A tree of this species out in the open, away from any building, with a clear line to stand on, its trunk at least
+// `stout` metres in radius as drawn. The forest's trees lie in one grid a section's array of roots (forestTrunks.grids).
+const pickTree = (page, species, range, stout = 0) => page.evaluate(({ species, range, stout }) => {
+  const t = oceanFleet.terrain, grids = t.forestTrunks.grids, shapes = grids[0].shapes;
   const buildings = (t.ports ?? []).flatMap((q) => q.instances ?? []);
   const cx = t.port?.center?.x ?? 0, cz = t.port?.center?.z ?? 0, list = [];
-  for (const grid of grids) for (let i = 0; i < grid.trees; i++) if (names[grid.roots[grid.rootOf[i] * 12 + 8] | 0] === species) list.push(grid.roots.subarray(grid.rootOf[i] * 12, grid.rootOf[i] * 12 + 12));
+  for (const grid of grids) for (let i = 0; i < grid.trees; i++) {
+    const root = grid.roots.subarray(grid.rootOf[i] * 12, grid.rootOf[i] * 12 + 12), shape = shapes[root[8] | 0];
+    if (shape?.species === species && (shape.trunkRadius ?? 0) * root[3] >= stout) list.push(root);
+  }
   list.sort((a, b) => Math.hypot(a[0] - cx, a[2] - cz) - Math.hypot(b[0] - cx, b[2] - cz));
   for (const root of list.slice(0, 1600)) {
-    const x = root[0], y = root[1], z = root[2];
+    const x = root[0], y = root[1], z = root[2], ground = t.groundSample(x, z);
     if (t.groundSample(x, z) < 1.5 || buildings.some((b) => Math.hypot(b.x - x, b.z - z) < 70 + Math.max(b.width ?? 10, b.length ?? 10))) continue;
     for (let a = 0; a < 16; a++) {
       const angle = (a / 16) * Math.PI * 2, ex = x + Math.cos(angle) * range, ez = z + Math.sin(angle) * range, eyeY = Math.max(t.groundSample(ex, ez) + 2.2, y + 2.4);
       let clear = true;
-      for (let s = 0.08; s <= 0.92 && clear; s += 0.04) clear = t.groundSample(x + (ex - x) * s, z + (ez - z) * s) <= y + 1.6 + (eyeY - y - 1.6) * s - 0.3;
+      // The ball's own line, from the muzzle to two metres up the trunk (cameraAt), clears the ground between.
+      for (let s = 0.08; s <= 0.92 && clear; s += 0.04) clear = t.groundSample(x + (ex - x) * s, z + (ez - z) * s) <= ground + 2 + (eyeY - 0.8 - ground - 2) * s - 0.3;
       for (const grid of grids) for (let k = 0; k < grid.trees && clear; k++) {
         const q = grid.rootOf[k] * 12, roots = grid.roots;
         if (roots[q] === x && roots[q + 2] === z) continue;
         const along = ((roots[q] - ex) * (x - ex) + (roots[q + 2] - ez) * (z - ez)) / (range * range);
         if (along >= -0.05 && along <= 1 && Math.hypot(roots[q] - (ex + (x - ex) * along), roots[q + 2] - (ez + (z - ez) * along)) < 9) clear = false;
       }
-      if (clear) return { x, y, z, ex, eyeY, ez, scale: root[3] };
+      if (clear) return { x, y, z, ex, eyeY, ez, scale: root[3], ground };
     }
   }
   return null;
-}, { species, range });
+}, { species, range, stout });
 
-const cameraAt = ({ x, y, z, ex, eyeY, ez, scale }) => {
-  const dx = x - ex, dz = z - ez, yaw = (Math.atan2(dx, -dz) * 180) / Math.PI, pitch = (Math.atan2(y + 1.5 * scale - eyeY, Math.hypot(dx, dz)) * 180) / Math.PI;
+// The free cannon's muzzle stands 0.8 m below the eye (js/free-cannon.js) and its ball flies the eye's line that much
+// lower, so the eye aims 0.8 m above where the ball is to strike: two metres up the trunk.
+const cameraAt = ({ x, z, ex, eyeY, ez, ground }) => {
+  const dx = x - ex, dz = z - ez, yaw = (Math.atan2(dx, -dz) * 180) / Math.PI, pitch = (Math.atan2(ground + 2 + 0.8 - eyeY, Math.hypot(dx, dz)) * 180) / Math.PI;
   return [ex, eyeY, ez, yaw, pitch].join(',');
 };
 const readTree = (page, tree) => page.evaluate(({ x, z }) => {
@@ -157,8 +163,11 @@ test('the free cannon snaps a foreshore palm where its trunk is drawn, and it st
 
 test('the free cannon wounds a hardwood, the next ball fells it, and the sweep costs nothing to speak of', { timeout: 590000 }, async () => {
   let tree;
-  { const { page } = await open('jamestown'); tree = await pickTree(page, 'chestnut', 30); await page.close(); }
-  assert.ok(tree, 'a chestnut in the open');
+  // A ball breaks as much trunk as its energy pays for at 8 MJ a square metre of section (js/forest-trunks.js), so the
+  // 24-pounder's ball, 10.9 kg at 470 m/s or 1.2 MJ, fells any trunk under 0.22 m in radius at a blow: the chestnut shot at
+  // is stouter.
+  { const { page } = await open('jamestown'); tree = await pickTree(page, 'chestnut', 30, 0.25); await page.close(); }
+  assert.ok(tree, 'a stout chestnut in the open');
   const { page, errors } = await open('jamestown', { cam: cameraAt(tree) });
   try {
     await picture(page);

@@ -14,12 +14,15 @@ before(async()=>{
 after(async()=>{await browser?.close();server?.closeAllConnections?.();server?.close();});
 
 // What the forest's view of the one cut really drew, list by list, read back from its indirect arguments
-// (js/continuum-scene.js draw: one drawIndirect a list, at the list's index times 16 bytes).
+// (js/continuum-scene.js draw: one drawIndirect a list, at the list's index times 16 bytes). The forest's own view
+// pipeline draws its clusters and far bodies; its splats, once its octahedral cards are baked, are drawn as cards by
+// the pipeline every carded family shares, from the forest's own lists.
 const LISTS=['clusters','small clusters','far body','splat'];
 const instrument=()=>{
   const pass=GPURenderPassEncoder.prototype,pipelines=new WeakMap(),draws=(window.forestDraws=[]);window.forestCapture=false;
+  const views=new Set(['forestContinuum view','continuum card view']);
   const setPipeline=pass.setPipeline;pass.setPipeline=function(p){pipelines.set(this,p.label||'');return setPipeline.call(this,p);};
-  const original=pass.drawIndirect;pass.drawIndirect=function(b,o){if(window.forestCapture&&pipelines.get(this)==='forestContinuum view')draws.push({buffer:b,offset:o});return original.call(this,b,o);};
+  const original=pass.drawIndirect;pass.drawIndirect=function(b,o){if(window.forestCapture&&b.label==='forest continuum draws'&&views.has(pipelines.get(this)))draws.push({buffer:b,offset:o});return original.call(this,b,o);};
   const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...a){return window.forestDevice=await request.apply(this,a);};
 };
 const drawn=page=>page.evaluate(async(lists)=>{
@@ -57,13 +60,43 @@ async function open(query,region='lisbon'){
   await page.waitForTimeout(9000);
   return {page,errors,requested};
 }
+// Stands the free camera `range` metres from a planted tree in the open, on dry ground with nothing between, looking at
+// its crown: found from the forest's own roots (forestTrunks.grids), so the view keeps up with the coast's planting.
+const standNear=async(page,range)=>{
+  await page.waitForFunction(()=>window.oceanFleet?.terrain?.forestTrunks?.trees>0,null,{timeout:120000,polling:200});
+  const stood=await page.evaluate(range=>{
+    const t=oceanFleet.terrain,grids=t.forestTrunks.grids,cam=oceanFleet.freeCam,trees=[];
+    for(const grid of grids)for(let i=0;i<grid.trees;i++)trees.push(grid.roots.subarray(grid.rootOf[i]*12,grid.rootOf[i]*12+12));
+    const cx=t.port?.center?.x??0,cz=t.port?.center?.z??0;
+    trees.sort((a,b)=>Math.hypot(a[0]-cx,a[2]-cz)-Math.hypot(b[0]-cx,b[2]-cz));
+    for(const [x,y,z,scale] of trees){
+      if(!(scale>0)||t.groundSample(x,z)<1.5)continue;
+      for(let a=0;a<16;a++){
+        const angle=a/16*Math.PI*2,ex=x+Math.cos(angle)*range,ez=z+Math.sin(angle)*range,eyeY=Math.max(t.groundSample(ex,ez)+2.2,y+2.4);
+        if(t.groundSample(ex,ez)<1)continue;
+        let clear=true;
+        for(let s=0.08;s<=0.92&&clear;s+=0.04)clear=t.groundSample(x+(ex-x)*s,z+(ez-z)*s)<=y+1.6+(eyeY-y-1.6)*s-0.3;
+        for(const q of trees){if(!clear)break;if(q[0]===x&&q[2]===z)continue;const along=((q[0]-ex)*(x-ex)+(q[2]-ez)*(z-ez))/(range*range);if(along>=-0.05&&along<=1&&Math.hypot(q[0]-(ex+(x-ex)*along),q[2]-(ez+(z-ez)*along))<6)clear=false;}
+        if(!clear)continue;
+        const dx=x-ex,dz=z-ez;
+        Object.assign(cam,{x:ex,y:eyeY,z:ez,yaw:Math.atan2(dx,-dz),pitch:Math.atan2(y+4*scale-eyeY,Math.hypot(dx,dz))});
+        return {x,z,ex,ez};
+      }
+    }
+    return null;
+  },range);
+  assert.ok(stood,'no planted tree stands in the open with a clear view of it');
+  await page.waitForTimeout(4000);
+  return stood;
+};
 
 // Lisbon wears the Portugal pack. Near trees draw as clusters cut per tree by projected error, farther ones as their
 // one far body, collapsing a half-edge at a time, and the farthest as 1-triangle splats: one continuum, and nothing
-// else. The view stands under a chestnut in the open country outside the town, with planted trees near and far.
+// else. The view stands by a planted tree in the open country, with others near and far.
 test('Lisbon\'s trees draw through the one cut, near to the horizon, and no map the compressed set replaces is fetched',{timeout:360000},async()=>{
-  const {page,errors,requested}=await open({view:'free',prow:0,cam:'-2165,60,-2548,40,4'});
+  const {page,errors,requested}=await open({view:'free',prow:0});
   try{
+    await standNear(page,18);
     const totals=await drawn(page);
     assert.ok(totals.clusters+totals['small clusters']>1000,JSON.stringify(totals));
     assert.ok(totals['far body']+totals.splat>0,`far trees draw as their far body and splats: ${JSON.stringify(totals)}`);
@@ -87,9 +120,10 @@ test('the surveyed island\'s forest is the one continuum, not its old shells and
 });
 
 test('tropical coasts draw palms through the one cut, down to 1-triangle horizon splats',{timeout:360000},async()=>{
-  // Among the palms of the San Juan shore, looking inland.
-  const {page,errors,requested}=await open({view:'free',prow:0,cam:'3274.9,8.4,-2425.1,40,12'},'san-juan');
+  // By a palm of the San Juan shore.
+  const {page,errors,requested}=await open({view:'free',prow:0},'san-juan');
   try{
+    await standNear(page,14);
     const totals=await drawn(page);
     assert.ok(totals.clusters+totals['small clusters']>0,JSON.stringify(totals));
     assert.ok(totals.splat>0,`distant trees collapse to 1-triangle splats: ${JSON.stringify(totals)}`);
