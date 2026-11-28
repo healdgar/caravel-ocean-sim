@@ -4989,13 +4989,13 @@ fn tvFarShade(in: ContinuumVarying, front: bool) -> vec4f {
 fn tradeVesselContinuumShade(in: ContinuumVarying, front: bool) -> vec4f {
   let near = tvShadeFragment(in, front);
   let far = tvFarShade(in, front);
-  return select(near, far, in.coverage.x != CONTINUUM_CLUSTER_ENTRY && in.coverage.x != CONTINUUM_SURFEL_ENTRY);
+  return select(near, far, in.coverage.x != CONTINUUM_CLUSTER_ENTRY);
 }
 
 // The samples a damaged vessel's clusters keep: none where shot has holed her timber, parted her rope or torn her canvas.
 fn tradeVesselContinuumMask(in: ContinuumVarying, front: bool) -> u32 {
   let tvSlot = in.ids.z;
-  if (tvSlot == 0u || (in.coverage.x != CONTINUUM_CLUSTER_ENTRY && in.coverage.x != CONTINUUM_SURFEL_ENTRY)) { return 0xffffffffu; }
+  if (tvSlot == 0u || (in.coverage.x != CONTINUUM_CLUSTER_ENTRY)) { return 0xffffffffu; }
   let slot = min(tvSlot - 1u, arrayLength(&hullDamage) - 1u);
   let m = in.ids.x;
   let dmg = in.state.x;

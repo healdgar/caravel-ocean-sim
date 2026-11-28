@@ -143,9 +143,8 @@ async function openCrewContinuumBody(device, id, fetchAsset, { mobile, verifySha
       device.queue.writeTexture({ texture, mipLevel }, picture, { offset: level.offset, bytesPerRow: across * 16, rowsPerImage: down }, [across * 4, down * 4]);
     });
   }
-  // No micro-surfels: a person past the handoff wears the far body (a closed skin, each triangle its region's dye),
-  // which a few hundred points at a time cannot stand for at the ranges a deck is seen from.
-  const uploadedAtlas = uploadContinuumAtlas(device, words, `crew ${id}`, { surfels: false });
+  // Past the handoff a person wears the far body: a closed skin, each triangle its region's dye.
+  const uploadedAtlas = uploadContinuumAtlas(device, words, `crew ${id}`);
   return {
     id, manifest, standIn, words: continuumAtlasMetaWords(words), types: uploadedAtlas.types, atlas: uploadedAtlas,
     rig: uniform(`crew continuum ${id} rig`, crewContinuumRig(manifest)), wear: uniform(`crew continuum ${id} wear`, crewContinuumWear(manifest)),

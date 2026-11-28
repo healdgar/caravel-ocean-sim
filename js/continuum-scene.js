@@ -12,8 +12,8 @@ import { continuumProfile } from './continuum-profiles.js';
 import { continuumGroundView } from './continuum-ground.js';
 import { continuumHiZView, continuumHiZUniform, CONTINUUM_HIZ_TEXTURE_BINDING, CONTINUUM_HIZ_UNIFORM_BINDING } from './continuum-hiz.js';
 import {
-  CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_SHADOW_LISTS, CONTINUUM_CAPTURE_LISTS, CONTINUUM_CARD_LIST, CONTINUUM_CARD_LEVELS, CONTINUUM_CHUNK_TRIANGLES,
-  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, buildContinuumSurfels, computeContinuumTightSpheres, computeContinuumCardGrid,
+  CONTINUUM_HEADER, CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, CONTINUUM_SHADOW_LISTS, CONTINUUM_CAPTURE_LISTS, CONTINUUM_CARD_LIST, CONTINUUM_CARD_LEVELS,
+  writeContinuumRecord, continuumAtlasTypes, continuumAtlasTotalWords, continuumAtlasMetaWords, buildContinuumClusterCones, computeContinuumTightSpheres, computeContinuumCardGrid,
 } from './continuum-format.js';
 import {
   CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_PLAN_WORD, CONTINUUM_PLAN_GROUPS, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_BATCH, CONTINUUM_STATE_ENTRIES,
@@ -191,38 +191,31 @@ function writeBufferChunked(device, buffer, dstByteOffset, src, startWord, endWo
     device.queue.writeBuffer(buffer, dstByteOffset + (at - startWord) * 4, src.subarray(at, next));
   }
 }
-// Isolated factory so the returned destroy() closure never captures uploadContinuumAtlas's `words`, `cones`, or `surfels`
-// buffers in a shared JS engine function context (which would otherwise pin 100-800 MB of raw CPU atlas words forever).
+// Isolated factory so the returned destroy() closure never captures uploadContinuumAtlas's `words` or `cones` buffers
+// in a shared JS engine function context (which would otherwise pin 100-800 MB of raw CPU atlas words forever).
 function makeAtlasDestroy(pages) {
   return function destroy() { for (const page of pages) page.destroy(); };
 }
 // An atlas on the GPU, in as many pages as the device needs to bind it (continuumAtlasPages), with what each of its
 // types can enter in the lists (continuumAtlasTypes): { pages, buffer (the first page, which holds its header and
 // types), types, destroy() }. Every scene of the one cut binds its atlas so, with programs of as many pages.
-// Appends per-cluster normal cones and optional universal prefix micro-surfels directly into GPU upload pages.
+// Appends per-cluster normal cones directly into GPU upload pages.
 // `cardGrid` (js/continuum-format.js computeContinuumCardGrid's options): its types' card grid, measured here while
 // the atlas's vertices are still on the CPU, as `cardGrid` of what is returned.
-export function uploadContinuumAtlas(device, words, label, { surfels = true, cardGrid = null } = {}) {
+export function uploadContinuumAtlas(device, words, label, { cardGrid = null } = {}) {
   const needCones = words[CONTINUUM_HEADER.cones] === 0 && words[CONTINUUM_HEADER.clusterCount] > 0;
   const cones = needCones ? buildContinuumClusterCones(words) : null;
   const conesAt = cones ? words.length : words[CONTINUUM_HEADER.cones];
-  const afterCones = cones ? words.length + cones.length : words.length;
-  const needSurfels = Boolean(surfels) && words[CONTINUUM_HEADER.surfels] === 0 && words[CONTINUUM_HEADER.clusterCount] > 0;
-  const surfelBuild = needSurfels ? buildContinuumSurfels(words, typeof surfels === 'object' ? surfels : {}) : null;
-  const surfelWords = surfelBuild?.words?.length ? surfelBuild.words : null;
-  const surfelsAt = surfelWords ? afterCones : words[CONTINUUM_HEADER.surfels];
-  const totalWords = surfelWords ? afterCones + surfelWords.length : afterCones;
+  const totalWords = cones ? words.length + cones.length : words.length;
   const tightSpheres = computeContinuumTightSpheres(words);
   const aboveGroundSpheres = computeContinuumTightSpheres(words, { clipBelowY: -2.2 });
   const count = continuumAtlasPages(device, totalWords), { pageWords } = continuumAtlasPaging(device, count);
-  // Where the cones and surfels built here lie is written into a copy of the header's first words, so every byte of
-  // the atlas goes to the GPU once.
-  const head = cones || surfelWords ? words.slice(0, Math.max(CONTINUUM_HEADER.cones, CONTINUUM_HEADER.surfels) + 1) : null;
+  // Where the cones built here lie is written into a copy of the header's first words, so every byte of the atlas
+  // goes to the GPU once.
+  const head = cones ? words.slice(0, CONTINUUM_HEADER.cones + 1) : null;
   if (cones) head[CONTINUUM_HEADER.cones] = conesAt;
-  if (surfelWords) head[CONTINUUM_HEADER.surfels] = surfelsAt;
   const segments = head ? [[0, head], [head.length, words.subarray(head.length)]] : [[0, words]];
   if (cones) segments.push([words.length, cones]);
-  if (surfelWords) segments.push([afterCones, surfelWords]);
   const pages = [];
   for (let p = 0; p < count; p++) {
     const pageStart = p * pageWords;
@@ -238,12 +231,6 @@ export function uploadContinuumAtlas(device, words, label, { surfels = true, car
     pages.push(buffer);
   }
   const types = continuumAtlasTypes(words);
-  if (surfelBuild?.counts) {
-    for (let t = 0; t < types.length; t++) {
-      const sc = surfelBuild.counts[t];
-      if (sc > 0) types[t].farChunks = Math.max(types[t].farChunks, Math.ceil(sc / CONTINUUM_CHUNK_TRIANGLES));
-    }
-  }
   return { pages, buffer: pages[0], types, tightSpheres, aboveGroundSpheres, cardGrid: cardGrid ? computeContinuumCardGrid(words, cardGrid) : null, destroy: makeAtlasDestroy(pages) };
 }
 

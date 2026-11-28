@@ -1262,7 +1262,7 @@ fn herdContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>)
     coat = coatA;
     ao = clamp(0.42 + 0.33 * clamp(rest.y / max(continuumTypeF(s.model, ${ANIMAL_CONTINUUM_MATERIAL.height}u), 0.4), 0.0, 1.0) + 0.23 * (0.5 + 0.5 * s.normal.y), 0.12, 0.96);
   }
-  if (species < 4u && (s.what == CONTINUUM_CLUSTER_ENTRY || s.what == CONTINUUM_SURFEL_ENTRY)) {
+  if (species < 4u && (s.what == CONTINUUM_CLUSTER_ENTRY)) {
     (*v).uv = continuumUV(s.vertex);
   }
   // Far, the sky its optical moments say reaches what is seen of the beast, morphed with its points.
@@ -1288,7 +1288,7 @@ fn herdContinuumShade(v: ContinuumVarying, front: bool) -> vec4f {
   var localXZ = v.localXZ;
   var texColor = v.texColor;
   var n = normalize(v.normal);
-  let isTexturedCluster = (v.coverage.x == CONTINUUM_CLUSTER_ENTRY || v.coverage.x == CONTINUUM_SURFEL_ENTRY) && species < 4u && coatCode >= 16.0;
+  let isTexturedCluster = (v.coverage.x == CONTINUUM_CLUSTER_ENTRY) && species < 4u && coatCode >= 16.0;
   if (isTexturedCluster) {
     texColor = mapSample;
     // Subtle micro-relief normal perturbation from high-res wool/hide albedo gradient (filtered by UV footprint so zero shimmer).

@@ -740,7 +740,7 @@ fn continuumCellTap(cell:vec2u,layer:u32,half:vec3f,q:vec3f,ray:vec3f,foot:f32)-
   s.local=centre+v.plane+ray*t;s.world=world;s.normal=continuumTurnNormal(record,normalize(normal+vec3f(0.0,1e-5,0.0)));
   s.high=0u;s.word=0u;s.wear=0.0;s.corner=vec2f(0.0);s.optics=CONTINUUM_NEAR_OPTICS;s.albedo=vec4f(albedo,alpha);
   var shaded:ContinuumVarying;
-  shaded.position=v.position;shaded.world=world;shaded.normal=s.normal;shaded.optics=s.optics;shaded.surfel=vec2f(0.0);
+  shaded.position=v.position;shaded.world=world;shaded.normal=s.normal;shaded.optics=s.optics;
   shaded.coverage=vec4u(CONTINUUM_CLUSTER_ENTRY,0u,v.coverage.z,v.coverage.w);
   ${name}CardVarying(s,flag,&shaded);
   ${material.coverage ? `mask&=${name}Coverage(shaded,true);\n  if(mask==0u){return out;}` : ''}

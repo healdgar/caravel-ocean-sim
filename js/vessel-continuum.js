@@ -40,7 +40,7 @@ fn ${fnName}Varying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
   let scale=max(continuumPoses[data+1u].xyz,vec3f(1e-4));
   var local=s.local/scale;var normalLocal=vec3f(0.0,1.0,0.0);var uv=vec2f(0.5);var wet=vec2f(0.0);var damage=s.wear;var material=0u;
   let word=select(0u,shipRiderWord(s.vertex),s.vertex!=CONTINUUM_NO_VERTEX);
-  let isDetail=s.what==CONTINUUM_CLUSTER_ENTRY||s.what==CONTINUUM_SURFEL_ENTRY;
+  let isDetail=s.what==CONTINUUM_CLUSTER_ENTRY;
   if(isDetail&&(word&SHIP_RIDER_LINE)!=0u){
     let at=u32(head.z)+(word&0x3fffffffu)*3u;
     let r0=continuumPoses[at];let r1=continuumPoses[at+1u];let r2=continuumPoses[at+2u];
@@ -94,11 +94,11 @@ fn vesselContinuumFarShade(v:ContinuumVarying,front:bool)->vec4f {
 // keeps her samples by her mask as her view does (js/wgsl/continuum-cut.js), so her holes read from below as above.
 fn ${fnName}Shade(v:ContinuumVarying,front:bool)->vec4f {
   let near=vesselShade(vesselContinuumBoat(v),front);
-  ${damaged ? 'if(v.coverage.x==CONTINUUM_CLUSTER_ENTRY||v.coverage.x==CONTINUUM_SURFEL_ENTRY){return near;}\n  return vesselContinuumFarShade(v,front);' : 'if(F.screen.x< -1.0){return near+vec4f(hullDamage.scale.xxx,0.0);}\n  return near;'}
+  ${damaged ? 'if(v.coverage.x==CONTINUUM_CLUSTER_ENTRY){return near;}\n  return vesselContinuumFarShade(v,front);' : 'if(F.screen.x< -1.0){return near+vec4f(hullDamage.scale.xxx,0.0);}\n  return near;'}
 }
 ${damaged ? `// The samples a holed vessel's clusters keep: none where shot has holed her timber, parted her rope or torn her canvas.
 fn ${fnName}Mask(v:ContinuumVarying,front:bool)->u32 {
-  let holed=(v.coverage.x==CONTINUUM_CLUSTER_ENTRY||v.coverage.x==CONTINUUM_SURFEL_ENTRY)&&continuumFlagged(continuumRecords[v.coverage.z],CONTINUUM_DAMAGED);
+  let holed=(v.coverage.x==CONTINUUM_CLUSTER_ENTRY)&&continuumFlagged(continuumRecords[v.coverage.z],CONTINUUM_DAMAGED);
   return select(0xffffffffu,select(0u,0xffffffffu,vesselSurvives(vesselContinuumBoat(v))),holed);
 }` : ''}
 `;

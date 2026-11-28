@@ -783,7 +783,7 @@ fn meadowColourOf(word: u32) -> vec3f { let root = unpack4x8unorm(word).rgb; ret
 fn meadowContinuumVarying(s: ContinuumSurface, v: ptr<function, ContinuumVarying>) {
   let seed = s.record.tag.z;
   let splat = s.what == CONTINUUM_SPLAT_ENTRY;
-  let cluster = s.what == CONTINUUM_CLUSTER_ENTRY || s.what == CONTINUUM_SURFEL_ENTRY;
+  let cluster = s.what == CONTINUUM_CLUSTER_ENTRY;
   // A splat is read at its patch's middle; every other corner where it stands.
   let at = select(s.world.xz, continuumPlace(s.record, vec3f(MEADOW_PATCH * 0.5, 0.0, MEADOW_PATCH * 0.5)).xz, splat);
   let eye = continuumEye();
@@ -917,7 +917,7 @@ fn meadowContinuumShadeAt(v: ContinuumVarying, frontFacing: bool, dxW: vec2f, dy
   let gust = clamp(v.blade.y, 0.0, 1.0);
   let swell = v.blade.z;
   let bendSlope = clamp(v.harm.y, 0.0, 1.0);
-  let isContinuum = v.coverage.x != CONTINUUM_CLUSTER_ENTRY && v.coverage.x != CONTINUUM_SURFEL_ENTRY;
+  let isContinuum = v.coverage.x != CONTINUUM_CLUSTER_ENTRY;
 
   let dist = v.flow.z;
   let unshiftedWorldXZ = v.world.xz;

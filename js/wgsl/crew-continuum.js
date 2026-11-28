@@ -482,7 +482,7 @@ fn crewContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
     tone=vec4f(colour,skin);region=0u;
   }else{
     rest=continuumPointAt(s.model,s.vertex).position;
-    if(s.what==CONTINUUM_CLUSTER_ENTRY||s.what==CONTINUUM_SURFEL_ENTRY){(*v).uv=continuumUV(s.vertex);}
+    if(s.what==CONTINUUM_CLUSTER_ENTRY){(*v).uv=continuumUV(s.vertex);}
     else{tone=crewContinuumWorn(region,tone.rgb,actor,rest,scalpMode);}
   }
   (*v).tone=tone;
@@ -553,7 +553,7 @@ fn crewContinuumShade(v:ContinuumVarying,front:bool)->vec4f {
   let picture=textureSample(crewAlbedo,crewAlbedoSampler,sampleUV).rgb;
   let actor=actors[v.look.z];
   var surface=v.tone;
-  if(v.look.x==CONTINUUM_CLUSTER_ENTRY||v.look.x==CONTINUUM_SURFEL_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actor,v.bodyPos,v.hurt.w);}
+  if(v.look.x==CONTINUUM_CLUSTER_ENTRY){surface=crewContinuumWorn(v.look.y,picture,actor,v.bodyPos,v.hurt.w);}
   var c:CrewVertex;
   c.position=v.position;c.world=v.world;c.normal=v.normal;c.color=surface.rgb;c.wet=v.wet;c.skin=clamp(surface.w,0.0,1.0);
   c.bodyPos=v.bodyPos;c.damage=v.hurt.xyz;c.paint=v.look.w;c.actor=v.look.z;
@@ -783,7 +783,7 @@ fn hairContinuumVarying(s:ContinuumSurface,v:ptr<function,ContinuumVarying>) {
     tLocal=hairContinuumDecodeOct(tu,tv);
     lockTone=f32((s.word>>16u)&255u)/255.0;
     seedPhase=f32((s.word>>24u)&255u)/255.0;
-    if(s.what==CONTINUUM_CLUSTER_ENTRY||s.what==CONTINUUM_SURFEL_ENTRY){
+    if(s.what==CONTINUUM_CLUSTER_ENTRY){
       let hv=continuumPointAt(s.model,s.vertex).high;
       along=f32(hv&255u)/255.0;
       crossV=f32((hv>>8u)&255u)/255.0*2.0-1.0;

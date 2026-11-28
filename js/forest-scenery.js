@@ -620,7 +620,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     // mobile continuum pack (26.5 MB vs 807 MB) so the atlas fits one page and stays safely inside mobile VRAM.
     const compactContinuum=isMobile||(device.limits?.maxStorageBufferBindingSize??Infinity)<256*1024*1024;
     const assets=forestContinuumAssetsFor(m,{mobile:compactContinuum});
-    const atlasReady=requestContinuumAtlas(device,`forest ${assets['manifest.json']}`,()=>loadForestContinuum({assets}),{surfels:{foliage:true,organic:true,maxSurfels:isMobile?8192:24576}}),pages=atlasReady.then(a=>a.pages.length);
+    const atlasReady=requestContinuumAtlas(device,`forest ${assets['manifest.json']}`,()=>loadForestContinuum({assets})),pages=atlasReady.then(a=>a.pages.length);
     const ready=Promise.all([
       atlasReady,
       requestContinuumPrograms({device,shader,shadowFormat,pages}),

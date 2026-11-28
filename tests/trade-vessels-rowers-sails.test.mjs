@@ -524,7 +524,7 @@ test('Harbor stern z-separation, 0.000 mm collinear river-barge oars, over-gunwa
   const start = TRADE_VESSEL_VIEW.indexOf('@fragment fn continuumFS');
   assert.ok(start >= 0, 'the vessels\' view defines @fragment fn continuumFS');
   const snippet = TRADE_VESSEL_VIEW.slice(start, TRADE_VESSEL_VIEW.indexOf('\n}', start) + 2);
-  assert.match(snippet, /continuum(?:Surfel)?Mask\(v\.coverage[^;]*&\s*tradeVesselContinuumMask\(/, 'continuumFS keeps its samples through the shared split and the material\'s mask');
+  assert.match(snippet, /continuumMask\(v\.coverage[^;]*&\s*tradeVesselContinuumMask\(/, 'continuumFS keeps its samples through the shared split and the material\'s mask');
   assert.doesNotMatch(snippet, /\bdiscard\b/);
 });
 

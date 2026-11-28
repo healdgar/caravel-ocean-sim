@@ -54,7 +54,7 @@ export const CONTINUUM_HEADER_WORDS = 32;
 export const CONTINUUM_HEADER = Object.freeze({
   magic: 0, version: 1, typeCount: 2, typesAt: 3, clustersAt: 4, clusterCount: 5, verticesAt: 6, vertexCount: 7, indicesAt: 8, indexCount: 9,
   chainsAt: 10, words: 11, hops: 12, chunkTriangles: 13, clusterTriangles: 14, streams: 15, skin: 16, uv: 17, rider: 18, wind: 19, surface: 20,
-  cones: 21, surfels: 22, groupParts: 23,
+  cones: 21, groupParts: 23, // 22 is free
 });
 export const CONTINUUM_TYPE_WORDS = 32;
 export const CONTINUUM_TYPE = Object.freeze({
@@ -137,22 +137,12 @@ export const CONTINUUM_CAPTURE_LISTS = Object.freeze([6, 7, 8]);
 // The view's cell cards: a card a cell of a type's card grid (computeContinuumCardGrid), two triangles each.
 export const CONTINUUM_CARD_LIST = 9;
 export const CONTINUUM_ENTRY_TRIANGLES = Object.freeze([CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES, 1, CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_CHUNK_TRIANGLES, 2]);
-export const CONTINUUM_CLUSTER_ENTRY = 1, CONTINUUM_FAR_ENTRY = 2, CONTINUUM_SPLAT_ENTRY = 3, CONTINUUM_SURFEL_ENTRY = 4, CONTINUUM_CARD_ENTRY = 5;
+export const CONTINUUM_CLUSTER_ENTRY = 1, CONTINUUM_FAR_ENTRY = 2, CONTINUUM_SPLAT_ENTRY = 3, CONTINUUM_CARD_ENTRY = 5;
 // A card grid has at most this many levels (each a grid of cells over its type's square, the finest first), and a
 // card's frame is CONTINUUM_CARD_FRAME_WORDS f32: its box's centre and the sway weight of its top, then its box's
 // half-extents and a spare.
 export const CONTINUUM_CARD_LEVELS = 3;
 export const CONTINUUM_CARD_FRAME_WORDS = 8;
-// Universal prefix micro-surfel stream layout (header slot CONTINUUM_HEADER.surfels):
-//   directory: typeCount * CONTINUUM_SURFEL_HEADER_WORDS ([firstSurfel, surfelCount, f32(areaRadius), f32(handoffError)])
-//   payload:   CONTINUUM_SURFEL_WORDS per surfel ([vertexIdx, relRadiusUnorm16 | (part16 << 16)])
-export const CONTINUUM_SURFEL_HEADER_WORDS = 4;
-export const CONTINUUM_SURFEL_WORDS = 2;
-export const CONTINUUM_SURFEL_SCALE_MAX = 4.0;
-// Bit 31 of surfel header word 1 (count) enables rotated organic leaf/strand aspect; bits 0..23 hold surfel count.
-export const CONTINUUM_SURFEL_ORGANIC_FLAG = 0x80000000;
-export const CONTINUUM_SURFEL_COUNT_MASK = 0x00ffffff;
-
 const continuumUnit16 = (v) => Math.max(0, Math.min(65535, Math.round(v * 65535)));
 const continuumBits = new Float32Array(1), continuumBitsWord = new Uint32Array(continuumBits.buffer);
 // A float's bits, for a word of a record or a material block.
@@ -760,223 +750,6 @@ export function computeContinuumCardGrid(words, { size, levels, texels = 64, pad
     });
   }
   return { levels: levels.map((l) => ({ ...l })), size, perType, offsets, cellError, frames, clusters, texels };
-}
-// Builds a universal blue-noise Morton-bit-reversed prefix micro-surfel stream directly from every type's Level-0
-// physical clusters (zero offline rebake). Each surfel references an exact Level-0 atlas vertex (preserving every
-// material attribute, UV, skin joint, wind bone, and part ID) so ANY 3D model family can seamlessly transition from
-// crisp Level-0 clusters into pixel-perfect ~1.1-1.5 px micro-surfels before coarse inflated polygons ever appear.
-// Returns { words: Uint32Array, counts: Uint32Array } where `counts[t]` is the surfel count for type t.
-export function buildContinuumSurfels(words, { maxSurfels = 8192, minLevel0Tris = 128, foliage = false, organic = foliage } = {}) {
-  const H = CONTINUUM_HEADER, T = CONTINUUM_TYPE;
-  const typeCount = words[H.typeCount];
-  const counts = new Uint32Array(typeCount);
-  if (!typeCount) return { words: new Uint32Array(0), counts };
-  const typesAt = words[H.typesAt], clustersAt = words[H.clustersAt];
-  const verticesAt = words[H.verticesAt], indicesAt = words[H.indicesAt];
-  const f32 = new Float32Array(words.buffer, words.byteOffset, words.length);
-  const perType = new Array(typeCount);
-  const permCache = new Map();
-  const bitRevPerm = (n) => {
-    let cached = permCache.get(n);
-    if (cached) return cached;
-    const revRank = new Uint32Array(n);
-    const perm = new Uint32Array(n);
-    for (let r = 0; r < n; r++) { revRank[r] = reverseBits32(r); perm[r] = r; }
-    perm.sort((a, b) => revRank[a] - revRank[b]);
-    permCache.set(n, perm);
-    return perm;
-  };
-  let totalSurfels = 0;
-
-  for (let ty = 0; ty < typeCount; ty++) {
-    const tb = typesAt + ty * CONTINUUM_TYPE_WORDS;
-    const flags = words[tb + T.flags];
-    if ((flags & CONTINUUM_TYPE_PIECES) !== 0) {
-      perType[ty] = null;
-      continue;
-    }
-    const first = words[tb + T.clusterFirst], cnt = words[tb + T.clusterCount];
-    const span = f32[tb + T.span];
-    if (!(span > 0) || !cnt) { perType[ty] = null; continue; }
-    const qScale = span / 65535;
-    const qAreaScale = qScale * qScale;
-    const rx = Math.max(f32[tb + T.splatRx], 0.05);
-    const ry = Math.max(f32[tb + T.splatRy], 0.05);
-
-    let lv0Tris = 0;
-    const lv0PErrs = [];
-    for (let i = 0; i < cnt; i++) {
-      const cb = clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS;
-      const pk = words[cb + 15];
-      if (((pk >>> 8) & 255) !== 0) continue;
-      lv0Tris += pk & 255;
-      const pe = f32[cb + 13];
-      if (pe > 0 && pe < 1e20) lv0PErrs.push(pe);
-    }
-    if (lv0Tris < minLevel0Tris) { perType[ty] = null; continue; }
-
-    // Deterministic stride keeps CPU build time < 25 ms even on multi-million-triangle atlases.
-    const stride = lv0Tris > 65536 ? Math.ceil(lv0Tris / 65536) : 1;
-    const maxCand = Math.ceil(lv0Tris / stride) + 16;
-    const candCdf = new Float64Array(maxCand);
-    const candV0 = new Uint32Array(maxCand);
-    const candV1 = new Uint32Array(maxCand);
-    const candV2 = new Uint32Array(maxCand);
-    const candMeta = new Uint32Array(maxCand);
-    let candCount = 0;
-    let totalWeight = 0;
-    let sampledEffArea = 0;
-    let sampledRawArea = 0;
-    let sampledAreaTriR = 0;
-    let triSkip = 0;
-
-    for (let i = 0; i < cnt; i++) {
-      const cb = clustersAt + (first + i) * CONTINUUM_CLUSTER_WORDS;
-      const pk = words[cb + 15];
-      if (((pk >>> 8) & 255) !== 0) continue;
-      const tris = pk & 255;
-      const part = pk >>> 16;
-      const iFirst = indicesAt + words[cb + 14];
-      for (let t = 0; t < tris; t++) {
-        if (triSkip > 0) { triSkip--; continue; }
-        triSkip = stride - 1;
-        const i0 = iFirst + t * 3;
-        const iv0 = words[i0], iv1 = words[i0 + 1], iv2 = words[i0 + 2];
-        const v0 = verticesAt + iv0 * CONTINUUM_VERTEX_WORDS;
-        const v1 = verticesAt + iv1 * CONTINUUM_VERTEX_WORDS;
-        const v2 = verticesAt + iv2 * CONTINUUM_VERTEX_WORDS;
-        const w0 = words[v0], w0b = words[v0 + 1];
-        const x0 = w0 & 65535, y0 = w0 >>> 16, z0 = w0b & 65535;
-        const w1 = words[v1], w1b = words[v1 + 1];
-        const x1 = w1 & 65535, y1 = w1 >>> 16, z1 = w1b & 65535;
-        const w2 = words[v2], w2b = words[v2 + 1];
-        const x2 = w2 & 65535, y2 = w2 >>> 16, z2 = w2b & 65535;
-        const e1x = x1 - x0, e1y = y1 - y0, e1z = z1 - z0;
-        const e2x = x2 - x0, e2y = y2 - y0, e2z = z2 - z0;
-        const cx = e1y * e2z - e1z * e2y;
-        const cy = e1z * e2x - e1x * e2z;
-        const cz = e1x * e2y - e1y * e2x;
-        const area = 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz) * qAreaScale;
-        if (!(area > 1e-10)) continue;
-        const triR = Math.sqrt(area / Math.PI);
-        sampledRawArea += area;
-        sampledAreaTriR += area * triR;
-
-        let effArea = area;
-        let weight = area;
-        let relRadius = 1.0;
-        if (foliage) {
-          const isLeaf = ((w0b >>> 20) & 1) !== 0;
-          if (isLeaf) {
-            const exposure = ((w0b >>> 21) & 255) / 255;
-            effArea = area * 0.36;
-            weight = effArea * (0.30 + 0.70 * exposure);
-            relRadius = 1.02;
-          } else {
-            // Keep solid trunks & primary boughs crisp while filtering out sub-1.2 cm outer twigs
-            // so thin canopy twigs never inflate into floating brown dots among the leaves.
-            const trunkFactor = Math.max(0, Math.min(1, (triR - 0.012) / 0.025));
-            effArea = area * (0.20 + 0.80 * trunkFactor);
-            weight = area * (0.04 + 1.12 * trunkFactor);
-            relRadius = 0.45 + 0.22 * trunkFactor;
-          }
-        }
-        totalWeight += weight;
-        sampledEffArea += effArea;
-        candCdf[candCount] = totalWeight;
-        candV0[candCount] = iv0;
-        candV1[candCount] = iv1;
-        candV2[candCount] = iv2;
-        const relU16 = Math.max(1, Math.min(65535, Math.round((relRadius / CONTINUUM_SURFEL_SCALE_MAX) * 65535)));
-        candMeta[candCount] = (relU16 | ((part & 65535) << 16)) >>> 0;
-        candCount++;
-      }
-    }
-    if (candCount === 0 || !(totalWeight > 0)) { perType[ty] = null; continue; }
-
-    const rawEffArea = sampledEffArea * stride;
-    const diskArea = Math.PI * rx * ry;
-    const shellArea = 4 * diskArea;
-    // Universal Beer-Lambert visible projected area: exact for solid closed surfaces (where rawEffArea ~= shellArea)
-    // and naturally saturates deep multi-layer interiors (e.g. LAI 10-14 tree crowns or dense hair volumes).
-    const visProjArea = Math.min(rawEffArea * 0.55, diskArea * (1.28 + 0.62 * Math.log(1 + rawEffArea / Math.max(shellArea, 1e-4))));
-    const areaRadius = Math.sqrt(Math.max(visProjArea, 1e-4) / Math.PI);
-
-    lv0PErrs.sort((a, b) => a - b);
-    const p75 = lv0PErrs.length ? lv0PErrs[Math.min(lv0PErrs.length - 1, Math.floor(lv0PErrs.length * 0.75))] : 0;
-    const dTri = Math.sqrt(rawEffArea / Math.max(lv0Tris, 1));
-    const farFirst = words[tb + T.farFirst], stepsAt = words[tb + T.steps];
-    const farErr = stepsAt > 0 ? f32[stepsAt + farFirst * CONTINUUM_STEP_WORDS + 1] : 0;
-    // Porous foliage/canopies switch right past Level 0 (eliminating inflated banana leaves); solid manifolds
-    // keep connected cluster DAG levels through mid-range and hand off to Level-0 micro-surfels before coarse far wraps.
-    let handoffError = foliage
-      ? Math.max(p75 * 0.92, dTri * 0.85, 0.012)
-      : farErr > 1e-4
-        ? Math.max(farErr * 0.88, p75 * 1.10, dTri * 0.85, 0.008)
-        : Math.max(p75 * 1.10, dTri * 0.85, 0.008);
-
-    const nNeeded = Math.ceil((areaRadius / Math.max(handoffError * 1.05, 0.008)) ** 2);
-    const targetCount = Math.max(256, Math.min(maxSurfels, lv0Tris, nNeeded));
-    // Geometric coverage check: vertex-anchored surfels can only cover faces without pinholes when Level-0 triangles
-    // are comparable to or smaller than the surfel spacing. Sparse planar meshes (e.g. flat stone walls, castle towers,
-    // sails, planks) stay on their watertight half-edge morph chain + octahedral G-buffer card.
-    const meanTriR = sampledRawArea > 0 ? sampledAreaTriR / sampledRawArea : 0;
-    const surfelSpacingR = areaRadius / Math.sqrt(targetCount);
-    if (meanTriR > surfelSpacingR * 1.15) { perType[ty] = null; continue; }
-    // Guarantee surfels never project larger than ~1.8 px radius at handoff start, even on huge high-LAI models.
-    handoffError = Math.max(handoffError, 0.72 * surfelSpacingR);
-
-    // Stratified CDF sampling -> 30-bit Morton spatial sort -> Van der Corput bit-reversed blue-noise prefix order.
-    const sVerts = new Uint32Array(targetCount);
-    const sMetas = new Uint32Array(targetCount);
-    const sMorton = new Uint32Array(targetCount);
-    const order = new Uint32Array(targetCount);
-    let cursor = 0;
-    for (let k = 0; k < targetCount; k++) {
-      const targetW = ((k + 0.5) / targetCount) * totalWeight;
-      while (cursor + 1 < candCount && candCdf[cursor] < targetW) cursor++;
-      const corner = k % 3;
-      const vIdx = corner === 0 ? candV0[cursor] : corner === 1 ? candV1[cursor] : candV2[cursor];
-      sVerts[k] = vIdx;
-      sMetas[k] = candMeta[cursor];
-      const va = verticesAt + vIdx * CONTINUUM_VERTEX_WORDS;
-      const qw0 = words[va], qw1 = words[va + 1];
-      const x10 = (qw0 & 65535) >>> 6;
-      const y10 = (qw0 >>> 16) >>> 6;
-      const z10 = (qw1 & 65535) >>> 6;
-      sMorton[k] = (mortonPart1By2(x10) | (mortonPart1By2(y10) << 1) | (mortonPart1By2(z10) << 2)) >>> 0;
-      order[k] = k;
-    }
-    order.sort((a, b) => sMorton[a] - sMorton[b]);
-
-    const perm = bitRevPerm(targetCount);
-    const packed = new Uint32Array(targetCount * CONTINUUM_SURFEL_WORDS);
-    for (let i = 0; i < targetCount; i++) {
-      const src = order[perm[i]];
-      packed[i * 2] = sVerts[src];
-      packed[i * 2 + 1] = sMetas[src];
-    }
-    counts[ty] = targetCount;
-    perType[ty] = { first: totalSurfels, count: targetCount, areaRadius, handoffError, packed };
-    totalSurfels += targetCount;
-  }
-
-  if (!totalSurfels) return { words: new Uint32Array(0), counts };
-  const dirWords = typeCount * CONTINUUM_SURFEL_HEADER_WORDS;
-  const out = new Uint32Array(dirWords + totalSurfels * CONTINUUM_SURFEL_WORDS);
-  const outF32 = new Float32Array(out.buffer);
-  const organicBit = organic ? CONTINUUM_SURFEL_ORGANIC_FLAG : 0;
-  for (let ty = 0; ty < typeCount; ty++) {
-    const info = perType[ty];
-    if (!info) continue;
-    const hAt = ty * CONTINUUM_SURFEL_HEADER_WORDS;
-    out[hAt] = info.first;
-    out[hAt + 1] = ((info.count & CONTINUUM_SURFEL_COUNT_MASK) | organicBit) >>> 0;
-    outF32[hAt + 2] = info.areaRadius;
-    outF32[hAt + 3] = info.handoffError;
-    out.set(info.packed, dirWords + info.first * CONTINUUM_SURFEL_WORDS);
-  }
-  return { words: out, counts };
 }
 // How full an entry of a list is taken to be at least, on the mean, when its lists are sized: a cut of real bodies
 // fills its clusters and chunks far better than this, so a scene within the budget never fills a list.

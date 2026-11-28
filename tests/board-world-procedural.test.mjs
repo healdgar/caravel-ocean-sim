@@ -286,8 +286,7 @@ test('herd, vessel and city WGSL: zero discard and the city continuum\'s sample-
   assert.match(cityMask, /let splat=handoff&continuumSamples\(/);
   assert.match(cityMask, /return all&~handoff;/);
   assert.match(cityMask, /return handoff&~splat;/);
-  assert.match(wgslBody('continuumSurfelMask', CITY_RENDER), /continuumMask\(/);
-  assert.match(wgslBody('continuumFS', CITY_RENDER), /out\.mask=continuum(?:Surfel)?Mask\(/);
+  assert.match(wgslBody('continuumFS', CITY_RENDER), /out\.mask=continuumMask\(/);
 });
 
 test('harbor fleet archetypes, bathymetry & berth safety, caravan bridge decks, and Lisbon street bridges', async () => {
